@@ -1411,3 +1411,156 @@ def test_boundary_verification_passes_parent_and_siblings_as_insert_guards(monke
         "A Generic Section",
         "This paragraph discusses A Generic Section in prose.",
     )
+
+
+def test_compress_pdf_bytes_reuses_compress_pdf_to_limit(monkeypatch, tmp_path):
+    analyzer = StructureAnalyzer(
+        structure_client=object(),
+        structure_model="test",
+        toc_model="test",
+        analysis_client=object(),
+        analysis_model="test",
+        config={},
+    )
+
+    def fake_compress_to_limit(input_path, output_path, target_mb):
+        output_path.write_bytes(b"%PDF-compressed")
+        return True
+
+    monkeypatch.setattr(analyzer, "_compress_pdf_to_limit", fake_compress_to_limit)
+    result = analyzer._compress_pdf_bytes(b"%PDF-big", target_mb=1.0, label="test")
+    assert result == b"%PDF-compressed"
+
+
+def test_compress_pdf_bytes_returns_none_on_compression_failure(monkeypatch):
+    analyzer = StructureAnalyzer(
+        structure_client=object(),
+        structure_model="test",
+        toc_model="test",
+        analysis_client=object(),
+        analysis_model="test",
+        config={},
+    )
+
+    def failing_compress_to_limit(input_path, output_path, target_mb):
+        return False
+
+    monkeypatch.setattr(analyzer, "_compress_pdf_to_limit", failing_compress_to_limit)
+    assert analyzer._compress_pdf_bytes(b"%PDF-big", target_mb=1.0, label="test") is None
+
+
+def test_prepare_pdf_internal_compresses_in_memory_when_over_limit(monkeypatch, tmp_path):
+    import fitz
+
+    pdf_path = tmp_path / "book.pdf"
+    document = fitz.open()
+    document.new_page()
+    document.save(pdf_path)
+    document.close()
+
+    analyzer = StructureAnalyzer(
+        structure_client=object(),
+        structure_model="test",
+        toc_model="test",
+        analysis_client=object(),
+        analysis_model="test",
+        config={"refine": {"pdf_compression": {"payload_limit_mb": 0.0001, "compress_if_exceeds": True}}},
+    )
+
+    def fake_compress_bytes(pdf_bytes, target_mb, label):
+        return b"%PDF-compressed-bytes"
+
+    monkeypatch.setattr(analyzer, "_compress_pdf_bytes", fake_compress_bytes)
+    result = analyzer._prepare_pdf_internal(pdf_path)
+    assert result == b"%PDF-compressed-bytes"
+
+
+def test_prepare_pdf_internal_does_not_compress_within_limit(monkeypatch, tmp_path):
+    import fitz
+
+    pdf_path = tmp_path / "book.pdf"
+    document = fitz.open()
+    document.new_page()
+    document.save(pdf_path)
+    document.close()
+    original_bytes = pdf_path.read_bytes()
+
+    analyzer = StructureAnalyzer(
+        structure_client=object(),
+        structure_model="test",
+        toc_model="test",
+        analysis_client=object(),
+        analysis_model="test",
+        config={"refine": {"pdf_compression": {"payload_limit_mb": 100, "compress_if_exceeds": True}}},
+    )
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("should not compress within payload limit")
+
+    monkeypatch.setattr(analyzer, "_compress_pdf_bytes", fail_if_called)
+    result = analyzer._prepare_pdf_internal(pdf_path)
+    assert result == original_bytes
+
+
+def test_compressed_pdf_reuse_when_fresh(monkeypatch, tmp_path):
+    import os
+    import time
+
+    import fitz
+
+    pdf_path = tmp_path / "book.pdf"
+    document = fitz.open()
+    document.new_page()
+    document.save(pdf_path)
+    document.close()
+
+    analyzer = StructureAnalyzer(
+        structure_client=object(),
+        structure_model="test",
+        toc_model="test",
+        analysis_client=object(),
+        analysis_model="test",
+        config={"refine": {"pdf_compression": {"payload_limit_mb": 0.0001, "compress_if_exceeds": True}}},
+    )
+
+    compressed_pdf_path = pdf_path.parent / "book_compressed.pdf"
+    compressed_pdf_path.write_bytes(b"%PDF-compressed")
+    os.utime(pdf_path, (time.time() - 100, time.time() - 100))
+
+    working_path = analyzer._choose_compressed_pdf(pdf_path, 0.0001)
+    assert working_path == compressed_pdf_path
+
+
+def test_compressed_pdf_stale_is_recompressed(monkeypatch, tmp_path):
+    import os
+    import time
+
+    import fitz
+
+    pdf_path = tmp_path / "book.pdf"
+    document = fitz.open()
+    document.new_page()
+    document.save(pdf_path)
+    document.close()
+
+    analyzer = StructureAnalyzer(
+        structure_client=object(),
+        structure_model="test",
+        toc_model="test",
+        analysis_client=object(),
+        analysis_model="test",
+        config={"refine": {"pdf_compression": {"payload_limit_mb": 0.0001, "compress_if_exceeds": True}}},
+    )
+
+    compressed_pdf_path = pdf_path.parent / "book_compressed.pdf"
+    compressed_pdf_path.write_bytes(b"%PDF-old")
+    os.utime(compressed_pdf_path, (time.time() - 100, time.time() - 100))
+
+    def fake_compress_to_limit(input_path, output_path, target_mb):
+        output_path.write_bytes(b"%PDF-new")
+        return True
+
+    monkeypatch.setattr(analyzer, "_compress_pdf_to_limit", fake_compress_to_limit)
+    working_path = analyzer._choose_compressed_pdf(pdf_path, 0.0001)
+    assert working_path == compressed_pdf_path
+    assert compressed_pdf_path.read_bytes() == b"%PDF-new"

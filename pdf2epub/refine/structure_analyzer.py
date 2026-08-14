@@ -419,6 +419,33 @@ Return ONLY the cleaned text, nothing else.
 
         return self._prepare_pdf_internal(pdf_path, include_pages, exclude_pages)
 
+    def _compress_pdf_bytes(
+        self,
+        pdf_bytes: bytes,
+        target_mb: float,
+        label: str,
+    ) -> Optional[bytes]:
+        """Compress in-memory PDF bytes down to <= target_mb. None on failure."""
+        try:
+            import tempfile
+
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                tmp_path = Path(tmp_dir)
+                tmp_in = tmp_path / "input.pdf"
+                tmp_out = tmp_path / "compressed.pdf"
+                tmp_in.write_bytes(pdf_bytes)
+                if not self._compress_pdf_to_limit(tmp_in, tmp_out, target_mb):
+                    return None
+                compressed = tmp_out.read_bytes()
+                logger.info(
+                    f"Compressed {label} batch PDF to "
+                    f"{len(compressed) / 1024 / 1024:.2f} MB"
+                )
+                return compressed
+        except Exception as e:
+            logger.error(f"Failed to compress {label} batch PDF: {e}")
+            return None
+
     def _prepare_pdf_internal(
         self,
         pdf_path: Path,
@@ -491,11 +518,28 @@ Return ONLY the cleaned text, nothing else.
             payload_limit_mb = compression_config.get('payload_limit_mb', 30)
 
             if file_size_mb > payload_limit_mb:
-                logger.warning(
-                    f"Prepared PDF ({len(pages_to_keep)} pages, {file_size_mb:.1f} MB) "
-                    f"exceeds limit ({payload_limit_mb} MB). "
-                    f"Consider reducing batch size via adaptive splitting."
-                )
+                if compression_config.get('compress_if_exceeds', True):
+                    compressed_bytes = self._compress_pdf_bytes(
+                        pdf_bytes,
+                        payload_limit_mb,
+                        f"{len(pages_to_keep)} pages",
+                    )
+                    if compressed_bytes is not None:
+                        pdf_bytes = compressed_bytes
+                        file_size_mb = len(pdf_bytes) / 1024 / 1024
+                    else:
+                        logger.error(
+                            f"Prepared PDF ({len(pages_to_keep)} pages, "
+                            f"{file_size_mb:.1f} MB) exceeds limit "
+                            f"({payload_limit_mb} MB) and compression failed; "
+                            "sending as-is."
+                        )
+                else:
+                    logger.warning(
+                        f"Prepared PDF ({len(pages_to_keep)} pages, {file_size_mb:.1f} MB) "
+                        f"exceeds limit ({payload_limit_mb} MB). "
+                        f"Consider reducing batch size via adaptive splitting."
+                    )
 
             logger.debug(
                 f"Prepared PDF from {pdf_path.name}: {len(pages_to_keep)} pages "
@@ -634,6 +678,41 @@ Return ONLY the cleaned text, nothing else.
         # (but bypass _prefer_rasterized check to avoid recursion)
         return self._prepare_pdf_internal(rasterized_path, include_pages=include_pages)
 
+    def _choose_compressed_pdf(
+        self,
+        pdf_path: Path,
+        payload_limit_mb: float,
+    ) -> Path:
+        """Reuse a fresh compressed PDF, or (re)compress to fit the payload limit.
+
+        Returns the PDF path to use for further processing. A previously
+        compressed PDF is reused when it is newer than the source, so batch
+        caches keyed on the prepared PDF bytes survive interrupted runs.
+        Falls back to the original PDF when compression fails.
+        """
+        compressed_pdf_path = pdf_path.parent / f"{pdf_path.stem}_compressed.pdf"
+        if (
+            compressed_pdf_path.exists()
+            and compressed_pdf_path.stat().st_mtime >= pdf_path.stat().st_mtime
+        ):
+            logger.info(f"Reusing existing compressed PDF: {compressed_pdf_path}")
+            return compressed_pdf_path
+
+        logger.warning(
+            f"PDF size ({os.path.getsize(pdf_path) / 1024 / 1024:.2f} MB) "
+            f"exceeds payload limit ({payload_limit_mb} MB)"
+        )
+        logger.info("Compressing PDF to fit within API payload limit...")
+
+        if self._compress_pdf_to_limit(pdf_path, compressed_pdf_path, payload_limit_mb):
+            logger.success(f"Using compressed PDF: {compressed_pdf_path}")
+            return compressed_pdf_path
+        logger.error(
+            "PDF compression failed, attempting to use original PDF "
+            "(may fail with 413 error)"
+        )
+        return pdf_path
+
     def analyze_pdf_structure(
         self,
         pdf_path: Path,
@@ -677,18 +756,9 @@ Return ONLY the cleaned text, nothing else.
         working_pdf_path = pdf_path  # By default, use original PDF
 
         if should_compress and pdf_size_mb > payload_limit_mb:
-            logger.warning(f"PDF size ({pdf_size_mb:.2f} MB) exceeds payload limit ({payload_limit_mb} MB)")
-            logger.info("Compressing PDF to fit within API payload limit...")
-
-            # Create compressed PDF in same directory as input
-            compressed_pdf_path = pdf_path.parent / f"{pdf_path.stem}_compressed.pdf"
-
-            if self._compress_pdf_to_limit(pdf_path, compressed_pdf_path, payload_limit_mb):
-                logger.success(f"Using compressed PDF: {compressed_pdf_path}")
-                working_pdf_path = compressed_pdf_path
-            else:
-                logger.error("PDF compression failed, attempting to use original PDF (may fail with 413 error)")
-                working_pdf_path = pdf_path
+            working_pdf_path = self._choose_compressed_pdf(
+                pdf_path, payload_limit_mb
+            )
         else:
             logger.info(f"PDF size ({pdf_size_mb:.2f} MB) is within payload limit ({payload_limit_mb} MB), no compression needed")
 
