@@ -1,6 +1,36 @@
-# pdf2epub
+# pdf2epub-for-antigravity
 
-将外语的学术书籍或者纵排日语书籍的扫描件转换成epub格式，保留完备的目录、注音、脚注、插图、表格（公式待支持）等信息，具备完备的链接跳转功能，使其尽可能接近出版社原epub的排版。
+> 🌟 **专为 Google Antigravity & Windows 生态优化的高精度学术/轻小说 PDF 转 EPUB 转换器。**  
+> 本项目是 [ShenSheiBot/pdf2epub](https://github.com/ShenSheiBot/pdf2epub) 的优化增强 Fork，针对 Antigravity 运行环境、大模型大上下文 Refine 与 Windows 跨平台兼容进行了深度适配。
+
+将外语学术书籍、扫描件 PDF 或纵排日语轻小说转换成结构完备的 EPUB 格式，保留目录层级、振假名注音、双向脚注跳转、高清插图与表格，使其达到或超越出版社原版排版质感。
+
+---
+
+## 🚀 Antigravity Edition 专属增强特性
+
+1. 🔑 **Google Antigravity 零配置直连（Zero-Config Gemini Auth）**
+   * 内置 `google-antigravity` 适配，直接复用本地 Antigravity / Gemini 授权环境。
+   * **无需申请或硬编码 Google AI Studio API Key**，配置 `type: antigravity` 即可直接调度 Gemini 2.5 Pro / Flash 的百万上下文与多模态能力。
+
+2. 🛡️ **自适应超大 PDF 压缩与 Refine Payload 防爆（Adaptive PDF Compression）**
+   * Refine 目录与边界分析阶段针对超长超大扫描件（数百页/几百兆 PDF）自动进行多级自适应二值化压缩（`120 -> 90 -> 72 -> 50 DPI`）。
+   * 彻底根治超长学术书籍在向多模态 LLM 发送 PDF Part 时触发 `413 Payload Too Large` 或上下文超限崩溃的问题。
+
+3. 🪟 **原生 Windows 深度跨平台兼容（Native Windows Compatibility）**
+   * 修复了 Windows 默认 GBK 编码引发的 `UnicodeDecodeError`，强制 UTF-8 跨平台一致。
+   * 基于 Windows 原生 `msvcrt.locking` 实现了跨进程安全互斥锁，解决无 `fcntl` 时的并发冲突。
+   * 统一生成 POSIX 相对路径（`pages/page_001.html`），保证打包出的 EPUB 无论在 Calibre、Apple Books 还是各平台阅读器均能完美解析。
+   * 自动支持从 `input/` 子目录解析 PDF 文件，增强文件查找与路径容错。
+
+4. ⚡ **一键式全自动流水线脚本（All-in-One Automation）**
+   * 提供经过生产验证的自动化脚本：
+     * `bash translate_pdf.sh config.yaml`：全自动 OCR ➔ Refine ➔ TOC 校验 ➔ Polish ➔ Translate ➔ 自动打包生成原版与中文版双 EPUB。
+     * `bash ocr_polish.sh config.yaml`：原版学术书籍一键 OCR 与版式精修。
+     * `bash translate_epub.sh config_epub.yaml`：已有 EPUB 保留原始 CSS/字体排版的高保真翻译。
+   * 全程支持中断自动断点续跑（`--resume`）。
+
+---
 
 ## 技术优势
 经测试，本项目效果远强于各大商业软件的直接转换效果，同时因为其基于OCR的特性，不会因出版社更新DRM机制而失效。
@@ -127,22 +157,26 @@ LLM。只有候选译文无法编译时才调用 whole-mode repair agent；修�
 - VLLM 整体识别速度缓慢且费用较高，胜在输出文本连贯，但仍不能完全摆脱后处理需求，故整体仅作为备用方案
 
 ## 安装
-
+ 
 ### 依赖要求
 - Python 3.11+
 - UV (包管理器)
-- 至少一个OCR后端的API账户
+- 至少一个OCR后端的API账户（如本地/远程 Chandra 2、Google Cloud Vision 或 Azure）
 
 ### 安装步骤
 
 1. 克隆仓库
 ```bash
-git clone https://github.com/yourusername/pdf2epub.git
-cd pdf2epub
+git clone https://github.com/yuukoamamiya/pdf2epub-for-antigravity.git
+cd pdf2epub-for-antigravity
 ```
 
 2. 安装 UV（如果未安装）
 ```bash
+# Windows (PowerShell)
+irm https://astral.sh/uv/install.ps1 | iex
+
+# Linux / macOS
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
@@ -151,37 +185,40 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync
 ```
 
-4. 配置 API 密钥
+4. 配置环境与凭据
 ```bash
 cp config.yaml.example config.yaml
-# 编辑 config.yaml 填入你的 API 密钥
+# 编辑 config.yaml 调整书名与配置
 ```
 
-### 配置
+### 配置示例 (Antigravity 极简配置)
 
-参考 `config.yaml.example`。基本结构：
+参考 `config.yaml.example`。使用 Antigravity 运行时的最简配置结构：
 
 ```yaml
-title: "书名"
+title: "我的学术书籍"
+input_pdf: "input/book.pdf"  # 可将 PDF 放入 input/ 目录
 
 credentials:
   providers:
-    anthropic:
-      type: anthropic
-      api_key: your-key
-      base_url: https://api.anthropic.com  # 可选
-    gemini:
-      type: google
-      api_key: your-key
+    # 🌟 推荐：直接复用本地 Google Antigravity 环境（无需填写 API Key）
+    antigravity:
+      type: antigravity
+
+    # 备用 / 翻译模型提供商
     deepseek:
       type: openai
       api_key: your-key
       base_url: https://api.deepseek.com/v1
-    # 可选：供 refine 的 OpenAI Responses PDF 传输使用。
-    openai_pdf:
-      type: openai
-      api_key: your-key
-      base_url: https://your-responses-compatible-endpoint.example/v1
+
+ocr:
+  backend: chandra  # 推荐 chandra，或 vision / azure
+
+refine:
+  structure:
+    provider: antigravity
+    model: gemini-2.5-pro
+    toc_model: gemini-2.5-pro
 
 ocr:
   backend: chandra  # chandra / azure / vision / vllm
@@ -430,10 +467,14 @@ output/
 ```
 
 
+## 致谢与上游项目
+
+本项目是 [ShenSheiBot/pdf2epub](https://github.com/ShenSheiBot/pdf2epub) 的优化增强版本。非常感谢原作者 [甚谁 (ShenSheiBot)](https://www.zhihu.com/people/sakuraayane_justice) 开源如此优秀的 PDF 到 EPUB 结构化转换引擎！
+
 ## 贡献
 
-欢迎提交Issue和Pull Request！
-关注[甚谁](https://www.zhihu.com/people/sakuraayane_justice)谢谢喵！
+欢迎提交 Issue 和 Pull Request！
+关注原作者 [甚谁](https://www.zhihu.com/people/sakuraayane_justice) 谢谢喵！
 
 ## 许可
 

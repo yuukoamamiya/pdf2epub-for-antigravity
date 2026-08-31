@@ -1,4 +1,5 @@
 /output/
+/input/
 /.vscode/
 *.pdf
 /config*.yaml
@@ -13,6 +14,8 @@ uv.lock
 # Security - API keys and credentials
 sa-keys.json
 vertex_adc.json
+chandra-access.json
+*-access.json
 service-account-*.json
 *-service-account.json
 credentials.json
@@ -41,3 +44,7 @@ experiments/
 test_*.py
 test_ocr.png
 scripts/realign_*.py
+
+# Security & Local Private files
+deepsec-report.json
+AGENTS.md

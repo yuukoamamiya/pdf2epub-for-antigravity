@@ -3,13 +3,19 @@
 # Copy this file to config.yaml and fill in your credentials
 
 title: "Your Book Title"
+input_pdf: "input/your_book.pdf"  # 可选：直接在此指定输入 PDF
 
 # Credentials - Provider configurations
 # =====================================
 # Define all your API providers here. You can have multiple instances of the same type.
 credentials:
   providers:
-    # Google (Gemini) - Required for most operations
+    # 🌟 Google Antigravity (推荐 / 零配置)
+    # 无需填写 API Key，自动复用本地 Google Antigravity / Gemini Pro 授权通道
+    antigravity:
+      type: antigravity
+
+    # Google (Gemini API) - 传统 API Key 方式
     gemini:
       type: google
       api_key: "your-google-api-key"

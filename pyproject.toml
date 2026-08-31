@@ -1,10 +1,15 @@
 [project]
-name = "pdf2epub"
+name = "pdf2epub-for-antigravity"
 version = "0.2.0"
-description = ""
-authors = [{name = "ShenSheiBot", email = "shensheibot@protonmail.com"}]
+description = "Optimized PDF to EPUB converter tailored for Google Antigravity & Windows users, featuring zero-config Gemini integration and adaptive PDF compression"
+authors = [
+    {name = "Amamiya Yuuko", email = "39460830+yuukoamamiya@users.noreply.github.com"},
+    {name = "ShenSheiBot", email = "shensheibot@protonmail.com"},
+]
 readme = "README.md"
 requires-python = ">=3.11"
+keywords = ["antigravity", "gemini", "pdf2epub", "ocr", "epub", "chandra", "japanese-ocr", "academic-pdf"]
+
 dependencies = [
     "pyyaml>=6.0.2",
     "pypdf>=5.4.0",
@@ -33,7 +38,9 @@ dependencies = [
     "tinycss2>=1.2.1",
     "cssselect2>=0.7.0",
     "mobi>=0.4.1",
-    "pydantic-ai>=1.107.1,<2.0.0",
+    "pydantic-ai-slim>=1.107.1,<2.0.0",
+    "google-antigravity>=0.1.15",
+    "protobuf>=7.36.0",
     "sentence-transformers>=2.2.0",
     "pikepdf>=10.3.0",
     "rapidfuzz>=3.14.3",
@@ -42,8 +49,14 @@ dependencies = [
     "griffe<2.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/yuukoamamiya/pdf2epub-for-antigravity"
+Repository = "https://github.com/yuukoamamiya/pdf2epub-for-antigravity.git"
+"Upstream Repository" = "https://github.com/ShenSheiBot/pdf2epub"
+
 [project.scripts]
 pdf2epub = "pdf2epub.cli:main"
+pdf2epub-for-antigravity = "pdf2epub.cli:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -58,6 +71,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
+testpaths = ["tests"]
 # Disable logfire plugin (not used directly)
 addopts = "-p no:logfire"
 # Filter deprecation warnings from third-party dependencies (pydantic-ai -> logfire -> opentelemetry)
