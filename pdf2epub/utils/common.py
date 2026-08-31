@@ -6,11 +6,36 @@ import json
 import time
 import yaml
 from pathlib import Path
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, Union
 
 from loguru import logger
 
 from .config_manager import ConfigManager, load_config as _load_config_from_manager
+
+
+def resolve_input_path(path: Optional[Union[str, Path]]) -> Optional[Path]:
+    """
+    Resolve an input file path, searching in input/ directory if not found directly.
+
+    Args:
+        path: Path string or Path object
+
+    Returns:
+        Resolved Path object or original Path if not found
+    """
+    if path is None:
+        return None
+    p = Path(path)
+    if p.exists():
+        return p
+    # Check under input/ directory
+    input_p = Path("input") / p
+    if input_p.exists():
+        return input_p
+    input_name = Path("input") / p.name
+    if input_name.exists():
+        return input_name
+    return p
 
 
 def parse_llm_json(

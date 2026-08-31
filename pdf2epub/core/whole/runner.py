@@ -41,7 +41,7 @@ def _strip_fences_and_bom(text: str) -> str:
     return text
 
 
-_AGENT_RUN_MAX_RETRIES = 3
+_AGENT_RUN_MAX_RETRIES = 6
 
 _TRANSIENT_KEYWORDS = frozenset([
     'timeout', 'timed out', 'connection', 'disconnected', 'payload',
@@ -517,7 +517,9 @@ async def run_agent_loop(
                             agent_run.all_messages(), round_num, workspace_dir
                         )
                     if _is_transient_agent_error(agent_err) and attempt < _AGENT_RUN_MAX_RETRIES - 1:
-                        wait = 2 ** attempt
+                        # For rate limits (429), back off with minimum 5s
+                        base_wait = 5 if '429' in str(agent_err) or 'exhausted' in str(agent_err).lower() else 2
+                        wait = min(60, base_wait * (2 ** attempt))
                         logger.warning(
                             f"[agent-loop] Agent transient error in round {round_num} "
                             f"(attempt {attempt + 1}/{_AGENT_RUN_MAX_RETRIES}): "
@@ -610,7 +612,20 @@ async def run_agent_loop(
                         continue
 
                 # Call generate_fn with prefix for continuation
-                continuation_output = generate_fn(prefix=prefix)
+                try:
+                    continuation_output = generate_fn(prefix=prefix)
+                except ValueError as exc:
+                    # A streaming provider can finish with STOP while emitting
+                    # no text at all.  Treat this as an empty continuation so
+                    # the loop can make its normal second attempt (and so the
+                    # caller can retry the batch after two empty attempts).
+                    if "empty stream response" not in str(exc).lower():
+                        raise
+                    logger.warning(
+                        "[agent-loop] Continuation provider returned an empty "
+                        f"stream; treating it as an empty continuation: {exc}"
+                    )
+                    continuation_output = ""
                 if not isinstance(continuation_output, str):
                     continuation_output = str(continuation_output) if continuation_output is not None else ""
                 # Strip markdown fences and BOM
@@ -692,7 +707,12 @@ def _resolve_decision_path(file_path: str, work_dir: Path) -> Path:
     # Prevent path traversal — resolved path must be inside work_dir
     resolved = p.resolve()
     work_resolved = work_dir.resolve()
-    if not (resolved == work_resolved or str(resolved).startswith(str(work_resolved) + "/")):
+    try:
+        is_inside = resolved == work_resolved or resolved.is_relative_to(work_resolved)
+    except (ValueError, TypeError):
+        is_inside = False
+
+    if not is_inside:
         raise ValueError(
             f"Agent referenced path outside work directory: {file_path} "
             f"(resolved to {resolved})"

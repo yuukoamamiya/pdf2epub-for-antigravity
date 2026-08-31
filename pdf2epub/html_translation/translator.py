@@ -341,45 +341,78 @@ class HTMLTranslateProcessor:
         return len(chinese_pattern.findall(text_only)) >= 5  # At least 5 Chinese chars overall
 
     def _get_agent_model(self):
-        """Get or create pydantic-ai Model for the verification agent.
-
-        Priority: Anthropic (Haiku) > Google > Poe.
-        Anthropic is preferred to avoid competing with translation model for Gemini quota.
-        """
-        if self._agent_model is not None:
-            return self._agent_model
-
+        """Get or create pydantic-ai Model for the verification agent."""
         providers = self.config.get('credentials', {}).get('providers', {})
-
         model_name = self._agent_model_name
+
+        # Priority 0: Explicit html_translation.agent config
+        agent_cfg = self.config.get('html_translation', {}).get('agent', {})
+        if agent_cfg and agent_cfg.get('provider') in providers:
+            provider_name = agent_cfg['provider']
+            model_name = agent_cfg.get('model', self._agent_model_name)
+            p = providers[provider_name]
+            p_type = p.get('type', provider_name)
+            if p_type in ('google', 'antigravity'):
+                from pydantic_ai.models.google import GoogleModel
+                from pydantic_ai.providers.google import GoogleProvider
+                from google.genai import Client
+                from google.genai.types import HttpOptions
+
+                client_kwargs = {}
+                if p.get('api_key'):
+                    client_kwargs['api_key'] = p.get('api_key')
+                if p.get('base_url'):
+                    client_kwargs['http_options'] = HttpOptions(base_url=p.get('base_url'))
+                if p_type == 'antigravity' or (not p.get('api_key') and not p.get('base_url')):
+                    client_kwargs['vertexai'] = True
+                    client_kwargs['project'] = p.get('project', 'project-8dcc0e99-48d6-44c4-b50')
+                    client_kwargs['location'] = p.get('location', 'global')
+
+                client = Client(**client_kwargs)
+                gp = GoogleProvider(client=client)
+                logger.info(f"[html-translate] Agent model: {model_name} via {provider_name}")
+                return GoogleModel(model_name, provider=gp)
+            elif p_type == 'openai':
+                from pydantic_ai.models.openai import OpenAIChatModel
+                from pydantic_ai.providers.openai import OpenAIProvider
+                provider = OpenAIProvider(api_key=p.get('api_key'), base_url=p.get('base_url'))
+                logger.info(f"[html-translate] Agent model: {model_name} via {provider_name}")
+                return OpenAIChatModel(model_name, provider=provider)
 
         # Priority 1: Anthropic (default model is Haiku — different provider from translation)
         if 'anthropic' in providers and model_name.startswith('claude'):
             from pdf2epub.core.whole.model_factory import create_anthropic_model
             p = providers['anthropic']
-            logger.info(f"[html-translate] Agent model: {model_name} via anthropic (cached)")
-            self._agent_model = create_anthropic_model(
+            logger.info(f"[html-translate] Agent model: {model_name} via anthropic")
+            return create_anthropic_model(
                 model_name, api_key=p['api_key'], base_url=p.get('base_url'),
             )
-            return self._agent_model
 
-        # Priority 2: Google providers
-        for provider_name in ('gemini-direct', 'gemini', 'gemini-cf'):
+        # Priority 2: Google / Antigravity providers
+        for provider_name in ('antigravity', 'gemini-direct', 'gemini', 'gemini-cf'):
             if provider_name in providers:
                 p = providers[provider_name]
-                if p.get('type') == 'google':
+                p_type = p.get('type', provider_name)
+                if p_type in ('google', 'antigravity'):
                     from pydantic_ai.models.google import GoogleModel
                     from pydantic_ai.providers.google import GoogleProvider
                     from google.genai import Client
                     from google.genai.types import HttpOptions
-                    client = Client(
-                        api_key=p.get('api_key'),
-                        http_options=HttpOptions(base_url=p.get('base_url')),
-                    )
+
+                    client_kwargs = {}
+                    if p.get('api_key'):
+                        client_kwargs['api_key'] = p.get('api_key')
+                    if p.get('base_url'):
+                        client_kwargs['http_options'] = HttpOptions(base_url=p.get('base_url'))
+                    if p_type == 'antigravity' or (not p.get('api_key') and not p.get('base_url')):
+                        client_kwargs['vertexai'] = True
+                        client_kwargs['project'] = p.get('project', 'project-8dcc0e99-48d6-44c4-b50')
+                        client_kwargs['location'] = p.get('location', 'global')
+
+                    client = Client(**client_kwargs)
                     gp = GoogleProvider(client=client)
                     logger.info(f"[html-translate] Agent model: {model_name} via {provider_name}")
-                    self._agent_model = GoogleModel(model_name, provider=gp)
-                    return self._agent_model
+                    return GoogleModel(model_name, provider=gp)
 
         # Priority 3: Poe
         if 'poe' in providers:
@@ -388,8 +421,7 @@ class HTMLTranslateProcessor:
             p = providers['poe']
             provider = OpenAIProvider(api_key=p.get('api_key'), base_url=p.get('base_url'))
             logger.info(f"[html-translate] Agent model: {model_name} via poe")
-            self._agent_model = OpenAIChatModel(model_name, provider=provider)
-            return self._agent_model
+            return OpenAIChatModel(model_name, provider=provider)
 
         raise RuntimeError("No suitable provider found for HTML translation agent model")
 

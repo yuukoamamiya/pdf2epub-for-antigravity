@@ -1637,11 +1637,15 @@ class HTMLEpubPipeline:
         """Translate book title."""
         prompt = self._create_title_prompt(title, source_lang, target_lang)
 
+        model_configs = (
+            self.config.get('translation', {}).get('models')
+            or self.config.get('translation_models')
+            or [{"provider": "antigravity", "model": "gemini-3.1-pro-preview"}]
+        )
+
         response = llm_client.generate(
             prompt=prompt,
-            model_configs=self.config.get('translation_models', [
-                {"provider": "gemini", "model": "gemini-2.5-pro"}
-            ]),
+            model_configs=model_configs,
             operation_name="Translate title"
         )
 
@@ -1673,6 +1677,12 @@ class HTMLEpubPipeline:
         results = []
         total_batches = (len(flat_toc) + batch_size - 1) // batch_size
 
+        model_configs = (
+            self.config.get('translation', {}).get('models')
+            or self.config.get('translation_models')
+            or [{"provider": "antigravity", "model": "gemini-3.1-pro-preview"}]
+        )
+
         for batch_idx in range(total_batches):
             start = batch_idx * batch_size
             end = min(start + batch_size, len(flat_toc))
@@ -1686,9 +1696,7 @@ class HTMLEpubPipeline:
             # Call LLM
             response = llm_client.generate(
                 prompt=prompt,
-                model_configs=self.config.get('translation_models', [
-                    {"provider": "gemini", "model": "gemini-2.5-pro"}
-                ]),
+                model_configs=model_configs,
                 operation_name=f"Translate TOC batch {batch_idx + 1}/{total_batches}"
             )
 

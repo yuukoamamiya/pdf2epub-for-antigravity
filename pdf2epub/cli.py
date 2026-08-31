@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 from loguru import logger
 from pdf2epub.utils.logging_config import configure_logging
-from pdf2epub.utils.common import load_config
+from pdf2epub.utils.common import load_config, resolve_input_path
 from pdf2epub.utils.network_utils import set_llm_trace_path
 
 # Configure logger
@@ -49,7 +49,7 @@ def refine_command(args):
     output_dir = Path("output") / book_title
     set_llm_trace_path(output_dir / "logs" / "llm_trace.jsonl")
     if args.input:
-        pdf_path = Path(args.input)
+        pdf_path = resolve_input_path(args.input)
     else:
         # Try to find processed PDF in output directory
         pdf_path = output_dir / "input.pdf"
@@ -116,7 +116,7 @@ def ocr_pages_command(args):
 
     # Find PDF
     if args.input:
-        pdf_path = Path(args.input)
+        pdf_path = resolve_input_path(args.input)
     else:
         pdf_path = output_dir / "input.pdf"
         if not pdf_path.exists():
@@ -229,7 +229,7 @@ def extract_entities_command(args):
 
     # Determine PDF path
     if args.input:
-        pdf_path = Path(args.input)
+        pdf_path = resolve_input_path(args.input)
     else:
         # Default to input.pdf in the book's output directory
         pdf_path = output_dir / "input.pdf"
@@ -391,7 +391,7 @@ def translate_html_command(args):
     # Setup paths
     output_dir = Path("output") / book_title
     set_llm_trace_path(output_dir / "logs" / "llm_trace.jsonl")
-    epub_path = Path(args.input) if args.input else None
+    epub_path = resolve_input_path(args.input) if args.input else None
 
     # If no epub specified, look for original epub in output dir
     if epub_path is None:
@@ -540,7 +540,7 @@ def translate_novel_command(args):
     set_llm_trace_path(output_dir / "logs" / "llm_trace.jsonl")
 
     # Validate input file before creating output directories
-    epub_path = Path(args.input) if args.input else None
+    epub_path = resolve_input_path(args.input) if args.input else None
     if epub_path is None:
         candidate_path = output_dir / "input.epub"
         if candidate_path.exists():
@@ -1039,7 +1039,7 @@ def build_html_epub_command(args):
     # Setup paths
     output_dir = Path("output") / book_title
     set_llm_trace_path(output_dir / "logs" / "llm_trace.jsonl")
-    epub_path = Path(args.input) if args.input else None
+    epub_path = resolve_input_path(args.input) if args.input else None
 
     # If no epub specified, look for original epub in output dir
     if epub_path is None:

@@ -70,6 +70,22 @@ def get_verification_model():
                     base_url=p.get('base_url'),
                 )
                 model = AnthropicModel(configured_model, provider=provider)
+            elif provider_type in ('google', 'antigravity'):
+                from google.genai import Client
+                from google.genai.types import HttpOptions
+                from pydantic_ai.models.google import GoogleModel
+                from pydantic_ai.providers.google import GoogleProvider
+                client_kwargs = {}
+                if p.get('api_key'):
+                    client_kwargs['api_key'] = p['api_key']
+                if p.get('base_url'):
+                    client_kwargs['http_options'] = HttpOptions(base_url=p['base_url'])
+                if provider_type == 'antigravity' or (not p.get('api_key') and not p.get('base_url')):
+                    client_kwargs['vertexai'] = True
+                    client_kwargs['project'] = p.get('project') or "project-8dcc0e99-48d6-44c4-b50"
+                    client_kwargs['location'] = p.get('location') or "global"
+                client = Client(**client_kwargs)
+                model = GoogleModel(configured_model, provider=GoogleProvider(client=client))
             else:
                 provider = OpenAIProvider(
                     api_key=p.get('api_key'),

@@ -55,8 +55,8 @@ def test_hierarchical_toc_uses_reader_language_label(tmp_path: Path) -> None:
         language="zh",
     )
 
-    assert "<text>目录</text>" in ncx_path.read_text()
-    html = html_path.read_text()
+    assert "<text>目录</text>" in ncx_path.read_text(encoding="utf-8")
+    html = html_path.read_text(encoding="utf-8")
     assert "<title>目录</title>" in html
     assert "<h1>目录</h1>" in html
     assert "Table of Contents" not in html
@@ -75,8 +75,8 @@ def test_epub_builder_uses_reader_language_label(tmp_path: Path) -> None:
 
     assert builder.create_toc_ncx({"chapters": []}, ncx_path)
     assert builder.create_toc_html({"chapters": []}, html_path)
-    assert "<text>目录</text>" in ncx_path.read_text()
-    assert "<title>目录</title>" in html_path.read_text()
+    assert "<text>目录</text>" in ncx_path.read_text(encoding="utf-8")
+    assert "<title>目录</title>" in html_path.read_text(encoding="utf-8")
 
 
 def test_hierarchical_ncx_reuses_play_order_for_same_target(
@@ -129,7 +129,7 @@ def test_epub_stylesheet_uses_a_valid_quote_string() -> None:
         / "epub"
         / "resources"
         / "stylesheet.css"
-    ).read_text()
+    ).read_text(encoding="utf-8")
 
     assert 'content: "“";' in stylesheet
     assert 'content: """;' not in stylesheet

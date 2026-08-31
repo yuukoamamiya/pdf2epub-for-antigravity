@@ -206,9 +206,11 @@ TOC 章节列表：
             llm_client = LLMClient(self.config)
 
             # Get model config
-            model_configs = self.config.get("translation.models", [
-                {"provider": "gemini", "model": "gemini-2.5-flash", "max_retries": 2}
-            ])
+            model_configs = (
+                self.config.get("translation", {}).get("models")
+                or self.config.get("translation.models")
+                or [{"provider": "antigravity", "model": "gemini-2.5-flash", "max_retries": 2}]
+            )
 
             response = llm_client.generate(
                 prompt=prompt,

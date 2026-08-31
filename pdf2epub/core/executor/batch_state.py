@@ -17,8 +17,13 @@ from loguru import logger
 
 try:
     import fcntl
-except ImportError:  # pragma: no cover - batch execution currently targets POSIX
+except ImportError:
     fcntl = None
+
+try:
+    import msvcrt
+except ImportError:
+    msvcrt = None
 
 
 class BatchRunLockedError(RuntimeError):
@@ -43,42 +48,80 @@ class BatchRunLock:
         self._handle: Optional[IO[str]] = None
 
     def __enter__(self) -> "BatchRunLock":
-        if fcntl is None:
-            raise RuntimeError(
-                "Safe batch execution requires POSIX advisory file locking"
-            )
-
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        handle = self._path.open("a+", encoding="utf-8")
-        try:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            handle.seek(0)
-            owner = handle.read().strip()
-            handle.close()
-            owner_hint = f" (owner PID {owner})" if owner else ""
-            raise BatchRunLockedError(
-                f"Another pdf2epub process is already using "
-                f"{self._path.parent}{owner_hint}"
-            ) from exc
 
-        handle.seek(0)
-        handle.truncate()
+        if fcntl is not None:
+            handle = self._path.open("a+", encoding="utf-8")
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except (BlockingIOError, OSError) as exc:
+                handle.seek(0)
+                owner = handle.read().strip()
+                handle.close()
+                owner_hint = f" (owner PID {owner})" if owner else ""
+                raise BatchRunLockedError(
+                    f"Another process is already using batch execution directory{owner_hint}: {self._path.parent}"
+                ) from exc
+
+            handle.seek(0)
+            handle.truncate()
+            handle.write(str(os.getpid()))
+            handle.flush()
+            self._handle = handle
+            return self
+
+        elif msvcrt is not None:
+            handle = self._path.open("a+", encoding="utf-8")
+            try:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            except (OSError, IOError, PermissionError) as exc:
+                try:
+                    owner = self._path.read_text(encoding="utf-8").strip()
+                except Exception:
+                    owner = ""
+                try:
+                    handle.close()
+                except Exception:
+                    pass
+                owner_hint = f" (owner PID {owner})" if owner else ""
+                raise BatchRunLockedError(
+                    f"Another process is already using batch execution directory{owner_hint}: {self._path.parent}"
+                ) from exc
+
+            handle.seek(0)
+            handle.truncate()
+            handle.write(str(os.getpid()))
+            handle.flush()
+            self._handle = handle
+            return self
+
+        # Fallback
+        handle = self._path.open("w", encoding="utf-8")
         handle.write(str(os.getpid()))
         handle.flush()
         self._handle = handle
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback) -> None:
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         if self._handle is None:
             return
+
         try:
-            self._handle.seek(0)
-            self._handle.truncate()
-            self._handle.flush()
-            fcntl.flock(self._handle.fileno(), fcntl.LOCK_UN)
-        finally:
+            if fcntl is not None:
+                fcntl.flock(self._handle.fileno(), fcntl.LOCK_UN)
+            elif msvcrt is not None:
+                try:
+                    self._handle.seek(0)
+                    msvcrt.locking(self._handle.fileno(), msvcrt.LK_UNLCK, 1)
+                except Exception:
+                    pass
             self._handle.close()
+            if self._path.exists():
+                self._path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        finally:
             self._handle = None
 
 
@@ -171,7 +214,7 @@ class MegaUnitState:
         try:
             with open(tmp_path, 'w', encoding='utf-8') as f:
                 json.dump(self.to_dict(), f, ensure_ascii=False, indent=2)
-            tmp_path.rename(path)
+            os.replace(str(tmp_path), str(path))
             logger.debug(f"Saved mega unit state to {path}")
         except Exception as e:
             logger.error(f"Failed to save mega unit state: {e}")

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 import os
 import re
 import tempfile
@@ -330,12 +331,30 @@ class ChandraClient:
         access_client_secret_env = backend_config.get(
             "access_client_secret_env", "CHANDRA_CF_ACCESS_CLIENT_SECRET"
         )
-        access_client_id = os.environ.get(access_client_id_env)
-        access_client_secret = os.environ.get(access_client_secret_env)
+        access_client_id = backend_config.get("access_client_id") or os.environ.get(access_client_id_env)
+        access_client_secret = backend_config.get("access_client_secret") or os.environ.get(access_client_secret_env)
+
+        # Fallback to credentials JSON file if neither in config nor env
+        if not access_client_id and not access_client_secret:
+            for cred_path in [
+                Path(os.environ.get("CHANDRA_ACCESS_CREDENTIALS", "")),
+                Path.home() / ".config" / "pdf2epub" / "chandra-access.json",
+                Path("chandra-access.json"),
+            ]:
+                if cred_path and cred_path.is_file():
+                    try:
+                        cred_data = json.loads(cred_path.read_text(encoding="utf-8"))
+                        access_client_id = cred_data.get("client_id")
+                        access_client_secret = cred_data.get("client_secret")
+                        if access_client_id and access_client_secret:
+                            break
+                    except Exception:
+                        pass
+
         if bool(access_client_id) != bool(access_client_secret):
             raise ValueError(
                 "Chandra Cloudflare Access requires both "
-                f"{access_client_id_env} and {access_client_secret_env}"
+                f"{access_client_id_env} and {access_client_secret_env} (or in config/credentials file)"
             )
         default_headers = None
         if access_client_id and access_client_secret:

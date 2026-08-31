@@ -46,6 +46,10 @@ def test_wrapper_injects_credentials_only_into_child(tmp_path):
     assert os.environ.get("CHANDRA_CF_ACCESS_CLIENT_SECRET") == parent_secret
 
 
+import pytest
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permissions not supported on Windows")
 def test_wrapper_rejects_credentials_readable_by_other_users(tmp_path):
     credentials = tmp_path / "chandra-access.json"
     _write_credentials(credentials, mode=0o644)

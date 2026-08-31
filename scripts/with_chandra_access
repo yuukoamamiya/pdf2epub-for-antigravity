@@ -19,7 +19,7 @@ def _load_credentials(path: Path) -> tuple[str, str]:
 
     if not stat.S_ISREG(file_stat.st_mode):
         raise SystemExit(f"Chandra Access credentials are not a regular file: {path}")
-    if file_stat.st_mode & 0o077:
+    if os.name != "nt" and (file_stat.st_mode & 0o077):
         raise SystemExit(
             f"Chandra Access credentials must not be accessible by group/others: {path}"
         )
@@ -71,7 +71,12 @@ def main() -> None:
     child_env["CHANDRA_CF_ACCESS_CLIENT_SECRET"] = client_secret
 
     try:
-        os.execvpe(command[0], command, child_env)
+        if os.name == "nt":
+            import subprocess
+            proc = subprocess.run(command, env=child_env)
+            sys.exit(proc.returncode)
+        else:
+            os.execvpe(command[0], command, child_env)
     except FileNotFoundError:
         raise SystemExit(f"Command not found: {command[0]}") from None
 

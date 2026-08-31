@@ -486,7 +486,7 @@ def ocr_full_book_pagewise(
                     token_count = count_tokens(existing_content)
                     page_stats[str(page_num)] = {
                         'tokens': token_count,
-                        'file': str(page_file.relative_to(output_dir)),
+                        'file': (page_file.relative_to(output_dir)).as_posix(),
                         'char_count': len(existing_content)
                     }
                 logger.debug(f"Skipping page {page_num} (already processed)")
@@ -567,15 +567,15 @@ def ocr_full_book_pagewise(
                     # Update stats
                     page_stats[str(page_num)] = {
                         'tokens': token_count,
-                        'file': str(page_file.relative_to(output_dir)),
+                        'file': (page_file.relative_to(output_dir)).as_posix(),
                         'char_count': len(page_result.markdown),
                         'html_file': (
-                            str((pages_dir / f"page_{page_num:03d}.html").relative_to(output_dir))
+                            (pages_dir / f"page_{page_num:03d}.html").relative_to(output_dir).as_posix()
                             if page_result.html is not None
                             else None
                         ),
-                        'artifact_file': str(
-                            (pages_dir / f"page_{page_num:03d}.ocr.json").relative_to(output_dir)
+                        'artifact_file': (
+                            (pages_dir / f"page_{page_num:03d}.ocr.json").relative_to(output_dir).as_posix()
                         ),
                     }
 

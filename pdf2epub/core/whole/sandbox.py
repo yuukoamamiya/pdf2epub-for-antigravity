@@ -144,9 +144,7 @@ class Sandbox:
         try:
             resolved = path.resolve()
             workspace_resolved = self.workspace_dir.resolve()
-            return resolved == workspace_resolved or str(resolved).startswith(
-                str(workspace_resolved) + "/"
-            )
+            return resolved.is_relative_to(workspace_resolved)
         except (OSError, ValueError):
             return False
 
@@ -155,8 +153,6 @@ class Sandbox:
         try:
             resolved = path.resolve()
             work_resolved = self.work_dir.resolve()
-            return resolved == work_resolved or str(resolved).startswith(
-                str(work_resolved) + "/"
-            )
+            return resolved.is_relative_to(work_resolved)
         except (OSError, ValueError):
             return False
