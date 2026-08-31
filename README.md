@@ -96,6 +96,8 @@ input_pdf: "input/mybook.pdf"
 translation:
   source_language: English
   target_language: Chinese
+  # auto 优先使用精修稿；也可指定 ocr 或 polished
+  source_stage: auto
 
 ocr:
   backend: chandra
@@ -125,6 +127,7 @@ uv run pdf2epub -c config.yaml refine-prepare
 
 - 阅读 output/<title>/refine_subagent_prompt.md 和 pages/；
 - 按 prompt 中的格式分析章节层级和页码；
+- 同时从书名页、版权页或前言页提取作者和出版社，原样写入 toc_tree.json；
 - 将结果写入 output/<title>/toc_tree.json。
 
 确认 toc_tree.json 已写入后，运行：
@@ -132,6 +135,11 @@ uv run pdf2epub -c config.yaml refine-prepare
 ~~~bash
 uv run pdf2epub -c config.yaml refine-local --resume
 ~~~
+
+`refine-prepare` 还会生成 `pagination_map.json`。它从 OCR 页脚中提取可能的
+罗马数字和阿拉伯数字，并给出物理页与书内页的 offset 提示。这个文件只供
+Subagent 对照目录判断范围，OCR 文件名代表的物理页始终是最终权威，不会被
+程序自动按 offset 改写。
 
 这个阶段在本地校验目录范围、父子关系、章节重叠和缺失页面，然后生成 ocr_markdown/ 工作单元。它不会调用模型。
 
@@ -170,6 +178,16 @@ uv run pdf2epub -c config.yaml translate --target-language Chinese
 uv run pdf2epub -c config.yaml translate-validate
 ~~~
 
+如果 TOC 节点包含 `type: bibliography` 或 `type: index`，`translate` 生成的
+manifest 会在 `file_roles` 中标记对应单元，并把专用规则写入 prompt：参考文献
+保留作者、书名、年份、DOI、URL、ISBN、页码和引用标点；索引保留层级、页码、
+范围和交叉引用，同时翻译索引词。两类内容仍会完整交给 Subagent，不会被静默
+跳过。
+
+`translate-validate` 还会在 JSON 报告的 `bilingual_warnings` 中记录疑似双语
+污染（例如连续长英文原文未发生变化）。这是预警而不是硬失败；人名、公式、URL
+和 Bibliography/Index 单元会避免按此启发式误报。
+
 ### 5. 打包
 
 只做 OCR、润色而不翻译：
@@ -184,7 +202,23 @@ uv run pdf2epub -c config.yaml build-epub
 uv run pdf2epub -c config.yaml build-epub --translated
 ~~~
 
+当使用 `--translated` 时，程序会在生成中文 EPUB 前，自动用同一套英文源稿
+（优先使用通过 `polish-validate` 的精修稿）生成英文 EPUB 伴随产物：
+
+- `output/<title>/<安全书名>_en.epub`：英文精修版 EPUB。
+
+随后再生成中文 EPUB。英文 EPUB 和中文 EPUB 使用同一套英文源稿。若配置 `translation.source_stage: ocr`，伴随产物会使用 OCR
+稿；默认 `auto` 会在精修稿可用时使用精修稿，否则回退到 OCR 稿。
+
 构建命令只接受通过本地校验的文件。输出在 output/<title>/ 下，文件名会根据书名安全清理。
+
+所有 EPUB/PDF 输入入口统一按以下顺序解析：命令行参数、配置文件中的路径、
+`input/` 中唯一匹配的 EPUB/PDF/MOBI/AZW3 文件，最后才尝试输出目录中的标准
+缓存文件。发现多个候选时会明确要求使用 `-i`，避免误处理错误书籍。
+
+PDF 的作者和出版社元数据优先来自 `toc_tree.json` 中 Agent 从书名页/版权页提取的
+信息；也可以在配置中用 `metadata.author` 或 `metadata.publisher` 显式覆盖。中文 EPUB
+会回退读取原始目录中的原作者和出版社，不会翻译作者名。
 
 ## 流程二：已有 EPUB 的高保真翻译
 
@@ -354,6 +388,7 @@ output/<title>/
 ├── ocr_markdown/                  # PDF 合并后的源单元
 ├── polished_markdown/             # Subagent 润色结果
 ├── translated/                    # PDF 翻译结果
+├── <safe-title>_en.epub           # 翻译时自动生成的英文 EPUB
 ├── compressed_units/              # EPUB 压缩正文单元
 ├── translated_compressed/         # EPUB 正文译文
 ├── novel_units/                   # 轻小说源单元

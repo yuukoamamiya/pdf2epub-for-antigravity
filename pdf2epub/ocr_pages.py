@@ -23,7 +23,7 @@ from google.oauth2 import service_account
 from google.auth.transport.requests import AuthorizedSession
 from loguru import logger
 from .utils.logging_config import configure_logging
-from .utils.common import load_config
+from .utils.common import load_config, resolve_book_input_path
 from .ocr_backends import ocr_pdf_chunk_mistral, ocr_pdf_chunk_vertex, ocr_pdf_chunk_vllm
 from .ocr.artifacts import OCRPageResult
 
@@ -712,21 +712,14 @@ def main():
         raise ValueError(f"Unknown OCR backend: {ocr_backend}. Supported: vertex, mistral, vllm, azure, vision, chandra")
 
     # Determine PDF path
-    if args.input:
-        pdf_path = Path(args.input)
-    else:
-        # Check for input_original.pdf first, then fall back to input.pdf
-        pdf_original_path = Path("output") / book_title / "input_original.pdf"
-        pdf_path = Path("output") / book_title / "input.pdf"
-
-        if pdf_original_path.exists():
-            pdf_path = pdf_original_path
-            logger.info(f"Using original PDF: {pdf_path}")
-        elif pdf_path.exists():
-            logger.info(f"Using PDF: {pdf_path}")
-        else:
-            logger.error(f"No PDF file found. Looked for: {pdf_original_path} and {pdf_path}")
-            return
+    pdf_path = resolve_book_input_path(
+        args.input,
+        config_value=config.get("input_pdf") or config.get("input"),
+        config_path=args.config,
+        output_dir=output_dir,
+        extensions=(".pdf",),
+        output_names=("input_original.pdf", "input.pdf"),
+    )
 
     if not pdf_path.exists():
         logger.error(f"PDF file not found: {pdf_path}")

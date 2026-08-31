@@ -2,9 +2,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from xml.etree import ElementTree as ET
 
+from pdf2epub.cli import _resolve_pdf_markdown_source
 from pdf2epub.build_epub import (
     generate_hierarchical_toc_html,
     generate_hierarchical_toc_ncx,
+    resolve_book_metadata,
+    write_combined_markdown,
 )
 from pdf2epub.epub.builder import EpubBuilder
 
@@ -79,6 +82,29 @@ def test_epub_builder_uses_reader_language_label(tmp_path: Path) -> None:
     assert "<title>目录</title>" in html_path.read_text(encoding="utf-8")
 
 
+def test_epub_builder_writes_author_and_optional_publisher(tmp_path: Path) -> None:
+    builder = EpubBuilder(
+        SimpleNamespace(
+            book_title="Test Book",
+            author="Elena Ficara",
+            publisher="Walter de Gruyter GmbH",
+            language="en",
+        )
+    )
+    opf_path = tmp_path / "content.opf"
+
+    assert builder.create_content_opf(
+        {"chapters": []},
+        tmp_path,
+        opf_path,
+        all_html_files=[],
+    )
+
+    opf = opf_path.read_text(encoding="utf-8")
+    assert "<dc:creator opf:role=\"aut\">Elena Ficara</dc:creator>" in opf
+    assert "<dc:publisher>Walter de Gruyter GmbH</dc:publisher>" in opf
+
+
 def test_hierarchical_ncx_reuses_play_order_for_same_target(
     tmp_path: Path,
 ) -> None:
@@ -133,3 +159,61 @@ def test_epub_stylesheet_uses_a_valid_quote_string() -> None:
 
     assert 'content: "“";' in stylesheet
     assert 'content: """;' not in stylesheet
+
+
+def test_combined_markdown_follows_toc_and_split_part_order(tmp_path: Path) -> None:
+    chapter_one = tmp_path / "chapter_1.md"
+    chapter_one.write_text("# First\n\nFirst body", encoding="utf-8")
+    chapter_two_part_one = tmp_path / "chapter_2.part1.md"
+    chapter_two_part_one.write_text("# Second\n\nPart one", encoding="utf-8")
+    chapter_two_part_two = tmp_path / "chapter_2.part2.md"
+    chapter_two_part_two.write_text("Part two", encoding="utf-8")
+    output_path = tmp_path / "book_en.md"
+
+    structure = [
+        {
+            "file_path": chapter_one,
+            "part_files": [chapter_one],
+            "children": [],
+        },
+        {
+            "file_path": chapter_two_part_one,
+            "part_files": [chapter_two_part_one, chapter_two_part_two],
+            "children": [],
+        },
+    ]
+
+    assert write_combined_markdown(structure, output_path) == output_path
+    assert output_path.read_text(encoding="utf-8") == (
+        "# First\n\nFirst body\n\n# Second\n\nPart one\n\nPart two\n"
+    )
+
+
+def test_pdf_source_stage_can_be_auto_selected_or_explicit(tmp_path: Path) -> None:
+    polished_dir = tmp_path / "polished_markdown" / "validated"
+    polished_dir.mkdir(parents=True)
+    (polished_dir / "chapter_1.md").write_text("polished", encoding="utf-8")
+    ocr_dir = tmp_path / "ocr_markdown"
+    ocr_dir.mkdir()
+    (ocr_dir / "chapter_1.md").write_text("ocr", encoding="utf-8")
+
+    assert _resolve_pdf_markdown_source(tmp_path, {}) == (polished_dir, "polished")
+    assert _resolve_pdf_markdown_source(
+        tmp_path, {"translation": {"source_stage": "ocr"}}
+    ) == (ocr_dir, "ocr")
+
+
+def test_book_metadata_prefers_explicit_values_and_ignores_unknown(tmp_path: Path) -> None:
+    metadata = resolve_book_metadata(
+        [
+            {"author": "Unknown", "publisher": "Agent Publisher"},
+            {"author": "Translated Author"},
+        ],
+        {"metadata": {"author": "Explicit Author"}},
+        tmp_path,
+    )
+
+    assert metadata == {
+        "author": "Explicit Author",
+        "publisher": "Agent Publisher",
+    }

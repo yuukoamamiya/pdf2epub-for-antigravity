@@ -111,7 +111,8 @@
 
 #### Step 3: 结构分析与章节合并
 1. Agent 执行命令：`uv run pdf2epub -c config.yaml refine-prepare`
-2. 在 Antigravity IDE 中让 Subagent 阅读 `output/<title>/refine_subagent_prompt.md` 和 `pages/`，写入 `output/<title>/toc_tree.json`。
+2. 在 Antigravity IDE 中让 Subagent 阅读 `output/<title>/refine_subagent_prompt.md` 和 `pages/`，从书名页/版权页提取作者与出版社并写入 `output/<title>/toc_tree.json`。
+   `refine-prepare` 同时生成 `pagination_map.json`；它只是 Roman/Arabic 书内页码的辅助映射，物理 OCR 页码仍是范围判断的权威。
 3. Agent 执行命令：`uv run pdf2epub -c config.yaml refine-local --resume`
 4. 产物：`output/<title>/toc_tree.json` 与 `output/<title>/ocr_markdown/chapter_XXX.md`。
 5. **TOC 校验**：`refine-local` 本地检查章节重叠、父子范围和缺失页面；若失败，修正 `toc_tree.json` 后重新执行。
@@ -124,6 +125,11 @@
      `toc_tree_translated.json`；
   3. 保持 Markdown 标题层级（`#`, `##`）、公式（`$...$`）、脚注（`[^...]`）
      和图片链接原样不变；完成后运行 `translate-validate`。
+  4. 若节点使用 `type: bibliography` 或 `type: index`，按 translate manifest
+     中的 `file_roles` 和专用规则处理。参考文献保留书目身份字段、页码和引用
+     标点；索引保留层级、页码、范围和交叉引用，不得省略条目。
+  5. `translate-validate` 的 `bilingual_warnings` 仅是长英文原文未变化的预警，
+     不是自动阻断条件；应人工检查后再决定是否让 Subagent 重写。
 - **若仅为版式精修需求**：
   1. 执行 `polish`，让 Subagent 按 `polish_subagent_prompt.md` 修复 OCR 文本
      断行与格式，写入 `output/<title>/polished_markdown/`；完成后运行
@@ -132,6 +138,8 @@
 #### Step 5: 离线打包生成 EPUB
 - 生成中文翻译版：`uv run pdf2epub -c config.yaml build-epub --translated`
 - 生成原版精修版：`uv run pdf2epub -c config.yaml build-epub`
+- 使用 `build-epub --translated` 时，会同时从英文源稿生成
+  `output/<title>/<safe-title>_en.epub`，然后再生成中文 EPUB；不再额外生成英文 Markdown。
 
 ---
 

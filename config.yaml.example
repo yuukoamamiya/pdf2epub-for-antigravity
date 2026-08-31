@@ -8,6 +8,13 @@ input_pdf: "input/your_book.pdf"
 translation:
   source_language: English # 或 Japanese / German / French 等
   target_language: Chinese
+  # auto 优先使用 polished_markdown/validated；也可明确指定 ocr 或 polished。
+  source_stage: auto
+
+# 可选：手动覆盖书名页提取的书目信息
+# metadata:
+#   author: "Author Name"
+#   publisher: "Publisher Name"
 
 # Antigravity Subagent 模型（只作为 IDE 子 Agent 的任务提示，不调用任何 API）
 # 翻译类任务默认使用 Pro，其余任务（结构分析、润色、实体提取）默认使用 Flash。

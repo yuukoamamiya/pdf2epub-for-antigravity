@@ -308,6 +308,8 @@ class RefinedBreakdown:
                 'token_count': unit['token_count'],
                 'file': str(output_file.name)
             }
+            if node.chapter_type:
+                metadata['type'] = node.chapter_type
             unit_metadata.append(metadata)
 
             logger.debug(f"Saved {unit['unit_id']}: {unit['token_count']} tokens")

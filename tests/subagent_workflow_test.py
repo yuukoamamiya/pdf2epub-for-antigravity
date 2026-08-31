@@ -13,6 +13,7 @@ from pdf2epub.subagent_workflow import (
     DEFAULT_SUBAGENT_MODEL,
     DEFAULT_TRANSLATION_MODEL,
     detect_refusal,
+    detect_bilingual_output,
     prepare_markdown_subagent,
     prepare_toc_translation_subagent,
     resolve_subagent_model,
@@ -61,6 +62,46 @@ def test_detect_refusal_flags_chinese_disclaimer():
 
     assert reason is not None
     assert "Chinese refusal" in reason
+
+
+def test_detect_bilingual_output_is_advisory_for_long_unchanged_spans():
+    line = "This is a deliberately long English paragraph that should remain unchanged in a bilingual output warning."
+    warning = detect_bilingual_output(f"{line}\n{line}", f"{line}\n{line}")
+    assert warning is not None
+    assert warning["start_line"] == 1
+    assert warning["end_line"] == 2
+
+
+def test_markdown_validation_reports_bilingual_warning_without_failing(tmp_path: Path):
+    from pdf2epub.subagent_workflow import validate_markdown_subagent
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    line = "This is a deliberately long English paragraph that should remain unchanged in a bilingual output warning."
+    (source_dir / "unit.md").write_text(f"{line}\n{line}\n", encoding="utf-8")
+    (target_dir / "unit.md").write_text(f"{line}\n{line}\n", encoding="utf-8")
+    report = validate_markdown_subagent(tmp_path, "translate", source_dir, target_dir)
+    assert report["all_passed"] is True
+    assert report["bilingual_warnings"][0]["file"] == "unit.md"
+
+
+def test_markdown_validation_excludes_bibliography_from_bilingual_warning(tmp_path: Path):
+    from pdf2epub.subagent_workflow import validate_markdown_subagent
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    line = "This is a deliberately long English bibliographic entry with a title, publisher, and publication year."
+    (source_dir / "unit.md").write_text(f"{line}\n{line}\n", encoding="utf-8")
+    (target_dir / "unit.md").write_text(f"{line}\n{line}\n", encoding="utf-8")
+    report = validate_markdown_subagent(
+        tmp_path, "translate", source_dir, target_dir,
+        file_roles={"unit.md": "bibliography"},
+    )
+    assert report["bilingual_warnings"] == []
 
 
 def test_html_validation_quarantines_refusal_candidate(tmp_path: Path):
@@ -137,6 +178,20 @@ def test_prepare_markdown_subagent_records_file_sizes_and_batches(tmp_path: Path
     assert stats["a.md"]["estimated_tokens"] > 0
     assert manifest["batching"]["max_concurrency"] == 2
     assert manifest["recommended_batches"] == [["a.md"], ["b.md"]]
+
+
+def test_prepare_markdown_subagent_records_special_file_roles(tmp_path: Path):
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    (source_dir / "refs.md").write_text("References\n", encoding="utf-8")
+    paths = prepare_markdown_subagent(
+        tmp_path, "translate", source_dir, tmp_path / "target", "English", "Chinese",
+        file_roles={"refs.md": "bibliography"},
+    )
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    prompt = paths["prompt"].read_text(encoding="utf-8")
+    assert manifest["file_roles"] == {"refs.md": "bibliography"}
+    assert "preserve author names" in prompt
 
 
 def test_prepare_markdown_subagent_does_not_trust_unvalidated_partial_file(
@@ -370,6 +425,8 @@ def test_prepare_refine_subagent_writes_manifest_and_prompt(tmp_path: Path):
     assert manifest["model"] == "configured-flash"
     assert "configured-flash" in paths["prompt"].read_text(encoding="utf-8")
     assert "toc_tree.json" in paths["prompt"].read_text(encoding="utf-8")
+    assert (tmp_path / "pagination_map.json").exists()
+    assert "pagination_map.json" in paths["prompt"].read_text(encoding="utf-8")
 
 
 def test_prepare_toc_translation_subagent_writes_clean_prompt(tmp_path: Path):

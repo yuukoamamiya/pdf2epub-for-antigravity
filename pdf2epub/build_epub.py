@@ -35,6 +35,79 @@ class BuildEpubConfig:
     translated: bool = False
     target_language: str = "Chinese"
     config: Optional[Dict] = None
+    output_epub: Optional[Path] = None
+    combined_markdown_path: Optional[Path] = None
+
+
+def _usable_metadata_value(value) -> str:
+    """Return a clean metadata string, treating placeholders as missing."""
+    if not isinstance(value, str):
+        return ""
+    value = value.strip()
+    if value.lower() in {"unknown", "unknown author", "n/a", "na", "none"}:
+        return ""
+    return value
+
+
+def resolve_book_metadata(
+    toc_trees: List[Dict],
+    config: Optional[Dict],
+    output_dir: Path,
+) -> Dict[str, str]:
+    """Resolve bibliographic metadata without guessing from body text.
+
+    Explicit config values win, followed by Agent-extracted TOC metadata and
+    finally the PDF's embedded author field.  The original TOC is accepted
+    alongside the translated TOC so translated builds retain original names.
+    """
+    config = config or {}
+    configured_metadata = config.get("metadata", {})
+    if not isinstance(configured_metadata, dict):
+        configured_metadata = {}
+
+    result: Dict[str, str] = {}
+    for field in ("author", "publisher"):
+        candidates = [config.get(field), configured_metadata.get(field)]
+        for tree in toc_trees:
+            if not isinstance(tree, dict):
+                continue
+            candidates.append(tree.get(field))
+            tree_metadata = tree.get("metadata")
+            if isinstance(tree_metadata, dict):
+                candidates.append(tree_metadata.get(field))
+        result[field] = next(
+            (
+                value
+                for value in (_usable_metadata_value(item) for item in candidates)
+                if value
+            ),
+            "",
+        )
+
+    if not result["author"]:
+        try:
+            import fitz
+
+            for filename in ("input_original.pdf", "input.pdf"):
+                pdf_path = Path(output_dir) / filename
+                if not pdf_path.exists():
+                    continue
+                with fitz.open(pdf_path) as document:
+                    embedded_author = _usable_metadata_value(
+                        (document.metadata or {}).get("author")
+                    )
+                if embedded_author:
+                    result["author"] = embedded_author
+                    break
+        except Exception as exc:
+            logger.debug(f"Could not read embedded PDF metadata: {exc}")
+
+    if not result["author"]:
+        logger.warning(
+            "No author metadata found; EPUB will use 'Unknown'. "
+            "Add author to toc_tree.json or metadata in config.yaml."
+        )
+    return result
 
 
 def load_toc_tree(path: Path) -> Dict:
@@ -536,6 +609,42 @@ def build_epub_structure(
     return [process_entry(ch) for ch in toc_structure]
 
 
+def write_combined_markdown(
+    structure: List[Dict],
+    output_path: Path,
+) -> Path:
+    """Write Markdown in the same chapter/part order used for the EPUB."""
+    parts: List[str] = []
+    seen_files = set()
+
+    def collect(entries: List[Dict]) -> None:
+        for entry in entries:
+            file_path = entry.get("file_path")
+            if file_path:
+                part_files = entry.get("part_files") or [file_path]
+                for part_file in part_files:
+                    part_path = Path(part_file)
+                    if part_path in seen_files or not part_path.is_file():
+                        continue
+                    seen_files.add(part_path)
+                    content = part_path.read_text(encoding="utf-8").strip()
+                    if content:
+                        parts.append(content)
+            children = entry.get("children") or []
+            if children:
+                collect(children)
+
+    collect(structure)
+    if not parts:
+        raise ValueError("No Markdown content found for combined output")
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text("\n\n".join(parts) + "\n", encoding="utf-8")
+    logger.success(f"Combined Markdown created: {output_path}")
+    return output_path
+
+
 def generate_hierarchical_toc_ncx(
     structure: List[Dict],
     book_title: str,
@@ -801,6 +910,7 @@ def build_epub(config: BuildEpubConfig) -> Path:
 
     # Load toc_tree.json
     toc_tree = load_toc_tree(config.toc_tree_path)
+    original_toc_tree = toc_tree
     logger.info(f"Loaded toc_tree.json with {len(toc_tree.get('chapters', []))} top-level entries")
 
     # Extract cover image from PDF if not provided
@@ -901,18 +1011,25 @@ def build_epub(config: BuildEpubConfig) -> Path:
 
     # Create a minimal config object for EpubBuilder and ContentConverter
     class MinimalConfig:
-        def __init__(self, book_title, author, language, markdown_dir):
+        def __init__(self, book_title, author, language, markdown_dir, publisher):
             self.book_title = book_title
             self.author = author
+            self.publisher = publisher
             self.language = language
             self.markdown_dir = markdown_dir
 
-    author = toc_tree.get('author', 'Unknown')
+    metadata = resolve_book_metadata(
+        [original_toc_tree, toc_tree], config.config, config.output_dir
+    )
+    author = metadata["author"] or "Unknown"
+    publisher = metadata["publisher"]
     language = 'zh' if config.translated else toc_tree.get('language', 'en')
     if language.lower() in ['english', 'japanese', 'chinese']:
         language = {'english': 'en', 'japanese': 'ja', 'chinese': 'zh'}.get(language.lower(), 'en')
 
-    minimal_config = MinimalConfig(config.book_title, author, language, config.markdown_dir)
+    minimal_config = MinimalConfig(
+        config.book_title, author, language, config.markdown_dir, publisher
+    )
     builder = EpubBuilder(minimal_config)
 
     # Create ContentConverter for cleanup operations
@@ -926,6 +1043,9 @@ def build_epub(config: BuildEpubConfig) -> Path:
     removed_duplicates = converter.remove_duplicate_titles()
     if removed_duplicates > 0:
         logger.info(f"Removed {removed_duplicates} duplicate titles")
+
+    if config.combined_markdown_path:
+        write_combined_markdown(epub_structure, config.combined_markdown_path)
 
     # Initialize FootnoteManager after cleanup so scanned refs/defs match the
     # markdown that will actually be converted.
@@ -1074,7 +1194,7 @@ def build_epub(config: BuildEpubConfig) -> Path:
     # Create final EPUB with sanitized filename
     from .utils.common import sanitize_filename
     safe_title = sanitize_filename(config.book_title)
-    epub_path = config.output_dir / f"{safe_title}.epub"
+    epub_path = config.output_epub or (config.output_dir / f"{safe_title}.epub")
     builder.create_epub(epub_dir, epub_path)
 
     # Keep build directory for debugging (don't clean up)

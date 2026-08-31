@@ -444,12 +444,19 @@ a { text-decoration: none; }
             date = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
             
             # Start OPF document
+            author = getattr(self.config, "author", "") or "Unknown"
+            publisher = getattr(self.config, "publisher", "") or ""
+            publisher_element = (
+                f"        <dc:publisher>{html.escape(publisher)}</dc:publisher>\n"
+                if publisher
+                else ""
+            )
             opf = f"""<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="BookId">
     <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
         <dc:title>{html.escape(self.config.book_title or "Unknown")}</dc:title>
-        <dc:creator opf:role="aut">{html.escape(self.config.author or "Unknown")}</dc:creator>
-        <dc:language>{self.config.language}</dc:language>
+        <dc:creator opf:role="aut">{html.escape(author)}</dc:creator>
+{publisher_element}        <dc:language>{self.config.language}</dc:language>
         <dc:identifier id="BookId" opf:scheme="UUID">{self.uid}</dc:identifier>
         <dc:date>{date}</dc:date>
         <meta name="generator" content="PDF2EPUB v3"/>

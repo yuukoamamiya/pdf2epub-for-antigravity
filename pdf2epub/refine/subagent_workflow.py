@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 from pdf2epub.subagent_workflow import resolve_subagent_model
+from .pagination import build_pagination_map
 
 
 PAGE_RE = re.compile(r"^page_(\d+)\.md$")
@@ -51,11 +52,14 @@ def prepare_refine_subagent(
         "max_tokens_per_unit": max_tokens,
         "model": model,
         "output_file": "toc_tree.json",
+        "pagination_map": "pagination_map.json",
     }
     manifest_path = output_dir / "refine_subagent_manifest.json"
     manifest_path.write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    pagination_path = output_dir / "pagination_map.json"
+    build_pagination_map(pages_dir, pagination_path)
 
     prompt_path = output_dir / "refine_subagent_prompt.md"
     prompt_path.write_text(
@@ -67,6 +71,13 @@ Recommended Antigravity model: `{model}`
 Read all OCR Markdown files under `pages/` and write `toc_tree.json` in this
 directory.  The file is consumed by a local deterministic step, so output
 valid JSON only and do not add Markdown fences or commentary.
+
+Before deciding chapter ranges, read `pagination_map.json`. It is a local
+heuristic mapping between physical OCR pages and printed Roman/Arabic page
+labels. Use it as supporting evidence for the table of contents; the physical
+OCR page number remains authoritative in `start_page` and `end_page`. If the
+map is uncertain, inspect the page text and record the uncertainty rather than
+blindly applying an offset.
 
 Use 1-based inclusive OCR page numbers.  Identify the book's real chapters and
 sections from the page text, including nested sections.  Keep nodes ordered by
@@ -80,6 +91,9 @@ Required output shape:
 {{
   "schema_version": 1,
   "book_title": "{book_title}",
+  "author": "Exact author name from the title or copyright page",
+  "publisher": "Exact publisher name when visible",
+  "metadata_source_pages": [1],
   "chapters": [
     {{
       "title": "Chapter title",
@@ -99,7 +113,14 @@ Rules:
   range, and use integer values.
 - `level` starts at 1 and increases for nested children.
 - Preserve meaningful title text from the OCR; do not invent page numbers.
-- You may include `type: "notes"`, `boundary_info`, or other book metadata,
+- Inspect the title page, copyright page, and front matter for bibliographic metadata.
+  Copy the author and publisher exactly as printed; do not translate, normalize,
+  or guess them. Use an empty string only when the information is genuinely not
+  visible, and record the relevant OCR page numbers in `metadata_source_pages`.
+- You may include `type: "notes"`, `type: "bibliography"`, `type: "index"`,
+  `boundary_info`, or other book metadata. Use `bibliography` for a references
+  section and `index` for an index so the later translation prompt can apply
+  the appropriate preservation rules.
   but do not change the required field names.
 - The local step will estimate tokens using `{max_tokens}` as the unit limit;
   it will not call any model or provider.

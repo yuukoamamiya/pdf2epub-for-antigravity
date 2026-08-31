@@ -240,6 +240,7 @@ def prepare_markdown_subagent(
     extra_rules: Iterable[str] = (),
     config: Optional[Mapping[str, Any]] = None,
     resume: bool = False,
+    file_roles: Optional[Mapping[str, str]] = None,
 ) -> Dict[str, Path]:
     """Write a manifest and prompt for a markdown Subagent task."""
     source_dir = Path(source_dir)
@@ -316,6 +317,13 @@ def prepare_markdown_subagent(
         "completed_files": completed_files,
         "pending_files": pending_files,
     }
+    normalized_roles = {
+        str(name): str(role).strip().lower()
+        for name, role in (file_roles or {}).items()
+        if str(role).strip().lower() in {"bibliography", "index"}
+    }
+    if normalized_roles:
+        manifest["file_roles"] = normalized_roles
     manifest_path = output_dir / f"{task}_subagent_manifest.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -326,6 +334,14 @@ def prepare_markdown_subagent(
         "If the model refuses a unit or inserts a safety disclaimer, do not write that refusal as the translation; leave the target absent and report the blocked unit.",
         *extra_rules,
     ]
+    role_rules = []
+    if normalized_roles:
+        role_rules = [
+            "The manifest file_roles map identifies special units; apply the corresponding rules below.",
+            "For bibliography units: preserve author names, publication titles, years, editions, DOI/URL/ISBN, page numbers, and citation punctuation. Translate only prose labels, headings, and explanatory text when present.",
+            "For index units: translate index terms naturally, but preserve indentation/entry hierarchy, page numbers, ranges, cross-reference targets, and alphabetic grouping as far as the target language permits.",
+            "Do not omit, summarize, or silently skip bibliography or index entries.",
+        ]
     prompt_path = output_dir / f"{task}_subagent_prompt.md"
     prompt_path.write_text(
         f"""# {task} Subagent task
@@ -354,7 +370,11 @@ Batching guidance:
 
 Rules:
 
-{chr(10).join(f"- {rule}" for rule in rules)}
+{chr(10).join(f"- {rule}" for rule in rules + role_rules)}
+
+File roles (apply only to the named files):
+
+{chr(10).join(f"- `{name}`: `{role}`" for name, role in normalized_roles.items()) or "- none"}
 """,
         encoding="utf-8",
     )
@@ -368,6 +388,7 @@ def validate_markdown_subagent(
     target_dir: Path,
     structural_patterns: Iterable[str] = (),
     create_validated_copy: bool = True,
+    file_roles: Optional[Mapping[str, str]] = None,
 ) -> Dict:
     """Validate a Subagent markdown hand-off and optionally stage it."""
     source_dir = Path(source_dir)
@@ -378,6 +399,12 @@ def validate_markdown_subagent(
     safety_blocked: List[str] = []
     valid_files: List[str] = []
     source_sha256: Dict[str, str] = {}
+    normalized_roles = {
+        str(name): str(role).strip().lower()
+        for name, role in (file_roles or {}).items()
+        if str(role).strip().lower() in {"bibliography", "index"}
+    }
+    bilingual_warnings: List[Dict[str, Any]] = []
     validated_dir = target_dir / "validated"
     # Never leave a previous successful hand-off usable after a later failed
     # validation.  The validated directory is a generated staging area.
@@ -402,6 +429,10 @@ def validate_markdown_subagent(
             )
             safety_blocked.append(source.name)
             continue
+        warning = detect_bilingual_output(source_text, target_text)
+        if warning and source.name not in normalized_roles:
+            warning["file"] = source.name
+            bilingual_warnings.append(warning)
         for pattern in structural_patterns:
             if len(re.findall(pattern, source_text, flags=re.MULTILINE)) != len(
                 re.findall(pattern, target_text, flags=re.MULTILINE)
@@ -436,6 +467,8 @@ def validate_markdown_subagent(
         "missing": missing,
         "invalid": invalid,
         "safety_blocked": safety_blocked,
+        "bilingual_warnings": bilingual_warnings,
+        "file_roles": normalized_roles,
         "extra": extras,
         "valid_files": valid_files,
         "source_sha256": source_sha256,
@@ -446,6 +479,37 @@ def validate_markdown_subagent(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     return report
+
+
+def detect_bilingual_output(source_text: str, target_text: str) -> Optional[Dict[str, Any]]:
+    """Warn when a translation appears to contain a long unchanged source span.
+
+    This is deliberately advisory: names, formulas, URLs and references can be
+    legitimately unchanged, so the validator reports a warning and never makes
+    the unit fail solely on this heuristic.
+    """
+    source_lines = source_text.splitlines()
+    target_lines = target_text.splitlines()
+    unchanged = []
+    for index, (source_line, target_line) in enumerate(zip(source_lines, target_lines), 1):
+        source_line = source_line.strip()
+        target_line = target_line.strip()
+        if len(source_line) < 80 or source_line != target_line:
+            if unchanged:
+                break
+            continue
+        letters = re.sub(r"[^A-Za-z]", "", source_line)
+        if len(letters) >= 60:
+            unchanged.append(index)
+        elif unchanged:
+            break
+    if len(unchanged) >= 2:
+        return {
+            "reason": "long unchanged English source span; possible bilingual output",
+            "start_line": unchanged[0],
+            "end_line": unchanged[-1],
+        }
+    return None
 
 
 def prepare_toc_translation_subagent(

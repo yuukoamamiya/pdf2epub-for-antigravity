@@ -12,11 +12,83 @@ import sys
 from pathlib import Path
 from loguru import logger
 from pdf2epub.utils.logging_config import configure_logging
-from pdf2epub.utils.common import load_config, resolve_input_path
+from pdf2epub.utils.common import (
+    load_config,
+    resolve_book_input_path,
+    sanitize_filename,
+)
 from pdf2epub.utils.network_utils import set_llm_trace_path
 
 # Configure logger
 logger = configure_logging()
+
+
+def _resolve_pdf_markdown_source(output_dir: Path, config):
+    """Choose the Markdown stage shared by PDF translation and source builds."""
+    translation = config.get("translation", {})
+    requested_stage = str(translation.get("source_stage", "auto")).strip().lower()
+    if requested_stage not in {"auto", "ocr", "polished"}:
+        raise ValueError(
+            "translation.source_stage must be one of: auto, ocr, polished"
+        )
+
+    polished_dir = output_dir / "polished_markdown" / "validated"
+    ocr_dir = output_dir / "ocr_markdown"
+    polished_available = polished_dir.is_dir() and any(polished_dir.glob("*.md"))
+
+    if requested_stage == "polished":
+        return polished_dir, "polished"
+    if requested_stage == "ocr":
+        return ocr_dir, "ocr"
+    if polished_available:
+        return polished_dir, "polished"
+    return ocr_dir, "ocr"
+
+
+def _load_pdf_file_roles(output_dir: Path) -> dict:
+    """Load chapter roles produced by refine-local for translation prompts."""
+    progress = output_dir / "ocr_markdown" / "tree_progress.json"
+    if not progress.is_file():
+        return {}
+    try:
+        data = json.loads(progress.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    roles = {}
+    for unit in data.get("units", []):
+        role = str(unit.get("type") or "").strip().lower()
+        if role in {"bibliography", "index"}:
+            roles[str(unit.get("file") or "")] = role
+    if roles:
+        return roles
+
+    # Older tree_progress files predate the ``type`` field.  Recover roles
+    # from the current TOC so adding a type to toc_tree.json does not require
+    # deleting a resumable refinement checkpoint.
+    toc_path = output_dir / "toc_tree.json"
+    try:
+        toc = json.loads(toc_path.read_text(encoding="utf-8"))
+        from pdf2epub.utils.unit_id import generate_unit_id
+
+        def visit(nodes, path):
+            for index, node in enumerate(nodes or [], 1):
+                node_path = path + [index]
+                role = str(node.get("type") or "").strip().lower()
+                if role in {"bibliography", "index"}:
+                    roles[f"{generate_unit_id(node_path)}.md"] = role
+                visit(node.get("children", node.get("subchapters", [])), node_path)
+
+        visit(toc.get("chapters", []), [])
+    except (OSError, json.JSONDecodeError, AttributeError, TypeError, ValueError):
+        pass
+    return roles
+
+
+def _validate_pdf_source_stage(args, source_stage: str) -> int:
+    """Validate a Subagent-produced source stage when one is selected."""
+    if source_stage == "polished":
+        return polish_validate_command(args)
+    return 0
 
 
 def polish_command(args):
@@ -51,12 +123,13 @@ def _prepare_pdf_markdown_task(args, task: str):
         if content_type and content_type != "auto":
             rules.append(f"Treat this as {content_type} content and preserve its domain-specific conventions.")
     else:
-        source_dir = output_dir / "polished_markdown" / "validated"
+        source_dir, _ = _resolve_pdf_markdown_source(output_dir, config)
         target_dir = output_dir / "translated"
         rules = [
             "Translate prose to the target language; do not summarize, censor, or add commentary.",
             "Preserve Markdown heading levels, image links, footnote references, formulas, and link destinations exactly.",
             "Keep one output file for every source file and keep filenames unchanged.",
+            "Output only the target-language replacement: never add bilingual paragraphs, parallel English titles, or the original text beside the translation.",
             "If translation_entities.json exists, use it as a terminology reference without modifying it.",
         ]
     configure_logging(book_title, f"{task}-prepare")
@@ -71,6 +144,7 @@ def _prepare_pdf_markdown_task(args, task: str):
             rules,
             config=config,
             resume=getattr(args, "resume", False),
+            file_roles=_load_pdf_file_roles(output_dir) if task == "translate" else None,
         )
         if task == "translate":
             from pdf2epub.subagent_workflow import prepare_toc_translation_subagent
@@ -106,7 +180,7 @@ def _validate_pdf_markdown_task(args, task: str):
         source_dir = output_dir / "ocr_markdown"
         target_dir = output_dir / "polished_markdown"
     else:
-        source_dir = output_dir / "polished_markdown" / "validated"
+        source_dir, _ = _resolve_pdf_markdown_source(output_dir, config)
         target_dir = output_dir / "translated"
     report = validate_markdown_subagent(
         output_dir,
@@ -114,6 +188,7 @@ def _validate_pdf_markdown_task(args, task: str):
         source_dir,
         target_dir,
         structural_patterns=(r"^#{1,6}\s", r"!\[[^\]]*\]\([^)]+\)", r"\[\^[^\]]+\]"),
+        file_roles=_load_pdf_file_roles(output_dir) if task == "translate" else None,
     )
     if task == "translate":
         from pdf2epub.subagent_workflow import validate_toc_translation_subagent
@@ -134,6 +209,11 @@ def _validate_pdf_markdown_task(args, task: str):
     if report.get("safety_blocked"):
         logger.error(
             f"Safety/refusal blocked units: {report['safety_blocked'][:10]}"
+        )
+    if report.get("bilingual_warnings"):
+        logger.warning(
+            f"Bilingual output warnings: {len(report['bilingual_warnings'])} "
+            "(warning only; inspect the validation JSON before building)"
         )
     if report["all_passed"]:
         logger.success(f"{task} Subagent output validated: {report['validated_dir']}")
@@ -232,12 +312,14 @@ def ocr_pages_command(args):
     set_llm_trace_path(output_dir / "logs" / "llm_trace.jsonl")
 
     # Find PDF
-    if args.input:
-        pdf_path = resolve_input_path(args.input)
-    else:
-        pdf_path = output_dir / "input.pdf"
-        if not pdf_path.exists():
-            pdf_path = output_dir / "input_original.pdf"
+    pdf_path = resolve_book_input_path(
+        args.input,
+        config_value=config.get("input_pdf") or config.get("input"),
+        config_path=args.config,
+        output_dir=output_dir,
+        extensions=(".pdf",),
+        output_names=("input_original.pdf", "input.pdf"),
+    )
 
     if not pdf_path.exists():
         logger.error(f"PDF not found: {pdf_path}")
@@ -401,25 +483,30 @@ def build_epub_command(args):
         logger.info("Run 'refine-prepare', use a Subagent, then 'refine-local' first to generate toc_tree.json")
         return 1
 
-    # Determine markdown directory
-    # V2 architecture stores results in validated/ subdirectory
+    # V2 architecture stores Subagent results in validated/ subdirectories.
+    source_dir, source_stage = _resolve_pdf_markdown_source(output_dir, config)
     if args.translated:
         markdown_dir = output_dir / "translated" / "validated"
         logger.info("Building EPUB from translated markdown...")
+        source_validation = _validate_pdf_source_stage(args, source_stage)
+        if source_validation != 0:
+            logger.error("Refusing to build: the English source stage is not validated")
+            return 1
+        if not source_dir.is_dir() or not any(source_dir.glob("*.md")):
+            logger.error(f"English source Markdown not found: {source_dir}")
+            return 1
     else:
-        markdown_dir = output_dir / "polished_markdown" / "validated"
-        logger.info("Building EPUB from polished markdown...")
+        markdown_dir = source_dir
+        logger.info(f"Building EPUB from {source_stage} markdown...")
 
-    if not markdown_dir.exists():
+    if not markdown_dir.is_dir() or not any(markdown_dir.glob("*.md")):
         logger.error(f"Markdown directory not found: {markdown_dir}")
         logger.info("Run the corresponding Subagent task and its -validate command first")
         return 1
 
-    validation_result = (
-        translate_validate_command(args)
-        if args.translated
-        else polish_validate_command(args)
-    )
+    validation_result = translate_validate_command(args) if args.translated else 0
+    if not args.translated:
+        validation_result = _validate_pdf_source_stage(args, source_stage)
     if validation_result != 0:
         logger.error("Refusing to build from unvalidated Subagent output")
         return 1
@@ -449,6 +536,33 @@ def build_epub_command(args):
 
     # Get target language from config
     target_language = config.get("translation", {}).get("target_language", "Chinese")
+
+    if args.translated:
+        source_language = config.get("translation", {}).get(
+            "source_language", "English"
+        )
+        safe_title = sanitize_filename(book_title)
+        english_epub = output_dir / f"{safe_title}_en.epub"
+        english_config = BuildEpubConfig(
+            book_title=book_title,
+            output_dir=output_dir,
+            markdown_dir=source_dir,
+            toc_tree_path=toc_tree_path,
+            images_dir=images_dir,
+            cover_image=cover_image,
+            translated=False,
+            target_language=source_language,
+            config=config,
+            output_epub=english_epub,
+        )
+        try:
+            english_path = build_epub(english_config)
+            logger.success(f"English EPUB created: {english_path}")
+        except Exception as e:
+            logger.error(f"English EPUB build failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return 1
 
     # Create config
     build_config = BuildEpubConfig(
@@ -488,15 +602,14 @@ def _prepare_html_command(args):
     config = load_config(args.config)
     book_title = config.get("title")
 
-    input_file = getattr(args, 'input', None) or config.get("input_epub")
-    if input_file is None:
-        input_dir = Path("input")
-        if input_dir.exists():
-            candidates = list(input_dir.glob("*.epub")) + list(input_dir.glob("*.azw3")) + list(input_dir.glob("*.mobi"))
-            if len(candidates) == 1:
-                input_file = str(candidates[0])
-
-    epub_path = resolve_input_path(input_file) if input_file else None
+    epub_path = resolve_book_input_path(
+        getattr(args, "input", None),
+        config_value=config.get("input_epub"),
+        config_path=args.config,
+        output_dir=Path("output") / book_title if book_title else None,
+        extensions=(".epub", ".azw3", ".mobi"),
+        output_names=("input.epub", "original.epub"),
+    )
 
     # Auto-infer book_title from metadata or filename if missing
     if not book_title:
@@ -521,12 +634,15 @@ def _prepare_html_command(args):
     set_llm_trace_path(output_dir / "logs" / "llm_trace.jsonl")
 
     # If no epub specified, look for original epub in output dir
-    if epub_path is None:
-        for candidate in ["input.epub", "original.epub"]:
-            candidate_path = output_dir / candidate
-            if candidate_path.exists():
-                epub_path = candidate_path
-                break
+    if not epub_path.exists():
+        epub_path = resolve_book_input_path(
+            getattr(args, "input", None),
+            config_value=config.get("input_epub"),
+            config_path=args.config,
+            output_dir=output_dir,
+            extensions=(".epub", ".azw3", ".mobi"),
+            output_names=("input.epub", "original.epub"),
+        )
 
     if epub_path is None or not epub_path.exists():
         logger.error("Input file not found. Specify input_epub in config or place file in input/.")
@@ -633,15 +749,14 @@ def html_validate_command(args):
     config = load_config(args.config)
     book_title = config.get("title")
 
-    input_file = getattr(args, 'input', None) or config.get("input_epub")
-    if input_file is None:
-        input_dir = Path("input")
-        if input_dir.exists():
-            candidates = list(input_dir.glob("*.epub")) + list(input_dir.glob("*.azw3")) + list(input_dir.glob("*.mobi"))
-            if len(candidates) == 1:
-                input_file = str(candidates[0])
-
-    epub_path = resolve_input_path(input_file) if input_file else None
+    epub_path = resolve_book_input_path(
+        getattr(args, "input", None),
+        config_value=config.get("input_epub"),
+        config_path=args.config,
+        output_dir=Path("output") / book_title if book_title else None,
+        extensions=(".epub", ".azw3", ".mobi"),
+        output_names=("input.epub", "original.epub"),
+    )
 
     # Auto-infer book_title from metadata or filename if missing
     if not book_title:
@@ -661,12 +776,15 @@ def html_validate_command(args):
     configure_logging(book_title, "html-validate")
     output_dir = Path("output") / book_title
 
-    if epub_path is None:
-        for candidate in ["input.epub", "original.epub"]:
-            candidate_path = output_dir / candidate
-            if candidate_path.exists():
-                epub_path = candidate_path
-                break
+    if not epub_path.exists():
+        epub_path = resolve_book_input_path(
+            getattr(args, "input", None),
+            config_value=config.get("input_epub"),
+            config_path=args.config,
+            output_dir=output_dir,
+            extensions=(".epub", ".azw3", ".mobi"),
+            output_names=("input.epub", "original.epub"),
+        )
 
     if epub_path is None or not epub_path.exists():
         logger.error("Input file not found. Specify input_epub in config or place file in input/.")
@@ -736,7 +854,14 @@ def translate_novel_command(args):
         logger.error("No title found in config.yaml")
         return 1
     output_dir = Path("output") / book_title
-    epub_path = resolve_input_path(args.input) if args.input else output_dir / "input.epub"
+    epub_path = resolve_book_input_path(
+        args.input,
+        config_value=config.get("input_epub"),
+        config_path=args.config,
+        output_dir=output_dir,
+        extensions=(".epub", ".azw3", ".mobi"),
+        output_names=("input.epub", "original.epub"),
+    )
     if not epub_path.exists():
         logger.error("Input EPUB not found. Use -i to specify it.")
         return 1
@@ -1218,15 +1343,14 @@ def build_html_epub_command(args):
     config = load_config(args.config)
     book_title = config.get("title")
 
-    input_file = getattr(args, 'input', None) or config.get("input_epub")
-    if input_file is None:
-        input_dir = Path("input")
-        if input_dir.exists():
-            candidates = list(input_dir.glob("*.epub")) + list(input_dir.glob("*.azw3")) + list(input_dir.glob("*.mobi"))
-            if len(candidates) == 1:
-                input_file = str(candidates[0])
-
-    epub_path = resolve_input_path(input_file) if input_file else None
+    epub_path = resolve_book_input_path(
+        getattr(args, "input", None),
+        config_value=config.get("input_epub"),
+        config_path=args.config,
+        output_dir=Path("output") / book_title if book_title else None,
+        extensions=(".epub", ".azw3", ".mobi"),
+        output_names=("input.epub", "original.epub"),
+    )
 
     # Auto-infer book_title from metadata or filename if missing
     if not book_title:
@@ -1251,12 +1375,15 @@ def build_html_epub_command(args):
     set_llm_trace_path(output_dir / "logs" / "llm_trace.jsonl")
 
     # If no epub specified, look for original epub in output dir
-    if epub_path is None:
-        for candidate in ["input.epub", "original.epub"]:
-            candidate_path = output_dir / candidate
-            if candidate_path.exists():
-                epub_path = candidate_path
-                break
+    if not epub_path.exists():
+        epub_path = resolve_book_input_path(
+            getattr(args, "input", None),
+            config_value=config.get("input_epub"),
+            config_path=args.config,
+            output_dir=output_dir,
+            extensions=(".epub", ".azw3", ".mobi"),
+            output_names=("input.epub", "original.epub"),
+        )
 
     if epub_path is None or not epub_path.exists():
         logger.error("Input file not found. Specify input_epub in config or place file in input/.")
