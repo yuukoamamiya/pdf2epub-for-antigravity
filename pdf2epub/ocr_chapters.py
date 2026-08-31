@@ -7,13 +7,14 @@ This module is part of the LEGACY workflow and may be removed in future versions
 
 RECOMMENDED workflow / 推荐的新工作流:
     pdf2epub ocr-pages -i <pdf>   # Page-level OCR
-    pdf2epub refine               # Generate toc_tree.json
+    pdf2epub refine-prepare       # Prepare Subagent TOC analysis
+    pdf2epub refine-local         # Generate work units from toc_tree.json
     pdf2epub polish
     pdf2epub build-epub
 
 This module (ocr_chapters.py) aggregates page-level OCR results into chapters
-based on book_structure.json. The new workflow uses refine which generates
-toc_tree.json with precise boundary detection.
+based on book_structure.json. The new workflow uses refine-local, which
+consumes the Subagent-produced toc_tree.json.
 ================================================================================
 
 Chapter aggregation from OCR'd pages.

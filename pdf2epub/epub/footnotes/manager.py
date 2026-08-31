@@ -198,6 +198,11 @@ class FootnoteManager:
         # Determine style
         self.style = self.scanner.determine_style(self.force_global, self.auto_global)
 
+        # Footnote mapping is a build-time structural operation.  Any
+        # ambiguous semantic matching must be prepared by the workspace
+        # Subagent before this stage; EPUB construction itself is offline.
+        # A cached Subagent result may be reused for deterministic builds.  A
+        # cache miss is deliberately offline; it must not trigger a model call.
         self._build_style_mappings(run_llm=True)
 
         # Log the analysis results
@@ -444,11 +449,7 @@ class FootnoteManager:
         )
         self._drop_replaced_heading_references()
         self.style = self.scanner.determine_style(self.force_global, self.auto_global)
-        run_llm = bool(
-            self.style == FootnoteStyle.GLOBAL
-            and (self.force_global or self.auto_global)
-        )
-        self._build_style_mappings(run_llm=run_llm)
+        self._build_style_mappings(run_llm=True)
 
     def get_html_filename(self, markdown_stem: str) -> str:
         """

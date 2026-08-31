@@ -8,6 +8,7 @@ from pathlib import Path
 from lxml import etree
 from collections import defaultdict
 import json
+import argparse
 
 def extract_xhtml_from_epub(epub_path: Path) -> dict:
     """Extract all XHTML files from EPUB."""
@@ -140,9 +141,28 @@ def compare_structures(orig_file: str, trans_file: str, orig_content: str, trans
 
 
 def main():
-    base_dir = Path("/Users/kevinzhou/Github/pdf2epub/output/Excalibur, Durendal, Joyeuse")
-    orig_epub = base_dir / "input.epub"
-    trans_epub = base_dir / "王者之剑、杜兰德尔、咎瓦尤斯：剑的力量.epub"
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--base-dir",
+        type=Path,
+        help="Run directory containing input.epub and translated.epub",
+    )
+    parser.add_argument("--original", type=Path, help="Path to the original EPUB")
+    parser.add_argument("--translated", type=Path, help="Path to the translated EPUB")
+    args = parser.parse_args()
+
+    if args.original and args.translated:
+        orig_epub, trans_epub = args.original, args.translated
+    elif args.base_dir:
+        orig_epub = args.base_dir / "input.epub"
+        trans_epub = args.base_dir / "translated.epub"
+    else:
+        parser.error("provide --base-dir or both --original and --translated")
+
+    if not orig_epub.is_file():
+        parser.error(f"original EPUB does not exist: {orig_epub}")
+    if not trans_epub.is_file():
+        parser.error(f"translated EPUB does not exist: {trans_epub}")
 
     print("Extracting EPUB contents...")
     orig_files = extract_xhtml_from_epub(orig_epub)

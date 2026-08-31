@@ -1,16 +1,7 @@
-"""
-Commands module - new CLI commands using the new architecture.
+"""Command helpers intentionally kept out of the public CLI.
 
-This module provides CLI commands that use the new:
-- Phase (composable stages)
-- Pipeline V2 (with Executor + Hooks)
-- Unified model chain (batch + online)
+The public commands in :mod:`pdf2epub.cli` are file-based Subagent hand-offs;
+this package no longer registers provider-backed translation commands.
 """
 
-from .polish_v2 import polish_v2_command
-from .translate_v2 import translate_v2_command
-
-__all__ = [
-    'polish_v2_command',
-    'translate_v2_command',
-]
+__all__ = []

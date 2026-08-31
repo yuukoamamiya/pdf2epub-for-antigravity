@@ -368,7 +368,7 @@ def restore_lost_images_fast(
 restore_lost_images = restore_lost_images_fast
 
 
-# For compatibility with old API
+# Backward-compatible helper aliases for local image restoration.
 def extract_images(text: str) -> List[Tuple[str, str]]:
     """
     Extract all image references from markdown text.

@@ -7,6 +7,7 @@ including polishing OCR output and translating content.
 """
 
 import argparse
+import json
 import sys
 from pathlib import Path
 from loguru import logger
@@ -19,79 +20,188 @@ logger = configure_logging()
 
 
 def polish_command(args):
-    """Handle the polish subcommand - uses V2 pipeline."""
-    from .commands import polish_v2_command
-    return polish_v2_command(args)
+    """Prepare a local Markdown hand-off for a polishing Subagent."""
+    return _prepare_pdf_markdown_task(args, "polish")
+
+
+def _prepare_pdf_markdown_task(args, task: str):
+    from pdf2epub.subagent_workflow import prepare_markdown_subagent, resolve_subagent_model
+
+    config = load_config(args.config)
+    book_title = config.get("title")
+    if not book_title:
+        logger.error("No title found in config.yaml")
+        return 1
+    output_dir = Path("output") / book_title
+    translation = config.get("translation", {})
+    source_language = getattr(args, "source_language", None) or translation.get(
+        "source_language", "English"
+    )
+    target_language = getattr(args, "target_language", None) or translation.get(
+        "target_language", "Chinese"
+    )
+    if task == "polish":
+        source_dir = output_dir / "ocr_markdown"
+        target_dir = output_dir / "polished_markdown"
+        rules = [
+            "Fix OCR line breaks, obvious OCR errors, and formatting while preserving meaning.",
+            "Preserve Markdown heading levels, image links, footnote references, formulas, and link destinations.",
+        ]
+    else:
+        source_dir = output_dir / "polished_markdown" / "validated"
+        target_dir = output_dir / "translated"
+        rules = [
+            "Translate prose to the target language; do not summarize, censor, or add commentary.",
+            "Preserve Markdown heading levels, image links, footnote references, formulas, and link destinations exactly.",
+            "Keep one output file for every source file and keep filenames unchanged.",
+            "If translation_entities.json exists, use it as a terminology reference without modifying it.",
+        ]
+    configure_logging(book_title, f"{task}-prepare")
+    try:
+        paths = prepare_markdown_subagent(
+            output_dir,
+            task,
+            source_dir,
+            target_dir,
+            source_language,
+            target_language,
+            rules,
+            config=config,
+            resume=getattr(args, "resume", False),
+        )
+        if task == "translate":
+            from pdf2epub.subagent_workflow import prepare_toc_translation_subagent
+            toc_paths = prepare_toc_translation_subagent(
+                output_dir, source_language, target_language, config=config
+            )
+            paths.update({"toc_source": toc_paths["source"], "toc_prompt": toc_paths["prompt"]})
+    except Exception as exc:
+        logger.error(f"Could not prepare {task} task: {exc}")
+        return 1
+    logger.success(f"Wrote Subagent prompt: {paths['prompt']}")
+    logger.info(f"Recommended Antigravity model: {resolve_subagent_model(config, task)}")
+    logger.info(
+        f"在 Antigravity 中让 Subagent 执行提示词，完成后运行 {task}-validate。"
+    )
+    return 0
+
+
+def polish_validate_command(args):
+    return _validate_pdf_markdown_task(args, "polish")
+
+
+def _validate_pdf_markdown_task(args, task: str):
+    from pdf2epub.subagent_workflow import validate_markdown_subagent
+
+    config = load_config(args.config)
+    book_title = config.get("title")
+    if not book_title:
+        logger.error("No title found in config.yaml")
+        return 1
+    output_dir = Path("output") / book_title
+    if task == "polish":
+        source_dir = output_dir / "ocr_markdown"
+        target_dir = output_dir / "polished_markdown"
+    else:
+        source_dir = output_dir / "polished_markdown" / "validated"
+        target_dir = output_dir / "translated"
+    report = validate_markdown_subagent(
+        output_dir,
+        task,
+        source_dir,
+        target_dir,
+        structural_patterns=(r"^#{1,6}\s", r"!\[[^\]]*\]\([^)]+\)", r"\[\^[^\]]+\]"),
+    )
+    if task == "translate":
+        from pdf2epub.subagent_workflow import validate_toc_translation_subagent
+        toc_report = validate_toc_translation_subagent(output_dir)
+        report["toc"] = toc_report
+        report["all_passed"] = report["all_passed"] and toc_report["valid"]
+        if not toc_report["valid"]:
+            for error in toc_report["errors"]:
+                logger.error(f"TOC: {error}")
+    logger.info(
+        f"{task} 校验: {report['completed']}/{report['total']} completed, "
+        f"{len(report['invalid'])} invalid"
+    )
+    for name in report["missing"][:10]:
+        logger.error(f"Missing: {name}")
+    for item in report["invalid"][:10]:
+        logger.error(f"Invalid: {item['file']}: {item['reason']}")
+    if report["all_passed"]:
+        logger.success(f"{task} Subagent output validated: {report['validated_dir']}")
+        return 0
+    return 1
 
 
 
 def refine_command(args):
-    """Handle the refine subcommand (refined breakdown with boundary verification)."""
-    from pdf2epub.refine import RefinedBreakdown
-    from pathlib import Path
+    """Prepare the PDF structure task for an Antigravity Subagent."""
+    return refine_prepare_command(args)
 
-    # Load configuration
+
+def refine_prepare_command(args):
+    """Prepare a PDF TOC task for an Antigravity workspace subagent."""
+    from pathlib import Path
+    from pdf2epub.refine.subagent_workflow import prepare_refine_subagent
+
     config = load_config(args.config)
     book_title = config.get("title")
-
     if not book_title:
         logger.error("No title found in config.yaml")
         return 1
 
-    # Configure file logging
-    configure_logging(book_title, "refine")
-
-    # Get refine config
-    refine_config = config.get('refine', {})
-    max_tokens = args.max_tokens or refine_config.get('max_tokens', 8000)
-
-    # Determine PDF path
     output_dir = Path("output") / book_title
-    set_llm_trace_path(output_dir / "logs" / "llm_trace.jsonl")
-    if args.input:
-        pdf_path = resolve_input_path(args.input)
-    else:
-        # Try to find processed PDF in output directory
-        pdf_path = output_dir / "input.pdf"
-        if not pdf_path.exists():
-            pdf_path = output_dir / "input_original.pdf"
-
-    if not pdf_path.exists():
-        logger.error(f"PDF not found: {pdf_path}")
-        logger.info("Specify --input <pdf_path> to provide the PDF file")
+    configure_logging(book_title, "refine-prepare")
+    refine_config = config.get("refine", {})
+    max_tokens = args.max_tokens or refine_config.get("max_tokens", 8000)
+    try:
+        paths = prepare_refine_subagent(output_dir, book_title, max_tokens, config=config)
+    except Exception as exc:
+        logger.error(f"Could not prepare refine task: {exc}")
         return 1
 
-    # Check for pages
-    pages_dir = output_dir / "pages"
-    if not pages_dir.exists() or not list(pages_dir.glob("page_*.md")):
-        logger.error(f"OCR pages not found in {pages_dir}")
-        logger.info("Run 'pdf2epub ocr-pages' first to generate page-level OCR")
+    logger.success(f"Wrote subagent prompt: {paths['prompt']}")
+    logger.success(f"Wrote subagent manifest: {paths['manifest']}")
+    logger.info(
+        "请在 Antigravity 中让子 Agent 阅读 refine_subagent_prompt.md，"
+        "并在同一目录写入 toc_tree.json。完成后运行 pdf2epub refine-local。"
+    )
+    return 0
+
+
+def refine_local_command(args):
+    """Consume a subagent TOC and generate PDF work units without an LLM."""
+    from pathlib import Path
+    from pdf2epub.refine import RefinedBreakdown
+
+    config = load_config(args.config)
+    book_title = config.get("title")
+    if not book_title:
+        logger.error("No title found in config.yaml")
         return 1
 
-    logger.info(f"Starting refined breakdown for: {book_title}")
-    logger.info(f"Max tokens per unit: {max_tokens}")
-
+    configure_logging(book_title, "refine-local")
+    output_dir = Path("output") / book_title
+    refine_config = config.get("refine", {})
+    max_tokens = args.max_tokens or refine_config.get("max_tokens", 8000)
     try:
         refiner = RefinedBreakdown(
             config=config,
-            max_tokens=max_tokens
+            max_tokens=max_tokens,
         )
-
-        unit_metadata = refiner.process(
-            pdf_path=pdf_path,
+        units = refiner.process_from_toc(
+            pdf_path=output_dir / "input.pdf",
             output_dir=output_dir,
             book_title=book_title,
-            resume=args.resume
+            resume=args.resume,
         )
-
-        logger.success(f"Refined breakdown complete: {len(unit_metadata)} units generated")
-        return 0
-
-    except Exception as e:
-        logger.error(f"Refined breakdown failed: {e}")
-        import traceback
-        traceback.print_exc()
+    except Exception as exc:
+        logger.error(f"Local refine failed: {exc}")
         return 1
+
+    logger.success(f"Local refine complete: {len(units)} units generated")
+    return 0
 
 
 def ocr_pages_command(args):
@@ -174,7 +284,7 @@ def ocr_pages_command(args):
 
         logger.success(f"Page-level OCR complete!")
         logger.info(f"Output: {output_dir / 'pages'}")
-        logger.info("Next step: pdf2epub refine")
+        logger.info("Next step: pdf2epub refine-prepare")
         return 0
 
     except Exception as e:
@@ -186,92 +296,74 @@ def ocr_pages_command(args):
 
 
 def extract_entities_command(args):
-    """Handle the extract-entities subcommand."""
-    from pdf2epub.entity_extractor import (
-        load_config as load_entity_config,
-        extract_entities_from_pdf,
-        save_entities
-    )
-    from pdf2epub.utils.network_utils import create_gemini_client_from_config
-    
-    # Load configuration
-    config = load_entity_config(args.config)
-    book_title = config.get("title")
+    """Prepare entity extraction for an Antigravity Subagent (local only)."""
+    from pdf2epub.subagent_workflow import resolve_subagent_model
 
+    config = load_config(args.config)
+    book_title = config.get("title") or (Path(args.input).stem if args.input else None)
     if not book_title:
-        if args.input:
-            # Use PDF filename as fallback
-            book_title = Path(args.input).stem
-            logger.warning(f"No title in config, using: {book_title}")
-        else:
-            logger.error("No title found in config.yaml and no input file specified")
-            return 1
-
-    # Configure file logging
-    configure_logging(book_title, "extract-entities")
-
-    logger.info(f"Extracting entities from: {book_title}")
-    logger.info(f"Language pair: {args.source_lang} → {args.target_lang}")
-
-    # Initialize Gemini client
-    translation_config = config.get("translation", {})
-    provider_name = translation_config.get("provider", "gemini")
-    try:
-        gemini_client = create_gemini_client_from_config(config, provider_name)
-    except ValueError as e:
-        logger.error(str(e))
+        logger.error("No title found in config.yaml")
         return 1
-
-    # Setup paths
     output_dir = Path("output") / book_title
-    set_llm_trace_path(output_dir / "logs" / "llm_trace.jsonl")
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Determine PDF path
-    if args.input:
-        pdf_path = resolve_input_path(args.input)
-    else:
-        # Default to input.pdf in the book's output directory
-        pdf_path = output_dir / "input.pdf"
-
-    # Check if PDF exists
-    if not pdf_path.exists():
-        # Try alternative paths in output directory
-        processed_path = output_dir / "input.pdf"
-        original_path = output_dir / "input_original.pdf"
-
-        if processed_path.exists() and pdf_path != processed_path:
-            pdf_path = processed_path
-            logger.info(f"Using processed PDF from: {pdf_path}")
-        elif original_path.exists():
-            pdf_path = original_path
-            logger.info(f"Using original PDF from: {pdf_path}")
-        else:
-            if args.input:
-                logger.error(f"PDF not found: {args.input}")
-            else:
-                logger.error(f"PDF not found in {output_dir}/. Expected input.pdf or input_original.pdf")
-            return 1
-    
-    try:
-        # Extract entities
-        entities = extract_entities_from_pdf(
-            pdf_path=pdf_path,
-            book_title=book_title,
-            gemini_client=gemini_client,
-            config=config,
-            language_pair=(args.source_lang, args.target_lang)
-        )
-        
-        # Save results
-        save_entities(entities, output_dir)
-        
-        logger.success("Entity extraction completed!")
-        return 0
-        
-    except Exception as e:
-        logger.error(f"Entity extraction failed: {e}")
+    source_dir = output_dir / "ocr_markdown"
+    if not source_dir.exists():
+        source_dir = output_dir / "pages"
+    if not list(source_dir.glob("*.md")):
+        logger.error(f"No OCR Markdown found in {source_dir}; run OCR and refine first")
         return 1
+    output_dir.mkdir(parents=True, exist_ok=True)
+    model = resolve_subagent_model(config, "extract-entities")
+    manifest = {
+        "schema_version": 1,
+        "workflow": "antigravity-subagent",
+        "task": "extract-entities",
+        "source_language": args.source_lang,
+        "target_language": args.target_lang,
+        "model": model,
+        "source_dir": str(source_dir.relative_to(output_dir)),
+        "output_file": "translation_entities.json",
+    }
+    (output_dir / "entity_subagent_manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    from pdf2epub.entity_extractor import create_entity_extraction_prompt
+    (output_dir / "entity_subagent_prompt.md").write_text(
+        create_entity_extraction_prompt(book_title, (args.source_lang, args.target_lang))
+        + f"\n\nRecommended Antigravity model: `{model}`\n",
+        encoding="utf-8",
+    )
+    logger.info(
+        f"已生成实体提取 Subagent 任务：{output_dir / 'entity_subagent_prompt.md'}；"
+        "完成后由 Subagent 写入 translation_entities.json。"
+    )
+    return 0
+
+
+def extract_entities_validate_command(args):
+    """Validate the optional entity JSON written by a workspace Subagent."""
+    from pdf2epub.entity_extractor import validate_entities
+
+    config = load_config(args.config)
+    book_title = config.get("title")
+    if not book_title:
+        logger.error("No title found in config.yaml")
+        return 1
+    entity_path = Path("output") / book_title / "translation_entities.json"
+    if not entity_path.exists():
+        logger.error(f"Entity output not found: {entity_path}")
+        return 1
+    try:
+        data = json.loads(entity_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.error(f"Invalid entity JSON: {exc}")
+        return 1
+    errors = validate_entities(data, book_title)
+    if errors:
+        for error in errors:
+            logger.error(error)
+        return 1
+    logger.success(f"Entity Subagent output validated: {entity_path}")
+    return 0
 
 
 
@@ -299,26 +391,30 @@ def build_epub_command(args):
 
     if not toc_tree_path.exists():
         logger.error(f"toc_tree.json not found at {toc_tree_path}")
-        logger.info("Run 'refine' command first to generate toc_tree.json")
+        logger.info("Run 'refine-prepare', use a Subagent, then 'refine-local' first to generate toc_tree.json")
         return 1
 
     # Determine markdown directory
     # V2 architecture stores results in validated/ subdirectory
     if args.translated:
         markdown_dir = output_dir / "translated" / "validated"
-        if not markdown_dir.exists():
-            # Fallback to old path for backwards compatibility
-            markdown_dir = output_dir / "translated"
         logger.info("Building EPUB from translated markdown...")
     else:
         markdown_dir = output_dir / "polished_markdown" / "validated"
-        if not markdown_dir.exists():
-            # Fallback to old path for backwards compatibility
-            markdown_dir = output_dir / "polished_markdown"
         logger.info("Building EPUB from polished markdown...")
 
     if not markdown_dir.exists():
         logger.error(f"Markdown directory not found: {markdown_dir}")
+        logger.info("Run the corresponding Subagent task and its -validate command first")
+        return 1
+
+    validation_result = (
+        translate_validate_command(args)
+        if args.translated
+        else polish_validate_command(args)
+    )
+    if validation_result != 0:
+        logger.error("Refusing to build from unvalidated Subagent output")
         return 1
 
     # Set up images directory
@@ -372,10 +468,14 @@ def build_epub_command(args):
         return 1
 
 
-def translate_html_command(args):
-    """Handle the translate-html subcommand (direct HTML translation)."""
+def _prepare_html_command(args):
+    """Prepare EPUB HTML for a Subagent; this function never translates."""
     from pathlib import Path
-    from pdf2epub.html_translation import HTMLEpubPipeline, HTMLTranslateProcessor
+    from pdf2epub.html_translation import HTMLEpubPipeline
+
+    # This guard is intentional: the former in-process translation branch is
+    # no longer reachable from any command.
+    args.skip_translate = True
 
     # Load configuration
     config = load_config(args.config)
@@ -407,7 +507,7 @@ def translate_html_command(args):
             return 1
 
     # Configure file logging
-    configure_logging(book_title, "translate-html")
+    configure_logging(book_title, "html-prepare")
 
     # Setup paths
     output_dir = Path("output") / book_title
@@ -461,68 +561,36 @@ def translate_html_command(args):
         logger.info(f"Translation: {source_language} → {target_language}")
 
         # Step 1: Extract and preprocess
-        if not args.skip_extract:
-            extracted = pipeline.extract_and_preprocess()
+        if not getattr(args, "skip_extract", False):
+            extracted = pipeline.extract_and_preprocess(target_language=target_language)
             logger.info(f"Extracted {extracted} XHTML files")
 
-        # Step 2: Translate metadata (title + TOC)
-        if not args.skip_translate:
-            logger.info("Translating book title and TOC...")
-            metadata = pipeline.translate_metadata(target_language=target_language)
-            logger.info(f"Translated title: {metadata['translated_title']}")
+        # Create the body translation contract alongside the metadata contract.
+        # Both are workspace Subagent tasks; this command never translates.
+        from pdf2epub.subagent_workflow import prepare_markdown_subagent
+        body_paths = prepare_markdown_subagent(
+            output_dir,
+            "translate-html",
+            pipeline.compressed_units_dir,
+            pipeline.translated_dir,
+            source_language,
+            target_language,
+            extra_rules=(
+                "Keep exactly one output line for every source line.",
+                "Preserve every HTML tag, attribute, entity, and placeholder exactly; translate only text.",
+            ),
+            config=config,
+            resume=getattr(args, "resume", False),
+        )
 
-        # Step 3: Translate content
-        if not args.skip_translate:
-            # Initialize translator
-            use_entities = None
-            if args.use_entities:
-                use_entities = True
-            elif args.no_entities:
-                use_entities = False
-
-            processor = HTMLTranslateProcessor(
-                config=config,
-                book_title=book_title,
-                source_language=source_language,
-                target_language=target_language,
-                max_workers=args.max_workers or config.get('max_concurrent_workers', 4),
-                resume=args.resume,
-                translation_models=config.get('translation', {}).get('models'),
-                use_entities=use_entities,
-                use_longest_on_failure=config.get('validation_strategy', {}).get('use_longest_on_failure', False)
-            )
-
-            # Handle --limit: only translate first N files, copy rest
-            if args.limit:
-                import shutil
-                all_files = sorted(pipeline.compressed_units_dir.glob("*.md"))
-                files_to_translate = all_files[:args.limit]
-                files_to_copy = all_files[args.limit:]
-
-                logger.info(f"Limit mode: translating {len(files_to_translate)} files, copying {len(files_to_copy)} untranslated")
-
-                # Copy untranslated files directly
-                for f in files_to_copy:
-                    dest = pipeline.translated_dir / f.name
-                    shutil.copy(f, dest)
-                    logger.debug(f"Copied untranslated: {f.name}")
-
-                # Process only limited files (pass specific files to processor)
-                summary = processor.process_specific_files([f.stem for f in files_to_translate])
-            else:
-                # Process all files
-                summary = processor.process_all_files()
-
-            if summary.get("error"):
-                logger.error(f"Translation failed: {summary['error']}")
-                return 1
-
-            logger.info(f"Translation complete: {summary.get('successful', 0)} files")
-            pipeline.write_translation_report(phase="translation")
-
-        logger.success("HTML translation complete!")
-        logger.info(f"Output: {output_dir / 'translated_compressed'}")
-        logger.info("Next step: pdf2epub build-html-epub")
+        logger.success("EPUB HTML preparation complete")
+        logger.info(f"Output: {output_dir / 'compressed_units'}")
+        logger.info(f"Body Subagent prompt: {body_paths['prompt']}")
+        logger.info(
+            "Recommended models: body/metadata are declared in their manifests "
+            "and default to the configured translation model."
+        )
+        logger.info("Next step: use the Subagent, then run html-validate and build-html-epub")
         return 0
 
     except Exception as e:
@@ -543,7 +611,7 @@ def html_prepare_command(args):
     args.source_language = getattr(args, 'source_language', None)
     args.target_language = getattr(args, 'target_language', None)
     args.max_workers = 1
-    return translate_html_command(args)
+    return _prepare_html_command(args)
 
 
 def html_validate_command(args):
@@ -600,6 +668,9 @@ def html_validate_command(args):
     )
 
     report = pipeline.validate_translated_units()
+    (output_dir / "translate-html_validation.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     logger.info("=" * 60)
     logger.info(f"翻译单元验证结果: {book_title}")
@@ -607,6 +678,13 @@ def html_validate_command(args):
     logger.info(f"总单元数: {report['total']}")
     logger.info(f"已完成:   {report['completed']}/{report['total']}")
     logger.info(f"通过校验: {report['valid']}/{report['total']}")
+    metadata_report = report.get("metadata", {})
+    if metadata_report.get("valid"):
+        logger.info("元数据翻译校验通过（作者和出版社保持原文）")
+    else:
+        logger.error("元数据翻译校验未通过:")
+        for error in metadata_report.get("errors", []):
+            logger.error(f"   - {error}")
     if report['missing']:
         logger.warning(f"未翻译单元 ({len(report['missing'])}):")
         for m in report['missing'][:10]:
@@ -628,245 +706,192 @@ def html_validate_command(args):
 
 
 def translate_novel_command(args):
-    """Handle the translate-novel subcommand (light novel translation)."""
-    from pathlib import Path
+    """Prepare light-novel text and metadata for a Subagent, locally only."""
+    import hashlib
+
+    from pdf2epub.subagent_workflow import resolve_subagent_model
+
     import shutil
     from pdf2epub.html_translation.epub_parser import EPUBParser
     from pdf2epub.html_translation.novel_extractor import NovelExtractor
-    from pdf2epub.html_translation.novel_translator import NovelTranslator
-    from pdf2epub.html_translation.glossary_manager import GlossaryManager
-    from pdf2epub.html_translation.builder import BuildConfig, HTMLEpubBuilder, sanitize_filename
-    from pdf2epub.utils.llm_client import LLMClient
+    from pdf2epub.html_translation.builder import HTMLEpubPipeline
+    from pdf2epub.utils.ebook_converter import needs_conversion, convert_to_epub
 
-    # Load configuration
     config = load_config(args.config)
     book_title = config.get("title")
-
     if not book_title:
         logger.error("No title found in config.yaml")
         return 1
-
-    # Configure file logging
-    configure_logging(book_title, "translate-novel")
-
     output_dir = Path("output") / book_title
+    epub_path = resolve_input_path(args.input) if args.input else output_dir / "input.epub"
+    if not epub_path.exists():
+        logger.error("Input EPUB not found. Use -i to specify it.")
+        return 1
+    output_dir.mkdir(parents=True, exist_ok=True)
+    model = resolve_subagent_model(config, "translate-novel")
+    input_epub = output_dir / "input.epub"
+    try:
+        if needs_conversion(epub_path):
+            epub_path, _ = convert_to_epub(epub_path, output_dir)
+        elif epub_path.resolve() != input_epub.resolve():
+            shutil.copy2(epub_path, input_epub)
+            epub_path = input_epub
+        parser = EPUBParser(str(epub_path))
+        units = NovelExtractor(parser).extract_all(output_dir / "novel_units")
+        content_units = [unit for unit in units if unit.has_content]
+        metadata_pipeline = HTMLEpubPipeline(epub_path, output_dir, config)
+        metadata_pipeline.create_metadata_translation_source(
+            target_language=args.target_language
+            or config.get("translation", {}).get("target_language", "Chinese")
+        )
+        manifest = {
+            "schema_version": 1,
+            "workflow": "antigravity-subagent",
+            "task": "translate-novel",
+            "source_language": args.source_language
+            or config.get("translation", {}).get("source_language", "Japanese"),
+            "target_language": args.target_language
+            or config.get("translation", {}).get("target_language", "Chinese"),
+            "model": model,
+            "source_dir": "novel_units",
+            "target_dir": "translated_novel",
+            "files": [unit.text_path.name for unit in content_units],
+        }
+        translated_dir = output_dir / "translated_novel"
+        completed_files = []
+        if getattr(args, "resume", False):
+            validation = {}
+            validation_path = output_dir / "translate-novel_validation.json"
+            if validation_path.is_file():
+                try:
+                    validation = json.loads(validation_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    validation = {}
+            validation_available = isinstance(validation.get("valid_files"), list)
+            validated_files = set(validation.get("valid_files", []))
+            validation_hashes = validation.get("source_sha256", {})
+            completed_files = [
+                name for name in manifest["files"]
+                if (translated_dir / name).is_file()
+                and (translated_dir / name).read_text(encoding="utf-8").strip()
+                and (
+                    not validation_available
+                    or (
+                        name in validated_files
+                        and validation_hashes.get(name)
+                        == hashlib.sha256((output_dir / "novel_units" / name).read_bytes()).hexdigest()
+                    )
+                )
+            ]
+        manifest["completed_files"] = completed_files
+        manifest["pending_files"] = [
+            name for name in manifest["files"] if name not in completed_files
+        ]
+        (output_dir / "novel_subagent_manifest.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        (output_dir / "novel_subagent_prompt.md").write_text(
+            f"""# Light-novel translation Subagent task
 
-    # Set up unified LLM trace
-    set_llm_trace_path(output_dir / "logs" / "llm_trace.jsonl")
+Recommended Antigravity model: `{model}`
 
-    # Validate input file before creating output directories
-    epub_path = resolve_input_path(args.input) if args.input else None
-    if epub_path is None:
-        candidate_path = output_dir / "input.epub"
-        if candidate_path.exists():
-            epub_path = candidate_path
-
-    if epub_path is None or not epub_path.exists():
-        logger.error("Input file not found. Use -i to specify EPUB file.")
+Read only the files listed in `pending_files` in `novel_subagent_manifest.json` under
+`novel_units/` and write its translation with the same filename under
+`translated_novel/`. Preserve image markers and paragraph boundaries, and do
+not add commentary or Markdown fences. Use `metadata_translation_prompt.md`
+to create the translated metadata JSON as well. Authors and publishers must
+remain byte-for-byte unchanged. Do not call an API or modify source files.
+Files listed in `completed_files` are checkpoints; do not overwrite them unless
+validation reports them as invalid.
+""",
+            encoding="utf-8",
+        )
+        logger.info(
+            f"已生成 {len(content_units)} 个小说翻译单元和 Subagent 提示词："
+            f"{output_dir / 'novel_subagent_prompt.md'}"
+        )
+        return 0
+    except Exception as exc:
+        logger.error(f"Could not prepare novel Subagent task: {exc}")
         return 1
 
-    # Validate glossary early
-    if args.glossary:
-        glossary_path = Path(args.glossary)
-        if not glossary_path.exists():
-            logger.error(f"Glossary file not found: {glossary_path}")
-            return 1
 
-    output_dir.mkdir(parents=True, exist_ok=True)
+def translate_novel_validate_command(args):
+    """Validate novel text and metadata written by the Subagent."""
+    from pdf2epub.html_translation.epub_parser import EPUBParser
+    from pdf2epub.html_translation.novel_extractor import NovelExtractor
+    from pdf2epub.html_translation.builder import HTMLEpubPipeline
 
-    # Format conversion if needed
-    from pdf2epub.utils.ebook_converter import needs_conversion, convert_to_epub
-
-    input_epub = output_dir / "input.epub"
-    if needs_conversion(epub_path):
-        try:
-            epub_path, _ = convert_to_epub(epub_path, output_dir)
-        except Exception as e:
-            logger.error(f"Format conversion failed: {e}")
-            return 1
-    elif epub_path.resolve() != input_epub.resolve():
-        shutil.copy2(epub_path, input_epub)
-        epub_path = input_epub
-
-    # Language settings
-    translation_config = config.get("translation", {})
-    source_language = args.source_language or translation_config.get("source_language", "Japanese")
-    target_language = args.target_language or translation_config.get("target_language", "Chinese")
-
-    logger.info(f"Novel translation: {book_title} ({source_language} → {target_language})")
-
+    config = load_config(args.config)
+    book_title = config.get("title")
+    if not book_title:
+        logger.error("No title found in config.yaml")
+        return 1
+    output_dir = Path("output") / book_title
+    manifest_path = output_dir / "novel_subagent_manifest.json"
+    epub_path = output_dir / "input.epub"
+    if not manifest_path.exists() or not epub_path.exists():
+        logger.error("Novel Subagent manifest or input.epub is missing; run translate-novel first")
+        return 1
     try:
-        # Step 1: Extract EPUB to plain text
-        parser = EPUBParser(str(epub_path))
-        extractor = NovelExtractor(parser)
-        novel_units_dir = output_dir / "novel_units"
-        units = extractor.extract_all(novel_units_dir)
-
-        content_units = [u for u in units if u.has_content]
-        logger.info(f"Extracted {len(content_units)} content units from {len(units)} spine items")
-
-        # Apply --limit
-        if args.limit:
-            content_units = content_units[:args.limit]
-            logger.info(f"Limiting to first {args.limit} content units")
-
-        # Use EPUB's actual title for translation
-        epub_title = parser.metadata.get('title', book_title)
-        logger.info(f"EPUB title: {epub_title}")
-
-        # Step 2: Translate metadata (title + TOC) using Haiku
-        from pdf2epub.html_translation.builder import HTMLEpubPipeline
-        metadata_models = translation_config.get("models", [
-            {"provider": "anthropic", "model": "claude-haiku-4-5-20251001"}
-        ])
-        metadata_config = {**config, "translation_models": metadata_models}
-        pipeline = HTMLEpubPipeline(epub_path, output_dir, metadata_config)
-        translated_metadata = pipeline.translate_metadata(target_language=target_language)
-        logger.info(
-            f"Translated metadata: title='{translated_metadata.get('translated_title')}', "
-            f"{len(translated_metadata.get('toc', []))} TOC entries"
-        )
-
-        # Step 3: Init GlossaryManager
-        llm_client = LLMClient(config)
-        novel_config = config.get("novel", {})
-        glossary_manager = GlossaryManager(
-            output_dir=output_dir,
-            llm_client=llm_client,
-            model_configs=metadata_models,
-            max_tokens=novel_config.get("glossary_max_tokens", 1000),
-            extract_retries=novel_config.get("glossary_extract_retries", 2),
-            dedup_retries=novel_config.get("glossary_dedup_retries", 2),
-        )
-        glossary_manager.load()
-
-        # Load initial glossary if provided
-        if args.glossary:
-            glossary_manager.load_initial_glossary(glossary_path)
-            glossary_manager.save()
-
-        # Step 4: Translate chapters
-        translator = NovelTranslator(
-            config=config,
-            book_title=epub_title,
-            source_language=source_language,
-            target_language=target_language,
-            glossary_manager=glossary_manager,
-            resume=args.resume,
-            output_dir=output_dir,
-        )
-
-        # Handle --retranslate: single chapter retranslation
-        if args.retranslate is not None:
-            from pdf2epub.html_translation.novel_translator import NOVEL_TRANSLATE_PROMPT
-            spine_idx = args.retranslate
-            target_unit = None
-            for u in content_units:
-                if u.spine_index == spine_idx:
-                    target_unit = u
-                    break
-            if target_unit is None:
-                logger.error(f"No content unit found at spine index {spine_idx}")
-                return 1
-
-            source_text_raw = target_unit.text_path.read_text(encoding="utf-8")
-            chapter_id = f"{target_unit.spine_index:03d}_{target_unit.file_name}"
-            logger.info(f"Retranslating chapter {chapter_id} ({len(source_text_raw.splitlines())} lines)")
-
-            # Degeneration guard: truncate repetitive kana sequences
-            from pdf2epub.html_translation.chunked_translator import compress_repetitive_source
-            source_text = compress_repetitive_source(source_text_raw)
-
-            # Backup current translation
-            existing = output_dir / "translated_novel" / f"{chapter_id}.txt"
-            if existing.exists():
-                backup = existing.with_suffix(".txt.bak")
-                import shutil
-                shutil.copy2(existing, backup)
-                logger.info(f"Backed up existing translation to {backup.name}")
-
-            # Recall glossary (current state — before rollback, in case translation fails)
-            glossary_prompt = glossary_manager.recall(source_text)
-
-            # Translate first (if this fails, glossary is untouched)
-            translated, exhausted = translator._run_translation(target_unit, source_text, glossary_prompt)
-            if exhausted:
-                logger.warning(f"  Chapter {chapter_id} exhausted retries (hallucinated)")
-
-            # Image repair
-            from pdf2epub.html_translation.novel_translator import repair_images
-            translated = repair_images(source_text_raw, translated)
-
-            # Translation succeeded — now rollback + re-extract glossary (atomic)
-            glossary_manager.rollback_chapter(chapter_id)
-            system_prompt = NOVEL_TRANSLATE_PROMPT
-            if glossary_prompt:
-                system_prompt = f"{NOVEL_TRANSLATE_PROMPT}\n\n{glossary_prompt}"
-            glossary_manager.extract_and_update(
-                source_text, translated, chapter_id,
-                translation_system_prompt=system_prompt,
-            )
-
-            # Write output
-            existing.parent.mkdir(parents=True, exist_ok=True)
-            existing.write_text(translated, encoding="utf-8")
-            logger.info(f"Wrote retranslated chapter to {existing.name}")
-
-            tl_lines = len([l for l in translated.splitlines() if l.strip()])
-            src_lines = len([l for l in source_text.splitlines() if l.strip()])
-            logger.info(f"Retranslation complete: {src_lines} source → {tl_lines} translated")
-            return 0
-
-        summary = translator.translate_all(content_units)
-        logger.info(f"Translation summary: {summary}")
-
-        # Step 5: Build EPUB
-        if not args.skip_build:
-            import json
-
-            translated_xhtml_dir = output_dir / "translated_xhtml"
-            translated_xhtml_dir.mkdir(parents=True, exist_ok=True)
-            _convert_txt_to_xhtml(
-                units=units,
-                translated_dir=output_dir / "translated_novel",
-                xhtml_dir=translated_xhtml_dir,
-                parser=parser,
-            )
-
-            metadata_path = output_dir / "translated_metadata.json"
-            translated_metadata = None
-            if metadata_path.exists():
-                translated_metadata = json.loads(metadata_path.read_text(encoding='utf-8'))
-
-            if translated_metadata and translated_metadata.get('translated_title'):
-                safe_title = sanitize_filename(translated_metadata['translated_title'])
-                output_epub = output_dir / f"{safe_title}.epub"
-            else:
-                output_epub = output_dir / f"{book_title}_translated.epub"
-
-            build_config = BuildConfig(
-                original_epub=epub_path,
-                translated_dir=translated_xhtml_dir,
-                output_path=output_epub,
-                book_title=book_title,
-                translated_metadata=translated_metadata,
-                epubcheck_mode=config.get("html_translation", {}).get(
-                    "epubcheck_mode", "warn"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        source_dir = output_dir / manifest["source_dir"]
+        target_dir = output_dir / manifest["target_dir"]
+        missing = [
+            name for name in manifest.get("files", [])
+            if not (source_dir / name).exists() or not (target_dir / name).exists()
+            or not (target_dir / name).read_text(encoding="utf-8").strip()
+        ]
+        import hashlib
+        valid_files = [name for name in manifest.get("files", []) if name not in missing]
+        source_sha256 = {
+            name: hashlib.sha256((source_dir / name).read_bytes()).hexdigest()
+            for name in manifest.get("files", [])
+            if (source_dir / name).is_file()
+        }
+        metadata_report = HTMLEpubPipeline(
+            epub_path, output_dir, config
+        ).validate_translated_metadata()
+        if missing:
+            logger.error(f"Missing or empty novel translations: {missing[:10]}")
+        if not metadata_report["valid"]:
+            logger.error(f"Invalid novel metadata: {metadata_report['errors']}")
+        if missing or not metadata_report["valid"]:
+            (output_dir / "translate-novel_validation.json").write_text(
+                json.dumps(
+                    {
+                        "task": "translate-novel",
+                        "valid_files": valid_files,
+                        "source_sha256": source_sha256,
+                        "missing": missing,
+                        "metadata": metadata_report,
+                        "all_passed": not missing and metadata_report["valid"],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
                 ),
-                epubcheck_path=config.get("html_translation", {}).get(
-                    "epubcheck_path"
-                ),
+                encoding="utf-8",
             )
-            builder = HTMLEpubBuilder(build_config)
-            builder.build()
-            logger.success(f"Translated EPUB: {output_epub}")
-
+            return 1
+        (output_dir / "translate-novel_validation.json").write_text(
+            json.dumps(
+                {
+                    "task": "translate-novel",
+                    "valid_files": valid_files,
+                    "source_sha256": source_sha256,
+                    "missing": [],
+                    "metadata": metadata_report,
+                    "all_passed": True,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        logger.success(f"Novel Subagent output validated: {len(manifest.get('files', []))} files")
         return 0
-
-    except Exception as e:
-        logger.error(f"Novel translation failed: {e}")
-        import traceback
-        traceback.print_exc()
+    except Exception as exc:
+        logger.error(f"Novel validation failed: {exc}")
         return 1
 
 
@@ -895,6 +920,10 @@ def build_novel_epub_command(args):
         logger.error(f"Input EPUB not found: {epub_path}")
         return 1
 
+    if translate_novel_validate_command(args) != 0:
+        logger.error("Refusing to build novel EPUB before Subagent validation")
+        return 1
+
     try:
         parser_obj = EPUBParser(str(epub_path))
         units = NovelExtractor(parser_obj).extract_all(output_dir / "novel_units")
@@ -903,7 +932,8 @@ def build_novel_epub_command(args):
         xhtml_dir = output_dir / "final_xhtml"
         xhtml_dir.mkdir(parents=True, exist_ok=True)
 
-        # Convert txt to xhtml (partial OK — untranslated chapters keep original)
+        # Validation above guarantees that every content unit has a Subagent
+        # output; this conversion therefore never silently falls back to source.
         _convert_txt_to_xhtml(units, translated_dir, xhtml_dir, parser_obj)
 
         translated_count = sum(1 for u in units if u.has_content and (translated_dir / u.text_path.name).exists())
@@ -1220,7 +1250,18 @@ def build_html_epub_command(args):
         output_epub = Path(args.output) if args.output else None
 
         # Build EPUB (restore attrs + repackage)
-        result_path = pipeline.postprocess_and_build(output_epub)
+        validation = pipeline.validate_translated_units()
+        if not validation["all_passed"] and not args.allow_partial:
+            logger.error(
+                "翻译校验未通过，拒绝打包。请先运行 html-validate；"
+                "如确实需要生成部分译文，请显式使用 --allow-partial。"
+            )
+            return 1
+
+        result_path = pipeline.postprocess_and_build(
+            output_epub,
+            allow_partial=args.allow_partial,
+        )
 
         logger.success(f"EPUB created: {result_path}")
         return 0
@@ -1233,99 +1274,228 @@ def build_html_epub_command(args):
 
 
 def translate_command(args):
-    """Handle the translate subcommand - uses V2 pipeline."""
-    from .commands import translate_v2_command
-    return translate_v2_command(args)
+    """Prepare a local Markdown hand-off for a translation Subagent."""
+    return _prepare_pdf_markdown_task(args, "translate")
+
+
+def translate_validate_command(args):
+    return _validate_pdf_markdown_task(args, "translate")
 
 
 def translate_arxiv_command(args):
-    """Translate an arXiv/local TeX project with compile-gated whole mode."""
-    from pdf2epub.tex_translation import (
-        TexTranslationOptions,
-        TexTranslationPipeline,
-    )
-    from pdf2epub.tex_translation.arxiv import (
-        ArxivSourceResolver,
-        slugify_source_id,
-    )
-    from pdf2epub.tex_translation.compiler import TexCompiler
+    """Materialize a TeX project and prepare a Subagent translation task."""
+    from pdf2epub.subagent_workflow import resolve_subagent_model
+
+    import shutil
+    from pdf2epub.tex_translation.arxiv import ArxivSourceResolver, slugify_source_id
+    from pdf2epub.tex_translation.document import discover_main_tex, scan_project
 
     config = load_config(args.config)
-    tex_config = config.get("tex_translation", {})
-    model_config = tex_config.get("model", {})
-    repair_config = tex_config.get("repair", {})
-    compile_config = tex_config.get("compiler", {})
-
-    options = TexTranslationOptions(
-        provider=args.provider or model_config.get("provider", "gemini"),
-        model=args.model or model_config.get("model", "gemini-3.1-pro-preview"),
-        source_language=(
-            args.source_language
-            or tex_config.get("source_language", "English")
-        ),
-        target_language=(
-            args.target_language
-            or tex_config.get("target_language", "Simplified Chinese")
-        ),
-        unit_chars=args.unit_chars or tex_config.get("unit_chars", 12_000),
-        max_retries=model_config.get("max_retries", 2),
-        use_local_cache=not args.no_local_cache,
-        repair_enabled=(
-            repair_config.get("enabled", True) and not args.no_repair
-        ),
-        repair_provider=(
-            args.repair_provider
-            or repair_config.get("provider", "codex")
-        ),
-        repair_model=(
-            args.repair_model
-            or repair_config.get("model", "gpt-5.6-luna")
-        ),
-        retry_fallbacks=args.retry_fallbacks,
-        retry_repaired=args.retry_repaired,
+    source_language = args.source_language or config.get("tex_translation", {}).get(
+        "source_language", "English"
     )
+    target_language = args.target_language or config.get("tex_translation", {}).get(
+        "target_language", "Simplified Chinese"
+    )
+    model = resolve_subagent_model(config, "translate-arxiv")
     resolver = ArxivSourceResolver()
-    if args.output_dir:
-        run_dir = Path(args.output_dir)
-    else:
-        source_id = resolver.source_id(args.source)
-        run_dir = Path("output") / "arxiv" / slugify_source_id(source_id)
+    source_id = resolver.source_id(args.source)
+    run_dir = Path(args.output_dir) if args.output_dir else Path("output") / "arxiv" / slugify_source_id(source_id)
     run_dir = run_dir.resolve()
-    set_llm_trace_path(run_dir / ".pdf2epub" / "logs" / "llm_trace.jsonl")
-
-    pipeline = TexTranslationPipeline(
-        config=config,
-        options=options,
-        compiler=TexCompiler(
-            timeout_seconds=(
-                args.compile_timeout
-                or compile_config.get("timeout_seconds", 180)
-            )
-        ),
-        source_resolver=resolver,
-    )
+    source_dir = run_dir / "source"
+    project_dir = run_dir / "project"
     try:
-        result = pipeline.run(
-            args.source,
-            run_dir=run_dir,
-            main_tex=args.main_tex,
-            limit=args.limit,
+        resolved = resolver.materialize(args.source, source_dir)
+        main_tex = discover_main_tex(source_dir, args.main_tex or resolved.suggested_main_tex)
+        document = scan_project(
+            source_dir,
+            main_tex,
+            unit_chars=args.unit_chars or config.get("tex_translation", {}).get("unit_chars", 12_000),
+            target_language=target_language,
         )
+        unit_chars = args.unit_chars or config.get("tex_translation", {}).get("unit_chars", 12_000)
+        shutil.copytree(source_dir, project_dir, dirs_exist_ok=True)
+        # Materialize the normalized source snapshot (including CJK support
+        # injected by scan_project) into the editable project.  Copying the
+        # raw archive alone would make a Chinese hand-off fail at XeLaTeX.
+        for relative_path, source_text in document.sources.items():
+            target_path = (project_dir / relative_path).resolve()
+            target_path.relative_to(project_dir.resolve())
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_text(source_text, encoding="utf-8")
+        source_units_dir = run_dir / "tex_units"
+        translated_units_dir = run_dir / "translated_tex_units"
+        source_units_dir.mkdir(parents=True, exist_ok=True)
+        translated_units_dir.mkdir(parents=True, exist_ok=True)
+        for unit in document.units:
+            source_unit_path = source_units_dir / f"{unit.id}.md"
+            source_unit_path.write_text(unit.source_text, encoding="utf-8")
+
+        unit_entries = []
+        for unit in document.units:
+            target_name = f"{unit.id}.md"
+            entry = unit.manifest_entry()
+            entry.update({
+                "source_file": f"tex_units/{unit.id}.md",
+                "target_file": f"translated_tex_units/{target_name}",
+            })
+            unit_entries.append(entry)
+        completed_units = [
+            entry["id"] for entry in unit_entries
+            if (translated_units_dir / Path(entry["target_file"]).name).is_file()
+            and (translated_units_dir / Path(entry["target_file"]).name).read_text(encoding="utf-8").strip()
+            and getattr(args, "resume", False)
+        ]
+        manifest = {
+            "schema_version": 1,
+            "workflow": "antigravity-subagent",
+            "task": "translate-arxiv",
+            "source_language": source_language,
+            "target_language": target_language,
+            "model": model,
+            "source_dir": "source",
+            "target_dir": "translated_tex_units",
+            "project_dir": "project",
+            "main_tex": document.main_tex,
+            "unit_chars": unit_chars,
+            "units": unit_entries,
+            "resume": getattr(args, "resume", False),
+            "completed_units": completed_units,
+            "pending_units": [
+                entry["id"] for entry in unit_entries if entry["id"] not in completed_units
+            ],
+        }
+        control_dir = run_dir / ".pdf2epub"
+        control_dir.mkdir(parents=True, exist_ok=True)
+        (control_dir / "tex_subagent_manifest.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        (control_dir / "tex_subagent_prompt.md").write_text(
+            f"""# TeX translation Subagent task
+
+Recommended Antigravity model: `{model}`
+
+Translate only the units listed in `pending_units` in
+`tex_subagent_manifest.json` from {source_language} to {target_language}.
+Read each `source_file` and write the complete translation to its corresponding
+`target_file`. Preserve LaTeX commands, labels, references, formulas, and
+document structure. Do not add Markdown fences or commentary. Files listed in
+`completed_units` are checkpoints and must not be overwritten unless validation
+reports them as invalid. Do not call an API, modify `../source/`, or edit
+`../project/` directly; the local validator reconstructs it from the unit files.
+""",
+            encoding="utf-8",
+        )
+        logger.success(f"Prepared TeX Subagent task: {control_dir / 'tex_subagent_prompt.md'}")
+        logger.info("完成后运行 pdf2epub translate-arxiv-validate --output-dir <run_dir>")
+        return 0
     except Exception as exc:
-        logger.error(f"arXiv/TeX translation failed: {exc}")
+        logger.error(f"Could not prepare TeX Subagent task: {exc}")
         return 1
 
-    logger.success(f"Translated TeX project: {result.project_dir}")
-    logger.success(f"Compiled PDF: {result.pdf_path}")
-    logger.info(f"State summary: {result.summary}")
-    return 0
 
+def translate_arxiv_validate_command(args):
+    """Rebuild and compile TeX from validated Subagent unit files locally."""
+    import hashlib
 
+    from pdf2epub.tex_translation.compiler import TexCompiler
+    from pdf2epub.tex_translation.document import scan_project
 
-def cancel_batch_command(args):
-    """Cancel active batch jobs."""
-    from .commands.cancel_batch import run
-    return run(args)
+    if not args.output_dir:
+        logger.error("--output-dir is required for translate-arxiv-validate")
+        return 1
+    run_dir = Path(args.output_dir).resolve()
+    manifest_path = run_dir / ".pdf2epub" / "tex_subagent_manifest.json"
+    if not manifest_path.exists():
+        logger.error(f"TeX Subagent manifest not found: {manifest_path}")
+        return 1
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if not all("source_file" in unit and "target_file" in unit for unit in manifest.get("units", [])):
+            logger.error(
+                "This TeX manifest uses the old project-editing format; "
+                "rerun translate-arxiv to prepare resumable unit files."
+            )
+            return 1
+        source_dir = run_dir / "source"
+        document = scan_project(
+            source_dir,
+            manifest["main_tex"],
+            unit_chars=manifest.get("unit_chars", 12_000),
+            target_language=manifest.get("target_language", "Simplified Chinese"),
+        )
+        document_units = {unit.id: unit for unit in document.units}
+        translated = {}
+        missing_units = []
+        invalid_units = []
+        completed_units = []
+        run_root = run_dir.resolve()
+
+        def safe_run_path(relative_name: str) -> Path:
+            target = (run_root / relative_name).resolve()
+            target.relative_to(run_root)
+            return target
+
+        for entry in manifest.get("units", []):
+            unit_id = entry.get("id", "unknown")
+            if unit_id not in document_units:
+                invalid_units.append(f"{unit_id}: no matching source unit")
+                continue
+            source_path = safe_run_path(entry["source_file"])
+            target_path = safe_run_path(entry["target_file"])
+            if not source_path.is_file() or not target_path.is_file():
+                missing_units.append(unit_id)
+                continue
+            source_text = source_path.read_text(encoding="utf-8")
+            target_text = target_path.read_text(encoding="utf-8")
+            if hashlib.sha256(source_text.encode("utf-8")).hexdigest() != entry.get("source_sha256"):
+                invalid_units.append(f"{unit_id}: source unit changed")
+                continue
+            if not target_text.strip():
+                invalid_units.append(f"{unit_id}: target is empty")
+                continue
+            if target_text.lstrip().startswith("```"):
+                invalid_units.append(f"{unit_id}: Markdown fence is not allowed")
+                continue
+            translated[unit_id] = target_text
+            completed_units.append(unit_id)
+
+        manifest["completed_units"] = completed_units
+        manifest["pending_units"] = [
+            entry.get("id") for entry in manifest.get("units", [])
+            if entry.get("id") not in completed_units
+        ]
+        manifest_path.write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        if missing_units or invalid_units:
+            if missing_units:
+                logger.error(f"Missing translated TeX units: {missing_units[:10]}")
+            if invalid_units:
+                logger.error(f"Invalid translated TeX units: {invalid_units[:10]}")
+            return 1
+
+        project_dir = run_dir / "project"
+        project_dir.mkdir(parents=True, exist_ok=True)
+        for relative_path, source_text in document.render(translated).items():
+            target_path = (project_dir / relative_path).resolve()
+            target_path.relative_to(project_dir.resolve())
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_text(source_text, encoding="utf-8")
+        result = TexCompiler(timeout_seconds=args.compile_timeout or 180).compile(
+            project_dir,
+            manifest["main_tex"],
+            run_dir / ".pdf2epub" / "logs" / "subagent_compile.log",
+        )
+        if not result.success:
+            logger.error(f"TeX validation failed:\n{result.tail()}")
+            return 1
+        logger.success(f"TeX Subagent output compiled successfully: {result.pdf_path}")
+        return 0
+    except Exception as exc:
+        logger.error(f"TeX validation failed: {exc}")
+        return 1
+
 
 
 def main():
@@ -1340,28 +1510,38 @@ RECOMMENDED WORKFLOW / 推荐工作流 (uses toc_tree.json):
 
   # Complete pipeline for a PDF book:
   pdf2epub ocr-pages -i mybook.pdf   # Page-level OCR
-  pdf2epub refine                    # Generate toc_tree.json with boundary verification
-  pdf2epub polish                    # Clean up OCR output
-  pdf2epub build-epub                # Generate EPUB from toc_tree.json
+  pdf2epub refine-prepare            # Prepare Subagent TOC analysis
+  # Antigravity Subagent writes toc_tree.json
+  pdf2epub refine-local              # Validate TOC and merge OCR pages locally
+  pdf2epub polish                    # Prepare Subagent polishing task
+  # Antigravity Subagent writes polished_markdown/*.md
+  pdf2epub polish-validate
+  pdf2epub build-epub                # Generate EPUB from validated output
 
   # With translation:
   pdf2epub ocr-pages -i mybook.pdf
-  pdf2epub refine
+  pdf2epub refine-prepare
+  # Antigravity Subagent writes toc_tree.json
+  pdf2epub refine-local
   pdf2epub polish --content-type japanese
+  # Antigravity Subagent writes polished_markdown/*.md
+  pdf2epub polish-validate
   pdf2epub translate --target-language Chinese
+  # Antigravity Subagent writes translated/*.md
+  pdf2epub translate-validate
   pdf2epub build-epub --translated
 
   # EPUB Translation (preserves original formatting):
-  pdf2epub translate-html -i mybook.epub     # Extract + translate HTML
+  pdf2epub html-prepare -i mybook.epub       # Extract locally
+  # Antigravity Subagent writes translated_compressed/* and translated_metadata.json
+  pdf2epub html-validate
   pdf2epub build-html-epub                    # Build translated EPUB
 
-  # Test with limited files first:
-  pdf2epub translate-html -i mybook.epub --limit 5
-  pdf2epub build-html-epub
-
   # Novel Translation (text mode for light novels):
-  pdf2epub translate-novel -i mybook.epub     # Translate with glossary
-  pdf2epub build-novel-epub                   # Rebuild EPUB from translations
+  pdf2epub translate-novel -i mybook.epub     # Prepare Subagent task
+  # Subagent writes translated_novel/* and translated_metadata.json
+  pdf2epub translate-novel-validate
+  pdf2epub build-novel-epub                   # Rebuild EPUB locally
 
   # arXiv/TeX Translation (compile-gated whole mode):
   pdf2epub translate-arxiv 2503.01800
@@ -1417,17 +1597,11 @@ RECOMMENDED WORKFLOW / 推荐工作流 (uses toc_tree.json):
     # Refine subcommand (refined breakdown with boundary verification)
     refine_parser = subparsers.add_parser(
         "refine",
-        help="Refine structure with boundary verification",
-        description="Analyze TOC structure and verify section boundaries for precise splitting"
-    )
-    refine_parser.add_argument(
-        "-i", "--input",
-        help="Path to PDF file (default: auto-detect from output directory)"
-    )
-    refine_parser.add_argument(
-        "--resume",
-        action="store_true",
-        help="Resume from previous progress"
+        help="Prepare PDF structure analysis for an Antigravity Subagent",
+        description=(
+            "Alias for refine-prepare. Structure analysis is performed by a "
+            "workspace Subagent; the local program never calls a translation API."
+        )
     )
     refine_parser.add_argument(
         "--max-tokens",
@@ -1436,17 +1610,50 @@ RECOMMENDED WORKFLOW / 推荐工作流 (uses toc_tree.json):
         help="Maximum tokens per unit (default: from config or 8000)"
     )
     refine_parser.set_defaults(func=refine_command)
+
+    # Antigravity Subagent refine workflow (no API calls in these commands)
+    refine_prepare_parser = subparsers.add_parser(
+        "refine-prepare",
+        help="Prepare PDF TOC analysis for an Antigravity subagent",
+        description=(
+            "Write a prompt and manifest for a workspace subagent to inspect "
+            "OCR pages and produce toc_tree.json."
+        ),
+    )
+    refine_prepare_parser.add_argument(
+        "--max-tokens",
+        type=int,
+        default=None,
+        help="Maximum tokens per unit (default: from config or 8000)",
+    )
+    refine_prepare_parser.set_defaults(func=refine_prepare_command)
+
+    refine_local_parser = subparsers.add_parser(
+        "refine-local",
+        help="Generate PDF work units from a subagent TOC (no API calls)",
+        description=(
+            "Validate toc_tree.json and deterministically merge OCR pages into "
+            "ocr_markdown work units."
+        ),
+    )
+    refine_local_parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume from previously generated local units",
+    )
+    refine_local_parser.add_argument(
+        "--max-tokens",
+        type=int,
+        default=None,
+        help="Maximum tokens per unit (default: from config or 8000)",
+    )
+    refine_local_parser.set_defaults(func=refine_local_command)
     
     # Polish subcommand
     polish_parser = subparsers.add_parser(
         "polish",
-        help="Polish OCR-extracted markdown files",
-        description="Clean up and format OCR-extracted markdown content"
-    )
-    polish_parser.add_argument(
-        "--skip-truncation-check",
-        action="store_true",
-        help="Skip truncation detection"
+        help="Prepare OCR Markdown for a polishing Subagent",
+        description="Create a local Subagent hand-off; does not call an API",
     )
     polish_parser.add_argument(
         "--content-type",
@@ -1457,33 +1664,21 @@ RECOMMENDED WORKFLOW / 推荐工作流 (uses toc_tree.json):
     polish_parser.add_argument(
         "--resume",
         action="store_true",
-        help="Resume from previous progress"
-    )
-    polish_parser.add_argument(
-        "--max-workers",
-        type=int,
-        default=None,
-        help="Maximum number of concurrent workers (default: from config or 4)"
-    )
-    polish_parser.add_argument(
-        "--use-longest-on-failure",
-        action="store_true",
-        default=None,
-        help="Use longest response when all validation attempts fail (default: from config.yaml)"
-    )
-    polish_parser.add_argument(
-        "--no-use-longest-on-failure",
-        dest="use_longest_on_failure",
-        action="store_false",
-        help="Don't use longest response on failure (overrides config.yaml)"
+        help="Keep existing non-empty Subagent outputs and prepare only pending files",
     )
     polish_parser.set_defaults(func=polish_command)
+
+    polish_validate_parser = subparsers.add_parser(
+        "polish-validate",
+        help="Validate and stage Subagent polishing output (no API calls)",
+    )
+    polish_validate_parser.set_defaults(func=polish_validate_command)
 
     # Translate subcommand
     translate_parser = subparsers.add_parser(
         "translate",
-        help="Translate polished markdown files",
-        description="Translate markdown content to another language"
+        help="Prepare polished Markdown for a translation Subagent",
+        description="Create a local Subagent hand-off; does not call an API",
     )
     translate_parser.add_argument(
         "--source-language",
@@ -1496,47 +1691,23 @@ RECOMMENDED WORKFLOW / 推荐工作流 (uses toc_tree.json):
     translate_parser.add_argument(
         "--resume",
         action="store_true",
-        help="Resume from previous progress"
-    )
-    translate_parser.add_argument(
-        "--max-workers",
-        type=int,
-        default=None,
-        help="Maximum number of concurrent workers (default: from config or 4)"
-    )
-    translate_parser.add_argument(
-        "--use-entities",
-        action="store_true",
-        default=None,
-        help="Force use of extracted entities (auto-detects by default)"
-    )
-    translate_parser.add_argument(
-        "--no-entities",
-        action="store_true",
-        help="Force disable entity usage even if file exists"
-    )
-    translate_parser.add_argument(
-        "--use-longest-on-failure",
-        action="store_true",
-        default=None,
-        help="Use longest response when all validation attempts fail (default: from config.yaml)"
-    )
-    translate_parser.add_argument(
-        "--no-use-longest-on-failure",
-        dest="use_longest_on_failure",
-        action="store_false",
-        help="Don't use longest response on failure (overrides config.yaml)"
+        help="Keep existing non-empty Subagent outputs and prepare only pending files",
     )
     translate_parser.set_defaults(func=translate_command)
+
+    translate_validate_parser = subparsers.add_parser(
+        "translate-validate",
+        help="Validate and stage Subagent translation output (no API calls)",
+    )
+    translate_validate_parser.set_defaults(func=translate_validate_command)
 
     # arXiv / TeX whole-mode translation
     translate_arxiv_parser = subparsers.add_parser(
         "translate-arxiv",
-        help="Translate an arXiv or local TeX project and recompile it",
+        help="Prepare an arXiv/local TeX project for a translation Subagent",
         description=(
-            "Download or copy a TeX source tree, translate it unit by unit, "
-            "commit only replacements that pass a full XeLaTeX build, and "
-            "produce a resumable translated project."
+            "Download or copy a TeX source tree and create a local Subagent "
+            "hand-off; no translation API is called."
         ),
     )
     translate_arxiv_parser.add_argument(
@@ -1552,14 +1723,6 @@ RECOMMENDED WORKFLOW / 推荐工作流 (uses toc_tree.json):
         help="Run directory (default: output/arxiv/<source-id>)",
     )
     translate_arxiv_parser.add_argument(
-        "--provider",
-        help="Translation provider name (default: tex_translation.model.provider)",
-    )
-    translate_arxiv_parser.add_argument(
-        "--model",
-        help="Translation model ID (default: gemini-3.1-pro-preview)",
-    )
-    translate_arxiv_parser.add_argument(
         "--source-language",
         help="Source language (default: English)",
     )
@@ -1573,50 +1736,37 @@ RECOMMENDED WORKFLOW / 推荐工作流 (uses toc_tree.json):
         help="Approximate characters per TeX transaction (default: 12000)",
     )
     translate_arxiv_parser.add_argument(
-        "--limit",
-        type=int,
-        help="Process only the next N pending units; the partial project still compiles",
-    )
-    translate_arxiv_parser.add_argument(
-        "--no-repair",
-        action="store_true",
-        help="On compile failure, keep the original unit without invoking an agent",
-    )
-    translate_arxiv_parser.add_argument(
-        "--repair-provider",
-        help="Whole-mode repair provider (default: codex)",
-    )
-    translate_arxiv_parser.add_argument(
-        "--repair-model",
-        help="Whole-mode repair model (default: gpt-5.6-luna)",
-    )
-    translate_arxiv_parser.add_argument(
-        "--retry-fallbacks",
-        action="store_true",
-        help="Retry units previously kept in the source language",
-    )
-    translate_arxiv_parser.add_argument(
-        "--retry-repaired",
-        action="store_true",
-        help="Retranslate repaired units while retaining the last compile-safe version",
-    )
-    translate_arxiv_parser.add_argument(
-        "--no-local-cache",
-        action="store_true",
-        help="Disable the content-addressed local translation response cache",
-    )
-    translate_arxiv_parser.add_argument(
         "--compile-timeout",
         type=int,
         help="Seconds allowed for each full-project compile (default: 180)",
     )
+    translate_arxiv_parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Keep existing translated TeX unit files and prepare only pending units",
+    )
     translate_arxiv_parser.set_defaults(func=translate_arxiv_command)
+
+    translate_arxiv_validate_parser = subparsers.add_parser(
+        "translate-arxiv-validate",
+        help="Compile a Subagent-edited TeX project locally (no API calls)",
+    )
+    translate_arxiv_validate_parser.add_argument(
+        "--output-dir", required=True, help="Run directory created by translate-arxiv"
+    )
+    translate_arxiv_validate_parser.add_argument(
+        "--compile-timeout", type=int, help="XeLaTeX timeout in seconds (default: 180)"
+    )
+    translate_arxiv_validate_parser.set_defaults(func=translate_arxiv_validate_command)
 
     # Entity extraction subcommand
     entity_parser = subparsers.add_parser(
         "extract-entities",
-        help="Extract characters, places, and terms for translation consistency",
-        description="Analyze PDF to extract entities that need consistent translation"
+        help="Prepare entity extraction for a translation Subagent",
+        description=(
+            "Create a local Subagent hand-off for extracting characters, "
+            "places, and terms; no model API is called."
+        )
     )
     entity_parser.add_argument(
         "-i", "--input",
@@ -1634,6 +1784,13 @@ RECOMMENDED WORKFLOW / 推荐工作流 (uses toc_tree.json):
         help="Target language for translation (default: Chinese)"
     )
     entity_parser.set_defaults(func=extract_entities_command)
+
+    entity_validate_parser = subparsers.add_parser(
+        "extract-entities-validate",
+        help="Validate entity JSON written by a Subagent",
+        description="Validate the optional translation entity hand-off locally.",
+    )
+    entity_validate_parser.set_defaults(func=extract_entities_validate_command)
     
     # Build EPUB subcommand (toc_tree.json driven - new approach)
     build_epub_parser = subparsers.add_parser(
@@ -1652,64 +1809,6 @@ RECOMMENDED WORKFLOW / 推荐工作流 (uses toc_tree.json):
     )
     build_epub_parser.set_defaults(func=build_epub_command)
 
-    # HTML Translation subcommand (direct HTML translation for EPUB/AZW3/MOBI)
-    translate_html_parser = subparsers.add_parser(
-        "translate-html",
-        help="Translate EPUB/AZW3/MOBI content directly (preserves HTML structure)",
-        description="Translate ebook XHTML content directly. AZW3/MOBI files are auto-converted to EPUB."
-    )
-    translate_html_parser.add_argument(
-        "-i", "--input",
-        help="Input file: EPUB, AZW3, or MOBI (default: output/<book_title>/input.epub)"
-    )
-    translate_html_parser.add_argument(
-        "--source-language",
-        help="Source language (default: from config or Japanese)"
-    )
-    translate_html_parser.add_argument(
-        "--target-language",
-        help="Target language (default: from config or Chinese)"
-    )
-    translate_html_parser.add_argument(
-        "--resume",
-        action="store_true",
-        help="Resume from previous progress"
-    )
-    translate_html_parser.add_argument(
-        "--max-workers",
-        type=int,
-        default=None,
-        help="Maximum number of concurrent workers (default: from config or 4)"
-    )
-    translate_html_parser.add_argument(
-        "--skip-extract",
-        action="store_true",
-        help="Skip extraction step (use existing html_units/)"
-    )
-    translate_html_parser.add_argument(
-        "--skip-translate",
-        action="store_true",
-        help="Skip translation step (only extract)"
-    )
-    translate_html_parser.add_argument(
-        "--use-entities",
-        action="store_true",
-        default=None,
-        help="Force use of extracted entities"
-    )
-    translate_html_parser.add_argument(
-        "--no-entities",
-        action="store_true",
-        help="Force disable entity usage"
-    )
-    translate_html_parser.add_argument(
-        "--limit",
-        type=int,
-        default=None,
-        help="Only translate first N files (rest are copied untranslated for testing)"
-    )
-    translate_html_parser.set_defaults(func=translate_html_command)
-
     # HTML Prepare subcommand (pure local extraction and compression)
     html_prepare_parser = subparsers.add_parser(
         "html-prepare",
@@ -1727,6 +1826,11 @@ RECOMMENDED WORKFLOW / 推荐工作流 (uses toc_tree.json):
     html_prepare_parser.add_argument(
         "--target-language",
         help="Target language (default: from config or Chinese)"
+    )
+    html_prepare_parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Keep existing translated HTML units and prepare only pending files",
     )
     html_prepare_parser.set_defaults(func=html_prepare_command)
 
@@ -1756,14 +1860,18 @@ RECOMMENDED WORKFLOW / 推荐工作流 (uses toc_tree.json):
         "-o", "--output",
         help="Path to output EPUB file (default: <book_title>_translated.epub)"
     )
+    build_html_epub_parser.add_argument(
+        "--allow-partial",
+        action="store_true",
+        help="Build despite missing/invalid units or metadata (unsafe; for previews only)",
+    )
     build_html_epub_parser.set_defaults(func=build_html_epub_command)
 
     # Novel Translation subcommand (text-mode for light novels)
     translate_novel_parser = subparsers.add_parser(
         "translate-novel",
-        help="Translate light novel EPUB (text mode + glossary)",
-        description="Translate light novel EPUB using sliding window with glossary management. "
-                    "Optimized for small-context models like murasaki-14b."
+        help="Prepare light-novel EPUB for a translation Subagent",
+        description="Extract light-novel text and create a local Subagent hand-off."
     )
     translate_novel_parser.add_argument(
         "-i", "--input",
@@ -1780,58 +1888,23 @@ RECOMMENDED WORKFLOW / 推荐工作流 (uses toc_tree.json):
     translate_novel_parser.add_argument(
         "--resume",
         action="store_true",
-        help="Resume from previous progress"
-    )
-    translate_novel_parser.add_argument(
-        "--limit",
-        type=int,
-        default=None,
-        help="Only translate first N content chapters (for testing)"
-    )
-    translate_novel_parser.add_argument(
-        "--retranslate",
-        type=int,
-        default=None,
-        help="Retranslate a single chapter by spine index (rolls back glossary, retranslates, re-extracts)"
-    )
-    translate_novel_parser.add_argument(
-        "--glossary",
-        help="Path to initial glossary file (for series continuation)"
-    )
-    translate_novel_parser.add_argument(
-        "--skip-build",
-        action="store_true",
-        help="Skip EPUB building step (only translate)"
+        help="Keep existing translated novel units and prepare only pending files",
     )
     translate_novel_parser.set_defaults(func=translate_novel_command)
+
+    translate_novel_validate_parser = subparsers.add_parser(
+        "translate-novel-validate",
+        help="Validate Subagent light-novel output (no API calls)",
+    )
+    translate_novel_validate_parser.set_defaults(func=translate_novel_validate_command)
 
     # Build Novel EPUB subcommand (rebuild from translated text, no re-translation)
     build_novel_epub_parser = subparsers.add_parser(
         "build-novel-epub",
-        help="Build EPUB from translated novel text (no re-translation)",
-        description="Rebuild EPUB from existing translated .txt files. Supports partial translation — untranslated chapters keep original content."
+        help="Build EPUB from validated Subagent novel text",
+        description="Rebuild EPUB only after translate-novel-validate succeeds."
     )
     build_novel_epub_parser.set_defaults(func=build_novel_epub_command)
-
-    # Patch paper structure subcommand
-
-    # Cancel batch subcommand
-    cancel_batch_parser = subparsers.add_parser(
-        "cancel-batch",
-        help="Cancel active batch jobs",
-        description="Cancel all active batch jobs for the current project"
-    )
-    cancel_batch_parser.add_argument(
-        "-c", "--config",
-        default="config.yaml",
-        help="Path to config file (default: config.yaml)"
-    )
-    cancel_batch_parser.add_argument(
-        "--all",
-        action="store_true",
-        help="Cancel ALL batch jobs from API (not just from state files)"
-    )
-    cancel_batch_parser.set_defaults(func=cancel_batch_command)
 
     # Parse arguments
     args = parser.parse_args()

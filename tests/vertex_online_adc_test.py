@@ -106,38 +106,9 @@ def test_create_gemini_client_from_config_passes_adc_vertex_fields(
     ]
 
 
-def test_legacy_breakdown_entry_uses_shared_adc_client_factory(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    observed = []
-    monkeypatch.setattr(
-        network_utils,
-        "GeminiClient",
-        lambda **kwargs: observed.append(kwargs) or object(),
-    )
-
-    client = breakdown.create_breakdown_client(
-        {
-            "credentials": {
-                "providers": {"vertex-online": ADC_VERTEX_PROVIDER}
-            },
-            "breakdown": {"provider": "vertex-online"},
-        }
-    )
-
-    assert client is not None
-    assert observed == [
-        {
-            "api_key": None,
-            "base_url": None,
-            "vertexai": True,
-            "project": "test-project",
-            "location": "global",
-            "extra_headers": None,
-            "num_retries": 3,
-            "max_backoff_seconds": 30,
-        }
-    ]
+def test_legacy_breakdown_entry_is_removed() -> None:
+    with pytest.raises(RuntimeError, match="legacy breakdown API workflow was removed"):
+        breakdown.create_breakdown_client({})
 
 
 def test_gemini_vertex_express_mode_keeps_using_api_key(

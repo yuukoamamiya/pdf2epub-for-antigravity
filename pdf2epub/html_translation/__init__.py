@@ -1,13 +1,11 @@
-"""
-HTML Translation Pipeline.
+"""Local EPUB preparation, validation, and rebuilding utilities.
 
-This package provides direct HTML translation for EPUB content,
-using HTMLCompressor for structure-preserving translation.
+Translation is performed by an Antigravity workspace Subagent.  This package
+does not expose an in-process translation client.
 """
 
 from .compressor import HTMLCompressor
 from .splitter import HTMLSplitter, CompressedSplitter
-from .translator import HTMLTranslateProcessor
 from .builder import HTMLEpubBuilder, HTMLEpubPipeline, build_html_epub
 
 __all__ = [
@@ -16,8 +14,6 @@ __all__ = [
     # Splitting
     "HTMLSplitter",
     "CompressedSplitter",
-    # Translation
-    "HTMLTranslateProcessor",
     # Building
     "HTMLEpubBuilder",
     "HTMLEpubPipeline",

@@ -1,5 +1,12 @@
 # PDF2EPUB Structure Refinement Design
 
+# 历史设计文档（不适用于当前实现）
+
+> 本文保留的是旧版结构精修方案，包含已移除的进程内 LLM/API 示例。当前
+> 工作流请以 [antigravity-workflow.md](antigravity-workflow.md) 为准：由
+> Antigravity 工作区 Subagent 生成 `toc_tree.json`，Python 只负责本地校验、
+> 分割和打包。不要根据本文的 API、provider 或旧命令示例执行翻译。
+
 ## 问题分析
 
 ### 当前实现的问题

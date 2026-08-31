@@ -31,7 +31,7 @@ def _builder(
     )
 
 
-def test_update_content_opf_preserves_namespaced_attrs_and_collapses_creators(
+def test_update_content_opf_preserves_authors_and_namespaced_attrs(
     tmp_path: Path,
 ) -> None:
     meta_inf = tmp_path / "META-INF"
@@ -82,10 +82,10 @@ def test_update_content_opf_preserves_namespaced_attrs_and_collapses_creators(
     root = etree.parse(str(opf_path)).getroot()
     namespaces = {"dc": DC_NS}
     creators = root.findall(".//dc:creator", namespaces)
-    assert len(creators) == 1
-    assert creators[0].text == "作者一, 作者二"
+    assert len(creators) == 2
+    assert [creator.text for creator in creators] == ["Author One", "Author Two"]
     assert creators[0].get(f"{{{OPF_NS}}}role") == "aut"
-    assert creators[0].get(f"{{{OPF_NS}}}file-as") == "作者一, 作者二"
+    assert creators[0].get(f"{{{OPF_NS}}}file-as") == "Alpha, A"
     assert creators[0].get("role") is None
     assert creators[0].get("file-as") is None
 
@@ -99,7 +99,7 @@ def test_update_content_opf_preserves_namespaced_attrs_and_collapses_creators(
     assert root.findtext(".//dc:language", namespaces=namespaces) == "zh"
 
 
-def test_update_epub3_creators_updates_and_removes_refinements(
+def test_update_epub3_creators_and_refinements_are_preserved(
     tmp_path: Path,
 ) -> None:
     meta_inf = tmp_path / "META-INF"
@@ -158,20 +158,18 @@ def test_update_epub3_creators_updates_and_removes_refinements(
     namespaces = {"opf": OPF_NS, "dc": DC_NS}
     creators = root.findall(".//dc:creator", namespaces)
     assert [(creator.get("id"), creator.text) for creator in creators] == [
-        ("creator-1", "作者一, 作者二")
+        ("creator-1", "Author One"),
+        ("creator-2", "Author Two"),
     ]
 
     refinements = root.findall(".//opf:meta[@refines]", namespaces)
-    assert all(meta.get("refines") != "#creator-2" for meta in refinements)
+    assert {meta.get("refines") for meta in refinements} >= {"#creator-1", "#creator-2"}
     first_creator_refinements = {
         meta.get("property"): meta.text
         for meta in refinements
         if meta.get("refines") == "#creator-1"
     }
-    assert first_creator_refinements == {
-        "role": "aut",
-        "file-as": "作者一, 作者二",
-    }
+    assert first_creator_refinements == {"role": "aut", "file-as": "Alpha, A"}
     title_sort = root.find(".//opf:meta[@name='calibre:title_sort']", namespaces)
     assert title_sort is not None
     assert title_sort.get("content") == "Translated title"
@@ -233,48 +231,6 @@ def test_epubcheck_strict_mode_requires_executable(
         builder._validate_output_epub()
 
 
-def test_html_translator_google_agent_uses_provider_module(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import google.genai
-    import pydantic_ai.models.google
-    import pydantic_ai.providers.google
-
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(
-        google.genai,
-        "Client",
-        lambda **kwargs: ("client", kwargs),
-    )
-    monkeypatch.setattr(
-        pydantic_ai.providers.google,
-        "GoogleProvider",
-        lambda **kwargs: ("provider", kwargs),
-    )
-    monkeypatch.setattr(
-        pydantic_ai.models.google,
-        "GoogleModel",
-        lambda model_name, provider: ("model", model_name, provider),
-    )
-
-    processor = HTMLTranslateProcessor(
-        config={
-            "credentials": {
-                "providers": {
-                    "gemini": {
-                        "type": "google",
-                        "api_key": "test-key",
-                        "base_url": "https://example.invalid",
-                    }
-                }
-            },
-            "html_translation": {"agent_model": "gemini-test"},
-        },
-        book_title="Test Book",
-    )
-
-    model = processor._get_agent_model()
-
-    assert model[0:2] == ("model", "gemini-test")
-    assert model[2][0] == "provider"
+def test_html_translator_provider_path_is_removed() -> None:
+    with pytest.raises(RuntimeError, match="in-process HTML translator was removed"):
+        HTMLTranslateProcessor(config={}, book_title="Test Book")

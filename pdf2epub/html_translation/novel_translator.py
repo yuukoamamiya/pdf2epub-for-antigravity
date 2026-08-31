@@ -127,7 +127,13 @@ def repair_images(source_text: str, translated_text: str) -> str:
 # ─── Translator ───
 
 class NovelTranslator:
-    """Translate light novel chapters with deterministic verification and glossary memory."""
+    """Removed in-process novel translator.
+
+    Novel translation is now an Antigravity workspace hand-off implemented by
+    the CLI.  The historical implementation remains below only as an
+    isolated migration/test seam, but normal construction is blocked so it
+    cannot create an API client or start a provider-backed translation.
+    """
 
     def __init__(
         self,
@@ -139,6 +145,12 @@ class NovelTranslator:
         resume: bool = False,
         output_dir: Optional[Path] = None,
     ):
+        raise RuntimeError(
+            "The in-process novel translator was removed. Run 'pdf2epub "
+            "translate-novel', let an Antigravity Subagent translate the "
+            "workspace files, then run 'pdf2epub translate-novel-validate'."
+        )
+
         self.config = config
         self.book_title = book_title
         self.source_language = source_language

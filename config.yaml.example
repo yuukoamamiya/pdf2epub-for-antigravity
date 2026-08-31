@@ -9,6 +9,16 @@ translation:
   source_language: English # 或 Japanese / German / French 等
   target_language: Chinese
 
+# Antigravity Subagent 模型（只作为 IDE 子 Agent 的任务提示，不调用任何 API）
+# 翻译类任务默认使用 Pro，其余任务（结构分析、润色、实体提取）默认使用 Flash。
+subagent:
+  models:
+    translation: gemini-2.5-pro
+    default: gemini-2.5-flash
+  # 可选：按任务覆盖上面的默认值，例如 refine / polish / translate-html。
+  # task_models:
+  #   refine: gemini-2.5-flash
+
 # OCR 设置 (默认 chandra，支持多模态 OCR)
 ocr:
   backend: chandra
@@ -28,12 +38,5 @@ ocr:
 
 # Refine 与结构自愈设置
 refine:
-  adaptive_page_limit:
-    initial_pages: 150
-    min_pages: 30
-  pdf_compression:
-    payload_limit_mb: 18
-    compress_if_exceeds: true
-    dpi: 50
-    quality: 40
-    grayscale: true
+  # TOC analysis is done by an Antigravity workspace subagent.
+  max_tokens: 8000

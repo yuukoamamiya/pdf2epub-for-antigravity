@@ -799,10 +799,6 @@ def build_epub(config: BuildEpubConfig) -> Path:
     logger.info(f"Building EPUB for: {config.book_title}")
     logger.info(f"Source: {'translated' if config.translated else 'polished_markdown'}")
 
-    # Use the exact command config. Loading the repository default here would
-    # silently switch providers/models when ``-c`` selected a per-book config.
-    llm_config = config.config
-
     # Load toc_tree.json
     toc_tree = load_toc_tree(config.toc_tree_path)
     logger.info(f"Loaded toc_tree.json with {len(toc_tree.get('chapters', []))} top-level entries")
@@ -838,41 +834,28 @@ def build_epub(config: BuildEpubConfig) -> Path:
 
     # Load translated TOC if building translated EPUB
     if config.translated:
+        from .subagent_workflow import validate_toc_translation_subagent
+
+        toc_validation = validate_toc_translation_subagent(config.output_dir)
+        if not toc_validation["valid"]:
+            raise ValueError(
+                "Translated TOC validation failed: "
+                + "; ".join(toc_validation["errors"][:10])
+            )
         translated_toc_path = config.output_dir / "toc_tree_translated.json"
-        if not translated_toc_path.exists() and config.config:
-            try:
-                from .commands.translate_v2 import _translate_toc
-                from .utils.llm_client import LLMClient
-                logger.info("toc_tree_translated.json not found, translating TOC on the fly...")
-                llm_client = LLMClient(config.config)
-                translation_models = config.config.get("translation", {}).get("models", [])
-                source_language = config.config.get("translation", {}).get("source_language", "English")
-                target_language = config.config.get("translation", {}).get("target_language", "Chinese")
-                translate_dir = config.markdown_dir.parent if config.markdown_dir.name in ('validated', 'raw') else config.markdown_dir
-                _translate_toc(
-                    output_dir=config.output_dir,
-                    translate_dir=translate_dir,
-                    llm_client=llm_client,
-                    translation_models=translation_models,
-                    source_language=source_language,
-                    target_language=target_language,
-                    config=config.config,
-                    resume=False,
-                )
-            except Exception as e:
-                logger.warning(f"Could not auto-translate TOC on the fly: {e}")
+        if not translated_toc_path.exists():
+            raise FileNotFoundError(
+                f"{translated_toc_path} is missing. Ask the Subagent to translate "
+                "the TOC, then run translate-validate before building."
+            )
+        with open(translated_toc_path, 'r', encoding='utf-8') as f:
+            toc_tree = json.load(f)
+        logger.info("Loaded Subagent-produced toc_tree_translated.json")
 
-        if translated_toc_path.exists():
-            with open(translated_toc_path, 'r', encoding='utf-8') as f:
-                toc_tree = json.load(f)
-            logger.info("Loaded translated TOC from toc_tree_translated.json")
-
-            # Use translated book title
-            if 'book_title' in toc_tree:
-                config.book_title = toc_tree['book_title']
-                logger.info(f"Using translated title: {config.book_title}")
-        else:
-            logger.warning("toc_tree_translated.json not found, using original titles")
+        # Use translated book title
+        if 'book_title' in toc_tree:
+            config.book_title = toc_tree['book_title']
+            logger.info(f"Using translated title: {config.book_title}")
 
     # Flatten and process structure
     toc_structure = flatten_toc_tree(toc_tree['chapters'])
@@ -952,7 +935,7 @@ def build_epub(config: BuildEpubConfig) -> Path:
     footnote_manager = FootnoteManager(
         config.markdown_dir,
         auto_global=auto_global,
-        config=llm_config,
+        config=None,
         epub_structure=epub_structure,
     )
     converter.footnote_manager = footnote_manager

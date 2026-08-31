@@ -9,9 +9,9 @@
 
 ## 🚀 Antigravity Edition 专属增强特性
 
-1. 🔑 **Google Antigravity 零配置直连（Zero-Config Gemini Auth）**
-   * 内置 `google-antigravity` 适配，直接复用本地 Antigravity / Gemini 授权环境。
-   * **无需申请或硬编码 Google AI Studio API Key**，配置 `type: antigravity` 即可直接调度 Gemini 2.5 Pro / Flash 的百万上下文与多模态能力。
+1. 🔑 **Antigravity IDE / Subagent 协同**
+   * 书籍翻译与 PDF 结构判断通过 Antigravity IDE 中的 Subagent 读写工作区，使用 Gemini Pro 订阅额度。
+   * 本地程序只负责拆分、文件交接、校验、合并和打包，不伪装 IDE 登录，也不注入内部项目 ID 或请求头。
 
 2. 🛡️ **自适应超大 PDF 压缩与 Refine Payload 防爆（Adaptive PDF Compression）**
    * Refine 目录与边界分析阶段针对超长超大扫描件（数百页/几百兆 PDF）自动进行多级自适应二值化压缩（`120 -> 90 -> 72 -> 50 DPI`）。
@@ -25,8 +25,27 @@
 
 4. ⚡ **Antigravity 原生 Subagent 协同流水线（Native Subagent Architecture）**
    * **EPUB 高保真翻译**：`pdf2epub html-prepare` ➔ `book_translator` 子 Agent 协同翻译 ➔ `pdf2epub html-validate` 校验 ➔ `pdf2epub build-html-epub` 逆向重构打包。
-   * **PDF 学术转换与精修**：`ocr-pages` 页面提取 ➔ `refine` 目录自愈 ➔ Subagent 翻译/润色 ➔ `build-epub` 输出双版 EPUB。
-   * 零外部商业 API 成本，100% 官方合规安全。
+   * **PDF 学术转换与精修**：`ocr-pages` 页面提取 ➔ `refine-prepare` ➔ Subagent 生成 `toc_tree.json` ➔ `refine-local` 本地合并 ➔ 翻译/润色 ➔ `build-epub`。
+   * 翻译阶段不需要额外 API；OCR 是否联网由所选 OCR 后端决定。
+
+### Subagent 模型配置
+
+在 `config.yaml` 或 `config_epub.yaml` 中统一配置 Subagent 使用的模型：
+
+```yaml
+subagent:
+  models:
+    translation: gemini-2.5-pro
+    default: gemini-2.5-flash
+  # 可选：按任务覆盖，例如 refine、polish、translate-html
+  # task_models:
+  #   refine: gemini-2.5-flash
+```
+
+默认情况下，正文、元数据、目录、轻小说和 TeX 翻译使用 Pro；结构分析、OCR
+润色和实体提取使用 Flash。每个 Subagent manifest 和提示词都会写明最终模型。
+这些字段只是 Antigravity IDE 子 Agent 的任务约定，Python 不会根据它们调用或
+切换任何翻译 API。
 
 ---
 
@@ -39,7 +58,8 @@
 转换后：https://raw.githubusercontent.com/ShenSheiBot/pdf2epub/refs/heads/main/example.epub
 
 ## 局限性
-因为其复杂性和对多模态LLM的依赖，转换速度较慢并有小概率可能会因为LLM的审核原因失败。第一步的目录分解和术语表提取强制需求 gemini 的大 context。剩余步骤建议尽量避免 gemini（审核最严格）。
+因为其复杂性和对 OCR/Subagent 的依赖，转换速度较慢。Subagent 任务需要在
+Antigravity IDE 中执行；OCR 是否联网取决于所选后端。
 
 对于纵排日语，需要扫描文件的质量较高且为*白底*。（并非白底会导致插图识别错误）
 
@@ -52,25 +72,30 @@
 适用于 PDF 扫描件转换：
 
 1. **ocr-pages**：逐页进行 OCR，保存 Markdown、HTML 和可审计的原始版式信息
-2. **refine**：智能分析 TOC 结构，验证章节边界，生成精确的 toc_tree.json（支持无限层级嵌套）
-3. **polish**：使用 LLM 建立正确的链接跳转，消除 OCR 错误、页眉页脚等
-4. **translate**：（可选）使用 LLM 翻译成目标语言
-5. **build-epub**：基于 toc_tree.json 生成 EPUB
+2. **refine-prepare**：生成 Subagent 任务说明和页清单
+3. **Antigravity Subagent**：阅读 `pages/`，在输出目录写入 `toc_tree.json`
+4. **refine-local**：本地校验 TOC、估算 token 并合并章节工作单元
+5. **polish**：生成润色任务，由 Antigravity Subagent 消除 OCR 错误、页眉页脚等
+6. **translate**：（可选）生成翻译任务，由 Antigravity Subagent 翻译成目标语言
+7. **build-epub**：基于 toc_tree.json 生成 EPUB
 
 ### EPUB 高保真翻译工作流 (Antigravity Subagent 驱动)
 
 适用于已有 EPUB 文件的翻译，完整保留原书的 CSS 样式、字体与排版：
 
 1. **html-prepare**：本地解析 EPUB 并无损压缩 XHTML，生成单行映射单元
-2. **Subagent 协同翻译**：由 Antigravity `book_translator` 子 Agent 批量翻译并保证标签与行数 1:1 绝对保全
-3. **html-validate**：纯本地全量校验标签序列与行数一致性
+2. **Subagent 协同翻译**：由 Antigravity `book_translator` 子 Agent 批量翻译正文，并单独填写 `translated_metadata.json`
+3. **html-validate**：纯本地全量校验正文标签/行数和元数据结构；作者名、出版社强制保持原文
 4. **build-html-epub**：逆向重构完整 XHTML 并重新打包生成高质量 EPUB
 
 ```bash
-# 1. 本地结构拆分与无损压缩 (0 API 消耗)
+# 1. 本地结构拆分与无损压缩（不调用翻译 API）
 uv run pdf2epub -c config_epub.yaml html-prepare
 
-# 2. 在 Antigravity 对话框中调度 book_translator 翻译各单元
+# 2. 在 Antigravity 对话框中调度 book_translator 翻译各单元，
+#    同时按 output/<title>/metadata_translation_prompt.md 填写元数据
+#    如果额度中断，重新生成任务时加 --resume，只处理清单中的 pending_files
+# uv run pdf2epub -c config_epub.yaml html-prepare --resume
 
 # 3. 本地离线 100% 质量与标签校验
 uv run pdf2epub -c config_epub.yaml html-validate
@@ -81,61 +106,67 @@ uv run pdf2epub -c config_epub.yaml build-html-epub
 
 优势：
 - 完整保留原书的 CSS 样式、字体、封面、目录结构
-- 走 Antigravity 官方会话与 Gemini Pro 订阅配额，零额外 API 成本，绝对合规安全
+- 由 Antigravity 官方会话与 Gemini Pro 订阅配额完成翻译
 - 100% 本地快速校验防幻觉、防标签丢失与行数错位
 
 ### 轻小说翻译工作流 (Novel - 文本模式 + 术语表)
 
-适用于轻小说 EPUB 的日→中翻译，支持术语表记忆和退化防护：
+适用于轻小说 EPUB 的日→中翻译，由工作区 Subagent 负责正文和元数据：
 
-1. **translate-novel**：逐章翻译，自动提取/维护术语表，embedding验证对齐
-2. **build-novel-epub**：从翻译文本重建 EPUB（支持部分翻译）
+1. **translate-novel**：提取章节和元数据，生成 Subagent 文件任务
+2. **translate-novel-validate**：本地检查章节和元数据
+3. **build-novel-epub**：从已校验的翻译文本重建 EPUB
 
 ```bash
 # 轻小说翻译示例
 uv run pdf2epub translate-novel -i novel.epub -c config.yaml
+uv run pdf2epub translate-novel-validate -c config.yaml
 uv run pdf2epub build-novel-epub -c config.yaml
 ```
 
+额度耗尽时不需要从头翻译：已写入目标目录的单元会保留。先运行对应的
+`*-validate` 查看缺失/错误单元，再用 `polish --resume`、`translate --resume`、
+`html-prepare --resume` 或 `translate-novel --resume` 重新生成任务。manifest
+会记录 `completed_files` 和 `pending_files`，Subagent 只处理后者。TeX 使用
+`translate-arxiv ... --resume`，对应清单字段为 `completed_units` 和 `pending_units`。
+
 优势：
-- 跨章术语一致性（GlossaryManager 自动维护）
-- Sonnet 退化防护（streaming guard + chunked fallback）
-- Embedding-based 对齐验证（无安全过滤限制）
-- DeepSeek 作为 fallback（R18 内容无审核）
-- 支持 `--resume`、`--retranslate <chapter>`、`--limit N`
+- Subagent 可在同一工作区维护术语一致性
+- 本地结构校验避免不完整译文进入打包阶段
+- 作者名、出版社始终由本地校验强制保持原文
 
 ### arXiv / LaTeX 翻译工作流
 
-适用于 arXiv 论文源码或本地 TeX 工程。它不经过 PDF OCR，而是直接翻译
-TeX 正文，并将“完整工程可以用 XeLaTeX 编译”作为每个翻译单元的提交条件。
+适用于 arXiv 论文源码或本地 TeX 工程。它不经过 PDF OCR，而是准备 TeX
+正文翻译任务，并将“完整工程可以用 XeLaTeX 编译”作为本地验收条件。
 
 ```bash
-# 直接下载 arXiv 源码、翻译并重新编译
+# 下载 arXiv 源码并准备 Subagent 翻译任务
 uv run pdf2epub translate-arxiv 2503.01800
 
 # 翻译本地工程；入口也可以自动识别
 uv run pdf2epub translate-arxiv ./paper-source --main-tex main.tex
 
-# 只处理下一个单元，适合先做小规模验证
-uv run pdf2epub translate-arxiv 2503.01800 --limit 1
+# Subagent 完成后，在同一 run 目录运行本地编译校验
+uv run pdf2epub translate-arxiv-validate --output-dir output/arxiv/2503.01800
 ```
 
-该工作流会自动注入 `ctex`、递归跟踪正文中的 `\input` / `\include` /
-`\subfile`，并在 `output/arxiv/<source-id>/project` 中留下可独立重新编译的
-工程。状态、单元译文、编译日志和内容寻址缓存保存在同一运行目录的
-`.pdf2epub` 下；重复执行同一命令会从已编译成功的单元继续，不会再次请求
-LLM。只有候选译文无法编译时才调用 whole-mode repair agent；修复失败则保留
-该单元原文。默认修复模型为 `gpt-5.6-luna`，并可通过配置中的
-`type: codex` 复用本机 Codex 当前选中的 OpenAI-compatible provider，
-无需把 bearer token 复制到 `config.yaml`。
+TeX 翻译使用 `tex_units/` 与 `translated_tex_units/` 作为独立单元交接目录；
+额度中断后运行 `translate-arxiv ... --resume`，只会把未完成单元放入
+`pending_units`。校验命令会根据完整单元集合重新构建 `project/`，再执行本地编译。
+
+该工作流会递归跟踪正文中的 `\input` / `\include` / `\subfile`，并在
+`output/arxiv/<source-id>/tex_units` 和 `translated_tex_units` 中留下独立交接
+单元；校验时再生成可独立编译的 `project` 工程。任务清单和编译日志保存在同一运行目录的 `.pdf2epub` 下；本地阶段只
+负责准备工程、校验并调用 XeLaTeX 编译，不会调用翻译模型或 repair agent。
 
 需要本机安装包含 XeLaTeX、`latexmk`、`ctex` 和 Fandol 字体的 TeX Live。
 
-## 推荐LLM：
+## 关于模型与授权
 
-- refine / entity extraction：gemini-2.5-pro
-- polish / translate：claude-sonnet-4-6 或 deepseek-chat
-- translate-novel：claude-sonnet-4-6（主）+ deepseek-chat（fallback）
+本项目不保留翻译 API 路径：在 Antigravity IDE 中使用 Subagent 和 Gemini Pro
+订阅额度完成结构判断、正文翻译及元数据翻译。本地 Python 只做文件准备、
+离线校验、合并和打包；OCR 后端仍按配置运行。
 
 ## 日语OCR架构
 
@@ -248,8 +279,6 @@ refine:
 # 轻小说专用配置（可选）
 novel:
   glossary_max_tokens: 1000
-  embedding_provider: gemini       # embedding 验证
-  embedding_model: gemini-embedding-001
 ```
 
 ### 2. 推荐工作流程（统一CLI）
@@ -268,11 +297,13 @@ uv run pdf2epub ocr-pages -i input.pdf
 - `--end-page`: 结束页码
 - `--max-workers`: 并发数
 
-#### 步骤 2: 精细化拆分
+#### 步骤 2: Subagent 精细化拆分
 ```bash
-uv run pdf2epub refine
+uv run pdf2epub refine-prepare
+# 在 Antigravity 中生成 output/{book_title}/toc_tree.json
+uv run pdf2epub refine-local
 ```
-分析 TOC 结构并验证章节边界，生成 `output/{book_title}/toc_tree.json`（支持无限层级嵌套）
+Subagent 分析 TOC；本地命令验证章节边界并生成工作单元（支持无限层级嵌套）。
 
 参数说明：
 - `--resume`: 从上次中断处继续
@@ -343,19 +374,27 @@ uv run pdf2epub translate --target-language Chinese --no-entities
 # 1. 页级OCR
 uv run pdf2epub ocr-pages -i manga.pdf
 
-# 2. 精细化拆分
-uv run pdf2epub refine
+# 2. 准备 Subagent 结构分析任务
+uv run pdf2epub refine-prepare
 
-# 3. 提取翻译实体（可选，用于一致性）
+# 3. 在 Antigravity 中让 Subagent 读取
+#    output/<book_title>/refine_subagent_prompt.md，写入 toc_tree.json
+
+# 4. 本地校验并生成工作单元
+uv run pdf2epub refine-local
+
+# 5. 准备翻译实体任务（可选，用于一致性）
 uv run pdf2epub extract-entities
+# Subagent 写入 translation_entities.json 后进行本地校验
+uv run pdf2epub extract-entities-validate
 
-# 4. 日语内容润色
+# 6. 日语内容润色
 uv run pdf2epub polish --content-type japanese
 
-# 5. 翻译成中文（自动使用已提取的实体）
+# 7. 准备中文翻译任务（Subagent 可读取已校验实体）
 uv run pdf2epub translate --target-language Chinese
 
-# 6. 生成EPUB
+# 8. 生成EPUB
 uv run pdf2epub build-epub --translated
 ```
 
@@ -364,8 +403,10 @@ uv run pdf2epub build-epub --translated
 # 1. 页级OCR
 uv run pdf2epub ocr-pages -i thesis.pdf
 
-# 2. 精细化拆分
-uv run pdf2epub refine
+# 2. 准备 Subagent 结构分析任务
+uv run pdf2epub refine-prepare
+# 在 Antigravity 中生成 output/<book_title>/toc_tree.json
+uv run pdf2epub refine-local
 
 # 3. 学术内容润色（保留脚注）
 uv run pdf2epub polish --content-type academic
@@ -379,7 +420,18 @@ uv run pdf2epub build-epub --translated
 
 #### 已有 EPUB 翻译（保留原格式）
 ```bash
-uv run pdf2epub translate-html -i book.epub --target-language Chinese
+# 本地准备压缩单元和元数据翻译协议
+uv run pdf2epub -c config_epub.yaml html-prepare
+# 在 Antigravity 中运行 book_translator，并填写 translated_metadata.json
+uv run pdf2epub -c config_epub.yaml html-validate
+uv run pdf2epub -c config_epub.yaml build-html-epub
+```
+
+EPUB 翻译统一使用 Subagent 文件交接：
+```bash
+uv run pdf2epub html-prepare -i book.epub --target-language Chinese
+# 在 Antigravity 中翻译 compressed_units/*，并写入 translated_compressed/*
+uv run pdf2epub html-validate
 uv run pdf2epub build-html-epub
 ```
 
@@ -397,8 +449,10 @@ uv run pdf2epub -c config.yaml build-novel-epub
 # 1. 页级OCR
 uv run pdf2epub ocr-pages -i book.pdf
 
-# 2. 精细化拆分
-uv run pdf2epub refine
+# 2. 准备并完成 Subagent 结构分析
+uv run pdf2epub refine-prepare
+# 在 Antigravity 中生成 output/<book_title>/toc_tree.json
+uv run pdf2epub refine-local
 
 # 3. 内容润色
 uv run pdf2epub polish
@@ -409,7 +463,9 @@ uv run pdf2epub build-epub
 
 ### 5. 高级配置
 
-系统支持在模型失败或触发安全审核时自动 fallback 到下一个 provider。在 `translation.models` 数组中配置多个 provider 即可。
+PDF 的结构分析和 EPUB/PDF/TeX 的翻译都在 Antigravity Subagent 中完成；本地
+命令不需要配置 provider 或 API 凭证。Subagent 模型按上面的 `subagent.models`
+配置，未配置时翻译默认 `gemini-2.5-pro`，其他任务默认 `gemini-2.5-flash`。
 
 ### 6. 故障排除
 
@@ -418,9 +474,10 @@ uv run pdf2epub build-epub
 - 降低 `max_workers` 减少并发
 - 使用 `--resume` 从失败处继续
 
-#### 审核问题
-- 配置多个模型提供商
-- Gemini 被阻止时会自动切换到 Anthropic
+#### Subagent 工作流问题
+- 确认 Subagent 直接读写当前工作区，而不是把内容复制到外部脚本
+- EPUB 翻译检查 `metadata_translation_prompt.md`，并确保生成 `translated_metadata.json`
+- PDF 检查 `refine_subagent_prompt.md`，并确保生成 `toc_tree.json`
 
 #### 内存不足
 - 减少 `max_workers`
@@ -455,6 +512,11 @@ output/
     ├── translation_reference.txt  # 人类可读的翻译参考
     ├── pages/ocr_progress.json           # 页级OCR进度
     ├── ocr_markdown/tree_progress.json   # refine进度
+    ├── refine_subagent_prompt.md          # PDF结构分析Subagent提示词
+    ├── toc_tree.json                      # Subagent生成、由本地校验
+    ├── metadata_translation_source.json  # EPUB元数据翻译输入
+    ├── metadata_translation_prompt.md    # EPUB元数据Subagent提示词
+    ├── translated_metadata.json          # EPUB元数据译文
     ├── polished_markdown/processing_tracker.json   # 润色进度
     ├── translated/processing_tracker.json          # 翻译进度
     └── output.epub            # 最终 EPUB

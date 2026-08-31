@@ -8,6 +8,7 @@ all other resources (CSS, fonts, images, metadata).
 import zipfile
 import tempfile
 import json
+import hashlib
 import re
 import shutil
 import subprocess
@@ -22,7 +23,7 @@ from xml.etree import ElementTree as ET
 
 from .epub_parser import EPUBParser
 from .validation import nonempty_lines, tag_mismatch_count
-from ..utils.common import parse_llm_json
+from pdf2epub.subagent_workflow import resolve_subagent_model
 
 
 PART_FILE_RE = re.compile(r'^(.+)\.part(\d+)\.md$')
@@ -564,56 +565,9 @@ class HTMLEpubBuilder:
                 else:
                     logger.warning("dc:language element not found in content.opf")
 
-            # Update dc:creator (author)
-            if metadata.get('translated_author'):
-                creator_elems = root.findall('.//dc:creator', namespaces)
-                if not creator_elems:
-                    creator_elems = [
-                        e for e in root.iter()
-                        if _has_local_tag(e, 'creator')
-                    ]
-
-                if creator_elems:
-                    creator_elem = creator_elems[0]
-                    creator_elem.text = metadata['translated_author']
-                    translated_file_as = metadata.get('translated_author_file_as')
-
-                    # EPUB 2 stores file-as directly on dc:creator.
-                    opf_ns = 'http://www.idpf.org/2007/opf'
-                    file_as_key = f'{{{opf_ns}}}file-as'
-                    if file_as_key in creator_elem.attrib and translated_file_as:
-                        creator_elem.attrib[file_as_key] = translated_file_as
-
-                    def creator_refinements(creator_id: Optional[str]):
-                        if not creator_id:
-                            return []
-                        target = f'#{creator_id}'
-                        return [
-                            e for e in root.iter()
-                            if _has_local_tag(e, 'meta')
-                            and e.get('refines') == target
-                        ]
-
-                    # EPUB 3 stores file-as and role in refining meta elements.
-                    for refinement in creator_refinements(creator_elem.get('id')):
-                        if refinement.get('property') == 'file-as' and translated_file_as:
-                            refinement.text = translated_file_as
-
-                    # EPUBParser exposes multiple creators as one comma-joined
-                    # author string, and metadata translation returns that same
-                    # combined shape. Replace the original creator list with the
-                    # translated aggregate instead of leaving duplicate authors.
-                    # Remove EPUB 3 refinements together with deleted creators so
-                    # their refines attributes cannot become dangling references.
-                    for extra_creator in creator_elems[1:]:
-                        for refinement in creator_refinements(extra_creator.get('id')):
-                            refinement_parent = refinement.getparent()
-                            if refinement_parent is not None:
-                                refinement_parent.remove(refinement)
-                        parent = extra_creator.getparent()
-                        if parent is not None:
-                            parent.remove(extra_creator)
-                    logger.debug(f"Updated creator: {metadata['translated_author']}")
+            # dc:creator and dc:publisher are intentionally untouched.  Names
+            # and publisher imprints are bibliographic identity, not prose;
+            # changing them would also break EPUB 3 creator refinements.
 
             # Update dc:description
             if metadata.get('translated_description'):
@@ -626,18 +580,6 @@ class HTMLEpubBuilder:
                 if desc_elem is not None:
                     desc_elem.text = metadata['translated_description']
                     logger.debug("Updated description")
-
-            # Update dc:publisher
-            if metadata.get('translated_publisher'):
-                pub_elem = root.find('.//dc:publisher', namespaces)
-                if pub_elem is None:
-                    for e in root.iter():
-                        if _has_local_tag(e, 'publisher'):
-                            pub_elem = e
-                            break
-                if pub_elem is not None:
-                    pub_elem.text = metadata['translated_publisher']
-                    logger.debug(f"Updated publisher: {metadata['translated_publisher']}")
 
             # Update dc:rights
             if metadata.get('translated_rights'):
@@ -1080,7 +1022,7 @@ class HTMLEpubPipeline:
         lang_lower = language.lower()
         return name_to_code.get(lang_lower, 'zh')  # Default to 'zh' for Chinese
 
-    def extract_and_preprocess(self) -> int:
+    def extract_and_preprocess(self, target_language: Optional[str] = None) -> int:
         """
         Extract XHTML from EPUB and compress for translation.
 
@@ -1162,8 +1104,121 @@ class HTMLEpubPipeline:
             except Exception as e:
                 logger.warning(f"Failed to extract {href}: {e}")
 
+        # Metadata is deliberately prepared as a separate, small work item.
+        # The Antigravity subagent can translate it without touching OPF/XML,
+        # while the builder remains responsible for applying only validated
+        # values.  This also makes metadata translation resumable and auditable.
+        self.create_metadata_translation_source(target_language=target_language)
+
         logger.info(f"Compressed {extracted} XHTML files to {self.compressed_units_dir}")
         return extracted
+
+    def create_metadata_translation_source(
+        self,
+        target_language: Optional[str] = None,
+    ) -> Path:
+        """Write the metadata input contract for the workspace subagent.
+
+        Author and publisher are intentionally placed in ``preserved_metadata``
+        and are never included in the translatable payload.  The generated
+        prompt asks the subagent to write ``translated_metadata.json`` next to
+        this file.
+        """
+        from .toc_extractor import TOCExtractor
+
+        runtime_config = getattr(self, "config", {})
+        target_language = target_language or runtime_config.get("translation", {}).get(
+            "target_language", "Chinese"
+        )
+        model = resolve_subagent_model(runtime_config, "metadata-translation")
+        description = self.metadata.get("description") or ""
+        rights = self.metadata.get("rights") or ""
+
+        # OPF descriptions can contain markup.  Metadata translation is plain
+        # text, so do not make the subagent reproduce arbitrary XML/HTML.
+        description = re.sub(r"<[^>]+>", "", description).strip()
+        rights = re.sub(r"<[^>]+>", "", rights).strip()
+
+        toc = []
+        for entry in TOCExtractor(self.parser).get_flat_toc():
+            toc.append({
+                "original": entry.get("title", ""),
+                "href": entry.get("href", ""),
+                "anchor": entry.get("anchor"),
+                "level": entry.get("level", 1),
+            })
+
+        source = {
+            "schema_version": 1,
+            "workflow": "antigravity-subagent",
+            "model": model,
+            "source_language": self.source_language,
+            "target_language": target_language,
+            "target_language_code": self._get_language_code(target_language),
+            "original_title": self.book_title,
+            "preserved_metadata": {
+                "author": self.metadata.get("author") or "",
+                "publisher": self.metadata.get("publisher") or "",
+            },
+            "translatable_metadata": {
+                "description": description,
+                "rights": rights,
+            },
+            "toc": toc,
+        }
+
+        source_path = self.output_dir / "metadata_translation_source.json"
+        source_path.write_text(
+            json.dumps(source, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        prompt_path = self.output_dir / "metadata_translation_prompt.md"
+        prompt_path.write_text(
+            self._metadata_translation_prompt(source_path.name, model),
+            encoding="utf-8",
+        )
+        logger.info(f"Wrote metadata translation source: {source_path}")
+        logger.info(f"Wrote metadata translation prompt: {prompt_path}")
+        return source_path
+
+    @staticmethod
+    def _metadata_translation_prompt(source_filename: str, model: str = "gemini-2.5-pro") -> str:
+        """Return a concise, copyable subagent instruction."""
+        return f"""# EPUB metadata translation
+
+Recommended Antigravity model: `{model}`
+
+Read `{source_filename}` and write `translated_metadata.json` in the same directory.
+
+Rules:
+
+1. Translate `original_title` to `translated_title`.
+2. Translate every `toc[].original` to `toc[].translated`; keep each entry's
+   `href`, `anchor`, `level`, and order exactly unchanged.
+3. Translate non-empty `translatable_metadata.description` and `rights` to
+   `translated_description` and `translated_rights`.
+4. Copy `preserved_metadata.author` and `preserved_metadata.publisher` exactly
+   into the output's `preserved_metadata` object. Never translate, transliterate,
+   normalize, or omit these two fields.
+5. Return valid JSON only. Do not wrap it in Markdown fences or add commentary.
+
+The output must have this shape:
+
+```json
+{{
+  "schema_version": 1,
+  "original_title": "...",
+  "translated_title": "...",
+  "target_language": "...",
+  "target_language_code": "...",
+  "preserved_metadata": {{"author": "...", "publisher": "..."}},
+  "toc": [{{"original": "...", "translated": "...", "href": "...", "anchor": null, "level": 1}}],
+  "translated_description": "...",
+  "translated_rights": "..."
+}}
+```
+"""
 
     def _merge_part_files(self) -> Dict[str, str]:
         """
@@ -1400,11 +1455,12 @@ class HTMLEpubPipeline:
             "translated_title": translated_metadata.get("translated_title"),
             "target_language": translated_metadata.get("target_language"),
             "target_language_code": translated_metadata.get("target_language_code"),
+            "metadata_validation": self.validate_translated_metadata(),
             "summary": summary,
             "files": files,
             "logs": {
                 "llm_trace": str(trace_path),
-                "translate_log": str(self.output_dir / "logs" / "translate-html.log"),
+                "prepare_log": str(self.output_dir / "logs" / "html-prepare.log"),
                 "build_log": str(self.output_dir / "logs" / "build-html-epub.log"),
             },
         }
@@ -1427,20 +1483,13 @@ class HTMLEpubPipeline:
         Returns:
             Dict summary with keys: total, completed, valid, invalid (list), missing (list), all_passed (bool)
         """
-        from .translator import HTMLTranslateProcessor
-
-        processor = HTMLTranslateProcessor(
-            config=self.config,
-            book_title=self.book_title,
-            source_language=self.source_language,
-            target_language=self.config.get("translation", {}).get("target_language", "Chinese")
-        )
-
         all_sources = sorted(self.compressed_units_dir.glob("*.md"))
         total = len(all_sources)
         missing = []
         invalid = []
         valid = 0
+        valid_files = []
+        source_sha256 = {}
 
         for src_file in all_sources:
             tgt_file = self.translated_dir / src_file.name
@@ -1450,21 +1499,34 @@ class HTMLEpubPipeline:
 
             src_content = src_file.read_text(encoding="utf-8")
             tgt_content = tgt_file.read_text(encoding="utf-8")
+            source_sha256[src_file.name] = hashlib.sha256(src_content.encode("utf-8")).hexdigest()
 
-            # If target content is raw div-wrapped LLM response, clean it; otherwise use as-is
-            if "<div>" in tgt_content and "</div>" in tgt_content:
-                cleaned_tgt = processor.clean_response(tgt_content)
-            else:
-                cleaned_tgt = tgt_content.strip()
-            is_valid, reason = processor.validate_output(src_content, cleaned_tgt, src_file.name)
-
-            if is_valid:
-                valid += 1
-            else:
+            src_lines = nonempty_lines(src_content)
+            tgt_lines = nonempty_lines(tgt_content)
+            if len(src_lines) != len(tgt_lines):
                 invalid.append({
                     "file": src_file.name,
-                    "reason": reason
+                    "reason": f"Line count mismatch: expected {len(src_lines)}, got {len(tgt_lines)}",
                 })
+                continue
+            mismatches = tag_mismatch_count(src_lines, tgt_lines)
+            if mismatches:
+                invalid.append({
+                    "file": src_file.name,
+                    "reason": f"HTML tag structure mismatch in {mismatches} line(s)",
+                })
+                continue
+            if not tgt_content.strip():
+                invalid.append({"file": src_file.name, "reason": "target is empty"})
+                continue
+            if tgt_content.lstrip().startswith("```"):
+                invalid.append({"file": src_file.name, "reason": "Markdown code fence is not allowed"})
+                continue
+            else:
+                valid += 1
+                valid_files.append(src_file.name)
+
+        metadata_report = self.validate_translated_metadata()
 
         return {
             "total": total,
@@ -1472,10 +1534,119 @@ class HTMLEpubPipeline:
             "valid": valid,
             "invalid": invalid,
             "missing": missing,
-            "all_passed": (len(missing) == 0 and len(invalid) == 0 and total > 0)
+            "valid_files": valid_files,
+            "source_sha256": source_sha256,
+            "metadata": metadata_report,
+            "all_passed": (
+                len(missing) == 0
+                and len(invalid) == 0
+                and total > 0
+                and metadata_report["valid"]
+            )
         }
 
-    def postprocess_and_build(self, output_epub: Optional[Path] = None) -> Path:
+    def validate_translated_metadata(self) -> Dict[str, Any]:
+        """Validate the subagent metadata hand-off without contacting an LLM."""
+        source_path = self.output_dir / "metadata_translation_source.json"
+        translated_path = self.output_dir / "translated_metadata.json"
+        errors: List[str] = []
+
+        if not source_path.exists():
+            errors.append(
+                "metadata_translation_source.json is missing; run html-prepare again"
+            )
+        if not translated_path.exists():
+            errors.append(
+                "translated_metadata.json is missing; ask the subagent to create it"
+            )
+        if errors:
+            return {"valid": False, "errors": errors}
+
+        try:
+            source = json.loads(source_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            return {"valid": False, "errors": [f"invalid metadata source JSON: {exc}"]}
+        try:
+            translated = json.loads(translated_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            return {"valid": False, "errors": [f"invalid translated metadata JSON: {exc}"]}
+
+        if not isinstance(translated, dict):
+            errors.append("translated metadata must be a JSON object")
+            return {"valid": False, "errors": errors}
+
+        if translated.get("schema_version") != source.get("schema_version", 1):
+            errors.append("schema_version does not match metadata source")
+        if translated.get("original_title") != source.get("original_title"):
+            errors.append("original_title does not match metadata source")
+        if not str(translated.get("translated_title") or "").strip():
+            errors.append("translated_title is missing or empty")
+        for key in ("target_language", "target_language_code"):
+            if translated.get(key) != source.get(key):
+                errors.append(f"{key} does not match metadata source")
+
+        source_preserved = source.get("preserved_metadata", {})
+        translated_preserved = translated.get("preserved_metadata", {})
+        if not isinstance(translated_preserved, dict):
+            errors.append("preserved_metadata must be an object")
+        else:
+            for key in ("author", "publisher"):
+                if translated_preserved.get(key) != source_preserved.get(key, ""):
+                    errors.append(f"preserved_metadata.{key} was changed or omitted")
+
+        source_toc = source.get("toc", [])
+        translated_toc = translated.get("toc")
+        if not isinstance(translated_toc, list):
+            errors.append("toc must be an array")
+        elif len(translated_toc) != len(source_toc):
+            errors.append(
+                f"toc entry count mismatch: expected {len(source_toc)}, "
+                f"got {len(translated_toc)}"
+            )
+        else:
+            for index, (expected, actual) in enumerate(zip(source_toc, translated_toc)):
+                if not isinstance(actual, dict):
+                    errors.append(f"toc[{index}] must be an object")
+                    continue
+                actual_href = actual.get("href", "")
+                actual_anchor = actual.get("anchor")
+                # Accept the legacy writer's combined ``href#anchor`` form,
+                # but compare the canonical path and fragment separately.
+                if actual_anchor is None and isinstance(actual_href, str) and "#" in actual_href:
+                    actual_href, actual_anchor = actual_href.split("#", 1)
+                for key, value in (
+                    ("original", actual.get("original")),
+                    ("href", actual_href),
+                    ("anchor", actual_anchor),
+                    ("level", actual.get("level")),
+                ):
+                    if value != expected.get(key):
+                        errors.append(f"toc[{index}].{key} was changed")
+                if not str(actual.get("translated") or "").strip():
+                    errors.append(f"toc[{index}].translated is missing or empty")
+
+        source_extra = source.get("translatable_metadata", {})
+        if source_extra.get("description") and not str(
+            translated.get("translated_description") or ""
+        ).strip():
+            errors.append("translated_description is missing or empty")
+        if source_extra.get("rights") and not str(
+            translated.get("translated_rights") or ""
+        ).strip():
+            errors.append("translated_rights is missing or empty")
+
+        return {
+            "valid": not errors,
+            "errors": errors,
+            "source": str(source_path),
+            "translated": str(translated_path),
+        }
+
+    def postprocess_and_build(
+        self,
+        output_epub: Optional[Path] = None,
+        allow_partial: bool = False,
+    ) -> Path:
         """
         Decompress translated content and build final EPUB.
 
@@ -1489,6 +1660,25 @@ class HTMLEpubPipeline:
             Path to built EPUB
         """
         from .compressor import HTMLCompressor
+
+        validation = self.validate_translated_units()
+        if not validation["all_passed"] and not allow_partial:
+            metadata_errors = validation.get("metadata", {}).get("errors", [])
+            detail = list(metadata_errors)
+            detail.extend(
+                f"{item['file']}: {item['reason']}"
+                for item in validation.get("invalid", [])
+            )
+            detail.extend(
+                f"missing unit: {name}" for name in validation.get("missing", [])
+            )
+            raise ValueError(
+                "Translation validation failed; refusing to build EPUB. "
+                "Run html-validate or use --allow-partial explicitly. "
+                + "; ".join(detail[:10])
+            )
+        if not validation["all_passed"]:
+            logger.warning("Building partial EPUB because allow_partial=True")
 
         compressor = HTMLCompressor()
 
@@ -1510,7 +1700,8 @@ class HTMLEpubPipeline:
             record["final_path"].write_text(restored, encoding='utf-8')
             logger.debug(f"Decompressed: {base_stem}")
 
-        # Load translated metadata if available
+        # Load translated metadata.  A complete build always has a validated
+        # metadata hand-off; partial builds may intentionally omit it.
         metadata_path = self.output_dir / "translated_metadata.json"
         translated_metadata = None
         if metadata_path.exists():
@@ -1540,382 +1731,3 @@ class HTMLEpubPipeline:
         )
         self.write_translation_report(output_epub=result_path, phase="build")
         return result_path
-
-    def translate_metadata(
-        self,
-        target_language: str = "Chinese",
-        llm_client=None,
-        force: bool = False,
-        batch_size: int = 50
-    ) -> Dict:
-        """
-        Translate book title and TOC using JSON format and batch processing.
-
-        Args:
-            target_language: Target language
-            llm_client: LLM client for translation
-            force: Force re-translation even if cached
-            batch_size: Number of TOC entries per batch
-
-        Returns:
-            Dict with translated_title and translated_toc
-        """
-        # Check for existing translated metadata (resume support)
-        metadata_path = self.output_dir / "translated_metadata.json"
-        if metadata_path.exists() and not force:
-            with open(metadata_path, 'r', encoding='utf-8') as f:
-                existing = json.load(f)
-            logger.info(f"Using existing translated metadata: {existing['translated_title']}")
-            return existing
-
-        from .toc_extractor import TOCExtractor
-
-        if llm_client is None:
-            from pdf2epub.utils.llm_client import LLMClient
-            llm_client = LLMClient(self.config)
-
-        # Get TOC (flattened to include all levels)
-        toc_extractor = TOCExtractor(self.parser)
-        flat_toc = toc_extractor.get_flat_toc()
-
-        # Translate book title first
-        translated_title = self._translate_title(
-            self.book_title, self.source_language, target_language, llm_client
-        )
-
-        # Translate TOC entries in batches
-        translated_toc = self._translate_toc_batched(
-            flat_toc, self.source_language, target_language, llm_client, batch_size
-        )
-
-        # Translate other metadata fields (author, description, publisher, etc.)
-        extra_metadata = self._translate_extra_metadata(
-            self.source_language, target_language, llm_client
-        )
-
-        # Map target language to ISO 639-1 code for EPUB metadata
-        target_lang_code = self._get_language_code(target_language)
-
-        # Set title_sort to translated title
-        if 'translated_title_sort' in extra_metadata:
-            extra_metadata['translated_title_sort'] = translated_title
-
-        # Build result
-        result = {
-            'original_title': self.book_title,
-            'translated_title': translated_title,
-            'target_language': target_language,
-            'target_language_code': target_lang_code,
-            'toc': translated_toc,
-            **extra_metadata,
-        }
-
-        # Save to file
-        with open(metadata_path, 'w', encoding='utf-8') as f:
-            json.dump(result, f, ensure_ascii=False, indent=2)
-
-        logger.info(f"Translated title: {result['translated_title']}")
-        logger.info(f"Translated {len(result['toc'])} TOC entries")
-
-        return result
-
-    def _translate_extra_metadata(
-        self,
-        source_lang: str,
-        target_lang: str,
-        llm_client
-    ) -> Dict:
-        """Translate author, description, publisher and other metadata fields."""
-        import json as _json
-
-        meta = self.metadata
-        fields = {}
-        if meta.get('author') and meta['author'] != 'Unknown':
-            fields['author'] = meta['author']
-        if meta.get('description'):
-            # Strip HTML tags from description for cleaner translation
-            import re
-            desc = re.sub(r'<[^>]+>', '', meta['description'])
-            if len(desc.strip()) > 10:
-                fields['description'] = desc.strip()
-        if meta.get('publisher'):
-            fields['publisher'] = meta['publisher']
-        if meta.get('rights'):
-            fields['rights'] = meta['rights']
-
-        if not fields:
-            return {}
-
-        prompt = (
-            f"Translate the following book metadata from {source_lang} to {target_lang}.\n"
-            f"For author names, transliterate to the target language "
-            f"(e.g., 'Adam Hanieh' → '亚当·哈尼耶').\n"
-            f"For publisher names, transliterate if well-known, otherwise keep original.\n"
-            f"Return ONLY valid JSON with the same keys.\n\n"
-            f"```json\n{_json.dumps(fields, ensure_ascii=False, indent=2)}\n```"
-        )
-
-        try:
-            response = llm_client.generate(
-                prompt=prompt,
-                model_configs=self.config.get('translation', {}).get('models') or self.config.get('translation_models', [
-                    {"provider": "anthropic", "model": "claude-sonnet-4-6"}
-                ]),
-                operation_name="Translate metadata fields"
-            )
-            # Parse JSON response (use parse_llm_json for robustness)
-            from pdf2epub.utils.common import parse_llm_json
-            translated = parse_llm_json(response, operation_name="Translate metadata fields")
-
-            result = {}
-            if 'author' in translated:
-                result['translated_author'] = translated['author']
-                # Generate file-as (sort) form
-                result['translated_author_file_as'] = translated['author']
-            if 'description' in translated:
-                result['translated_description'] = translated['description']
-            if 'publisher' in translated:
-                result['translated_publisher'] = translated['publisher']
-            if 'rights' in translated:
-                result['translated_rights'] = translated['rights']
-            # Title sort = translated title (will be set by caller)
-            result['translated_title_sort'] = None  # Placeholder, set after title is known
-
-            logger.info(f"Translated metadata: {list(result.keys())}")
-            return result
-
-        except Exception as e:
-            logger.warning(f"Failed to translate extra metadata: {e}")
-            return {}
-
-    def _translate_title(
-        self,
-        title: str,
-        source_lang: str,
-        target_lang: str,
-        llm_client
-    ) -> str:
-        """Translate book title."""
-        prompt = self._create_title_prompt(title, source_lang, target_lang)
-
-        model_configs = (
-            self.config.get('translation', {}).get('models')
-            or self.config.get('translation_models')
-            or [{"provider": "antigravity", "model": "gemini-3.1-pro-preview"}]
-        )
-
-        response = llm_client.generate(
-            prompt=prompt,
-            model_configs=model_configs,
-            operation_name="Translate title"
-        )
-
-        # Clean up response
-        translated = response.strip()
-        # Remove quotes if present
-        if translated.startswith('"') and translated.endswith('"'):
-            translated = translated[1:-1]
-        if translated.startswith('《') and translated.endswith('》'):
-            translated = translated[1:-1]
-
-        return translated or title
-
-    def _translate_toc_batched(
-        self,
-        flat_toc: List[Dict],
-        source_lang: str,
-        target_lang: str,
-        llm_client,
-        batch_size: int
-    ) -> List[Dict]:
-        """Translate TOC entries in batches using JSON format."""
-        import json
-
-        if not flat_toc:
-            return []
-
-        # Build original -> entry mapping for later
-        results = []
-        total_batches = (len(flat_toc) + batch_size - 1) // batch_size
-
-        model_configs = (
-            self.config.get('translation', {}).get('models')
-            or self.config.get('translation_models')
-            or [{"provider": "antigravity", "model": "gemini-3.1-pro-preview"}]
-        )
-
-        for batch_idx in range(total_batches):
-            start = batch_idx * batch_size
-            end = min(start + batch_size, len(flat_toc))
-            batch = flat_toc[start:end]
-
-            logger.info(f"Translating TOC batch {batch_idx + 1}/{total_batches} ({len(batch)} entries)")
-
-            # Create batch prompt
-            prompt = self._create_toc_batch_prompt(batch, source_lang, target_lang)
-
-            # Call LLM
-            response = llm_client.generate(
-                prompt=prompt,
-                model_configs=model_configs,
-                operation_name=f"Translate TOC batch {batch_idx + 1}/{total_batches}"
-            )
-
-            # Parse JSON response
-            translations = self._parse_toc_json_response(response, batch)
-
-            # Build result entries
-            for entry, translated in zip(batch, translations):
-                href = entry['href']
-                if entry.get('anchor'):
-                    href = f"{href}#{entry['anchor']}"
-
-                results.append({
-                    'original': entry['title'],
-                    'translated': translated,
-                    'level': entry['level'],
-                    'href': href
-                })
-
-        return results
-
-    def _create_title_prompt(self, title: str, source_lang: str, target_lang: str) -> str:
-        """Create prompt for translating book title."""
-        if target_lang.lower() in ['chinese', '中文', 'zh']:
-            return f"""请将以下书名从{source_lang}翻译成简体中文。只返回翻译结果，不要添加任何解释或标点。
-
-书名：{title}
-
-翻译："""
-        else:
-            return f"""Translate the following book title from {source_lang} to {target_lang}. Return only the translation, no explanation.
-
-Title: {title}
-
-Translation:"""
-
-    def _create_toc_batch_prompt(
-        self,
-        batch: List[Dict],
-        source_lang: str,
-        target_lang: str
-    ) -> str:
-        """Create prompt for translating a batch of TOC entries using JSON format."""
-        import json
-
-        # Build input JSON
-        input_entries = [{"original": entry['title']} for entry in batch]
-        input_json = json.dumps(input_entries, ensure_ascii=False, indent=2)
-
-        if target_lang.lower() in ['chinese', '中文', 'zh']:
-            return f"""请将以下目录条目从{source_lang}翻译成简体中文。
-
-要求：
-1. 返回JSON数组格式
-2. 每个对象包含 "original"（原文）和 "translated"（译文）两个字段
-3. 保持条目顺序不变
-4. 保持学术著作的专业性和准确性
-5. 只返回JSON，不要添加任何解释
-
-输入：
-{input_json}
-
-输出JSON："""
-        else:
-            return f"""Translate the following TOC entries from {source_lang} to {target_lang}.
-
-Requirements:
-1. Return as JSON array
-2. Each object should have "original" and "translated" fields
-3. Maintain the same order
-4. Maintain academic professionalism
-5. Return only JSON, no explanation
-
-Input:
-{input_json}
-
-Output JSON:"""
-
-    def _parse_toc_json_response(self, response: str, batch: List[Dict]) -> List[str]:
-        """Parse JSON response from LLM for TOC translation."""
-        import json
-        import re
-
-        # Try to extract JSON from response
-        response = response.strip()
-
-        # Remove markdown code block if present
-        if response.startswith('```'):
-            # Find the end of code block
-            lines = response.split('\n')
-            json_lines = []
-            in_block = False
-            for line in lines:
-                if line.startswith('```') and not in_block:
-                    in_block = True
-                    continue
-                elif line.startswith('```') and in_block:
-                    break
-                elif in_block:
-                    json_lines.append(line)
-            response = '\n'.join(json_lines)
-
-        # Try to parse as JSON
-        try:
-            parsed = parse_llm_json(response, operation_name="Heading translation")
-
-            if isinstance(parsed, list):
-                # Build original -> translated mapping
-                translation_map = {}
-                for item in parsed:
-                    if isinstance(item, dict):
-                        orig = item.get('original', '')
-                        trans = item.get('translated', '')
-                        if orig and trans:
-                            translation_map[orig] = trans
-
-                # Match back to batch order
-                results = []
-                for entry in batch:
-                    title = entry['title']
-                    # Try exact match first
-                    if title in translation_map:
-                        results.append(translation_map[title])
-                    else:
-                        # Try fuzzy match (strip whitespace, case-insensitive)
-                        found = False
-                        for orig, trans in translation_map.items():
-                            if orig.strip().lower() == title.strip().lower():
-                                results.append(trans)
-                                found = True
-                                break
-                        if not found:
-                            logger.warning(f"No translation found for: {title[:50]}")
-                            results.append(title)  # Fallback to original
-
-                return results
-
-        except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse JSON response: {e}")
-
-        # Fallback: try line-by-line parsing
-        logger.warning("Falling back to line-by-line parsing")
-        lines = response.strip().split('\n')
-        translations = []
-
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            # Remove numbering prefix
-            cleaned = re.sub(r'^\d+[\.\、\)\]]\s*', '', line)
-            # Remove JSON-like formatting
-            cleaned = re.sub(r'^["\']|["\']$', '', cleaned)
-            if cleaned:
-                translations.append(cleaned)
-
-        # Pad or trim to match batch size
-        while len(translations) < len(batch):
-            translations.append(batch[len(translations)]['title'])
-
-        return translations[:len(batch)]

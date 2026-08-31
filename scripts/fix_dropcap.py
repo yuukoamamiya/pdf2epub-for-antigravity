@@ -15,6 +15,7 @@ from pathlib import Path
 from lxml import etree
 from loguru import logger
 import sys
+import argparse
 
 logger.remove()
 logger.add(sys.stderr, level="INFO", format="<level>{level: <8}</level> | {message}")
@@ -105,11 +106,18 @@ def fix_epub(epub_path: Path, output_path: Path = None):
 
 
 def main():
-    base_dir = Path("/Users/kevinzhou/Github/pdf2epub/output/Excalibur, Durendal, Joyeuse")
-    input_epub = base_dir / "王者之剑、杜兰德尔、咎瓦尤斯：剑的力量.epub"
-    output_epub = base_dir / "王者之剑、杜兰德尔、咎瓦尤斯：剑的力量.epub"  # Overwrite
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("epub", type=Path, help="EPUB to repair")
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="Output EPUB; defaults to updating the input file in place",
+    )
+    args = parser.parse_args()
+    if not args.epub.is_file():
+        parser.error(f"EPUB does not exist: {args.epub}")
 
-    fix_epub(input_epub, output_epub)
+    fix_epub(args.epub, args.output or args.epub)
 
 
 if __name__ == "__main__":

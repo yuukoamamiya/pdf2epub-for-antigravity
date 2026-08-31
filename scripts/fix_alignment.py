@@ -18,6 +18,7 @@ import re
 from typing import List, Dict, Tuple, Optional
 from loguru import logger
 import sys
+import argparse
 
 # Configure logging
 logger.remove()
@@ -311,12 +312,17 @@ class HTMLAlignmentFixer:
 
 
 def main():
-    base_dir = Path("/Users/kevinzhou/Github/pdf2epub/output/Excalibur, Durendal, Joyeuse")
-    orig_epub = base_dir / "input.epub"
-    trans_epub = base_dir / "王者之剑、杜兰德尔、咎瓦尤斯：剑的力量.epub"
-    output_epub = base_dir / "王者之剑、杜兰德尔、咎瓦尤斯：剑的力量_fixed.epub"
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--original", type=Path, required=True, help="Path to the original EPUB")
+    parser.add_argument("--translated", type=Path, required=True, help="Path to the translated EPUB")
+    parser.add_argument("--output", type=Path, required=True, help="Path for the repaired EPUB")
+    args = parser.parse_args()
 
-    fixer = HTMLAlignmentFixer(orig_epub, trans_epub, output_epub)
+    for label, path in (("original", args.original), ("translated", args.translated)):
+        if not path.is_file():
+            parser.error(f"{label} EPUB does not exist: {path}")
+
+    fixer = HTMLAlignmentFixer(args.original, args.translated, args.output)
     fixer.fix_epub()
 
 

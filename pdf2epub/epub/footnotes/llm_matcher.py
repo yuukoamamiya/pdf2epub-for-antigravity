@@ -10,7 +10,6 @@ from loguru import logger
 
 from .content_index import ContentAddressIndex
 from .models import FootnoteDefinition, NotesSection
-from ...utils.common import parse_llm_json
 from ...utils.unit_id import generate_unit_id
 
 
@@ -125,7 +124,10 @@ class LLMSectionMatcher:
             return sorted(chapter_names, key=self.content_index.order_key)
         return sorted(chapter_names)
 
-    def match_sections(self, primary_definition_chapters: Set[str]) -> bool:
+    def match_sections(
+        self,
+        primary_definition_chapters: Set[str],
+    ) -> bool:
         """
         Use LLM to match Notes section headers to TOC chapters.
 
@@ -150,106 +152,10 @@ class LLMSectionMatcher:
             except Exception as e:
                 logger.warning(f"Failed to load cached matches: {e}")
 
-        # No cache, need to call LLM
-        if not self.config:
-            logger.warning("No config provided, cannot use LLM for section matching")
-            return False
-
-        # Get Notes structure
-        notes_structure = self.get_notes_structure(primary_definition_chapters)
-        if not notes_structure.strip():
-            logger.warning("Notes structure is empty")
-            return False
-
-        # Filter TOC to exclude notes chapter itself
-        toc_entries = [
-            {"unit_id": ch["unit_id"], "title": ch["title"]}
-            for ch in self.toc_chapters
-            if ch.get("type") != "notes"
-        ]
-
-        # Build prompt
-        prompt = f"""分析以下 Notes 章节的结构（已删除脚注内容，只保留标题），并将每个标题匹配到对应的 TOC 章节。
-
-Notes 章节结构：
-```
-{notes_structure}
-```
-
-TOC 章节列表：
-```json
-{json.dumps(toc_entries, ensure_ascii=False, indent=2)}
-```
-
-请返回一个 JSON 数组，每个元素包含：
-- "header": Notes 中的标题文本（完全匹配原文）
-- "unit_id": 对应的 TOC 章节 unit_id
-
-注意：
-1. Notes 中可能有 OCR 错误或格式问题，请基于语义理解进行匹配
-2. 标题可能是任何格式（如 "## CHAPTER ONE"、"PREFACE"、"第一章" 等）
-3. 只返回 JSON 数组，不要其他内容
-
-示例返回格式：
-```json
-[
-  {{"header": "PREFACE", "unit_id": "chapter_3"}},
-  {{"header": "INTRODUCTION", "unit_id": "chapter_4"}},
-  {{"header": "CHAPTER ONE", "unit_id": "chapter_5"}}
-]
-```
-"""
-
-        try:
-            from ...utils.llm_client import LLMClient
-
-            llm_client = LLMClient(self.config)
-
-            # Get model config
-            model_configs = (
-                self.config.get("translation", {}).get("models")
-                or self.config.get("translation.models")
-                or [{"provider": "antigravity", "model": "gemini-2.5-flash", "max_retries": 2}]
-            )
-
-            response = llm_client.generate(
-                prompt=prompt,
-                model_configs=model_configs,
-                operation_name="Match notes sections to chapters"
-            )
-
-            # Parse JSON response
-            response = response.strip()
-            if response.startswith("```"):
-                # Remove markdown code block
-                lines = response.split('\n')
-                json_lines = []
-                in_block = False
-                for line in lines:
-                    if line.startswith("```"):
-                        in_block = not in_block
-                        continue
-                    if in_block:
-                        json_lines.append(line)
-                response = '\n'.join(json_lines)
-
-            matches = parse_llm_json(response, operation_name="Notes section matching")
-            logger.info(f"LLM returned {len(matches)} section matches")
-
-            # Save matches to cache
-            try:
-                with open(cache_path, 'w', encoding='utf-8') as f:
-                    json.dump(matches, f, ensure_ascii=False, indent=2)
-                logger.info(f"Saved section matches to cache: {cache_path}")
-            except Exception as e:
-                logger.warning(f"Failed to save matches to cache: {e}")
-
-            # Parse sections from LLM result
-            return self._parse_sections_from_result(matches, primary_definition_chapters)
-
-        except Exception as e:
-            logger.error(f"Error in LLM section matching: {e}")
-            return False
+        # Cache misses are intentionally offline.  Semantic matching must be
+        # prepared by the workspace Subagent before the EPUB build.
+        logger.warning("No cached Subagent section matches; using local mapping")
+        return False
 
     def _parse_sections_from_result(
         self,

@@ -9,7 +9,6 @@
 
 # UV
 .venv/
-uv.lock
 
 # Security - API keys and credentials
 sa-keys.json

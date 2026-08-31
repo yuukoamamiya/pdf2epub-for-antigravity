@@ -9,6 +9,18 @@ translation:
   source_language: English # 或 Japanese / French 等
   target_language: Chinese
 
+# Antigravity Subagent 模型（只作为 IDE 子 Agent 的任务提示，不调用任何 API）
+# 正文、元数据和目录翻译默认使用 Pro；其他任务默认使用 Flash。
+subagent:
+  models:
+    translation: gemini-2.5-pro
+    default: gemini-2.5-flash
+  # 可选的单任务覆盖：
+  # task_models:
+  #   translate-html: gemini-2.5-pro
+
 # EPUB 构建与校验选项
 html_translation:
   epubcheck_mode: warn # 可选: warn / off / strict
+  # html-prepare creates metadata_translation_source.json. The Subagent writes
+  # translated_metadata.json; html-validate checks it before packaging.

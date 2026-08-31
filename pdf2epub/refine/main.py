@@ -11,21 +11,16 @@ Orchestrates the entire refinement process:
 
 import json
 import shutil
-import asyncio
 from pathlib import Path
 from typing import List, Dict
 from loguru import logger
 import tiktoken
 
-from ..utils.llm_client import LLMClient, BoundLLMClient
-from ..utils.pdf_utils import preprocess_pdf
 from ..utils.unit_id import generate_unit_id
 from .toc_tree import TOCNode, dict_list_to_toc_tree
 from .refiner_state import RefinerState
-from .boundary_agent import verify_toc_recursive, get_model_max_tokens
-from .structure_analyzer import StructureAnalyzer
-from .pdf_transport import create_pdf_transport
 from .page_merger import PageMerger
+from .subagent_workflow import page_numbers, validate_toc_tree_data
 
 # Initialize tokenizer
 tokenizer = tiktoken.get_encoding("cl100k_base")
@@ -75,6 +70,7 @@ class RefinedBreakdown:
         config: Dict,
         max_tokens: int = None,
         max_workers: int = None,
+        local_only: bool = True,
     ):
         """
         Initialize the refined breakdown processor.
@@ -87,209 +83,101 @@ class RefinedBreakdown:
         self.config = config
         self.max_workers = max_workers or config.get('general', {}).get('max_concurrent_workers', 8)
 
-        # Get max_tokens from boundary_agent's model config if not specified
-        if max_tokens is None:
-            max_tokens = get_model_max_tokens(config)
-        self.max_tokens = max_tokens
+        self.max_tokens = max_tokens or config.get('refine', {}).get('max_tokens', 8000)
 
-        # Get refine config with backward compatibility
-        refine_config = config.get('refine', {})
-        default_provider = refine_config.get('provider', 'gemini')
-
-        # New nested format: refine.structure.{provider, model}
-        # Old flat format: refine.{provider, structure_model, verification_model}
-        structure_config = refine_config.get('structure', {})
-        verification_config = refine_config.get('verification', {})
-
-        structure_provider = structure_config.get('provider', default_provider)
-        structure_model = structure_config.get('model', refine_config.get('structure_model', 'gemini-2.5-pro'))
-        toc_model = structure_config.get('toc_model', refine_config.get('toc_model', 'gemini-2.5-flash'))
-
-        verification_provider = verification_config.get('provider', structure_provider)
-        verification_model = verification_config.get('model', refine_config.get('verification_model', 'gemini-2.5-flash'))
-
-        # Create unified LLM client and bind to specific providers
-        llm_client = LLMClient(config)
-        structure_client = BoundLLMClient(llm_client, structure_provider)
-        verification_client = BoundLLMClient(llm_client, verification_provider)
-        pdf_transport = create_pdf_transport(
-            config=config,
-            structure_provider=structure_provider,
-            structure_client=structure_client,
-            transport_config=structure_config.get('pdf_transport'),
-        )
-
-        # Initialize components with their respective clients
-        self.structure_analyzer = StructureAnalyzer(
-            structure_client, structure_model, toc_model,
-            verification_client, verification_model,
-            config,
-            pdf_transport=pdf_transport,
-        )
-        # Note: BoundaryVerifier and GapAnalyzer replaced by boundary_agent
         self.page_merger = PageMerger()
         self.state = RefinerState()
 
-    def process(
+    def process_from_toc(
         self,
         pdf_path: Path,
         output_dir: Path,
         book_title: str,
         resume: bool = False,
     ) -> List[Dict]:
-        """
-        Main entry point: process PDF and generate work units.
+        """Generate units from a subagent-produced ``toc_tree.json`` locally.
 
-        Args:
-            pdf_path: Path to PDF file
-            output_dir: Output directory
-            book_title: Book title for prompts
-            resume: Resume from previous state
-
-        Returns:
-            List of work unit metadata dicts
+        This is the second half of the Subagent workflow.  It validates the
+        hand-off, estimates tokens, merges OCR pages, and writes the
+        ``ocr_markdown`` artifacts used by the local build pipeline.
         """
-        # Create directories
         output_dir.mkdir(parents=True, exist_ok=True)
         pages_dir = output_dir / "pages"
-        ocr_markdown_dir = output_dir / "ocr_markdown"
-
-        # Check if pages exist
-        if not pages_dir.exists() or not list(pages_dir.glob("page_*.md")):
+        available = page_numbers(pages_dir)
+        if not available:
             raise ValueError(f"Pages not found in {pages_dir}. Run 'pdf2epub ocr-pages' first.")
 
-        # Load state if resuming
+        toc_tree_file = output_dir / "toc_tree.json"
+        if not toc_tree_file.exists():
+            raise ValueError(
+                f"{toc_tree_file} not found. Run 'pdf2epub refine-prepare', "
+                "then ask the Antigravity subagent to write it."
+            )
+        try:
+            toc_data = json.loads(toc_tree_file.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid TOC JSON: {exc}") from exc
+
+        errors = validate_toc_tree_data(toc_data, max(available), available)
+        if errors:
+            raise ValueError("Invalid subagent TOC: " + "; ".join(errors[:10]))
+
+        toc_tree = dict_list_to_toc_tree(toc_data["chapters"])
+        book_metadata = {key: value for key, value in toc_data.items() if key != "chapters"}
+        return self._generate_units_from_tree(
+            toc_tree,
+            book_metadata,
+            pages_dir,
+            output_dir,
+            resume=resume,
+        )
+
+    def _generate_units_from_tree(
+        self,
+        toc_tree: List[TOCNode],
+        book_metadata: Dict,
+        pages_dir: Path,
+        output_dir: Path,
+        resume: bool = False,
+    ) -> List[Dict]:
+        """Shared deterministic token estimation, splitting, and page merge."""
+        ocr_markdown_dir = output_dir / "ocr_markdown"
         state_file = output_dir / "refiner_state.json"
-        if resume and state_file.exists():
-            self.state.load(state_file)
-            logger.info("Resumed from saved state")
-
-        # Check if ocr_markdown exists but has no tree_progress.json
         tree_progress_file = ocr_markdown_dir / "tree_progress.json"
+
+        if resume and tree_progress_file.exists():
+            progress_data = json.loads(tree_progress_file.read_text(encoding="utf-8"))
+            logger.success(
+                f"Refined breakdown already complete: {len(progress_data.get('units', []))} units"
+            )
+            return progress_data.get("units", [])
+
         if ocr_markdown_dir.exists() and not tree_progress_file.exists():
-            logger.warning("Found ocr_markdown without tree_progress.json, clearing")
+            logger.warning("Found incomplete ocr_markdown; clearing it before regeneration")
             shutil.rmtree(ocr_markdown_dir)
-
-        # Check if already complete (verification includes gap/overlap handling)
-        if resume and tree_progress_file.exists() and self.state.verification_complete:
-            # Load tree_progress to return metadata
-            with open(tree_progress_file, 'r', encoding='utf-8') as f:
-                progress_data = json.load(f)
-            unit_count = len(progress_data.get('units', []))
-            logger.success(f"Refined breakdown already complete: {unit_count} units")
-            return progress_data.get('units', [])
-
         ocr_markdown_dir.mkdir(parents=True, exist_ok=True)
 
-        # Step 1: Analyze structure (or load existing)
-        toc_tree_file = output_dir / "toc_tree.json"
-        toc_tree_original = output_dir / "toc_tree_original.json"
-
-        # Priority: toc_tree_original > toc_tree > analysis.
-        # Always use original if available (agent may have modified toc_tree).
-        if toc_tree_original.exists() and resume:
-            logger.info("Loading original TOC tree for verification")
-            with open(toc_tree_original, 'r', encoding='utf-8') as f:
-                toc_data = json.load(f)
-            toc_tree = dict_list_to_toc_tree(toc_data['chapters'])
-            book_metadata = {k: v for k, v in toc_data.items() if k != 'chapters'}
-        elif toc_tree_file.exists() and resume:
-            logger.info("Loading TOC tree")
-            with open(toc_tree_file, 'r', encoding='utf-8') as f:
-                toc_data = json.load(f)
-            toc_tree = dict_list_to_toc_tree(toc_data['chapters'])
-            book_metadata = {k: v for k, v in toc_data.items() if k != 'chapters'}
-        else:
-            # Preprocess PDF
-            processed_pdf = preprocess_pdf(pdf_path, output_dir)
-
-            # Analyze structure (with resume support)
-            logger.info("Analyzing PDF structure...")
-            agent_artifacts = output_dir / "logs" / "agent_artifacts"
-            toc_tree, book_metadata = self.structure_analyzer.analyze_pdf_structure(
-                processed_pdf, book_title,
-                state=self.state, state_path=state_file,
-                pages_dir=pages_dir,
-                artifacts_dir=agent_artifacts,
-            )
-
-            # Insert table_of_contents as a chapter if it exists
-            toc_info = book_metadata.get('table_of_contents')
-            if toc_info and toc_info.get('start_page') and toc_info.get('end_page'):
-                toc_chapter = _insert_toc_chapter(toc_tree, toc_info)
-                logger.info(f"Added 'Table of Contents' chapter (p{toc_info['start_page']}-p{toc_info['end_page']})")
-
-            # Save TOC tree (both original and working copy)
-            toc_data = {
-                **book_metadata,
-                'chapters': [node.to_dict() for node in toc_tree]
-            }
-            with open(toc_tree_file, 'w', encoding='utf-8') as f:
-                json.dump(toc_data, f, indent=2, ensure_ascii=False)
-            with open(toc_tree_original, 'w', encoding='utf-8') as f:
-                json.dump(toc_data, f, indent=2, ensure_ascii=False)
-            logger.success(f"TOC tree saved to {toc_tree_file} and {toc_tree_original}")
-
-        # Step 1.5: Verify boundaries using agent-based verification
-        # This ensures start_pages are correct before we detect gaps
-        # Also automatically removes children for nodes below token threshold
-        if self.state.verification_complete:
-            logger.info(f"Verification already complete, skipping")
-        else:
-            # Count total pages
-            total_pages = len(list(pages_dir.glob("page_*.md")))
-
-            logger.info(f"Verifying boundaries using agent (total_pages={total_pages})...")
-            try:
-                toc_tree = asyncio.run(verify_toc_recursive(
-                    toc_tree, pages_dir, total_pages,
-                    max_tokens=self.max_tokens,
-                    runtime_config=self.config,
-                ))
-
-                # Update toc_data with verified tree
-                toc_data['chapters'] = [node.to_dict() for node in toc_tree]
-
-                with open(toc_tree_file, 'w', encoding='utf-8') as f:
-                    json.dump(toc_data, f, indent=2, ensure_ascii=False)
-                logger.success(f"Saved verified TOC tree to {toc_tree_file}")
-
-            except Exception as e:
-                logger.error(f"Agent verification failed: {e}")
-                raise
-
-            # Mark verification as complete and save state
-            self.state.verification_complete = True
-            self.state.save(state_file)
-
-        # Note: Gap filling and overlap detection are now handled by the agent
-        # via insert_section tools during boundary verification
-
-        # Step 2: Estimate tokens for all nodes
-        logger.info("Estimating token counts...")
         self._estimate_all_tokens(toc_tree, pages_dir)
-
-        # Step 4: Generate work units
-        logger.info("Generating work units...")
-        work_units = []
+        work_units: List[Dict] = []
         for chapter_idx, chapter in enumerate(toc_tree):
-            # index_path starts with 1-based top-level index
-            chapter_units = self._generate_units_recursive(
-                chapter, pages_dir, [chapter_idx + 1]
+            work_units.extend(
+                self._generate_units_recursive(chapter, pages_dir, [chapter_idx + 1])
             )
-            work_units.extend(chapter_units)
 
-        # Step 5: Merge pages and save
         logger.info(f"Saving {len(work_units)} work units...")
         unit_metadata = self._save_units(work_units, pages_dir, ocr_markdown_dir)
-
-        # Save tree progress
-        with open(tree_progress_file, 'w', encoding='utf-8') as f:
-            json.dump({
-                'units': unit_metadata,
-                'book_metadata': book_metadata
-            }, f, indent=2, ensure_ascii=False)
-
+        tree_progress_file.write_text(
+            json.dumps(
+                {"units": unit_metadata, "book_metadata": book_metadata},
+                indent=2,
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        # A local run has no verification agent state, but recording completion
+        # makes --resume deterministic and keeps the existing state format.
+        self.state.verification_complete = True
+        self.state.save(state_file)
         logger.success(f"Refined breakdown complete: {len(work_units)} units")
         return unit_metadata
 

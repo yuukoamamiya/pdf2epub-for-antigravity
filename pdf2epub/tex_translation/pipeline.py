@@ -6,10 +6,9 @@ import hashlib
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
-
-from pdf2epub.utils.llm_client import LLMClient
 
 from .arxiv import ArxivSourceResolver
 from .cache import TranslationCache
@@ -62,14 +61,18 @@ class TexTranslationPipeline:
         *,
         config: dict,
         options: TexTranslationOptions | None = None,
-        llm_client: LLMClient | None = None,
+        llm_client: Any | None = None,
         compiler: TexCompiler | None = None,
         source_resolver: ArxivSourceResolver | None = None,
         repair_agent: TexRepairAgent | None = None,
     ):
         self.config = config
         self.options = options or TexTranslationOptions()
-        self.llm_client = llm_client or LLMClient(config)
+        # This class is retained only as a migration/test seam.  The former
+        # implicit LLMClient construction was an easy way to accidentally
+        # revive the removed provider-backed translation path.  Production
+        # users must use the CLI Subagent hand-off instead.
+        self.llm_client = llm_client
         self.compiler = compiler or TexCompiler()
         self.source_resolver = source_resolver or ArxivSourceResolver()
         self._repair_agent = repair_agent
@@ -82,6 +85,12 @@ class TexTranslationPipeline:
         main_tex: str | None = None,
         limit: int | None = None,
     ) -> TexTranslationResult:
+        if self.llm_client is None:
+            raise RuntimeError(
+                "The in-process TeX translation pipeline was removed. Run "
+                "'pdf2epub translate-arxiv', let an Antigravity Subagent edit "
+                "the project, then run 'pdf2epub translate-arxiv-validate'."
+            )
         run_dir = run_dir.resolve()
         source_dir = run_dir / "source"
         project_dir = run_dir / "project"
