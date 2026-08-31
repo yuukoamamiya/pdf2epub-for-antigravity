@@ -2,8 +2,12 @@
 Refactored network utilities using tenacity for cleaner retry logic.
 """
 
+import os
 import base64
-import fcntl
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
 import httpx
 import json as _json
 import threading
@@ -44,7 +48,8 @@ def _write_trace(entry: dict):
         _trace_path.parent.mkdir(parents=True, exist_ok=True)
         line = _json.dumps(entry, ensure_ascii=False, default=str) + "\n"
         with open(_trace_path, "a", encoding="utf-8") as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            if fcntl is not None:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
             f.write(line)
     except Exception:
         pass  # Never break pipeline for logging
@@ -272,23 +277,38 @@ def _detect_streaming_hallucination(text: str) -> Optional[str]:
 
     Returns a reason string if hallucination detected, None otherwise.
     Only detects repetition loops — non-repeating long output is normal.
-
-    Uses multi-period detection: checks if the tail of the text contains
-    any repeating pattern with period 1-100 chars, repeated 3+ times.
-    This catches both single-char loops (啊啊啊...) and multi-token
-    cycles (啊呀啊呀...) regardless of alignment.
     """
     if len(text) < 300:
         return None
 
     tail = text[-200:]
-    for period in range(1, 101):
-        if len(tail) < period * 3:
+
+    # 1. Single character loops: require at least 15 identical consecutive characters
+    # (3 backticks ``` or dashes --- or dots ... are normal markdown/text)
+    for char in set(tail[-30:]):
+        if not char.isspace() and (char * 15) in tail:
+            return f"single-char repetition loop detected (pattern={char * 15!r})"
+
+    # 2. Multi-character period loops (period >= 2):
+    for period in range(2, 101):
+        if period <= 4:
+            min_repeats = 5
+        elif period <= 10:
+            min_repeats = 4
+        else:
+            min_repeats = 3
+
+        if len(tail) < period * min_repeats:
             break
         pat = tail[-period:]
         if not pat.strip():
             continue
-        if tail[-period * 3:-period * 2] == pat and tail[-period * 2:-period] == pat:
+
+        is_loop = all(
+            tail[-period * (i + 1): -period * i if i > 0 else None] == pat
+            for i in range(1, min_repeats)
+        )
+        if is_loop:
             return f"repetition loop detected (period={period}, pattern={pat[:30]!r})"
 
     return None
@@ -323,6 +343,13 @@ class GeminiClient:
         from google import genai
 
         if vertexai and not base_url:
+            # Auto-detect vertex_adc.json if GOOGLE_APPLICATION_CREDENTIALS is not explicitly set
+            if "GOOGLE_APPLICATION_CREDENTIALS" not in os.environ:
+                for cand in [Path("vertex_adc.json"), Path(__file__).resolve().parents[2] / "vertex_adc.json"]:
+                    if cand.is_file():
+                        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(cand.resolve())
+                        break
+
             if api_key:
                 # Official Vertex AI express mode.
                 self.client = genai.Client(vertexai=True, api_key=api_key)
@@ -614,6 +641,36 @@ class GeminiClient:
                     threshold=HarmBlockThreshold.BLOCK_NONE,
                 ),
             ],
+        )
+
+
+class AntigravityClient(GeminiClient):
+    """
+    Client for Antigravity-provided Gemini models.
+    Leverages Antigravity / Google authorized session credentials.
+    """
+
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        project: Optional[str] = None,
+        location: Optional[str] = None,
+        num_retries: int = 3,
+        max_backoff_seconds: int = 30,
+        **kwargs
+    ):
+        # Default to ADC Google authorized session if project/location not specified
+        resolved_project = project or "project-8dcc0e99-48d6-44c4-b50"
+        resolved_location = location or "global"
+        super().__init__(
+            api_key=api_key,
+            base_url=base_url,
+            vertexai=True if not base_url else False,
+            project=resolved_project,
+            location=resolved_location,
+            num_retries=num_retries,
+            max_backoff_seconds=max_backoff_seconds
         )
 
 

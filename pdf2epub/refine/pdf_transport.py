@@ -413,7 +413,7 @@ def create_pdf_transport(
     provider_type = provider_config.get("type")
     if not provider_type:
         provider_name = structure_provider.casefold()
-        if "gemini" in provider_name or "vertex" in provider_name:
+        if "gemini" in provider_name or "vertex" in provider_name or "antigravity" in provider_name:
             provider_type = "google"
         elif "anthropic" in provider_name or "claude" in provider_name:
             provider_type = "anthropic"
@@ -421,7 +421,7 @@ def create_pdf_transport(
             provider_type = "openai"
 
     if transport_type in (None, "gemini"):
-        if provider_type != "google":
+        if provider_type not in ("google", "antigravity"):
             raise ValueError(
                 f"refine.structure.provider '{structure_provider}' is type "
                 f"'{provider_type}' and cannot use Gemini PDF parts. "

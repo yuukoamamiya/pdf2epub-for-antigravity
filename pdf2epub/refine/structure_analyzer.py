@@ -128,39 +128,42 @@ class StructureAnalyzer:
             )
             return True
 
-        # Step 2: JBIG2 unavailable/failed, fall back to binarized PNG at 120 DPI
-        logger.warning("JBIG2 compression failed, falling back to binarized PNG at 120 DPI...")
+        # Step 2: JBIG2 unavailable/failed, fall back to binarized PNG with adaptive DPI
+        logger.warning("JBIG2 compression failed, falling back to binarized PNG compression...")
         from ..pdf_compressor import compress_pdf
 
-        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
-            tmp_path = Path(tmp.name)
+        dpi_candidates = [120, 90, 72, 50]
+        for dpi in dpi_candidates:
+            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
+                tmp_path = Path(tmp.name)
 
-        try:
-            success, stats = compress_pdf(
-                str(input_path),
-                str(tmp_path),
-                dpi=120,
-            )
+            try:
+                success, stats = compress_pdf(
+                    str(input_path),
+                    str(tmp_path),
+                    dpi=dpi,
+                )
 
-            if not success:
-                logger.error("Binarized PNG compression failed")
+                if not success:
+                    tmp_path.unlink(missing_ok=True)
+                    continue
+
+                output_size_mb = stats['output_size_mb']
+                if output_size_mb <= target_mb:
+                    import shutil
+                    shutil.move(str(tmp_path), str(output_path))
+                    logger.success(f"Successfully compressed to {output_size_mb:.2f} MB (binarized PNG @ {dpi} DPI)")
+                    return True
+                else:
+                    logger.info(f"Binarized PNG at {dpi} DPI is {output_size_mb:.2f} MB (target: {target_mb:.2f} MB), trying lower resolution...")
+                    tmp_path.unlink(missing_ok=True)
+
+            except Exception as e:
+                logger.error(f"Error during PNG compression @ {dpi} DPI: {e}")
                 tmp_path.unlink(missing_ok=True)
-                return False
 
-            output_size_mb = stats['output_size_mb']
-            if output_size_mb <= target_mb:
-                tmp_path.rename(output_path)
-                logger.success(f"Successfully compressed to {output_size_mb:.2f} MB (binarized PNG)")
-                return True
-            else:
-                logger.error(f"Binarized PNG still too large ({output_size_mb:.2f} MB > {target_mb:.2f} MB)")
-                tmp_path.unlink(missing_ok=True)
-                return False
-
-        except Exception as e:
-            logger.error(f"Error during PNG compression: {e}")
-            tmp_path.unlink(missing_ok=True)
-            return False
+        logger.error(f"Could not compress PDF below target {target_mb:.2f} MB with available DPIs")
+        return False
 
     def detect_toc_location(
         self, pdf_path: Path, batch_ctx: Optional[PdfBatchContext] = None,
@@ -352,8 +355,6 @@ Return ONLY the cleaned text, nothing else.
         and checking if the output shrinks. Result is cached per PDF path.
         """
         import tempfile
-        import os
-
         pdf_key = str(pdf_path.resolve())
         if pdf_key in self._corrupted_xref_pdfs:
             return True
@@ -459,9 +460,6 @@ Return ONLY the cleaned text, nothing else.
         pages as images instead of using select().
         """
         try:
-            import tempfile
-            import os
-
             # Suppress MuPDF warnings for corrupted PDFs
             fitz.TOOLS.mupdf_warnings(reset=True)
 
@@ -555,7 +553,7 @@ Return ONLY the cleaned text, nothing else.
         self,
         pdf_path: Path,
         pages_0indexed: List[int],
-        dpi: int = 200,
+        dpi: int = 120,
     ) -> Optional[bytes]:
         """
         Render selected pages as images and build a new clean PDF.
@@ -572,40 +570,48 @@ Return ONLY the cleaned text, nothing else.
             PDF bytes, or None on failure
         """
         try:
+            from .pdf_rasterizer import _binarize_image
+            from PIL import Image
+
             src = fitz.open(pdf_path)
             new_doc = fitz.open()
             scale = dpi / 72
             mat = fitz.Matrix(scale, scale)
 
-            for page_idx in pages_0indexed:
-                page = src[page_idx]
-                pix = page.get_pixmap(matrix=mat)
-                # Create page at original dimensions
-                rect = fitz.Rect(0, 0, page.rect.width, page.rect.height)
-                new_page = new_doc.new_page(width=rect.width, height=rect.height)
-                new_page.insert_image(rect, pixmap=pix)
-
-            src.close()
-
             import tempfile, os
-            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
-                tmp_path = tmp.name
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                for page_idx in pages_0indexed:
+                    page = src[page_idx]
+                    pix = page.get_pixmap(matrix=mat, alpha=False)
+                    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples).convert("L")
+                    img = _binarize_image(img)
+                    p_img = os.path.join(tmp_dir, f"page_{page_idx}.png")
+                    img.save(p_img, "PNG", optimize=True)
 
-            try:
-                new_doc.save(tmp_path, garbage=4, deflate=True)
-                new_doc.close()
+                    rect = fitz.Rect(0, 0, page.rect.width, page.rect.height)
+                    new_page = new_doc.new_page(width=rect.width, height=rect.height)
+                    new_page.insert_image(rect, filename=p_img)
 
-                file_size_mb = os.path.getsize(tmp_path) / 1024 / 1024
-                logger.info(
-                    f"Rendered {len(pages_0indexed)} pages to new PDF: "
-                    f"{file_size_mb:.2f} MB ({dpi} DPI)"
-                )
+                src.close()
 
-                with open(tmp_path, 'rb') as f:
-                    return f.read()
-            finally:
-                if os.path.exists(tmp_path):
-                    os.unlink(tmp_path)
+                with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
+                    tmp_path = tmp.name
+
+                try:
+                    new_doc.save(tmp_path, garbage=4, deflate=True, clean=True)
+                    new_doc.close()
+
+                    file_size_mb = os.path.getsize(tmp_path) / 1024 / 1024
+                    logger.info(
+                        f"Rendered {len(pages_0indexed)} pages to new PDF: "
+                        f"{file_size_mb:.2f} MB ({dpi} DPI, binarized)"
+                    )
+
+                    with open(tmp_path, 'rb') as f:
+                        return f.read()
+                finally:
+                    if os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
 
         except Exception as e:
             logger.error(f"Failed to render pages to PDF: {e}")

@@ -796,17 +796,24 @@ Look at the PDF pages carefully to verify page numbers are correct."""
                     f"[agent-model] Using explicit {provider_type} {model_name}"
                 )
                 return build_openai_agent_model(model_name, p)
-            if provider_type == 'google':
+            if provider_type in ('google', 'antigravity'):
                 from pydantic_ai.models.google import GoogleModel
                 from pydantic_ai.providers.google import GoogleProvider
                 from google.genai import Client
                 from google.genai.types import HttpOptions
-                client = Client(
-                    api_key=p.get('api_key'),
-                    http_options=HttpOptions(base_url=p.get('base_url')),
-                )
+
+                client_kwargs = {}
+                if p.get('api_key'):
+                    client_kwargs['api_key'] = p['api_key']
+                if p.get('base_url'):
+                    client_kwargs['http_options'] = HttpOptions(base_url=p['base_url'])
+                if provider_type == 'antigravity' or (not p.get('api_key') and not p.get('base_url')):
+                    client_kwargs['vertexai'] = True
+                    client_kwargs['project'] = p.get('project') or "project-8dcc0e99-48d6-44c4-b50"
+                    client_kwargs['location'] = p.get('location') or "global"
+                client = Client(**client_kwargs)
                 google_provider = GoogleProvider(client=client)
-                logger.info(f"[agent-model] Using explicit Google {model_name}")
+                logger.info(f"[agent-model] Using explicit {provider_type} {model_name}")
                 return GoogleModel(model_name, provider=google_provider)
             raise ValueError(
                 f"Unsupported refine.agent provider type '{provider_type}'"
@@ -955,40 +962,53 @@ validator identified as unsupported or overlapping.
                 )
 
                 provider_config = _load_codex_openai_provider(provider_config)
-            elif provider_type != 'openai':
+                provider_type = 'openai'
+
+            if provider_type in ('google', 'antigravity'):
+                def generate_fn(prefix=None):
+                    return self._pdf_transport.generate_text(
+                        model=model_name,
+                        prompt=prompt,
+                        config=config,
+                        operation_name=op_name,
+                        prefix=prefix,
+                    )
+                return generate_fn
+
+            elif provider_type == 'openai':
+                from openai import OpenAI
+
+                client = OpenAI(
+                    api_key=provider_config.get('api_key'),
+                    base_url=provider_config.get('base_url'),
+                    timeout=600,
+                )
+
+                def generate_fn(prefix=None):
+                    messages = [{'role': 'user', 'content': prompt}]
+                    if prefix:
+                        messages.extend([
+                            {'role': 'assistant', 'content': prefix},
+                            {
+                                'role': 'user',
+                                'content': (
+                                    "Continue exactly after the existing JSON "
+                                    "prefix. Output only the remaining JSON."
+                                ),
+                            },
+                        ])
+                    response = client.chat.completions.create(
+                        model=model_name,
+                        messages=messages,
+                    )
+                    return response.choices[0].message.content or ""
+
+                return generate_fn
+            else:
                 raise ValueError(
-                    "refine.merge_generator supports only OpenAI-compatible "
-                    f"or Codex providers, got {provider_type!r}"
+                    "refine.merge_generator supports OpenAI-compatible, Codex, Google, "
+                    f"or Antigravity providers, got {provider_type!r}"
                 )
-
-            from openai import OpenAI
-
-            client = OpenAI(
-                api_key=provider_config.get('api_key'),
-                base_url=provider_config.get('base_url'),
-                timeout=600,
-            )
-
-            def generate_fn(prefix=None):
-                messages = [{'role': 'user', 'content': prompt}]
-                if prefix:
-                    messages.extend([
-                        {'role': 'assistant', 'content': prefix},
-                        {
-                            'role': 'user',
-                            'content': (
-                                "Continue exactly after the existing JSON "
-                                "prefix. Output only the remaining JSON."
-                            ),
-                        },
-                    ])
-                response = client.chat.completions.create(
-                    model=model_name,
-                    messages=messages,
-                )
-                return response.choices[0].message.content or ""
-
-            return generate_fn
 
         def generate_fn(prefix=None):
             return self._pdf_transport.generate_text(
@@ -1189,6 +1209,21 @@ validator identified as unsupported or overlapping.
                         f"[{self.operation_name}] Agent loop exhausted for "
                         f"batch {batch_idx+1}/{total_batches} "
                         f"(attempt {attempt+1}/{1 + self.batch_validation_retries})"
+                    )
+                    if attempt < self.batch_validation_retries:
+                        continue
+                    raise
+                except ValueError as exc:
+                    # Empty streaming responses are provider/transient failures,
+                    # not bad JSON or a valid-but-invalid batch result.  Retry
+                    # the whole batch while the PDF and prompt are still known.
+                    if "empty stream response" not in str(exc).lower():
+                        raise
+                    logger.warning(
+                        f"[{self.operation_name}] Empty model stream for "
+                        f"batch {batch_idx+1}/{total_batches} "
+                        f"(attempt {attempt+1}/{1 + self.batch_validation_retries}); "
+                        "retrying batch"
                     )
                     if attempt < self.batch_validation_retries:
                         continue
@@ -1500,6 +1535,13 @@ Analyze this book PDF section and extract chapter structure.
 **BATCH INFO**: Batch {batch_num}/{total_batches}, pages {batch_start}-{batch_end}
 {toc_block}
 **CRITICAL**: Extract the COMPLETE hierarchical structure.
+- This is a batched analysis. Report only chapters/sections whose evidence
+  appears in the observed PDF pages {batch_start}-{batch_end}. Do not try to
+  recreate pages from other batches or require this batch to cover pages
+  outside that range.
+- The final batch may contain only an index, end matter, or back cover. That is
+  a valid result; do not request continuation merely because earlier book pages
+  are not represented in this batch.
 - Extract ALL levels: Part, Chapter, Section, Subsection, etc.
 - DO NOT create artificial subdivisions beyond what actually exists
 - Use PDF page numbers from "PDF Page: X" labels (not printed page numbers)

@@ -105,7 +105,7 @@ class RefinedBreakdown:
         structure_model = structure_config.get('model', refine_config.get('structure_model', 'gemini-2.5-pro'))
         toc_model = structure_config.get('toc_model', refine_config.get('toc_model', 'gemini-2.5-flash'))
 
-        verification_provider = verification_config.get('provider', default_provider)
+        verification_provider = verification_config.get('provider', structure_provider)
         verification_model = verification_config.get('model', refine_config.get('verification_model', 'gemini-2.5-flash'))
 
         # Create unified LLM client and bind to specific providers

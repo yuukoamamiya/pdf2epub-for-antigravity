@@ -866,7 +866,7 @@ def test_merge_generator_rejects_non_openai_provider():
         },
     )
 
-    with pytest.raises(ValueError, match="OpenAI-compatible or Codex"):
+    with pytest.raises(ValueError, match="OpenAI-compatible.*Antigravity|OpenAI-compatible or Codex"):
         call._build_merge_generate_fn(
             "MERGE PROMPT",
             LLMGenerateConfig(),

@@ -9,6 +9,7 @@ from tenacity import stop_after_attempt, wait_random_exponential
 from .retry_utils import retry_with_logging
 from .network_utils import (
     GeminiClient,
+    AntigravityClient,
     AnthropicClient,
     OpenAIClient,
     is_transient_gemini_error,
@@ -129,6 +130,13 @@ class LLMClient:
                 self._clients[provider_name] = client
                 return client
 
+        # If provider_name is 'gemini' or 'google' and 'antigravity' exists in providers, alias it
+        if provider_name in ("gemini", "google") and "antigravity" in providers:
+            client = self._get_client("antigravity")
+            if client:
+                self._clients[provider_name] = client
+                return client
+
         # Fallback: infer from provider name for legacy compatibility
         return self._get_legacy_client(provider_name)
 
@@ -151,17 +159,23 @@ class LLMClient:
         location = provider_config.get("location")
 
         uses_adc_vertex = bool(
-            provider_type == "google"
-            and vertexai
+            (provider_type in ("google", "antigravity"))
             and not base_url
-            and project
-            and location
         )
-        if not api_key and not uses_adc_vertex:
+        if not api_key and not uses_adc_vertex and provider_type not in ("antigravity",):
             logger.warning(f"No API key found for provider '{provider_name}'")
             return None
 
-        if provider_type == "google":
+        if provider_type == "antigravity":
+            return AntigravityClient(
+                api_key=api_key,
+                base_url=base_url,
+                project=project,
+                location=location,
+                num_retries=self._num_retries,
+                max_backoff_seconds=self._max_backoff_seconds
+            )
+        elif provider_type == "google":
             return GeminiClient(
                 api_key=api_key,
                 base_url=base_url,
@@ -195,7 +209,7 @@ class LLMClient:
         """Get client using legacy provider name mapping."""
         name_lower = provider_name.lower()
 
-        if "gemini" in name_lower or provider_name == "google":
+        if "antigravity" in name_lower or "gemini" in name_lower or provider_name == "google":
             return self._gemini_client
         elif "anthropic" in name_lower or "claude" in name_lower:
             return self._anthropic_client
@@ -208,7 +222,9 @@ class LLMClient:
         """Infer provider type from provider name."""
         name_lower = provider_name.lower()
 
-        if "gemini" in name_lower or "vertex" in name_lower:
+        if "antigravity" in name_lower:
+            return "antigravity"
+        elif "gemini" in name_lower or "vertex" in name_lower:
             return "google"
         elif "anthropic" in name_lower or "claude" in name_lower:
             return "anthropic"
@@ -256,8 +272,8 @@ class LLMClient:
         provider_type = self._get_provider_type(provider)
         json_mode = getattr(config, 'response_mime_type', None) == "application/json"
 
-        if provider_type == "google":
-            # Use Gemini's native config with full settings (thinking, safety, etc.)
+        if provider_type in ("google", "antigravity"):
+            # Use Gemini/Antigravity's native config with full settings (thinking, safety, etc.)
             gemini_config = client.get_default_config(temperature=config.temperature)
             gemini_config.max_output_tokens = config.max_tokens
             if json_mode:
@@ -386,7 +402,7 @@ class LLMClient:
                 # Determine provider type and call appropriate method
                 provider_type = self._get_provider_type(provider)
 
-                if provider_type == "google":
+                if provider_type in ("google", "antigravity"):
                     response = self._generate_with_gemini(
                         prompt=prompt,
                         model=model,
@@ -545,7 +561,7 @@ class LLMClient:
                     # Generate with API retries handled internally
                     provider_type = self._get_provider_type(provider)
 
-                    if provider_type == "google":
+                    if provider_type in ("google", "antigravity"):
                         response = self._generate_with_gemini(
                             prompt=current_prompt,
                             model=model,
