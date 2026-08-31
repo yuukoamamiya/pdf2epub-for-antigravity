@@ -312,6 +312,8 @@ uv run pdf2epub translate-arxiv-validate --output-dir output/arxiv/2503.01800
 4. 让 Subagent 只处理 pending 项；
 5. 再次运行校验，全部通过后才打包。
 
+如果 Subagent 没有写入文件，或写入的是“无法翻译”“I can’t assist…”等高置信度拒答/免责声明，校验会将对应单元列入 `safety_blocked`，不会进入 validated，也不会影响其他已完成单元。不要无限重复同一提示词；如果确认是误判，可将内容拆成更小的合法上下文后人工复核。流程不会绕过模型的安全限制。
+
 示例：
 
 ~~~bash

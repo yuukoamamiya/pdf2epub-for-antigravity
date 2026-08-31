@@ -23,7 +23,7 @@ from xml.etree import ElementTree as ET
 
 from .epub_parser import EPUBParser
 from .validation import nonempty_lines, tag_mismatch_count
-from pdf2epub.subagent_workflow import resolve_subagent_model
+from pdf2epub.subagent_workflow import detect_refusal, resolve_subagent_model
 
 
 PART_FILE_RE = re.compile(r'^(.+)\.part(\d+)\.md$')
@@ -1205,6 +1205,8 @@ Rules:
    into the output's `preserved_metadata` object. Never translate, transliterate,
    normalize, or omit these two fields.
 6. Return valid JSON only. Do not wrap it in Markdown fences or add commentary.
+   If the model refuses a field, do not put the refusal text into the JSON;
+   report the blocked metadata task instead.
 
 The output must have this shape:
 
@@ -1490,6 +1492,7 @@ The output must have this shape:
         total = len(all_sources)
         missing = []
         invalid = []
+        safety_blocked = []
         valid = 0
         valid_files = []
         source_sha256 = {}
@@ -1503,6 +1506,15 @@ The output must have this shape:
             src_content = src_file.read_text(encoding="utf-8")
             tgt_content = tgt_file.read_text(encoding="utf-8")
             source_sha256[src_file.name] = hashlib.sha256(src_content.encode("utf-8")).hexdigest()
+
+            refusal = detect_refusal(src_content, tgt_content)
+            if refusal:
+                invalid.append({
+                    "file": src_file.name,
+                    "reason": f"refusal/disclaimer detected: {refusal}",
+                })
+                safety_blocked.append(src_file.name)
+                continue
 
             src_lines = nonempty_lines(src_content)
             tgt_lines = nonempty_lines(tgt_content)
@@ -1536,6 +1548,7 @@ The output must have this shape:
             "completed": total - len(missing),
             "valid": valid,
             "invalid": invalid,
+            "safety_blocked": safety_blocked,
             "missing": missing,
             "valid_files": valid_files,
             "source_sha256": source_sha256,
@@ -1577,6 +1590,42 @@ The output must have this shape:
         if not isinstance(translated, dict):
             errors.append("translated metadata must be a JSON object")
             return {"valid": False, "errors": errors}
+
+        metadata_pairs = [
+            ("translated_title", source.get("original_title", ""), translated.get("translated_title", "")),
+            (
+                "translated_description",
+                source.get("translatable_metadata", {}).get("description", ""),
+                translated.get("translated_description", ""),
+            ),
+            (
+                "translated_rights",
+                source.get("translatable_metadata", {}).get("rights", ""),
+                translated.get("translated_rights", ""),
+            ),
+        ]
+        source_toc_for_refusal = source.get("toc", [])
+        translated_toc_for_refusal = translated.get("toc", [])
+        if isinstance(source_toc_for_refusal, list) and isinstance(
+            translated_toc_for_refusal, list
+        ):
+            metadata_pairs.extend(
+                (
+                    "toc.translated",
+                    expected.get("original", ""),
+                    actual.get("translated", ""),
+                )
+                for expected, actual in zip(
+                    source_toc_for_refusal, translated_toc_for_refusal
+                    )
+                if isinstance(expected, dict) and isinstance(actual, dict)
+            )
+        metadata_safety_blocked = []
+        for field, source_value, translated_value in metadata_pairs:
+            refusal = detect_refusal(str(source_value), str(translated_value))
+            if refusal:
+                errors.append(f"metadata refusal/disclaimer detected: {refusal}")
+                metadata_safety_blocked.append(field)
 
         if translated.get("schema_version") != source.get("schema_version", 1):
             errors.append("schema_version does not match metadata source")
@@ -1643,6 +1692,7 @@ The output must have this shape:
         return {
             "valid": not errors,
             "errors": errors,
+            "safety_blocked": metadata_safety_blocked,
             "source": str(source_path),
             "translated": str(translated_path),
         }

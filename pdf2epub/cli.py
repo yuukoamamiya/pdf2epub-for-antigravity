@@ -131,6 +131,10 @@ def _validate_pdf_markdown_task(args, task: str):
         logger.error(f"Missing: {name}")
     for item in report["invalid"][:10]:
         logger.error(f"Invalid: {item['file']}: {item['reason']}")
+    if report.get("safety_blocked"):
+        logger.error(
+            f"Safety/refusal blocked units: {report['safety_blocked'][:10]}"
+        )
     if report["all_passed"]:
         logger.success(f"{task} Subagent output validated: {report['validated_dir']}")
         return 0
@@ -702,6 +706,8 @@ def html_validate_command(args):
         logger.error(f"校验未通过单元 ({len(report['invalid'])}):")
         for inv in report['invalid']:
             logger.error(f"   - {inv['file']}: {inv['reason']}")
+    if report.get("safety_blocked"):
+        logger.error(f"检测到拒答/免责声明单元: {report['safety_blocked'][:10]}")
 
     logger.info("=" * 60)
     if report['all_passed']:
@@ -805,7 +811,9 @@ Recommended Antigravity model: `{model}`
 Read only the files listed in `pending_files` in `novel_subagent_manifest.json` under
 `novel_units/` and write its translation with the same filename under
 `translated_novel/`. Preserve image markers and paragraph boundaries, and do
-not add commentary or Markdown fences. Use `metadata_translation_prompt.md`
+not add commentary or Markdown fences. If the model refuses a unit or inserts
+a safety disclaimer, do not write that refusal as its translation; report the
+blocked unit instead. Use `metadata_translation_prompt.md`
 to create the translated metadata JSON as well. Authors and publishers must
 remain byte-for-byte unchanged. Do not call an API or modify source files.
 Files listed in `completed_files` are checkpoints; do not overwrite them unless
@@ -825,6 +833,7 @@ validation reports them as invalid.
 
 def translate_novel_validate_command(args):
     """Validate novel text and metadata written by the Subagent."""
+    from pdf2epub.subagent_workflow import detect_refusal
     from pdf2epub.html_translation.epub_parser import EPUBParser
     from pdf2epub.html_translation.novel_extractor import NovelExtractor
     from pdf2epub.html_translation.builder import HTMLEpubPipeline
@@ -850,7 +859,29 @@ def translate_novel_validate_command(args):
             or not (target_dir / name).read_text(encoding="utf-8").strip()
         ]
         import hashlib
-        valid_files = [name for name in manifest.get("files", []) if name not in missing]
+        refusal_files = []
+        for name in manifest.get("files", []):
+            if name in missing:
+                continue
+            source_text = (source_dir / name).read_text(encoding="utf-8")
+            target_text = (target_dir / name).read_text(encoding="utf-8")
+            refusal = detect_refusal(source_text, target_text)
+            if refusal or "```" in target_text:
+                refusal_files.append(
+                    {
+                        "file": name,
+                        "reason": (
+                            f"refusal/disclaimer detected: {refusal}"
+                            if refusal
+                            else "Markdown code fence is not allowed"
+                        ),
+                    }
+                )
+        valid_files = [
+            name
+            for name in manifest.get("files", [])
+            if name not in missing and not any(item["file"] == name for item in refusal_files)
+        ]
         source_sha256 = {
             name: hashlib.sha256((source_dir / name).read_bytes()).hexdigest()
             for name in manifest.get("files", [])
@@ -861,9 +892,11 @@ def translate_novel_validate_command(args):
         ).validate_translated_metadata()
         if missing:
             logger.error(f"Missing or empty novel translations: {missing[:10]}")
+        if refusal_files:
+            logger.error(f"Novel translations containing refusal/disclaimer text: {refusal_files[:10]}")
         if not metadata_report["valid"]:
             logger.error(f"Invalid novel metadata: {metadata_report['errors']}")
-        if missing or not metadata_report["valid"]:
+        if missing or refusal_files or not metadata_report["valid"]:
             (output_dir / "translate-novel_validation.json").write_text(
                 json.dumps(
                     {
@@ -871,8 +904,10 @@ def translate_novel_validate_command(args):
                         "valid_files": valid_files,
                         "source_sha256": source_sha256,
                         "missing": missing,
+                        "invalid": refusal_files,
+                        "safety_blocked": [item["file"] for item in refusal_files],
                         "metadata": metadata_report,
-                        "all_passed": not missing and metadata_report["valid"],
+                        "all_passed": not missing and not refusal_files and metadata_report["valid"],
                     },
                     ensure_ascii=False,
                     indent=2,
@@ -887,6 +922,8 @@ def translate_novel_validate_command(args):
                     "valid_files": valid_files,
                     "source_sha256": source_sha256,
                     "missing": [],
+                    "invalid": [],
+                    "safety_blocked": [],
                     "metadata": metadata_report,
                     "all_passed": True,
                 },
@@ -1416,7 +1453,9 @@ Read each `source_file` and write the complete translation to its corresponding
 `target_file`. Preserve LaTeX commands, labels, references, formulas, and
 document structure. Do not add Markdown fences or commentary. Files listed in
 `completed_units` are checkpoints and must not be overwritten unless validation
-reports them as invalid. Do not call an API, modify `../source/`, or edit
+reports them as invalid. If the model refuses a unit or inserts a safety
+disclaimer, do not write that refusal as its translation; report the blocked
+unit instead. Do not call an API, modify `../source/`, or edit
 `../project/` directly; the local validator reconstructs it from the unit files.
 """,
             encoding="utf-8",
@@ -1433,6 +1472,7 @@ def translate_arxiv_validate_command(args):
     """Rebuild and compile TeX from validated Subagent unit files locally."""
     import hashlib
 
+    from pdf2epub.subagent_workflow import detect_refusal
     from pdf2epub.tex_translation.compiler import TexCompiler
     from pdf2epub.tex_translation.document import scan_project
 
@@ -1463,6 +1503,7 @@ def translate_arxiv_validate_command(args):
         translated = {}
         missing_units = []
         invalid_units = []
+        safety_blocked_units = []
         completed_units = []
         run_root = run_dir.resolve()
 
@@ -1489,7 +1530,12 @@ def translate_arxiv_validate_command(args):
             if not target_text.strip():
                 invalid_units.append(f"{unit_id}: target is empty")
                 continue
-            if target_text.lstrip().startswith("```"):
+            refusal = detect_refusal(source_text, target_text)
+            if refusal:
+                invalid_units.append(f"{unit_id}: refusal/disclaimer detected ({refusal})")
+                safety_blocked_units.append(unit_id)
+                continue
+            if "```" in target_text:
                 invalid_units.append(f"{unit_id}: Markdown fence is not allowed")
                 continue
             translated[unit_id] = target_text
@@ -1504,6 +1550,7 @@ def translate_arxiv_validate_command(args):
         # project compiles successfully.  Keep a separate durable checkpoint
         # so --resume never trusts a truncated or compile-breaking file.
         manifest["validated_units"] = []
+        manifest["safety_blocked_units"] = safety_blocked_units
         manifest_path.write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
         )

@@ -22,6 +22,60 @@ DEFAULT_BATCH_MAX_FILES = 5
 DEFAULT_BATCH_MAX_SOURCE_TOKENS = 12_000
 DEFAULT_BATCH_MAX_CONCURRENCY = 3
 
+_REFUSAL_PATTERNS = (
+    (
+        "English refusal",
+        re.compile(
+            r"\b(?:i|we)\s+(?:cannot|can't|can not|won't|will not|must not|mustn't)"
+            r"\s+(?:translate|assist|help|provide|comply|fulfill|process|continue|generate|rewrite)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "English refusal",
+        re.compile(
+            r"\b(?:i am|i'm)\s+unable\s+to\s+"
+            r"(?:translate|assist|help|provide|comply|process|continue|generate|rewrite)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "English refusal",
+        re.compile(r"\b(?:i\s+must|i\s+have\s+to)\s+refuse\b", re.IGNORECASE),
+    ),
+    (
+        "English policy disclaimer",
+        re.compile(
+            r"\b(?:as\s+an?\s+ai|as\s+a\s+language\s+model)\b|"
+            r"\b(?:cannot|can't|unable|refuse).{0,50}\b(?:safety|content)\s+"
+            r"(?:policy|policies|guidelines?)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "Chinese refusal",
+        re.compile(
+            r"(?:抱歉|很抱歉).{0,25}(?:无法|不能|不可以|拒绝).{0,20}"
+            r"(?:翻译|协助|帮助|处理|提供|继续|完成)"
+        ),
+    ),
+    (
+        "Chinese refusal",
+        re.compile(
+            r"(?:我|本人).{0,4}(?:无法|不能|不可以|拒绝).{0,15}"
+            r"(?:翻译|协助|帮助|处理|提供|继续|完成)"
+        ),
+    ),
+    (
+        "Chinese policy disclaimer",
+        re.compile(
+            r"作为(?:一个)?(?:AI|人工智能|语言模型)|"
+            r"(?:无法|不能|不可以|拒绝|抱歉).{0,30}"
+            r"(?:安全|内容|使用)政策"
+        ),
+    ),
+)
+
 _TRANSLATION_TASKS = {
     "translate",
     "translate-novel",
@@ -84,6 +138,42 @@ def estimate_tokens(text: str) -> int:
     if tokenizer is not None:
         return len(tokenizer.encode(text))
     return max(1, (len(text) + 3) // 4) if text else 0
+
+
+def _normalize_detection_text(text: str) -> str:
+    return (
+        text.replace("\u2018", "'")
+        .replace("\u2019", "'")
+        .replace("\u201c", '"')
+        .replace("\u201d", '"')
+    )
+
+
+def detect_refusal(source_text: str, translated_text: str) -> Optional[str]:
+    """Detect high-confidence model refusal text in a candidate translation.
+
+    This is intentionally conservative: a match is reported only when the
+    corresponding source line does not contain the same refusal/disclaimer
+    signal.  Thus a book character saying "I cannot help" can still be
+    translated normally, while a model-generated "I cannot translate this"
+    replacing ordinary source text is rejected.
+    """
+    source_lines = [line for line in source_text.splitlines() if line.strip()]
+    target_lines = [line for line in translated_text.splitlines() if line.strip()]
+    for index, target_line in enumerate(target_lines):
+        target_line = _normalize_detection_text(target_line)
+        target_match = next(
+            ((label, pattern) for label, pattern in _REFUSAL_PATTERNS if pattern.search(target_line)),
+            None,
+        )
+        if target_match is None:
+            continue
+        source_line = source_lines[index] if index < len(source_lines) else ""
+        source_line = _normalize_detection_text(source_line)
+        if any(pattern.search(source_line) for _label, pattern in _REFUSAL_PATTERNS):
+            continue
+        return f"{target_match[0]} detected at non-empty line {index + 1}"
+    return None
 
 
 def _positive_int(value: Any, default: int) -> int:
@@ -233,6 +323,7 @@ def prepare_markdown_subagent(
         "Read each source file and write a same-named target file; do not skip files.",
         "Write files directly in the target directory, with no Markdown code fences around the file contents.",
         "Do not rename files, alter the source directory, or create extra output files.",
+        "If the model refuses a unit or inserts a safety disclaimer, do not write that refusal as the translation; leave the target absent and report the blocked unit.",
         *extra_rules,
     ]
     prompt_path = output_dir / f"{task}_subagent_prompt.md"
@@ -284,6 +375,7 @@ def validate_markdown_subagent(
     sources = _markdown_files(source_dir)
     missing: List[str] = []
     invalid: List[Dict[str, str]] = []
+    safety_blocked: List[str] = []
     valid_files: List[str] = []
     source_sha256: Dict[str, str] = {}
     validated_dir = target_dir / "validated"
@@ -302,6 +394,13 @@ def validate_markdown_subagent(
         target_text = target.read_text(encoding="utf-8")
         if not target_text.strip():
             invalid.append({"file": source.name, "reason": "target is empty"})
+            continue
+        refusal = detect_refusal(source_text, target_text)
+        if refusal:
+            invalid.append(
+                {"file": source.name, "reason": f"refusal/disclaimer detected: {refusal}"}
+            )
+            safety_blocked.append(source.name)
             continue
         for pattern in structural_patterns:
             if len(re.findall(pattern, source_text, flags=re.MULTILINE)) != len(
@@ -336,6 +435,7 @@ def validate_markdown_subagent(
         "completed": len(sources) - len(missing),
         "missing": missing,
         "invalid": invalid,
+        "safety_blocked": safety_blocked,
         "extra": extras,
         "valid_files": valid_files,
         "source_sha256": source_sha256,

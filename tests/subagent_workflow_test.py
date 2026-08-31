@@ -12,6 +12,7 @@ from pdf2epub.refine.subagent_workflow import (
 from pdf2epub.subagent_workflow import (
     DEFAULT_SUBAGENT_MODEL,
     DEFAULT_TRANSLATION_MODEL,
+    detect_refusal,
     prepare_markdown_subagent,
     prepare_toc_translation_subagent,
     resolve_subagent_model,
@@ -35,6 +36,51 @@ def test_resolve_subagent_model_supports_configured_and_task_overrides():
     assert resolve_subagent_model(config, "translate-novel") == "pro-custom"
     assert resolve_subagent_model(config, "polish") == "flash-custom"
     assert resolve_subagent_model(config, "refine") == "refine-custom"
+
+
+def test_detect_refusal_flags_model_text_but_allows_matching_source_dialogue():
+    assert detect_refusal(
+        "This is an ordinary paragraph.",
+        "I cannot translate this content because of safety policy.",
+    )
+    assert detect_refusal(
+        "This is an ordinary paragraph.",
+        "I can’t assist with this request.",
+    )
+    assert detect_refusal(
+        "I cannot help you with that.",
+        "我无法帮助你处理那件事。",
+    ) is None
+
+
+def test_detect_refusal_flags_chinese_disclaimer():
+    reason = detect_refusal(
+        "这是一本书中的普通段落。",
+        "抱歉，我无法翻译或处理这部分内容。",
+    )
+
+    assert reason is not None
+    assert "Chinese refusal" in reason
+
+
+def test_html_validation_quarantines_refusal_candidate(tmp_path: Path):
+    pipeline = object.__new__(HTMLEpubPipeline)
+    pipeline.output_dir = tmp_path
+    pipeline.compressed_units_dir = tmp_path / "compressed_units"
+    pipeline.translated_dir = tmp_path / "translated_compressed"
+    pipeline.compressed_units_dir.mkdir()
+    pipeline.translated_dir.mkdir()
+    (pipeline.compressed_units_dir / "chapter.md").write_text(
+        "<span>Ordinary source text.</span>\n", encoding="utf-8"
+    )
+    (pipeline.translated_dir / "chapter.md").write_text(
+        "<span>抱歉，我无法翻译或处理这部分内容。</span>\n", encoding="utf-8"
+    )
+
+    report = pipeline.validate_translated_units()
+
+    assert report["safety_blocked"] == ["chapter.md"]
+    assert any("refusal/disclaimer" in item["reason"] for item in report["invalid"])
 
 
 def test_prepare_markdown_subagent_records_model(tmp_path: Path):
@@ -271,6 +317,38 @@ def test_metadata_validation_rejects_missing_top_level_rights_field(tmp_path: Pa
     report = pipeline.validate_translated_metadata()
     assert not report["valid"]
     assert "translated_rights field is missing" in report["errors"]
+
+
+def test_metadata_validation_rejects_refusal_text(tmp_path: Path):
+    pipeline = object.__new__(HTMLEpubPipeline)
+    pipeline.output_dir = tmp_path
+    source = {
+        "schema_version": 1,
+        "original_title": "Original",
+        "target_language": "Chinese",
+        "target_language_code": "zh",
+        "preserved_metadata": {"author": "", "publisher": ""},
+        "translatable_metadata": {"description": "Description", "rights": "Rights"},
+        "toc": [],
+    }
+    target = {
+        **source,
+        "translated_title": "译名",
+        "preserved_metadata": {"author": "", "publisher": ""},
+        "toc": [],
+        "translated_description": "简介",
+        "translated_rights": "抱歉，我无法翻译或处理这部分内容。",
+    }
+    (tmp_path / "metadata_translation_source.json").write_text(
+        json.dumps(source), encoding="utf-8"
+    )
+    (tmp_path / "translated_metadata.json").write_text(
+        json.dumps(target), encoding="utf-8"
+    )
+
+    report = pipeline.validate_translated_metadata()
+    assert not report["valid"]
+    assert report["safety_blocked"] == ["translated_rights"]
 
 
 def test_prepare_refine_subagent_writes_manifest_and_prompt(tmp_path: Path):
