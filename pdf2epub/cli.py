@@ -47,6 +47,9 @@ def _prepare_pdf_markdown_task(args, task: str):
             "Fix OCR line breaks, obvious OCR errors, and formatting while preserving meaning.",
             "Preserve Markdown heading levels, image links, footnote references, formulas, and link destinations.",
         ]
+        content_type = getattr(args, "content_type", "auto")
+        if content_type and content_type != "auto":
+            rules.append(f"Treat this as {content_type} content and preserve its domain-specific conventions.")
     else:
         source_dir = output_dir / "polished_markdown" / "validated"
         target_dir = output_dir / "translated"
@@ -607,7 +610,9 @@ def html_prepare_command(args):
     args.limit = None
     args.use_entities = None
     args.no_entities = False
-    args.resume = False
+    # Preserve the explicit --resume flag.  The old compatibility setup
+    # accidentally overwrote it, so html-prepare could not resume.
+    args.resume = getattr(args, "resume", False)
     args.source_language = getattr(args, 'source_language', None)
     args.target_language = getattr(args, 'target_language', None)
     args.max_workers = 1

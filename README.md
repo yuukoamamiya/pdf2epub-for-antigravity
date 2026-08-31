@@ -67,6 +67,10 @@ Antigravity IDE 中执行；OCR 是否联网取决于所选后端。
 
 ## 工作流程 (Workflow)
 
+第一次使用时，只需记住这条原则：Python 命令负责准备文件和本地校验，
+Antigravity Subagent 负责阅读源文件并把结果写回指定目录。每个阶段完成后，
+先运行对应的 `*-validate`，再进入下一阶段。
+
 ### PDF 工作流 (Recommended - uses toc_tree.json)
 
 适用于 PDF 扫描件转换：
@@ -76,12 +80,17 @@ Antigravity IDE 中执行；OCR 是否联网取决于所选后端。
 3. **Antigravity Subagent**：阅读 `pages/`，在输出目录写入 `toc_tree.json`
 4. **refine-local**：本地校验 TOC、估算 token 并合并章节工作单元
 5. **polish**：生成润色任务，由 Antigravity Subagent 消除 OCR 错误、页眉页脚等
-6. **translate**：（可选）生成翻译任务，由 Antigravity Subagent 翻译成目标语言
-7. **build-epub**：基于 toc_tree.json 生成 EPUB
+6. **polish-validate**：本地校验并暂存润色结果
+7. **translate**：（可选）生成翻译任务，由 Antigravity Subagent 翻译成目标语言
+8. **translate-validate**：本地校验翻译结果和译后目录
+9. **build-epub**：基于 toc_tree.json 生成 EPUB
 
 ### EPUB 高保真翻译工作流 (Antigravity Subagent 驱动)
 
 适用于已有 EPUB 文件的翻译，完整保留原书的 CSS 样式、字体与排版：
+
+书名、简介、版权信息和目录会提交给 Subagent 翻译；作者名和出版社名称
+会原样保留，并由本地校验强制检查。
 
 1. **html-prepare**：本地解析 EPUB 并无损压缩 XHTML，生成单行映射单元
 2. **Subagent 协同翻译**：由 Antigravity `book_translator` 子 Agent 批量翻译正文，并单独填写 `translated_metadata.json`
@@ -276,7 +285,9 @@ refine:
     grayscale: true
 ```
 
-# 轻小说专用配置（可选）
+#### C. 轻小说专用配置（可选）
+
+```yaml
 novel:
   glossary_max_tokens: 1000
 ```
@@ -312,6 +323,8 @@ Subagent 分析 TOC；本地命令验证章节边界并生成工作单元（支�
 #### 步骤 3: 内容润色
 ```bash
 uv run pdf2epub polish
+# 在 Antigravity 中按 polish_subagent_prompt.md 处理并写入 polished_markdown/
+uv run pdf2epub polish-validate
 ```
 
 针对不同内容类型：
@@ -326,11 +339,20 @@ uv run pdf2epub polish --content-type japanese
 uv run pdf2epub polish --content-type auto
 ```
 
-#### 步骤 4: 生成 EPUB
+#### 步骤 4: 翻译（可选）
+```bash
+# 先确保已执行 polish-validate
+uv run pdf2epub translate --target-language Chinese
+# 在 Antigravity 中按 translate_subagent_prompt.md 写入 translated/
+uv run pdf2epub translate-validate
+```
+
+#### 步骤 5: 生成 EPUB
 ```bash
 uv run pdf2epub build-epub
 ```
-最终 EPUB 文件保存在 `output/{book_title}/output.epub`
+不翻译时基于润色结果生成；如需从翻译结果生成，使用 `--translated`。
+最终 EPUB 文件保存在 `output/{book_title}/` 下，文件名会进行安全清理。
 
 如需从翻译后的内容生成：
 ```bash
@@ -361,11 +383,10 @@ uv run pdf2epub extract-entities -i input.pdf --source-lang Japanese --target-la
 # 基本翻译（自动检测并使用实体文件，如果存在）
 uv run pdf2epub translate --target-language Chinese
 
-# 强制不使用实体（即使文件存在）
-uv run pdf2epub translate --target-language Chinese --no-entities
 ```
 
-**注意**：如果 `translation_entities.json` 文件存在，翻译器会自动使用它以保持一致性。
+**注意**：如果 `translation_entities.json` 文件存在，Subagent 会将其作为术语参考；
+当前 CLI 没有单独关闭实体参考的参数。
 
 ### 4. 完整工作流程示例
 
@@ -422,7 +443,8 @@ uv run pdf2epub build-epub --translated
 ```bash
 # 本地准备压缩单元和元数据翻译协议
 uv run pdf2epub -c config_epub.yaml html-prepare
-# 在 Antigravity 中运行 book_translator，并填写 translated_metadata.json
+# 在 Antigravity 中让 Subagent 按 manifest 的 pending_files 翻译正文，
+# 并按 metadata_translation_prompt.md 写入 translated_metadata.json
 uv run pdf2epub -c config_epub.yaml html-validate
 uv run pdf2epub -c config_epub.yaml build-html-epub
 ```
@@ -430,7 +452,8 @@ uv run pdf2epub -c config_epub.yaml build-html-epub
 EPUB 翻译统一使用 Subagent 文件交接：
 ```bash
 uv run pdf2epub html-prepare -i book.epub --target-language Chinese
-# 在 Antigravity 中翻译 compressed_units/*，并写入 translated_compressed/*
+# 在 Antigravity 中按 manifest 的 pending_files 翻译 compressed_units/*，
+# 写入 translated_compressed/*，并完成 translated_metadata.json
 uv run pdf2epub html-validate
 uv run pdf2epub build-html-epub
 ```
@@ -519,7 +542,7 @@ output/
     ├── translated_metadata.json          # EPUB元数据译文
     ├── polished_markdown/processing_tracker.json   # 润色进度
     ├── translated/processing_tracker.json          # 翻译进度
-    └── output.epub            # 最终 EPUB
+    └── {book_title}.epub      # 最终 EPUB（翻译版可能使用译后书名）
 ```
 
 
