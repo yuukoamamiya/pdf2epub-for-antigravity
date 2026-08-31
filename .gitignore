@@ -46,4 +46,3 @@ scripts/realign_*.py
 
 # Security & Local Private files
 deepsec-report.json
-AGENTS.md

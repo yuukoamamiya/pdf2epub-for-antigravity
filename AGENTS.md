@@ -1,0 +1,156 @@
+# Agent Execution Guidelines
+
+## Auto-Execution & Approval Policy
+- **工作区内自动执行 (Auto-Execute within Workspace)**：在当前仓库目录内的代码编辑、文件创建、配置修改与命令测试可以自动执行；涉及仓库外路径或不可逆操作时必须先确认。
+- **非阻断式规划 (Non-Blocking Review Gates)**：日常任务、调试与代码改动，工件默认设置 `RequestFeedback: false`，不产生多余的阻断式确认卡片。
+- **工作区外严格防护 (Strict Non-Workspace Protection)**：涉及工作目录以外的敏感系统路径时，必须明确告知用户并获得许可。
+
+## Command & Scripting Preference
+- **优先使用 Python 脚本**：对于文件读写、数据处理、JSON 凭证配置或复杂逻辑，优先使用 Python 脚本（如 `uv run python` 或独立 `.py` 脚本）执行，确保跨平台确定性与 UTF-8 编码安全。
+- **优先使用 Git Bash / POSIX 兼容命令**：运行自动化工作流和脚本时，优先使用 `bash` 兼容语法或 POSIX 风格脚本，避免依赖平台特定的复杂终端特性。
+- **减少使用 PowerShell**：尽量避免生成复杂的 PowerShell（`pwsh`）单行指令、复杂转义或多行 Heredoc 字符串，防止因引号解析与控制台编码导致进程挂起或误阻断。
+
+## 标准书籍翻译工作流规范 (Standard Translation Workflow SOP)
+**【核心原则：严禁重新造轮子，严禁编写临时脚本】**
+当用户在任何会话中提出“翻译某本书”、“处理 EPUB/PDF”等需求时，**必须严格遵循以下精确 SOP 步骤与 Subagent 协同协议**：
+
+### 总体执行规则
+
+- 需要阅读、判断、翻译或润色内容时，在 Antigravity IDE 中使用工作区
+  Subagent，按本地命令生成的 `*_subagent_prompt.md` 和 manifest 执行。
+- 不要假设存在 `define_subagent`、`invoke_subagent` 等固定工具名；使用当前
+  IDE 提供的 Subagent 入口即可。
+- Subagent 必须直接读写工作区文件。只在聊天中返回译文而不写目标文件，视为
+  未完成。
+- Python 命令只负责拆分、压缩、校验、合并和打包，不调用翻译 API。
+- 只有 `ocr-pages` 可以按 OCR 配置调用本地或远程 OCR 服务；OCR 服务不得
+  被用于翻译、润色或结构判断。
+
+---
+
+### 1. EPUB 高保真翻译工作流 (EPUB Pipeline SOP)
+
+#### Step 1: 检查配置并准备任务
+1. 扫描 `input/` 目录下的 EPUB 文件（也支持 MOBI、AZW3），确认输入文件。
+2. 从 EPUB 元数据确认书名和源语言；在本地 `config_epub.yaml` 中填写 `title`、
+   `input_epub`、源语言和目标语言。不要覆盖用户的真实配置文件，除非用户明确要求。
+3. 配置至少应类似：
+   ```yaml
+   title: "提取到的书名"
+   input_epub: "实际文件名.epub"
+   translation:
+     source_language: English # 依据元数据判断
+     target_language: Chinese
+   html_translation:
+     epubcheck_mode: warn
+   ```
+
+#### Step 2: 本地离线结构拆分与压缩
+1. Agent 执行命令：`uv run pdf2epub -c config_epub.yaml html-prepare`
+2. 产物目录：`output/<title>/compressed_units/*.md`、对应 mapping，以及 `metadata_translation_source.json` 和 `metadata_translation_prompt.md`。
+
+#### Step 3: 调度 `book_translator` Subagent 协同翻译
+1. **检查与断点续传**：比对 `output/<title>/compressed_units/` 与 `output/<title>/translated_compressed/`，找出尚未完成或校验未通过的 `.md` 文件列表。
+2. 在 Antigravity IDE 中使用工作区 Subagent，读取生成的
+   `translate-html_subagent_prompt.md` 和 manifest；不要从 Python 创建模型客户端。
+   - **Subagent 必须遵守的翻译规则**：
+     ```markdown
+     请翻译以下 EPUB 压缩单元文件：
+     - 源文件路径：output/<title>/compressed_units/<file>.md
+     - 目标文件路径：output/<title>/translated_compressed/<file>.md
+     - 翻译语言：从 <source_language> 翻译为 简体中文
+
+     【翻译执行铁律】：
+     1. 【行数 1:1 绝对一致】：源文件有 N 行，输出文件必须严格保持 N 行（每行对应一个翻译单元）。
+     2. 【<div> 容器保全】：若源文件每行被 <div>...</div> 包裹，翻译后每行也必须用 <div>...</div> 包裹。
+     3. 【HTML 标签绝对保全】：严禁修改、删除或翻译任何 HTML 标签及属性（如 <span class="...">, <a>, <em>, <i>, <b>, <ruby>, <rt>, <img> 等），仅翻译标签包裹的文本内容。
+     4. 【直接写回文件】：将纯翻译内容写入 manifest 指定的目标文件。严禁在输出中添加 Markdown 代码块（```）包裹！
+     ```
+4. **元数据交接**：Subagent 还必须按 `metadata_translation_prompt.md` 读取元数据输入，并写入 `output/<title>/translated_metadata.json`。书名、目录、简介和版权说明翻译；`preserved_metadata.author` 与 `preserved_metadata.publisher` 必须逐字复制，禁止翻译或改写。
+5. 可以分批处理多个单元，但每次只处理 manifest 的 `pending_files`；不要覆盖
+   `completed_files`，除非本地校验明确指出该文件无效。
+
+#### Step 4: 本地离线全量质量校验
+1. Agent 执行命令：`uv run pdf2epub -c config_epub.yaml html-validate`
+2. **错误处理机制**：
+   - 若出现 `Line count mismatch` 或 `Tag mismatch`，定位具体报错的单元（如 `bm01.md`）；
+   - 将报错原因附带在 Prompt 中，重新调度 `book_translator` 仅重译并修复该单元；
+   - 重新执行 `html-validate`，直到 100% 单元通过校验。
+
+#### Step 5: 逆向重构与生成最终 EPUB
+1. Agent 执行命令：`uv run pdf2epub -c config_epub.yaml build-html-epub`
+   （校验失败时默认拒绝打包；仅预览时才显式使用 `--allow-partial`。）
+2. 生成最终文件：`output/<title>/<title>_translated.epub`（或中文书名.epub）。
+3. 向用户汇报完成并提供 EPUB 产物路径。
+
+---
+
+### 2. PDF 扫描件翻译与精修工作流 (PDF Pipeline SOP)
+
+#### Step 1: 检查配置
+1. 扫描 `input/` 目录下的 PDF 文件，确认输入文件和书名。
+2. 在本地 `config.yaml` 中填写 `title`、`input_pdf`、语言和 OCR 后端；不要自动
+   覆盖用户的真实配置。
+
+#### Step 2: 页面 OCR 提取
+1. Agent 执行命令：`uv run pdf2epub -c config.yaml ocr-pages --resume`
+2. 产物目录：`output/<title>/pages/page_XXX.md` 与 OCR 布局信息。
+
+#### Step 3: 结构分析与章节合并
+1. Agent 执行命令：`uv run pdf2epub -c config.yaml refine-prepare`
+2. 在 Antigravity IDE 中让 Subagent 阅读 `output/<title>/refine_subagent_prompt.md` 和 `pages/`，写入 `output/<title>/toc_tree.json`。
+3. Agent 执行命令：`uv run pdf2epub -c config.yaml refine-local --resume`
+4. 产物：`output/<title>/toc_tree.json` 与 `output/<title>/ocr_markdown/chapter_XXX.md`。
+5. **TOC 校验**：`refine-local` 本地检查章节重叠、父子范围和缺失页面；若失败，修正 `toc_tree.json` 后重新执行。
+
+#### Step 4: Subagent 润色或翻译
+- **若为翻译需求**：
+  1. 执行 `translate`，让 Subagent 按 `translate_subagent_prompt.md` 读取
+     `polished_markdown/validated/`，把同名译文写入 `translated/`；
+  2. 让 Subagent 按目录翻译 prompt 读取 `toc_tree.json`，写入
+     `toc_tree_translated.json`；
+  3. 保持 Markdown 标题层级（`#`, `##`）、公式（`$...$`）、脚注（`[^...]`）
+     和图片链接原样不变；完成后运行 `translate-validate`。
+- **若仅为版式精修需求**：
+  1. 执行 `polish`，让 Subagent 按 `polish_subagent_prompt.md` 修复 OCR 文本
+     断行与格式，写入 `output/<title>/polished_markdown/`；完成后运行
+     `polish-validate`。
+
+#### Step 5: 离线打包生成 EPUB
+- 生成中文翻译版：`uv run pdf2epub -c config.yaml build-epub --translated`
+- 生成原版精修版：`uv run pdf2epub -c config.yaml build-epub`
+
+---
+
+### 3. 轻小说 EPUB 翻译
+
+1. 执行 `translate-novel -i <input.epub>`，生成 `novel_units/`、manifest 和
+   `novel_subagent_prompt.md`。
+2. 让 Subagent 只处理 manifest 的 `pending_files`，将同名译文写入
+   `translated_novel/`，并按 `metadata_translation_prompt.md` 写入
+   `translated_metadata.json`。
+3. 作者名和出版社原样保留；保留图片标记和段落边界，不添加说明或代码围栏。
+4. 运行 `translate-novel-validate`，通过后运行 `build-novel-epub`。
+5. 额度中断时先校验，再用原命令加 `--resume`，不要删除已有结果。
+
+### 4. arXiv / LaTeX 翻译
+
+1. 执行 `translate-arxiv <source>`，读取生成的
+   `.pdf2epub/tex_subagent_prompt.md` 和 `tex_subagent_manifest.json`。
+2. 让 Subagent 只处理 `pending_units`，将译文写入 `translated_tex_units/`。
+   不要直接修改 `source/` 或把 `project/` 当作翻译交接目录。
+3. 完成后运行 `translate-arxiv-validate --output-dir <run_dir>`；该命令从完整
+   单元重建 `project/` 并进行本地编译。
+4. 额度中断时用原命令加 `--resume`，只处理 `pending_units`。
+
+### 5. 断点续传和错误处理
+
+1. 不要因为额度耗尽删除输出目录或源文件。
+2. 先运行对应的 `*-validate`，根据报告定位缺失、空白或结构错误文件。
+3. 使用 `--resume` 重新生成 manifest；Subagent 只处理 `pending_files` 或
+   `pending_units`。
+4. 修复后重复校验，全部通过才允许打包。元数据 JSON 必须整体重写为合法 JSON。
+
+### 6. 安全与合规红线 (Security Guardrails)
+- **严禁逆向伪装**：严禁在代码中硬编码或向请求头注入未经授权的内部项目 ID（如 `project-8dcc0e99-48d6-44c4-b50`）或外部冒用 `vertex_adc.json`。
+- **全流程安全**：翻译与精修统一在 Antigravity 内通过 Subagent 读写工作区文件进行，消耗 Antigravity / Gemini Pro 会话配额，兼顾零额外成本与 100% 官方合规安全。
