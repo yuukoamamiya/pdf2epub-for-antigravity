@@ -469,12 +469,12 @@ output/
 
 ## 致谢与上游项目
 
-本项目是 [ShenSheiBot/pdf2epub](https://github.com/ShenSheiBot/pdf2epub) 的优化增强版本。非常感谢原作者 [甚谁 (ShenSheiBot)](https://www.zhihu.com/people/sakuraayane_justice) 开源如此优秀的 PDF 到 EPUB 结构化转换引擎！
+本项目是 [ShenSheiBot/pdf2epub](https://github.com/ShenSheiBot/pdf2epub) 的优化增强版本。非常感谢原作者 [ShenSheiBot](https://github.com/ShenSheiBot)（bot）开源如此优秀的 PDF 到 EPUB 结构化转换引擎！
 
 ## 贡献
 
 欢迎提交 Issue 和 Pull Request！
-关注原作者 [甚谁](https://www.zhihu.com/people/sakuraayane_justice) 谢谢喵！
+也可以去关注一下[甚谁](https://www.zhihu.com/people/sakuraayane_justice)谢谢喵！
 
 ## 许可
 
