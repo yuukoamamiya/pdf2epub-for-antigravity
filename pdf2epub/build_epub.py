@@ -839,6 +839,29 @@ def build_epub(config: BuildEpubConfig) -> Path:
     # Load translated TOC if building translated EPUB
     if config.translated:
         translated_toc_path = config.output_dir / "toc_tree_translated.json"
+        if not translated_toc_path.exists() and config.config:
+            try:
+                from .commands.translate_v2 import _translate_toc
+                from .utils.llm_client import LLMClient
+                logger.info("toc_tree_translated.json not found, translating TOC on the fly...")
+                llm_client = LLMClient(config.config)
+                translation_models = config.config.get("translation", {}).get("models", [])
+                source_language = config.config.get("translation", {}).get("source_language", "English")
+                target_language = config.config.get("translation", {}).get("target_language", "Chinese")
+                translate_dir = config.markdown_dir.parent if config.markdown_dir.name in ('validated', 'raw') else config.markdown_dir
+                _translate_toc(
+                    output_dir=config.output_dir,
+                    translate_dir=translate_dir,
+                    llm_client=llm_client,
+                    translation_models=translation_models,
+                    source_language=source_language,
+                    target_language=target_language,
+                    config=config.config,
+                    resume=False,
+                )
+            except Exception as e:
+                logger.warning(f"Could not auto-translate TOC on the fly: {e}")
+
         if translated_toc_path.exists():
             with open(translated_toc_path, 'r', encoding='utf-8') as f:
                 toc_tree = json.load(f)
