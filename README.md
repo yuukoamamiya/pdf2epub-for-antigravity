@@ -65,6 +65,10 @@ subagent:
   models:
     translation: gemini-3.1-pro-preview
     default: gemini-3.6-flash
+  batching:
+    max_files: 5
+    max_source_tokens: 12000
+    max_concurrency: 3
   # 可选：覆盖某个任务
   # task_models:
   #   refine: gemini-3.6-flash
@@ -76,6 +80,8 @@ subagent:
 - 结构分析、OCR 润色和实体提取使用 default。
 
 这里的模型名是写给 Antigravity Subagent 的推荐值，不是 Python API 配置。每次任务生成的 manifest 和 prompt 会记录最终推荐模型。
+
+`batching` 只生成分批建议，不会从 Python 启动模型调用。manifest 会为每个源文件记录字节数、物理行数、非空翻译单元行数和估算 token 数，并给出 `recommended_batches`。超过单批 token 上限的文件会单独列出，需按完整翻译单元拆分后再交给 Subagent。默认最多同时进行 3 个 Subagent 任务。
 
 ## 流程一：扫描版 PDF 转 EPUB
 
@@ -200,6 +206,10 @@ subagent:
   models:
     translation: gemini-3.1-pro-preview
     default: gemini-3.6-flash
+  batching:
+    max_files: 5
+    max_source_tokens: 12000
+    max_concurrency: 3
 
 html_translation:
   epubcheck_mode: warn

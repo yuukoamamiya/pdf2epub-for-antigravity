@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -58,6 +59,102 @@ def test_prepare_markdown_subagent_records_model(tmp_path: Path):
     assert "configured-pro" in prompt
 
 
+def test_prepare_markdown_subagent_records_file_sizes_and_batches(tmp_path: Path):
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    (source_dir / "a.md").write_text("one\ntwo\n", encoding="utf-8")
+    (source_dir / "b.md").write_text("three", encoding="utf-8")
+
+    paths = prepare_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        tmp_path / "target",
+        "English",
+        "Chinese",
+        config={
+            "subagent": {
+                "batching": {
+                    "max_files": 1,
+                    "max_source_tokens": 100,
+                    "max_concurrency": 2,
+                }
+            }
+        },
+    )
+
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    stats = manifest["file_stats"]
+    assert stats["a.md"]["size_bytes"] == len((source_dir / "a.md").read_bytes())
+    assert stats["a.md"]["line_count"] == 2
+    assert stats["a.md"]["nonempty_line_count"] == 2
+    assert stats["a.md"]["estimated_tokens"] > 0
+    assert manifest["batching"]["max_concurrency"] == 2
+    assert manifest["recommended_batches"] == [["a.md"], ["b.md"]]
+
+
+def test_prepare_markdown_subagent_does_not_trust_unvalidated_partial_file(
+    tmp_path: Path,
+):
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "unit.md").write_text("source", encoding="utf-8")
+    (target_dir / "unit.md").write_text("partial", encoding="utf-8")
+
+    paths = prepare_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        target_dir,
+        "English",
+        "Chinese",
+        resume=True,
+    )
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+
+    assert manifest["completed_files"] == []
+    assert manifest["pending_files"] == ["unit.md"]
+
+
+def test_prepare_markdown_subagent_accepts_only_matching_validated_checkpoint(
+    tmp_path: Path,
+):
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    source = source_dir / "unit.md"
+    source.write_text("source", encoding="utf-8")
+    (target_dir / "unit.md").write_text("complete", encoding="utf-8")
+    (tmp_path / "translate_validation.json").write_text(
+        json.dumps(
+            {
+                "valid_files": ["unit.md"],
+                "source_sha256": {
+                    "unit.md": hashlib.sha256(source.read_bytes()).hexdigest()
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    paths = prepare_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        target_dir,
+        "English",
+        "Chinese",
+        resume=True,
+    )
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+
+    assert manifest["completed_files"] == ["unit.md"]
+    assert manifest["pending_files"] == []
+
+
 def test_prepare_markdown_subagent_emits_explicit_resume_lists(tmp_path: Path):
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"
@@ -79,8 +176,10 @@ def test_prepare_markdown_subagent_emits_explicit_resume_lists(tmp_path: Path):
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
     prompt = paths["prompt"].read_text(encoding="utf-8")
 
-    assert manifest["completed_files"] == ["done.md"]
-    assert manifest["pending_files"] == ["pending.md"]
+    # A non-empty file without a validation report may be a truncated output
+    # from an interrupted Subagent and must not be trusted as a checkpoint.
+    assert manifest["completed_files"] == []
+    assert manifest["pending_files"] == ["done.md", "pending.md"]
     assert "pending_files" in prompt
 
 
@@ -129,6 +228,7 @@ def test_metadata_validation_rejects_changed_publisher(tmp_path: Path):
         "preserved_metadata": {"author": "Jane Doe", "publisher": "Example 出版社"},
         "toc": [],
         "translated_description": "简介",
+        "translated_rights": "",
     }
     (tmp_path / "metadata_translation_source.json").write_text(
         json.dumps(source), encoding="utf-8"
@@ -140,6 +240,37 @@ def test_metadata_validation_rejects_changed_publisher(tmp_path: Path):
     report = pipeline.validate_translated_metadata()
     assert not report["valid"]
     assert any("publisher" in error for error in report["errors"])
+
+
+def test_metadata_validation_rejects_missing_top_level_rights_field(tmp_path: Path):
+    pipeline = object.__new__(HTMLEpubPipeline)
+    pipeline.output_dir = tmp_path
+    source = {
+        "schema_version": 1,
+        "original_title": "Original",
+        "target_language": "Chinese",
+        "target_language_code": "zh",
+        "preserved_metadata": {"author": "", "publisher": ""},
+        "translatable_metadata": {"description": "", "rights": ""},
+        "toc": [],
+    }
+    target = {
+        **source,
+        "translated_title": "译名",
+        "preserved_metadata": {"author": "", "publisher": ""},
+        "toc": [],
+        "translated_description": "",
+    }
+    (tmp_path / "metadata_translation_source.json").write_text(
+        json.dumps(source), encoding="utf-8"
+    )
+    (tmp_path / "translated_metadata.json").write_text(
+        json.dumps(target), encoding="utf-8"
+    )
+
+    report = pipeline.validate_translated_metadata()
+    assert not report["valid"]
+    assert "translated_rights field is missing" in report["errors"]
 
 
 def test_prepare_refine_subagent_writes_manifest_and_prompt(tmp_path: Path):

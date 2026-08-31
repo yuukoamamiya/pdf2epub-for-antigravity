@@ -11,12 +11,16 @@ import json
 import hashlib
 import re
 import shutil
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 
 DEFAULT_TRANSLATION_MODEL = "gemini-3.1-pro-preview"
 DEFAULT_SUBAGENT_MODEL = "gemini-3.6-flash"
+DEFAULT_BATCH_MAX_FILES = 5
+DEFAULT_BATCH_MAX_SOURCE_TOKENS = 12_000
+DEFAULT_BATCH_MAX_CONCURRENCY = 3
 
 _TRANSLATION_TASKS = {
     "translate",
@@ -62,6 +66,80 @@ def _markdown_files(directory: Path) -> List[Path]:
     return sorted(path for path in directory.glob("*.md") if path.is_file())
 
 
+@lru_cache(maxsize=1)
+def _get_tokenizer():
+    """Load the local tokenizer once for manifest estimates."""
+    try:
+        import tiktoken
+
+        return tiktoken.get_encoding("cl100k_base")
+    except Exception:
+        # The estimate is advisory only.  Keep task preparation usable if a
+        # downstream installation omits the optional tokenizer package.
+        return None
+
+
+def estimate_tokens(text: str) -> int:
+    tokenizer = _get_tokenizer()
+    if tokenizer is not None:
+        return len(tokenizer.encode(text))
+    return max(1, (len(text) + 3) // 4) if text else 0
+
+
+def _positive_int(value: Any, default: int) -> int:
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+def _batching_config(config: Optional[Mapping[str, Any]]) -> Dict[str, int]:
+    subagent = config.get("subagent", {}) if isinstance(config, Mapping) else {}
+    batching = subagent.get("batching", {}) if isinstance(subagent, Mapping) else {}
+    if not isinstance(batching, Mapping):
+        batching = {}
+    return {
+        "max_files": _positive_int(batching.get("max_files"), DEFAULT_BATCH_MAX_FILES),
+        "max_source_tokens": _positive_int(
+            batching.get("max_source_tokens"), DEFAULT_BATCH_MAX_SOURCE_TOKENS
+        ),
+        "max_concurrency": _positive_int(
+            batching.get("max_concurrency"), DEFAULT_BATCH_MAX_CONCURRENCY
+        ),
+    }
+
+
+def _recommended_batches(
+    file_stats: Mapping[str, Mapping[str, int]],
+    max_files: int,
+    max_source_tokens: int,
+) -> List[List[str]]:
+    """Create advisory, file-safe batches without splitting source lines."""
+    batches: List[List[str]] = []
+    current: List[str] = []
+    current_tokens = 0
+    for name, stats in file_stats.items():
+        tokens = stats["estimated_tokens"]
+        if current and (
+            len(current) >= max_files or current_tokens + tokens > max_source_tokens
+        ):
+            batches.append(current)
+            current = []
+            current_tokens = 0
+        current.append(name)
+        current_tokens += tokens
+        # An oversized file remains alone; the manifest explicitly flags it
+        # so the operator can split it at logical line boundaries if needed.
+        if tokens > max_source_tokens:
+            batches.append(current)
+            current = []
+            current_tokens = 0
+    if current:
+        batches.append(current)
+    return batches
+
+
 def prepare_markdown_subagent(
     output_dir: Path,
     task: str,
@@ -81,6 +159,27 @@ def prepare_markdown_subagent(
         raise ValueError(f"No Markdown source units found in {source_dir}")
 
     model = resolve_subagent_model(config, task)
+    batching = _batching_config(config)
+    file_stats: Dict[str, Dict[str, int]] = {}
+    for source in sources:
+        raw = source.read_bytes()
+        text = raw.decode("utf-8")
+        file_stats[source.name] = {
+            "size_bytes": len(raw),
+            "line_count": len(text.splitlines()),
+            "nonempty_line_count": len([line for line in text.splitlines() if line.strip()]),
+            "estimated_tokens": estimate_tokens(text),
+        }
+    recommended_batches = _recommended_batches(
+        file_stats,
+        batching["max_files"],
+        batching["max_source_tokens"],
+    )
+    oversized_files = [
+        name
+        for name, stats in file_stats.items()
+        if stats["estimated_tokens"] > batching["max_source_tokens"]
+    ]
     validated_files = None
     validation: Dict[str, Any] = {}
     validation_path = output_dir / f"{task}_validation.json"
@@ -102,9 +201,10 @@ def prepare_markdown_subagent(
             and source.name in validated_files
             and validation_hashes.get(source.name) == source_hash
         )
-        if resume and target.is_file() and target.read_text(encoding="utf-8").strip() and (
-            is_validated or validated_files is None
-        ):
+        # A non-empty target is not proof of completion: an interrupted
+        # Subagent can leave a truncated file behind.  Only a prior local
+        # validation with the same source hash is a resumable checkpoint.
+        if resume and target.is_file() and target.read_text(encoding="utf-8").strip() and is_validated:
             completed_files.append(source.name)
         else:
             pending_files.append(source.name)
@@ -119,6 +219,10 @@ def prepare_markdown_subagent(
         "source_dir": str(source_dir.relative_to(output_dir)),
         "target_dir": str(target_dir.relative_to(output_dir)),
         "files": [path.name for path in sources],
+        "file_stats": file_stats,
+        "batching": batching,
+        "recommended_batches": recommended_batches,
+        "oversized_files": oversized_files,
         "completed_files": completed_files,
         "pending_files": pending_files,
     }
@@ -146,6 +250,16 @@ Files listed in `completed_files` are existing checkpoints. Do not overwrite
 them unless a later local validation explicitly reports that file as invalid.
 If a target file is incomplete or invalid, replace it completely rather than
 appending to it.
+
+Batching guidance:
+
+- Prefer the `recommended_batches` in the manifest.
+- Keep each batch at or below {batching['max_files']} files and approximately
+  {batching['max_source_tokens']} source tokens; keep oversized files in their
+  own Subagent task and split them only at complete source-line boundaries.
+- Keep at most {batching['max_concurrency']} Subagent tasks active at once.
+- Files with no prior validation report are pending, even when a non-empty
+  target file already exists.
 
 Rules:
 
@@ -197,6 +311,13 @@ def validate_markdown_subagent(
                 break
         else:
             valid_files.append(source.name)
+
+        if target_text and "```" in target_text:
+            invalid.append(
+                {"file": source.name, "reason": "Markdown code fence is not allowed"}
+            )
+            if source.name in valid_files:
+                valid_files.remove(source.name)
 
     extras = sorted(path.name for path in _markdown_files(target_dir) if path.name not in {p.name for p in sources})
     if extras:

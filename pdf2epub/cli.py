@@ -579,7 +579,7 @@ def _prepare_html_command(args):
             source_language,
             target_language,
             extra_rules=(
-                "【1:1 Line Count Consistency】: Keep exactly one output line for every source line. Never insert internal newlines or line breaks inside a paragraph.",
+                "【1:1 Line Count Consistency】: Keep exactly one non-empty output line for every non-empty source translation unit. Never insert internal newlines or line breaks inside a paragraph.",
                 "【Exact Tag Sequence】: Preserve every HTML tag, attribute, and entity (<span ...>, <a ...>, <em>, <i>, <b>, <ruby>, etc.) in the exact same sequence. NEVER delete or merge adjacent tags (e.g. `<span>A</span> (<span>B</span>)` MUST remain two separate tags `<span>甲</span> (<span>乙</span>)`, not merged into one).",
                 "【Direct File Writing】: Write output directly to the designated target file without markdown code fences.",
                 "【Self-Validation】: Subagents should verify that output line count and tag sequences match the source before marking the task complete.",
@@ -782,8 +782,8 @@ def translate_novel_command(args):
                 if (translated_dir / name).is_file()
                 and (translated_dir / name).read_text(encoding="utf-8").strip()
                 and (
-                    not validation_available
-                    or (
+                    validation_available
+                    and (
                         name in validated_files
                         and validation_hashes.get(name)
                         == hashlib.sha256((output_dir / "novel_units" / name).read_bytes()).hexdigest()
@@ -1291,7 +1291,7 @@ def translate_validate_command(args):
 
 def translate_arxiv_command(args):
     """Materialize a TeX project and prepare a Subagent translation task."""
-    from pdf2epub.subagent_workflow import resolve_subagent_model
+    from pdf2epub.subagent_workflow import estimate_tokens, resolve_subagent_model
 
     import shutil
     from pdf2epub.tex_translation.arxiv import ArxivSourceResolver, slugify_source_id
@@ -1311,6 +1311,30 @@ def translate_arxiv_command(args):
     run_dir = run_dir.resolve()
     source_dir = run_dir / "source"
     project_dir = run_dir / "project"
+    control_dir = run_dir / ".pdf2epub"
+    previous_manifest = {}
+    previous_manifest_path = control_dir / "tex_subagent_manifest.json"
+    if getattr(args, "resume", False) and previous_manifest_path.is_file():
+        try:
+            previous_manifest = json.loads(
+                previous_manifest_path.read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError):
+            previous_manifest = {}
+    if not isinstance(previous_manifest, dict):
+        previous_manifest = {}
+    previous_manifest_units = previous_manifest.get("units", [])
+    previous_units = {
+        entry.get("id"): entry
+        for entry in previous_manifest_units
+        if isinstance(entry, dict) and entry.get("id")
+    } if isinstance(previous_manifest_units, list) else {}
+    previous_validated_ids = previous_manifest.get("validated_units", [])
+    previously_validated = (
+        set(previous_validated_ids)
+        if isinstance(previous_validated_ids, list)
+        else set()
+    )
     try:
         resolved = resolver.materialize(args.source, source_dir)
         main_tex = discover_main_tex(source_dir, args.main_tex or resolved.suggested_main_tex)
@@ -1345,13 +1369,18 @@ def translate_arxiv_command(args):
             entry.update({
                 "source_file": f"tex_units/{unit.id}.md",
                 "target_file": f"translated_tex_units/{target_name}",
+                "size_bytes": len(unit.source_text.encode("utf-8")),
+                "line_count": len(unit.source_text.splitlines()),
+                "estimated_tokens": estimate_tokens(unit.source_text),
             })
             unit_entries.append(entry)
         completed_units = [
             entry["id"] for entry in unit_entries
             if (translated_units_dir / Path(entry["target_file"]).name).is_file()
             and (translated_units_dir / Path(entry["target_file"]).name).read_text(encoding="utf-8").strip()
-            and getattr(args, "resume", False)
+            and entry["id"] in previously_validated
+            and previous_units.get(entry["id"], {}).get("source_sha256")
+            == entry.get("source_sha256")
         ]
         manifest = {
             "schema_version": 1,
@@ -1372,7 +1401,6 @@ def translate_arxiv_command(args):
                 entry["id"] for entry in unit_entries if entry["id"] not in completed_units
             ],
         }
-        control_dir = run_dir / ".pdf2epub"
         control_dir.mkdir(parents=True, exist_ok=True)
         (control_dir / "tex_subagent_manifest.json").write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -1472,6 +1500,10 @@ def translate_arxiv_validate_command(args):
             entry.get("id") for entry in manifest.get("units", [])
             if entry.get("id") not in completed_units
         ]
+        # A non-empty TeX unit is only a candidate until the reconstructed
+        # project compiles successfully.  Keep a separate durable checkpoint
+        # so --resume never trusts a truncated or compile-breaking file.
+        manifest["validated_units"] = []
         manifest_path.write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
         )
@@ -1497,6 +1529,10 @@ def translate_arxiv_validate_command(args):
         if not result.success:
             logger.error(f"TeX validation failed:\n{result.tail()}")
             return 1
+        manifest["validated_units"] = completed_units
+        manifest_path.write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         logger.success(f"TeX Subagent output compiled successfully: {result.pdf_path}")
         return 0
     except Exception as exc:

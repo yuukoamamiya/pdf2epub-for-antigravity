@@ -15,6 +15,11 @@ subagent:
   models:
     translation: gemini-3.1-pro-preview
     default: gemini-3.6-flash
+  # Subagent 批处理建议；长文件仍应按完整翻译单元拆分。
+  batching:
+    max_files: 5
+    max_source_tokens: 12000
+    max_concurrency: 3
   # 可选的单任务覆盖：
   # task_models:
   #   translate-html: gemini-3.1-pro-preview

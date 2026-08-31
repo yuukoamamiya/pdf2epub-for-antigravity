@@ -51,6 +51,8 @@
 
 #### Step 3: 调度 `book_translator` Subagent 协同翻译
 1. **检查与断点续传**：比对 `output/<title>/compressed_units/` 与 `output/<title>/translated_compressed/`，找出尚未完成或校验未通过的 `.md` 文件列表。
+   - 只有上一次本地校验报告中、且源文件 SHA-256 未变化的文件才算已完成；仅凭目标文件非空不能跳过。
+   - manifest 中的 `file_stats`、`recommended_batches` 和 `oversized_files` 用于安排任务；超过 token 上限的文件要按完整翻译单元拆分。
 2. **分批与并发粒度**：
    - 对于长篇或学术大章节（>30KB），推荐**单章节派发一个独立 Subagent**，避免单会话因 Token 截断导致的拼接/换行错误；
    - 对于前后置元数据、短章节（<20KB），可 3~5 篇一组并发派发。
@@ -64,7 +66,7 @@
      - 翻译语言：从 <source_language> 翻译为 简体中文
 
      【翻译执行铁律】：
-     1. 【行数 1:1 绝对一致】：源文件有 N 行，输出文件必须严格保持 N 行（每行对应一个翻译单元）。严禁在段落内部插入任何多余换行符 \n。
+     1. 【非空翻译单元 1:1 对齐】：源文件有 N 个非空翻译单元，输出文件必须保持 N 个非空译文行（每行对应一个翻译单元）。严禁在段落内部插入任何多余换行符 \n。
      2. 【<div> 容器保全】：若源文件每行被 <div>...</div> 包裹，翻译后每行也必须用 <div>...</div> 包裹。
      3. 【HTML 标签绝对保全与顺序一致】：严禁修改、删除或丢失任何 HTML 标签及属性（如 <span class="...">, <a>, <em>, <i>, <b>, <ruby>, <rt>, <img> 等），仅翻译标签包裹的文本内容。严禁合并相邻标签（例如 <span>A</span> (<span>B</span>) 必须翻译为 <span>甲</span> (<span>乙</span>)，保持两组独立标签）。
      4. 【直接写回文件】：将纯翻译内容直接写入 manifest 指定的目标文件。严禁在输出中添加 Markdown 代码块（```）包裹！
@@ -75,6 +77,7 @@
    - 中文译名写入 `translated_title`；
    - 章节目录翻译写入 `toc[].translated`，`href`、`anchor`、`level` 和顺序原样保留；
    - `preserved_metadata.author` 与 `preserved_metadata.publisher` 必须逐字复制，禁止翻译或改写；
+   - `translated_description` 和 `translated_rights` 始终保留为顶层字段；源字段为空时值可为空，源字段非空时必须翻译。
    - 版权声明写入顶层 `translated_rights`（如“保留所有权利”）。
 5. 可以分批处理多个单元，但每次只处理 manifest 的 `pending_files`；不要覆盖
    `completed_files`，除非本地校验明确指出该文件无效。

@@ -1197,8 +1197,10 @@ Rules:
 2. Translate title to `translated_title`.
 3. Translate every `toc[].original` to `toc[].translated`; keep each entry's
    `href`, `anchor`, `level`, and order exactly unchanged.
-4. Translate non-empty `translatable_metadata.description` and `rights` to top-level
-   `translated_description` and `translated_rights` (e.g. "保留所有权利").
+4. Always include top-level `translated_description` and `translated_rights`.
+   Translate non-empty `translatable_metadata.description` and `rights` into
+   those fields (for example, "保留所有权利"); use an empty string when the
+   corresponding source field is empty.
 5. Copy `preserved_metadata.author` and `preserved_metadata.publisher` exactly
    into the output's `preserved_metadata` object. Never translate, transliterate,
    normalize, or omit these two fields.
@@ -1520,7 +1522,7 @@ The output must have this shape:
             if not tgt_content.strip() and src_content.strip():
                 invalid.append({"file": src_file.name, "reason": "target is empty"})
                 continue
-            if tgt_content.lstrip().startswith("```"):
+            if "```" in tgt_content:
                 invalid.append({"file": src_file.name, "reason": "Markdown code fence is not allowed"})
                 continue
             else:
@@ -1627,14 +1629,16 @@ The output must have this shape:
                     errors.append(f"toc[{index}].translated is missing or empty")
 
         source_extra = source.get("translatable_metadata", {})
-        if source_extra.get("description") and not str(
-            translated.get("translated_description") or ""
-        ).strip():
-            errors.append("translated_description is missing or empty")
-        if source_extra.get("rights") and not str(
-            translated.get("translated_rights") or ""
-        ).strip():
-            errors.append("translated_rights is missing or empty")
+        for key, source_value in (
+            ("translated_description", source_extra.get("description")),
+            ("translated_rights", source_extra.get("rights")),
+        ):
+            if key not in translated:
+                errors.append(f"{key} field is missing")
+            elif not isinstance(translated.get(key), str):
+                errors.append(f"{key} must be a string")
+            elif source_value and not translated[key].strip():
+                errors.append(f"{key} is missing or empty")
 
         return {
             "valid": not errors,

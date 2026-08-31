@@ -15,6 +15,11 @@ subagent:
   models:
     translation: gemini-3.1-pro-preview
     default: gemini-3.6-flash
+  # Subagent 批处理建议；仅生成 manifest 和提示，不由 Python 自动调用模型。
+  batching:
+    max_files: 5
+    max_source_tokens: 12000
+    max_concurrency: 3
   # 可选：按任务覆盖上面的默认值，例如 refine / polish / translate-html。
   # task_models:
   #   refine: gemini-3.6-flash
