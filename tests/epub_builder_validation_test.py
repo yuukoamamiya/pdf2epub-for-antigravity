@@ -4,6 +4,7 @@ from xml.etree import ElementTree as ET
 
 from pdf2epub.cli import _resolve_pdf_markdown_source
 from pdf2epub.build_epub import (
+    flatten_toc_tree,
     generate_hierarchical_toc_html,
     generate_hierarchical_toc_ncx,
     resolve_book_metadata,
@@ -159,6 +160,28 @@ def test_epub_stylesheet_uses_a_valid_quote_string() -> None:
 
     assert 'content: "“";' in stylesheet
     assert 'content: """;' not in stylesheet
+
+
+def test_flatten_toc_tree_uses_subagent_translated_title_fields() -> None:
+    structure = flatten_toc_tree(
+        [{
+            "title": "Original",
+            "title_translated": "译名",
+            "level": 1,
+            "start_page": 1,
+            "end_page": 2,
+            "children": [{
+                "title": "Child",
+                "translated_title": "子标题",
+                "level": 2,
+                "start_page": 1,
+                "end_page": 2,
+            }],
+        }],
+        use_translated_titles=True,
+    )
+    assert structure[0]["title"] == "译名"
+    assert structure[0]["children"][0]["title"] == "子标题"
 
 
 def test_combined_markdown_follows_toc_and_split_part_order(tmp_path: Path) -> None:

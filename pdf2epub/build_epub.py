@@ -86,7 +86,7 @@ def resolve_book_metadata(
 
     if not result["author"]:
         try:
-            import fitz
+            import pymupdf as fitz
 
             for filename in ("input_original.pdf", "input.pdf"):
                 pdf_path = Path(output_dir) / filename
@@ -518,7 +518,8 @@ def has_notes_chapter(chapters: List[Dict]) -> bool:
 
 def flatten_toc_tree(
     chapters: List[Dict],
-    parent_index_path: List[int] = None
+    parent_index_path: List[int] = None,
+    use_translated_titles: bool = False,
 ) -> List[Dict]:
     """
     Flatten nested toc_tree structure into a list with file assignments.
@@ -538,8 +539,15 @@ def flatten_toc_tree(
         else:
             index_path = parent_index_path + [i + 1]
 
+        title = chapter.get('title', '')
+        if use_translated_titles:
+            title = (
+                chapter.get('title_translated')
+                or chapter.get('translated_title')
+                or title
+            )
         entry = {
-            'title': chapter['title'],
+            'title': title,
             'level': chapter.get('level', 1),
             'index_path': index_path,
             'start_page': chapter.get('start_page'),
@@ -551,7 +559,8 @@ def flatten_toc_tree(
         if 'children' in chapter and chapter['children']:
             entry['children'] = flatten_toc_tree(
                 chapter['children'],
-                index_path
+                index_path,
+                use_translated_titles=use_translated_titles,
             )
 
         result.append(entry)
@@ -574,7 +583,7 @@ def build_epub_structure(
     Returns:
         Structure dict for EPUB generation
     """
-    def process_entry(entry: Dict) -> Dict:
+    def process_entry(entry: Dict, inherited_file: Optional[Path] = None) -> Dict:
         result = {
             'title': entry['title'],
             'level': entry['level'],
@@ -595,14 +604,17 @@ def build_epub_structure(
             if file_path:
                 result['file_path'] = file_path
                 result['part_files'] = find_part_files(file_path)
-            elif 'children' not in entry:
+            elif 'children' not in entry and inherited_file is None:
                 # Only warn if this is a leaf node (no children)
                 # Container nodes (with children) don't need their own markdown
                 logger.warning(f"No markdown file found for {unit_id}: {entry['title']}")
 
         # Process children recursively
         if 'children' in entry:
-            result['children'] = [process_entry(c) for c in entry['children']]
+            child_inherited_file = result.get('file_path') or inherited_file
+            result['children'] = [
+                process_entry(c, child_inherited_file) for c in entry['children']
+            ]
 
         return result
 
@@ -962,13 +974,23 @@ def build_epub(config: BuildEpubConfig) -> Path:
             toc_tree = json.load(f)
         logger.info("Loaded Subagent-produced toc_tree_translated.json")
 
-        # Use translated book title
-        if 'book_title' in toc_tree:
-            config.book_title = toc_tree['book_title']
+        # Accept both the documented in-place form and the compatibility form
+        # commonly produced by Subagents (book_title_translated).
+        translated_title = (
+            toc_tree.get('book_title_translated')
+            or toc_tree.get('translated_book_title')
+            or toc_tree.get('translated_title')
+            or toc_tree.get('book_title')
+        )
+        if translated_title:
+            config.book_title = translated_title
             logger.info(f"Using translated title: {config.book_title}")
 
     # Flatten and process structure
-    toc_structure = flatten_toc_tree(toc_tree['chapters'])
+    toc_structure = flatten_toc_tree(
+        toc_tree['chapters'],
+        use_translated_titles=config.translated,
+    )
 
     # Build structure with file paths
     epub_structure = build_epub_structure(toc_structure, config.markdown_dir)

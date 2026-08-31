@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 from io import BytesIO
 from PIL import Image
-import fitz  # PyMuPDF
+import pymupdf as fitz
 from loguru import logger
 
 from ..markdown_to_html import convert_markdown_to_html

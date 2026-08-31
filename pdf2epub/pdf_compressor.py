@@ -17,7 +17,7 @@ import argparse
 import tempfile
 from pathlib import Path
 from PIL import Image
-import fitz  # PyMuPDF
+import pymupdf as fitz
 from loguru import logger
 from tqdm import tqdm
 from .utils.logging_config import configure_logging

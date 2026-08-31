@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List
 
-import fitz
+import pymupdf as fitz
 
 
 @dataclass

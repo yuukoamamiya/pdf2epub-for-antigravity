@@ -231,12 +231,30 @@ class RefinedBreakdown:
                 logger.info(f"'{node.title}' ({node.estimated_tokens} tokens) exceeds max_tokens, will be split by processor")
                 return [self._create_unit(node, index_path)]
 
-        # Case 2: Has children
+        # Case 2: Has children. If the direct children cover the complete
+        # parent range, use leaf units so every TOC leaf has a real file and
+        # EPUB navigation does not point at a non-existent chapter_N.M file.
         total_children_tokens = sum(child.estimated_tokens for child in node.children)
 
         if total_children_tokens <= self.max_tokens:
-            # Whole node fits in one unit
-            return [self._create_unit(node, index_path, include_children=True)]
+            cursor = node.start_page
+            children_cover_parent = True
+            for child in sorted(node.children, key=lambda item: item.start_page):
+                if child.start_page > cursor:
+                    children_cover_parent = False
+                    break
+                cursor = max(cursor, child.end_page + 1)
+            children_cover_parent = children_cover_parent and cursor > node.end_page
+            if not children_cover_parent:
+                # Preserve parent-only introductory material in one file.
+                return [self._create_unit(node, index_path, include_children=True)]
+            return [
+                unit
+                for child_idx, child in enumerate(node.children)
+                for unit in self._generate_units_recursive(
+                    child, pages_dir, index_path + [child_idx + 1]
+                )
+            ]
         else:
             # Recurse into children
             units = []

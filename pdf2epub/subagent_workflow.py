@@ -399,6 +399,7 @@ def validate_markdown_subagent(
     safety_blocked: List[str] = []
     valid_files: List[str] = []
     source_sha256: Dict[str, str] = {}
+    normalized_files: List[str] = []
     normalized_roles = {
         str(name): str(role).strip().lower()
         for name, role in (file_roles or {}).items()
@@ -419,6 +420,10 @@ def validate_markdown_subagent(
         source_text = source.read_text(encoding="utf-8")
         source_sha256[source.name] = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
         target_text = target.read_text(encoding="utf-8")
+        target_text, stripped_fence = strip_outer_markdown_fences(target_text)
+        if stripped_fence:
+            target.write_text(target_text, encoding="utf-8")
+            normalized_files.append(source.name)
         if not target_text.strip():
             invalid.append({"file": source.name, "reason": "target is empty"})
             continue
@@ -468,6 +473,7 @@ def validate_markdown_subagent(
         "invalid": invalid,
         "safety_blocked": safety_blocked,
         "bilingual_warnings": bilingual_warnings,
+        "normalized_files": normalized_files,
         "file_roles": normalized_roles,
         "extra": extras,
         "valid_files": valid_files,
@@ -479,6 +485,26 @@ def validate_markdown_subagent(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     return report
+
+
+def strip_outer_markdown_fences(text: str) -> tuple[str, bool]:
+    """Remove only a wrapping Markdown fence accidentally added by a Subagent.
+
+    Internal fences are left untouched and still fail validation.  This narrow
+    cleanup handles the common case where the model wraps the whole file in a
+    ````markdown`` block, without changing source code or mathematical content.
+    """
+    lines = text.splitlines(keepends=True)
+    nonempty = [index for index, line in enumerate(lines) if line.strip()]
+    if len(nonempty) < 3:
+        return text, False
+    first, last = nonempty[0], nonempty[-1]
+    if not re.fullmatch(r"```(?:markdown|md)?\s*", lines[first].strip(), re.IGNORECASE):
+        return text, False
+    if lines[last].strip() != "```":
+        return text, False
+    cleaned = "".join(lines[:first] + lines[first + 1:last] + lines[last + 1:])
+    return cleaned, True
 
 
 def detect_bilingual_output(source_text: str, target_text: str) -> Optional[Dict[str, Any]]:
@@ -556,8 +582,11 @@ Recommended Antigravity model: `{resolve_subagent_model(config, "toc-translation
 
 Read `toc_translation_source.json` and write `toc_tree_translated.json` in the
 same directory. Translate the book and chapter titles from {source_language}
-to {target_language}. Preserve every field except `book_title` and node
-`title`; preserve the complete tree, order, page ranges, levels,
+to {target_language}. Replace `book_title` and each node's `title` in place.
+Do not add parallel fields such as `book_title_translated` or
+`title_translated`; if a compatibility field is added, still write the
+translated value into the original field. Preserve the complete tree, order,
+page ranges, levels,
 `boundary_info`, types, and all other metadata.
 
 Return valid JSON only. Do not add Markdown fences or commentary.

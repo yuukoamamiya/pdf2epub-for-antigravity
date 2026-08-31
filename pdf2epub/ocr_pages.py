@@ -14,7 +14,7 @@ Supports multiple backends:
 
 import json
 import argparse
-import fitz  # PyMuPDF
+import pymupdf as fitz
 import os
 import tempfile
 from pathlib import Path

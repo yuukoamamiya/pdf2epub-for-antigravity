@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-import fitz
+import pymupdf as fitz
 import six
 from bs4 import BeautifulSoup, Tag
 from markdownify import MarkdownConverter, re_whitespace

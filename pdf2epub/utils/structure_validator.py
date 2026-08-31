@@ -330,7 +330,7 @@ def validate_book_structure_file(
         
         if pdf_path.exists():
             try:
-                import fitz
+                import pymupdf as fitz
                 with fitz.open(pdf_path) as pdf:
                     total_pages = len(pdf)
                     logger.info(f"Detected {total_pages} pages in PDF")

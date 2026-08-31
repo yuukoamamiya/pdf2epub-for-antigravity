@@ -14,6 +14,7 @@ from pdf2epub.subagent_workflow import (
     DEFAULT_TRANSLATION_MODEL,
     detect_refusal,
     detect_bilingual_output,
+    strip_outer_markdown_fences,
     prepare_markdown_subagent,
     prepare_toc_translation_subagent,
     resolve_subagent_model,
@@ -70,6 +71,15 @@ def test_detect_bilingual_output_is_advisory_for_long_unchanged_spans():
     assert warning is not None
     assert warning["start_line"] == 1
     assert warning["end_line"] == 2
+
+
+def test_strip_outer_markdown_fences_only_removes_wrapping_fence():
+    cleaned, changed = strip_outer_markdown_fences("```markdown\n# 标题\n正文\n```\n")
+    assert changed is True
+    assert cleaned == "# 标题\n正文\n"
+    unchanged, changed = strip_outer_markdown_fences("正文\n```\n内部\n")
+    assert changed is False
+    assert unchanged == "正文\n```\n内部\n"
 
 
 def test_markdown_validation_reports_bilingual_warning_without_failing(tmp_path: Path):
@@ -427,6 +437,34 @@ def test_prepare_refine_subagent_writes_manifest_and_prompt(tmp_path: Path):
     assert "toc_tree.json" in paths["prompt"].read_text(encoding="utf-8")
     assert (tmp_path / "pagination_map.json").exists()
     assert "pagination_map.json" in paths["prompt"].read_text(encoding="utf-8")
+
+
+def test_refine_local_splits_a_parent_when_children_cover_its_range(tmp_path: Path):
+    pages_dir = tmp_path / "pages"
+    pages_dir.mkdir()
+    for number in range(1, 5):
+        (pages_dir / f"page_{number:03d}.md").write_text(
+            f"Page {number} content", encoding="utf-8"
+        )
+    (tmp_path / "toc_tree.json").write_text(
+        json.dumps({
+            "chapters": [{
+                "title": "Container",
+                "level": 1,
+                "start_page": 1,
+                "end_page": 4,
+                "children": [
+                    {"title": "First", "level": 2, "start_page": 1, "end_page": 2},
+                    {"title": "Second", "level": 2, "start_page": 3, "end_page": 4},
+                ],
+            }]
+        }),
+        encoding="utf-8",
+    )
+    units = RefinedBreakdown(config={}, max_tokens=8000).process_from_toc(
+        tmp_path / "input.pdf", tmp_path, "Book"
+    )
+    assert [unit["unit_id"] for unit in units] == ["chapter_1.1", "chapter_1.2"]
 
 
 def test_prepare_toc_translation_subagent_writes_clean_prompt(tmp_path: Path):

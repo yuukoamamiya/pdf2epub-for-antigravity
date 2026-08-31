@@ -11,7 +11,7 @@ import tempfile
 import os
 from pathlib import Path
 from loguru import logger
-import fitz  # PyMuPDF
+import pymupdf as fitz
 
 from ..pdf_compressor import compress_pdf
 

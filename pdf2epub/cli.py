@@ -130,6 +130,8 @@ def _prepare_pdf_markdown_task(args, task: str):
             "Preserve Markdown heading levels, image links, footnote references, formulas, and link destinations exactly.",
             "Keep one output file for every source file and keep filenames unchanged.",
             "Output only the target-language replacement: never add bilingual paragraphs, parallel English titles, or the original text beside the translation.",
+            "Do not upgrade ordinary paragraphs, italic text, or bold text into Markdown headings: preserve exactly whether the source line begins with #.",
+            "Never add Markdown code fences (```); if the source has no fence, the translated output must have no fence.",
             "If translation_entities.json exists, use it as a terminology reference without modifying it.",
         ]
     configure_logging(book_title, f"{task}-prepare")

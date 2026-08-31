@@ -12,7 +12,7 @@ import tempfile
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 
-import fitz
+import pymupdf as fitz
 from loguru import logger
 
 from ..utils.common import parse_llm_json

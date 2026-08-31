@@ -18,7 +18,7 @@ def extract_pdf_metadata(pdf_path: Path) -> dict:
         dict: Contains title, author, pages
     """
     try:
-        import fitz  # PyMuPDF
+        import pymupdf as fitz
         doc = fitz.open(str(pdf_path))
         metadata = doc.metadata or {}
         page_count = len(doc)

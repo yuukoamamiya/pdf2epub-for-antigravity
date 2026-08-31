@@ -471,7 +471,7 @@ def ocr_pdf_chunk_vllm(
     """
     import io
     import re
-    import fitz  # PyMuPDF
+    import pymupdf as fitz
     from PIL import Image
     from pdf2epub.ocr.backends.vllm import init_client
 
