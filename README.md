@@ -23,12 +23,10 @@
    * 统一生成 POSIX 相对路径（`pages/page_001.html`），保证打包出的 EPUB 无论在 Calibre、Apple Books 还是各平台阅读器均能完美解析。
    * 自动支持从 `input/` 子目录解析 PDF 文件，增强文件查找与路径容错。
 
-4. ⚡ **一键式全自动流水线脚本（All-in-One Automation）**
-   * 提供经过生产验证的自动化脚本：
-     * `bash translate_pdf.sh config.yaml`：全自动 OCR ➔ Refine ➔ TOC 校验 ➔ Polish ➔ Translate ➔ 自动打包生成原版与中文版双 EPUB。
-     * `bash ocr_polish.sh config.yaml`：原版学术书籍一键 OCR 与版式精修。
-     * `bash translate_epub.sh config_epub.yaml`：已有 EPUB 保留原始 CSS/字体排版的高保真翻译。
-   * 全程支持中断自动断点续跑（`--resume`）。
+4. ⚡ **Antigravity 原生 Subagent 协同流水线（Native Subagent Architecture）**
+   * **EPUB 高保真翻译**：`pdf2epub html-prepare` ➔ `book_translator` 子 Agent 协同翻译 ➔ `pdf2epub html-validate` 校验 ➔ `pdf2epub build-html-epub` 逆向重构打包。
+   * **PDF 学术转换与精修**：`ocr-pages` 页面提取 ➔ `refine` 目录自愈 ➔ Subagent 翻译/润色 ➔ `build-epub` 输出双版 EPUB。
+   * 零外部商业 API 成本，100% 官方合规安全。
 
 ---
 
@@ -59,23 +57,32 @@
 4. **translate**：（可选）使用 LLM 翻译成目标语言
 5. **build-epub**：基于 toc_tree.json 生成 EPUB
 
-### EPUB 翻译工作流 (NEW - 保留原始格式)
+### EPUB 高保真翻译工作流 (Antigravity Subagent 驱动)
 
-适用于已有 EPUB 文件的翻译，完整保留原书的 CSS 样式、字体、排版：
+适用于已有 EPUB 文件的翻译，完整保留原书的 CSS 样式、字体与排版：
 
-1. **translate-html**：直接翻译 EPUB 内的 XHTML 内容，保留所有 HTML 结构和样式
-2. **build-html-epub**：将翻译后的 HTML 重新打包成 EPUB
+1. **html-prepare**：本地解析 EPUB 并无损压缩 XHTML，生成单行映射单元
+2. **Subagent 协同翻译**：由 Antigravity `book_translator` 子 Agent 批量翻译并保证标签与行数 1:1 绝对保全
+3. **html-validate**：纯本地全量校验标签序列与行数一致性
+4. **build-html-epub**：逆向重构完整 XHTML 并重新打包生成高质量 EPUB
 
 ```bash
-# EPUB 翻译示例
-uv run pdf2epub translate-html -i book.epub --target-language Chinese
-uv run pdf2epub build-html-epub
+# 1. 本地结构拆分与无损压缩 (0 API 消耗)
+uv run pdf2epub -c config_epub.yaml html-prepare
+
+# 2. 在 Antigravity 对话框中调度 book_translator 翻译各单元
+
+# 3. 本地离线 100% 质量与标签校验
+uv run pdf2epub -c config_epub.yaml html-validate
+
+# 4. 逆向重构并打包最终 EPUB
+uv run pdf2epub -c config_epub.yaml build-html-epub
 ```
 
 优势：
 - 完整保留原书的 CSS 样式、字体、封面、目录结构
-- 翻译后的书籍排版与原书一致
-- 支持增量翻译（`--resume`）和部分测试（`--limit N`）
+- 走 Antigravity 官方会话与 Gemini Pro 订阅配额，零额外 API 成本，绝对合规安全
+- 100% 本地快速校验防幻觉、防标签丢失与行数错位
 
 ### 轻小说翻译工作流 (Novel - 文本模式 + 术语表)
 
@@ -193,63 +200,50 @@ cp config.yaml.example config.yaml
 
 ### 配置示例 (Antigravity 极简配置)
 
-参考 `config.yaml.example`。使用 Antigravity 运行时的最简配置结构：
-
+#### A. EPUB 翻译配置 (`config_epub.yaml`)
 ```yaml
-title: "我的学术书籍"
-input_pdf: "input/book.pdf"  # 可将 PDF 放入 input/ 目录
-
-credentials:
-  providers:
-    # 🌟 推荐：直接复用本地 Google Antigravity 环境（无需填写 API Key）
-    antigravity:
-      type: antigravity
-
-    # 备用 / 翻译模型提供商
-    deepseek:
-      type: openai
-      api_key: your-key
-      base_url: https://api.deepseek.com/v1
-
-ocr:
-  backend: chandra  # 推荐 chandra，或 vision / azure
-
-refine:
-  structure:
-    provider: antigravity
-    model: gemini-2.5-pro
-    toc_model: gemini-2.5-pro
-
-ocr:
-  backend: chandra  # chandra / azure / vision / vllm
+title: "我的电子书"
+input_epub: "input/mybook.epub"  # 放入 input/ 目录后 Agent 会自动识别填充
 
 translation:
-  source_language: Japanese
+  source_language: English
   target_language: Chinese
-  models:
-    - provider: anthropic
-      model: claude-sonnet-4-6
-      api_retries: 2
-      validation_retries: 2
-    - provider: deepseek
-      model: deepseek-chat
-      api_retries: 2
-      validation_retries: 2
 
-# 可选：只在明确指定时让 refine 通过 OpenAI Responses API 传入 PDF。
-# 这是 Gemini PDF Part 路径的备用方案，不会在失败时自动切换模型。
+html_translation:
+  epubcheck_mode: warn
+```
+
+#### B. PDF 转换与精修配置 (`config.yaml`)
+```yaml
+title: "我的学术书籍"
+input_pdf: "input/mybook.pdf"
+
+translation:
+  source_language: English
+  target_language: Chinese
+
+ocr:
+  backend: chandra
+  furigana_mode: attach # 日语振假名: attach / remove / ruby
+  backends:
+    chandra:
+      base_url: https://chandra.shenshei.fans/v1
+      model: chandra
+      max_workers: 4
+      dpi: 192
+      min_dimension: 1024
+
 refine:
-  structure:
-    provider: openai_pdf
-    model: "your-pdf-capable-model"
-    toc_model: "your-pdf-capable-model"
-    pdf_transport:
-      type: openai_responses
-      timeout_seconds: 600
-
-# `base_url` 可写兼容端点根地址、.../v1，或 .../v1/responses；适配器会归一化。
-# 分批页数和重叠页数取决于模型、端点和 PDF，不存在通用的 50 页上限。
-# 明确的上下文超限会停止 refine 并保留错误，不会自行切换模型。
+  adaptive_page_limit:
+    initial_pages: 150
+    min_pages: 30
+  pdf_compression:
+    payload_limit_mb: 18
+    compress_if_exceeds: true
+    dpi: 50
+    quality: 40
+    grayscale: true
+```
 
 # 轻小说专用配置（可选）
 novel:

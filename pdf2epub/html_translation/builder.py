@@ -1414,6 +1414,67 @@ class HTMLEpubPipeline:
         logger.info(f"Wrote translation report: {report_path}")
         return report_path
 
+    def validate_translated_units(self) -> Dict[str, Any]:
+        """
+        Validate all translated compressed units against their sources.
+        Checks:
+        1. Translated file exists
+        2. Non-empty line count matches original
+        3. HTML tag sequence matches on each line
+        4. Target language content exists (Chinese characters)
+        5. Content omission checks
+
+        Returns:
+            Dict summary with keys: total, completed, valid, invalid (list), missing (list), all_passed (bool)
+        """
+        from .translator import HTMLTranslateProcessor
+
+        processor = HTMLTranslateProcessor(
+            config=self.config,
+            book_title=self.book_title,
+            source_language=self.source_language,
+            target_language=self.config.get("translation", {}).get("target_language", "Chinese")
+        )
+
+        all_sources = sorted(self.compressed_units_dir.glob("*.md"))
+        total = len(all_sources)
+        missing = []
+        invalid = []
+        valid = 0
+
+        for src_file in all_sources:
+            tgt_file = self.translated_dir / src_file.name
+            if not tgt_file.exists():
+                missing.append(src_file.name)
+                continue
+
+            src_content = src_file.read_text(encoding="utf-8")
+            tgt_content = tgt_file.read_text(encoding="utf-8")
+
+            # If target content is raw div-wrapped LLM response, clean it; otherwise use as-is
+            if "<div>" in tgt_content and "</div>" in tgt_content:
+                cleaned_tgt = processor.clean_response(tgt_content)
+            else:
+                cleaned_tgt = tgt_content.strip()
+            is_valid, reason = processor.validate_output(src_content, cleaned_tgt, src_file.name)
+
+            if is_valid:
+                valid += 1
+            else:
+                invalid.append({
+                    "file": src_file.name,
+                    "reason": reason
+                })
+
+        return {
+            "total": total,
+            "completed": total - len(missing),
+            "valid": valid,
+            "invalid": invalid,
+            "missing": missing,
+            "all_passed": (len(missing) == 0 and len(invalid) == 0 and total > 0)
+        }
+
     def postprocess_and_build(self, output_epub: Optional[Path] = None) -> Path:
         """
         Decompress translated content and build final EPUB.

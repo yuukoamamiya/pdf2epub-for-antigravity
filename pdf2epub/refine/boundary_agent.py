@@ -92,8 +92,8 @@ def get_model_and_limits(runtime_config: Optional[dict[str, Any]] = None):
                 )
             if provider_type == 'antigravity' or (not provider_config.get('api_key') and not provider_config.get('base_url')):
                 client_kwargs['vertexai'] = True
-                client_kwargs['project'] = provider_config.get('project') or "project-8dcc0e99-48d6-44c4-b50"
-                client_kwargs['location'] = provider_config.get('location') or "global"
+                client_kwargs['project'] = provider_config.get('project') or os.environ.get("GOOGLE_CLOUD_PROJECT")
+                client_kwargs['location'] = provider_config.get('location') or os.environ.get("GOOGLE_CLOUD_LOCATION", "global")
             client = Client(**client_kwargs)
             model = GoogleModel(
                 model_name,

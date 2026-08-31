@@ -504,7 +504,7 @@ async def run_agent_loop(
                         },
                     ) as agent_run:
                         async for _node in agent_run:
-                            pass
+                            await asyncio.sleep(0.3)
                         result = agent_run.result
                     last_agent_err = None
                     break

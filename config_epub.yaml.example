@@ -1,0 +1,14 @@
+# ==============================================================================
+# EPUB 高保真翻译配置模版 (Subagent 协同流水线)
+# ==============================================================================
+title: "Your Book Title"
+input_epub: "input/your_book.epub"
+
+# 语言设置
+translation:
+  source_language: English # 或 Japanese / French 等
+  target_language: Chinese
+
+# EPUB 构建与校验选项
+html_translation:
+  epubcheck_mode: warn # 可选: warn / off / strict

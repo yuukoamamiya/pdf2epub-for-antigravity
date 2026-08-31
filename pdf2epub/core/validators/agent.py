@@ -7,6 +7,7 @@ by giving an LLM agent tools to inspect and judge content quality.
 Implements BatchValidator protocol for use with new validation architecture.
 """
 
+import os
 import asyncio
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -82,8 +83,8 @@ def get_verification_model():
                     client_kwargs['http_options'] = HttpOptions(base_url=p['base_url'])
                 if provider_type == 'antigravity' or (not p.get('api_key') and not p.get('base_url')):
                     client_kwargs['vertexai'] = True
-                    client_kwargs['project'] = p.get('project') or "project-8dcc0e99-48d6-44c4-b50"
-                    client_kwargs['location'] = p.get('location') or "global"
+                    client_kwargs['project'] = p.get('project') or os.environ.get("GOOGLE_CLOUD_PROJECT")
+                    client_kwargs['location'] = p.get('location') or os.environ.get("GOOGLE_CLOUD_LOCATION", "global")
                 client = Client(**client_kwargs)
                 model = GoogleModel(configured_model, provider=GoogleProvider(client=client))
             else:

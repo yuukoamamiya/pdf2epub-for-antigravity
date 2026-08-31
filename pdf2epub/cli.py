@@ -381,9 +381,30 @@ def translate_html_command(args):
     config = load_config(args.config)
     book_title = config.get("title")
 
+    input_file = getattr(args, 'input', None) or config.get("input_epub")
+    if input_file is None:
+        input_dir = Path("input")
+        if input_dir.exists():
+            candidates = list(input_dir.glob("*.epub")) + list(input_dir.glob("*.azw3")) + list(input_dir.glob("*.mobi"))
+            if len(candidates) == 1:
+                input_file = str(candidates[0])
+
+    epub_path = resolve_input_path(input_file) if input_file else None
+
+    # Auto-infer book_title from metadata or filename if missing
     if not book_title:
-        logger.error("No title found in config.yaml")
-        return 1
+        if epub_path and epub_path.exists():
+            try:
+                from pdf2epub.html_translation.epub_parser import EPUBParser
+                parser = EPUBParser(epub_path)
+                meta = parser.get_metadata()
+                book_title = meta.get("title") or epub_path.stem
+            except Exception:
+                book_title = epub_path.stem
+            logger.info(f"Auto-inferred book title from input file: {book_title}")
+        else:
+            logger.error("No title found in config and no input file to infer from.")
+            return 1
 
     # Configure file logging
     configure_logging(book_title, "translate-html")
@@ -391,7 +412,6 @@ def translate_html_command(args):
     # Setup paths
     output_dir = Path("output") / book_title
     set_llm_trace_path(output_dir / "logs" / "llm_trace.jsonl")
-    epub_path = resolve_input_path(args.input) if args.input else None
 
     # If no epub specified, look for original epub in output dir
     if epub_path is None:
@@ -402,7 +422,7 @@ def translate_html_command(args):
                 break
 
     if epub_path is None or not epub_path.exists():
-        logger.error("Input file not found. Use -i to specify EPUB/AZW3/MOBI file.")
+        logger.error("Input file not found. Specify input_epub in config or place file in input/.")
         return 1
 
     # 格式转换或复制到 output 目录
@@ -509,6 +529,101 @@ def translate_html_command(args):
         logger.error(f"HTML translation failed: {e}")
         import traceback
         traceback.print_exc()
+        return 1
+
+
+def html_prepare_command(args):
+    """Handle html-prepare subcommand: extract EPUB and prepare compressed units (pure local, no LLM)."""
+    args.skip_extract = False
+    args.skip_translate = True
+    args.limit = None
+    args.use_entities = None
+    args.no_entities = False
+    args.resume = False
+    args.source_language = getattr(args, 'source_language', None)
+    args.target_language = getattr(args, 'target_language', None)
+    args.max_workers = 1
+    return translate_html_command(args)
+
+
+def html_validate_command(args):
+    """Handle html-validate subcommand: validate translated compressed units (pure local, no LLM)."""
+    from pathlib import Path
+    from pdf2epub.html_translation import HTMLEpubPipeline
+
+    config = load_config(args.config)
+    book_title = config.get("title")
+
+    input_file = getattr(args, 'input', None) or config.get("input_epub")
+    if input_file is None:
+        input_dir = Path("input")
+        if input_dir.exists():
+            candidates = list(input_dir.glob("*.epub")) + list(input_dir.glob("*.azw3")) + list(input_dir.glob("*.mobi"))
+            if len(candidates) == 1:
+                input_file = str(candidates[0])
+
+    epub_path = resolve_input_path(input_file) if input_file else None
+
+    # Auto-infer book_title from metadata or filename if missing
+    if not book_title:
+        if epub_path and epub_path.exists():
+            try:
+                from pdf2epub.html_translation.epub_parser import EPUBParser
+                parser = EPUBParser(epub_path)
+                meta = parser.get_metadata()
+                book_title = meta.get("title") or epub_path.stem
+            except Exception:
+                book_title = epub_path.stem
+            logger.info(f"Auto-inferred book title from input file: {book_title}")
+        else:
+            logger.error("No title found in config and no input file to infer from.")
+            return 1
+
+    configure_logging(book_title, "html-validate")
+    output_dir = Path("output") / book_title
+
+    if epub_path is None:
+        for candidate in ["input.epub", "original.epub"]:
+            candidate_path = output_dir / candidate
+            if candidate_path.exists():
+                epub_path = candidate_path
+                break
+
+    if epub_path is None or not epub_path.exists():
+        logger.error("Input file not found. Specify input_epub in config or place file in input/.")
+        return 1
+
+    pipeline = HTMLEpubPipeline(
+        epub_path=epub_path,
+        output_dir=output_dir,
+        config=config
+    )
+
+    report = pipeline.validate_translated_units()
+
+    logger.info("=" * 60)
+    logger.info(f"翻译单元验证结果: {book_title}")
+    logger.info("=" * 60)
+    logger.info(f"总单元数: {report['total']}")
+    logger.info(f"已完成:   {report['completed']}/{report['total']}")
+    logger.info(f"通过校验: {report['valid']}/{report['total']}")
+    if report['missing']:
+        logger.warning(f"未翻译单元 ({len(report['missing'])}):")
+        for m in report['missing'][:10]:
+            logger.warning(f"   - {m}")
+        if len(report['missing']) > 10:
+            logger.warning(f"   ...以及其余 {len(report['missing']) - 10} 个")
+    if report['invalid']:
+        logger.error(f"校验未通过单元 ({len(report['invalid'])}):")
+        for inv in report['invalid']:
+            logger.error(f"   - {inv['file']}: {inv['reason']}")
+
+    logger.info("=" * 60)
+    if report['all_passed']:
+        logger.success("所有翻译单元校验通过！可执行 pdf2epub build-html-epub 进行打包。")
+        return 0
+    else:
+        logger.warning("存在未完成或未通过校验的单元。")
         return 1
 
 
@@ -1029,9 +1144,30 @@ def build_html_epub_command(args):
     config = load_config(args.config)
     book_title = config.get("title")
 
+    input_file = getattr(args, 'input', None) or config.get("input_epub")
+    if input_file is None:
+        input_dir = Path("input")
+        if input_dir.exists():
+            candidates = list(input_dir.glob("*.epub")) + list(input_dir.glob("*.azw3")) + list(input_dir.glob("*.mobi"))
+            if len(candidates) == 1:
+                input_file = str(candidates[0])
+
+    epub_path = resolve_input_path(input_file) if input_file else None
+
+    # Auto-infer book_title from metadata or filename if missing
     if not book_title:
-        logger.error("No title found in config.yaml")
-        return 1
+        if epub_path and epub_path.exists():
+            try:
+                from pdf2epub.html_translation.epub_parser import EPUBParser
+                parser = EPUBParser(epub_path)
+                meta = parser.get_metadata()
+                book_title = meta.get("title") or epub_path.stem
+            except Exception:
+                book_title = epub_path.stem
+            logger.info(f"Auto-inferred book title from input file: {book_title}")
+        else:
+            logger.error("No title found in config and no input file to infer from.")
+            return 1
 
     # Configure file logging
     configure_logging(book_title, "build-html-epub")
@@ -1039,7 +1175,6 @@ def build_html_epub_command(args):
     # Setup paths
     output_dir = Path("output") / book_title
     set_llm_trace_path(output_dir / "logs" / "llm_trace.jsonl")
-    epub_path = resolve_input_path(args.input) if args.input else None
 
     # If no epub specified, look for original epub in output dir
     if epub_path is None:
@@ -1050,7 +1185,7 @@ def build_html_epub_command(args):
                 break
 
     if epub_path is None or not epub_path.exists():
-        logger.error("Input file not found. Use -i to specify EPUB/AZW3/MOBI file.")
+        logger.error("Input file not found. Specify input_epub in config or place file in input/.")
         return 1
 
     # 格式转换或复制到 output 目录
@@ -1574,6 +1709,38 @@ RECOMMENDED WORKFLOW / 推荐工作流 (uses toc_tree.json):
         help="Only translate first N files (rest are copied untranslated for testing)"
     )
     translate_html_parser.set_defaults(func=translate_html_command)
+
+    # HTML Prepare subcommand (pure local extraction and compression)
+    html_prepare_parser = subparsers.add_parser(
+        "html-prepare",
+        help="Extract and prepare compressed HTML units from EPUB (pure local, no LLM)",
+        description="Extract XHTML from EPUB and compress into units for translation."
+    )
+    html_prepare_parser.add_argument(
+        "-i", "--input",
+        help="Input file: EPUB, AZW3, or MOBI (default: output/<book_title>/input.epub)"
+    )
+    html_prepare_parser.add_argument(
+        "--source-language",
+        help="Source language (default: from EPUB metadata or Japanese)"
+    )
+    html_prepare_parser.add_argument(
+        "--target-language",
+        help="Target language (default: from config or Chinese)"
+    )
+    html_prepare_parser.set_defaults(func=html_prepare_command)
+
+    # HTML Validate subcommand (pure local validation)
+    html_validate_parser = subparsers.add_parser(
+        "html-validate",
+        help="Validate translated compressed units against originals (pure local, no LLM)",
+        description="Validate that all units are translated with matching line counts and intact HTML tag structures."
+    )
+    html_validate_parser.add_argument(
+        "-i", "--input",
+        help="Input file: EPUB, AZW3, or MOBI (default: output/<book_title>/input.epub)"
+    )
+    html_validate_parser.set_defaults(func=html_validate_command)
 
     # Build HTML EPUB subcommand (rebuild EPUB with translated HTML)
     build_html_epub_parser = subparsers.add_parser(

@@ -597,7 +597,10 @@ def create_processing_pipeline_v2(
 
     # Get max_workers from config if not specified
     if max_workers is None:
-        max_workers = config.get('general', {}).get('max_concurrent_workers', 4)
+        max_workers = (
+            config.get(task_type, {}).get('max_workers')
+            or config.get('general', {}).get('max_concurrent_workers', 4)
+        )
 
     # Create persistence (uses default raw/validated subdirs)
     persistence = ResultPersistence(output_dir=output_dir)

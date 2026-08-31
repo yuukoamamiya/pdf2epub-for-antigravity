@@ -152,18 +152,19 @@ class stop_after_self_retries(stop_base):
 
 class wait_exponential_with_self_max(wait_base):
     """Use Tenacity's wait_random_exponential with self.max_backoff_seconds."""
-    def __init__(self, multiplier: float = 1, attr: str = "max_backoff_seconds", default: int = 30):
+    def __init__(self, multiplier: float = 2.0, attr: str = "max_backoff_seconds", default: int = 30, min_wait: float = 2.0):
         self.multiplier = multiplier
         self.attr = attr
         self.default = default
+        self.min_wait = min_wait
 
     def __call__(self, retry_state):
         # For bound instance methods, args[0] is `self`
         obj = retry_state.args[0] if retry_state.args else None
         max_seconds = getattr(obj, self.attr, self.default)
         
-        # Create and use Tenacity's wait_random_exponential
-        wait_strategy = wait_random_exponential(multiplier=self.multiplier, max=max_seconds)
+        # Create and use Tenacity's wait_random_exponential with min wait
+        wait_strategy = wait_random_exponential(multiplier=self.multiplier, max=max_seconds, min=self.min_wait)
         return wait_strategy(retry_state)
 
 
@@ -332,7 +333,7 @@ class GeminiClient:
 
         Args:
             api_key: Gemini API key
-            base_url: Custom API endpoint (e.g., 'google.shenshei.fans')
+            base_url: Custom API endpoint (e.g., 'https://generativelanguage.googleapis.com')
             vertexai: Use Vertex AI (official, not via proxy)
             extra_headers: Extra HTTP headers (e.g., {'X-Use-Vertex': 'true'} for proxy)
             num_retries: Number of retries for transient errors
@@ -343,13 +344,6 @@ class GeminiClient:
         from google import genai
 
         if vertexai and not base_url:
-            # Auto-detect vertex_adc.json if GOOGLE_APPLICATION_CREDENTIALS is not explicitly set
-            if "GOOGLE_APPLICATION_CREDENTIALS" not in os.environ:
-                for cand in [Path("vertex_adc.json"), Path(__file__).resolve().parents[2] / "vertex_adc.json"]:
-                    if cand.is_file():
-                        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(cand.resolve())
-                        break
-
             if api_key:
                 # Official Vertex AI express mode.
                 self.client = genai.Client(vertexai=True, api_key=api_key)
@@ -363,7 +357,8 @@ class GeminiClient:
             else:
                 raise ValueError(
                     "Vertex AI requires either an API key for express mode "
-                    "or both project and location for ADC authentication"
+                    "or both project and location for ADC authentication. "
+                    "To avoid 403 / ToS bans, avoid unofficial internal project IDs."
                 )
         else:
             if not api_key:
@@ -660,13 +655,13 @@ class AntigravityClient(GeminiClient):
         max_backoff_seconds: int = 30,
         **kwargs
     ):
-        # Default to ADC Google authorized session if project/location not specified
-        resolved_project = project or "project-8dcc0e99-48d6-44c4-b50"
-        resolved_location = location or "global"
+        # Use explicitly configured project / location or environment variables
+        resolved_project = project or os.environ.get("GOOGLE_CLOUD_PROJECT")
+        resolved_location = location or os.environ.get("GOOGLE_CLOUD_LOCATION", "global")
         super().__init__(
-            api_key=api_key,
+            api_key=api_key or os.environ.get("GEMINI_API_KEY"),
             base_url=base_url,
-            vertexai=True if not base_url else False,
+            vertexai=True if (resolved_project and not base_url) else False,
             project=resolved_project,
             location=resolved_location,
             num_retries=num_retries,

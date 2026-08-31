@@ -9,6 +9,7 @@ Supports two modes:
 - Whole mode: agent-assisted loop with continuation for large files
 """
 
+import os
 import re
 import json
 from typing import Dict, Optional, Tuple, List, Any
@@ -365,8 +366,8 @@ class HTMLTranslateProcessor:
                     client_kwargs['http_options'] = HttpOptions(base_url=p.get('base_url'))
                 if p_type == 'antigravity' or (not p.get('api_key') and not p.get('base_url')):
                     client_kwargs['vertexai'] = True
-                    client_kwargs['project'] = p.get('project', 'project-8dcc0e99-48d6-44c4-b50')
-                    client_kwargs['location'] = p.get('location', 'global')
+                    client_kwargs['project'] = p.get('project') or os.environ.get("GOOGLE_CLOUD_PROJECT")
+                    client_kwargs['location'] = p.get('location') or os.environ.get("GOOGLE_CLOUD_LOCATION", "global")
 
                 client = Client(**client_kwargs)
                 gp = GoogleProvider(client=client)
@@ -406,8 +407,8 @@ class HTMLTranslateProcessor:
                         client_kwargs['http_options'] = HttpOptions(base_url=p.get('base_url'))
                     if p_type == 'antigravity' or (not p.get('api_key') and not p.get('base_url')):
                         client_kwargs['vertexai'] = True
-                        client_kwargs['project'] = p.get('project', 'project-8dcc0e99-48d6-44c4-b50')
-                        client_kwargs['location'] = p.get('location', 'global')
+                        client_kwargs['project'] = p.get('project') or os.environ.get("GOOGLE_CLOUD_PROJECT")
+                        client_kwargs['location'] = p.get('location') or os.environ.get("GOOGLE_CLOUD_LOCATION", "global")
 
                     client = Client(**client_kwargs)
                     gp = GoogleProvider(client=client)

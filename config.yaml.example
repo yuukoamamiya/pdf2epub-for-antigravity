@@ -1,260 +1,39 @@
-# PDF2EPUB Configuration Example
-# ===============================
-# Copy this file to config.yaml and fill in your credentials
-
+# ==============================================================================
+# PDF 转 EPUB / 精修 / 翻译配置模版 (Subagent 协同流水线)
+# ==============================================================================
 title: "Your Book Title"
-input_pdf: "input/your_book.pdf"  # 可选：直接在此指定输入 PDF
+input_pdf: "input/your_book.pdf"
 
-# Credentials - Provider configurations
-# =====================================
-# Define all your API providers here. You can have multiple instances of the same type.
-credentials:
-  providers:
-    # 🌟 Google Antigravity (推荐 / 零配置)
-    # 无需填写 API Key，自动复用本地 Google Antigravity / Gemini Pro 授权通道
-    antigravity:
-      type: antigravity
+# 语言设置
+translation:
+  source_language: English # 或 Japanese / German / French 等
+  target_language: Chinese
 
-    # Google (Gemini API) - 传统 API Key 方式
-    gemini:
-      type: google
-      api_key: "your-google-api-key"
-      # base_url: "https://your-proxy.example.com"  # Optional: custom endpoint
-
-    # Anthropic - Optional, for Claude models
-    anthropic:
-      type: anthropic
-      api_key: "your-anthropic-api-key"
-      base_url: "https://api.anthropic.com"  # or your proxy URL
-
-    # OpenAI-compatible providers
-    # You can define multiple OpenAI-compatible endpoints
-
-    openai:
-      type: openai
-      api_key: "your-openai-api-key"
-      base_url: "https://api.openai.com/v1"
-
-    # Optional: reuse the active OpenAI-compatible provider from Codex settings.
-    # No API token is copied into this file.
-    codex:
-      type: codex
-      # config_path: "~/.codex/config.toml"
-      # model_provider: "your-codex-provider"  # defaults to the active provider
-
-    deepseek:
-      type: openai
-      api_key: "your-deepseek-api-key"
-      base_url: "https://api.deepseek.com/v1"
-
-    # poe:
-    #   type: openai
-    #   api_key: "your-poe-api-key"
-    #   base_url: "https://api.poe.com/v1"
-
-    # Azure (for OCR) - Optional
-    # azure:
-    #   type: azure
-    #   api_key: "your-azure-key"
-    #   endpoint: "https://your-resource.cognitiveservices.azure.com/"
-
-# OCR Configuration
-# =================
+# OCR 设置 (默认 chandra，支持多模态 OCR)
 ocr:
-  backend: vision  # Options: 'chandra', 'vertex', 'mistral', 'vllm', 'azure', 'vision'
-  furigana_mode: attach  # Options: 'attach' or 'delete'
-
-  max_retries: 5
-  initial_backoff: 4.0
-
-  # Backend-specific overrides (optional)
+  backend: chandra
+  furigana_mode: attach # 日语振假名: attach / remove / ruby
   backends:
-    vision:
-      max_retries: 3
-      initial_backoff: 2.0
-    # Chandra runs as one persistent vLLM service per 24 GB GPU. The server
-    # performs continuous batching; four client requests gave the best
-    # throughput/latency tradeoff on mixed book pages.
     chandra:
-      base_url: http://127.0.0.1:8100/v1
+      base_url: https://chandra.shenshei.fans/v1
       model: chandra
-      model_revision: af93b47dba1b47b6640c86ccf487ed2260ab9a09
       max_workers: 4
-      max_output_tokens: 12384
       dpi: 192
       min_dimension: 1024
       include_headers_footers: false
-      # For a Cloudflare Access-protected public endpoint, keep the service
-      # token out of YAML and provide it to the OCR process through these
-      # environment variables. The names below are the defaults.
-      # base_url: https://chandra.example.com/v1
-      # access_client_id_env: CHANDRA_CF_ACCESS_CLIENT_ID
-      # access_client_secret_env: CHANDRA_CF_ACCESS_CLIENT_SECRET
-      # Run protected endpoints with: scripts/with_chandra_access uv run pdf2epub ...
+      access_client_id_env: CHANDRA_CF_ACCESS_CLIENT_ID
+      access_client_secret_env: CHANDRA_CF_ACCESS_CLIENT_SECRET
+      request_timeout: 300
+      max_retries: 6
 
-  # Vision API settings (for 'vision' backend)
-  vision:
-    service_account_key_path: sa-keys.json
-    zoom_factor: 1.0
-    max_workers: 4
-    illustration_padding: 25
-    trim_step_percent: 0.005
-    min_black_pixels: 200
-
-  # VLLM models for OCR (for 'vllm' backend)
-  vllm_models:
-    - provider: gemini
-      model: gemini-2.5-pro
-    # - provider: anthropic
-    #   model: claude-sonnet-4-5-20250929
-
-# Translation Configuration
-# =========================
-translation:
-  source_language: Japanese
-  target_language: Chinese
-  entity_extraction_model: gemini-2.5-flash
-
-  # Models to use for translation (tried in order)
-  models:
-    - provider: gemini
-      model: gemini-2.5-pro
-      api_retries: 2
-      validation_retries: 3
-    - provider: deepseek
-      model: deepseek-chat
-      api_retries: 3
-      validation_retries: 1
-
-  truncation_check_lines: 3
-
-# arXiv / LaTeX whole-mode translation
-# =====================================
-# Each TeX unit is committed only after the complete project compiles with
-# ctex + XeLaTeX. Completed units and raw model responses are cached on disk.
-tex_translation:
-  source_language: English
-  target_language: Simplified Chinese
-  unit_chars: 12000
-  model:
-    provider: gemini
-    model: gemini-3.1-pro-preview
-    max_retries: 2
-  compiler:
-    timeout_seconds: 180
-  repair:
-    enabled: true
-    provider: codex
-    model: gpt-5.6-luna
-
-# HTML EPUB Build Configuration
-# =============================
-html_translation:
-  # Run EPUBCheck after packaging when it is installed.
-  # off: skip; warn: report errors and keep the EPUB; strict: fail the build.
-  epubcheck_mode: warn
-
-# Polish Configuration
-# ====================
-polish:
-  processing_mode: parallel  # 'parallel' or 'sequential'
-
-  models:
-    - provider: gemini
-      model: gemini-2.5-flash
-      api_retries: 2
-      validation_retries: 1
-    # - provider: anthropic
-    #   model: claude-sonnet-4-5-20250929
-    #   api_retries: 2
-    #   validation_retries: 1
-
-  truncation_check_lines: 5
-
-# Breakdown Configuration
-# =======================
-breakdown:
-  model: gemini-2.5-pro
-
-# Storage Configuration (for sync feature)
-# ========================================
-# storage:
-#   s3:
-#     access_key_id: "your-access-key"
-#     secret_access_key: "your-secret-key"
-#     bucket_name: "your-bucket"
-#     endpoint: "https://your-s3-endpoint"
-
-# General Configuration
-# =====================
-general:
-  max_concurrent_workers: 8
-
-# Validation Strategy
-# ===================
-validation_strategy:
-  max_attempts: 2
-  use_longest_on_failure: false
-  fallback_between_models: true
-  validate_chinese_translation: false
-
-# Validation Configuration (for polish / translate commands)
-# ==========================================================
-validation_v2:
-  # Truncation detection settings
-  truncation:
-    min_unique_preserved_ratio: 0.60  # N-gram unique content threshold
-    allow_deduplication: true          # Whether deduplication is acceptable
-    truncation_check_lines: 5          # Lines to check with LLM fallback
-    enable_llm_fallback: true          # Use LLM to verify N-gram results
-
-  # Hooks configuration
-  hooks:
-    length_ratio:
-      min_ratio: 0.3   # Minimum result/original length ratio
-      max_ratio: 3.0   # Maximum result/original length ratio
-    skip_chapter_types:
-      - front_matter
-      - back_matter
-      - toc
-      - notes
-      - appendix
-    skip_short_content_chars: 50  # Skip validation for content < N chars
-
-  # Retry quotas per error type
-  quotas:
-    total: 5           # Total retries per unit
-    network: 3         # Network error retries
-    validation: 1      # Validation error retries
-    truncation: 2      # Truncation error retries (switches model)
-    rate_limit: 3      # Rate limit retries
-    timeout: 3         # Timeout retries
-
-# Model Output Limits
-# ===================
-# Practical reliable output tokens per model
-# Adjust based on your experience with each model
-model_output_limits:
-  "gemini-2.5-pro": 8000
-  "gemini-2.5-flash": 6000
-  "gemini-3-pro-preview": 8000
-  "claude-sonnet-4-5-20250929": 8000
-  "claude-3-haiku-20240307": 4000
-  "deepseek-chat": 8000
-  "gpt-4o": 8000
-  "gpt-4o-mini": 4000
-  "_default": 4000
-
-# Splitting Configuration
-# =======================
-splitting:
-  max_resplits: 3
-  consecutive_failures_threshold: 2
-  max_retries_before_resplit: 2
-
-# Retry Configuration
-# ===================
-retry:
-  num_retries: 3
-  max_backoff_seconds: 30
-  max_wait_seconds: 30
+# Refine 与结构自愈设置
+refine:
+  adaptive_page_limit:
+    initial_pages: 150
+    min_pages: 30
+  pdf_compression:
+    payload_limit_mb: 18
+    compress_if_exceeds: true
+    dpi: 50
+    quality: 40
+    grayscale: true
