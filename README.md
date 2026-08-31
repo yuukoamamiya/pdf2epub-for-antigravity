@@ -63,11 +63,11 @@ Windows 用户也可以直接复制文件，不必使用 cp。真实配置、凭
 ~~~yaml
 subagent:
   models:
-    translation: gemini-2.5-pro
-    default: gemini-2.5-flash
+    translation: gemini-3.1-pro-preview
+    default: gemini-3.6-flash
   # 可选：覆盖某个任务
   # task_models:
-  #   refine: gemini-2.5-flash
+  #   refine: gemini-3.6-flash
 ~~~
 
 默认规则：
@@ -198,8 +198,8 @@ translation:
 
 subagent:
   models:
-    translation: gemini-2.5-pro
-    default: gemini-2.5-flash
+    translation: gemini-3.1-pro-preview
+    default: gemini-3.6-flash
 
 html_translation:
   epubcheck_mode: warn

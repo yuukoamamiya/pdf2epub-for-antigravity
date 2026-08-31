@@ -13,11 +13,11 @@ translation:
 # 翻译类任务默认使用 Pro，其余任务（结构分析、润色、实体提取）默认使用 Flash。
 subagent:
   models:
-    translation: gemini-2.5-pro
-    default: gemini-2.5-flash
+    translation: gemini-3.1-pro-preview
+    default: gemini-3.6-flash
   # 可选：按任务覆盖上面的默认值，例如 refine / polish / translate-html。
   # task_models:
-  #   refine: gemini-2.5-flash
+  #   refine: gemini-3.6-flash
 
 # OCR 设置 (默认 chandra，支持多模态 OCR)
 ocr:

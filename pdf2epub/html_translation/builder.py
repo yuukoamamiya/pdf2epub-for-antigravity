@@ -1183,7 +1183,7 @@ class HTMLEpubPipeline:
         return source_path
 
     @staticmethod
-    def _metadata_translation_prompt(source_filename: str, model: str = "gemini-2.5-pro") -> str:
+    def _metadata_translation_prompt(source_filename: str, model: str = "gemini-3.1-pro-preview") -> str:
         """Return a concise, copyable subagent instruction."""
         return f"""# EPUB metadata translation
 
@@ -1193,15 +1193,16 @@ Read `{source_filename}` and write `translated_metadata.json` in the same direct
 
 Rules:
 
-1. Translate `original_title` to `translated_title`.
-2. Translate every `toc[].original` to `toc[].translated`; keep each entry's
+1. Keep `original_title` exactly matching the `original_title` value in `{source_filename}` (do NOT translate `original_title`).
+2. Translate title to `translated_title`.
+3. Translate every `toc[].original` to `toc[].translated`; keep each entry's
    `href`, `anchor`, `level`, and order exactly unchanged.
-3. Translate non-empty `translatable_metadata.description` and `rights` to
-   `translated_description` and `translated_rights`.
-4. Copy `preserved_metadata.author` and `preserved_metadata.publisher` exactly
+4. Translate non-empty `translatable_metadata.description` and `rights` to top-level
+   `translated_description` and `translated_rights` (e.g. "保留所有权利").
+5. Copy `preserved_metadata.author` and `preserved_metadata.publisher` exactly
    into the output's `preserved_metadata` object. Never translate, transliterate,
    normalize, or omit these two fields.
-5. Return valid JSON only. Do not wrap it in Markdown fences or add commentary.
+6. Return valid JSON only. Do not wrap it in Markdown fences or add commentary.
 
 The output must have this shape:
 
@@ -1516,7 +1517,7 @@ The output must have this shape:
                     "reason": f"HTML tag structure mismatch in {mismatches} line(s)",
                 })
                 continue
-            if not tgt_content.strip():
+            if not tgt_content.strip() and src_content.strip():
                 invalid.append({"file": src_file.name, "reason": "target is empty"})
                 continue
             if tgt_content.lstrip().startswith("```"):

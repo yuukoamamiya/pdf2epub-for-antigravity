@@ -15,8 +15,8 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 
-DEFAULT_TRANSLATION_MODEL = "gemini-2.5-pro"
-DEFAULT_SUBAGENT_MODEL = "gemini-2.5-flash"
+DEFAULT_TRANSLATION_MODEL = "gemini-3.1-pro-preview"
+DEFAULT_SUBAGENT_MODEL = "gemini-3.6-flash"
 
 _TRANSLATION_TASKS = {
     "translate",

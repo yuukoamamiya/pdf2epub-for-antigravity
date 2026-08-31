@@ -579,8 +579,10 @@ def _prepare_html_command(args):
             source_language,
             target_language,
             extra_rules=(
-                "Keep exactly one output line for every source line.",
-                "Preserve every HTML tag, attribute, entity, and placeholder exactly; translate only text.",
+                "【1:1 Line Count Consistency】: Keep exactly one output line for every source line. Never insert internal newlines or line breaks inside a paragraph.",
+                "【Exact Tag Sequence】: Preserve every HTML tag, attribute, and entity (<span ...>, <a ...>, <em>, <i>, <b>, <ruby>, etc.) in the exact same sequence. NEVER delete or merge adjacent tags (e.g. `<span>A</span> (<span>B</span>)` MUST remain two separate tags `<span>甲</span> (<span>乙</span>)`, not merged into one).",
+                "【Direct File Writing】: Write output directly to the designated target file without markdown code fences.",
+                "【Self-Validation】: Subagents should verify that output line count and tag sequences match the source before marking the task complete.",
             ),
             config=config,
             resume=getattr(args, "resume", False),

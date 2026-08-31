@@ -51,9 +51,12 @@
 
 #### Step 3: 调度 `book_translator` Subagent 协同翻译
 1. **检查与断点续传**：比对 `output/<title>/compressed_units/` 与 `output/<title>/translated_compressed/`，找出尚未完成或校验未通过的 `.md` 文件列表。
-2. 在 Antigravity IDE 中使用工作区 Subagent，读取生成的
+2. **分批与并发粒度**：
+   - 对于长篇或学术大章节（>30KB），推荐**单章节派发一个独立 Subagent**，避免单会话因 Token 截断导致的拼接/换行错误；
+   - 对于前后置元数据、短章节（<20KB），可 3~5 篇一组并发派发。
+3. 在 Antigravity IDE 中使用工作区 Subagent，读取生成的
    `translate-html_subagent_prompt.md` 和 manifest；不要从 Python 创建模型客户端。
-   - **Subagent 必须遵守的翻译规则**：
+   - **Subagent 必须遵守的翻译铁律**：
      ```markdown
      请翻译以下 EPUB 压缩单元文件：
      - 源文件路径：output/<title>/compressed_units/<file>.md
@@ -61,18 +64,23 @@
      - 翻译语言：从 <source_language> 翻译为 简体中文
 
      【翻译执行铁律】：
-     1. 【行数 1:1 绝对一致】：源文件有 N 行，输出文件必须严格保持 N 行（每行对应一个翻译单元）。
+     1. 【行数 1:1 绝对一致】：源文件有 N 行，输出文件必须严格保持 N 行（每行对应一个翻译单元）。严禁在段落内部插入任何多余换行符 \n。
      2. 【<div> 容器保全】：若源文件每行被 <div>...</div> 包裹，翻译后每行也必须用 <div>...</div> 包裹。
-     3. 【HTML 标签绝对保全】：严禁修改、删除或翻译任何 HTML 标签及属性（如 <span class="...">, <a>, <em>, <i>, <b>, <ruby>, <rt>, <img> 等），仅翻译标签包裹的文本内容。
-     4. 【直接写回文件】：将纯翻译内容写入 manifest 指定的目标文件。严禁在输出中添加 Markdown 代码块（```）包裹！
+     3. 【HTML 标签绝对保全与顺序一致】：严禁修改、删除或丢失任何 HTML 标签及属性（如 <span class="...">, <a>, <em>, <i>, <b>, <ruby>, <rt>, <img> 等），仅翻译标签包裹的文本内容。严禁合并相邻标签（例如 <span>A</span> (<span>B</span>) 必须翻译为 <span>甲</span> (<span>乙</span>)，保持两组独立标签）。
+     4. 【直接写回文件】：将纯翻译内容直接写入 manifest 指定的目标文件。严禁在输出中添加 Markdown 代码块（```）包裹！
+     5. 【写入后自检】：Subagent 完成写入后应自检行数与标签数量，确保 100% 对齐后再报告完成。
      ```
-4. **元数据交接**：Subagent 还必须按 `metadata_translation_prompt.md` 读取元数据输入，并写入 `output/<title>/translated_metadata.json`。书名、目录、简介和版权说明翻译；`preserved_metadata.author` 与 `preserved_metadata.publisher` 必须逐字复制，禁止翻译或改写。
+4. **元数据交接**：Subagent 还必须按 `metadata_translation_prompt.md` 读取元数据输入，并写入 `output/<title>/translated_metadata.json`。
+   - `original_title` 保持原英文书名不变；
+   - 中文译名写入 `translated_title`；
+   - 章节目录翻译写入 `toc[].translated`，`href`、`anchor`、`level` 和顺序原样保留；
+   - `preserved_metadata.author` 与 `preserved_metadata.publisher` 必须逐字复制，禁止翻译或改写；
+   - 版权声明写入顶层 `translated_rights`（如“保留所有权利”）。
 5. 可以分批处理多个单元，但每次只处理 manifest 的 `pending_files`；不要覆盖
    `completed_files`，除非本地校验明确指出该文件无效。
 
 #### Step 4: 本地离线全量质量校验
 1. Agent 执行命令：`uv run pdf2epub -c config_epub.yaml html-validate`
-2. **错误处理机制**：
    - 若出现 `Line count mismatch` 或 `Tag mismatch`，定位具体报错的单元（如 `bm01.md`）；
    - 将报错原因附带在 Prompt 中，重新调度 `book_translator` 仅重译并修复该单元；
    - 重新执行 `html-validate`，直到 100% 单元通过校验。

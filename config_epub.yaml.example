@@ -13,11 +13,11 @@ translation:
 # 正文、元数据和目录翻译默认使用 Pro；其他任务默认使用 Flash。
 subagent:
   models:
-    translation: gemini-2.5-pro
-    default: gemini-2.5-flash
+    translation: gemini-3.1-pro-preview
+    default: gemini-3.6-flash
   # 可选的单任务覆盖：
   # task_models:
-  #   translate-html: gemini-2.5-pro
+  #   translate-html: gemini-3.1-pro-preview
 
 # EPUB 构建与校验选项
 html_translation:
