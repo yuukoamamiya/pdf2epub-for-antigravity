@@ -650,9 +650,7 @@ Recommended Antigravity model: `{resolve_subagent_model(config, "toc-translation
 Read `toc_translation_source.json` and write `toc_tree_translated.json` in the
 same directory. Translate the book and chapter titles from {source_language}
 to {target_language}. Replace `book_title` and each node's `title` in place.
-Do not add parallel fields such as `book_title_translated` or
-`title_translated`; if a compatibility field is added, still write the
-translated value into the original field. Preserve the complete tree, order,
+Do not add parallel translation fields. Preserve the complete tree, order,
 page ranges, levels,
 `boundary_info`, types, and all other metadata.
 
@@ -669,7 +667,6 @@ def validate_toc_translation_subagent(output_dir: Path) -> Dict:
     source_path = output_dir / "toc_translation_source.json"
     target_path = output_dir / "toc_tree_translated.json"
     errors: List[str] = []
-    compatibility_warnings: List[str] = []
     if not source_path.exists():
         errors.append("toc_translation_source.json is missing")
     if not target_path.exists():
@@ -688,15 +685,6 @@ def validate_toc_translation_subagent(output_dir: Path) -> Dict:
     if target.get("schema_version") != source.get("schema_version"):
         errors.append("schema_version changed")
     if "book_title" in source:
-        translated_book_title = (
-            target.get("book_title_translated")
-            or target.get("translated_book_title")
-            or target.get("translated_title")
-        )
-        if translated_book_title and target.get("book_title") == source.get("book_title"):
-            compatibility_warnings.append(
-                "book_title was left unchanged; using a *_translated compatibility field"
-            )
         if not isinstance(target.get("book_title"), str) or not target["book_title"].strip():
             errors.append("book_title is missing or empty")
     for key, value in source.items():
@@ -717,14 +705,6 @@ def validate_toc_translation_subagent(output_dir: Path) -> Dict:
             if not isinstance(source_node, dict) or not isinstance(target_node, dict):
                 errors.append(f"{node_path} must remain an object")
                 continue
-            translated_node_title = (
-                target_node.get("title_translated")
-                or target_node.get("translated_title")
-            )
-            if translated_node_title and target_node.get("title") == source_node.get("title"):
-                compatibility_warnings.append(
-                    f"{node_path}.title was left unchanged; using a *_translated compatibility field"
-                )
             if not isinstance(target_node.get("title"), str) or not target_node["title"].strip():
                 errors.append(f"{node_path}.title is missing or empty")
             for key, value in source_node.items():
@@ -738,13 +718,7 @@ def validate_toc_translation_subagent(output_dir: Path) -> Dict:
     return {
         "valid": not errors,
         "errors": errors,
-        "compatibility_warnings": compatibility_warnings,
-        "resolved_book_title": (
-            target.get("book_title_translated")
-            or target.get("translated_book_title")
-            or target.get("translated_title")
-            or target.get("book_title")
-        ),
+        "resolved_book_title": target.get("book_title"),
         "source": str(source_path),
         "translated": str(target_path),
     }

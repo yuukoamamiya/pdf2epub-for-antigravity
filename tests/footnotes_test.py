@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 import pytest
@@ -58,26 +57,6 @@ def _render(structure: list[dict], manager: FootnoteManager) -> dict[str, str]:
 
     walk(structure)
     return html_files
-
-
-def _write_section_cache(markdown_dir: Path, matches: list[dict]) -> None:
-    book_dir = markdown_dir.parent.parent
-    (book_dir / "toc_tree.json").write_text(
-        json.dumps(
-            {
-                "chapters": [
-                    {"title": "Body one"},
-                    {"title": "Body two"},
-                    {"title": "Notes", "type": "notes"},
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
-    (markdown_dir.parent / "footnote_section_matches.json").write_text(
-        json.dumps(matches, ensure_ascii=False),
-        encoding="utf-8",
-    )
 
 
 def test_content_address_index_uses_structure_for_leaf_ancestry_and_html_names(
@@ -178,136 +157,8 @@ def test_global_occurrence_mapping_without_semantic_sections_is_valid(
     manager = FootnoteManager(tmp_path, auto_global=True, epub_structure=structure)
     report = validate_footnote_graph(_render(structure, manager))
 
-    assert manager.notes_sections == []
     assert report["forward_hrefs"] == 2
     assert report["backref_hrefs"] == 0
-
-
-def test_repeated_notes_fragments_merge_into_hierarchical_semantic_scope(
-    tmp_path: Path,
-) -> None:
-    markdown_dir = tmp_path / "translated" / "validated"
-    markdown_dir.mkdir(parents=True)
-    body_a = markdown_dir / "chapter_1.1.md"
-    body_b = markdown_dir / "chapter_1.2.md"
-    notes_a = markdown_dir / "chapter_3.part10.md"
-    notes_b = markdown_dir / "chapter_3.part2.md"
-    body_a.write_text("First [^1].\n", encoding="utf-8")
-    body_b.write_text("Second [^2]. False OCR [^3].\n", encoding="utf-8")
-    notes_a.write_text("## Chapter One\n\n[^1]: First.\n", encoding="utf-8")
-    notes_b.write_text("### False Heading\n\n[^2]: Second.\n", encoding="utf-8")
-    structure = [
-        _entry(
-            "chapter_1",
-            children=[_entry("chapter_1.1", body_a), _entry("chapter_1.2", body_b)],
-        ),
-        _entry("chapter_3", notes_a, notes_b, entry_type="notes"),
-    ]
-    _write_section_cache(
-        markdown_dir,
-        [
-            {"header": "## Chapter One", "unit_id": "chapter_1"},
-            {"header": "### False Heading", "unit_id": "chapter_1"},
-        ],
-    )
-
-    manager = FootnoteManager(
-        markdown_dir,
-        auto_global=True,
-        epub_structure=structure,
-    )
-    report = validate_footnote_graph(_render(structure, manager))
-
-    assert len(manager.notes_sections) == 1
-    assert len(manager.notes_sections[0].definitions) == 2
-    assert report["forward_hrefs"] == 2
-    assert report["backref_hrefs"] == 2
-    assert report["unlinked_sup_count"] == 1
-
-
-def test_semantic_scopes_prevent_reset_keys_from_colliding_or_cross_linking(
-    tmp_path: Path,
-) -> None:
-    markdown_dir = tmp_path / "translated" / "validated"
-    markdown_dir.mkdir(parents=True)
-    body_one = markdown_dir / "chapter_1.md"
-    body_two = markdown_dir / "chapter_2.md"
-    notes = markdown_dir / "chapter_3.md"
-    body_one.write_text("Real [^1]. Extra [^1].\n", encoding="utf-8")
-    body_two.write_text("Other chapter [^1].\n", encoding="utf-8")
-    notes.write_text(
-        "## One\n\n[^1]: Definition one.\n\n"
-        "## Two\n\n[^1]: Definition two.\n",
-        encoding="utf-8",
-    )
-    structure = [
-        _entry("chapter_1", body_one),
-        _entry("chapter_2", body_two),
-        _entry("chapter_3", notes, entry_type="notes"),
-    ]
-    _write_section_cache(
-        markdown_dir,
-        [
-            {"header": "## One", "unit_id": "chapter_1"},
-            {"header": "## Two", "unit_id": "chapter_2"},
-        ],
-    )
-
-    manager = FootnoteManager(
-        markdown_dir,
-        auto_global=True,
-        epub_structure=structure,
-    )
-    html_files = _render(structure, manager)
-    report = validate_footnote_graph(html_files)
-
-    assert "fn-chapter_1-1-1" in html_files["chapter_3.html"]
-    assert "fn-chapter_2-1-1" in html_files["chapter_3.html"]
-    assert report["forward_hrefs"] == 2
-    assert report["backref_hrefs"] == 2
-    assert report["unlinked_sup_count"] == 1
-
-
-def test_resumed_semantic_scope_keeps_physical_definition_occurrences_aligned(
-    tmp_path: Path,
-) -> None:
-    markdown_dir = tmp_path / "translated" / "validated"
-    markdown_dir.mkdir(parents=True)
-    body_one = markdown_dir / "chapter_1.md"
-    body_two = markdown_dir / "chapter_2.md"
-    notes = markdown_dir / "chapter_3.md"
-    body_one.write_text("First [^1]. Resumed [^1].\n", encoding="utf-8")
-    body_two.write_text("Middle [^1].\n", encoding="utf-8")
-    notes.write_text(
-        "## One\n\n[^1]: One first.\n\n"
-        "## Two\n\n[^1]: Two.\n\n"
-        "### One continued\n\n[^1]: One second.\n",
-        encoding="utf-8",
-    )
-    structure = [
-        _entry("chapter_1", body_one),
-        _entry("chapter_2", body_two),
-        _entry("chapter_3", notes, entry_type="notes"),
-    ]
-    _write_section_cache(
-        markdown_dir,
-        [
-            {"header": "## One", "unit_id": "chapter_1"},
-            {"header": "## Two", "unit_id": "chapter_2"},
-            {"header": "### One continued", "unit_id": "chapter_1"},
-        ],
-    )
-
-    manager = FootnoteManager(
-        markdown_dir,
-        auto_global=True,
-        epub_structure=structure,
-    )
-    report = validate_footnote_graph(_render(structure, manager))
-
-    assert report["forward_hrefs"] == 3
-    assert report["backref_hrefs"] == 3
-    assert report["duplicate_footnote_id_count"] == 0
 
 
 def test_no_colon_definitions_are_limited_to_structural_notes_scope(

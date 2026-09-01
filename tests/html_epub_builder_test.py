@@ -6,7 +6,6 @@ from lxml import etree
 
 from pdf2epub.html_translation import builder as builder_module
 from pdf2epub.html_translation.builder import BuildConfig, HTMLEpubBuilder
-from pdf2epub.html_translation.translator import HTMLTranslateProcessor
 
 
 OPF_NS = "http://www.idpf.org/2007/opf"
@@ -196,7 +195,6 @@ def test_epubcheck_warn_mode_keeps_failed_build(
 
     builder._validate_output_epub()
 
-
 def test_epubcheck_strict_mode_rejects_failed_build(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -229,8 +227,3 @@ def test_epubcheck_strict_mode_requires_executable(
 
     with pytest.raises(RuntimeError, match="not installed"):
         builder._validate_output_epub()
-
-
-def test_html_translator_provider_path_is_removed() -> None:
-    with pytest.raises(RuntimeError, match="in-process HTML translator was removed"):
-        HTMLTranslateProcessor(config={}, book_title="Test Book")

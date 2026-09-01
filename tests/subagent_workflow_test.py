@@ -585,7 +585,7 @@ def test_refine_local_does_not_reuse_checkpoint_after_toc_changes(tmp_path: Path
     assert second[0]["title"] == "Renamed"
 
 
-def test_toc_validation_accepts_legacy_translated_fields_with_warning(tmp_path: Path):
+def test_toc_validation_requires_in_place_translated_fields(tmp_path: Path):
     source = {
         "schema_version": 1,
         "book_title": "Original",
@@ -593,8 +593,8 @@ def test_toc_validation_accepts_legacy_translated_fields_with_warning(tmp_path: 
     }
     target = {
         **source,
-        "book_title_translated": "译名",
-        "chapters": [{**source["chapters"][0], "title_translated": "章节"}],
+        "book_title": "译名",
+        "chapters": [{**source["chapters"][0], "title": "章节"}],
     }
     (tmp_path / "toc_translation_source.json").write_text(
         json.dumps({"toc": source}), encoding="utf-8"
@@ -605,7 +605,6 @@ def test_toc_validation_accepts_legacy_translated_fields_with_warning(tmp_path: 
     report = validate_toc_translation_subagent(tmp_path)
     assert report["valid"] is True
     assert report["resolved_book_title"] == "译名"
-    assert len(report["compatibility_warnings"]) == 2
 
 
 def test_prepare_toc_translation_subagent_writes_clean_prompt(tmp_path: Path):
@@ -672,7 +671,6 @@ def test_local_refine_generates_units_without_constructing_model(tmp_path: Path)
     refiner = RefinedBreakdown(
         config={"refine": {"max_tokens": 8000}},
         max_tokens=8000,
-        local_only=True,
     )
     units = refiner.process_from_toc(
         pdf_path=tmp_path / "input.pdf",

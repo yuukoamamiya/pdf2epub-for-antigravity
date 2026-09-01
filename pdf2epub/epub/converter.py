@@ -697,27 +697,14 @@ class ContentConverter:
         Returns:
             Modified HTML content with anchors added
         """
-        # Some callers provide subchapter entries as dicts; extract titles.
-        if subchapter_info and isinstance(subchapter_info[0], dict):
-            subchapters = [
-                (
-                    j,
-                    info.get("title", ""),
-                    info.get("anchor") or f"{chapter_index}-{j}",
-                )
-                for j, info in enumerate(subchapter_info, 1)
-            ]
-        elif subchapter_info and isinstance(subchapter_info[0], tuple):
-            subchapters = [
-                (item[0], item[1], item[2] if len(item) > 2 else f"{chapter_index}-{item[0]}")
-                for item in subchapter_info
-            ]  # Legacy format
-        else:
-            # Convert simple list of strings to tuples with indices
-            subchapters = [
-                (j, title, f"{chapter_index}-{j}")
-                for j, title in enumerate(subchapter_info, 1)
-            ]
+        subchapters = [
+            (
+                j,
+                info.get("title", ""),
+                info.get("anchor") or f"{chapter_index}-{j}",
+            )
+            for j, info in enumerate(subchapter_info, 1)
+        ]
 
         import html as html_module
 

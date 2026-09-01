@@ -186,9 +186,8 @@ manifest 会在 `file_roles` 中标记对应单元，并把专用规则写入 pr
 范围和交叉引用，同时翻译索引词。两类内容仍会完整交给 Subagent，不会被静默
 跳过。
 
-TOC 翻译校验优先要求书名写入 `book_title`、章节标题写入 `title`。对旧结果中
-仍使用 `book_title_translated`/`title_translated` 的文件，校验报告会给出兼容性
-警告，打包器仍可读取这些字段。
+TOC 翻译校验要求译后书名仍写入 `book_title`、译后章节标题仍写入 `title`，
+不再接受平行的旧字段。
 
 `translate-validate` 还会在 JSON 报告的 `bilingual_warnings` 中记录疑似双语
 污染（例如连续长英文原文未发生变化）。这是预警而不是硬失败；人名、公式、URL

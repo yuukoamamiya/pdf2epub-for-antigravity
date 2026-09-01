@@ -6,7 +6,7 @@ from typing import Dict, List, Set, Tuple
 from loguru import logger
 
 from .content_index import ContentAddressIndex
-from .models import FootnoteDefinition, NotesSection
+from .models import FootnoteDefinition
 
 
 class FootnoteMapper:
@@ -28,10 +28,6 @@ class FootnoteMapper:
         self.local_part_to_group: Dict[str, str] = {}  # part file -> logical local footnote group
         self.local_occurrence_mapping: Dict[str, Dict] = {}  # base_chapter -> occurrence mappings
 
-        # For section-based mapping in GLOBAL mode (LLM-based)
-        self.section_definition_by_occurrence: Dict[Tuple[str, str, int], FootnoteDefinition] = {}
-        self.section_definition_occurrence_by_line: Dict[Tuple[str, str, int], Tuple[str, int]] = {}
-        self.section_definition_occurrence_in_file: Dict[Tuple[str, str, int], Tuple[str, int]] = {}
 
     def build_chapter_groups(
         self,
@@ -151,7 +147,6 @@ class FootnoteMapper:
                 'reference_occurrence_in_file': {},  # (key, part_file, occurrence_in_file) -> position
                 'definition_positions': {},  # (key, part_file, line_num) -> position
                 'definition_occurrence_in_file': {},  # (key, part_file, occurrence_in_file) -> position
-                # Kept for manager-internal compatibility while callers use manager APIs.
                 'reference_occurrence_count': {},
                 'definition_by_occurrence': {},
             }
@@ -222,75 +217,6 @@ class FootnoteMapper:
             total_refs = sum(len(refs) for refs in refs_by_key.values())
             total_defs = sum(len(defs) for defs in defs_by_key.values())
             logger.debug(f"Built position-based mapping for {base_chapter}: {total_refs} refs, {total_defs} defs")
-
-    def build_section_occurrence_mapping(self, notes_sections: List[NotesSection]) -> None:
-        """
-        Build occurrence-based mapping within each section.
-
-        Args:
-            notes_sections: List of NotesSection objects
-        """
-        if not notes_sections:
-            return
-
-        self.section_definition_by_occurrence = {}
-        self.section_definition_occurrence_by_line = {}
-        self.section_definition_occurrence_in_file = {}
-        definition_assignments = []
-
-        # Build mapping for each semantic section. ``matched_unit_id`` is the
-        # stable scope identity; list position is not.
-        for section in notes_sections:
-            scope_unit_id = section.matched_unit_id
-            if not scope_unit_id:
-                continue
-
-            # Group definitions by key within this section
-            defs_by_key = {}
-            for defn in section.definitions:
-                if defn.key not in defs_by_key:
-                    defs_by_key[defn.key] = []
-                defs_by_key[defn.key].append(defn)
-
-            # Sort definitions by line number
-            for key in defs_by_key:
-                defs_by_key[key].sort(
-                    key=lambda definition: (
-                        self._chapter_sort_key(definition.chapter),
-                        definition.line_num,
-                    )
-                )
-
-            # Store in section_definition_by_occurrence
-            for key, def_list in defs_by_key.items():
-                for occurrence, defn in enumerate(def_list, 1):
-                    self.section_definition_by_occurrence[(scope_unit_id, key, occurrence)] = defn
-                    self.section_definition_occurrence_by_line[
-                        (key, defn.chapter, defn.line_num)
-                    ] = (scope_unit_id, occurrence)
-                    definition_assignments.append(
-                        (defn, scope_unit_id, occurrence)
-                    )
-
-        # Markdown conversion reports occurrence within the physical file. Build
-        # that index in physical line order, independently of semantic-section
-        # iteration order (a scope may resume after another scope).
-        assignments_by_file: Dict[Tuple[str, str], List] = {}
-        for defn, scope_unit_id, scope_occurrence in definition_assignments:
-            assignments_by_file.setdefault((defn.key, defn.chapter), []).append(
-                (defn, scope_unit_id, scope_occurrence)
-            )
-        for (key, chapter), assignments in assignments_by_file.items():
-            assignments.sort(key=lambda item: item[0].line_num)
-            for occurrence_in_file, (_, scope_unit_id, scope_occurrence) in enumerate(
-                assignments,
-                1,
-            ):
-                self.section_definition_occurrence_in_file[
-                    (key, chapter, occurrence_in_file)
-                ] = (scope_unit_id, scope_occurrence)
-
-        logger.debug(f"Built section occurrence mapping for {len(notes_sections)} sections")
 
     def _chapter_sort_key(self, chapter_name: str) -> tuple:
         """

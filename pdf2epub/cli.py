@@ -17,7 +17,6 @@ from pdf2epub.utils.common import (
     resolve_book_input_path,
     sanitize_filename,
 )
-from pdf2epub.utils.network_utils import set_llm_trace_path
 from pdf2epub.utils.encoding import configure_utf8_stdio
 
 # Windows consoles may still default to an active code page such as GBK.
@@ -82,7 +81,7 @@ def _load_pdf_file_roles(output_dir: Path) -> dict:
                 role = str(node.get("type") or "").strip().lower()
                 if role in {"bibliography", "index"}:
                     roles[f"{generate_unit_id(node_path)}.md"] = role
-                visit(node.get("children", node.get("subchapters", [])), node_path)
+                visit(node.get("children", []), node_path)
 
         visit(toc.get("chapters", []), [])
     except (OSError, json.JSONDecodeError, AttributeError, TypeError, ValueError):
@@ -207,8 +206,6 @@ def _validate_pdf_markdown_task(args, task: str):
         if not toc_report["valid"]:
             for error in toc_report["errors"]:
                 logger.error(f"TOC: {error}")
-        for warning in toc_report.get("compatibility_warnings", []):
-            logger.warning(f"TOC compatibility: {warning}")
     logger.info(
         f"{task} 校验: {report['completed']}/{report['total']} completed, "
         f"{len(report['invalid'])} invalid"
@@ -325,7 +322,6 @@ def ocr_pages_command(args):
 
     # Setup paths
     output_dir = Path("output") / book_title
-    set_llm_trace_path(output_dir / "logs" / "llm_trace.jsonl")
 
     # Find PDF
     pdf_path = resolve_book_input_path(
@@ -491,7 +487,6 @@ def build_epub_command(args):
 
     # Set up paths
     output_dir = Path("output") / book_title
-    set_llm_trace_path(output_dir / "logs" / "llm_trace.jsonl")
     toc_tree_path = output_dir / "toc_tree.json"
 
     if not toc_tree_path.exists():
@@ -647,7 +642,6 @@ def _prepare_html_command(args):
 
     # Setup paths
     output_dir = Path("output") / book_title
-    set_llm_trace_path(output_dir / "logs" / "llm_trace.jsonl")
 
     # If no epub specified, look for original epub in output dir
     if not epub_path.exists():
@@ -748,8 +742,6 @@ def html_prepare_command(args):
     args.limit = None
     args.use_entities = None
     args.no_entities = False
-    # Preserve the explicit --resume flag.  The old compatibility setup
-    # accidentally overwrote it, so html-prepare could not resume.
     args.resume = getattr(args, "resume", False)
     args.source_language = getattr(args, 'source_language', None)
     args.target_language = getattr(args, 'target_language', None)
@@ -1098,7 +1090,6 @@ def build_novel_epub_command(args):
     configure_logging(book_title, "build-novel-epub")
 
     output_dir = Path("output") / book_title
-    set_llm_trace_path(output_dir / "logs" / "llm_trace.jsonl")
     epub_path = output_dir / "input.epub"
 
     if not epub_path.exists():
@@ -1388,7 +1379,6 @@ def build_html_epub_command(args):
 
     # Setup paths
     output_dir = Path("output") / book_title
-    set_llm_trace_path(output_dir / "logs" / "llm_trace.jsonl")
 
     # If no epub specified, look for original epub in output dir
     if not epub_path.exists():

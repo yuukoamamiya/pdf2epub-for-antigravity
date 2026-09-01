@@ -5,7 +5,7 @@ This module handles both local (per-chapter) and global (cross-chapter) footnote
 It automatically detects which style is appropriate based on the book's structure.
 """
 
-from .models import FootnoteStyle, FootnoteDefinition, FootnoteReference, NotesSection
+from .models import FootnoteStyle, FootnoteDefinition, FootnoteReference
 from .manager import FootnoteManager
 from .validator import FootnoteGraphError, inspect_footnote_graph, validate_footnote_graph
 
@@ -13,7 +13,6 @@ __all__ = [
     'FootnoteStyle',
     'FootnoteDefinition',
     'FootnoteReference',
-    'NotesSection',
     'FootnoteManager',
     'FootnoteGraphError',
     'inspect_footnote_graph',

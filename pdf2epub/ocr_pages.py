@@ -13,17 +13,13 @@ Supports multiple backends:
 """
 
 import json
-import argparse
 import pymupdf as fitz
 import os
 import tempfile
 from pathlib import Path
-from typing import Dict, Optional, Tuple, List
-from google.oauth2 import service_account
-from google.auth.transport.requests import AuthorizedSession
+from typing import Any, Dict, Optional, Tuple, List
 from loguru import logger
 from .utils.logging_config import configure_logging
-from .utils.common import load_config, resolve_book_input_path
 from .ocr_backends import ocr_pdf_chunk_mistral, ocr_pdf_chunk_vertex, ocr_pdf_chunk_vllm
 from .ocr.artifacts import OCRPageResult
 
@@ -70,7 +66,7 @@ def ocr_pdf_chunk(
     """OCR a PDF chunk using selected backend.
 
     Routes to the appropriate backend based on configuration.
-    Supports legacy tuple backends: vertex, mistral, vllm, azure, vision.
+    Tuple-based adapters are used for vertex, mistral, vllm, azure, and vision.
     Chandra uses :func:`ocr_pdf_page` because it returns richer page artifacts.
 
     Args:
@@ -275,7 +271,7 @@ def ocr_pdf_page(
             image_counter=image_counter,
         )
 
-    legacy_result = ocr_pdf_chunk(
+    tuple_result = ocr_pdf_chunk(
         pdf_bytes=pdf_bytes,
         session=session,
         project_id=project_id,
@@ -291,7 +287,7 @@ def ocr_pdf_page(
         base_url=base_url,
         config=config,
     )
-    return OCRPageResult.from_legacy_tuple(legacy_result, backend=backend)
+    return OCRPageResult.from_tuple(tuple_result, backend=backend)
 
 
 def _atomic_write_text(path: Path, content: str) -> None:
@@ -382,7 +378,7 @@ def extract_pdf_pages(pdf_path: Path, start_page: int, end_page: int) -> bytes:
 def ocr_full_book_pagewise(
     pdf_path: Path,
     output_dir: Path,
-    session: AuthorizedSession = None,
+    session: Any = None,
     project_id: str = None,
     location: str = None,
     start_page: int = 1,
@@ -623,130 +619,3 @@ def ocr_full_book_pagewise(
         logger.success(f"All pages processed successfully!")
 
     logger.info(f"Output directory: {pages_dir}")
-
-
-def main():
-    """CLI entry point for page-wise OCR."""
-    parser = argparse.ArgumentParser(description="OCR PDF pages individually")
-    parser.add_argument("-i", "--input", help="Path to input PDF file")
-    parser.add_argument("-c", "--config", default="config.yaml", help="Path to config file")
-    parser.add_argument("--start-page", type=int, default=1, help="First page to process")
-    parser.add_argument("--end-page", type=int, help="Last page to process")
-    parser.add_argument("--resume", action="store_true", help="Resume from previous progress")
-    parser.add_argument("--max-workers", type=int, default=5, help="Number of parallel OCR requests (default: 5)")
-
-    args = parser.parse_args()
-
-    # Load configuration
-    config = load_config(args.config)
-    book_title = config.get("title")
-
-    if not book_title:
-        logger.error("No title found in config.yaml")
-        return
-
-    # Determine OCR backend
-    ocr_backend = config.get("ocr_backend", "vertex").lower()
-    logger.info(f"Using OCR backend: {ocr_backend}")
-
-    # Setup backend-specific configuration
-    session = None
-    project_id = None
-    location = None
-    api_key = None
-    base_url = None
-
-    if ocr_backend == "vertex":
-        # Setup Google Cloud authentication
-        sa_key_path = config.get("service_account_key_path", "sa-keys.json")
-
-        if not Path(sa_key_path).exists():
-            raise FileNotFoundError(f"Service account key file not found: {sa_key_path}")
-
-        # Load project ID from service account JSON
-        with open(sa_key_path, "r") as f:
-            sa_key_data = json.load(f)
-
-        project_id = sa_key_data.get("project_id")
-        if not project_id:
-            raise ValueError(f"No project_id found in service account key file: {sa_key_path}")
-
-        location = config.get("gcp_location", "us-central1")
-
-        logger.info(f"Using GCP project: {project_id}, location: {location}")
-
-        # Create authenticated session
-        scopes = ["https://www.googleapis.com/auth/cloud-platform"]
-        credentials = service_account.Credentials.from_service_account_file(
-            sa_key_path, scopes=scopes
-        )
-        session = AuthorizedSession(credentials)
-
-    elif ocr_backend == "mistral":
-        # Get Mistral API key and base URL
-        api_key = config.get("mistral_api_key")
-        if not api_key:
-            raise ValueError("mistral_api_key not found in config.yaml")
-
-        base_url = config.get("mistral_base_url", "https://api.mistral.ai/v1")
-        logger.info(f"Using Mistral API with key: {api_key[:8]}... at {base_url}")
-
-    elif ocr_backend == "vllm":
-        # VLLM backend uses init_client from vllm.py
-        logger.info("Using VLLM backend")
-
-    elif ocr_backend == "azure":
-        # Azure Document Intelligence backend (for Japanese vertical text)
-        # Client will be initialized lazily in ocr_pdf_chunk
-        logger.info("Using Azure Document Intelligence backend")
-
-    elif ocr_backend == "vision":
-        # Google Cloud Vision API backend (for Japanese vertical text)
-        # Client will be initialized lazily in ocr_pdf_chunk
-        logger.info("Using Google Cloud Vision backend")
-
-    elif ocr_backend == "chandra":
-        logger.info("Using Chandra OCR service")
-
-    else:
-        raise ValueError(f"Unknown OCR backend: {ocr_backend}. Supported: vertex, mistral, vllm, azure, vision, chandra")
-
-    # Determine PDF path
-    pdf_path = resolve_book_input_path(
-        args.input,
-        config_value=config.get("input_pdf") or config.get("input"),
-        config_path=args.config,
-        output_dir=output_dir,
-        extensions=(".pdf",),
-        output_names=("input_original.pdf", "input.pdf"),
-    )
-
-    if not pdf_path.exists():
-        logger.error(f"PDF file not found: {pdf_path}")
-        return
-
-    logger.info(f"Using PDF: {pdf_path}")
-
-    # Output directory
-    output_dir = Path("output") / book_title
-
-    # Run page-wise OCR
-    ocr_full_book_pagewise(
-        pdf_path=pdf_path,
-        output_dir=output_dir,
-        session=session,
-        project_id=project_id,
-        location=location,
-        start_page=args.start_page,
-        end_page=args.end_page,
-        backend=ocr_backend,
-        api_key=api_key,
-        base_url=base_url,
-        resume=args.resume,
-        config=config,
-        max_workers=args.max_workers
-    )
-
-
-if __name__ == "__main__":
-    main()

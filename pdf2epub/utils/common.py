@@ -10,8 +10,6 @@ from typing import Dict, Optional, Any, Union, Iterable, Sequence
 
 from loguru import logger
 
-from .config_manager import ConfigManager, load_config as _load_config_from_manager
-
 
 def resolve_input_path(path: Optional[Union[str, Path]]) -> Optional[Path]:
     """
@@ -201,51 +199,10 @@ def parse_llm_json(
 
         raise original_error
 
-# Re-export for backward compatibility
 def load_config(config_path: str = "config.yaml") -> Dict:
-    """
-    Load configuration from config file.
-
-    Uses ConfigManager internally for migration and backward compatibility.
-
-    Args:
-        config_path: Path to the YAML config file
-
-    Returns:
-        Configuration dictionary (in legacy format for backward compatibility)
-    """
-    return _load_config_from_manager(config_path)
-
-
-def get_config_manager(config_path: str = "config.yaml") -> ConfigManager:
-    """
-    Get a ConfigManager instance for advanced config access.
-
-    Args:
-        config_path: Path to the YAML config file
-
-    Returns:
-        ConfigManager instance
-    """
-    return ConfigManager(config_path)
-
-
-def load_book_structure(book_title: str) -> Optional[Dict]:
-    """
-    Load the book structure JSON file.
-    
-    Args:
-        book_title: Title of the book
-        
-    Returns:
-        Book structure dictionary or None if not found
-    """
-    structure_path = Path("output") / book_title / "book_structure.json"
-    if structure_path.exists():
-        with open(structure_path, "r", encoding="utf-8") as file:
-            structure = json.load(file)
-        return structure
-    return None
+    """Load the current nested YAML configuration without migration."""
+    with Path(config_path).open("r", encoding="utf-8") as file:
+        return yaml.safe_load(file) or {}
 
 
 def ensure_directory(directory_path: Path) -> None:

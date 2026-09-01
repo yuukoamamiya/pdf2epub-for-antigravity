@@ -1,6 +1,6 @@
 """Rich page-level OCR artifacts.
 
-Markdown remains the compatibility view consumed by the existing refine
+Markdown remains the workflow view consumed by refine
 pipeline.  Backends which expose richer output can additionally persist HTML,
 the unmodified model response, ordered layout blocks, and extracted assets.
 """
@@ -30,7 +30,7 @@ class OCRPageResult:
     assets: List[Dict[str, Any]] = field(default_factory=list)
 
     @classmethod
-    def from_legacy_tuple(
+    def from_tuple(
         cls,
         value: tuple[str, List[Dict[str, Any]], int],
         *,

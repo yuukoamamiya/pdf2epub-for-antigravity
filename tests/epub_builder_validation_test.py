@@ -165,17 +165,15 @@ def test_epub_stylesheet_uses_a_valid_quote_string() -> None:
     assert 'content: """;' not in stylesheet
 
 
-def test_flatten_toc_tree_uses_subagent_translated_title_fields() -> None:
+def test_flatten_toc_tree_uses_in_place_translated_title_fields() -> None:
     structure = flatten_toc_tree(
         [{
-            "title": "Original",
-            "title_translated": "译名",
+            "title": "译名",
             "level": 1,
             "start_page": 1,
             "end_page": 2,
             "children": [{
-                "title": "Child",
-                "translated_title": "子标题",
+                "title": "子标题",
                 "level": 2,
                 "start_page": 1,
                 "end_page": 2,

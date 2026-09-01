@@ -727,9 +727,8 @@ class HTMLCompressor:
         """
         Restore attributes to tags using lxml DOM operations.
 
-        Supports two mapping formats:
-        - New format: {'index': N, 'tag': 'span', 'attrs': {'class': 'x'}}
-        - Legacy format: {'index': N, 'tag': 'span', 'original': '<span class="x">'}
+        Mapping records use the canonical ``index``/``tag``/``attrs`` format
+        produced by ``_strip_inner_attrs``.
 
         包含容错降级策略（局部降级）：
         1. 先尝试 HTML 规范化修复
@@ -738,10 +737,6 @@ class HTMLCompressor:
         """
         if not attr_map:
             return html
-
-        # Check for legacy format (backward compatibility)
-        if attr_map and 'original' in attr_map[0]:
-            return self._restore_inner_attrs_legacy(html, attr_map)
 
         if not html or not html.strip():
             return html
@@ -810,42 +805,6 @@ class HTMLCompressor:
         result = f"<{tag_name}{attr_str}>{text_content}</{tag_name}>"
         logger.debug(f"Partial restore: kept <{tag_name}>, inner content as plain text")
         return result
-
-    def _restore_inner_attrs_legacy(self, html: str, attr_map: List[Dict]) -> str:
-        """Restore original tags with attributes (legacy regex-based implementation)."""
-        if not attr_map:
-            return html
-
-        # Build restoration mapping: index -> original tag
-        restore_map = {item['index']: item['original'] for item in attr_map}
-
-        tag_index = 0
-        result_parts = []
-        last_end = 0
-
-        pattern = r'<(/)?(\w+)(?:[^>]*?)(/)?>'
-        for match in re.finditer(pattern, html):
-            is_closing = match.group(1) is not None
-
-            if is_closing:
-                # Closing tags don't count in index
-                result_parts.append(html[last_end:match.end()])
-                last_end = match.end()
-                continue
-
-            # Opening or self-closing tag
-            result_parts.append(html[last_end:match.start()])
-
-            if tag_index in restore_map:
-                result_parts.append(restore_map[tag_index])
-            else:
-                result_parts.append(match.group(0))
-
-            last_end = match.end()
-            tag_index += 1
-
-        result_parts.append(html[last_end:])
-        return ''.join(result_parts)
 
     def _normalize_whitespace(self, text: str) -> str:
         """Normalize whitespace: newlines to spaces, collapse multiple spaces.

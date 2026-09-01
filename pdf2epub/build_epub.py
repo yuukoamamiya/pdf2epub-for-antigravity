@@ -561,11 +561,7 @@ def flatten_toc_tree(
 
         title = chapter.get('title', '')
         if use_translated_titles:
-            title = (
-                chapter.get('title_translated')
-                or chapter.get('translated_title')
-                or title
-            )
+            title = chapter.get('title', '')
         entry = {
             'title': title,
             'level': chapter.get('level', 1),
@@ -1005,14 +1001,7 @@ def build_epub(config: BuildEpubConfig) -> Path:
             toc_tree = json.load(f)
         logger.info("Loaded Subagent-produced toc_tree_translated.json")
 
-        # Accept both the documented in-place form and the compatibility form
-        # commonly produced by Subagents (book_title_translated).
-        translated_title = (
-            toc_tree.get('book_title_translated')
-            or toc_tree.get('translated_book_title')
-            or toc_tree.get('translated_title')
-            or toc_tree.get('book_title')
-        )
+        translated_title = toc_tree.get('book_title')
         if translated_title:
             config.book_title = translated_title
             logger.info(f"Using translated title: {config.book_title}")
@@ -1108,7 +1097,6 @@ def build_epub(config: BuildEpubConfig) -> Path:
     footnote_manager = FootnoteManager(
         config.markdown_dir,
         auto_global=auto_global,
-        config=None,
         epub_structure=epub_structure,
     )
     converter.footnote_manager = footnote_manager

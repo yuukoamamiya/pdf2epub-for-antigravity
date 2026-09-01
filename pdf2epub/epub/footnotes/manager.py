@@ -9,10 +9,9 @@ from typing import Dict, List, Optional, Set
 from loguru import logger
 
 from .content_index import ContentAddressIndex
-from .models import FootnoteStyle, FootnoteDefinition, NotesSection
+from .models import FootnoteStyle, FootnoteDefinition
 from .scanner import FootnoteScanner
 from .mapper import FootnoteMapper
-from .llm_matcher import LLMSectionMatcher
 
 
 _ALLOWED_INLINE_HTML = {
@@ -101,7 +100,7 @@ class FootnoteManager:
     or globally (centralized in specific chapters) and handles them appropriately.
     """
 
-    def __init__(self, markdown_dir: Path, force_global: bool = False, auto_global: bool = False, config=None, epub_structure=None):
+    def __init__(self, markdown_dir: Path, force_global: bool = False, auto_global: bool = False, epub_structure=None):
         """
         Initialize the footnote manager.
 
@@ -109,13 +108,11 @@ class FootnoteManager:
             markdown_dir: Directory containing markdown files
             force_global: If True, force global footnote style via CLI flag
             auto_global: If True, auto-detected global mode (e.g., notes chapter found)
-            config: Configuration object for LLM calls (optional)
             epub_structure: Refined EPUB structure for local footnote scopes
         """
         self.markdown_dir = Path(markdown_dir)
         self.force_global = force_global
         self.auto_global = auto_global
-        self.config = config
         self.epub_structure = epub_structure
         self._chapter_files = self._discover_chapter_files()
         self.content_index = (
@@ -127,7 +124,6 @@ class FootnoteManager:
         # Initialize components
         self.scanner = FootnoteScanner()
         self.mapper = FootnoteMapper(self.content_index)
-        self.llm_matcher: Optional[LLMSectionMatcher] = None
 
         # Enable global mode if either forced or auto-detected
         use_global = force_global or auto_global
@@ -165,15 +161,6 @@ class FootnoteManager:
     def reference_only_chapters(self) -> Set[str]:
         return self.scanner.reference_only_chapters
 
-    # Expose LLM matcher data for external access
-    @property
-    def notes_sections(self) -> List[NotesSection]:
-        return self.llm_matcher.notes_sections if self.llm_matcher else []
-
-    @property
-    def chapter_to_section(self) -> Dict[str, NotesSection]:
-        return self.llm_matcher.chapter_to_section if self.llm_matcher else {}
-
     def _analyze_footnote_structure(self) -> None:
         """
         Analyze all markdown files to determine footnote style.
@@ -198,12 +185,8 @@ class FootnoteManager:
         # Determine style
         self.style = self.scanner.determine_style(self.force_global, self.auto_global)
 
-        # Footnote mapping is a build-time structural operation.  Any
-        # ambiguous semantic matching must be prepared by the workspace
-        # Subagent before this stage; EPUB construction itself is offline.
-        # A cached Subagent result may be reused for deterministic builds.  A
-        # cache miss is deliberately offline; it must not trigger a model call.
-        self._build_style_mappings(run_llm=True)
+        # Footnote mapping is a deterministic build-time operation.
+        self._build_style_mappings()
 
         # Log the analysis results
         self._log_analysis_results()
@@ -252,7 +235,7 @@ class FootnoteManager:
         """Return whether legacy ``[^key] text`` lines are definitions here."""
         return source_chapter in self.no_colon_definition_chapters
 
-    def _build_style_mappings(self, run_llm: bool = False) -> None:
+    def _build_style_mappings(self) -> None:
         """Build mapper state from the current scanner data and style."""
         self.mapper.build_chapter_groups(
             self.scanner.references,
@@ -288,21 +271,6 @@ class FootnoteManager:
                 self.auto_global
             )
 
-            # Try LLM-based section matching for better accuracy
-            if run_llm and (self.force_global or self.auto_global):
-                self.llm_matcher = LLMSectionMatcher(
-                    self.markdown_dir,
-                    self.config,
-                    content_index=self.content_index,
-                )
-                if self.llm_matcher.load_toc_tree():
-                    if self.llm_matcher.match_sections(self.primary_definition_chapters):
-                        self.mapper.build_section_occurrence_mapping(self.llm_matcher.notes_sections)
-                        logger.info("Using LLM-based section matching for footnotes")
-                    else:
-                        logger.info("LLM section matching failed, using occurrence-based mapping")
-                else:
-                    logger.info("Could not load TOC, using occurrence-based mapping")
 
     def _drop_replaced_heading_references(self) -> bool:
         """
@@ -438,7 +406,6 @@ class FootnoteManager:
         """
         self.epub_structure = epub_structure
         self.content_index = ContentAddressIndex.from_structure(epub_structure)
-        self.llm_matcher = None
         self.mapper = FootnoteMapper(self.content_index)
         self._chapter_files = self._discover_chapter_files()
         self.scanner = FootnoteScanner()
@@ -449,7 +416,7 @@ class FootnoteManager:
         )
         self._drop_replaced_heading_references()
         self.style = self.scanner.determine_style(self.force_global, self.auto_global)
-        self._build_style_mappings(run_llm=True)
+        self._build_style_mappings()
 
     def get_html_filename(self, markdown_stem: str) -> str:
         """
@@ -615,38 +582,6 @@ class FootnoteManager:
         line_num: Optional[int] = None,
         occurrence_in_file: Optional[int] = None,
     ) -> str:
-        section_occurrence = None
-        if occurrence_in_file is not None:
-            section_occurrence = self.mapper.section_definition_occurrence_in_file.get(
-                (key, source_chapter, occurrence_in_file)
-            )
-        if section_occurrence is None and line_num is not None:
-            section_occurrence = self.mapper.section_definition_occurrence_by_line.get(
-                (key, source_chapter, line_num)
-            )
-
-        if section_occurrence is not None:
-            scope_unit_id, occurrence_num = section_occurrence
-            fn_id = self._section_definition_id(scope_unit_id, key, occurrence_num)
-            backref_html = self._section_definition_backref_html(
-                scope_unit_id,
-                key,
-                occurrence_num,
-            )
-            return self._definition_html(fn_id, key, content, backref_html)
-
-        # Once semantic Notes sections are available, an unassigned definition
-        # must not reuse a book-global anchor. It is intentionally left orphaned
-        # with a physical-source-scoped ID.
-        if self.chapter_to_section:
-            occurrence_marker = occurrence_in_file or 1
-            fn_id = self._footnote_definition_id(
-                key,
-                occurrence_marker,
-                scope_unit_id=f"orphan-{source_chapter}",
-            )
-            return self._definition_html(fn_id, key, content, "")
-
         occurrence_num = None
         if occurrence_in_file is not None:
             occurrence_num = self.mapper.definition_occurrence_in_file.get(
@@ -663,12 +598,6 @@ class FootnoteManager:
         fn_id = self._footnote_definition_id(key, occurrence_num)
         return self._definition_html(fn_id, key, content, "")
 
-    def _section_definition_id(self, scope_unit_id: str, key: str, occurrence_num: int) -> str:
-        return self._footnote_definition_id(key, occurrence_num, scope_unit_id)
-
-    def _section_reference_id(self, scope_unit_id: str, key: str, occurrence_num: int) -> str:
-        return f"fnref-{scope_unit_id}-{key}-{occurrence_num}"
-
     def _footnote_definition_id(
         self,
         key: str,
@@ -683,24 +612,6 @@ class FootnoteManager:
         if occurrence_num is not None:
             components.append(str(occurrence_num))
         return "-".join(components)
-
-    def _section_definition_backref_html(
-        self,
-        scope_unit_id: str,
-        key: str,
-        occurrence_num: int,
-    ) -> str:
-        ref_file = self._reference_chapter_for_scope_occurrence(
-            key,
-            scope_unit_id,
-            occurrence_num,
-        )
-        if not ref_file:
-            return ""
-
-        fnref_id = self._section_reference_id(scope_unit_id, key, occurrence_num)
-        backref_link = f"{self.get_html_filename(ref_file)}#{fnref_id}"
-        return self._backref_html(backref_link, key)
 
     def _definition_html(self, fn_id: str, key: str, content: str, backref_html: str) -> str:
         def escape_unknown_tag(match: re.Match) -> str:
@@ -733,50 +644,6 @@ class FootnoteManager:
         if occurrence_marker and occurrence_marker > 1:
             return f"fnref-{source_chapter}-{key}-{occurrence_marker}"
         return f"fnref-{source_chapter}-{key}"
-
-    def _reference_occurrence_for_scope(
-        self,
-        key: str,
-        scope_unit_id: str,
-        source_chapter: str,
-        occurrence_in_file: Optional[int] = None,
-        line_num: Optional[int] = None,
-    ) -> Optional[int]:
-        semantic_scope_ids = set(self.chapter_to_section)
-        refs = [
-            ref for ref in self.scanner.references.get(key, [])
-            if self.content_index.nearest_scope(ref.chapter, semantic_scope_ids)
-            == scope_unit_id
-        ]
-        refs.sort(key=lambda ref: (self._chapter_sort_key(ref.chapter), ref.line_num))
-
-        source_seen = 0
-        for occurrence, ref in enumerate(refs, 1):
-            if ref.chapter != source_chapter:
-                continue
-            source_seen += 1
-            if occurrence_in_file is not None and source_seen == occurrence_in_file:
-                return occurrence
-            if occurrence_in_file is None and line_num is not None and ref.line_num == line_num:
-                return occurrence
-        return None
-
-    def _reference_chapter_for_scope_occurrence(
-        self,
-        key: str,
-        scope_unit_id: str,
-        occurrence_num: int,
-    ) -> Optional[str]:
-        semantic_scope_ids = set(self.chapter_to_section)
-        refs = [
-            ref for ref in self.scanner.references.get(key, [])
-            if self.content_index.nearest_scope(ref.chapter, semantic_scope_ids)
-            == scope_unit_id
-        ]
-        refs.sort(key=lambda ref: (self._chapter_sort_key(ref.chapter), ref.line_num))
-        if 1 <= occurrence_num <= len(refs):
-            return refs[occurrence_num - 1].chapter
-        return None
 
     def get_footnote_html(
         self,
@@ -872,47 +739,9 @@ class FootnoteManager:
             source_html = self.get_html_filename(source_chapter)
             return f'<sup id="{fnref_id}"><a class="footnote-ref" href="{source_html}#{fn_id}">[{key}]</a></sup>'
 
-        # Semantic Notes scopes are authoritative when available.
-        if self.notes_sections and self.chapter_to_section:
-            scope_unit_id = self.content_index.nearest_scope(
-                source_chapter,
-                set(self.chapter_to_section),
-            )
-            if scope_unit_id:
-                occurrence = self._reference_occurrence_for_scope(
-                    key,
-                    scope_unit_id,
-                    source_chapter,
-                    occurrence_in_file=occurrence_in_file,
-                    line_num=line_num,
-                )
-
-                lookup_key = (scope_unit_id, key, occurrence)
-                if occurrence and lookup_key in self.mapper.section_definition_by_occurrence:
-                    definition = self.mapper.section_definition_by_occurrence[lookup_key]
-                    target_chapter = definition.chapter
-                    fnref_id = self._section_reference_id(
-                        scope_unit_id,
-                        key,
-                        occurrence,
-                    )
-                    html_target = self.get_html_filename(target_chapter)
-                    fn_id = self._section_definition_id(
-                        scope_unit_id,
-                        key,
-                        occurrence,
-                    )
-
-                    return (
-                        f'<sup id="{fnref_id}">'
-                        f'<a class="footnote-ref" href="{html_target}#{fn_id}">[{original_key}]</a>'
-                        f'</sup>'
-                    )
-            # A section model exists, so crossing into another section via the
-            # book-global occurrence list would create a plausible but wrong link.
-            return unlinked_reference()
-
-        # Books without a usable section model retain occurrence-based mapping.
+        # Global footnotes use the deterministic occurrence mapping built from
+        # the scanned source files. Semantic/model matching is intentionally
+        # outside the EPUB builder workflow.
         if key in self.scanner.definitions:
             # Use occurrence-based mapping if available
             occurrence_num = None

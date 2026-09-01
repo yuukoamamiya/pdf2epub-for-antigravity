@@ -5,15 +5,11 @@ does not expose an in-process translation client.
 """
 
 from .compressor import HTMLCompressor
-from .splitter import HTMLSplitter, CompressedSplitter
 from .builder import HTMLEpubBuilder, HTMLEpubPipeline, build_html_epub
 
 __all__ = [
     # Compression
     "HTMLCompressor",
-    # Splitting
-    "HTMLSplitter",
-    "CompressedSplitter",
     # Building
     "HTMLEpubBuilder",
     "HTMLEpubPipeline",

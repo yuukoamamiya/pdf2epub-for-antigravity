@@ -4,11 +4,8 @@ Utility to convert markdown files to HTML with proper EPUB formatting.
 Uses python-markdown library with extensions for footnotes, tables, and other features.
 """
 
-import argparse
 import re
-from pathlib import Path
 from typing import Optional
-import yaml
 from loguru import logger
 from .utils.logging_config import configure_logging
 
@@ -28,13 +25,6 @@ OL_START_RE = re.compile(r'\sstart="([+-]?\d+)"')
 def contains_footnote_syntax(markdown_content: str) -> bool:
     """Return whether markdown contains supported footnote syntax."""
     return bool(FOOTNOTE_SYNTAX_RE.search(markdown_content))
-
-
-def load_config(config_path="config.yaml"):
-    """Load configuration from config file."""
-    with open(config_path, "r", encoding="utf-8") as file:
-        config = yaml.safe_load(file)
-    return config
 
 
 def get_epub_css():
@@ -818,158 +808,3 @@ def post_process_html(html: str) -> str:
     html = re.sub(r'<p>(\s*)</p>', '', html)  # Remove empty paragraphs
     
     return html
-
-
-def convert_file(
-    input_path: Path,
-    output_path: Optional[Path] = None,
-    title: Optional[str] = None,
-    include_css: bool = True,
-    standalone: bool = True,
-    footnote_manager=None,
-    source_chapter: Optional[str] = None
-) -> bool:
-    """
-    Convert a markdown file to HTML.
-    
-    Args:
-        input_path: Path to the markdown file
-        output_path: Path for the output HTML file (default: same name with .html extension)
-        title: Optional title for the HTML document
-        include_css: Whether to include CSS in the HTML head
-        standalone: Whether to create a complete HTML document
-    
-    Returns:
-        True if successful, False otherwise
-    """
-    try:
-        # Read markdown file
-        with open(input_path, 'r', encoding='utf-8') as f:
-            markdown_content = f.read()
-        
-        # Extract title from first H1 if not provided
-        if not title:
-            match = re.search(r'^#\s+(.+)$', markdown_content, re.MULTILINE)
-            if match:
-                title = match.group(1)
-            else:
-                title = input_path.stem
-        
-        # Convert to HTML
-        if source_chapter is None:
-            source_chapter = input_path.stem
-        if footnote_manager is None and contains_footnote_syntax(markdown_content):
-            from pdf2epub.epub.footnotes import FootnoteManager
-            footnote_manager = FootnoteManager(input_path.parent)
-
-        html = convert_markdown_to_html(
-            markdown_content,
-            title=title,
-            include_css=include_css,
-            standalone=standalone,
-            footnote_manager=footnote_manager,
-            source_chapter=source_chapter if footnote_manager else None
-        )
-        
-        # Determine output path
-        if not output_path:
-            output_path = input_path.with_suffix('.html')
-        
-        # Write HTML file
-        with open(output_path, 'w', encoding='utf-8') as f:
-            f.write(html)
-        
-        logger.success(f"Converted {input_path} -> {output_path}")
-        return True
-        
-    except Exception as e:
-        logger.error(f"Error converting {input_path}: {e}")
-        return False
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Convert markdown files to HTML for EPUB")
-    parser.add_argument("input", help="Input markdown file or directory")
-    parser.add_argument("-o", "--output", help="Output HTML file or directory")
-    parser.add_argument("-c", "--config", default="config.yaml", help="Config file path")
-    parser.add_argument("--no-css", action="store_true", help="Don't include CSS in output")
-    parser.add_argument("--body-only", action="store_true", help="Output only body content (no HTML wrapper)")
-    parser.add_argument("--chapter", type=int, help="Convert specific chapter number")
-    
-    args = parser.parse_args()
-    
-    input_path = Path(args.input)
-    
-    if not input_path.exists():
-        # Try to interpret as book title from config
-        config = load_config(args.config)
-        book_title = config.get("title")
-        
-        if book_title:
-            # Check for polished markdown directory
-            polished_dir = Path("output") / book_title / "polished_markdown"
-            if polished_dir.exists():
-                input_path = polished_dir
-            else:
-                logger.error(f"Polished markdown directory not found: {polished_dir}")
-                return
-        else:
-            logger.error(f"Input path not found: {input_path}")
-            return
-    
-    # Process single file or directory
-    if input_path.is_file():
-        # Single file conversion
-        output_path = Path(args.output) if args.output else None
-        convert_file(
-            input_path,
-            output_path,
-            include_css=not args.no_css,
-            standalone=not args.body_only
-        )
-    
-    elif input_path.is_dir():
-        # Directory conversion
-        output_dir = Path(args.output) if args.output else input_path.parent / "html_output"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Get all markdown files
-        if args.chapter:
-            markdown_files = [input_path / f"chapter_{args.chapter}.md"]
-        else:
-            markdown_files = sorted(input_path.glob("chapter_*.md"))
-        
-        if not markdown_files:
-            logger.error(f"No chapter markdown files found in {input_path}")
-            return
-        
-        logger.info(f"Converting {len(markdown_files)} markdown files to HTML...")
-        
-        success_count = 0
-        footnote_manager = None
-        if any(
-            contains_footnote_syntax(md_file.read_text(encoding='utf-8'))
-            for md_file in markdown_files
-            if md_file.exists()
-        ):
-            from pdf2epub.epub.footnotes import FootnoteManager
-            footnote_manager = FootnoteManager(input_path)
-
-        for md_file in markdown_files:
-            output_file = output_dir / md_file.with_suffix('.html').name
-            if convert_file(
-                md_file,
-                output_file,
-                include_css=not args.no_css,
-                standalone=not args.body_only,
-                footnote_manager=footnote_manager,
-                source_chapter=md_file.stem
-            ):
-                success_count += 1
-        
-        logger.info(f"Successfully converted {success_count}/{len(markdown_files)} files")
-        logger.info(f"Output saved to: {output_dir}")
-
-
-if __name__ == "__main__":
-    main()

@@ -92,8 +92,7 @@ class TOCNode:
             chapter_type=data.get('type')
         )
 
-        # Handle both 'children' and legacy 'subchapters'
-        children_data = data.get('children', data.get('subchapters', []))
+        children_data = data.get('children', [])
         if children_data:
             children = [cls.from_dict(child) for child in children_data]
             node.children = [c for c in children if c is not None]  # Filter invalid

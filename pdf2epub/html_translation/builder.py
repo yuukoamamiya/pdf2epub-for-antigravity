@@ -1662,10 +1662,6 @@ The output must have this shape:
                     continue
                 actual_href = actual.get("href", "")
                 actual_anchor = actual.get("anchor")
-                # Accept the legacy writer's combined ``href#anchor`` form,
-                # but compare the canonical path and fragment separately.
-                if actual_anchor is None and isinstance(actual_href, str) and "#" in actual_href:
-                    actual_href, actual_anchor = actual_href.split("#", 1)
                 for key, value in (
                     ("original", actual.get("original")),
                     ("href", actual_href),

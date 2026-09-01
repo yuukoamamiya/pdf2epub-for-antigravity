@@ -1,13 +1,4 @@
-"""
-Main workflow coordinator for refined breakdown.
-
-Orchestrates the entire refinement process:
-1. Analyze PDF structure
-2. Verify boundaries
-3. Handle failures (re-breakdown, discover subsections)
-4. Generate work units
-5. Merge pages and save
-"""
+"""Deterministic local half of the PDF refinement workflow."""
 
 import json
 import hashlib
@@ -19,7 +10,6 @@ import tiktoken
 
 from ..utils.unit_id import generate_unit_id
 from .toc_tree import TOCNode, dict_list_to_toc_tree
-from .refiner_state import RefinerState
 from .page_merger import PageMerger
 from .subagent_workflow import page_numbers, validate_toc_tree_data
 
@@ -67,23 +57,12 @@ def _insert_toc_chapter(toc_tree: List[TOCNode], toc_info: Dict) -> TOCNode:
 
 
 class RefinedBreakdown:
-    """
-    Main class for refined breakdown process.
-
-    Workflow:
-    1. Analyze PDF structure (extract recursive TOC tree)
-    2. Verify boundaries for each node
-    3. Handle verification failures
-    4. Generate work units based on token limits
-    5. Merge pages with precise boundary cutting
-    """
+    """Validate a Subagent TOC and generate local Markdown work units."""
 
     def __init__(
         self,
         config: Dict,
         max_tokens: int = None,
-        max_workers: int = None,
-        local_only: bool = True,
     ):
         """
         Initialize the refined breakdown processor.
@@ -91,15 +70,11 @@ class RefinedBreakdown:
         Args:
             config: Configuration dict (from config.yaml)
             max_tokens: Maximum tokens per unit (LLM limit). If None, uses model limit from config.
-            max_workers: Maximum parallel workers for verification
         """
         self.config = config
-        self.max_workers = max_workers or config.get('general', {}).get('max_concurrent_workers', 8)
-
         self.max_tokens = max_tokens or config.get('refine', {}).get('max_tokens', 8000)
 
         self.page_merger = PageMerger()
-        self.state = RefinerState()
 
     def process_from_toc(
         self,
@@ -162,7 +137,6 @@ class RefinedBreakdown:
     ) -> List[Dict]:
         """Shared deterministic token estimation, splitting, and page merge."""
         ocr_markdown_dir = output_dir / "ocr_markdown"
-        state_file = output_dir / "refiner_state.json"
         tree_progress_file = ocr_markdown_dir / "tree_progress.json"
 
         if resume and tree_progress_file.exists():
@@ -173,9 +147,7 @@ class RefinedBreakdown:
                     f"Refined breakdown already complete: {len(progress_data.get('units', []))} units"
                 )
                 return progress_data.get("units", [])
-            logger.warning(
-                "Refinement inputs changed or checkpoint is legacy; regenerating OCR work units"
-            )
+            logger.warning("Refinement inputs changed; regenerating OCR work units")
             shutil.rmtree(ocr_markdown_dir)
 
         if ocr_markdown_dir.exists() and not tree_progress_file.exists():
@@ -205,10 +177,6 @@ class RefinedBreakdown:
             ),
             encoding="utf-8",
         )
-        # A local run has no verification agent state, but recording completion
-        # makes --resume deterministic and keeps the existing state format.
-        self.state.verification_complete = True
-        self.state.save(state_file)
         logger.success(f"Refined breakdown complete: {len(work_units)} units")
         return unit_metadata
 

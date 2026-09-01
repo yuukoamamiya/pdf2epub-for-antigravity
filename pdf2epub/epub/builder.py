@@ -22,19 +22,19 @@ def _calculate_structure_depth(structure: Dict[str, Any]) -> int:
     Calculate maximum depth of book structure.
 
     Args:
-        structure: Book structure with chapters and optional subchapters
+        structure: Book structure with chapters and optional children
 
     Returns:
-        Maximum depth (1 for flat, 2 for chapters+subchapters, etc.)
+        Maximum depth (1 for flat, 2 for chapters+children, etc.)
     """
     def get_depth(items: List[Dict], current: int) -> int:
         if not items:
             return current
         max_depth = current
         for item in items:
-            subchapters = item.get('subchapters', [])
-            if subchapters:
-                child_depth = get_depth(subchapters, current + 1)
+            children = item.get('children', [])
+            if children:
+                child_depth = get_depth(children, current + 1)
                 max_depth = max(max_depth, child_depth)
         return max_depth
 
@@ -226,9 +226,9 @@ a { text-decoration: none; }
             <content src="text/{chapter_file}"/>
 """
                 
-                # Add subchapters if they exist
-                if "subchapters" in chapter:
-                    for j, subchapter in enumerate(chapter["subchapters"], 1):
+                # Add children if they exist
+                if "children" in chapter:
+                    for j, subchapter in enumerate(chapter["children"], 1):
                         play_order += 1
                         sub_title = subchapter.get("title", f"Section {j}")
                         anchor = f"{chapter_index}-{j}"
@@ -331,11 +331,11 @@ a { text-decoration: none; }
                 <a href="{chapter_file}">{html.escape(chapter_title)}</a>
 """
                 
-                # Add subchapters if they exist
-                if "subchapters" in chapter and chapter["subchapters"]:
+                # Add children if they exist
+                if "children" in chapter and chapter["children"]:
                     toc_html += """                <ul>
 """
-                    for j, subchapter in enumerate(chapter["subchapters"], 1):
+                    for j, subchapter in enumerate(chapter["children"], 1):
                         sub_title = subchapter.get("title", f"Section {j}")
                         anchor = f"{chapter_index}-{j}"
                         
