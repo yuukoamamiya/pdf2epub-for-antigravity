@@ -130,8 +130,10 @@
      是后续所有翻译 Subagent 的只读统一术语上下文；实体提取完成前不要执行
      `translate`。确实不需要术语表时，才显式使用 `translate --skip-entities`。
   3. 执行 `translate`，让 Subagent 按 `translate_subagent_prompt.md` 读取
-     `polished_markdown/validated/`，把同名译文写入 `translated/`；同时可用
-     `translate-toc` 单独准备 `toc_tree.json` 的 JSON 翻译任务。
+     manifest 中实际选定的源目录（默认优先
+     `polished_markdown/validated/`，也可由 `translation.source_stage` 指定
+     `ocr` 或 `polished`），把同名译文写入 `translated/`；该命令同时准备
+     TOC 翻译交接文件，也可用 `translate-toc` 单独重跑目录任务。
   4. 让 Subagent 按目录翻译 prompt 读取 `toc_tree.json`，写入
      `toc_tree_translated.json`；完成后可运行 `translate-toc-validate`。
   5. 保持 Markdown 标题层级（`#`, `##`）、公式（`$...$`）、脚注（`[^...]`）

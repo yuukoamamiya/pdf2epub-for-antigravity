@@ -100,6 +100,7 @@ input_pdf: "input/mybook.pdf"
 translation:
   source_language: English
   target_language: Chinese
+  require_entities: true  # PDF 翻译前要求统一术语表；确实不需要时用 --skip-entities
   # auto 优先使用精修稿；也可指定 ocr 或 polished
   source_stage: auto
 
@@ -183,10 +184,14 @@ uv run pdf2epub -c config.yaml translate --target-language Chinese
 让 Subagent：
 
 - 阅读 translate_subagent_prompt.md；
-- 读取 polished_markdown/validated/；
+- 读取 manifest 中实际选定的源目录（默认优先 polished_markdown/validated/，也可由
+  `translation.source_stage` 指定 ocr 或 polished）；
 - 将同名译文写入 translated/；
 - 只读取 translation_entities.json，使用其中的 suggested_translation 作为统一术语；
 - 按目录翻译 prompt 将译后目录写入 toc_tree_translated.json。
+
+`translate` 会同时生成目录翻译交接文件；如果只需重新准备目录任务，也可以单独
+运行 `translate-toc`，不必重新准备正文任务。
 
 也可以单独准备或校验目录翻译任务：
 
