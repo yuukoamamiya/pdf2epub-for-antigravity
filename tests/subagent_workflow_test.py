@@ -131,6 +131,87 @@ def test_markdown_validation_includes_structural_diff_summary(tmp_path: Path):
     assert diff["code_fence_changes"] is False
 
 
+def test_polish_validation_allows_only_duplicate_heading_reduction(tmp_path: Path):
+    from pdf2epub.subagent_workflow import validate_markdown_subagent
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "unit.md").write_text(
+        "## Preface and Acknowledgements\n\nText.\n\n"
+        "## Preface and Acknowledgements\n\nMore text.\n",
+        encoding="utf-8",
+    )
+    (target_dir / "unit.md").write_text(
+        "## Preface and Acknowledgements\n\nText.\n\nMore text.\n",
+        encoding="utf-8",
+    )
+
+    report = validate_markdown_subagent(
+        tmp_path,
+        "polish",
+        source_dir,
+        target_dir,
+        structural_patterns=(r"^#{1,6}\s",),
+        tolerate_duplicate_headings=True,
+    )
+
+    assert report["all_passed"] is True
+    assert report["structural_warnings"][0]["file"] == "unit.md"
+
+
+def test_polish_validation_still_rejects_unique_heading_removal(tmp_path: Path):
+    from pdf2epub.subagent_workflow import validate_markdown_subagent
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "unit.md").write_text("## Unique Section\n\nText.\n", encoding="utf-8")
+    (target_dir / "unit.md").write_text("Text.\n", encoding="utf-8")
+
+    report = validate_markdown_subagent(
+        tmp_path,
+        "polish",
+        source_dir,
+        target_dir,
+        structural_patterns=(r"^#{1,6}\s",),
+        tolerate_duplicate_headings=True,
+    )
+
+    assert report["all_passed"] is False
+    assert "structural marker mismatch" in report["invalid"][0]["reason"]
+
+
+def test_polish_validation_ignores_known_blank_page_image_artifact(tmp_path: Path):
+    from pdf2epub.subagent_workflow import validate_markdown_subagent
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "unit.md").write_text(
+        "![Blank white page](../images/page_004_img_001.png)"
+        "A completely blank white page with no visible content, text, or markings.\n",
+        encoding="utf-8",
+    )
+    (target_dir / "unit.md").write_text("\n", encoding="utf-8")
+
+    report = validate_markdown_subagent(
+        tmp_path,
+        "polish",
+        source_dir,
+        target_dir,
+        structural_patterns=(r"!\[[^\]]*\]\([^)]+\)",),
+    )
+
+    assert report["all_passed"] is False
+    # Removing the fake image is tolerated structurally, but an empty polished
+    # unit remains invalid and must not be staged for EPUB building.
+    assert report["invalid"][0]["reason"] == "target is empty"
+
+
 def test_html_validation_quarantines_refusal_candidate(tmp_path: Path):
     pipeline = object.__new__(HTMLEpubPipeline)
     pipeline.output_dir = tmp_path

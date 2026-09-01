@@ -10,6 +10,7 @@ from typing import List
 from loguru import logger
 
 from .toc_tree import TOCNode
+from ..utils.ocr_artifacts import clean_ocr_page_artifacts, remove_repeated_page_header
 
 
 class PageMerger:
@@ -41,6 +42,7 @@ class PageMerger:
         """
         content_parts = []
         boundary = node.boundary_info or {}
+        previous_header = None
 
         for page_num in range(node.start_page, node.end_page + 1):
             page_file = pages_dir / f"page_{page_num:03d}.md"
@@ -75,6 +77,13 @@ class PageMerger:
                         logger.debug(f"Cutting before next section at line {next_start_line}")
 
             page_content = '\n'.join(lines)
+            page_content = clean_ocr_page_artifacts(page_content)
+            lines = page_content.split('\n')
+            lines, current_header = remove_repeated_page_header(lines, previous_header)
+            if current_header is not None and current_header == previous_header:
+                logger.debug(f"Removed repeated running header on page {page_num}")
+            previous_header = current_header
+            page_content = '\n'.join(lines)
             if page_content.strip():
                 content_parts.append(page_content)
 
@@ -106,6 +115,7 @@ class PageMerger:
         start_page = min(n.start_page for n in nodes)
         end_page = max(n.end_page for n in nodes)
         first_boundary = nodes[0].boundary_info or {}
+        previous_header = None
 
         content_parts = []
 
@@ -130,6 +140,13 @@ class PageMerger:
                 if next_start_line is not None:
                     lines = lines[:next_start_line - 1]
 
+            page_content = '\n'.join(lines)
+            page_content = clean_ocr_page_artifacts(page_content)
+            lines = page_content.split('\n')
+            lines, current_header = remove_repeated_page_header(lines, previous_header)
+            if current_header is not None and current_header == previous_header:
+                logger.debug(f"Removed repeated running header on page {page_num}")
+            previous_header = current_header
             page_content = '\n'.join(lines)
             if page_content.strip():
                 content_parts.append(page_content)

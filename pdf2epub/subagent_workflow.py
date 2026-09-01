@@ -15,6 +15,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
+from .utils.ocr_artifacts import clean_ocr_page_artifacts
+
 
 DEFAULT_TRANSLATION_MODEL = "gemini-3.1-pro-preview"
 DEFAULT_SUBAGENT_MODEL = "gemini-3.6-flash"
@@ -389,6 +391,7 @@ def validate_markdown_subagent(
     structural_patterns: Iterable[str] = (),
     create_validated_copy: bool = True,
     file_roles: Optional[Mapping[str, str]] = None,
+    tolerate_duplicate_headings: bool = False,
 ) -> Dict:
     """Validate a Subagent markdown hand-off and optionally stage it."""
     source_dir = Path(source_dir)
@@ -401,6 +404,7 @@ def validate_markdown_subagent(
     source_sha256: Dict[str, str] = {}
     normalized_files: List[str] = []
     diff_summary: Dict[str, Dict[str, Any]] = {}
+    structural_warnings: List[Dict[str, Any]] = []
     normalized_roles = {
         str(name): str(role).strip().lower()
         for name, role in (file_roles or {}).items()
@@ -441,11 +445,28 @@ def validate_markdown_subagent(
             warning["file"] = source.name
             bilingual_warnings.append(warning)
         for pattern in structural_patterns:
-            if len(re.findall(pattern, source_text, flags=re.MULTILINE)) != len(
-                re.findall(pattern, target_text, flags=re.MULTILINE)
-            ):
+            comparison_source = source_text
+            if pattern == r"!\[[^\]]*\]\([^)]+\)":
+                comparison_source = clean_ocr_page_artifacts(source_text)
+            source_count = len(re.findall(pattern, comparison_source, flags=re.MULTILINE))
+            target_count = len(re.findall(pattern, target_text, flags=re.MULTILINE))
+            mismatch_allowed = (
+                pattern == r"^#{1,6}\s"
+                and tolerate_duplicate_headings
+                and _heading_reduction_is_duplicate_only(comparison_source, target_text)
+            )
+            if source_count != target_count and not mismatch_allowed:
                 invalid.append({"file": source.name, "reason": f"structural marker mismatch: {pattern}"})
                 break
+            if source_count != target_count and mismatch_allowed:
+                structural_warnings.append(
+                    {
+                        "file": source.name,
+                        "reason": "duplicate Markdown heading removed during polishing",
+                        "source_count": source_count,
+                        "target_count": target_count,
+                    }
+                )
         else:
             valid_files.append(source.name)
 
@@ -476,6 +497,7 @@ def validate_markdown_subagent(
         "safety_blocked": safety_blocked,
         "bilingual_warnings": bilingual_warnings,
         "normalized_files": normalized_files,
+        "structural_warnings": structural_warnings,
         "diff_summary": diff_summary,
         "file_roles": normalized_roles,
         "extra": extras,
@@ -488,6 +510,30 @@ def validate_markdown_subagent(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     return report
+
+
+def _heading_reduction_is_duplicate_only(source_text: str, target_text: str) -> bool:
+    """Allow polishing to remove only headings duplicated in the source.
+
+    This covers running headers repeated across a page boundary without
+    silently accepting the loss of a unique section heading.
+    """
+    from collections import Counter
+
+    heading_pattern = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
+
+    def signatures(text: str) -> Counter:
+        return Counter(
+            (len(match.group(1)), re.sub(r"\s+", " ", match.group(2)).strip().casefold())
+            for match in heading_pattern.finditer(text)
+        )
+
+    source = signatures(source_text)
+    target = signatures(target_text)
+    if sum(source.values()) <= sum(target.values()):
+        return False
+    missing = source - target
+    return bool(missing) and all(source[signature] >= 2 for signature in missing)
 
 
 def strip_outer_markdown_fences(text: str) -> tuple[str, bool]:

@@ -18,6 +18,12 @@ from pdf2epub.utils.common import (
     sanitize_filename,
 )
 from pdf2epub.utils.network_utils import set_llm_trace_path
+from pdf2epub.utils.encoding import configure_utf8_stdio
+
+# Windows consoles may still default to an active code page such as GBK.
+# Configure before loguru captures stderr so international filenames cannot
+# abort an otherwise successful CLI command.
+configure_utf8_stdio()
 
 # Configure logger
 logger = configure_logging()
@@ -191,6 +197,7 @@ def _validate_pdf_markdown_task(args, task: str):
         target_dir,
         structural_patterns=(r"^#{1,6}\s", r"!\[[^\]]*\]\([^)]+\)", r"\[\^[^\]]+\]"),
         file_roles=_load_pdf_file_roles(output_dir) if task == "translate" else None,
+        tolerate_duplicate_headings=task == "polish",
     )
     if task == "translate":
         from pdf2epub.subagent_workflow import validate_toc_translation_subagent
@@ -218,6 +225,11 @@ def _validate_pdf_markdown_task(args, task: str):
         logger.warning(
             f"Bilingual output warnings: {len(report['bilingual_warnings'])} "
             "(warning only; inspect the validation JSON before building)"
+        )
+    if report.get("structural_warnings"):
+        logger.warning(
+            f"Structural changes tolerated: {len(report['structural_warnings'])} "
+            "duplicate heading/image artifact adjustment(s)"
         )
     if report["all_passed"]:
         logger.success(f"{task} Subagent output validated: {report['validated_dir']}")
