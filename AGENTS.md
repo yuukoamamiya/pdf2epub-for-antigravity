@@ -116,6 +116,8 @@
 3. Agent 执行命令：`uv run pdf2epub -c config.yaml refine-local --resume`
 4. 产物：`output/<title>/toc_tree.json` 与 `output/<title>/ocr_markdown/chapter_XXX.md`。
 5. **TOC 校验**：`refine-local` 本地检查章节重叠、父子范围和缺失页面；若失败，修正 `toc_tree.json` 后重新执行。
+   `refine-local --resume` 会比较 `tree_progress.json` 中保存的 TOC/OCR SHA-256
+   指纹；输入变化时自动废弃旧工作单元并重新生成。
 
 #### Step 4: Subagent 润色或翻译
 - **若为翻译需求**：
@@ -130,6 +132,7 @@
      标点；索引保留层级、页码、范围和交叉引用，不得省略条目。
   5. `translate-validate` 的 `bilingual_warnings` 仅是长英文原文未变化的预警，
      不是自动阻断条件；应人工检查后再决定是否让 Subagent 重写。
+     报告中的 `diff_summary` 可用于定位行数、标题和代码围栏变化。
 - **若仅为版式精修需求**：
   1. 执行 `polish`，让 Subagent 按 `polish_subagent_prompt.md` 修复 OCR 文本
      断行与格式，写入 `output/<title>/polished_markdown/`；完成后运行
@@ -140,6 +143,8 @@
 - 生成原版精修版：`uv run pdf2epub -c config.yaml build-epub`
 - 使用 `build-epub --translated` 时，会同时从英文源稿生成
   `output/<title>/<safe-title>_en.epub`，然后再生成中文 EPUB；不再额外生成英文 Markdown。
+- 没有独立 Markdown 文件的叶子子章节使用稳定锚点（如 `#toc-3-7-1`）链接到父章节正文，
+  不因父子节点合并而产生失效目录项。
 
 ---
 

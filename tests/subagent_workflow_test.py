@@ -18,6 +18,7 @@ from pdf2epub.subagent_workflow import (
     prepare_markdown_subagent,
     prepare_toc_translation_subagent,
     resolve_subagent_model,
+    validate_toc_translation_subagent,
 )
 
 
@@ -112,6 +113,22 @@ def test_markdown_validation_excludes_bibliography_from_bilingual_warning(tmp_pa
         file_roles={"unit.md": "bibliography"},
     )
     assert report["bilingual_warnings"] == []
+
+
+def test_markdown_validation_includes_structural_diff_summary(tmp_path: Path):
+    from pdf2epub.subagent_workflow import validate_markdown_subagent
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "unit.md").write_text("# Original\nBody\n", encoding="utf-8")
+    (target_dir / "unit.md").write_text("# 译文\n正文\n", encoding="utf-8")
+    report = validate_markdown_subagent(tmp_path, "translate", source_dir, target_dir)
+    diff = report["diff_summary"]["unit.md"]
+    assert diff["line_count_changed"] is False
+    assert diff["heading_count_changed"] is False
+    assert diff["code_fence_changes"] is False
 
 
 def test_html_validation_quarantines_refusal_candidate(tmp_path: Path):
@@ -465,6 +482,49 @@ def test_refine_local_splits_a_parent_when_children_cover_its_range(tmp_path: Pa
         tmp_path / "input.pdf", tmp_path, "Book"
     )
     assert [unit["unit_id"] for unit in units] == ["chapter_1.1", "chapter_1.2"]
+
+
+def test_refine_local_does_not_reuse_checkpoint_after_toc_changes(tmp_path: Path):
+    pages_dir = tmp_path / "pages"
+    pages_dir.mkdir()
+    for number in range(1, 3):
+        (pages_dir / f"page_{number:03d}.md").write_text("Content", encoding="utf-8")
+    toc_path = tmp_path / "toc_tree.json"
+    toc_path.write_text(json.dumps({
+        "chapters": [{"title": "First", "level": 1, "start_page": 1, "end_page": 2}]
+    }), encoding="utf-8")
+    refiner = RefinedBreakdown(config={}, max_tokens=8000)
+    first = refiner.process_from_toc(tmp_path / "input.pdf", tmp_path, "Book", resume=False)
+    assert first[0]["title"] == "First"
+
+    toc_path.write_text(json.dumps({
+        "chapters": [{"title": "Renamed", "level": 1, "start_page": 1, "end_page": 2}]
+    }), encoding="utf-8")
+    second = refiner.process_from_toc(tmp_path / "input.pdf", tmp_path, "Book", resume=True)
+    assert second[0]["title"] == "Renamed"
+
+
+def test_toc_validation_accepts_legacy_translated_fields_with_warning(tmp_path: Path):
+    source = {
+        "schema_version": 1,
+        "book_title": "Original",
+        "chapters": [{"title": "Chapter", "level": 1, "start_page": 1, "end_page": 2}],
+    }
+    target = {
+        **source,
+        "book_title_translated": "译名",
+        "chapters": [{**source["chapters"][0], "title_translated": "章节"}],
+    }
+    (tmp_path / "toc_translation_source.json").write_text(
+        json.dumps({"toc": source}), encoding="utf-8"
+    )
+    (tmp_path / "toc_tree_translated.json").write_text(
+        json.dumps(target), encoding="utf-8"
+    )
+    report = validate_toc_translation_subagent(tmp_path)
+    assert report["valid"] is True
+    assert report["resolved_book_title"] == "译名"
+    assert len(report["compatibility_warnings"]) == 2
 
 
 def test_prepare_toc_translation_subagent_writes_clean_prompt(tmp_path: Path):

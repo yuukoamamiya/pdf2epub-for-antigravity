@@ -142,6 +142,8 @@ Subagent 对照目录判断范围，OCR 文件名代表的物理页始终是最�
 程序自动按 offset 改写。
 
 这个阶段在本地校验目录范围、父子关系、章节重叠和缺失页面，然后生成 ocr_markdown/ 工作单元。它不会调用模型。
+`refine-local --resume` 会在 `tree_progress.json` 中保存 TOC 与 OCR 页面的 SHA-256
+指纹；只要输入发生变化，就会自动重新生成工作单元，不会误用旧断点。
 
 ### 3. 可选：润色 OCR 结果
 
@@ -184,9 +186,15 @@ manifest 会在 `file_roles` 中标记对应单元，并把专用规则写入 pr
 范围和交叉引用，同时翻译索引词。两类内容仍会完整交给 Subagent，不会被静默
 跳过。
 
+TOC 翻译校验优先要求书名写入 `book_title`、章节标题写入 `title`。对旧结果中
+仍使用 `book_title_translated`/`title_translated` 的文件，校验报告会给出兼容性
+警告，打包器仍可读取这些字段。
+
 `translate-validate` 还会在 JSON 报告的 `bilingual_warnings` 中记录疑似双语
 污染（例如连续长英文原文未发生变化）。这是预警而不是硬失败；人名、公式、URL
 和 Bibliography/Index 单元会避免按此启发式误报。
+同一报告的 `diff_summary` 会记录行数、标题数量、代码围栏和未变化英文段落的
+结构差异，便于定位局部格式问题。
 
 ### 5. 打包
 
@@ -209,6 +217,9 @@ uv run pdf2epub -c config.yaml build-epub --translated
 
 随后再生成中文 EPUB。英文 EPUB 和中文 EPUB 使用同一套英文源稿。若配置 `translation.source_stage: ocr`，伴随产物会使用 OCR
 稿；默认 `auto` 会在精修稿可用时使用精修稿，否则回退到 OCR 稿。
+
+目录中没有独立 Markdown 文件的叶子子章节，会链接到父章节正文中的稳定锚点（例如
+`#toc-3-7-1`），因此不会因为工作单元合并而丢失目录跳转。
 
 构建命令只接受通过本地校验的文件。输出在 output/<title>/ 下，文件名会根据书名安全清理。
 

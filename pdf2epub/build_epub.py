@@ -9,6 +9,7 @@ source for chapter structure and titles. This provides:
 """
 
 import json
+import difflib
 import os
 import re
 import sys
@@ -293,9 +294,20 @@ def _remove_duplicate_heading(lines: list, title_line_idx: int, toc_title: str):
     """Remove duplicate heading that follows the chapter title.
 
     OCR often produces a heading like "## Title" which duplicates the TOC title.
-    If we find a semantically similar heading within the next few lines, remove it.
-    Uses embedding-based similarity for better multilingual support.
+    If we find a textually equivalent heading within the next few lines, remove it.
+
+    Semantic similarity is intentionally not used here.  A chapter title and its
+    first real subsection can be conceptually related (especially in translated
+    Chinese text), but they are still distinct headings.  Removing a subsection
+    at this stage also makes its EPUB TOC anchor impossible to create.
     """
+    def normalize_heading(value: str) -> str:
+        value = re.sub(r"^#+\s*", "", value)
+        # Ignore punctuation and spacing differences commonly introduced by OCR,
+        # while retaining letters and ideographs for a conservative comparison.
+        return re.sub(r"[^\w\u3400-\u9fff]+", "", value, flags=re.UNICODE).casefold()
+
+    normalized_title = normalize_heading(toc_title)
     # Look in lines after the title (skip blank lines)
     for i in range(title_line_idx + 1, min(title_line_idx + 5, len(lines))):
         line = lines[i].strip()
@@ -304,12 +316,20 @@ def _remove_duplicate_heading(lines: list, title_line_idx: int, toc_title: str):
         if line.startswith('#'):
             # Extract heading text (remove # prefix)
             heading_text = re.sub(r'^#+\s*', '', line)
-            # Check semantic similarity using embeddings
-            similarity = _compute_semantic_similarity(toc_title, heading_text)
-            if similarity > 0.6:
+            normalized_heading = normalize_heading(heading_text)
+            similarity = difflib.SequenceMatcher(
+                None, normalized_title, normalized_heading
+            ).ratio()
+            if normalized_title and (
+                normalized_title == normalized_heading
+                or similarity >= 0.9
+            ):
                 # Remove this duplicate heading
                 lines[i] = ''
-                logger.debug(f"Removed duplicate heading: '{heading_text}' (similarity: {similarity:.2f})")
+                logger.debug(
+                    f"Removed duplicate heading: '{heading_text}' "
+                    f"(text similarity: {similarity:.2f})"
+                )
             break  # Only check the first heading after title
 
 
@@ -550,6 +570,7 @@ def flatten_toc_tree(
             'title': title,
             'level': chapter.get('level', 1),
             'index_path': index_path,
+            'anchor': 'toc-' + '-'.join(str(value) for value in index_path),
             'start_page': chapter.get('start_page'),
             'end_page': chapter.get('end_page'),
         }
@@ -590,6 +611,8 @@ def build_epub_structure(
         }
         if 'type' in entry:
             result['type'] = entry['type']
+        if 'anchor' in entry:
+            result['anchor'] = entry['anchor']
 
         # Find markdown file using unit_id
         index_path = entry.get('index_path')
@@ -731,6 +754,10 @@ def generate_hierarchical_toc_ncx(
         else:
             # No file, link to first child with file, or parent's file
             href = find_first_child_href(entry, parent_href)
+            if not entry.get('children') and entry.get('anchor'):
+                base_href = href.split('#', 1)[0]
+                if base_href != "text/toc.html":
+                    href = f"{base_href}#{entry['anchor']}"
 
         nav_id = f"navpoint-{nav_counter[0]}"
         nav_counter[0] += 1
@@ -849,6 +876,10 @@ def generate_hierarchical_toc_html(
         else:
             # No file - link to first child with file, or parent's file
             href = find_first_child_href_html(entry, parent_href)
+            if not entry.get('children') and entry.get('anchor'):
+                base_href = href.split('#', 1)[0]
+                if base_href != "toc.html":
+                    href = f"{base_href}#{entry['anchor']}"
 
         result += f"{indent}<li>\n"
         result += f"{indent}    <a href=\"{href}\">{title}</a>\n"
@@ -1148,7 +1179,10 @@ def build_epub(config: BuildEpubConfig) -> Path:
                                     chapter_index = identity.index_path[0]
                                     # Build subchapter_info from children
                                     subchapter_info = [
-                                        {'title': child['title']}
+                                        {
+                                            'title': child['title'],
+                                            'anchor': child.get('anchor'),
+                                        }
                                         for child in entry['children']
                                     ]
                                     html_content = converter._add_subchapter_anchors(

@@ -10,6 +10,7 @@ Orchestrates the entire refinement process:
 """
 
 import json
+import hashlib
 import shutil
 from pathlib import Path
 from typing import List, Dict
@@ -24,6 +25,18 @@ from .subagent_workflow import page_numbers, validate_toc_tree_data
 
 # Initialize tokenizer
 tokenizer = tiktoken.get_encoding("cl100k_base")
+
+
+REFINE_CHECKPOINT_SCHEMA = 2
+
+
+def _pages_fingerprint(pages_dir: Path) -> str:
+    """Hash page names and contents so resume cannot reuse stale OCR input."""
+    digest = hashlib.sha256()
+    for page in sorted(pages_dir.glob("page_*.md")):
+        digest.update(page.name.encode("utf-8"))
+        digest.update(hashlib.sha256(page.read_bytes()).digest())
+    return digest.hexdigest()
 
 
 def _insert_toc_chapter(toc_tree: List[TOCNode], toc_info: Dict) -> TOCNode:
@@ -124,12 +137,18 @@ class RefinedBreakdown:
 
         toc_tree = dict_list_to_toc_tree(toc_data["chapters"])
         book_metadata = {key: value for key, value in toc_data.items() if key != "chapters"}
+        source_fingerprint = {
+            "schema": REFINE_CHECKPOINT_SCHEMA,
+            "toc_sha256": hashlib.sha256(toc_tree_file.read_bytes()).hexdigest(),
+            "pages_sha256": _pages_fingerprint(pages_dir),
+        }
         return self._generate_units_from_tree(
             toc_tree,
             book_metadata,
             pages_dir,
             output_dir,
             resume=resume,
+            source_fingerprint=source_fingerprint,
         )
 
     def _generate_units_from_tree(
@@ -139,6 +158,7 @@ class RefinedBreakdown:
         pages_dir: Path,
         output_dir: Path,
         resume: bool = False,
+        source_fingerprint: Dict[str, str] = None,
     ) -> List[Dict]:
         """Shared deterministic token estimation, splitting, and page merge."""
         ocr_markdown_dir = output_dir / "ocr_markdown"
@@ -147,10 +167,16 @@ class RefinedBreakdown:
 
         if resume and tree_progress_file.exists():
             progress_data = json.loads(tree_progress_file.read_text(encoding="utf-8"))
-            logger.success(
-                f"Refined breakdown already complete: {len(progress_data.get('units', []))} units"
+            checkpoint = progress_data.get("fingerprint")
+            if source_fingerprint and checkpoint == source_fingerprint:
+                logger.success(
+                    f"Refined breakdown already complete: {len(progress_data.get('units', []))} units"
+                )
+                return progress_data.get("units", [])
+            logger.warning(
+                "Refinement inputs changed or checkpoint is legacy; regenerating OCR work units"
             )
-            return progress_data.get("units", [])
+            shutil.rmtree(ocr_markdown_dir)
 
         if ocr_markdown_dir.exists() and not tree_progress_file.exists():
             logger.warning("Found incomplete ocr_markdown; clearing it before regeneration")
@@ -168,7 +194,12 @@ class RefinedBreakdown:
         unit_metadata = self._save_units(work_units, pages_dir, ocr_markdown_dir)
         tree_progress_file.write_text(
             json.dumps(
-                {"units": unit_metadata, "book_metadata": book_metadata},
+                {
+                    "schema": REFINE_CHECKPOINT_SCHEMA,
+                    "fingerprint": source_fingerprint or {},
+                    "units": unit_metadata,
+                    "book_metadata": book_metadata,
+                },
                 indent=2,
                 ensure_ascii=False,
             ),

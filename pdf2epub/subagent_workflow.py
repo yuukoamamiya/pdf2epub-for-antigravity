@@ -400,6 +400,7 @@ def validate_markdown_subagent(
     valid_files: List[str] = []
     source_sha256: Dict[str, str] = {}
     normalized_files: List[str] = []
+    diff_summary: Dict[str, Dict[str, Any]] = {}
     normalized_roles = {
         str(name): str(role).strip().lower()
         for name, role in (file_roles or {}).items()
@@ -424,6 +425,7 @@ def validate_markdown_subagent(
         if stripped_fence:
             target.write_text(target_text, encoding="utf-8")
             normalized_files.append(source.name)
+        diff_summary[source.name] = translation_diff_summary(source_text, target_text)
         if not target_text.strip():
             invalid.append({"file": source.name, "reason": "target is empty"})
             continue
@@ -474,6 +476,7 @@ def validate_markdown_subagent(
         "safety_blocked": safety_blocked,
         "bilingual_warnings": bilingual_warnings,
         "normalized_files": normalized_files,
+        "diff_summary": diff_summary,
         "file_roles": normalized_roles,
         "extra": extras,
         "valid_files": valid_files,
@@ -505,6 +508,24 @@ def strip_outer_markdown_fences(text: str) -> tuple[str, bool]:
         return text, False
     cleaned = "".join(lines[:first] + lines[first + 1:last] + lines[last + 1:])
     return cleaned, True
+
+
+def translation_diff_summary(source_text: str, target_text: str) -> Dict[str, Any]:
+    """Return structural and translation-risk counters for a Markdown unit."""
+    heading_pattern = re.compile(r"^#{1,6}\s", re.MULTILINE)
+    warning = detect_bilingual_output(source_text, target_text)
+    return {
+        "source_line_count": len(source_text.splitlines()),
+        "target_line_count": len(target_text.splitlines()),
+        "line_count_changed": len(source_text.splitlines()) != len(target_text.splitlines()),
+        "source_heading_count": len(heading_pattern.findall(source_text)),
+        "target_heading_count": len(heading_pattern.findall(target_text)),
+        "heading_count_changed": len(heading_pattern.findall(source_text)) != len(heading_pattern.findall(target_text)),
+        "source_code_fence_count": source_text.count("```") ,
+        "target_code_fence_count": target_text.count("```") ,
+        "code_fence_changes": source_text.count("```") != target_text.count("```"),
+        "unchanged_english_spans": 1 if warning else 0,
+    }
 
 
 def detect_bilingual_output(source_text: str, target_text: str) -> Optional[Dict[str, Any]]:
@@ -602,6 +623,7 @@ def validate_toc_translation_subagent(output_dir: Path) -> Dict:
     source_path = output_dir / "toc_translation_source.json"
     target_path = output_dir / "toc_tree_translated.json"
     errors: List[str] = []
+    compatibility_warnings: List[str] = []
     if not source_path.exists():
         errors.append("toc_translation_source.json is missing")
     if not target_path.exists():
@@ -620,6 +642,15 @@ def validate_toc_translation_subagent(output_dir: Path) -> Dict:
     if target.get("schema_version") != source.get("schema_version"):
         errors.append("schema_version changed")
     if "book_title" in source:
+        translated_book_title = (
+            target.get("book_title_translated")
+            or target.get("translated_book_title")
+            or target.get("translated_title")
+        )
+        if translated_book_title and target.get("book_title") == source.get("book_title"):
+            compatibility_warnings.append(
+                "book_title was left unchanged; using a *_translated compatibility field"
+            )
         if not isinstance(target.get("book_title"), str) or not target["book_title"].strip():
             errors.append("book_title is missing or empty")
     for key, value in source.items():
@@ -640,6 +671,14 @@ def validate_toc_translation_subagent(output_dir: Path) -> Dict:
             if not isinstance(source_node, dict) or not isinstance(target_node, dict):
                 errors.append(f"{node_path} must remain an object")
                 continue
+            translated_node_title = (
+                target_node.get("title_translated")
+                or target_node.get("translated_title")
+            )
+            if translated_node_title and target_node.get("title") == source_node.get("title"):
+                compatibility_warnings.append(
+                    f"{node_path}.title was left unchanged; using a *_translated compatibility field"
+                )
             if not isinstance(target_node.get("title"), str) or not target_node["title"].strip():
                 errors.append(f"{node_path}.title is missing or empty")
             for key, value in source_node.items():
@@ -653,6 +692,13 @@ def validate_toc_translation_subagent(output_dir: Path) -> Dict:
     return {
         "valid": not errors,
         "errors": errors,
+        "compatibility_warnings": compatibility_warnings,
+        "resolved_book_title": (
+            target.get("book_title_translated")
+            or target.get("translated_book_title")
+            or target.get("translated_title")
+            or target.get("book_title")
+        ),
         "source": str(source_path),
         "translated": str(target_path),
     }

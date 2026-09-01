@@ -5,12 +5,15 @@ from xml.etree import ElementTree as ET
 from pdf2epub.cli import _resolve_pdf_markdown_source
 from pdf2epub.build_epub import (
     flatten_toc_tree,
+    build_epub_structure,
     generate_hierarchical_toc_html,
+    process_chapter_content,
     generate_hierarchical_toc_ncx,
     resolve_book_metadata,
     write_combined_markdown,
 )
 from pdf2epub.epub.builder import EpubBuilder
+from pdf2epub.epub.converter import ContentConverter
 
 
 def test_ncx_and_opf_share_publication_identifier(tmp_path: Path) -> None:
@@ -182,6 +185,54 @@ def test_flatten_toc_tree_uses_subagent_translated_title_fields() -> None:
     )
     assert structure[0]["title"] == "译名"
     assert structure[0]["children"][0]["title"] == "子标题"
+
+
+def test_toc_uses_stable_fragment_for_child_without_own_file(tmp_path: Path) -> None:
+    parent_file = tmp_path / "chapter_1.md"
+    parent_file.write_text("# Parent\n\n## Child\n", encoding="utf-8")
+    structure = build_epub_structure(
+        flatten_toc_tree([{
+            "title": "Parent",
+            "level": 1,
+            "start_page": 1,
+            "end_page": 2,
+            "children": [{
+                "title": "Child",
+                "level": 2,
+                "start_page": 1,
+                "end_page": 2,
+            }],
+        }]),
+        tmp_path,
+    )
+    from pdf2epub.build_epub import generate_hierarchical_toc_html
+    toc_path = tmp_path / "toc.html"
+    assert generate_hierarchical_toc_html(structure, "Book", toc_path)
+    toc = toc_path.read_text(encoding="utf-8")
+    assert 'href="chapter_1.html#toc-1-1"' in toc
+
+
+def test_subchapter_anchor_supports_deep_headings_and_nested_markup() -> None:
+    converter = object.__new__(ContentConverter)
+    html = '<h5 id="old"><strong>Child title</strong></h5>'
+    result = converter._add_subchapter_anchors(
+        html,
+        1,
+        [{"title": "Child title", "anchor": "toc-1-1"}],
+    )
+    assert 'id="toc-1-1"' in result
+    assert '<strong>Child title</strong>' in result
+
+
+def test_process_chapter_content_keeps_related_subsection_heading() -> None:
+    processed = process_chapter_content(
+        "第一部分附录",
+        1,
+        "# Appendices to Part One\n\n## A. 简要文献目录\n\nBody",
+        True,
+    )
+    assert "# 第一部分附录" in processed
+    assert "## A. 简要文献目录" in processed
 
 
 def test_combined_markdown_follows_toc_and_split_part_order(tmp_path: Path) -> None:

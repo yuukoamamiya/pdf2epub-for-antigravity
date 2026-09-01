@@ -200,6 +200,8 @@ def _validate_pdf_markdown_task(args, task: str):
         if not toc_report["valid"]:
             for error in toc_report["errors"]:
                 logger.error(f"TOC: {error}")
+        for warning in toc_report.get("compatibility_warnings", []):
+            logger.warning(f"TOC compatibility: {warning}")
     logger.info(
         f"{task} 校验: {report['completed']}/{report['total']} completed, "
         f"{len(report['invalid'])} invalid"
