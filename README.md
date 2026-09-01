@@ -56,6 +56,10 @@ cp config_epub.yaml.example config_epub.yaml
 
 Windows 用户也可以直接复制文件，不必使用 cp。真实配置、凭证、输入书籍和输出目录都只保存在本地，不要提交到 Git。
 
+Windows 下进行批量替换、JSON 写入或正则处理时，建议使用仓库已有的 UTF-8
+脚本，并显式指定文件编码；不要把复杂逻辑拼成 PowerShell 的 `python -c` 单行命令，
+以免引号转义和控制台编码破坏中文内容。
+
 ## 配置 Subagent 模型
 
 在 config.yaml 或 config_epub.yaml 中设置：
@@ -161,7 +165,16 @@ uv run pdf2epub -c config.yaml polish-validate
 
 ### 4. 可选：翻译
 
-先确保润色校验通过，然后运行：
+先确保润色校验通过。为了让并行 Subagent 使用同一套术语，先从实际翻译源稿
+提取并校验全书实体词表：
+
+~~~bash
+uv run pdf2epub -c config.yaml extract-entities
+# Antigravity Subagent 写入 output/<title>/translation_entities.json
+uv run pdf2epub -c config.yaml extract-entities-validate
+~~~
+
+然后准备正文和目录翻译任务：
 
 ~~~bash
 uv run pdf2epub -c config.yaml translate --target-language Chinese
@@ -172,7 +185,26 @@ uv run pdf2epub -c config.yaml translate --target-language Chinese
 - 阅读 translate_subagent_prompt.md；
 - 读取 polished_markdown/validated/；
 - 将同名译文写入 translated/；
+- 只读取 translation_entities.json，使用其中的 suggested_translation 作为统一术语；
 - 按目录翻译 prompt 将译后目录写入 toc_tree_translated.json。
+
+也可以单独准备或校验目录翻译任务：
+
+~~~bash
+uv run pdf2epub -c config.yaml translate-toc
+# Antigravity Subagent 写入 toc_tree_translated.json
+uv run pdf2epub -c config.yaml translate-toc-validate
+~~~
+
+如果任务确实不涉及需要统一的术语，可以明确跳过词表门槛：
+
+~~~bash
+uv run pdf2epub -c config.yaml translate --skip-entities
+~~~
+
+润色阶段会把已确认的 OCR `<sup>N</sup>` 注脚和章末数字注释转换成
+Markdown `[^N]` / `[^N]: ...`，同时避开数学、表格和序数上标；校验器会检查
+引用与定义是否一一对应。
 
 然后运行：
 

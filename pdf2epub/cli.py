@@ -7,6 +7,7 @@ including polishing OCR output and translating content.
 """
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -123,6 +124,9 @@ def _prepare_pdf_markdown_task(args, task: str):
         rules = [
             "Fix OCR line breaks, obvious OCR errors, and formatting while preserving meaning.",
             "Preserve Markdown heading levels, image links, footnote references, formulas, and link destinations.",
+            "Never add a # heading marker to an ordinary paragraph, bold line, italic line, Roman numeral, or numbered section that does not already begin with #. Preserve the source heading marker and level exactly.",
+            "Only remove a heading when it is an obvious duplicated running header; never remove a unique section heading.",
+            "When a Notes/注释 section contains numbered endnotes, convert only verified footnote superscripts from <sup>N</sup> to [^N], and convert the matching endnote lines to [^N]: text. Do not convert mathematical, table, ordinal, or other non-footnote superscripts.",
         ]
         content_type = getattr(args, "content_type", "auto")
         if content_type and content_type != "auto":
@@ -130,6 +134,30 @@ def _prepare_pdf_markdown_task(args, task: str):
     else:
         source_dir, _ = _resolve_pdf_markdown_source(output_dir, config)
         target_dir = output_dir / "translated"
+        translation_config = config.get("translation", {})
+        require_entities = translation_config.get("require_entities", True)
+        entity_path = output_dir / "translation_entities.json"
+        skip_entities = bool(getattr(args, "skip_entities", False))
+        if require_entities and not skip_entities:
+            if not entity_path.is_file():
+                logger.error(
+                    "translation_entities.json is required before PDF translation. "
+                    "Run extract-entities, let the Subagent write the file, then "
+                    "run extract-entities-validate; use --skip-entities only "
+                    "when a glossary is genuinely unnecessary."
+                )
+                return 1
+            try:
+                from pdf2epub.entity_extractor import validate_entities
+
+                entity_data = json.loads(entity_path.read_text(encoding="utf-8"))
+                entity_errors = validate_entities(entity_data, book_title)
+            except (OSError, json.JSONDecodeError) as exc:
+                entity_errors = [f"invalid translation_entities.json: {exc}"]
+            if entity_errors:
+                for error in entity_errors:
+                    logger.error(f"Entity glossary: {error}")
+                return 1
         rules = [
             "Translate prose to the target language; do not summarize, censor, or add commentary.",
             "Preserve Markdown heading levels, image links, footnote references, formulas, and link destinations exactly.",
@@ -137,8 +165,15 @@ def _prepare_pdf_markdown_task(args, task: str):
             "Output only the target-language replacement: never add bilingual paragraphs, parallel English titles, or the original text beside the translation.",
             "Do not upgrade ordinary paragraphs, italic text, or bold text into Markdown headings: preserve exactly whether the source line begins with #.",
             "Never add Markdown code fences (```); if the source has no fence, the translated output must have no fence.",
-            "If translation_entities.json exists, use it as a terminology reference without modifying it.",
         ]
+        if skip_entities:
+            rules.append(
+                "The translation glossary gate was explicitly skipped for this task; do not invent or expect a translation_entities.json context file."
+            )
+        else:
+            rules.append(
+                "Read translation_entities.json before translating and use its suggested_translation values as the canonical terminology reference; do not modify it."
+            )
     configure_logging(book_title, f"{task}-prepare")
     try:
         paths = prepare_markdown_subagent(
@@ -152,6 +187,12 @@ def _prepare_pdf_markdown_task(args, task: str):
             config=config,
             resume=getattr(args, "resume", False),
             file_roles=_load_pdf_file_roles(output_dir) if task == "translate" else None,
+            context_files={"translation_entities": entity_path}
+            if task == "translate" and not skip_entities and entity_path.is_file()
+            else None,
+            skipped_context_files=("translation_entities",)
+            if task == "translate" and skip_entities
+            else (),
         )
         if task == "translate":
             from pdf2epub.subagent_workflow import prepare_toc_translation_subagent
@@ -174,6 +215,60 @@ def polish_validate_command(args):
     return _validate_pdf_markdown_task(args, "polish")
 
 
+def _validate_translation_entities(output_dir: Path, config: dict) -> dict:
+    """Validate the glossary contract recorded by the translation manifest."""
+    manifest_path = output_dir / "translate_subagent_manifest.json"
+    translation = config.get("translation", {})
+    required = translation.get("require_entities", True)
+    if not manifest_path.is_file():
+        return {"valid": not required, "errors": ["translation manifest is missing"]}
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {"valid": False, "errors": [f"invalid translation manifest: {exc}"]}
+
+    context_files = manifest.get("context_files", {})
+    entity_relative = context_files.get("translation_entities")
+    if not entity_relative:
+        if "translation_entities" in manifest.get("skipped_context_files", []):
+            return {"valid": True, "skipped": True, "errors": []}
+        if required:
+            return {
+                "valid": False,
+                "errors": [
+                    "translation manifest has no translation_entities context; "
+                    "rerun translate after extract-entities-validate or use --skip-entities"
+                ],
+            }
+        return {"valid": True, "skipped": True, "errors": []}
+
+    entity_path = (output_dir / entity_relative).resolve()
+    try:
+        entity_path.relative_to(output_dir.resolve())
+    except ValueError:
+        return {"valid": False, "errors": ["translation entity context escapes output directory"]}
+    if not entity_path.is_file():
+        return {"valid": False, "errors": [f"entity context is missing: {entity_relative}"]}
+    expected_hash = manifest.get("context_sha256", {}).get("translation_entities")
+    actual_hash = hashlib.sha256(entity_path.read_bytes()).hexdigest()
+    errors = []
+    if expected_hash and expected_hash != actual_hash:
+        errors.append("translation_entities.json changed after the translation task was prepared")
+    try:
+        from pdf2epub.entity_extractor import validate_entities
+
+        entity_data = json.loads(entity_path.read_text(encoding="utf-8"))
+        errors.extend(validate_entities(entity_data, config.get("title")))
+    except (OSError, json.JSONDecodeError) as exc:
+        errors.append(f"invalid translation_entities.json: {exc}")
+    return {
+        "valid": not errors,
+        "errors": errors,
+        "file": str(entity_path),
+        "sha256": actual_hash,
+    }
+
+
 def _validate_pdf_markdown_task(args, task: str):
     from pdf2epub.subagent_workflow import validate_markdown_subagent
 
@@ -194,11 +289,22 @@ def _validate_pdf_markdown_task(args, task: str):
         task,
         source_dir,
         target_dir,
-        structural_patterns=(r"^#{1,6}\s", r"!\[[^\]]*\]\([^)]+\)", r"\[\^[^\]]+\]"),
+        structural_patterns=(
+            r"^#{1,6}\s",
+            r"!\[[^\]]*\]\([^)]+\)",
+            *( () if task == "polish" else (r"\[\^[^\]]+\]",) ),
+        ),
         file_roles=_load_pdf_file_roles(output_dir) if task == "translate" else None,
         tolerate_duplicate_headings=task == "polish",
+        validate_footnote_normalization=task == "polish",
     )
     if task == "translate":
+        entity_report = _validate_translation_entities(output_dir, config)
+        report["entities"] = entity_report
+        report["all_passed"] = report["all_passed"] and entity_report["valid"]
+        if not entity_report["valid"]:
+            for error in entity_report["errors"]:
+                logger.error(f"Entities: {error}")
         from pdf2epub.subagent_workflow import validate_toc_translation_subagent
         toc_report = validate_toc_translation_subagent(output_dir)
         report["toc"] = toc_report
@@ -406,22 +512,31 @@ def extract_entities_command(args):
         logger.error("No title found in config.yaml")
         return 1
     output_dir = Path("output") / book_title
-    source_dir = output_dir / "ocr_markdown"
+    source_dir, source_stage = _resolve_pdf_markdown_source(output_dir, config)
     if not source_dir.exists():
         source_dir = output_dir / "pages"
     if not list(source_dir.glob("*.md")):
         logger.error(f"No OCR Markdown found in {source_dir}; run OCR and refine first")
         return 1
+    source_files = sorted(source_dir.glob("*.md"))
     output_dir.mkdir(parents=True, exist_ok=True)
     model = resolve_subagent_model(config, "extract-entities")
+    source_language = args.source_lang or config.get("translation", {}).get(
+        "source_language", "English"
+    )
+    target_language = args.target_lang or config.get("translation", {}).get(
+        "target_language", "Chinese"
+    )
     manifest = {
         "schema_version": 1,
         "workflow": "antigravity-subagent",
         "task": "extract-entities",
-        "source_language": args.source_lang,
-        "target_language": args.target_lang,
+        "source_language": source_language,
+        "target_language": target_language,
         "model": model,
         "source_dir": str(source_dir.relative_to(output_dir)),
+        "source_stage": source_stage,
+        "files": [path.name for path in source_files],
         "output_file": "translation_entities.json",
     }
     (output_dir / "entity_subagent_manifest.json").write_text(
@@ -429,7 +544,7 @@ def extract_entities_command(args):
     )
     from pdf2epub.entity_extractor import create_entity_extraction_prompt
     (output_dir / "entity_subagent_prompt.md").write_text(
-        create_entity_extraction_prompt(book_title, (args.source_lang, args.target_lang))
+        create_entity_extraction_prompt(book_title, (source_language, target_language))
         + f"\n\nRecommended Antigravity model: `{model}`\n",
         encoding="utf-8",
     )
@@ -459,6 +574,16 @@ def extract_entities_validate_command(args):
         logger.error(f"Invalid entity JSON: {exc}")
         return 1
     errors = validate_entities(data, book_title)
+    report = {
+        "task": "extract-entities",
+        "valid": not errors,
+        "errors": errors,
+        "entity_sha256": hashlib.sha256(entity_path.read_bytes()).hexdigest(),
+        "file": str(entity_path),
+    }
+    (entity_path.parent / "translation_entities_validation.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     if errors:
         for error in errors:
             logger.error(error)
@@ -1455,6 +1580,50 @@ def translate_command(args):
     return _prepare_pdf_markdown_task(args, "translate")
 
 
+def translate_toc_command(args):
+    """Prepare the independent JSON TOC hand-off for a translation Subagent."""
+    from pdf2epub.subagent_workflow import prepare_toc_translation_subagent, resolve_subagent_model
+
+    config = load_config(args.config)
+    book_title = config.get("title")
+    if not book_title:
+        logger.error("No title found in config.yaml")
+        return 1
+    output_dir = Path("output") / book_title
+    translation = config.get("translation", {})
+    source_language = args.source_language or translation.get("source_language", "English")
+    target_language = args.target_language or translation.get("target_language", "Chinese")
+    try:
+        paths = prepare_toc_translation_subagent(
+            output_dir, source_language, target_language, config=config
+        )
+    except Exception as exc:
+        logger.error(f"Could not prepare TOC translation task: {exc}")
+        return 1
+    logger.success(f"Wrote TOC Subagent prompt: {paths['prompt']}")
+    logger.info(f"Recommended Antigravity model: {resolve_subagent_model(config, 'toc-translation')}")
+    logger.info("完成后运行 translate-toc-validate，或运行 translate-validate 进行全量校验。")
+    return 0
+
+
+def translate_toc_validate_command(args):
+    """Validate the independent translated PDF TOC contract locally."""
+    from pdf2epub.subagent_workflow import validate_toc_translation_subagent
+
+    config = load_config(args.config)
+    book_title = config.get("title")
+    if not book_title:
+        logger.error("No title found in config.yaml")
+        return 1
+    report = validate_toc_translation_subagent(Path("output") / book_title)
+    if report["valid"]:
+        logger.success("Translated TOC validation passed")
+        return 0
+    for error in report["errors"]:
+        logger.error(f"TOC: {error}")
+    return 1
+
+
 def translate_validate_command(args):
     return _validate_pdf_markdown_task(args, "translate")
 
@@ -1749,10 +1918,18 @@ RECOMMENDED WORKFLOW / 推荐工作流 (uses toc_tree.json):
   pdf2epub polish --content-type japanese
   # Antigravity Subagent writes polished_markdown/*.md
   pdf2epub polish-validate
+  pdf2epub extract-entities
+  # Antigravity Subagent writes translation_entities.json
+  pdf2epub extract-entities-validate
   pdf2epub translate --target-language Chinese
-  # Antigravity Subagent writes translated/*.md
+  # Antigravity Subagent writes translated/*.md and toc_tree_translated.json
   pdf2epub translate-validate
   pdf2epub build-epub --translated
+
+  # Translate only the PDF directory tree:
+  pdf2epub translate-toc
+  # Antigravity Subagent writes toc_tree_translated.json
+  pdf2epub translate-toc-validate
 
   # EPUB Translation (preserves original formatting):
   pdf2epub html-prepare -i mybook.epub       # Extract locally
@@ -1916,7 +2093,33 @@ RECOMMENDED WORKFLOW / 推荐工作流 (uses toc_tree.json):
         action="store_true",
         help="Keep existing non-empty Subagent outputs and prepare only pending files",
     )
+    translate_parser.add_argument(
+        "--skip-entities",
+        action="store_true",
+        help="Skip the translation glossary gate for a genuinely non-terminological task",
+    )
     translate_parser.set_defaults(func=translate_command)
+
+    translate_toc_parser = subparsers.add_parser(
+        "translate-toc",
+        help="Prepare the PDF TOC translation Subagent task",
+        description="Create the independent JSON TOC translation hand-off; no API calls",
+    )
+    translate_toc_parser.add_argument(
+        "--source-language",
+        help="Source language (default: from config or English)",
+    )
+    translate_toc_parser.add_argument(
+        "--target-language",
+        help="Target language (default: from config or Chinese)",
+    )
+    translate_toc_parser.set_defaults(func=translate_toc_command)
+
+    translate_toc_validate_parser = subparsers.add_parser(
+        "translate-toc-validate",
+        help="Validate the translated PDF TOC JSON",
+    )
+    translate_toc_validate_parser.set_defaults(func=translate_toc_validate_command)
 
     translate_validate_parser = subparsers.add_parser(
         "translate-validate",
@@ -1998,13 +2201,13 @@ RECOMMENDED WORKFLOW / 推荐工作流 (uses toc_tree.json):
     )
     entity_parser.add_argument(
         "--source-lang",
-        default="Japanese",
-        help="Source language (default: Japanese)"
+        default=None,
+        help="Source language (default: from config or English)"
     )
     entity_parser.add_argument(
         "--target-lang",
-        default="Chinese",
-        help="Target language for translation (default: Chinese)"
+        default=None,
+        help="Target language (default: from config or Chinese)"
     )
     entity_parser.set_defaults(func=extract_entities_command)
 

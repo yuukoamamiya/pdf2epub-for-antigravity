@@ -121,16 +121,25 @@
 
 #### Step 4: Subagent 润色或翻译
 - **若为翻译需求**：
-  1. 执行 `translate`，让 Subagent 按 `translate_subagent_prompt.md` 读取
-     `polished_markdown/validated/`，把同名译文写入 `translated/`；
-  2. 让 Subagent 按目录翻译 prompt 读取 `toc_tree.json`，写入
-     `toc_tree_translated.json`；
-  3. 保持 Markdown 标题层级（`#`, `##`）、公式（`$...$`）、脚注（`[^...]`）
+  1. 若执行过 `polish`，先运行 `polish-validate`；润色 Prompt 必须禁止把
+     普通粗体、罗马数字或编号文字升级为 `#` 标题，并要求将已确认的 OCR
+     `<sup>N</sup>` 注脚和章末数字注释规范化为 Markdown 注脚。数学、表格和
+     序数上标不得误转为注脚。
+  2. 在翻译前执行 `extract-entities`，让 Subagent 阅读实际翻译源稿并写入
+     `translation_entities.json`，然后运行 `extract-entities-validate`。该词表
+     是后续所有翻译 Subagent 的只读统一术语上下文；实体提取完成前不要执行
+     `translate`。确实不需要术语表时，才显式使用 `translate --skip-entities`。
+  3. 执行 `translate`，让 Subagent 按 `translate_subagent_prompt.md` 读取
+     `polished_markdown/validated/`，把同名译文写入 `translated/`；同时可用
+     `translate-toc` 单独准备 `toc_tree.json` 的 JSON 翻译任务。
+  4. 让 Subagent 按目录翻译 prompt 读取 `toc_tree.json`，写入
+     `toc_tree_translated.json`；完成后可运行 `translate-toc-validate`。
+  5. 保持 Markdown 标题层级（`#`, `##`）、公式（`$...$`）、脚注（`[^...]`）
      和图片链接原样不变；完成后运行 `translate-validate`。
-  4. 若节点使用 `type: bibliography` 或 `type: index`，按 translate manifest
+  6. 若节点使用 `type: bibliography` 或 `type: index`，按 translate manifest
      中的 `file_roles` 和专用规则处理。参考文献保留书目身份字段、页码和引用
      标点；索引保留层级、页码、范围和交叉引用，不得省略条目。
-  5. `translate-validate` 的 `bilingual_warnings` 仅是长英文原文未变化的预警，
+  7. `translate-validate` 的 `bilingual_warnings` 仅是长英文原文未变化的预警，
      不是自动阻断条件；应人工检查后再决定是否让 Subagent 重写。
      报告中的 `diff_summary` 可用于定位行数、标题和代码围栏变化。
 - **若仅为版式精修需求**：
@@ -145,6 +154,20 @@
   `output/<title>/<safe-title>_en.epub`，然后再生成中文 EPUB；不再额外生成英文 Markdown。
 - 没有独立 Markdown 文件的叶子子章节使用稳定锚点（如 `#toc-3-7-1`）链接到父章节正文，
   不因父子节点合并而产生失效目录项。
+
+### PDF 翻译的术语与注脚约束
+
+- `extract-entities` 读取 `translation.source_stage` 实际选中的源稿；默认语言来自
+  `translation.source_language` 和 `translation.target_language`，不会假定日文。
+- 当前 PDF 构建器生成的是 EPUB 2 兼容包，并提供可点击的正文—注脚双向链接；
+  `[^N]` 规范化不会被表述为所有阅读器都支持的 EPUB3 弹窗。若要启用真正的
+  EPUB3 `epub:type="noteref/footnote"` 语义，需要另行升级包格式。
+
+### Windows 脚本规范
+
+复杂的批量替换、JSON 写入和正则处理不得写成 PowerShell 内联的 `python -c`。
+优先使用仓库中已有或可复用的 UTF-8 脚本，并显式指定文件编码；不要为一次性
+翻译交接制造不可追踪的临时脚本。
 
 ---
 

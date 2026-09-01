@@ -20,6 +20,13 @@ from pdf2epub.subagent_workflow import (
     resolve_subagent_model,
     validate_toc_translation_subagent,
 )
+from pdf2epub.footnote_normalization import validate_polish_footnote_normalization
+from pdf2epub.cli import (
+    _prepare_pdf_markdown_task,
+    _validate_translation_entities,
+    extract_entities_command,
+    translate_toc_command,
+)
 
 
 def test_resolve_subagent_model_uses_translation_and_default_defaults():
@@ -184,6 +191,36 @@ def test_polish_validation_still_rejects_unique_heading_removal(tmp_path: Path):
     assert "structural marker mismatch" in report["invalid"][0]["reason"]
 
 
+def test_polish_footnote_normalization_accepts_verified_legacy_notes():
+    source = """Body<sup>1</sup> and another<sup>2</sup>.
+
+#### Notes
+
+1. First note.
+2. Second note.
+"""
+    target = """Body[^1] and another[^2].
+
+#### Notes
+
+[^1]: First note.
+[^2]: Second note.
+"""
+    assert validate_polish_footnote_normalization(source, target) == []
+
+
+def test_polish_footnote_normalization_rejects_unconverted_superscripts():
+    source = """Body<sup>1</sup>.
+
+#### Notes
+
+1. First note.
+"""
+    errors = validate_polish_footnote_normalization(source, source)
+    assert any("migration mismatch" in error for error in errors)
+    assert any("<sup>" in error for error in errors)
+
+
 def test_polish_validation_ignores_known_blank_page_image_artifact(tmp_path: Path):
     from pdf2epub.subagent_workflow import validate_markdown_subagent
 
@@ -300,6 +337,159 @@ def test_prepare_markdown_subagent_records_special_file_roles(tmp_path: Path):
     prompt = paths["prompt"].read_text(encoding="utf-8")
     assert manifest["file_roles"] == {"refs.md": "bibliography"}
     assert "preserve author names" in prompt
+
+
+def test_prepare_markdown_subagent_records_read_only_context_hash(tmp_path: Path):
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    (source_dir / "unit.md").write_text("source", encoding="utf-8")
+    glossary = tmp_path / "translation_entities.json"
+    glossary.write_text('{"metadata": {"book_title": "Book"}}', encoding="utf-8")
+
+    paths = prepare_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        tmp_path / "target",
+        "English",
+        "Chinese",
+        context_files={"translation_entities": glossary},
+    )
+
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    assert manifest["context_files"] == {"translation_entities": "translation_entities.json"}
+    assert manifest["context_sha256"]["translation_entities"] == hashlib.sha256(
+        glossary.read_bytes()
+    ).hexdigest()
+    assert "translation_entities.json" in paths["prompt"].read_text(encoding="utf-8")
+
+
+def test_prepare_markdown_subagent_records_explicitly_skipped_context(tmp_path: Path):
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    (source_dir / "unit.md").write_text("source", encoding="utf-8")
+
+    paths = prepare_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        tmp_path / "target",
+        "English",
+        "Chinese",
+        skipped_context_files=("translation_entities",),
+    )
+
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    assert manifest["skipped_context_files"] == ["translation_entities"]
+    assert "Skipped context files" in paths["prompt"].read_text(encoding="utf-8")
+
+
+def test_translation_entity_validation_accepts_explicit_skip(tmp_path: Path):
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    (output_dir / "translate_subagent_manifest.json").write_text(
+        json.dumps({"skipped_context_files": ["translation_entities"]}),
+        encoding="utf-8",
+    )
+
+    report = _validate_translation_entities(
+        output_dir, {"title": "Book", "translation": {"require_entities": True}}
+    )
+    assert report == {"valid": True, "skipped": True, "errors": []}
+
+
+def test_extract_entities_uses_configured_language_and_selected_source_stage(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "title: Book\ntranslation:\n  source_language: French\n"
+        "  target_language: Chinese\n  source_stage: ocr\n",
+        encoding="utf-8",
+    )
+    source_dir = tmp_path / "output" / "Book" / "ocr_markdown"
+    source_dir.mkdir(parents=True)
+    (source_dir / "chapter_001.md").write_text("Bonjour", encoding="utf-8")
+
+    result = extract_entities_command(
+        SimpleNamespace(
+            config=str(config_path), input=None, source_lang=None, target_lang=None
+        )
+    )
+
+    assert result == 0
+    manifest = json.loads(
+        (tmp_path / "output" / "Book" / "entity_subagent_manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert manifest["source_language"] == "French"
+    assert manifest["target_language"] == "Chinese"
+    assert manifest["source_stage"] == "ocr"
+    assert manifest["files"] == ["chapter_001.md"]
+
+
+def test_translate_toc_command_prepares_independent_json_task(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "title: Book\ntranslation:\n  source_language: German\n"
+        "  target_language: Chinese\n",
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "output" / "Book"
+    output_dir.mkdir(parents=True)
+    (output_dir / "toc_tree.json").write_text(
+        json.dumps({"book_title": "Book", "chapters": []}), encoding="utf-8"
+    )
+
+    result = translate_toc_command(
+        SimpleNamespace(config=str(config_path), source_language=None, target_language=None)
+    )
+
+    assert result == 0
+    source = json.loads(
+        (output_dir / "toc_translation_source.json").read_text(encoding="utf-8")
+    )
+    assert source["source_language"] == "German"
+    assert source["target_language"] == "Chinese"
+    assert source["output_file"] == "toc_tree_translated.json"
+
+
+def test_translate_skip_entities_is_recorded_in_prompt_and_manifest(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("title: Book\n", encoding="utf-8")
+    output_dir = tmp_path / "output" / "Book"
+    source_dir = output_dir / "ocr_markdown"
+    source_dir.mkdir(parents=True)
+    (source_dir / "chapter.md").write_text("Source", encoding="utf-8")
+    (output_dir / "toc_tree.json").write_text(
+        json.dumps({"book_title": "Book", "chapters": []}), encoding="utf-8"
+    )
+
+    result = _prepare_pdf_markdown_task(
+        SimpleNamespace(
+            config=str(config_path),
+            source_language=None,
+            target_language=None,
+            resume=False,
+            skip_entities=True,
+        ),
+        "translate",
+    )
+
+    assert result == 0
+    manifest = json.loads(
+        (output_dir / "translate_subagent_manifest.json").read_text(encoding="utf-8")
+    )
+    prompt = (output_dir / "translate_subagent_prompt.md").read_text(encoding="utf-8")
+    assert manifest["skipped_context_files"] == ["translation_entities"]
+    assert "do not invent or expect a translation_entities.json context file" in prompt
+    assert "Read translation_entities.json before translating" not in prompt
 
 
 def test_prepare_markdown_subagent_does_not_trust_unvalidated_partial_file(

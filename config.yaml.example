@@ -8,6 +8,8 @@ input_pdf: "input/your_book.pdf"
 translation:
   source_language: English # 或 Japanese / German / French 等
   target_language: Chinese
+  # PDF 翻译前要求先生成并校验统一术语表；确实不需要时可在 translate 中使用 --skip-entities。
+  require_entities: true
   # auto 优先使用 polished_markdown/validated；也可明确指定 ocr 或 polished。
   source_stage: auto
 

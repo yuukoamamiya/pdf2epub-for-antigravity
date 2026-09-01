@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 from .utils.ocr_artifacts import clean_ocr_page_artifacts
+from .footnote_normalization import validate_polish_footnote_normalization
 
 
 DEFAULT_TRANSLATION_MODEL = "gemini-3.1-pro-preview"
@@ -243,6 +244,8 @@ def prepare_markdown_subagent(
     config: Optional[Mapping[str, Any]] = None,
     resume: bool = False,
     file_roles: Optional[Mapping[str, str]] = None,
+    context_files: Optional[Mapping[str, Path]] = None,
+    skipped_context_files: Iterable[str] = (),
 ) -> Dict[str, Path]:
     """Write a manifest and prompt for a markdown Subagent task."""
     source_dir = Path(source_dir)
@@ -326,6 +329,27 @@ def prepare_markdown_subagent(
     }
     if normalized_roles:
         manifest["file_roles"] = normalized_roles
+    normalized_context = {}
+    context_sha256 = {}
+    for name, path in (context_files or {}).items():
+        context_path = Path(path).resolve()
+        try:
+            relative_path = context_path.relative_to(output_dir.resolve())
+        except ValueError as exc:
+            raise ValueError(f"Context file must be inside output directory: {path}") from exc
+        if not context_path.is_file():
+            raise ValueError(f"Context file not found: {context_path}")
+        relative_name = str(relative_path).replace("\\", "/")
+        normalized_context[str(name)] = relative_name
+        context_sha256[str(name)] = hashlib.sha256(context_path.read_bytes()).hexdigest()
+    if normalized_context:
+        manifest["context_files"] = normalized_context
+        manifest["context_sha256"] = context_sha256
+    normalized_skipped_context = sorted(
+        {str(name) for name in skipped_context_files if str(name).strip()}
+    )
+    if normalized_skipped_context:
+        manifest["skipped_context_files"] = normalized_skipped_context
     manifest_path = output_dir / f"{task}_subagent_manifest.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -377,6 +401,14 @@ Rules:
 File roles (apply only to the named files):
 
 {chr(10).join(f"- `{name}`: `{role}`" for name, role in normalized_roles.items()) or "- none"}
+
+Context files (read-only; do not modify):
+
+{chr(10).join(f"- `{name}`: `{path}`" for name, path in normalized_context.items()) or "- none"}
+
+Skipped context files:
+
+{chr(10).join(f"- `{name}`" for name in normalized_skipped_context) or "- none"}
 """,
         encoding="utf-8",
     )
@@ -392,6 +424,7 @@ def validate_markdown_subagent(
     create_validated_copy: bool = True,
     file_roles: Optional[Mapping[str, str]] = None,
     tolerate_duplicate_headings: bool = False,
+    validate_footnote_normalization: bool = False,
 ) -> Dict:
     """Validate a Subagent markdown hand-off and optionally stage it."""
     source_dir = Path(source_dir)
@@ -468,7 +501,18 @@ def validate_markdown_subagent(
                     }
                 )
         else:
-            valid_files.append(source.name)
+            footnote_errors = (
+                validate_polish_footnote_normalization(source_text, target_text)
+                if validate_footnote_normalization
+                else []
+            )
+            if footnote_errors:
+                invalid.extend(
+                    {"file": source.name, "reason": error}
+                    for error in footnote_errors
+                )
+            else:
+                valid_files.append(source.name)
 
         if target_text and "```" in target_text:
             invalid.append(

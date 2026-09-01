@@ -1,6 +1,6 @@
 """Workspace hand-off helpers for translation entity extraction.
 
-Entity extraction is optional context for a later translation Subagent. This
+Entity extraction is a local hand-off to a later translation Subagent. This
 module deliberately contains no model client and no network execution path.
 """
 
@@ -29,7 +29,7 @@ def create_entity_extraction_prompt(
     source_language, target_language = language_pair
     return f"""# Translation entity extraction
 
-Read all Markdown files listed by the entity task manifest for **{book_title}**.
+Read every Markdown file listed by the entity task manifest for **{book_title}**.
 Extract recurring people, places, organizations, terms, species, and items
 from {source_language} for consistent {target_language} translation.
 
@@ -48,6 +48,10 @@ and use this shape:
 
 For each entity preserve the original spelling and, when applicable, include a
 reading, romanization, suggested translation, category, and short description.
+The `suggested_translation` values form the canonical terminology reference for
+the later translation task. Prefer one stable translation for the same entity;
+record meaningful variants in a separate note rather than creating duplicate
+entries.
 Do not modify source OCR files, add Markdown fences, or call an API.
 """
 

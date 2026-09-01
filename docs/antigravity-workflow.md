@@ -62,6 +62,36 @@ ocr-pages → refine-prepare → Subagent → refine-local → polish/translate 
 
 `refine` 是 `refine-prepare` 的别名，不再存在 provider/API 实现。
 
+## PDF 翻译的术语、注脚和目录
+
+润色前后的 Markdown 标题标记是结构合同：Subagent 不得把普通粗体、罗马数字
+或编号文字升级成 `#` 标题，只能删除确认重复的 running header。润色校验还会
+安全检查 OCR 中 Notes/注释章节的 `<sup>N</sup>` 注脚迁移为 `[^N]` 和
+`[^N]: ...`；数学、表格和序数上标不会按注脚处理。
+
+PDF 正文翻译前，建议按以下顺序运行：
+
+```text
+extract-entities → extract-entities-validate → translate → translate-validate
+```
+
+`extract-entities` 读取 `translation.source_stage` 实际选中的源稿，并生成
+`translation_entities.json`。默认情况下 `translate` 要求这份文件存在且合法，
+随后把它作为只读上下文挂载到翻译 manifest，并记录 SHA-256；词表变化后校验会
+拒绝继续打包。确实不需要术语表时，使用 `translate --skip-entities`，该选择
+会记录在 manifest 中并由校验器识别。
+
+目录翻译保持独立的 JSON 合同，可使用：
+
+```text
+translate-toc → translate-toc-validate
+```
+
+这会保持目录树、顺序、页码、层级和元数据不变，只替换书名与章节标题。
+
+Windows 下的批量替换、JSON 写入和正则处理应使用仓库已有的 UTF-8 脚本或可复用
+脚本，不要拼接复杂的 PowerShell `python -c` 内联命令。
+
 ## 安全边界
 
 仓库不硬编码内部项目 ID，不伪造 IDE 请求头，也不自动导出或冒用 ADC 凭证。任何需要账号授权的模型调用都应由用户在 Antigravity IDE 会话中完成。
