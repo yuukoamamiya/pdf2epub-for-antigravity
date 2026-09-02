@@ -47,6 +47,14 @@ _REFUSAL_PATTERNS = (
         re.compile(r"\b(?:i\s+must|i\s+have\s+to)\s+refuse\b", re.IGNORECASE),
     ),
     (
+        "English refusal",
+        re.compile(
+            r"\b(?:i|we)\s+(?:refuse|decline)\s+to\s+"
+            r"(?:translate|assist|help|provide|process|continue|generate|rewrite)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
         "English policy disclaimer",
         re.compile(
             r"\b(?:as\s+an?\s+ai|as\s+a\s+language\s+model)\b|"
@@ -59,14 +67,18 @@ _REFUSAL_PATTERNS = (
         "Chinese refusal",
         re.compile(
             r"(?:抱歉|很抱歉).{0,25}(?:无法|不能|不可以|拒绝).{0,20}"
-            r"(?:翻译|协助|帮助|处理|提供|继续|完成)"
+            r"(?:翻译|协助|帮助|处理|提供|改写|重写|生成|回答|"
+            r"完成(?:这(?:项|个)|该)?(?:请求|任务))"
         ),
     ),
     (
         "Chinese refusal",
         re.compile(
-            r"(?:我|本人).{0,4}(?:无法|不能|不可以|拒绝).{0,15}"
-            r"(?:翻译|协助|帮助|处理|提供|继续|完成)"
+            r"(?<![\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff])"
+            r"(?:我|本人)(?=[，。、！？；：,.!?;:\s]|无法|不能|不可以|拒绝)"
+            r"(?:无法|不能|不可以|拒绝).{0,20}"
+            r"(?:翻译|协助|帮助|处理|提供|改写|重写|生成|回答|"
+            r"完成(?:这(?:项|个)|该)?(?:请求|任务))"
         ),
     ),
     (
@@ -233,6 +245,22 @@ def _recommended_batches(
     return batches
 
 
+def _batch_queue(
+    batches: List[List[str]],
+    file_stats: Mapping[str, Mapping[str, int]],
+) -> List[Dict[str, Any]]:
+    """Materialize an IDE-friendly pending queue without starting models."""
+    return [
+        {
+            "batch_id": f"batch_{index:03d}",
+            "files": batch,
+            "estimated_tokens": sum(file_stats[name]["estimated_tokens"] for name in batch),
+            "status": "pending",
+        }
+        for index, batch in enumerate(batches, 1)
+    ]
+
+
 def prepare_markdown_subagent(
     output_dir: Path,
     task: str,
@@ -304,6 +332,14 @@ def prepare_markdown_subagent(
             completed_files.append(source.name)
         else:
             pending_files.append(source.name)
+    pending_stats = {
+        name: stats for name, stats in file_stats.items() if name in pending_files
+    }
+    pending_batches = _recommended_batches(
+        pending_stats,
+        batching["max_files"],
+        batching["max_source_tokens"],
+    )
     manifest = {
         "schema_version": 1,
         "workflow": "antigravity-subagent",
@@ -318,6 +354,8 @@ def prepare_markdown_subagent(
         "file_stats": file_stats,
         "batching": batching,
         "recommended_batches": recommended_batches,
+        "pending_batches": pending_batches,
+        "batch_queue": _batch_queue(pending_batches, pending_stats),
         "oversized_files": oversized_files,
         "completed_files": completed_files,
         "pending_files": pending_files,
@@ -386,7 +424,8 @@ appending to it.
 
 Batching guidance:
 
-- Prefer the `recommended_batches` in the manifest.
+- Prefer the `pending_batches` / `batch_queue` in the manifest. The older
+  `recommended_batches` field includes the complete source inventory.
 - Keep each batch at or below {batching['max_files']} files and approximately
   {batching['max_source_tokens']} source tokens; keep oversized files in their
   own Subagent task and split them only at complete source-line boundaries.
@@ -667,6 +706,37 @@ def prepare_toc_translation_subagent(
     if not isinstance(source, dict) or not isinstance(source.get("chapters"), list):
         raise ValueError("toc_tree.json must contain a chapters array")
 
+    template = {
+        "schema_version": source.get("schema_version", 1),
+        "book_title": {
+            "original": source.get("book_title", ""),
+            "translated": "",
+        },
+        "entries": [],
+    }
+
+    def collect_titles(nodes: Any, path: str) -> None:
+        if not isinstance(nodes, list):
+            return
+        for index, node in enumerate(nodes):
+            if not isinstance(node, dict):
+                continue
+            node_path = f"{path}[{index}]"
+            template["entries"].append(
+                {
+                    "path": node_path,
+                    "original": node.get("title", ""),
+                    "translated": "",
+                }
+            )
+            collect_titles(node.get("children", []), f"{node_path}.children")
+
+    collect_titles(source.get("chapters", []), "chapters")
+    template_path = output_dir / "toc_translation_template.json"
+    template_path.write_text(
+        json.dumps(template, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
     source_contract = output_dir / "toc_translation_source.json"
     source_contract.write_text(
         json.dumps(
@@ -678,6 +748,7 @@ def prepare_toc_translation_subagent(
                 "model": resolve_subagent_model(config, "toc-translation"),
                 "source_file": "toc_tree.json",
                 "output_file": "toc_tree_translated.json",
+                "template_file": "toc_translation_template.json",
                 "toc": source,
             },
             ensure_ascii=False,
@@ -691,9 +762,10 @@ def prepare_toc_translation_subagent(
 
 Recommended Antigravity model: `{resolve_subagent_model(config, "toc-translation")}`
 
-Read `toc_translation_source.json` and write `toc_tree_translated.json` in the
-same directory. Translate the book and chapter titles from {source_language}
-to {target_language}. Replace `book_title` and each node's `title` in place.
+Read `toc_translation_source.json` and the title checklist in
+`toc_translation_template.json`. Write `toc_tree_translated.json` in the same
+directory. Translate the book and chapter titles from {source_language} to
+{target_language}. Replace `book_title` and each node's `title` in place.
 Do not add parallel translation fields. Preserve the complete tree, order,
 page ranges, levels,
 `boundary_info`, types, and all other metadata.
@@ -702,7 +774,7 @@ Return valid JSON only. Do not add Markdown fences or commentary.
 """,
         encoding="utf-8",
     )
-    return {"source": source_contract, "prompt": prompt_path}
+    return {"source": source_contract, "template": template_path, "prompt": prompt_path}
 
 
 def validate_toc_translation_subagent(output_dir: Path) -> Dict:

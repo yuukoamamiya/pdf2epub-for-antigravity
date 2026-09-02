@@ -5,6 +5,10 @@
 - **非阻断式规划 (Non-Blocking Review Gates)**：日常任务、调试与代码改动，工件默认设置 `RequestFeedback: false`，不产生多余的阻断式确认卡片。
 - **工作区外严格防护 (Strict Non-Workspace Protection)**：涉及工作目录以外的敏感系统路径时，必须明确告知用户并获得许可。
 
+## Git 维护约定
+- 本仓库由 Codex 直接维护，日常修改直接提交到当前主分支，不创建或切换到 `codex/` 等临时分支。
+- 用户明确要求上传 GitHub 时，提交并推送到本仓库的 `fork` 远程；推送前运行相关测试并核对工作区状态。
+
 ## Command & Scripting Preference
 - **优先使用 Python 脚本**：对于文件读写、数据处理、JSON 凭证配置或复杂逻辑，优先使用 Python 脚本（如 `uv run python` 或独立 `.py` 脚本）执行，确保跨平台确定性与 UTF-8 编码安全。
 - **优先使用 Git Bash / POSIX 兼容命令**：运行自动化工作流和脚本时，优先使用 `bash` 兼容语法或 POSIX 风格脚本，避免依赖平台特定的复杂终端特性。
@@ -69,10 +73,11 @@
 
      【翻译执行铁律】：
      1. 【非空翻译单元 1:1 对齐】：源文件有 N 个非空翻译单元，输出文件必须保持 N 个非空译文行（每行对应一个翻译单元）。严禁在段落内部插入任何多余换行符 \n。
-     2. 【<div> 容器保全】：若源文件每行被 <div>...</div> 包裹，翻译后每行也必须用 <div>...</div> 包裹。
-     3. 【HTML 标签绝对保全与顺序一致】：严禁修改、删除或丢失任何 HTML 标签及属性（如 <span class="...">, <a>, <em>, <i>, <b>, <ruby>, <rt>, <img> 等），仅翻译标签包裹的文本内容。严禁合并相邻标签（例如 <span>A</span> (<span>B</span>) 必须翻译为 <span>甲</span> (<span>乙</span>)，保持两组独立标签）。
-     4. 【直接写回文件】：将纯翻译内容直接写入 manifest 指定的目标文件。严禁在输出中添加 Markdown 代码块（```）包裹！
-     5. 【写入后自检】：Subagent 完成写入后应自检行数与标签数量，确保 100% 对齐后再报告完成。
+     2. 【<div> 容器保全】：只有源文件该行本身被 <div>...</div> 包裹时，翻译后才保留同一组 <div>...</div>；源文件没有 <div> 时严禁自行添加。结构容器由 mapping 在重构阶段恢复。
+     3. 【HTML 标签绝对保全与顺序一致】：严禁修改、删除或丢失任何 HTML 标签及属性（如 <span class="...">, <a>, <em>, <i>, <b>, <ruby>, <rt>, <img> 等），仅翻译标签包裹的文本内容。严禁合并相邻标签（例如 <span>A</span> (<span>B</span>) 必须翻译为 <span>甲</span> (<span>乙</span>)，保持两组独立标签）。<i> 标签必须保持数量、顺序和嵌套关系；例如 `<i>A, B</i>` 只能译为同一组 `<i>甲、乙</i>`，不能拆成两组或删除。
+     4. 【实体与占位符保全】：源文本中的 `&amp;`、`&lt;`、`&gt;`、`<a/>` 和其他实体/占位符必须逐字保留，只翻译周围文本。
+     5. 【直接写回文件】：将纯翻译内容直接写入 manifest 指定的目标文件。严禁在输出中添加 Markdown 代码块（```）包裹！
+     6. 【写入后自检】：Subagent 完成每个文件后，应运行 `uv run pdf2epub -c config_epub.yaml html-validate --file <文件名>`；只有 exit code 为 0 才能报告该文件完成。全部文件完成后仍必须运行全量 `html-validate`。
      ```
 4. **元数据交接**：Subagent 还必须按 `metadata_translation_prompt.md` 读取元数据输入，并写入 `output/<title>/translated_metadata.json`。
    - `original_title` 保持原英文书名不变；

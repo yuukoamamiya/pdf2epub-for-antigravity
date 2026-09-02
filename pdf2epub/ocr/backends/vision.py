@@ -694,7 +694,7 @@ def analyze_vision_ocr(
     """
     # 1. Setup
     if config is None:
-        with open("config.yaml", "r") as f:
+        with open("config.yaml", "r", encoding="utf-8") as f:
             config = yaml.safe_load(f)
 
     if output_dir is None:

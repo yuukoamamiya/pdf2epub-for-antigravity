@@ -87,6 +87,13 @@ subagent:
 
 `batching` 只生成分批建议，不会从 Python 启动模型调用。manifest 会为每个源文件记录字节数、物理行数、非空翻译单元行数和估算 token 数，并给出 `recommended_batches`。超过单批 token 上限的文件会单独列出，需按完整翻译单元拆分后再交给 Subagent。默认最多同时进行 3 个 Subagent 任务。
 
+对于 PDF 的 Notes、Bibliography 和 Index 单元，`refine-local` 默认会在合并后
+自动处理超过 15,000 tokens 的超大单元：优先按完整条目/段落切分，目标为每个
+分片不超过 12,000 tokens，文件名形如 `chapter_14.part1.md`。分片仍属于同一个
+TOC 单元，构建器会按顺序处理其导航和脚注关系。可在
+`refine.oversized_unit_split` 中调整阈值、目标大小或关闭该功能。普通正文不会
+因为这个设置自动拆分。
+
 ## 流程一：扫描版 PDF 转 EPUB
 
 ### 1. 配置和 OCR
@@ -171,9 +178,13 @@ uv run pdf2epub -c config.yaml polish-validate
 
 ~~~bash
 uv run pdf2epub -c config.yaml extract-entities
-# Antigravity Subagent 写入 output/<title>/translation_entities.json
+# 同时生成 translation_entities.template.json；Subagent 写入 translation_entities.json
 uv run pdf2epub -c config.yaml extract-entities-validate
 ~~~
+
+实体模板包含书名、语言、源文件清单和所有实体分类的结构骨架。Subagent 应以模板
+为起点，补充非空的 `original` 与 `suggested_translation`，并将
+`metadata.extraction_complete` 设为 `true`。
 
 然后准备正文和目录翻译任务：
 
@@ -192,6 +203,10 @@ uv run pdf2epub -c config.yaml translate --target-language Chinese
 
 `translate` 会同时生成目录翻译交接文件；如果只需重新准备目录任务，也可以单独
 运行 `translate-toc`，不必重新准备正文任务。
+
+目录任务还会生成 `toc_translation_template.json`，提供每个目录节点的路径和原文
+标题清单，减少遗漏；最终交付仍必须是完整的 `toc_tree_translated.json`，而不是
+模板文件本身。
 
 也可以单独准备或校验目录翻译任务：
 
@@ -318,6 +333,7 @@ uv run pdf2epub -c config_epub.yaml html-prepare
 - 从 compressed_units/ 读取源文件；
 - 将同名完整译文写入 translated_compressed/；
 - 保持行数、HTML 标签、属性、实体、占位符和容器不变；
+- 源行没有 `<div>` 时不得添加；`<i>`、`&amp;`、`<a/>` 等保护标记必须原样保留；
 - 不要添加 Markdown 代码围栏或解释文字。
 
 同时让 Subagent 按 metadata_translation_prompt.md 写入 translated_metadata.json。
@@ -331,9 +347,14 @@ uv run pdf2epub -c config_epub.yaml html-prepare
 ### 3. 校验和打包
 
 ~~~bash
+uv run pdf2epub -c config_epub.yaml html-validate --file 20_Chapter1.md
 uv run pdf2epub -c config_epub.yaml html-validate
 uv run pdf2epub -c config_epub.yaml build-html-epub
 ~~~
+
+`--file` 只检查一个压缩翻译单元的行数、保护标记和拒答内容，适合
+Subagent 写完文件后即时自检；它会跳过元数据和全书完整性检查，不能替代不带
+`--file` 的最终全量校验。
 
 校验失败时，只修复报告指出的单元，然后重新校验。默认禁止用不完整结果打包；--allow-partial 仅用于明确需要的预览。
 

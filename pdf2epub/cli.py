@@ -40,7 +40,7 @@ def _resolve_pdf_markdown_source(output_dir: Path, config):
 
     polished_dir = output_dir / "polished_markdown" / "validated"
     ocr_dir = output_dir / "ocr_markdown"
-    polished_available = polished_dir.is_dir() and any(polished_dir.glob("*.md"))
+    polished_available = _polished_stage_is_current(output_dir, polished_dir, ocr_dir)
 
     if requested_stage == "polished":
         return polished_dir, "polished"
@@ -49,6 +49,34 @@ def _resolve_pdf_markdown_source(output_dir: Path, config):
     if polished_available:
         return polished_dir, "polished"
     return ocr_dir, "ocr"
+
+
+def _polished_stage_is_current(
+    output_dir: Path,
+    polished_dir: Path,
+    ocr_dir: Path,
+) -> bool:
+    """Reject a polished stage left behind after OCR/refine inputs changed."""
+    if not polished_dir.is_dir() or not any(polished_dir.glob("*.md")):
+        return False
+    report_path = output_dir / "polish_validation.json"
+    if not report_path.is_file():
+        return False
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(report, dict) or not report.get("all_passed"):
+        return False
+    recorded_hashes = report.get("source_sha256")
+    if not isinstance(recorded_hashes, dict):
+        return False
+    current_hashes = {
+        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in sorted(ocr_dir.glob("*.md"))
+        if path.is_file()
+    }
+    return bool(current_hashes) and current_hashes == recorded_hashes
 
 
 def _load_pdf_file_roles(output_dir: Path) -> dict:
@@ -64,7 +92,10 @@ def _load_pdf_file_roles(output_dir: Path) -> dict:
     for unit in data.get("units", []):
         role = str(unit.get("type") or "").strip().lower()
         if role in {"bibliography", "index"}:
-            roles[str(unit.get("file") or "")] = role
+            files = unit.get("part_files") or [unit.get("file")]
+            for file_name in files:
+                if file_name:
+                    roles[str(file_name)] = role
     if roles:
         return roles
 
@@ -527,6 +558,22 @@ def extract_entities_command(args):
     target_language = args.target_lang or config.get("translation", {}).get(
         "target_language", "Chinese"
     )
+    from pdf2epub.entity_extractor import create_entity_template, create_entity_extraction_prompt
+
+    template_path = output_dir / "translation_entities.template.json"
+    template_path.write_text(
+        json.dumps(
+            create_entity_template(
+                book_title,
+                source_language,
+                target_language,
+                (path.name for path in source_files),
+            ),
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     manifest = {
         "schema_version": 1,
         "workflow": "antigravity-subagent",
@@ -538,11 +585,11 @@ def extract_entities_command(args):
         "source_stage": source_stage,
         "files": [path.name for path in source_files],
         "output_file": "translation_entities.json",
+        "template_file": "translation_entities.template.json",
     }
     (output_dir / "entity_subagent_manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    from pdf2epub.entity_extractor import create_entity_extraction_prompt
     (output_dir / "entity_subagent_prompt.md").write_text(
         create_entity_extraction_prompt(book_title, (source_language, target_language))
         + f"\n\nRecommended Antigravity model: `{model}`\n",
@@ -836,8 +883,11 @@ def _prepare_html_command(args):
             extra_rules=(
                 "【1:1 Line Count Consistency】: Keep exactly one non-empty output line for every non-empty source translation unit. Never insert internal newlines or line breaks inside a paragraph.",
                 "【Exact Tag Sequence】: Preserve every HTML tag, attribute, and entity (<span ...>, <a ...>, <em>, <i>, <b>, <ruby>, etc.) in the exact same sequence. NEVER delete or merge adjacent tags (e.g. `<span>A</span> (<span>B</span>)` MUST remain two separate tags `<span>甲</span> (<span>乙</span>)`, not merged into one).",
+                "【No Invented Containers】: Copy the source line's outer shape exactly. If a source line does not begin and end with `<div>...</div>`, NEVER add a `<div>` wrapper yourself. The compressor mapping restores structural containers; wrappers are not translation content.",
+                "【Italic Tag 1:1 Preservation】: Preserve the exact count, order, and nesting of `<i>...</i>` tags. Example: `<i>Gidra</i>` may become `<i>《基多拉》（Gidra）</i>`, and `<i>A, B</i>` may become `<i>《甲》、《乙》</i>`; in both cases it remains one `<i>` pair, never two pairs or none.",
+                "【Entity Preservation】: Copy protected entities and anchors literally, including `&amp;`, `&lt;`, `&gt;`, `<a/>`, and other self-closing or placeholder tokens. Translate surrounding text only; never replace an entity with its prose meaning.",
                 "【Direct File Writing】: Write output directly to the designated target file without markdown code fences.",
-                "【Self-Validation】: Subagents should verify that output line count and tag sequences match the source before marking the task complete.",
+                "【Self-Validation】: After writing each target file, run `uv run pdf2epub -c <same-config> html-validate --file <filename>` from the repository root. Only report that file complete when the command exits with code 0; this single-file check does not replace the final full-book html-validate.",
             ),
             config=config,
             resume=getattr(args, "resume", False),
@@ -881,6 +931,12 @@ def html_validate_command(args):
 
     config = load_config(args.config)
     book_title = config.get("title")
+    file_name = getattr(args, "file", None)
+    if file_name:
+        candidate = Path(file_name)
+        if candidate.name != file_name or candidate.suffix.lower() != ".md":
+            logger.error("--file must be a direct .md filename, such as 20_Chapter1.md")
+            return 1
 
     epub_path = resolve_book_input_path(
         getattr(args, "input", None),
@@ -909,7 +965,7 @@ def html_validate_command(args):
     configure_logging(book_title, "html-validate")
     output_dir = Path("output") / book_title
 
-    if not epub_path.exists():
+    if epub_path is None or not epub_path.exists():
         epub_path = resolve_book_input_path(
             getattr(args, "input", None),
             config_value=config.get("input_epub"),
@@ -929,8 +985,13 @@ def html_validate_command(args):
         config=config
     )
 
-    report = pipeline.validate_translated_units()
-    (output_dir / "translate-html_validation.json").write_text(
+    report = pipeline.validate_translated_units(file_name=file_name)
+    report_path = output_dir / (
+        "translate-html_validation.json"
+        if not file_name
+        else "translate-html_validation.single.json"
+    )
+    report_path.write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
@@ -941,7 +1002,10 @@ def html_validate_command(args):
     logger.info(f"已完成:   {report['completed']}/{report['total']}")
     logger.info(f"通过校验: {report['valid']}/{report['total']}")
     metadata_report = report.get("metadata", {})
-    if metadata_report.get("valid"):
+    if report.get("scope") == "file":
+        logger.info(f"单文件校验范围: {report.get('file')}")
+        logger.info("单文件模式跳过元数据和全书完整性检查")
+    elif metadata_report.get("valid"):
         logger.info("元数据翻译校验通过（作者和出版社保持原文）")
     else:
         logger.error("元数据翻译校验未通过:")
@@ -962,7 +1026,10 @@ def html_validate_command(args):
 
     logger.info("=" * 60)
     if report['all_passed']:
-        logger.success("所有翻译单元校验通过！可执行 pdf2epub build-html-epub 进行打包。")
+        if report.get("scope") == "file":
+            logger.success("该翻译文件校验通过；全书仍需运行不带 --file 的 html-validate。")
+        else:
+            logger.success("所有翻译单元校验通过！可执行 pdf2epub build-html-epub 进行打包。")
         return 0
     else:
         logger.warning("存在未完成或未通过校验的单元。")
@@ -2269,6 +2336,10 @@ RECOMMENDED WORKFLOW / 推荐工作流 (uses toc_tree.json):
     html_validate_parser.add_argument(
         "-i", "--input",
         help="Input file: EPUB, AZW3, or MOBI (default: output/<book_title>/input.epub)"
+    )
+    html_validate_parser.add_argument(
+        "--file",
+        help="Validate one compressed translation unit only (for example 20_Chapter1.md); skips book-level checks",
     )
     html_validate_parser.set_defaults(func=html_validate_command)
 

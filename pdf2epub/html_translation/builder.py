@@ -1475,9 +1475,16 @@ The output must have this shape:
         logger.info(f"Wrote translation report: {report_path}")
         return report_path
 
-    def validate_translated_units(self) -> Dict[str, Any]:
+    def validate_translated_units(self, file_name: Optional[str] = None) -> Dict[str, Any]:
         """
-        Validate all translated compressed units against their sources.
+        Validate translated compressed units against their sources.
+
+        When ``file_name`` is supplied, only that source/target pair is checked.
+        Single-file validation deliberately skips book-level metadata and
+        completeness checks so a Subagent can validate a file immediately after
+        writing it.  The returned ``scope`` and ``book_complete`` fields make
+        that distinction explicit.
+
         Checks:
         1. Translated file exists
         2. Non-empty line count matches original
@@ -1485,12 +1492,35 @@ The output must have this shape:
         4. Target language content exists (Chinese characters)
         5. Content omission checks
 
+        Args:
+            file_name: Optional source filename, restricted to a direct ``.md``
+                basename inside ``compressed_units``.
+
         Returns:
-            Dict summary with keys: total, completed, valid, invalid (list), missing (list), all_passed (bool)
+            Dict summary with validation counts and status fields.
         """
-        all_sources = sorted(self.compressed_units_dir.glob("*.md"))
-        total = len(all_sources)
+        scope = "file" if file_name is not None else "book"
+        requested_file = None
         missing = []
+        if file_name is None:
+            all_sources = sorted(self.compressed_units_dir.glob("*.md"))
+        else:
+            requested_file = str(file_name)
+            candidate = Path(requested_file)
+            if (
+                candidate.name != requested_file
+                or candidate.suffix.lower() != ".md"
+                or requested_file in {".", ".."}
+            ):
+                raise ValueError(
+                    "file_name must be a direct .md filename inside compressed_units"
+                )
+            source_path = self.compressed_units_dir / requested_file
+            all_sources = [source_path] if source_path.is_file() else []
+            if not all_sources:
+                missing.append(requested_file)
+
+        total = len(all_sources)
         invalid = []
         safety_blocked = []
         valid = 0
@@ -1541,9 +1571,25 @@ The output must have this shape:
                 valid += 1
                 valid_files.append(src_file.name)
 
-        metadata_report = self.validate_translated_metadata()
+        if file_name is None:
+            metadata_report = self.validate_translated_metadata()
+        else:
+            metadata_report = {
+                "valid": True,
+                "skipped": True,
+                "reason": "single-file validation scope",
+            }
+
+        all_passed = (
+            len(missing) == 0
+            and len(invalid) == 0
+            and total > 0
+            and metadata_report["valid"]
+        )
 
         return {
+            "scope": scope,
+            "file": requested_file,
             "total": total,
             "completed": total - len(missing),
             "valid": valid,
@@ -1553,12 +1599,8 @@ The output must have this shape:
             "valid_files": valid_files,
             "source_sha256": source_sha256,
             "metadata": metadata_report,
-            "all_passed": (
-                len(missing) == 0
-                and len(invalid) == 0
-                and total > 0
-                and metadata_report["valid"]
-            )
+            "all_passed": all_passed,
+            "book_complete": all_passed if scope == "book" else False,
         }
 
     def validate_translated_metadata(self) -> Dict[str, Any]:

@@ -1,3 +1,5 @@
+import hashlib
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from xml.etree import ElementTree as ET
@@ -268,11 +270,35 @@ def test_pdf_source_stage_can_be_auto_selected_or_explicit(tmp_path: Path) -> No
     ocr_dir = tmp_path / "ocr_markdown"
     ocr_dir.mkdir()
     (ocr_dir / "chapter_1.md").write_text("ocr", encoding="utf-8")
+    source_hash = hashlib.sha256(
+        (ocr_dir / "chapter_1.md").read_bytes()
+    ).hexdigest()
+    (tmp_path / "polish_validation.json").write_text(
+        json.dumps(
+            {"all_passed": True, "source_sha256": {"chapter_1.md": source_hash}}
+        ),
+        encoding="utf-8",
+    )
 
     assert _resolve_pdf_markdown_source(tmp_path, {}) == (polished_dir, "polished")
     assert _resolve_pdf_markdown_source(
         tmp_path, {"translation": {"source_stage": "ocr"}}
     ) == (ocr_dir, "ocr")
+
+
+def test_pdf_source_stage_ignores_stale_polished_output(tmp_path: Path) -> None:
+    polished_dir = tmp_path / "polished_markdown" / "validated"
+    polished_dir.mkdir(parents=True)
+    (polished_dir / "chapter_1.md").write_text("old polished", encoding="utf-8")
+    ocr_dir = tmp_path / "ocr_markdown"
+    ocr_dir.mkdir()
+    (ocr_dir / "chapter_1.md").write_text("new ocr", encoding="utf-8")
+    (tmp_path / "polish_validation.json").write_text(
+        '{"all_passed": true, "source_sha256": {"chapter_1.md": "stale"}}',
+        encoding="utf-8",
+    )
+
+    assert _resolve_pdf_markdown_source(tmp_path, {}) == (ocr_dir, "ocr")
 
 
 def test_book_metadata_prefers_explicit_values_and_ignores_unknown(tmp_path: Path) -> None:

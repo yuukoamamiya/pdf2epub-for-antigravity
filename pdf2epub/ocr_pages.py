@@ -434,7 +434,7 @@ def ocr_full_book_pagewise(
     page_stats_file = pages_dir / "page_stats.json"
 
     if resume and progress_file.exists():
-        with open(progress_file, 'r') as f:
+        with open(progress_file, 'r', encoding='utf-8') as f:
             progress = json.load(f)
         logger.info(f"Resuming from progress: {len(progress['pages_processed'])} pages already processed")
     else:
@@ -445,7 +445,7 @@ def ocr_full_book_pagewise(
         }
 
     if page_stats_file.exists():
-        with open(page_stats_file, 'r') as f:
+        with open(page_stats_file, 'r', encoding='utf-8') as f:
             page_stats = json.load(f)
     else:
         page_stats = {}
@@ -595,10 +595,10 @@ def ocr_full_book_pagewise(
                         progress['failed_pages'].append(page_num)
 
                 # Save progress after each page
-                with open(progress_file, 'w') as f:
+                with open(progress_file, 'w', encoding='utf-8') as f:
                     json.dump(progress, f, indent=2)
 
-                with open(page_stats_file, 'w') as f:
+                with open(page_stats_file, 'w', encoding='utf-8') as f:
                     json.dump(page_stats, f, indent=2)
 
     # Summary

@@ -9,6 +9,8 @@ from pdf2epub.refine.subagent_workflow import (
     prepare_refine_subagent,
     validate_toc_tree_data,
 )
+from pdf2epub.refine.unit_splitter import split_markdown_unit
+from pdf2epub.entity_extractor import validate_entities
 from pdf2epub.subagent_workflow import (
     DEFAULT_SUBAGENT_MODEL,
     DEFAULT_TRANSLATION_MODEL,
@@ -67,6 +69,23 @@ def test_detect_refusal_flags_chinese_disclaimer():
     reason = detect_refusal(
         "这是一本书中的普通段落。",
         "抱歉，我无法翻译或处理这部分内容。",
+    )
+
+    assert reason is not None
+    assert "Chinese refusal" in reason
+
+
+def test_detect_refusal_does_not_treat_chinese_noun_tail_as_first_person():
+    source = "The real-estate owner refused to complete the sale after learning they were Japanese."
+    target = "房地产老板得知他们是日本人时，拒绝完成交易。"
+
+    assert detect_refusal(source, target) is None
+
+
+def test_detect_refusal_still_flags_first_person_translation_refusal():
+    reason = detect_refusal(
+        "This is an ordinary paragraph.",
+        "本人无法协助翻译这段内容。",
     )
 
     assert reason is not None
@@ -269,6 +288,42 @@ def test_html_validation_quarantines_refusal_candidate(tmp_path: Path):
     assert any("refusal/disclaimer" in item["reason"] for item in report["invalid"])
 
 
+def test_html_validation_can_check_one_file_without_metadata(tmp_path: Path):
+    pipeline = object.__new__(HTMLEpubPipeline)
+    pipeline.output_dir = tmp_path
+    pipeline.compressed_units_dir = tmp_path / "compressed_units"
+    pipeline.translated_dir = tmp_path / "translated_compressed"
+    pipeline.compressed_units_dir.mkdir()
+    pipeline.translated_dir.mkdir()
+    (pipeline.compressed_units_dir / "chapter.md").write_text(
+        "<i>Ordinary source text.</i>\n", encoding="utf-8"
+    )
+    (pipeline.translated_dir / "chapter.md").write_text(
+        "<i>普通译文。</i>\n", encoding="utf-8"
+    )
+
+    report = pipeline.validate_translated_units(file_name="chapter.md")
+
+    assert report["scope"] == "file"
+    assert report["file"] == "chapter.md"
+    assert report["all_passed"] is True
+    assert report["book_complete"] is False
+    assert report["metadata"]["skipped"] is True
+
+
+def test_html_validation_rejects_path_in_one_file_scope(tmp_path: Path):
+    pipeline = object.__new__(HTMLEpubPipeline)
+    pipeline.compressed_units_dir = tmp_path / "compressed_units"
+    pipeline.translated_dir = tmp_path / "translated_compressed"
+    pipeline.compressed_units_dir.mkdir()
+    pipeline.translated_dir.mkdir()
+
+    import pytest
+
+    with pytest.raises(ValueError, match=r"direct \.md filename"):
+        pipeline.validate_translated_units(file_name="nested/chapter.md")
+
+
 def test_prepare_markdown_subagent_records_model(tmp_path: Path):
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"
@@ -323,6 +378,13 @@ def test_prepare_markdown_subagent_records_file_sizes_and_batches(tmp_path: Path
     assert stats["a.md"]["estimated_tokens"] > 0
     assert manifest["batching"]["max_concurrency"] == 2
     assert manifest["recommended_batches"] == [["a.md"], ["b.md"]]
+    assert manifest["pending_batches"] == [["a.md"], ["b.md"]]
+    assert manifest["batch_queue"][0] == {
+        "batch_id": "batch_001",
+        "files": ["a.md"],
+        "estimated_tokens": stats["a.md"]["estimated_tokens"],
+        "status": "pending",
+    }
 
 
 def test_prepare_markdown_subagent_records_special_file_roles(tmp_path: Path):
@@ -428,6 +490,21 @@ def test_extract_entities_uses_configured_language_and_selected_source_stage(
     assert manifest["target_language"] == "Chinese"
     assert manifest["source_stage"] == "ocr"
     assert manifest["files"] == ["chapter_001.md"]
+    template = json.loads(
+        (tmp_path / "output" / "Book" / "translation_entities.template.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert template["metadata"]["source_files"] == ["chapter_001.md"]
+    assert set(template) >= {
+        "metadata",
+        "characters",
+        "places",
+        "organizations",
+        "terms",
+        "races",
+        "items",
+    }
 
 
 def test_translate_toc_command_prepares_independent_json_task(tmp_path: Path, monkeypatch):
@@ -755,6 +832,69 @@ def test_refine_local_splits_a_parent_when_children_cover_its_range(tmp_path: Pa
     assert [unit["unit_id"] for unit in units] == ["chapter_1.1", "chapter_1.2"]
 
 
+def test_refine_local_splits_oversized_notes_into_entry_safe_parts(tmp_path: Path):
+    pages_dir = tmp_path / "pages"
+    pages_dir.mkdir()
+    content = "\n\n".join(
+        ["# Notes"] + [f"{index}. " + ("note text " * 12) for index in range(1, 8)]
+    )
+    (pages_dir / "page_001.md").write_text(content, encoding="utf-8")
+    (tmp_path / "toc_tree.json").write_text(
+        json.dumps({
+            "chapters": [{
+                "title": "Notes",
+                "type": "notes",
+                "level": 1,
+                "start_page": 1,
+                "end_page": 1,
+            }]
+        }),
+        encoding="utf-8",
+    )
+
+    units = RefinedBreakdown(
+        config={
+            "refine": {
+                "oversized_unit_split": {
+                    "threshold_tokens": 100,
+                    "target_tokens": 60,
+                }
+            }
+        },
+        max_tokens=8000,
+    ).process_from_toc(tmp_path / "input.pdf", tmp_path, "Book")
+
+    assert len(units) == 1
+    assert units[0]["part_files"]
+    assert units[0]["split_strategy"] == "entry-boundary"
+    assert not (tmp_path / "ocr_markdown" / "chapter_1.md").exists()
+    parts = [
+        (tmp_path / "ocr_markdown" / name).read_text(encoding="utf-8")
+        for name in units[0]["part_files"]
+    ]
+    assert "".join(parts) == content
+
+
+def test_markdown_unit_split_keeps_index_continuation_with_entry():
+    text = "# Index\n\nAlpha, 1\n\nAlgeria: first half,\n\nAlgeria: *(continued)*\n\nBeta, 2\n"
+    result = split_markdown_unit(text, 8, "index", lambda value: len(value.split()))
+
+    assert "Algeria: first half,\n\nAlgeria: *(continued)*" in "".join(result.parts)
+    assert "".join(result.parts) == text
+
+
+def test_entity_validation_requires_completed_entries():
+    data = {
+        "metadata": {"book_title": "Book", "extraction_complete": True},
+        **{collection: [] for collection in ("characters", "places", "organizations", "terms", "races", "items")},
+    }
+    data["terms"] = [{"original": "term"}]
+
+    errors = validate_entities(data, "Book")
+
+    assert "terms[0].suggested_translation must be a non-empty string" in errors
+
+
 def test_refine_local_does_not_reuse_checkpoint_after_toc_changes(tmp_path: Path):
     pages_dir = tmp_path / "pages"
     pages_dir.mkdir()
@@ -811,12 +951,14 @@ def test_prepare_toc_translation_subagent_writes_clean_prompt(tmp_path: Path):
     )
     prompt = paths["prompt"].read_text(encoding="utf-8")
     source = json.loads(paths["source"].read_text(encoding="utf-8"))
+    template = json.loads(paths["template"].read_text(encoding="utf-8"))
 
     assert 'Read `toc_translation_source.json`' in prompt
     assert 'f"Read' not in prompt
     assert 'f"in the same directory' not in prompt
     assert source["model"] == "configured-pro"
     assert "configured-pro" in prompt
+    assert template["book_title"]["original"] == "A Book"
 
 
 def test_validate_toc_tree_rejects_overlapping_siblings_and_bad_child():

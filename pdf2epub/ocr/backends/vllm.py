@@ -43,7 +43,7 @@ class OCRClient:
         else:
             config = {}
             if Path(config_path).exists():
-                with open(config_path, 'r') as f:
+                with open(config_path, 'r', encoding='utf-8') as f:
                     config = yaml.safe_load(f)
 
         if self.model_type == "gemini":
@@ -330,5 +330,4 @@ Please extract the complete text maintaining the original structure."""
         "columns": {},  # VLLM doesn't provide column data
         "viz_data": [],  # VLLM doesn't provide visualization data
     }
-
 

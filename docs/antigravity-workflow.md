@@ -42,8 +42,17 @@ html-prepare → Subagent(book_translator) → html-validate → build-html-epub
 Subagent 需要：
 
 1. 将每个正文单元写入 `translated_compressed/<同名>.md`；
-2. 保持正文行数、HTML 标签、属性和容器不变；
+2. 保持正文行数、HTML 标签、属性、实体和容器不变；源行没有 `<div>` 时不得添加，`<i>` 必须保持原有数量和嵌套关系；
 3. 阅读 `metadata_translation_prompt.md`，在输出目录写入 `translated_metadata.json`。
+
+写完单个文件后，可以立即运行：
+
+```text
+html-validate --file <同名文件>.md
+```
+
+单文件模式只检查该文件，不检查元数据和全书完整性；最终打包前仍须运行不带
+`--file` 的全量校验。
 
 元数据规则：书名、目录、简介和版权说明可以翻译；作者名和出版社必须原样复制。`html-validate` 会检查元数据结构、目录顺序、链接锚点以及作者/出版社是否被修改。校验不通过时，`build-html-epub` 默认拒绝打包。
 
@@ -58,6 +67,8 @@ ocr-pages → refine-prepare → Subagent → refine-local → polish/translate 
 - 校验页码范围、层级、父子包含关系和兄弟节点重叠；
 - 用本地 tokenizer 估算单元大小；
 - 用 `PageMerger` 合并页面并生成 `ocr_markdown/`；
+- 对超过 15,000 tokens 的 Notes、Bibliography 和 Index 单元按完整条目/段落
+  自动生成 `chapter_N.partM.md` 分片，默认目标为 12,000 tokens；
 - 不创建 LLM client、不发送 PDF、不消耗 API 配额。
 
 `refine` 是 `refine-prepare` 的别名，不再存在 provider/API 实现。
@@ -76,7 +87,8 @@ extract-entities → extract-entities-validate → translate → translate-valid
 ```
 
 `extract-entities` 读取 `translation.source_stage` 实际选中的源稿，并生成
-`translation_entities.json`。默认情况下 `translate` 要求这份文件存在且合法，
+`translation_entities.template.json` 和 `translation_entities.json` 的交接契约。
+默认情况下 `translate` 要求后者存在且合法，
 随后把它作为只读上下文挂载到翻译 manifest，并记录 SHA-256；词表变化后校验会
 拒绝继续打包。确实不需要术语表时，使用 `translate --skip-entities`，该选择
 会记录在 manifest 中并由校验器识别。
