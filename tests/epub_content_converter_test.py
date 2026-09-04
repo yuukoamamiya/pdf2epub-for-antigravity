@@ -36,3 +36,29 @@ def test_japanese_ruby_uses_epub2_compatible_spans() -> None:
     assert '<span class="ruby">玄関<span class="rt">げんかん</span></span>' in html
     assert "<ruby>" not in html
     assert "<rt>" not in html
+
+
+def test_named_html_entities_converted_to_unicode() -> None:
+    html = convert_markdown_to_html(
+        "It&rsquo;s &ldquo;smart quotes&rdquo; &hellip; &amp; &lt;tag&gt;",
+        standalone=False,
+    )
+
+    assert "It’s “smart quotes” … &amp; &lt;tag&gt;" in html
+    assert "&rsquo;" not in html
+    assert "&ldquo;" not in html
+    assert "&rdquo;" not in html
+    assert "&hellip;" not in html
+
+
+def test_generated_html_removes_active_content_and_escapes_title() -> None:
+    html = convert_markdown_to_html(
+        '<script>alert(1)</script>\n\n[bad](javascript:alert(1))\n\n<span onclick="alert(1)">safe</span>',
+        title='A <unsafe> "title"',
+        standalone=True,
+    )
+
+    assert "<script" not in html.lower()
+    assert "javascript:" not in html.lower()
+    assert "onclick" not in html.lower()
+    assert "<title>A &lt;unsafe&gt; &quot;title&quot;</title>" in html

@@ -21,6 +21,16 @@ EPUB_NS = "http://www.idpf.org/2007/ops"
 DEFAULT_NAMESPACES = {None: XHTML_NS, 'epub': EPUB_NS}
 
 
+def _safe_xml_parser() -> etree.XMLParser:
+    """Parse generated/untrusted XHTML without entities or network access."""
+    return etree.XMLParser(
+        resolve_entities=False,
+        load_dtd=False,
+        no_network=True,
+        huge_tree=False,
+    )
+
+
 # Type alias for index path (stable element identifier, element-only indexing)
 IndexPath = Tuple[int, ...]
 
@@ -348,7 +358,7 @@ def restore_subtree(
         parent.remove(old_elem)
 
     # Parse and insert restored element
-    restored = etree.fromstring(backup)
+    restored = etree.fromstring(backup, parser=_safe_xml_parser())
     restored.tail = original_tail  # Restore the tail
     parent.insert(index, restored)
     return restored
@@ -368,7 +378,7 @@ def restore_in_place(elem: etree._Element, backup: bytes) -> None:
     # Save original tail (backup excludes tail)
     original_tail = elem.tail
 
-    restored = etree.fromstring(backup)
+    restored = etree.fromstring(backup, parser=_safe_xml_parser())
 
     # Clear current element
     elem.clear()  # Removes all children and attributes

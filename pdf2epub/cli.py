@@ -14,6 +14,7 @@ from pathlib import Path
 from loguru import logger
 from pdf2epub.utils.logging_config import configure_logging
 from pdf2epub.utils.common import (
+    book_output_dir,
     load_config,
     resolve_book_input_path,
     sanitize_filename,
@@ -141,7 +142,7 @@ def _prepare_pdf_markdown_task(args, task: str):
     if not book_title:
         logger.error("No title found in config.yaml")
         return 1
-    output_dir = Path("output") / book_title
+    output_dir = book_output_dir(book_title)
     translation = config.get("translation", {})
     source_language = getattr(args, "source_language", None) or translation.get(
         "source_language", "English"
@@ -316,7 +317,7 @@ def _validate_pdf_markdown_task(args, task: str):
     if not book_title:
         logger.error("No title found in config.yaml")
         return 1
-    output_dir = Path("output") / book_title
+    output_dir = book_output_dir(book_title)
     if task == "polish":
         source_dir = output_dir / "ocr_markdown"
         target_dir = output_dir / "polished_markdown"
@@ -396,7 +397,7 @@ def refine_prepare_command(args):
         logger.error("No title found in config.yaml")
         return 1
 
-    output_dir = Path("output") / book_title
+    output_dir = book_output_dir(book_title)
     configure_logging(book_title, "refine-prepare")
     refine_config = config.get("refine", {})
     max_tokens = args.max_tokens or refine_config.get("max_tokens", 8000)
@@ -427,7 +428,7 @@ def refine_local_command(args):
         return 1
 
     configure_logging(book_title, "refine-local")
-    output_dir = Path("output") / book_title
+    output_dir = book_output_dir(book_title)
     refine_config = config.get("refine", {})
     max_tokens = args.max_tokens or refine_config.get("max_tokens", 8000)
     try:
@@ -466,7 +467,7 @@ def ocr_pages_command(args):
     configure_logging(book_title, "ocr-pages")
 
     # Setup paths
-    output_dir = Path("output") / book_title
+    output_dir = book_output_dir(book_title)
 
     # Find PDF
     pdf_path = resolve_book_input_path(
@@ -550,7 +551,7 @@ def extract_entities_command(args):
     if not book_title:
         logger.error("No title found in config.yaml")
         return 1
-    output_dir = Path("output") / book_title
+    output_dir = book_output_dir(book_title)
     source_dir, source_stage = _resolve_pdf_markdown_source(output_dir, config)
     if not source_dir.exists():
         source_dir = output_dir / "pages"
@@ -619,7 +620,7 @@ def extract_entities_validate_command(args):
     if not book_title:
         logger.error("No title found in config.yaml")
         return 1
-    entity_path = Path("output") / book_title / "translation_entities.json"
+    entity_path = book_output_dir(book_title) / "translation_entities.json"
     if not entity_path.exists():
         logger.error(f"Entity output not found: {entity_path}")
         return 1
@@ -666,7 +667,7 @@ def build_epub_command(args):
     configure_logging(book_title, "build-epub")
 
     # Set up paths
-    output_dir = Path("output") / book_title
+    output_dir = book_output_dir(book_title)
     toc_tree_path = output_dir / "toc_tree.json"
 
     if not toc_tree_path.exists():
@@ -797,7 +798,7 @@ def _prepare_html_command(args):
         getattr(args, "input", None),
         config_value=config.get("input_epub"),
         config_path=args.config,
-        output_dir=Path("output") / book_title if book_title else None,
+        output_dir=book_output_dir(book_title) if book_title else None,
         extensions=(".epub", ".azw3", ".mobi"),
         output_names=("input.epub", "original.epub"),
     )
@@ -821,7 +822,7 @@ def _prepare_html_command(args):
     configure_logging(book_title, "html-prepare")
 
     # Setup paths
-    output_dir = Path("output") / book_title
+    output_dir = book_output_dir(book_title)
 
     # If no epub specified, look for original epub in output dir
     if not epub_path.exists():
@@ -950,7 +951,7 @@ def html_validate_command(args):
         getattr(args, "input", None),
         config_value=config.get("input_epub"),
         config_path=args.config,
-        output_dir=Path("output") / book_title if book_title else None,
+        output_dir=book_output_dir(book_title) if book_title else None,
         extensions=(".epub", ".azw3", ".mobi"),
         output_names=("input.epub", "original.epub"),
     )
@@ -971,7 +972,7 @@ def html_validate_command(args):
             return 1
 
     configure_logging(book_title, "html-validate")
-    output_dir = Path("output") / book_title
+    output_dir = book_output_dir(book_title)
 
     if epub_path is None or not epub_path.exists():
         epub_path = resolve_book_input_path(
@@ -1061,7 +1062,7 @@ def translate_novel_command(args):
     if not book_title:
         logger.error("No title found in config.yaml")
         return 1
-    output_dir = Path("output") / book_title
+    output_dir = book_output_dir(book_title)
     epub_path = resolve_book_input_path(
         args.input,
         config_value=config.get("input_epub"),
@@ -1177,7 +1178,7 @@ def translate_novel_validate_command(args):
     if not book_title:
         logger.error("No title found in config.yaml")
         return 1
-    output_dir = Path("output") / book_title
+    output_dir = book_output_dir(book_title)
     manifest_path = output_dir / "novel_subagent_manifest.json"
     epub_path = output_dir / "input.epub"
     if not manifest_path.exists() or not epub_path.exists():
@@ -1295,7 +1296,7 @@ def build_novel_epub_command(args):
 
     configure_logging(book_title, "build-novel-epub")
 
-    output_dir = Path("output") / book_title
+    output_dir = book_output_dir(book_title)
     epub_path = output_dir / "input.epub"
 
     if not epub_path.exists():
@@ -1331,7 +1332,8 @@ def build_novel_epub_command(args):
             safe_title = sanitize_filename(translated_metadata['translated_title'])
             output_epub = output_dir / f"{safe_title}.epub"
         else:
-            output_epub = output_dir / f"{book_title}_translated.epub"
+            safe_title = sanitize_filename(book_title)
+            output_epub = output_dir / f"{safe_title}_translated.epub"
 
         build_config = BuildConfig(
             original_epub=epub_path,
@@ -1560,7 +1562,7 @@ def build_html_epub_command(args):
         getattr(args, "input", None),
         config_value=config.get("input_epub"),
         config_path=args.config,
-        output_dir=Path("output") / book_title if book_title else None,
+        output_dir=book_output_dir(book_title) if book_title else None,
         extensions=(".epub", ".azw3", ".mobi"),
         output_names=("input.epub", "original.epub"),
     )
@@ -1584,7 +1586,7 @@ def build_html_epub_command(args):
     configure_logging(book_title, "build-html-epub")
 
     # Setup paths
-    output_dir = Path("output") / book_title
+    output_dir = book_output_dir(book_title)
 
     # If no epub specified, look for original epub in output dir
     if not epub_path.exists():
@@ -1670,7 +1672,7 @@ def translate_toc_command(args):
     if not book_title:
         logger.error("No title found in config.yaml")
         return 1
-    output_dir = Path("output") / book_title
+    output_dir = book_output_dir(book_title)
     translation = config.get("translation", {})
     source_language = args.source_language or translation.get("source_language", "English")
     target_language = args.target_language or translation.get("target_language", "Chinese")
@@ -1696,7 +1698,7 @@ def translate_toc_validate_command(args):
     if not book_title:
         logger.error("No title found in config.yaml")
         return 1
-    report = validate_toc_translation_subagent(Path("output") / book_title)
+    report = validate_toc_translation_subagent(book_output_dir(book_title))
     if report["valid"]:
         logger.success("Translated TOC validation passed")
         return 0

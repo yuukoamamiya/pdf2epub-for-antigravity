@@ -26,6 +26,7 @@ from .oracle import (
     restore_subtree,
     restore_in_place,
     XHTML_NS,
+    _safe_xml_parser,
     _get_element_children,
 )
 
@@ -506,7 +507,7 @@ class VerifiedCompactor:
 
         try:
             wrapped = f'<div xmlns="{XHTML_NS}" xmlns:epub="{EPUB_NS}">{html}</div>'
-            root = etree.fromstring(wrapped.encode('utf-8'))
+            root = etree.fromstring(wrapped.encode('utf-8'), parser=_safe_xml_parser())
         except etree.XMLSyntaxError as e:
             logger.warning(f"Invalid XHTML, skipping compaction: {e}")
             return html
@@ -543,7 +544,7 @@ class VerifiedCompactor:
 
         try:
             wrapped = f'<div xmlns="{XHTML_NS}" xmlns:epub="{EPUB_NS}">{html}</div>'
-            root = etree.fromstring(wrapped.encode('utf-8'))
+            root = etree.fromstring(wrapped.encode('utf-8'), parser=_safe_xml_parser())
         except etree.XMLSyntaxError as e:
             logger.warning(f"Invalid XHTML, skipping compaction: {e}")
             return html, {'error': str(e), 'skipped': True}

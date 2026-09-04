@@ -35,7 +35,9 @@ def configure_logging(title=None, command=None, verbose=True):
     # Add file handler with detailed format (DEBUG level)
     if title:
         # Create logs directory
-        log_dir = Path("output") / title / "logs"
+        from pdf2epub.utils.common import book_output_dir
+
+        log_dir = book_output_dir(title) / "logs"
         os.makedirs(log_dir, exist_ok=True)
 
         # Determine log file name

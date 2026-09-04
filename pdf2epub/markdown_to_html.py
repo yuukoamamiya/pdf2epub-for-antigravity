@@ -4,10 +4,12 @@ Utility to convert markdown files to HTML with proper EPUB formatting.
 Uses python-markdown library with extensions for footnotes, tables, and other features.
 """
 
+import html as html_module
 import re
 from typing import Optional
 from loguru import logger
 from .utils.logging_config import configure_logging
+from .utils.html_safety import sanitize_html_fragment
 
 # We'll use markdown library - need to add to pyproject.toml: 
 # poetry add markdown
@@ -657,6 +659,9 @@ def convert_markdown_to_html(
 
     # Post-process HTML
     html_body = post_process_html(html_body)
+    # Markdown and model output are untrusted document content. Preserve
+    # normal book formatting while removing active elements and unsafe URLs.
+    html_body = sanitize_html_fragment(html_body)
 
     if not standalone:
         return html_body
@@ -665,12 +670,13 @@ def convert_markdown_to_html(
     css = get_epub_css() if include_css else ""
     
     # EPUB requires XHTML 1.1 with proper DOCTYPE
+    safe_title = html_module.escape(title or 'Chapter', quote=True)
     html = f"""<?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="ja">
 <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
-    <title>{title or 'Chapter'}</title>
+    <title>{safe_title}</title>
     {f'<style type="text/css">{css}</style>' if css else '<link rel="stylesheet" type="text/css" href="../stylesheet.css"/>'}
 </head>
 <body>
@@ -800,6 +806,18 @@ def post_process_html(html: str) -> str:
     
     # Convert & to &amp; in text (but not in existing entities)
     html = re.sub(r'&(?!(?:[a-zA-Z][a-zA-Z0-9]*|#[0-9]+|#x[0-9a-fA-F]+);)', '&amp;', html)
+
+    # Convert named HTML entities (such as &rsquo;, &ldquo;, &hellip;) to valid Unicode
+    # while preserving XML predefined entities (&amp;, &lt;, &gt;, &quot;, &apos;).
+    xml_predefined = {"amp", "lt", "gt", "quot", "apos"}
+
+    def replace_named_entity(match: re.Match) -> str:
+        entity = match.group(1)
+        if entity in xml_predefined:
+            return match.group(0)
+        return html_module.unescape(match.group(0))
+
+    html = re.sub(r"&([a-zA-Z]+);", replace_named_entity, html)
     
     # Ensure all attributes are quoted
     html = re.sub(r'<(\w+)([^>]*?)(\w+)=([^\s"\'>]+)', r'<\1\2\3="\4"', html)

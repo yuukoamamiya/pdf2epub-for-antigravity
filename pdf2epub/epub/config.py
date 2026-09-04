@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Dict, Any
 
+from pdf2epub.utils.common import book_output_dir, sanitize_filename
+
 
 @dataclass
 class EpubConfig:
@@ -65,7 +67,7 @@ class EpubConfig:
 
         # Set default paths if not provided
         if self.input_dir is None:
-            self.input_dir = Path("output") / self.book_title
+            self.input_dir = book_output_dir(self.book_title)
 
         if self.output_dir is None:
             self.output_dir = self.input_dir
@@ -93,7 +95,7 @@ class EpubConfig:
             self.epub_dir = self.output_dir / "epub"
 
         if self.output_epub_path is None:
-            self.output_epub_path = self.output_dir / f"{self.book_title}.epub"
+            self.output_epub_path = self.output_dir / f"{sanitize_filename(self.book_title)}.epub"
     
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any], **kwargs) -> "EpubConfig":

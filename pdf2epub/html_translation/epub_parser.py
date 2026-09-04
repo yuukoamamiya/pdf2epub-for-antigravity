@@ -26,6 +26,16 @@ NAMESPACES = {
     'xhtml': 'http://www.w3.org/1999/xhtml',
 }
 
+
+def _safe_xml_parser() -> etree.XMLParser:
+    """Parse untrusted EPUB XML without DTD/entity expansion or network I/O."""
+    return etree.XMLParser(
+        resolve_entities=False,
+        load_dtd=False,
+        no_network=True,
+        huge_tree=False,
+    )
+
 # Media type to category mapping
 MEDIA_TYPE_CATEGORIES = {
     'text/css': 'css',
@@ -91,7 +101,7 @@ class EPUBParser:
         container_path = 'META-INF/container.xml'
         try:
             container_xml = self._zf.read(container_path)
-            tree = etree.fromstring(container_xml)
+            tree = etree.fromstring(container_xml, parser=_safe_xml_parser())
             rootfile = tree.find('.//container:rootfile', NAMESPACES)
             if rootfile is not None:
                 return rootfile.get('full-path', 'content.opf')
@@ -103,7 +113,7 @@ class EPUBParser:
         """Parse the OPF (content.opf) file."""
         try:
             opf_content = self._zf.read(self._rootfile_path)
-            return etree.fromstring(opf_content)
+            return etree.fromstring(opf_content, parser=_safe_xml_parser())
         except Exception as e:
             raise ValueError(f"Failed to parse OPF file: {e}")
 
@@ -356,7 +366,7 @@ class EPUBParser:
 
         try:
             ncx_content = self._zf.read(ncx_item['full_href'])
-            ncx_tree = etree.fromstring(ncx_content)
+            ncx_tree = etree.fromstring(ncx_content, parser=_safe_xml_parser())
 
             # Helper: find element by local name (ignores namespace)
             def find_by_local(parent, local_name):
@@ -439,9 +449,13 @@ class EPUBParser:
 
         try:
             nav_content = self._zf.read(nav_item['full_href'])
-            # Use HTML parser for more tolerance
+            # Use a non-networking HTML parser for more tolerance.
             from lxml import html as lxml_html
-            nav_tree = lxml_html.fromstring(nav_content)
+            nav_parser = lxml_html.HTMLParser(
+                recover=True,
+                no_network=True,
+            )
+            nav_tree = lxml_html.fromstring(nav_content, parser=nav_parser)
 
             def parse_li(li) -> Optional[Dict]:
                 # Find <a> (direct child or nested)

@@ -12,9 +12,9 @@ keywords = ["antigravity", "gemini", "pdf2epub", "ocr", "epub", "chandra", "japa
 
 dependencies = [
     "pyyaml>=6.0.2",
+    "defusedxml>=0.7.1",
     "pypdf>=5.4.0",
     "google-genai>=1.70.0,<2.0.0",
-    "pypdf2>=3.0.1",
     "pymupdf>=1.25.4",
     "pillow>=11.1.0",
     "boto3>=1.38.2",
@@ -64,7 +64,7 @@ packages = ["pdf2epub"]
 
 [dependency-groups]
 dev = [
-    "pytest>=8.4.2",
+    "pytest>=9.0.3",
 ]
 
 [tool.pytest.ini_options]

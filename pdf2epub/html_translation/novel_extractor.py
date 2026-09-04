@@ -19,6 +19,13 @@ logger = logging.getLogger(__name__)
 XHTML_NS = "http://www.w3.org/1999/xhtml"
 XLINK_NS = "http://www.w3.org/1999/xlink"
 
+_SAFE_XML_PARSER = etree.XMLParser(
+    resolve_entities=False,
+    load_dtd=False,
+    no_network=True,
+    huge_tree=False,
+)
+
 
 @dataclass
 class NovelUnit:
@@ -125,10 +132,15 @@ class NovelExtractor:
         # Parse HTML
         try:
             # Try as XML first
-            tree = etree.fromstring(xhtml_content.encode('utf-8'))
+            tree = etree.fromstring(
+                xhtml_content.encode('utf-8'), parser=_SAFE_XML_PARSER
+            )
         except etree.XMLSyntaxError:
             try:
-                parser = etree.HTMLParser(encoding='utf-8')
+                parser = etree.HTMLParser(
+                    encoding='utf-8',
+                    no_network=True,
+                )
                 tree = etree.fromstring(xhtml_content.encode('utf-8'), parser)
             except Exception as e:
                 logger.warning(f"Failed to parse XHTML: {e}")

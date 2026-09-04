@@ -225,7 +225,37 @@ def sanitize_filename(filename: str) -> str:
     Returns:
         Sanitized filename safe for filesystem use
     """
-    return "".join(c for c in filename if c not in '<>:"/\\|?*')
+    if not isinstance(filename, str):
+        filename = str(filename)
+
+    # Replace rather than silently remove separators so the displayed title
+    # remains recognizable while never becoming another path component.
+    sanitized = filename.replace("\x00", "_")
+    sanitized = "".join("_" if c in '<>:"/\\|?*' else c for c in sanitized)
+    sanitized = " ".join(sanitized.split())
+    sanitized = sanitized.strip(" .")
+
+    # Windows device names are unsafe even when they have an extension.
+    reserved = {"CON", "PRN", "AUX", "NUL"}
+    reserved.update(f"COM{i}" for i in range(1, 10))
+    reserved.update(f"LPT{i}" for i in range(1, 10))
+    if sanitized.split(".", 1)[0].upper() in reserved:
+        sanitized = f"_{sanitized}"
+
+    return sanitized[:200].rstrip(" .") or "untitled"
+
+
+def book_output_dir(book_title: str, root: Union[str, Path] = "output") -> Path:
+    """Return a filesystem-safe book directory contained by ``root``."""
+    root_path = Path(root)
+    resolved_root = root_path.resolve()
+    candidate = root_path / sanitize_filename(book_title)
+    resolved_candidate = candidate.resolve()
+    try:
+        resolved_candidate.relative_to(resolved_root)
+    except ValueError as exc:
+        raise ValueError("Book title escapes the output directory") from exc
+    return candidate
 
 
 def guess_language(markdown_dir: Path) -> str:

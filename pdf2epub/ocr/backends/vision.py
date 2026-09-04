@@ -14,6 +14,7 @@ from collections import defaultdict
 from loguru import logger
 
 from pdf2epub.utils.logging_config import configure_logging
+from pdf2epub.utils.common import book_output_dir
 from ..illustration_extractor import extract_illustrations
 
 # Configure logger
@@ -699,7 +700,7 @@ def analyze_vision_ocr(
 
     if output_dir is None:
         book_title = config.get("title", "book")
-        output_dir = Path("output") / book_title / "images"
+        output_dir = book_output_dir(book_title) / "images"
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
