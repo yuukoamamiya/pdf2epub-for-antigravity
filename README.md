@@ -91,8 +91,8 @@ subagent:
 章节：优先按页面、Markdown 标题和段落边界切分，目标为每个分片不超过 12,000
 tokens，文件名形如 `chapter_14.part1.md`。分片仍属于同一个 TOC 单元，构建器会
 按顺序处理其导航、图片和脚注关系。可在 `refine.oversized_unit_split` 中调整
-阈值、目标大小或关闭该功能；显式设置 `types: [notes, bibliography, index]`
-可以保留旧的特殊单元模式。
+阈值、目标大小或关闭该功能。注释、参考文献和索引等内容角色由结构分析
+Subagent 写入 `toc_tree.json` 的节点 `type` 字段；这与 token 拆分策略无关。
 
 ## 流程一：扫描版 PDF 转 EPUB
 

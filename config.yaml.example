@@ -54,11 +54,10 @@ ocr:
 refine:
   # TOC analysis is done by an Antigravity workspace subagent.
   max_tokens: 8000
-  # Split every very large refined unit after merging. Use an explicit list
-  # such as [notes, bibliography, index] to retain the legacy special-only mode.
+  # Split every very large refined unit after merging. Content roles such as
+  # notes/bibliography/index are assigned by the TOC Subagent, not here.
   # The split files use the existing chapter_N.partM.md contract.
   oversized_unit_split:
     enabled: true
     threshold_tokens: 15000
     target_tokens: 12000
-    types: [all]

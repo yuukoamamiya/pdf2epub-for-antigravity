@@ -890,6 +890,8 @@ def test_prepare_refine_subagent_writes_manifest_and_prompt(tmp_path: Path):
     assert manifest["model"] == "configured-flash"
     assert "configured-flash" in paths["prompt"].read_text(encoding="utf-8")
     assert "toc_tree.json" in paths["prompt"].read_text(encoding="utf-8")
+    assert 'type: "bibliography"' in paths["prompt"].read_text(encoding="utf-8")
+    assert "not a token-size or splitting setting" in paths["prompt"].read_text(encoding="utf-8")
     assert (tmp_path / "pagination_map.json").exists()
     assert "pagination_map.json" in paths["prompt"].read_text(encoding="utf-8")
 

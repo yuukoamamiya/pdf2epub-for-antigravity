@@ -117,11 +117,14 @@ Rules:
   Copy the author and publisher exactly as printed; do not translate, normalize,
   or guess them. Use an empty string only when the information is genuinely not
   visible, and record the relevant OCR page numbers in `metadata_source_pages`.
-- You may include `type: "notes"`, `type: "bibliography"`, `type: "index"`,
-  `boundary_info`, or other book metadata. Use `bibliography` for a references
-  section and `index` for an index so the later translation prompt can apply
-  the appropriate preservation rules.
-  but do not change the required field names.
+- Classify each node by its content when applicable: use `type: "notes"` for
+  endnotes/notes, `type: "bibliography"` for references, and `type: "index"`
+  for an index. Omit `type` for ordinary prose chapters and sections. This is
+  an AI-assigned content role used by later translation and footnote rules; it
+  is not a token-size or splitting setting. Do not invent a role when the
+  evidence is unclear.
+- You may include `boundary_info` or other book metadata, but do not change
+  the required field names.
 - The local step will estimate tokens using `{max_tokens}` as the unit limit;
   it will not call any model or provider.
 """,
