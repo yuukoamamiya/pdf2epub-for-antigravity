@@ -195,7 +195,7 @@ def _prepare_pdf_markdown_task(args, task: str):
             "Keep one output file for every source file and keep filenames unchanged.",
             "Output only the target-language replacement: never add bilingual paragraphs, parallel English titles, or the original text beside the translation.",
             "Do not upgrade ordinary paragraphs, italic text, or bold text into Markdown headings: preserve exactly whether the source line begins with #.",
-            "Never add Markdown code fences (```); if the source has no fence, the translated output must have no fence.",
+            "Preserve Markdown code fences (```) exactly: the translated output must contain the same number of fence markers as the source; if the source has none, do not add any.",
         ]
         if skip_entities:
             rules.append(
@@ -226,11 +226,19 @@ def _prepare_pdf_markdown_task(args, task: str):
             else (),
         )
         if task == "translate":
-            from pdf2epub.subagent_workflow import prepare_toc_translation_subagent
+            from pdf2epub.subagent_workflow import (
+                integrate_toc_translation_task,
+                prepare_toc_translation_subagent,
+            )
             toc_paths = prepare_toc_translation_subagent(
                 output_dir, source_language, target_language, config=config
             )
-            paths.update({"toc_source": toc_paths["source"], "toc_prompt": toc_paths["prompt"]})
+            paths = integrate_toc_translation_task(
+                output_dir,
+                paths["manifest"],
+                paths["prompt"],
+                toc_paths,
+            )
     except Exception as exc:
         logger.error(f"Could not prepare {task} task: {exc}")
         return 1
@@ -1135,8 +1143,9 @@ Recommended Antigravity model: `{model}`
 
 Read only the files listed in `pending_files` in `novel_subagent_manifest.json` under
 `novel_units/` and write its translation with the same filename under
-`translated_novel/`. Preserve image markers and paragraph boundaries, and do
-not add commentary or Markdown fences. If the model refuses a unit or inserts
+`translated_novel/`. Preserve image markers, paragraph boundaries, and any
+Markdown code fences; keep the same number of fence markers as the source. If
+the source has no fences, do not add any. Do not add commentary. If the model refuses a unit or inserts
 a safety disclaimer, do not write that refusal as its translation; report the
 blocked unit instead. Use `metadata_translation_prompt.md`
 to create the translated metadata JSON as well. Authors and publishers must
@@ -1191,14 +1200,19 @@ def translate_novel_validate_command(args):
             source_text = (source_dir / name).read_text(encoding="utf-8")
             target_text = (target_dir / name).read_text(encoding="utf-8")
             refusal = detect_refusal(source_text, target_text)
-            if refusal or "```" in target_text:
+            source_fence_count = source_text.count("```")
+            target_fence_count = target_text.count("```")
+            if refusal or source_fence_count != target_fence_count:
                 refusal_files.append(
                     {
                         "file": name,
                         "reason": (
                             f"refusal/disclaimer detected: {refusal}"
                             if refusal
-                            else "Markdown code fence is not allowed"
+                            else (
+                                "Markdown code fence mismatch: "
+                                f"expected {source_fence_count}, got {target_fence_count}"
+                            )
                         ),
                     }
                 )

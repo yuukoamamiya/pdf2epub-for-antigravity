@@ -84,7 +84,11 @@ _REFUSAL_PATTERNS = (
     (
         "Chinese policy disclaimer",
         re.compile(
-            r"作为(?:一个)?(?:AI|人工智能|语言模型)|"
+            r"作为(?:一个)?(?:AI|人工智能|语言模型)"
+            r"(?:[，,]\s*(?:我|本人)\s*(?:无法|不能|不可以|拒绝)|"
+            r"[，,]?\s*(?:无法|不能|不可以|拒绝)\s*"
+            r"(?:翻译|协助|帮助|处理|提供|改写|重写|生成|回答|完成)|"
+            r"[，,]\s*(?:会|旨在)\s*(?:遵循|确保|保护|提供|协助))|"
             r"(?:无法|不能|不可以|拒绝|抱歉).{0,30}"
             r"(?:安全|内容|使用)政策"
         ),
@@ -553,9 +557,17 @@ def validate_markdown_subagent(
             else:
                 valid_files.append(source.name)
 
-        if target_text and "```" in target_text:
+        source_fence_count = source_text.count("```")
+        target_fence_count = target_text.count("```")
+        if source_fence_count != target_fence_count:
             invalid.append(
-                {"file": source.name, "reason": "Markdown code fence is not allowed"}
+                {
+                    "file": source.name,
+                    "reason": (
+                        "Markdown code fence mismatch: "
+                        f"expected {source_fence_count}, got {target_fence_count}"
+                    ),
+                }
             )
             if source.name in valid_files:
                 valid_files.remove(source.name)
@@ -775,6 +787,68 @@ Return valid JSON only. Do not add Markdown fences or commentary.
         encoding="utf-8",
     )
     return {"source": source_contract, "template": template_path, "prompt": prompt_path}
+
+
+def integrate_toc_translation_task(
+    output_dir: Path,
+    markdown_manifest_path: Path,
+    markdown_prompt_path: Path,
+    toc_paths: Mapping[str, Path],
+) -> Dict[str, Path]:
+    """Attach the TOC contract to the main PDF translation hand-off.
+
+    The TOC remains a separately validated JSON artifact, but the main
+    translation Subagent now receives one required hand-off instead of an
+    operator needing to dispatch a second task manually.  The standalone
+    ``translate-toc`` command continues to be useful for recovery.
+    """
+    output_dir = Path(output_dir)
+    manifest_path = Path(markdown_manifest_path)
+    prompt_path = Path(markdown_prompt_path)
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Invalid Markdown translation manifest: {exc}") from exc
+    if not isinstance(manifest, dict):
+        raise ValueError("Markdown translation manifest must be a JSON object")
+
+    toc_source = output_dir / "toc_tree.json"
+    if not toc_source.is_file():
+        raise ValueError(f"TOC source not found: {toc_source}")
+    manifest["toc_translation"] = {
+        "source_file": str(toc_source.relative_to(output_dir)).replace("\\", "/"),
+        "output_file": "toc_tree_translated.json",
+        "template_file": Path(toc_paths["template"]).name,
+        "prompt_file": Path(toc_paths["prompt"]).name,
+        "source_sha256": hashlib.sha256(toc_source.read_bytes()).hexdigest(),
+        "status": "pending",
+    }
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+    prompt = prompt_path.read_text(encoding="utf-8")
+    prompt += f"""
+
+## Required TOC translation (part of this same task)
+
+Before reporting the translation batch complete, also read
+`{Path(toc_paths['source']).name}`, `{Path(toc_paths['template']).name}`, and
+`{Path(toc_paths['prompt']).name}`. Translate the book title and every chapter
+title in place in `toc_tree.json`, then write the complete result to
+`toc_tree_translated.json`. Preserve the tree, order, page ranges, levels,
+types, anchors, boundary metadata, and all other non-title fields exactly.
+This JSON output is required by the final EPUB build. Do not add Markdown
+fences or commentary, and do not modify the source TOC or template.
+"""
+    prompt_path.write_text(prompt, encoding="utf-8")
+    return {
+        "manifest": manifest_path,
+        "prompt": prompt_path,
+        "toc_source": Path(toc_paths["source"]),
+        "toc_template": Path(toc_paths["template"]),
+        "toc_prompt": Path(toc_paths["prompt"]),
+    }
 
 
 def validate_toc_translation_subagent(output_dir: Path) -> Dict:

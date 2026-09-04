@@ -1,10 +1,10 @@
 """Deterministic splitting of oversized refined Markdown units.
 
-The PDF refine stage normally emits one Markdown file per TOC unit.  Notes,
-bibliographies, and indexes are different: they can be tens of thousands of
-tokens while still consisting of many independent entries.  This module
-splits those files only at blank-line/entry boundaries and falls back to
-physical line boundaries for an unusually large atomic block.
+The PDF refine stage normally emits one Markdown file per TOC unit.  A large
+chapter can exceed the safe Subagent transaction size even when its TOC entry
+is valid.  This module splits such files at Markdown block boundaries (which
+also preserve the page separators inserted by :class:`PageMerger`) and falls
+back to physical line boundaries for an unusually large atomic block.
 """
 
 from __future__ import annotations
@@ -26,14 +26,25 @@ class SplitMarkdownResult:
 
 
 def _blocks(text: str) -> List[str]:
-    """Split Markdown into paragraph-like blocks without losing separators."""
+    """Split Markdown into paragraph-like blocks without losing separators.
+
+    A heading starts a new block even when OCR omitted the blank line before
+    it.  This makes ordinary body chapters split cleanly at section headings,
+    while retaining every source character in the concatenated result.
+    """
     lines = text.splitlines(keepends=True)
     if not lines:
         return []
 
     blocks: List[str] = []
     current: List[str] = []
+    heading = re.compile(r"^\s{0,3}#{1,6}\s+\S")
     for index, line in enumerate(lines):
+        if current and line.strip() and heading.match(line) and any(
+            item.strip() for item in current
+        ):
+            blocks.append("".join(current))
+            current = []
         current.append(line)
         next_line = lines[index + 1] if index + 1 < len(lines) else None
         if not line.strip() and next_line is not None and next_line.strip():

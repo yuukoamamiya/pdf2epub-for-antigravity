@@ -87,12 +87,12 @@ subagent:
 
 `batching` 只生成分批建议，不会从 Python 启动模型调用。manifest 会为每个源文件记录字节数、物理行数、非空翻译单元行数和估算 token 数，并给出 `recommended_batches`。超过单批 token 上限的文件会单独列出，需按完整翻译单元拆分后再交给 Subagent。默认最多同时进行 3 个 Subagent 任务。
 
-对于 PDF 的 Notes、Bibliography 和 Index 单元，`refine-local` 默认会在合并后
-自动处理超过 15,000 tokens 的超大单元：优先按完整条目/段落切分，目标为每个
-分片不超过 12,000 tokens，文件名形如 `chapter_14.part1.md`。分片仍属于同一个
-TOC 单元，构建器会按顺序处理其导航和脚注关系。可在
-`refine.oversized_unit_split` 中调整阈值、目标大小或关闭该功能。普通正文不会
-因为这个设置自动拆分。
+对于 PDF 单元，`refine-local` 默认会在合并后自动处理超过 15,000 tokens 的超大
+章节：优先按页面、Markdown 标题和段落边界切分，目标为每个分片不超过 12,000
+tokens，文件名形如 `chapter_14.part1.md`。分片仍属于同一个 TOC 单元，构建器会
+按顺序处理其导航、图片和脚注关系。可在 `refine.oversized_unit_split` 中调整
+阈值、目标大小或关闭该功能；显式设置 `types: [notes, bibliography, index]`
+可以保留旧的特殊单元模式。
 
 ## 流程一：扫描版 PDF 转 EPUB
 
@@ -201,8 +201,9 @@ uv run pdf2epub -c config.yaml translate --target-language Chinese
 - 只读取 translation_entities.json，使用其中的 suggested_translation 作为统一术语；
 - 按目录翻译 prompt 将译后目录写入 toc_tree_translated.json。
 
-`translate` 会同时生成目录翻译交接文件；如果只需重新准备目录任务，也可以单独
-运行 `translate-toc`，不必重新准备正文任务。
+`translate` 会同时生成目录翻译交接文件，并将 TOC 翻译列为同一个主翻译任务的
+必做项；如果只需重新准备目录任务，也可以单独运行 `translate-toc`，不必重新
+准备正文任务。
 
 目录任务还会生成 `toc_translation_template.json`，提供每个目录节点的路径和原文
 标题清单，减少遗漏；最终交付仍必须是完整的 `toc_tree_translated.json`，而不是

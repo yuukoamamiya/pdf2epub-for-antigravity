@@ -12,7 +12,7 @@ from ..utils.unit_id import generate_unit_id
 from .toc_tree import TOCNode, dict_list_to_toc_tree
 from .page_merger import PageMerger
 from .subagent_workflow import page_numbers, validate_toc_tree_data
-from .unit_splitter import SPECIAL_UNIT_TYPES, split_markdown_unit
+from .unit_splitter import split_markdown_unit
 
 # Initialize tokenizer
 tokenizer = tiktoken.get_encoding("cl100k_base")
@@ -21,6 +21,7 @@ tokenizer = tiktoken.get_encoding("cl100k_base")
 REFINE_CHECKPOINT_SCHEMA = 3
 DEFAULT_OVERSIZED_SPLIT_THRESHOLD = 15_000
 DEFAULT_OVERSIZED_SPLIT_TARGET = 12_000
+DEFAULT_OVERSIZED_SPLIT_TYPES = ("all",)
 
 
 def _pages_fingerprint(pages_dir: Path) -> str:
@@ -98,12 +99,15 @@ class RefinedBreakdown:
         )
         if self.oversized_split_target >= self.oversized_split_threshold:
             self.oversized_split_target = max(1, self.oversized_split_threshold - 1)
-        configured_types = split_config.get("types", sorted(SPECIAL_UNIT_TYPES))
+        # New configurations split every oversized refined unit by default.
+        # Keep an explicit ``types`` list as an escape hatch for older books
+        # that intentionally only split notes/bibliographies/indexes.
+        configured_types = split_config.get("types", list(DEFAULT_OVERSIZED_SPLIT_TYPES))
         if not isinstance(configured_types, list):
-            configured_types = sorted(SPECIAL_UNIT_TYPES)
+            configured_types = list(DEFAULT_OVERSIZED_SPLIT_TYPES)
         self.oversized_split_types = tuple(
             sorted({str(value).strip().lower() for value in configured_types if str(value).strip()})
-        ) or tuple(sorted(SPECIAL_UNIT_TYPES))
+        ) or DEFAULT_OVERSIZED_SPLIT_TYPES
 
     @staticmethod
     def _positive_int(value: Any, default: int) -> int:
@@ -274,9 +278,9 @@ class RefinedBreakdown:
             if node.estimated_tokens <= self.max_tokens:
                 return [self._create_unit(node, index_path)]
             else:
-                # Keep the logical TOC unit intact here. Special large units
-                # are split after page merge, where Markdown entry boundaries
-                # are available and can be validated deterministically.
+                # Keep the logical TOC unit intact here. Any enabled oversized
+                # unit is split after page merge, where Markdown block and
+                # page-separator boundaries are available.
                 logger.info(
                     f"'{node.title}' ({node.estimated_tokens} tokens) exceeds max_tokens; "
                     "oversized-unit policy will be applied after merge"
@@ -365,11 +369,12 @@ class RefinedBreakdown:
             else:
                 content = self.page_merger.merge_node_content(node, pages_dir, next_node)
 
-            role = str(getattr(node, "chapter_type", "") or "").strip().lower()
+            role = str(getattr(node, "chapter_type", "") or "").strip().lower() or "body"
             actual_tokens = len(tokenizer.encode(content)) if content else 0
+            split_all_types = "all" in self.oversized_split_types or "*" in self.oversized_split_types
             should_split = (
                 self.oversized_split_enabled
-                and role in self.oversized_split_types
+                and (split_all_types or role in self.oversized_split_types)
                 and actual_tokens > self.oversized_split_threshold
             )
             split_result = (

@@ -17,6 +17,7 @@ from pdf2epub.subagent_workflow import (
     detect_refusal,
     detect_bilingual_output,
     strip_outer_markdown_fences,
+    integrate_toc_translation_task,
     prepare_markdown_subagent,
     prepare_toc_translation_subagent,
     resolve_subagent_model,
@@ -92,6 +93,23 @@ def test_detect_refusal_still_flags_first_person_translation_refusal():
     assert "Chinese refusal" in reason
 
 
+def test_detect_refusal_allows_book_discussion_of_artificial_intelligence():
+    source = 'They, as artificial intelligences, are bidding us farewell on the way to the unnamed command center.'
+    target = "它们作为人工智能，在通向无名最高指挥部的路上与我们道别。"
+
+    assert detect_refusal(source, target) is None
+
+
+def test_detect_refusal_still_flags_as_ai_first_person_disclaimer():
+    reason = detect_refusal(
+        "This is an ordinary paragraph about artificial intelligence.",
+        "作为人工智能，我无法翻译这段内容。",
+    )
+
+    assert reason is not None
+    assert "Chinese" in reason
+
+
 def test_detect_bilingual_output_is_advisory_for_long_unchanged_spans():
     line = "This is a deliberately long English paragraph that should remain unchanged in a bilingual output warning."
     warning = detect_bilingual_output(f"{line}\n{line}", f"{line}\n{line}")
@@ -155,6 +173,45 @@ def test_markdown_validation_includes_structural_diff_summary(tmp_path: Path):
     assert diff["line_count_changed"] is False
     assert diff["heading_count_changed"] is False
     assert diff["code_fence_changes"] is False
+
+
+def test_markdown_validation_preserves_source_code_fences(tmp_path: Path):
+    from pdf2epub.subagent_workflow import validate_markdown_subagent
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "unit.md").write_text(
+        "# Diagram\n\n```mermaid\ngraph TD\nA-->B\n```\n",
+        encoding="utf-8",
+    )
+    (target_dir / "unit.md").write_text(
+        "# 图表\n\n```mermaid\ngraph TD\nA-->B\n```\n",
+        encoding="utf-8",
+    )
+
+    report = validate_markdown_subagent(tmp_path, "translate", source_dir, target_dir)
+
+    assert report["all_passed"] is True
+
+
+def test_markdown_validation_rejects_added_code_fence(tmp_path: Path):
+    from pdf2epub.subagent_workflow import validate_markdown_subagent
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "unit.md").write_text("普通段落。\n", encoding="utf-8")
+    (target_dir / "unit.md").write_text(
+        "普通段落。\n\n```\n额外代码块\n```\n", encoding="utf-8"
+    )
+
+    report = validate_markdown_subagent(tmp_path, "translate", source_dir, target_dir)
+
+    assert report["all_passed"] is False
+    assert "code fence mismatch" in report["invalid"][0]["reason"]
 
 
 def test_polish_validation_allows_only_duplicate_heading_reduction(tmp_path: Path):
@@ -534,6 +591,37 @@ def test_translate_toc_command_prepares_independent_json_task(tmp_path: Path, mo
     assert source["output_file"] == "toc_tree_translated.json"
 
 
+def test_translate_task_integrates_toc_contract_into_main_manifest_and_prompt(tmp_path: Path):
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    (output_dir / "toc_tree.json").write_text(
+        json.dumps({"book_title": "Book", "chapters": []}), encoding="utf-8"
+    )
+    source_dir = output_dir / "ocr_markdown"
+    source_dir.mkdir()
+    (source_dir / "chapter.md").write_text("Source", encoding="utf-8")
+    paths = prepare_markdown_subagent(
+        output_dir,
+        "translate",
+        source_dir,
+        output_dir / "translated",
+        "English",
+        "Chinese",
+    )
+    toc_paths = prepare_toc_translation_subagent(output_dir, "English", "Chinese")
+
+    integrated = integrate_toc_translation_task(
+        output_dir, paths["manifest"], paths["prompt"], toc_paths
+    )
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    prompt = paths["prompt"].read_text(encoding="utf-8")
+
+    assert manifest["toc_translation"]["output_file"] == "toc_tree_translated.json"
+    assert manifest["toc_translation"]["status"] == "pending"
+    assert "Required TOC translation (part of this same task)" in prompt
+    assert integrated["toc_prompt"] == toc_paths["prompt"]
+
+
 def test_translate_skip_entities_is_recorded_in_prompt_and_manifest(
     tmp_path: Path, monkeypatch
 ):
@@ -565,6 +653,8 @@ def test_translate_skip_entities_is_recorded_in_prompt_and_manifest(
     )
     prompt = (output_dir / "translate_subagent_prompt.md").read_text(encoding="utf-8")
     assert manifest["skipped_context_files"] == ["translation_entities"]
+    assert manifest["toc_translation"]["output_file"] == "toc_tree_translated.json"
+    assert "Required TOC translation (part of this same task)" in prompt
     assert "do not invent or expect a translation_entities.json context file" in prompt
     assert "Read translation_entities.json before translating" not in prompt
 
@@ -873,6 +963,51 @@ def test_refine_local_splits_oversized_notes_into_entry_safe_parts(tmp_path: Pat
         for name in units[0]["part_files"]
     ]
     assert "".join(parts) == content
+
+
+def test_refine_local_splits_oversized_body_and_preserves_images(tmp_path: Path):
+    pages_dir = tmp_path / "pages"
+    pages_dir.mkdir()
+    page_one = "# Chapter\n\n## First section\n\n" + ("First paragraph. " * 80)
+    page_two = (
+        "## Second section\n\n"
+        "![Figure](../images/page_002_img_001.png)\n\n"
+        + ("Second paragraph. " * 80)
+    )
+    (pages_dir / "page_001.md").write_text(page_one, encoding="utf-8")
+    (pages_dir / "page_002.md").write_text(page_two, encoding="utf-8")
+    (tmp_path / "toc_tree.json").write_text(
+        json.dumps({
+            "chapters": [{
+                "title": "Chapter",
+                "level": 1,
+                "start_page": 1,
+                "end_page": 2,
+            }]
+        }),
+        encoding="utf-8",
+    )
+
+    units = RefinedBreakdown(
+        config={
+            "refine": {
+                "oversized_unit_split": {
+                    "threshold_tokens": 100,
+                    "target_tokens": 60,
+                }
+            }
+        },
+        max_tokens=8000,
+    ).process_from_toc(tmp_path / "input.pdf", tmp_path, "Book")
+
+    assert len(units) == 1
+    assert units[0]["part_files"]
+    parts = [
+        (tmp_path / "ocr_markdown" / name).read_text(encoding="utf-8")
+        for name in units[0]["part_files"]
+    ]
+    assert "".join(parts) == page_one + "\n\n" + page_two
+    assert "![Figure](../images/page_002_img_001.png)" in "".join(parts)
 
 
 def test_markdown_unit_split_keeps_index_continuation_with_entry():
