@@ -116,8 +116,8 @@
 
 #### Step 3: 结构分析与章节合并
 1. Agent 执行命令：`uv run pdf2epub -c config.yaml refine-prepare`
-2. 在 Antigravity IDE 中让 Subagent 阅读 `output/<title>/refine_subagent_prompt.md` 和 `pages/`，从书名页/版权页提取作者与出版社，并根据实际内容自动为注释、参考文献和索引节点标注 `type: notes`、`type: bibliography` 或 `type: index`；普通正文节点省略 `type`，最后写入 `output/<title>/toc_tree.json`。
-   `refine-prepare` 同时生成 `pagination_map.json`；它只是 Roman/Arabic 书内页码的辅助映射，物理 OCR 页码仍是范围判断的权威。
+2. 在 Antigravity IDE 中让 Subagent 阅读 `output/<title>/refine_subagent_prompt.md`、`pages/` 和（若存在）`outline_toc_draft.json`，从书名页/版权页提取作者与出版社，并根据实际内容自动为注释、参考文献和索引节点标注 `type: notes`、`type: bibliography` 或 `type: index`；普通正文节点省略 `type`，最后写入 `output/<title>/toc_tree.json`。
+   `refine-prepare` 同时生成 `pagination_map.json` 和 PDF 原生书签的 `outline_toc_draft.json`。Outline 只是 Subagent 的高置信度草稿，必须结合 OCR 核对，物理 OCR 页码仍是范围判断的权威。
 3. Agent 执行命令：`uv run pdf2epub -c config.yaml refine-local --resume`
 4. 产物：`output/<title>/toc_tree.json` 与 `output/<title>/ocr_markdown/chapter_XXX.md`。`toc_tree.json` 中的节点 `type` 是 Subagent 根据内容做出的语义分类；`refine.oversized_unit_split` 只负责本地按 token 阈值拆分，不要求用户手工填写内容类型。
 5. **TOC 校验**：`refine-local` 本地检查章节重叠、父子范围和缺失页面；若失败，修正 `toc_tree.json` 后重新执行。节点 `type` 只使用 Prompt 约定的内容角色值，不要把 token 大小或拆分策略写进节点类型。
@@ -142,7 +142,9 @@
   4. 让 Subagent 按目录翻译 prompt 读取 `toc_tree.json`，写入
      `toc_tree_translated.json`；完成后可运行 `translate-toc-validate`。
   5. 保持 Markdown 标题层级（`#`, `##`）、公式（`$...$`）、脚注（`[^...]`）
-     和图片链接原样不变；完成后运行 `translate-validate`。
+     和图片链接原样不变；源文件末尾的 `REFERENCES`、`Literatur`、`Notes` 或类似标签若没有 `#` 前缀，译文也必须保持普通段落；完成后运行 `translate-validate`。
+     若仅因这类标签被误升级为一个 Markdown 标题，可使用
+     `translate-validate --fix-reference-heading`；该选项只修复高置信度的单个末尾标签升级，不放宽一般标题校验。
   6. 若节点使用 `type: bibliography` 或 `type: index`，按 translate manifest
      中的 `file_roles` 和专用规则处理。参考文献保留书目身份字段、页码和引用
      标点；索引保留层级、页码、范围和交叉引用，不得省略条目。

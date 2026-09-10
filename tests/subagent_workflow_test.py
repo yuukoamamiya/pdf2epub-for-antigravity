@@ -9,6 +9,7 @@ from pdf2epub.refine.subagent_workflow import (
     prepare_refine_subagent,
     validate_toc_tree_data,
 )
+from pdf2epub.refine.pdf_outline import extract_pdf_outline
 from pdf2epub.refine.unit_splitter import split_markdown_unit
 from pdf2epub.entity_extractor import validate_entities
 from pdf2epub.subagent_workflow import (
@@ -22,6 +23,7 @@ from pdf2epub.subagent_workflow import (
     prepare_toc_translation_subagent,
     resolve_subagent_model,
     validate_toc_translation_subagent,
+    fix_reference_heading_mismatch,
 )
 from pdf2epub.footnote_normalization import validate_polish_footnote_normalization
 from pdf2epub.cli import (
@@ -173,6 +175,56 @@ def test_markdown_validation_includes_structural_diff_summary(tmp_path: Path):
     assert diff["line_count_changed"] is False
     assert diff["heading_count_changed"] is False
     assert diff["code_fence_changes"] is False
+
+
+def test_reference_heading_fix_only_removes_high_confidence_extra_heading():
+    source = "正文\n\nREFERENCES\n\nSmith, A.\n"
+    target = "正文\n\n## 参考文献\n\n史密斯，A。\n"
+
+    fixed, fixes = fix_reference_heading_mismatch(source, target)
+
+    assert fixed == "正文\n\n参考文献\n\n史密斯，A。\n"
+    assert fixes[0]["removed_level"] == 2
+
+
+def test_reference_heading_fix_does_not_relax_unique_heading_changes():
+    source = "正文\n\nREFERENCES\n"
+    target = "正文\n\n## 参考文献\n\n## 新增的真实章节\n"
+
+    fixed, fixes = fix_reference_heading_mismatch(source, target)
+
+    assert fixed == target
+    assert fixes == []
+
+
+def test_markdown_validation_stages_repaired_reference_heading(tmp_path: Path):
+    from pdf2epub.subagent_workflow import validate_markdown_subagent
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "unit.md").write_text(
+        "正文\n\nREFERENCES\n\nSmith, A.\n", encoding="utf-8"
+    )
+    (target_dir / "unit.md").write_text(
+        "正文\n\n## 参考文献\n\n史密斯，A。\n", encoding="utf-8"
+    )
+
+    report = validate_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        target_dir,
+        structural_patterns=(r"^#{1,6}\s",),
+        fix_reference_headings=True,
+    )
+
+    assert report["all_passed"] is True
+    assert len(report["reference_heading_fixes"]) == 1
+    assert (target_dir / "validated" / "unit.md").read_text(encoding="utf-8") == (
+        "正文\n\n参考文献\n\n史密斯，A。\n"
+    )
 
 
 def test_markdown_validation_preserves_source_code_fences(tmp_path: Path):
@@ -894,6 +946,38 @@ def test_prepare_refine_subagent_writes_manifest_and_prompt(tmp_path: Path):
     assert "not a token-size or splitting setting" in paths["prompt"].read_text(encoding="utf-8")
     assert (tmp_path / "pagination_map.json").exists()
     assert "pagination_map.json" in paths["prompt"].read_text(encoding="utf-8")
+    assert (tmp_path / "outline_toc_draft.json").exists()
+    assert manifest["outline_draft"] == "outline_toc_draft.json"
+    assert "outline_toc_draft.json" in paths["prompt"].read_text(encoding="utf-8")
+
+
+def test_extract_pdf_outline_builds_nested_reviewable_ranges(tmp_path: Path):
+    import pymupdf as fitz
+
+    pdf_path = tmp_path / "book.pdf"
+    document = fitz.open()
+    for _ in range(4):
+        document.new_page()
+    document.set_toc([
+        [1, "First chapter", 1],
+        [2, "First section", 2],
+        [1, "Second chapter", 3],
+    ])
+    document.save(pdf_path)
+    document.close()
+
+    draft = extract_pdf_outline(
+        pdf_path, tmp_path / "outline_toc_draft.json", total_pages=4
+    )
+
+    assert draft["extracted"] is True
+    assert draft["entry_count"] == 3
+    assert draft["chapters"][0]["end_page"] == 2
+    assert draft["chapters"][0]["children"][0]["end_page"] == 2
+    assert draft["chapters"][1]["start_page"] == 3
+    assert json.loads(
+        (tmp_path / "outline_toc_draft.json").read_text(encoding="utf-8")
+    )["source"] == "pdf-native-outline"
 
 
 def test_refine_local_splits_a_parent_when_children_cover_its_range(tmp_path: Path):

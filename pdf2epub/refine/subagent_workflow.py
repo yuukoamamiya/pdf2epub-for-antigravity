@@ -14,6 +14,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 from pdf2epub.subagent_workflow import resolve_subagent_model
 from .pagination import build_pagination_map
+from .pdf_outline import extract_pdf_outline
 
 
 PAGE_RE = re.compile(r"^page_(\d+)\.md$")
@@ -42,6 +43,13 @@ def prepare_refine_subagent(
         raise ValueError(f"OCR pages not found in {pages_dir}; run ocr-pages first")
 
     model = resolve_subagent_model(config, "refine")
+    # OCR keeps the untouched source beside the processed input.  Native PDF
+    # bookmarks must be read from that original whenever it is available.
+    pdf_path = output_dir / "input_original.pdf"
+    if not pdf_path.is_file():
+        pdf_path = output_dir / "input.pdf"
+    outline_path = output_dir / "outline_toc_draft.json"
+    outline_draft = extract_pdf_outline(pdf_path, outline_path, max(available))
     manifest = {
         "schema_version": 1,
         "workflow": "antigravity-subagent",
@@ -53,6 +61,9 @@ def prepare_refine_subagent(
         "model": model,
         "output_file": "toc_tree.json",
         "pagination_map": "pagination_map.json",
+        "outline_draft": "outline_toc_draft.json",
+        "outline_source": pdf_path.name,
+        "outline_entry_count": outline_draft["entry_count"],
     }
     manifest_path = output_dir / "refine_subagent_manifest.json"
     manifest_path.write_text(
@@ -78,6 +89,13 @@ labels. Use it as supporting evidence for the table of contents; the physical
 OCR page number remains authoritative in `start_page` and `end_page`. If the
 map is uncertain, inspect the page text and record the uncertainty rather than
 blindly applying an offset.
+
+If `outline_toc_draft.json` exists and contains entries, use it as a high-
+confidence draft of the publisher's PDF bookmarks. It is untrusted machine-
+generated evidence, not the final answer: compare every entry and page range
+with the OCR text, correct missing or extra sections, and preserve only entries
+supported by the document. Never copy its ranges blindly. If it is empty, use
+the OCR-only procedure below.
 
 Use 1-based inclusive OCR page numbers.  Identify the book's real chapters and
 sections from the page text, including nested sections.  Keep nodes ordered by

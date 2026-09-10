@@ -196,6 +196,7 @@ def _prepare_pdf_markdown_task(args, task: str):
             "Keep one output file for every source file and keep filenames unchanged.",
             "Output only the target-language replacement: never add bilingual paragraphs, parallel English titles, or the original text beside the translation.",
             "Do not upgrade ordinary paragraphs, italic text, or bold text into Markdown headings: preserve exactly whether the source line begins with #.",
+            "If a standalone REFERENCES, Bibliography, Literatur, Notes, or equivalent end-of-book label has no # prefix in the source, keep it as an ordinary paragraph in the translation; never upgrade it to a Markdown heading.",
             "Preserve Markdown code fences (```) exactly: the translated output must contain the same number of fence markers as the source; if the source has none, do not add any.",
         ]
         if skip_entities:
@@ -337,6 +338,9 @@ def _validate_pdf_markdown_task(args, task: str):
         file_roles=_load_pdf_file_roles(output_dir) if task == "translate" else None,
         tolerate_duplicate_headings=task == "polish",
         validate_footnote_normalization=task == "polish",
+        fix_reference_headings=task == "translate" and bool(
+            getattr(args, "fix_reference_heading", False)
+        ),
     )
     if task == "translate":
         entity_report = _validate_translation_entities(output_dir, config)
@@ -373,6 +377,11 @@ def _validate_pdf_markdown_task(args, task: str):
         logger.warning(
             f"Structural changes tolerated: {len(report['structural_warnings'])} "
             "duplicate heading/image artifact adjustment(s)"
+        )
+    if report.get("reference_heading_fixes"):
+        logger.warning(
+            f"Applied {len(report['reference_heading_fixes'])} high-confidence "
+            "reference-heading repair(s); inspect the validation JSON"
         )
     if report["all_passed"]:
         logger.success(f"{task} Subagent output validated: {report['validated_dir']}")
@@ -2207,6 +2216,14 @@ RECOMMENDED WORKFLOW / 推荐工作流 (uses toc_tree.json):
     translate_validate_parser = subparsers.add_parser(
         "translate-validate",
         help="Validate and stage Subagent translation output (no API calls)",
+    )
+    translate_validate_parser.add_argument(
+        "--fix-reference-heading",
+        action="store_true",
+        help=(
+            "Repair only a high-confidence extra Markdown heading for a plain "
+            "end-of-book references label"
+        ),
     )
     translate_validate_parser.set_defaults(func=translate_validate_command)
 
