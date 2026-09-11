@@ -615,6 +615,11 @@ class HTMLEpubBuilder:
                 'opf': 'http://www.idpf.org/2007/opf',
                 'dc': 'http://purl.org/dc/elements/1.1/'
             }
+            is_epub3 = str(root.get('version', '')).startswith('3')
+            metadata_elem = next(
+                (element for element in root.iter() if _has_local_tag(element, 'metadata')),
+                None,
+            )
 
             # Find and update dc:title
             if translated_title:
@@ -658,7 +663,6 @@ class HTMLEpubBuilder:
                 if _has_local_tag(element, 'creator')
                 and _has_local_tag(element.getparent(), 'metadata')
             ]
-            is_epub3 = str(root.get('version', '')).startswith('3')
             if isinstance(explicit_author_sort, list):
                 explicit_author_values = [str(value).strip() for value in explicit_author_sort]
             elif len(creator_elements) == 1 and isinstance(explicit_author_sort, str):
@@ -666,10 +670,6 @@ class HTMLEpubBuilder:
             else:
                 explicit_author_values = []
 
-            metadata_elem = next(
-                (element for element in root.iter() if _has_local_tag(element, 'metadata')),
-                None,
-            )
             for index, creator in enumerate(creator_elements):
                 sort_value = (
                     explicit_author_values[index]
@@ -765,6 +765,46 @@ class HTMLEpubBuilder:
                 if title_sort_elem is not None:
                     title_sort_elem.set('content', title_sort)
                     logger.debug(f"Updated title_sort: {title_sort}")
+
+                # EPUB 3 uses a title refinement as the canonical sort value;
+                # calibre:title_sort alone is not enough for readers that
+                # display the EPUB 3 ``file-as`` metadata.  EPUB 2 packages
+                # may carry the equivalent namespaced attribute directly on
+                # dc:title, so keep that value in sync when it is present.
+                title_elem = root.find('.//dc:title', namespaces)
+                if title_elem is None:
+                    title_elem = next(
+                        (element for element in root.iter() if _has_local_tag(element, 'title')),
+                        None,
+                    )
+                if title_elem is not None:
+                    namespaced_file_as = f"{{{namespaces['opf']}}}file-as"
+                    if namespaced_file_as in title_elem.attrib:
+                        title_elem.set(namespaced_file_as, title_sort)
+
+                    title_id = title_elem.get('id')
+                    title_refinement = None
+                    if title_id:
+                        title_refinement = next(
+                            (
+                                element
+                                for element in root.iter()
+                                if _has_local_tag(element, 'meta')
+                                and element.get('refines') == f'#{title_id}'
+                                and element.get('property') == 'file-as'
+                            ),
+                            None,
+                        )
+                    if title_refinement is not None:
+                        title_refinement.text = title_sort
+                    elif is_epub3 and title_id and metadata_elem is not None:
+                        LET.SubElement(
+                            metadata_elem,
+                            f"{{{namespaces['opf']}}}meta",
+                            refines=f'#{title_id}',
+                            property='file-as',
+                        ).text = title_sort
+                    logger.debug(f"Updated title file-as: {title_sort}")
 
             tree.write(str(opf_path), encoding='utf-8', xml_declaration=True)
 

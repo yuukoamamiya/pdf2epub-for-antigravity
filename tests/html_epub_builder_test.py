@@ -126,7 +126,8 @@ def test_update_epub3_creators_and_refinements_are_preserved(
          unique-identifier="book-id" version="3.0">
   <metadata>
     <dc:identifier id="book-id">book-id</dc:identifier>
-    <dc:title>Original title</dc:title>
+    <dc:title id="title-1">Original title</dc:title>
+    <meta refines="#title-1" property="file-as">Original title</meta>
     <dc:language>en</dc:language>
     <dc:creator id="creator-1">Author One</dc:creator>
     <meta refines="#creator-1" property="role" scheme="marc:relators">aut</meta>
@@ -175,6 +176,11 @@ def test_update_epub3_creators_and_refinements_are_preserved(
     title_sort = root.find(".//opf:meta[@name='calibre:title_sort']", namespaces)
     assert title_sort is not None
     assert title_sort.get("content") == "Translated title"
+    title_file_as = root.find(
+        ".//opf:meta[@refines='#title-1'][@property='file-as']", namespaces
+    )
+    assert title_file_as is not None
+    assert title_file_as.text == "Translated title"
 
 
 def test_update_content_opf_derives_and_creates_library_sort_metadata(
