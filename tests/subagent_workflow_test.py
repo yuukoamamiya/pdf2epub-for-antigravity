@@ -826,6 +826,13 @@ def test_metadata_source_keeps_identity_fields_out_of_translation_payload(tmp_pa
     assert "author" not in source["translatable_metadata"]
     assert "publisher" not in source["translatable_metadata"]
     assert source["translatable_metadata"]["description"] == "A short description."
+    assert source["sort_metadata"] == {
+        "original_title": "Original Book, The",
+        "author": "Doe, Jane",
+    }
+    prompt = (tmp_path / "metadata_translation_prompt.md").read_text(encoding="utf-8")
+    assert "translated_title_sort" in prompt
+    assert "translated_author_file_as" in prompt
 
 
 def test_metadata_validation_rejects_changed_publisher(tmp_path: Path):

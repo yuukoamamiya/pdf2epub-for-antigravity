@@ -31,6 +31,40 @@ from pdf2epub.utils.html_safety import sanitize_html_document
 PART_FILE_RE = re.compile(r'^(.+)\.part(\d+)\.md$')
 
 
+def sort_title_for_library(title: str) -> str:
+    """Return a library-friendly title sort value.
+
+    Calibre's default convention moves a leading English article to the end,
+    e.g. ``The Class Matrix`` -> ``Class Matrix, The``.  Keep the source title
+    casing because this field is an index value, not translated prose.
+    """
+    value = str(title or "").strip()
+    if not value:
+        return ""
+
+    match = re.match(r'^(?P<article>the|a|an)\s+(?P<rest>.+)$', value, re.IGNORECASE)
+    if not match:
+        return value
+    return f"{match.group('rest').strip()}, {match.group('article')}"
+
+
+def sort_author_for_library(author: str) -> str:
+    """Return a library-friendly sort value for one personal name.
+
+    Names already written as ``Family, Given`` are left in that order.  For
+    the common ``Given Family`` form, move the final name component first.
+    """
+    value = " ".join(str(author or "").split())
+    if not value:
+        return ""
+    if "," in value:
+        return value
+    parts = value.split(" ")
+    if len(parts) < 2:
+        return value
+    return f"{parts[-1]}, {' '.join(parts[:-1])}"
+
+
 def _safe_lxml_parser() -> LET.XMLParser:
     """Parse untrusted package XML without external entities or network I/O."""
     return LET.XMLParser(
@@ -72,6 +106,7 @@ class BuildConfig:
     translated_metadata: Optional[Dict] = None  # Contains translated_title and toc
     epubcheck_mode: str = "warn"  # off, warn, or strict
     epubcheck_path: Optional[str] = None
+    navigation_report: Optional[Dict[str, Any]] = None
 
 
 class HTMLEpubBuilder:
@@ -96,6 +131,43 @@ class HTMLEpubBuilder:
         self.original_epub = config.original_epub
         self.translated_dir = config.translated_dir
         self.output_path = config.output_path
+        self.navigation_report = config.navigation_report if config.navigation_report is not None else {}
+        self._reset_navigation_report()
+
+    def _reset_navigation_report(self) -> None:
+        """Reset the non-blocking NCX/nav build diagnostics."""
+        self.navigation_report.clear()
+        self.navigation_report.update(
+            {
+                "ncx": {"status": "not_attempted", "path": None, "updated_entries": 0},
+                "nav": {"status": "not_attempted", "path": None, "updated_entries": 0},
+            }
+        )
+
+    def _record_navigation(
+        self,
+        kind: str,
+        status: str,
+        path: Optional[Path] = None,
+        extract_dir: Optional[Path] = None,
+        updated_entries: int = 0,
+        error: Optional[str] = None,
+    ) -> None:
+        """Store structured navigation diagnostics without affecting the build."""
+        relative_path = None
+        if path is not None:
+            try:
+                relative_path = path.relative_to(extract_dir).as_posix() if extract_dir else path.as_posix()
+            except ValueError:
+                relative_path = path.name
+        entry: Dict[str, Any] = {
+            "status": status,
+            "path": relative_path,
+            "updated_entries": updated_entries,
+        }
+        if error:
+            entry["error"] = error
+        self.navigation_report[kind] = entry
 
     def build(self) -> Path:
         """
@@ -105,6 +177,7 @@ class HTMLEpubBuilder:
             Path to the output EPUB file
         """
         logger.info(f"Building translated EPUB from {self.original_epub}")
+        self._reset_navigation_report()
 
         # Create temp directory for extraction
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -513,8 +586,20 @@ class HTMLEpubBuilder:
 
         translated_title = metadata.get('translated_title')
         target_lang_code = metadata.get('target_language_code')
+        # Sort values are bibliographic indexes, not prose to be translated.
+        # Derive them locally so older hand-offs (and subagent omissions) still
+        # produce correct Calibre metadata.
+        # Sort the translated display title.  If a translation is not
+        # available (for a partial preview), fall back to the source title.
+        # This still handles an untranslated ``The Class Matrix`` as
+        # ``Class Matrix, The``.
+        title_for_sort = metadata.get('translated_title') or self.config.book_title
+        title_sort = sort_title_for_library(title_for_sort)
+        explicit_author_sort = metadata.get('translated_author_file_as') or metadata.get(
+            'translated_author_sort'
+        )
 
-        if not translated_title and not target_lang_code:
+        if not translated_title and not target_lang_code and not title_sort:
             return
 
         try:
@@ -564,9 +649,78 @@ class HTMLEpubBuilder:
                 else:
                     logger.warning("dc:language element not found in content.opf")
 
-            # dc:creator and dc:publisher are intentionally untouched.  Names
-            # and publisher imprints are bibliographic identity, not prose;
-            # changing them would also break EPUB 3 creator refinements.
+            # Keep creator text unchanged, but update its library sort value.
+            # EPUB 2 stores this as opf:file-as; EPUB 3 stores it as a
+            # refines/property meta element.
+            creator_elements = [
+                element
+                for element in root.iter()
+                if _has_local_tag(element, 'creator')
+                and _has_local_tag(element.getparent(), 'metadata')
+            ]
+            is_epub3 = str(root.get('version', '')).startswith('3')
+            if isinstance(explicit_author_sort, list):
+                explicit_author_values = [str(value).strip() for value in explicit_author_sort]
+            elif len(creator_elements) == 1 and isinstance(explicit_author_sort, str):
+                explicit_author_values = [explicit_author_sort.strip()]
+            else:
+                explicit_author_values = []
+
+            metadata_elem = next(
+                (element for element in root.iter() if _has_local_tag(element, 'metadata')),
+                None,
+            )
+            for index, creator in enumerate(creator_elements):
+                sort_value = (
+                    explicit_author_values[index]
+                    if index < len(explicit_author_values) and explicit_author_values[index]
+                    else sort_author_for_library(creator.text or '')
+                )
+                if not sort_value:
+                    continue
+
+                namespaced_file_as = f"{{{namespaces['opf']}}}file-as"
+                if namespaced_file_as in creator.attrib:
+                    creator.set(namespaced_file_as, sort_value)
+                elif not is_epub3:
+                    creator.set(namespaced_file_as, sort_value)
+
+                creator_id = creator.get('id')
+                refinement = None
+                if creator_id:
+                    refinement = next(
+                        (
+                            element
+                            for element in root.iter()
+                            if _has_local_tag(element, 'meta')
+                            and element.get('refines') == f'#{creator_id}'
+                            and element.get('property') == 'file-as'
+                        ),
+                        None,
+                    )
+                if refinement is not None:
+                    refinement.text = sort_value
+                elif is_epub3 and creator_id and metadata_elem is not None:
+                    LET.SubElement(
+                        metadata_elem,
+                        f"{{{namespaces['opf']}}}meta",
+                        refines=f'#{creator_id}',
+                        property='file-as',
+                    ).text = sort_value
+
+            # Some Calibre-generated packages also carry an explicit author
+            # sort meta. Update it when present, without adding a nonstandard
+            # duplicate to packages that use creator file-as/refinements.
+            if creator_elements:
+                first_author_sort = (
+                    explicit_author_values[0]
+                    if explicit_author_values and explicit_author_values[0]
+                    else sort_author_for_library(creator_elements[0].text or '')
+                )
+                for elem in root.iter():
+                    if _has_local_tag(elem, 'meta') and elem.get('name') == 'calibre:author_sort':
+                        elem.set('content', first_author_sort)
+                        break
 
             # Update dc:description
             if metadata.get('translated_description'):
@@ -592,14 +746,25 @@ class HTMLEpubBuilder:
                     rights_elem.text = metadata['translated_rights']
                     logger.debug("Updated rights")
 
-            # Update calibre:title_sort
-            if metadata.get('translated_title_sort'):
-                for elem in root.iter():
-                    if _has_local_tag(elem, 'meta'):
-                        if elem.get('name') == 'calibre:title_sort':
-                            elem.set('content', metadata['translated_title_sort'])
-                            logger.debug(f"Updated title_sort: {metadata['translated_title_sort']}")
-                            break
+            # Update (or create) calibre:title_sort.  The sort value follows
+            # the translated display title, so the Chinese title is
+            # sorted as Chinese; an untranslated ``The Class Matrix`` would be
+            # stored as ``Class Matrix, The``.
+            title_sort_elem = None
+            for elem in root.iter():
+                if _has_local_tag(elem, 'meta') and elem.get('name') == 'calibre:title_sort':
+                    title_sort_elem = elem
+                    break
+            if title_sort:
+                if title_sort_elem is None and metadata_elem is not None:
+                    title_sort_elem = LET.SubElement(
+                        metadata_elem,
+                        f"{{{namespaces['opf']}}}meta",
+                        name='calibre:title_sort',
+                    )
+                if title_sort_elem is not None:
+                    title_sort_elem.set('content', title_sort)
+                    logger.debug(f"Updated title_sort: {title_sort}")
 
             tree.write(str(opf_path), encoding='utf-8', xml_declaration=True)
 
@@ -612,6 +777,7 @@ class HTMLEpubBuilder:
         opf_path = self._find_opf_path(extract_dir)
         if not opf_path:
             logger.debug("No OPF found, cannot locate NCX")
+            self._record_navigation("ncx", "not_found", extract_dir=extract_dir)
             return
 
         toc_files = self._find_toc_files(extract_dir, opf_path)
@@ -622,12 +788,14 @@ class HTMLEpubBuilder:
             ncx_candidates = list(extract_dir.rglob("*.ncx"))
             if not ncx_candidates:
                 logger.debug("No NCX file found (EPUB 3 only?)")
+                self._record_navigation("ncx", "not_found", extract_dir=extract_dir)
                 return
             ncx_path = ncx_candidates[0]
 
         ncx_dir = ncx_path.parent  # For resolving relative paths
         toc_entries = metadata.get('toc', [])
         if not toc_entries:
+            self._record_navigation("ncx", "skipped", ncx_path, extract_dir=extract_dir)
             return
 
         # Build multiple mappings for robust matching
@@ -675,7 +843,11 @@ class HTMLEpubBuilder:
             return None
 
         try:
-            ET.register_namespace('', 'http://www.daisy.org/z3986/2005/ncx/')
+            # ``defusedxml.ElementTree`` intentionally exposes the safe
+            # parsing API but does not provide stdlib's ``register_namespace``
+            # helper.  Namespace registration is not needed to update or
+            # serialize an already namespaced NCX tree; calling it here made
+            # every EPUB 2 TOC update fail before any labels were written.
             tree = ET.parse(ncx_path)
             root = tree.getroot()
 
@@ -727,9 +899,15 @@ class HTMLEpubBuilder:
 
             tree.write(ncx_path, encoding='utf-8', xml_declaration=True)
             logger.debug(f"Updated {updated_count} navPoints in toc.ncx")
+            self._record_navigation(
+                "ncx", "updated", ncx_path, extract_dir, updated_count
+            )
 
         except Exception as e:
             logger.warning(f"Failed to update toc.ncx: {e}")
+            self._record_navigation(
+                "ncx", "warning", ncx_path, extract_dir, error=str(e)
+            )
 
     def _update_nav_xhtml(self, extract_dir: Path, metadata: Dict):
         """Update nav.xhtml with translated chapter titles (EPUB 3)."""
@@ -754,12 +932,14 @@ class HTMLEpubBuilder:
 
             if not nav_candidates:
                 logger.debug("No nav document found (EPUB 2 only?)")
+                self._record_navigation("nav", "not_found", extract_dir=extract_dir)
                 return
 
             nav_path = nav_candidates[0]
         nav_dir = nav_path.parent
         toc_entries = metadata.get('toc', [])
         if not toc_entries:
+            self._record_navigation("nav", "skipped", nav_path, extract_dir=extract_dir)
             return
 
         # Build multiple mappings for robust matching (like NCX)
@@ -877,6 +1057,10 @@ class HTMLEpubBuilder:
                 f"Updated {updated_count} links and {structural_updated_count} "
                 f"structural labels in nav.xhtml"
             )
+            self._record_navigation(
+                "nav", "updated", nav_path, extract_dir,
+                updated_count + structural_updated_count,
+            )
 
         except ImportError:
             # Fallback to regex if BeautifulSoup not available
@@ -891,9 +1075,13 @@ class HTMLEpubBuilder:
                     content = new_content
             nav_path.write_text(content, encoding='utf-8')
             logger.debug(f"Updated {updated_count} entries in nav.xhtml (regex)")
+            self._record_navigation("nav", "updated", nav_path, extract_dir, updated_count)
 
         except Exception as e:
             logger.warning(f"Failed to update nav.xhtml: {e}")
+            self._record_navigation(
+                "nav", "warning", nav_path, extract_dir, error=str(e)
+            )
 
 
 def build_html_epub(
@@ -904,6 +1092,7 @@ def build_html_epub(
     translated_metadata: Optional[Dict] = None,
     epubcheck_mode: str = "warn",
     epubcheck_path: Optional[str] = None,
+    navigation_report: Optional[Dict[str, Any]] = None,
 ) -> Path:
     """
     Convenience function to build translated EPUB.
@@ -929,6 +1118,7 @@ def build_html_epub(
         output_path=output_path,
         book_title=book_title or original_epub.stem,
         translated_metadata=translated_metadata,
+        navigation_report=navigation_report,
         epubcheck_mode=epubcheck_mode,
         epubcheck_path=epubcheck_path,
     )
@@ -977,6 +1167,7 @@ class HTMLEpubPipeline:
         self.compressed_units_dir = output_dir / "compressed_units"  # .md + .mapping.json
         self.translated_dir = output_dir / "translated_compressed"   # .md
         self.final_dir = output_dir / "final_xhtml"                  # .xhtml
+        self.navigation_report: Dict[str, Any] = {}
 
         for d in [self.compressed_units_dir, self.translated_dir, self.final_dir]:
             d.mkdir(parents=True, exist_ok=True)
@@ -1159,6 +1350,12 @@ class HTMLEpubPipeline:
                 "author": self.metadata.get("author") or "",
                 "publisher": self.metadata.get("publisher") or "",
             },
+            # These are deterministic library indexes.  They are included in
+            # the hand-off for auditability, but do not need LLM translation.
+            "sort_metadata": {
+                "original_title": sort_title_for_library(self.book_title),
+                "author": sort_author_for_library(self.metadata.get("author") or ""),
+            },
             "translatable_metadata": {
                 "description": description,
                 "rights": rights,
@@ -1204,7 +1401,14 @@ Rules:
 6. Copy `preserved_metadata.author` and `preserved_metadata.publisher` exactly
    into the output's `preserved_metadata` object. Never translate, transliterate,
    normalize, or omit these two fields.
-7. Return valid JSON only. Do not wrap it in Markdown fences or add commentary.
+7. After translating the title, set `translated_title_sort` to the library
+   sort form of `translated_title`: move a leading English `The`, `A`, or
+   `An` to the end (for example, `The Class Matrix` becomes `Class Matrix,
+   The`), while leaving a Chinese title in its translated form. Set
+   `translated_author_file_as` to `sort_metadata.author` exactly; for example,
+   `Vivek Chibber` becomes `Chibber, Vivek`. These are library index values,
+   not prose, so do not translate or otherwise rewrite them.
+8. Return valid JSON only. Do not wrap it in Markdown fences or add commentary.
    If the model refuses a field, do not put the refusal text into the JSON;
    report the blocked metadata task instead.
 
@@ -1218,6 +1422,8 @@ The output must have this shape:
   "target_language": "...",
   "target_language_code": "...",
   "preserved_metadata": {{"author": "...", "publisher": "..."}},
+  "translated_title_sort": "...",
+  "translated_author_file_as": "...",
   "toc": [{{"original": "...", "translated": "...", "href": "...", "anchor": null, "level": 1}}],
   "translated_description": "...",
   "translated_rights": "..."
@@ -1461,6 +1667,12 @@ The output must have this shape:
             "target_language": translated_metadata.get("target_language"),
             "target_language_code": translated_metadata.get("target_language_code"),
             "metadata_validation": self.validate_translated_metadata(),
+            "navigation": self.navigation_report,
+            "navigation_warnings": [
+                kind
+                for kind, result in self.navigation_report.items()
+                if isinstance(result, dict) and result.get("status") == "warning"
+            ],
             "summary": summary,
             "files": files,
             "logs": {
@@ -1815,6 +2027,7 @@ The output must have this shape:
             output_path=output_epub,
             book_title=self.book_title,
             translated_metadata=translated_metadata,
+            navigation_report=self.navigation_report,
             epubcheck_mode=self.config.get('html_translation', {}).get(
                 'epubcheck_mode', 'warn'
             ),

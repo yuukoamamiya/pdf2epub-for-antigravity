@@ -1,11 +1,12 @@
 from pathlib import Path
+import json
 from types import SimpleNamespace
 
 import pytest
 from lxml import etree
 
 from pdf2epub.html_translation import builder as builder_module
-from pdf2epub.html_translation.builder import BuildConfig, HTMLEpubBuilder
+from pdf2epub.html_translation.builder import BuildConfig, HTMLEpubBuilder, HTMLEpubPipeline
 
 
 OPF_NS = "http://www.idpf.org/2007/opf"
@@ -15,6 +16,7 @@ DC_NS = "http://purl.org/dc/elements/1.1/"
 def _builder(
     tmp_path: Path,
     *,
+    book_title: str = "Book",
     epubcheck_mode: str = "off",
     epubcheck_path: str | None = None,
 ) -> HTMLEpubBuilder:
@@ -23,7 +25,7 @@ def _builder(
             original_epub=tmp_path / "input.epub",
             translated_dir=tmp_path / "translated",
             output_path=tmp_path / "output.epub",
-            book_title="Book",
+            book_title=book_title,
             epubcheck_mode=epubcheck_mode,
             epubcheck_path=epubcheck_path,
         )
@@ -84,7 +86,8 @@ def test_update_content_opf_preserves_authors_and_namespaced_attrs(
     assert len(creators) == 2
     assert [creator.text for creator in creators] == ["Author One", "Author Two"]
     assert creators[0].get(f"{{{OPF_NS}}}role") == "aut"
-    assert creators[0].get(f"{{{OPF_NS}}}file-as") == "Alpha, A"
+    assert creators[0].get(f"{{{OPF_NS}}}file-as") == "One, Author"
+    assert creators[1].get(f"{{{OPF_NS}}}file-as") == "Two, Author"
     assert creators[0].get("role") is None
     assert creators[0].get("file-as") is None
 
@@ -168,10 +171,175 @@ def test_update_epub3_creators_and_refinements_are_preserved(
         for meta in refinements
         if meta.get("refines") == "#creator-1"
     }
-    assert first_creator_refinements == {"role": "aut", "file-as": "Alpha, A"}
+    assert first_creator_refinements == {"role": "aut", "file-as": "One, Author"}
     title_sort = root.find(".//opf:meta[@name='calibre:title_sort']", namespaces)
     assert title_sort is not None
     assert title_sort.get("content") == "Translated title"
+
+
+def test_update_content_opf_derives_and_creates_library_sort_metadata(
+    tmp_path: Path,
+) -> None:
+    oebps = tmp_path / "OEBPS"
+    oebps.mkdir()
+    opf_path = oebps / "content.opf"
+    opf_path.write_text(
+        f"""<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="{OPF_NS}" xmlns:dc="{DC_NS}" xmlns:opf="{OPF_NS}"
+         unique-identifier="book-id" version="2.0">
+  <metadata>
+    <dc:title>The Class Matrix</dc:title>
+    <dc:creator opf:role="aut">Vivek Chibber</dc:creator>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest/>
+  <spine/>
+</package>
+""",
+        encoding="utf-8",
+    )
+
+    _builder(tmp_path, book_title="The Class Matrix")._update_content_opf(
+        tmp_path,
+        {"translated_title": "阶级矩阵", "target_language_code": "zh"},
+    )
+
+    root = etree.parse(str(opf_path)).getroot()
+    namespaces = {"opf": OPF_NS, "dc": DC_NS}
+    creator = root.find(".//dc:creator", namespaces)
+    title_sort = root.find(".//opf:meta[@name='calibre:title_sort']", namespaces)
+    assert creator is not None
+    assert creator.get(f"{{{OPF_NS}}}file-as") == "Chibber, Vivek"
+    assert title_sort is not None
+    assert title_sort.get("content") == "阶级矩阵"
+    assert builder_module.sort_title_for_library("The Class Matrix") == "Class Matrix, The"
+
+
+def test_update_toc_ncx_translates_epub2_navigation(
+    tmp_path: Path,
+) -> None:
+    meta_inf = tmp_path / "META-INF"
+    oebps = tmp_path / "OEBPS"
+    meta_inf.mkdir()
+    oebps.mkdir()
+    (meta_inf / "container.xml").write_text(
+        f"""<?xml version="1.0" encoding="UTF-8"?>
+<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf"
+              media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+""",
+        encoding="utf-8",
+    )
+    (oebps / "content.opf").write_text(
+        f"""<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="{OPF_NS}" xmlns:dc="{DC_NS}" version="2.0">
+  <metadata><dc:title>Original title</dc:title></metadata>
+  <manifest>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+  </manifest>
+  <spine toc="ncx"/>
+</package>
+""",
+        encoding="utf-8",
+    )
+    ncx_path = oebps / "toc.ncx"
+    ncx_path.write_text(
+        """<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <docTitle><text>Original title</text></docTitle>
+  <navMap>
+    <navPoint id="chapter-1" playOrder="1">
+      <navLabel><text>Original chapter</text></navLabel>
+      <content src="Text/chapter.xhtml"/>
+    </navPoint>
+  </navMap>
+</ncx>
+""",
+        encoding="utf-8",
+    )
+
+    builder = _builder(tmp_path)
+    builder._update_toc_ncx(
+        tmp_path,
+        {
+            "translated_title": "译文书名",
+            "toc": [
+                {
+                    "original": "Original chapter",
+                    "translated": "译文章节",
+                    "href": "Text/chapter.xhtml",
+                    "anchor": None,
+                    "level": 1,
+                }
+            ],
+        },
+    )
+
+    content = ncx_path.read_text(encoding="utf-8")
+    assert "译文书名" in content
+    assert "译文章节" in content
+    assert "Original title" not in content
+    assert "Original chapter" not in content
+    assert builder.navigation_report["ncx"] == {
+        "status": "updated",
+        "path": "OEBPS/toc.ncx",
+        "updated_entries": 1,
+    }
+
+
+def test_update_toc_ncx_records_warning_without_aborting_build(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ncx_path = tmp_path / "toc.ncx"
+    ncx_path.write_text("<ncx>", encoding="utf-8")
+    builder = _builder(tmp_path)
+    monkeypatch.setattr(builder, "_find_opf_path", lambda _extract_dir: tmp_path / "book.opf")
+    monkeypatch.setattr(
+        builder,
+        "_find_toc_files",
+        lambda _extract_dir, _opf_path: {"ncx": ncx_path, "nav": None},
+    )
+
+    builder._update_toc_ncx(
+        tmp_path,
+        {"toc": [{"href": "chapter.xhtml", "translated": "译文"}]},
+    )
+
+    result = builder.navigation_report["ncx"]
+    assert result["status"] == "warning"
+    assert result["path"] == "toc.ncx"
+    assert "error" in result
+
+
+def test_translation_report_includes_navigation_diagnostics(tmp_path: Path) -> None:
+    pipeline = object.__new__(HTMLEpubPipeline)
+    pipeline.output_dir = tmp_path
+    pipeline.compressed_units_dir = tmp_path / "compressed_units"
+    pipeline.translated_dir = tmp_path / "translated_compressed"
+    pipeline.final_dir = tmp_path / "final_xhtml"
+    pipeline.compressed_units_dir.mkdir()
+    pipeline.translated_dir.mkdir()
+    pipeline.final_dir.mkdir()
+    pipeline.epub_path = tmp_path / "input.epub"
+    pipeline.book_title = "Book"
+    pipeline.navigation_report = {
+        "ncx": {
+            "status": "warning",
+            "path": "OEBPS/toc.ncx",
+            "updated_entries": 0,
+            "error": "test failure",
+        },
+        "nav": {"status": "not_found", "path": None, "updated_entries": 0},
+    }
+
+    report_path = pipeline.write_translation_report()
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["navigation"]["ncx"]["status"] == "warning"
+    assert report["navigation_warnings"] == ["ncx"]
 
 
 def test_epubcheck_warn_mode_keeps_failed_build(
