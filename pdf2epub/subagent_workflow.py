@@ -412,6 +412,17 @@ def prepare_markdown_subagent(
     ]
     validated_files = None
     validation: Dict[str, Any] = {}
+    previous_manifest: Dict[str, Any] = {}
+    previous_manifest_path = output_dir / f"{task}_subagent_manifest.json"
+    if resume and previous_manifest_path.is_file():
+        try:
+            loaded_manifest = json.loads(
+                previous_manifest_path.read_text(encoding="utf-8")
+            )
+            if isinstance(loaded_manifest, dict):
+                previous_manifest = loaded_manifest
+        except (OSError, json.JSONDecodeError):
+            previous_manifest = {}
     validation_path = output_dir / f"{task}_validation.json"
     if resume and validation_path.is_file():
         try:
@@ -489,6 +500,30 @@ def prepare_markdown_subagent(
     if normalized_context:
         manifest["context_files"] = normalized_context
         manifest["context_sha256"] = context_sha256
+    context_is_current = previous_manifest.get("context_sha256", {}) == context_sha256
+    manifest["context_is_current"] = context_is_current
+    if resume and not context_is_current:
+        # A translation checkpoint is only reusable with the same read-only
+        # terminology/entity context.  A changed glossary must cause all
+        # affected units to be handed back to the Subagent.
+        completed_files = []
+        pending_files = [path.name for path in sources]
+        pending_stats = {
+            name: stats for name, stats in file_stats.items() if name in pending_files
+        }
+        pending_batches = _recommended_batches(
+            pending_stats,
+            batching["max_files"],
+            batching["max_source_tokens"],
+        )
+        manifest.update(
+            {
+                "pending_batches": pending_batches,
+                "batch_queue": _batch_queue(pending_batches, pending_stats),
+                "completed_files": completed_files,
+                "pending_files": pending_files,
+            }
+        )
     normalized_skipped_context = sorted(
         {str(name) for name in skipped_context_files if str(name).strip()}
     )

@@ -10,6 +10,10 @@ translation:
   target_language: Chinese
   # PDF 翻译前要求先生成并校验统一术语表；确实不需要时可在 translate 中使用 --skip-entities。
   require_entities: true
+  # 外部领域术语表是按书选择的，可不填；可同时选择多个 YAML/JSON 术语表。
+  # glossaries:
+  #   - path: "glossaries/german-classical-philosophy.yaml"
+  #     id: german-classical-philosophy
   # auto 优先使用 polished_markdown/validated；也可明确指定 ocr 或 polished。
   source_stage: auto
 

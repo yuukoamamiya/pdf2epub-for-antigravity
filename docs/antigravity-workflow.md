@@ -29,21 +29,31 @@ TeX 使用独立的 `tex_units/` 和 `translated_tex_units/` 文件。校验时�
 ## EPUB 高保真翻译
 
 ```text
-html-prepare → Subagent(book_translator) → html-validate → build-html-epub
+html-prepare → Subagent(entity extraction) → html-prepare → Subagent(book_translator) → html-validate → build-html-epub
 ```
 
-执行 `html-prepare` 后，输出目录会包含：
+首次执行 `html-prepare` 后，输出目录会包含：
 
 - `compressed_units/*.md`：正文翻译单元，每行对应一个结构单元；
-- `translate-html_subagent_manifest.json`：正文翻译清单，包含已完成和待处理文件；
 - `metadata_translation_source.json`：书名、目录、简介、版权说明等元数据输入；
 - `metadata_translation_prompt.md`：元数据翻译说明。
+- 默认还会生成 `entity_subagent_manifest.json` 和 `entity_subagent_prompt.md`，
+  用于从整本 EPUB 提取 `translation_entities.json`，以便全书统一人名、专名和术语。
+- 配置中的 `translation.glossaries` 可以按书选择零个、一个或多个外部 YAML/JSON
+  领域术语表；程序会把只读规范化快照放到
+  `output/<title>/translation_glossaries/`，并在翻译 manifest 中锁定 SHA-256。
 
 Subagent 需要：
 
 1. 将每个正文单元写入 `translated_compressed/<同名>.md`；
 2. 保持正文行数、HTML 标签、属性、实体和容器不变；源行没有 `<div>` 时不得添加，`<i>` 必须保持原有数量和嵌套关系；
 3. 阅读 `metadata_translation_prompt.md`，在输出目录写入 `translated_metadata.json`。
+
+首次运行 `html-prepare` 后，先执行 manifest 中的实体提取任务，再次运行
+`html-prepare`。第二次生成的正文和元数据提示词会同时挂载当前书实体表和所选
+外部领域术语表，并生成 `translate-html_subagent_manifest.json`。确实不需要当前
+书实体表时，才使用
+`html-prepare --skip-entities`；外部领域术语表仍会继续生效。
 
 写完单个文件后，可以立即运行：
 
@@ -92,6 +102,10 @@ extract-entities → extract-entities-validate → translate → translate-valid
 随后把它作为只读上下文挂载到翻译 manifest，并记录 SHA-256；词表变化后校验会
 拒绝继续打包。确实不需要术语表时，使用 `translate --skip-entities`，该选择
 会记录在 manifest 中并由校验器识别。
+
+外部领域术语表通过同一配置中的 `translation.glossaries` 按书选择。它们与当前书
+实体表分开管理，可以不配置，也可以同时配置多个；外部表中的 `fixed` 译法优先，
+不同外部表对同一源词产生冲突时，准备阶段会拒绝继续。
 
 目录翻译保持独立的 JSON 合同，可使用：
 

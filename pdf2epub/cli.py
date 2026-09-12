@@ -150,6 +150,23 @@ def _prepare_pdf_markdown_task(args, task: str):
     target_language = getattr(args, "target_language", None) or translation.get(
         "target_language", "Chinese"
     )
+    glossary_bundle = None
+    context_files = {}
+    skipped_context_files = []
+    if task == "translate":
+        from pdf2epub.glossary import load_selected_glossaries
+
+        try:
+            glossary_bundle = load_selected_glossaries(
+                config,
+                output_dir,
+                source_language,
+                target_language,
+                Path(args.config),
+            )
+        except Exception as exc:
+            logger.error(f"Could not load external glossary: {exc}")
+            return 1
     if task == "polish":
         source_dir = output_dir / "ocr_markdown"
         target_dir = output_dir / "polished_markdown"
@@ -207,6 +224,16 @@ def _prepare_pdf_markdown_task(args, task: str):
             rules.append(
                 "Read translation_entities.json before translating and use its suggested_translation values as the canonical terminology reference; do not modify it."
             )
+        if glossary_bundle and glossary_bundle.rules:
+            rules.extend(glossary_bundle.rules)
+            rules.append(
+                "When book-specific entities and domain glossary entries overlap, follow the domain glossary policy and report any unresolved conflict instead of silently inventing a third translation."
+            )
+        context_files = dict(glossary_bundle.context_files if glossary_bundle else {})
+        if task == "translate" and not skip_entities and entity_path.is_file():
+            context_files["translation_entities"] = entity_path
+        if task == "translate" and (skip_entities or not entity_path.is_file()):
+            skipped_context_files.append("translation_entities")
     configure_logging(book_title, f"{task}-prepare")
     try:
         paths = prepare_markdown_subagent(
@@ -220,12 +247,8 @@ def _prepare_pdf_markdown_task(args, task: str):
             config=config,
             resume=getattr(args, "resume", False),
             file_roles=_load_pdf_file_roles(output_dir) if task == "translate" else None,
-            context_files={"translation_entities": entity_path}
-            if task == "translate" and not skip_entities and entity_path.is_file()
-            else None,
-            skipped_context_files=("translation_entities",)
-            if task == "translate" and skip_entities
-            else (),
+            context_files=context_files or None,
+            skipped_context_files=skipped_context_files,
         )
         if task == "translate":
             from pdf2epub.subagent_workflow import (
@@ -356,6 +379,16 @@ def _validate_pdf_markdown_task(args, task: str):
         if not toc_report["valid"]:
             for error in toc_report["errors"]:
                 logger.error(f"TOC: {error}")
+        from pdf2epub.glossary import validate_translation_context
+
+        context_report = validate_translation_context(
+            output_dir, f"{task}_subagent_manifest.json", config
+        )
+        report["translation_context"] = context_report
+        report["all_passed"] = report["all_passed"] and context_report["valid"]
+        if not context_report["valid"]:
+            for error in context_report["errors"]:
+                logger.error(f"Translation context: {error}")
     logger.info(
         f"{task} 校验: {report['completed']}/{report['total']} completed, "
         f"{len(report['invalid'])} invalid"
@@ -551,31 +584,23 @@ def ocr_pages_command(args):
 
 
 
-def extract_entities_command(args):
-    """Prepare entity extraction for an Antigravity Subagent (local only)."""
+def _prepare_entity_subagent_task(
+    output_dir: Path,
+    book_title: str,
+    source_dir: Path,
+    source_stage: str,
+    source_language: str,
+    target_language: str,
+    config: dict,
+) -> Path:
+    """Create the reusable book-specific terminology hand-off."""
     from pdf2epub.subagent_workflow import resolve_subagent_model
 
-    config = load_config(args.config)
-    book_title = config.get("title") or (Path(args.input).stem if args.input else None)
-    if not book_title:
-        logger.error("No title found in config.yaml")
-        return 1
-    output_dir = book_output_dir(book_title)
-    source_dir, source_stage = _resolve_pdf_markdown_source(output_dir, config)
-    if not source_dir.exists():
-        source_dir = output_dir / "pages"
-    if not list(source_dir.glob("*.md")):
-        logger.error(f"No OCR Markdown found in {source_dir}; run OCR and refine first")
-        return 1
     source_files = sorted(source_dir.glob("*.md"))
+    if not source_files:
+        raise ValueError(f"No Markdown source found in {source_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)
     model = resolve_subagent_model(config, "extract-entities")
-    source_language = args.source_lang or config.get("translation", {}).get(
-        "source_language", "English"
-    )
-    target_language = args.target_lang or config.get("translation", {}).get(
-        "target_language", "Chinese"
-    )
     from pdf2epub.entity_extractor import create_entity_template, create_entity_extraction_prompt
 
     template_path = output_dir / "translation_entities.template.json"
@@ -602,6 +627,10 @@ def extract_entities_command(args):
         "source_dir": str(source_dir.relative_to(output_dir)),
         "source_stage": source_stage,
         "files": [path.name for path in source_files],
+        "source_sha256": {
+            path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in source_files
+        },
         "output_file": "translation_entities.json",
         "template_file": "translation_entities.template.json",
     }
@@ -617,6 +646,72 @@ def extract_entities_command(args):
         f"已生成实体提取 Subagent 任务：{output_dir / 'entity_subagent_prompt.md'}；"
         "完成后由 Subagent 写入 translation_entities.json。"
     )
+    return output_dir / "translation_entities.json"
+
+
+def _entity_context_is_current(output_dir: Path, source_dir: Path) -> bool:
+    """Return whether the book entity hand-off matches its source snapshot."""
+    entity_path = output_dir / "translation_entities.json"
+    manifest_path = output_dir / "entity_subagent_manifest.json"
+    if not entity_path.is_file() or not manifest_path.is_file():
+        return False
+    try:
+        from pdf2epub.entity_extractor import validate_entities
+
+        data = json.loads(entity_path.read_text(encoding="utf-8"))
+        if validate_entities(data):
+            return False
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if Path(manifest.get("source_dir", "")).as_posix() != source_dir.relative_to(output_dir).as_posix():
+            return False
+        for name, expected in (manifest.get("source_sha256", {}) or {}).items():
+            path = source_dir / name
+            if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+                return False
+        return bool(manifest.get("source_sha256"))
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return False
+
+
+def extract_entities_command(args):
+    """Prepare entity extraction for an Antigravity Subagent (local only)."""
+    config = load_config(args.config)
+    book_title = config.get("title") or (Path(args.input).stem if args.input else None)
+    if not book_title:
+        logger.error("No title found in config.yaml")
+        return 1
+    output_dir = book_output_dir(book_title)
+    source_dir, source_stage = _resolve_pdf_markdown_source(output_dir, config)
+    if not source_dir.exists():
+        source_dir = output_dir / "pages"
+        source_stage = "ocr-pages"
+    # EPUB terminology is extracted from the compressed translation units so
+    # the same book-wide entity contract can be used by both pipelines.
+    epub_units = output_dir / "compressed_units"
+    if (
+        list(epub_units.glob("*.md"))
+        and (config.get("input_epub") or (output_dir / "input.epub").is_file())
+    ):
+        source_dir, source_stage = epub_units, "epub-compressed"
+    source_language = args.source_lang or config.get("translation", {}).get(
+        "source_language", "English"
+    )
+    target_language = args.target_lang or config.get("translation", {}).get(
+        "target_language", "Chinese"
+    )
+    try:
+        _prepare_entity_subagent_task(
+            output_dir,
+            book_title,
+            source_dir,
+            source_stage,
+            source_language,
+            target_language,
+            config,
+        )
+    except Exception as exc:
+        logger.error(f"Could not prepare entity task: {exc}")
+        return 1
     return 0
 
 
@@ -639,6 +734,20 @@ def extract_entities_validate_command(args):
         logger.error(f"Invalid entity JSON: {exc}")
         return 1
     errors = validate_entities(data, book_title)
+    manifest_path = entity_path.parent / "entity_subagent_manifest.json"
+    if manifest_path.is_file():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            source_dir = entity_path.parent / manifest.get("source_dir", "")
+            expected_hashes = manifest.get("source_sha256", {})
+            for name, expected in expected_hashes.items():
+                source_path = source_dir / name
+                if not source_path.is_file():
+                    errors.append(f"entity source file is missing: {name}")
+                elif hashlib.sha256(source_path.read_bytes()).hexdigest() != expected:
+                    errors.append(f"entity source file changed after extraction: {name}")
+        except (OSError, json.JSONDecodeError, TypeError):
+            errors.append("invalid entity_subagent_manifest.json")
     report = {
         "task": "extract-entities",
         "valid": not errors,
@@ -876,8 +985,41 @@ def _prepare_html_command(args):
         )
 
         # Auto-detect source language from EPUB metadata
-        source_language = args.source_language or pipeline.source_language
+        source_language = (
+            args.source_language
+            or config.get("translation", {}).get("source_language")
+            or pipeline.source_language
+        )
         target_language = args.target_language or config.get("translation", {}).get("target_language", "Chinese")
+
+        from pdf2epub.glossary import load_selected_glossaries
+
+        try:
+            glossary_bundle = load_selected_glossaries(
+                config,
+                output_dir,
+                source_language,
+                target_language,
+                Path(args.config),
+            )
+        except Exception as exc:
+            logger.error(f"Could not load external glossary: {exc}")
+            return 1
+
+        translation_config = config.get("translation", {}) or {}
+        require_entities = translation_config.get("require_entities", True)
+        entity_path = output_dir / "translation_entities.json"
+        entity_ready = _entity_context_is_current(
+            output_dir, output_dir / "compressed_units"
+        )
+        context_files = dict(glossary_bundle.context_files)
+        if entity_ready:
+            context_files["translation_entities"] = entity_path
+        skip_entities = bool(getattr(args, "skip_entities", False))
+        if skip_entities or not require_entities:
+            skipped_context_files = [] if entity_ready else ["translation_entities"]
+        else:
+            skipped_context_files = []
 
         logger.info(f"Starting HTML translation for: {pipeline.book_title}")
         logger.info(f"Source EPUB: {epub_path}")
@@ -885,8 +1027,47 @@ def _prepare_html_command(args):
 
         # Step 1: Extract and preprocess
         if not getattr(args, "skip_extract", False):
-            extracted = pipeline.extract_and_preprocess(target_language=target_language)
+            extracted = pipeline.extract_and_preprocess(
+                target_language=target_language,
+                translation_context=context_files or None,
+            )
             logger.info(f"Extracted {extracted} XHTML files")
+
+        # EPUB translations use the same book-wide entity hand-off as PDF
+        # translations.  The first html-prepare creates this task; rerunning
+        # html-prepare after the Subagent writes the entities attaches them to
+        # the body and metadata translation contracts.
+        if not skip_entities and require_entities:
+            try:
+                _prepare_entity_subagent_task(
+                    output_dir,
+                    book_title or pipeline.book_title,
+                    output_dir / "compressed_units",
+                    "epub-compressed",
+                    source_language,
+                    target_language,
+                    config,
+                )
+            except Exception as exc:
+                logger.error(f"Could not prepare EPUB entity task: {exc}")
+                return 1
+            entity_ready = _entity_context_is_current(
+                output_dir, output_dir / "compressed_units"
+            )
+            if not entity_ready:
+                logger.info(
+                    "EPUB terminology task is pending. Let the Subagent write "
+                    "translation_entities.json, then rerun html-prepare."
+                )
+                return 0
+            context_files["translation_entities"] = entity_path
+            skipped_context_files = []
+            # Refresh metadata hand-off so it references the newly validated
+            # book entity glossary as well as any selected domain glossaries.
+            pipeline.create_metadata_translation_source(
+                target_language=target_language,
+                context_files=context_files,
+            )
 
         # Create the body translation contract alongside the metadata contract.
         # Both are workspace Subagent tasks; this command never translates.
@@ -906,9 +1087,12 @@ def _prepare_html_command(args):
                 "【Entity Preservation】: Copy protected entities and anchors literally, including `&amp;`, `&lt;`, `&gt;`, `<a/>`, and other self-closing or placeholder tokens. Translate surrounding text only; never replace an entity with its prose meaning.",
                 "【Direct File Writing】: Write output directly to the designated target file without markdown code fences.",
                 "【Self-Validation】: After writing each target file, run `uv run pdf2epub -c <same-config> html-validate --file <filename>` from the repository root. Only report that file complete when the command exits with code 0; this single-file check does not replace the final full-book html-validate.",
+                *glossary_bundle.rules,
             ),
             config=config,
             resume=getattr(args, "resume", False),
+            context_files=context_files or None,
+            skipped_context_files=skipped_context_files,
         )
 
         logger.success("EPUB HTML preparation complete")
@@ -1028,6 +1212,19 @@ def html_validate_command(args):
     else:
         logger.error("元数据翻译校验未通过:")
         for error in metadata_report.get("errors", []):
+            logger.error(f"   - {error}")
+    context_report = report.get("translation_context", {})
+    if context_report.get("valid"):
+        if context_report.get("glossaries"):
+            logger.info(
+                "术语上下文校验通过: "
+                + ", ".join(context_report["glossaries"])
+            )
+        elif context_report.get("skipped_context_files"):
+            logger.info("已按任务配置跳过书内实体术语表")
+    elif context_report:
+        logger.error("术语上下文校验未通过:")
+        for error in context_report.get("errors", []):
             logger.error(f"   - {error}")
     if report['missing']:
         logger.warning(f"未翻译单元 ({len(report['missing'])}):")
@@ -2357,6 +2554,11 @@ RECOMMENDED WORKFLOW / 推荐工作流 (uses toc_tree.json):
         "--resume",
         action="store_true",
         help="Keep existing translated HTML units and prepare only pending files",
+    )
+    html_prepare_parser.add_argument(
+        "--skip-entities",
+        action="store_true",
+        help="Skip EPUB book-wide terminology extraction (external glossaries still apply)",
     )
     html_prepare_parser.set_defaults(func=html_prepare_command)
 

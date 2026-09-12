@@ -8,6 +8,13 @@ input_epub: "input/your_book.epub"
 translation:
   source_language: English # 或 Japanese / French 等
   target_language: Chinese
+  # EPUB 默认也会先提取当前书的实体术语，保证全书译名一致。
+  # 需要时可显式跳过：html-prepare --skip-entities
+  require_entities: true
+  # 外部领域术语表是按书选择的，可不填；可同时选择多个 YAML/JSON 术语表。
+  # glossaries:
+  #   - path: "glossaries/german-classical-philosophy.yaml"
+  #     id: german-classical-philosophy
 
 # Antigravity Subagent 模型（只作为 IDE 子 Agent 的任务提示，不调用任何 API）
 # 正文、元数据和目录翻译默认使用 Pro；其他任务默认使用 Flash。

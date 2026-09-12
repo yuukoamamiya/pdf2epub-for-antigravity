@@ -47,13 +47,24 @@
    translation:
      source_language: English # 依据元数据判断
      target_language: Chinese
+     # 可选：按本书选择一个或多个外部领域术语表；不配置则不加载外部表
+     # glossaries:
+     #   - path: "glossaries/german-classical-philosophy.yaml"
+     #     id: german-classical-philosophy
    html_translation:
      epubcheck_mode: warn
    ```
 
 #### Step 2: 本地离线结构拆分与压缩
 1. Agent 执行命令：`uv run pdf2epub -c config_epub.yaml html-prepare`
-2. 产物目录：`output/<title>/compressed_units/*.md`、对应 mapping，以及 `metadata_translation_source.json` 和 `metadata_translation_prompt.md`。
+2. 产物目录：`output/<title>/compressed_units/*.md`、对应 mapping，以及
+   `metadata_translation_source.json`、`metadata_translation_prompt.md` 和
+   `entity_subagent_prompt.md`。
+   完成实体提取并再次运行 `html-prepare` 后，才会生成带术语上下文的
+   `translate-html_subagent_manifest.json` 和 `translate-html_subagent_prompt.md`。
+3. `html-prepare` 默认还会为 EPUB 正文生成全书实体术语提取任务。外部领域术语表
+   由配置中的 `translation.glossaries` 按书选择，可不选、选一个或选多个；原文件
+   只读，程序会在 `output/<title>/translation_glossaries/` 保存规范化快照并锁定哈希。
 
 #### Step 3: 调度 `book_translator` Subagent 协同翻译
 1. **检查与断点续传**：比对 `output/<title>/compressed_units/` 与 `output/<title>/translated_compressed/`，找出尚未完成或校验未通过的 `.md` 文件列表。
@@ -62,7 +73,13 @@
 2. **分批与并发粒度**：
    - 对于长篇或学术大章节（>30KB），推荐**单章节派发一个独立 Subagent**，避免单会话因 Token 截断导致的拼接/换行错误；
    - 对于前后置元数据、短章节（<20KB），可 3~5 篇一组并发派发。
-3. 在 Antigravity IDE 中使用工作区 Subagent，读取生成的
+3. 先在 Antigravity IDE 中使用工作区 Subagent，读取生成的
+   `entity_subagent_prompt.md` 和 `entity_subagent_manifest.json`，写入
+   `translation_entities.json`。完成后再次执行：
+   `uv run pdf2epub -c config_epub.yaml html-prepare`，让正文和元数据任务挂载这份
+   当前书术语表。若确实不需要当前书实体术语表，才显式使用
+   `html-prepare --skip-entities`。
+4. 然后读取生成的
    `translate-html_subagent_prompt.md` 和 manifest；不要从 Python 创建模型客户端。
    - **Subagent 必须遵守的翻译铁律**：
      ```markdown
@@ -79,14 +96,14 @@
      5. 【直接写回文件】：将纯翻译内容直接写入 manifest 指定的目标文件。严禁在输出中添加 Markdown 代码块（```）包裹！
      6. 【写入后自检】：Subagent 完成每个文件后，应运行 `uv run pdf2epub -c config_epub.yaml html-validate --file <文件名>`；只有 exit code 为 0 才能报告该文件完成。全部文件完成后仍必须运行全量 `html-validate`。
      ```
-4. **元数据交接**：Subagent 还必须按 `metadata_translation_prompt.md` 读取元数据输入，并写入 `output/<title>/translated_metadata.json`。
+5. **元数据交接**：Subagent 还必须按 `metadata_translation_prompt.md` 读取元数据输入和其中列出的术语上下文，并写入 `output/<title>/translated_metadata.json`。
    - `original_title` 保持原英文书名不变；
    - 中文译名写入 `translated_title`；
    - 章节目录翻译写入 `toc[].translated`，`href`、`anchor`、`level` 和顺序原样保留；
    - `preserved_metadata.author` 与 `preserved_metadata.publisher` 必须逐字复制，禁止翻译或改写；
    - `translated_description` 和 `translated_rights` 始终保留为顶层字段；源字段为空时值可为空，源字段非空时必须翻译。
    - 版权声明写入顶层 `translated_rights`（如“保留所有权利”）。
-5. 可以分批处理多个单元，但每次只处理 manifest 的 `pending_files`；不要覆盖
+6. 可以分批处理多个单元，但每次只处理 manifest 的 `pending_files`；不要覆盖
    `completed_files`，除非本地校验明确指出该文件无效。
 
 #### Step 4: 本地离线全量质量校验
@@ -168,6 +185,10 @@
 
 - `extract-entities` 读取 `translation.source_stage` 实际选中的源稿；默认语言来自
   `translation.source_language` 和 `translation.target_language`，不会假定日文。
+- 外部领域术语表通过 `translation.glossaries` 按书选择，可不配置，也可配置多个
+  YAML/JSON 文件。外部术语表是只读领域上下文；当前书的 `translation_entities.json`
+  是书内实体上下文。外部表中标记为 `fixed` 的译法优先于实体表和 Subagent 判断，
+  不同术语表对同一源词给出不同译法时必须先解决冲突。
 - 当前 PDF 构建器生成的是 EPUB 2 兼容包，并提供可点击的正文—注脚双向链接；
   `[^N]` 规范化不会被表述为所有阅读器都支持的 EPUB3 弹窗。若要启用真正的
   EPUB3 `epub:type="noteref/footnote"` 语义，需要另行升级包格式。

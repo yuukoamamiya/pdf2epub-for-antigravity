@@ -15,7 +15,7 @@ import subprocess
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Mapping, Optional, Set
 from dataclasses import dataclass
 from loguru import logger
 from lxml import etree as LET
@@ -24,6 +24,7 @@ from defusedxml import ElementTree as ET
 from .epub_parser import EPUBParser
 from .validation import nonempty_lines, tag_mismatch_count
 from pdf2epub.subagent_workflow import detect_refusal, resolve_subagent_model
+from pdf2epub.glossary import validate_translation_context
 from pdf2epub.utils.common import sanitize_filename
 from pdf2epub.utils.html_safety import sanitize_html_document
 
@@ -1252,7 +1253,11 @@ class HTMLEpubPipeline:
         lang_lower = language.lower()
         return name_to_code.get(lang_lower, 'zh')  # Default to 'zh' for Chinese
 
-    def extract_and_preprocess(self, target_language: Optional[str] = None) -> int:
+    def extract_and_preprocess(
+        self,
+        target_language: Optional[str] = None,
+        translation_context: Optional[Mapping[str, Path]] = None,
+    ) -> int:
         """
         Extract XHTML from EPUB and compress for translation.
 
@@ -1338,7 +1343,10 @@ class HTMLEpubPipeline:
         # The Antigravity subagent can translate it without touching OPF/XML,
         # while the builder remains responsible for applying only validated
         # values.  This also makes metadata translation resumable and auditable.
-        self.create_metadata_translation_source(target_language=target_language)
+        self.create_metadata_translation_source(
+            target_language=target_language,
+            context_files=translation_context,
+        )
 
         logger.info(f"Compressed {extracted} XHTML files to {self.compressed_units_dir}")
         return extracted
@@ -1346,6 +1354,7 @@ class HTMLEpubPipeline:
     def create_metadata_translation_source(
         self,
         target_language: Optional[str] = None,
+        context_files: Optional[Mapping[str, Path]] = None,
     ) -> Path:
         """Write the metadata input contract for the workspace subagent.
 
@@ -1402,6 +1411,17 @@ class HTMLEpubPipeline:
             },
             "toc": toc,
         }
+        if context_files:
+            source["translation_context"] = {
+                "files": {
+                    str(name): str(Path(path).resolve().relative_to(self.output_dir.resolve())).replace("\\", "/")
+                    for name, path in context_files.items()
+                },
+                "sha256": {
+                    str(name): hashlib.sha256(Path(path).read_bytes()).hexdigest()
+                    for name, path in context_files.items()
+                },
+            }
 
         source_path = self.output_dir / "metadata_translation_source.json"
         source_path.write_text(
@@ -1448,7 +1468,10 @@ Rules:
    `translated_author_file_as` to `sort_metadata.author` exactly; for example,
    `Vivek Chibber` becomes `Chibber, Vivek`. These are library index values,
    not prose, so do not translate or otherwise rewrite them.
-8. Return valid JSON only. Do not wrap it in Markdown fences or add commentary.
+8. If `{source_filename}` contains a `translation_context` object, read every
+   listed context file before translating. Apply its terminology to the title,
+   TOC, description, and rights, while treating the files as read-only.
+9. Return valid JSON only. Do not wrap it in Markdown fences or add commentary.
    If the model refuses a field, do not put the refusal text into the JSON;
    report the blocked metadata task instead.
 
@@ -1825,8 +1848,18 @@ The output must have this shape:
 
         if file_name is None:
             metadata_report = self.validate_translated_metadata()
+            context_report = validate_translation_context(
+                self.output_dir,
+                "translate-html_subagent_manifest.json",
+                getattr(self, "config", {}),
+            )
         else:
             metadata_report = {
+                "valid": True,
+                "skipped": True,
+                "reason": "single-file validation scope",
+            }
+            context_report = {
                 "valid": True,
                 "skipped": True,
                 "reason": "single-file validation scope",
@@ -1837,6 +1870,7 @@ The output must have this shape:
             and len(invalid) == 0
             and total > 0
             and metadata_report["valid"]
+            and context_report["valid"]
         )
 
         return {
@@ -1851,6 +1885,7 @@ The output must have this shape:
             "valid_files": valid_files,
             "source_sha256": source_sha256,
             "metadata": metadata_report,
+            "translation_context": context_report,
             "all_passed": all_passed,
             "book_complete": all_passed if scope == "book" else False,
         }
@@ -1876,6 +1911,26 @@ The output must have this shape:
             source = json.loads(source_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             return {"valid": False, "errors": [f"invalid metadata source JSON: {exc}"]}
+        translation_context = source.get("translation_context", {})
+        if translation_context:
+            context_files = translation_context.get("files", {})
+            context_hashes = translation_context.get("sha256", {})
+            root = self.output_dir.resolve()
+            for name, relative in context_files.items():
+                context_path = (root / str(relative)).resolve()
+                try:
+                    context_path.relative_to(root)
+                except ValueError:
+                    errors.append(f"metadata translation context escapes output directory: {relative}")
+                    continue
+                if not context_path.is_file():
+                    errors.append(f"metadata translation context is missing: {relative}")
+                    continue
+                actual_hash = hashlib.sha256(context_path.read_bytes()).hexdigest()
+                if context_hashes.get(name) != actual_hash:
+                    errors.append(
+                        f"metadata translation context changed after preparation: {relative}"
+                    )
         try:
             translated = json.loads(translated_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
