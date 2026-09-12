@@ -299,6 +299,36 @@ def preprocess_markdown(markdown_content: str, footnote_manager=None, source_cha
     # IMPORTANT: Use placeholder to avoid interfering with $...$ LaTeX block matching
     markdown_content = markdown_content.replace(r'\$', '<<<ESCAPED_DOLLAR>>>')
 
+    # OCR backends may emit inline formulas as raw HTML ``<math>...</math>``
+    # instead of Markdown ``$...$``. Markdown preserves those HTML nodes as-is,
+    # so convert text-only math nodes here before the Markdown renderer runs.
+    # Nodes that already contain MathML children are intentionally left alone.
+    from latex2mathml import converter
+
+    def process_embedded_math(match):
+        body = match.group('body')
+        if re.search(r'<\s*/?\s*[A-Za-z]', body):
+            return match.group(0)
+
+        latex_code = html_module.unescape(body).strip()
+        if not latex_code:
+            return match.group(0)
+
+        try:
+            return converter.convert(latex_code)
+        except Exception as e:
+            logger.warning(
+                f"Failed to convert embedded math: {latex_code[:50]}... Error: {e}"
+            )
+            return match.group(0)
+
+    markdown_content = re.sub(
+        r'<math\b[^>]*>(?P<body>.*?)</math\s*>',
+        process_embedded_math,
+        markdown_content,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+
     # OCR/refine placeholders such as "$$$" mean an unknown page number, not math.
     # Protect them before the $$...$$ display-math pass so they cannot consume
     # following paragraphs or footnote definitions.
@@ -313,8 +343,6 @@ def preprocess_markdown(markdown_content: str, footnote_manager=None, source_cha
 
     # === DISPLAY MATH: Convert $$...$$ blocks to MathML ===
     # Process display math BEFORE inline math to avoid conflicts
-    from latex2mathml import converter
-
     def process_display_math(match):
         """
         Convert display math $$...$$ to MathML using latex2mathml.

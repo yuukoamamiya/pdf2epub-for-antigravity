@@ -51,6 +51,19 @@ def test_named_html_entities_converted_to_unicode() -> None:
     assert "&hellip;" not in html
 
 
+def test_raw_html_math_is_converted_to_mathml() -> None:
+    html = convert_markdown_to_html(
+        "<table><tr><td><math>I_A(A)</math></td>"
+        "<td><math>\\Gamma_x^1</math></td></tr></table>",
+        standalone=False,
+    )
+
+    assert "<msub>" in html
+    assert "<mi>Γ</mi>" in html
+    assert "I_A(A)" not in html
+    assert "\\Gamma_x^1" not in html
+
+
 def test_generated_html_removes_active_content_and_escapes_title() -> None:
     html = convert_markdown_to_html(
         '<script>alert(1)</script>\n\n[bad](javascript:alert(1))\n\n<span onclick="alert(1)">safe</span>',
