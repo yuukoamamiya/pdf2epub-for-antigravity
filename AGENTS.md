@@ -40,7 +40,16 @@
 1. 扫描 `input/` 目录下的 EPUB 文件（也支持 MOBI、AZW3），确认输入文件。
 2. 从 EPUB 元数据确认书名和源语言；在本地 `config_epub.yaml` 中填写 `title`、
    `input_epub`、源语言和目标语言。不要覆盖用户的真实配置文件，除非用户明确要求。
-3. 配置至少应类似：
+3. 自动检查工作区 `glossaries/` 及其子目录中的 `.yaml`、`.yml` 和 `.json` 外部术语表，
+   读取其中的 `metadata.domain`、`source_language` 和 `target_language`，并结合本书书名、
+   简介、目录和元数据判断是否适用：
+   - 只有唯一且明确匹配当前书籍领域及语言方向的术语表，才自动写入
+     `translation.glossaries`；
+   - 没有明确匹配时不配置；有多个候选或领域边界不清时先询问用户，不要猜选；
+   - 已存在的 `translation.glossaries`，以及用户明确表示不使用外部术语表的选择，必须原样保留；
+   - 忽略 `*.example.*`、README、`output/` 中的快照和无法解析的文件。DOCX 等自然语言术语表
+     不能直接载入，应提示用户先整理为本项目支持的 YAML/JSON 格式。
+4. 配置至少应类似：
    ```yaml
    title: "提取到的书名"
    input_epub: "实际文件名.epub"
@@ -126,6 +135,15 @@
 1. 扫描 `input/` 目录下的 PDF 文件，确认输入文件和书名。
 2. 在本地 `config.yaml` 中填写 `title`、`input_pdf`、语言和 OCR 后端；不要自动
    覆盖用户的真实配置。
+3. 自动检查工作区 `glossaries/` 及其子目录中的 `.yaml`、`.yml` 和 `.json` 外部术语表，
+   读取其中的 `metadata.domain`、`source_language` 和 `target_language`，并结合本书书名、
+   简介、目录和元数据判断是否适用：
+   - 只有唯一且明确匹配当前书籍领域及语言方向的术语表，才自动写入
+     `translation.glossaries`；
+   - 没有明确匹配时不配置；有多个候选或领域边界不清时先询问用户，不要猜选；
+   - 已存在的 `translation.glossaries`，以及用户明确表示不使用外部术语表的选择，必须原样保留；
+   - 忽略 `*.example.*`、README、`output/` 中的快照和无法解析的文件。DOCX 等自然语言术语表
+     不能直接载入，应提示用户先整理为本项目支持的 YAML/JSON 格式。
 
 #### Step 2: 页面 OCR 提取
 1. Agent 执行命令：`uv run pdf2epub -c config.yaml ocr-pages --resume`
