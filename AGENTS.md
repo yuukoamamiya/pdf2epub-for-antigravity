@@ -43,8 +43,17 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
 
 - Python 只做拆分、压缩、校验、合并和打包，不调用翻译 API，不创建模型客户端。
 - 只有 `ocr-pages` 可以按 OCR 配置调用 OCR 服务；OCR 服务不得用于翻译或结构判断。
-- 外部术语表只读。只自动选择唯一且明确匹配书籍领域及语言方向的 YAML/JSON 术语表；
+- 外部术语表只读。先用 `glossary-candidates` 扫描并生成候选报告；程序只做格式和
+  语言筛选，不凭文件名猜领域。唯一且明确匹配时才写入 `translation.glossaries`，
   多个候选或领域不清时先询问用户。忽略 `*.example.*`、README 和 `output/` 快照。
+- 术语优先级固定为：外部领域表 `fixed` > 外部领域表 `preferred` > 当前书实体表；
+  短语优先于其组成部分。若出现无法按此规则解释的冲突，停止翻译并报告，不要临时造译法。
+- 术语准备完成后，检查 `output/<title>/glossary_selection.json`：它记录本次是否明确
+  选择外部表、配置路径、源文件哈希和工作区快照哈希。规范化只读快照位于
+  `output/<title>/translation_glossaries/`；按源单元裁剪的上下文位于其下的
+  `unit_contexts/`。PDF 和 EPUB 翻译都必须优先读取 manifest 为当前单元列出的上下文，
+  完整快照只用于审计和冲突复核，不能修改。没有外部表时也要尊重记录的
+  `explicit_none`/`unconfigured` 状态，不得自行加载目录中的术语表。
 - `translate`、`polish`、`refine`、`extract-entities`、`translate-toc` 只准备交接或
   执行本地处理；命令成功不代表正文已经完成。
 - 不删除源文件、输出目录或已有中间结果。额度中断或失败时先校验，再使用原命令的
@@ -68,18 +77,21 @@ Subagent 直接写文件 → 单文件校验 → 收集完成结果 → 下一�
 
 1. 检查 `input/` 中的 PDF，在 `config.yaml` 填写 `title`、`input_pdf`、源语言、目标语言
    和 OCR 后端；不要覆盖用户真实配置。
-2. 执行：
+2. 如需选择外部术语表，先执行 `uv run pdf2epub -c config.yaml glossary-candidates`，
+   查看 `output/<title>/glossary_candidates.json`，再明确写入配置；没有明确匹配时留空，
+   不得因为目录中存在术语表就自动加载。
+3. 执行：
 
    ```text
    uv run pdf2epub -c config.yaml ocr-pages --resume
    ```
 
    产物是 `output/<title>/pages/page_XXX.md` 及 OCR 布局信息。
-3. 执行 `refine-prepare`。然后打开工作区 Subagent，读取
+4. 执行 `refine-prepare`。然后打开工作区 Subagent，读取
    `output/<title>/refine_subagent_prompt.md`，结合 `pages/` 写入 `toc_tree.json`。
    Subagent 应从书名页/版权页提取作者和出版社，并按内容标注 `notes`、`bibliography`、
    `index`；普通正文节点不写 `type`。
-4. 执行：
+5. 执行：
 
    ```text
    uv run pdf2epub -c config.yaml refine-local --resume
@@ -87,7 +99,7 @@ Subagent 直接写文件 → 单文件校验 → 收集完成结果 → 下一�
 
    本地程序校验页码范围、父子关系、兄弟节点重叠，并生成 `ocr_markdown/`。
    `tree_progress.json` 会锁定 TOC/OCR 指纹；输入变化后必须重新生成受影响单元。
-5. 若需要版式精修：执行 `polish`，打开工作区 Subagent 读取
+6. 若需要版式精修：执行 `polish`，打开工作区 Subagent 读取
    `polish_subagent_prompt.md` 写入 `polished_markdown/`，然后运行 `polish-validate`。
    润色不得把普通粗体、罗马数字、编号或序数上标升级成 Markdown 标题；已确认的
    `<sup>N</sup>` 注脚才可规范化为 `[^N]`。
@@ -113,7 +125,8 @@ uv run pdf2epub -c config.yaml check-ready --stage translate --skip-entities
 
 4. 执行 `translate`。该命令会生成 `translate_subagent_prompt.md`、manifest 和
    `batch_handoffs/`。立即打开工作区 Subagent：每个 Subagent 只处理自己 handoff 的
-   `assigned_files`，同名译文写入 `translated/`；大单元单独派发。
+   `assigned_files`，同名译文写入 `translated/`；大单元单独派发。Prompt 会为每个单元
+   提供精简术语上下文；完整快照只用于审计，不能修改。
 5. 由唯一 TOC owner Subagent 按目录 Prompt 写入 `toc_tree_translated.json`；其他任务
    不得修改该文件。完成后运行 `translate-toc-validate`。
 6. 每完成一个单元可运行：
@@ -150,25 +163,27 @@ uv run pdf2epub -c config.yaml check-ready --stage translate --skip-entities
 
 1. 检查 `input/` 中的 EPUB（也支持 MOBI/AZW3），在 `config_epub.yaml` 填写书名、输入文件、
    源语言和目标语言。外部术语表按第 1 节规则选择。
-2. 执行：
+2. 如需选择外部术语表，先执行 `uv run pdf2epub -c config_epub.yaml glossary-candidates`，
+   查看候选报告后再明确写入 `translation.glossaries`。
+3. 执行：
 
    ```text
    uv run pdf2epub -c config_epub.yaml html-prepare
    ```
 
    首次产物包括 `compressed_units/`、mapping、元数据输入/Prompt 和实体提取 Prompt。
-3. 立即打开工作区 Subagent，读取实体 Prompt/manifest，写入 `translation_entities.json`；
+4. 立即打开工作区 Subagent，读取实体 Prompt/manifest，写入 `translation_entities.json`；
    完成后再次运行 `html-prepare`，让正文和元数据任务挂载当前实体表及外部术语表。
    确实不需要实体表时才使用 `html-prepare --skip-entities`。
-4. 读取第二次生成的 `translate-html_subagent_prompt.md` 和 manifest，打开工作区
+5. 读取第二次生成的 `translate-html_subagent_prompt.md` 和 manifest，打开工作区
    Subagent，将同名译文写入 `translated_compressed/`。只处理 `pending_files`。
-5. EPUB 正文必须保持非空翻译单元 1:1 对齐；不得在单元内部增加换行；HTML 标签、属性、
+6. EPUB 正文必须保持非空翻译单元 1:1 对齐；不得在单元内部增加换行；HTML 标签、属性、
    实体、占位符、`<div>` 容器、`<i>` 数量/顺序/嵌套必须原样保留。
-6. Subagent 按 `metadata_translation_prompt.md` 写入 `translated_metadata.json`：
+7. Subagent 按 `metadata_translation_prompt.md` 写入 `translated_metadata.json`：
    `original_title`、作者和出版社保留原文；译名写入 `translated_title`；目录顺序、href、
    anchor、level 不变；`translated_description` 和 `translated_rights` 保留为顶层字段。
-7. 每个文件可运行 `html-validate --file <文件名>`，全部完成后运行全量 `html-validate`。
-8. 全量通过后执行：
+8. 每个文件可运行 `html-validate --file <文件名>`，全部完成后运行全量 `html-validate`。
+9. 全量通过后执行：
 
    ```text
    uv run pdf2epub -c config_epub.yaml build-html-epub

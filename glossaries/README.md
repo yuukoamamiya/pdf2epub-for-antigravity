@@ -3,6 +3,14 @@
 外部领域术语表不会全局生效，只有在某本书的配置中写入
 `translation.glossaries` 后才会被加载。支持 `.yaml`、`.yml` 和 `.json`。
 
+可以先运行 `uv run pdf2epub -c config.yaml glossary-candidates` 扫描本地候选文件。
+该命令只做格式和语言检查，不判断书籍领域是否匹配；领域判断完成后，仍需将最终选择
+明确写入书籍配置。
+
+准备翻译任务时，程序还会在 `translation_glossaries/unit_contexts/` 生成按单元裁剪的
+只读上下文，减少每个 Subagent 重复加载整张术语表；完整规范化快照仍保留在上级目录，
+用于审计和复现。
+
 最小格式：
 
 ```yaml

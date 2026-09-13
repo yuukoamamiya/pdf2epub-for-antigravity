@@ -7,6 +7,7 @@ module deliberately contains no model client and no network execution path.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
@@ -90,6 +91,7 @@ def validate_entities(
     if not isinstance(data, dict):
         return ["translation_entities.json must contain an object"]
     errors: List[str] = []
+    seen_originals: Dict[str, tuple[str, str]] = {}
     if data.get("schema_version", 1) != 1:
         errors.append("schema_version must be 1")
     metadata = data.get("metadata")
@@ -127,6 +129,18 @@ def validate_entities(
                 value = entity.get(field)
                 if not isinstance(value, str) or not value.strip():
                     errors.append(f"{path}.{field} must be a non-empty string")
+            original = entity.get("original")
+            target = entity.get("suggested_translation")
+            if isinstance(original, str) and original.strip() and isinstance(target, str) and target.strip():
+                key = " ".join(re.sub(r"\s+", " ", original).casefold().split())
+                previous = seen_originals.get(key)
+                if previous and previous[1] != target.strip():
+                    errors.append(
+                        f"{path}.original conflicts with {previous[0]}: "
+                        f"{original!r} maps to {previous[1]!r} and {target.strip()!r}"
+                    )
+                else:
+                    seen_originals[key] = (path, target.strip())
     return errors
 
 

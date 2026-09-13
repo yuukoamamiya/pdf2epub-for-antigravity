@@ -533,6 +533,7 @@ def prepare_markdown_subagent(
     context_files: Optional[Mapping[str, Path]] = None,
     skipped_context_files: Iterable[str] = (),
     file_contexts: Optional[Mapping[str, str]] = None,
+    unit_context_files: Optional[Mapping[str, Path]] = None,
 ) -> Dict[str, Path]:
     """Write a manifest and prompt for a markdown Subagent task."""
     source_dir = Path(source_dir)
@@ -723,6 +724,26 @@ def prepare_markdown_subagent(
     }
     if normalized_file_contexts:
         manifest["file_contexts"] = normalized_file_contexts
+    normalized_unit_contexts = {}
+    unit_context_sha256 = {}
+    for name, path in (unit_context_files or {}).items():
+        context_path = Path(path).resolve()
+        try:
+            relative_path = context_path.relative_to(output_dir.resolve())
+        except ValueError as exc:
+            raise ValueError(
+                f"Unit context file must be inside output directory: {path}"
+            ) from exc
+        if not context_path.is_file():
+            raise ValueError(f"Unit context file not found: {context_path}")
+        relative_name = str(relative_path).replace("\\", "/")
+        normalized_unit_contexts[str(name)] = relative_name
+        unit_context_sha256[str(name)] = hashlib.sha256(
+            context_path.read_bytes()
+        ).hexdigest()
+    if normalized_unit_contexts:
+        manifest["unit_context_files"] = normalized_unit_contexts
+        manifest["unit_context_sha256"] = unit_context_sha256
     manifest_path = output_dir / f"{task}_subagent_manifest.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -782,6 +803,14 @@ File roles (apply only to the named files):
 Context files (read-only; do not modify):
 
 {chr(10).join(f"- `{name}`: `{path}`" for name, path in normalized_context.items()) or "- none"}
+
+Unit-specific terminology contexts (read-only; use these for the matching file):
+
+{chr(10).join(f"- `{name}`: `{path}`" for name, path in normalized_unit_contexts.items()) or "- none"}
+
+When a unit-specific context is listed, read it before that unit. Full glossary
+snapshots above are retained for audit and conflict review; do not repeatedly
+load an entire snapshot when the unit-specific context is available.
 
 Source hierarchy (read-only context for each file):
 

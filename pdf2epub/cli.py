@@ -199,6 +199,7 @@ def _prepare_pdf_markdown_task(args, task: str):
     glossary_bundle = None
     context_files = {}
     skipped_context_files = []
+    unit_context_files = {}
     if task == "translate":
         from pdf2epub.glossary import load_selected_glossaries
 
@@ -270,18 +271,26 @@ def _prepare_pdf_markdown_task(args, task: str):
             )
         else:
             rules.append(
-                "Read translation_entities.json before translating and use its suggested_translation values as the canonical terminology reference; do not modify it."
+                "Read the unit-specific terminology context listed for each file before translating. Use translation_entities.json only as read-only audit context or when the unit context does not resolve an entity; do not modify either file."
             )
         if glossary_bundle and glossary_bundle.rules:
             rules.extend(glossary_bundle.rules)
             rules.append(
-                "When book-specific entities and domain glossary entries overlap, follow the domain glossary policy and report any unresolved conflict instead of silently inventing a third translation."
+                "When book-specific entities and domain glossary entries overlap, apply domain fixed, then domain preferred, then book-entity precedence; prefer the longest matching source form and report any unresolved conflict instead of silently inventing a third translation."
             )
         context_files = dict(glossary_bundle.context_files if glossary_bundle else {})
         if task == "translate" and not skip_entities and entity_path.is_file():
             context_files["translation_entities"] = entity_path
         if task == "translate" and (skip_entities or not entity_path.is_file()):
             skipped_context_files.append("translation_entities")
+        from pdf2epub.glossary import build_unit_glossary_contexts
+
+        unit_context_files = build_unit_glossary_contexts(
+            output_dir,
+            source_dir,
+            glossary_bundle.context_files if glossary_bundle else {},
+            None if skip_entities else entity_path,
+        )
     configure_logging(book_title, f"{task}-prepare")
     try:
         paths = prepare_markdown_subagent(
@@ -300,6 +309,7 @@ def _prepare_pdf_markdown_task(args, task: str):
             file_contexts=(
                 _load_pdf_file_contexts(output_dir) if task == "translate" else None
             ),
+            unit_context_files=unit_context_files or None,
         )
         if task == "translate":
             from pdf2epub.subagent_workflow import (
@@ -682,7 +692,12 @@ def _run_readiness_check(
     translation = config.get("translation", {}) or {}
     require_entities = bool(translation.get("require_entities", True))
     if require_entities and not skip_entities:
-        entity_ready = _entity_context_is_current(output_dir, source_dir)
+        entity_ready = _entity_context_is_current(
+            output_dir,
+            source_dir,
+            translation.get("source_language"),
+            translation.get("target_language"),
+        )
         entity_validation_path = output_dir / "translation_entities_validation.json"
         if entity_validation_path.is_file():
             try:
@@ -803,6 +818,51 @@ def check_ready_command(args):
         return 0
     logger.error(f"Pre-flight check failed for {report['stage']}")
     return 1
+
+
+def glossary_candidates_command(args):
+    """Create a deterministic report of local external glossary candidates."""
+    from pdf2epub.glossary import discover_glossary_candidates
+
+    config = load_config(args.config)
+    book_title = config.get("title")
+    if not book_title:
+        logger.error("No title found in config.yaml")
+        return 1
+    translation = config.get("translation", {}) or {}
+    source_language = args.source_language or translation.get(
+        "source_language", "English"
+    )
+    target_language = args.target_language or translation.get(
+        "target_language", "Chinese"
+    )
+    config_root = Path(args.config).expanduser().resolve().parent
+    glossary_dir = Path(args.glossary_dir) if args.glossary_dir else config_root / "glossaries"
+    if not glossary_dir.is_absolute():
+        glossary_dir = (config_root / glossary_dir).resolve()
+    candidates = discover_glossary_candidates(
+        glossary_dir, source_language, target_language
+    )
+    report = {
+        "schema_version": 1,
+        "glossary_dir": str(glossary_dir),
+        "source_language": source_language,
+        "target_language": target_language,
+        "selection_required": bool(candidates),
+        "candidates": candidates,
+    }
+    output_dir = book_output_dir(book_title)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    report_path = output_dir / "glossary_candidates.json"
+    report_path.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    eligible = [item for item in candidates if item.get("eligible")]
+    logger.info(
+        f"发现 {len(candidates)} 个术语表候选，其中 {len(eligible)} 个通过语言和格式检查。"
+    )
+    logger.success(f"术语表候选报告已写入: {report_path}")
+    return 0
 
 
 def refine_command(args):
@@ -1031,7 +1091,12 @@ def _prepare_entity_subagent_task(
     return output_dir / "translation_entities.json"
 
 
-def _entity_context_is_current(output_dir: Path, source_dir: Path) -> bool:
+def _entity_context_is_current(
+    output_dir: Path,
+    source_dir: Path,
+    source_language: str | None = None,
+    target_language: str | None = None,
+) -> bool:
     """Return whether the book entity hand-off matches its source snapshot."""
     entity_path = output_dir / "translation_entities.json"
     manifest_path = output_dir / "entity_subagent_manifest.json"
@@ -1041,7 +1106,7 @@ def _entity_context_is_current(output_dir: Path, source_dir: Path) -> bool:
         from pdf2epub.entity_extractor import validate_entities
 
         data = json.loads(entity_path.read_text(encoding="utf-8"))
-        if validate_entities(data):
+        if validate_entities(data, source_language=source_language, target_language=target_language):
             return False
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         if Path(manifest.get("source_dir", "")).as_posix() != source_dir.relative_to(output_dir).as_posix():
@@ -1398,7 +1463,10 @@ def _prepare_html_command(args):
         require_entities = translation_config.get("require_entities", True)
         entity_path = output_dir / "translation_entities.json"
         entity_ready = _entity_context_is_current(
-            output_dir, output_dir / "compressed_units"
+            output_dir,
+            output_dir / "compressed_units",
+            source_language,
+            target_language,
         )
         context_files = dict(glossary_bundle.context_files)
         if entity_ready:
@@ -1440,7 +1508,10 @@ def _prepare_html_command(args):
                 logger.error(f"Could not prepare EPUB entity task: {exc}")
                 return 1
             entity_ready = _entity_context_is_current(
-                output_dir, output_dir / "compressed_units"
+                output_dir,
+                output_dir / "compressed_units",
+                source_language,
+                target_language,
             )
             if not entity_ready:
                 logger.info(
@@ -1481,6 +1552,12 @@ def _prepare_html_command(args):
             resume=getattr(args, "resume", False),
             context_files=context_files or None,
             skipped_context_files=skipped_context_files,
+            unit_context_files=build_unit_glossary_contexts(
+                output_dir,
+                output_dir / "compressed_units",
+                glossary_bundle.context_files,
+                None if skip_entities else entity_path,
+            ),
         )
 
         logger.success("EPUB HTML preparation complete")
@@ -2662,6 +2739,24 @@ RECOMMENDED WORKFLOW / 推荐工作流 (uses toc_tree.json):
         help="Explicitly skip the book-specific entity glossary gate",
     )
     check_ready_parser.set_defaults(func=check_ready_command)
+
+    glossary_candidates_parser = subparsers.add_parser(
+        "glossary-candidates",
+        help="Scan local external glossary files and write a candidate report",
+    )
+    glossary_candidates_parser.add_argument(
+        "--glossary-dir",
+        help="Glossary directory (default: <config directory>/glossaries)",
+    )
+    glossary_candidates_parser.add_argument(
+        "--source-language",
+        help="Source language (default: from config or English)",
+    )
+    glossary_candidates_parser.add_argument(
+        "--target-language",
+        help="Target language (default: from config or Chinese)",
+    )
+    glossary_candidates_parser.set_defaults(func=glossary_candidates_command)
     
     # Breakdown subcommand (DEPRECATED)
 

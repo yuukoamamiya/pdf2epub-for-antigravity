@@ -6,10 +6,13 @@ import pytest
 
 from pdf2epub.glossary import (
     GlossaryError,
+    build_unit_glossary_contexts,
+    discover_glossary_candidates,
     load_selected_glossaries,
     load_glossary,
     validate_translation_context,
 )
+from pdf2epub.entity_extractor import validate_entities
 from pdf2epub.subagent_workflow import prepare_markdown_subagent
 
 
@@ -26,6 +29,7 @@ def _write_glossary(path: Path, entries=None, name="domain"):
         "schema_version: 1\n"
         "metadata:\n"
         f"  name: {name}\n"
+        "  domain: test domain\n"
         "  source_language: German\n"
         "  target_language: Chinese\n"
         "entries:\n"
@@ -70,6 +74,98 @@ def test_selected_glossary_is_snapshotted_and_hashable(tmp_path: Path):
     assert bundle.context_sha256["domain_glossary_001"] == hashlib.sha256(
         snapshot.read_bytes()
     ).hexdigest()
+
+
+def test_glossary_candidates_report_language_and_metadata_eligibility(tmp_path: Path):
+    glossary_dir = tmp_path / "glossaries"
+    glossary_dir.mkdir()
+    valid = glossary_dir / "valid.yaml"
+    _write_glossary(valid, name="valid")
+    invalid = glossary_dir / "wrong-language.yaml"
+    _write_glossary(invalid, name="wrong-language")
+    invalid.write_text(
+        invalid.read_text(encoding="utf-8").replace(
+            "source_language: German", "source_language: English"
+        ),
+        encoding="utf-8",
+    )
+
+    candidates = discover_glossary_candidates(glossary_dir, "German", "Chinese")
+
+    by_name = {item.get("name"): item for item in candidates}
+    assert by_name["valid"]["eligible"] is True
+    assert by_name["wrong-language"]["eligible"] is False
+    assert any("source language mismatch" in error for error in by_name["wrong-language"]["errors"])
+
+
+def test_selected_glossary_writes_provenance_record(tmp_path: Path):
+    source = tmp_path / "terms.yaml"
+    output = tmp_path / "output"
+    _write_glossary(source, name="domain")
+
+    load_selected_glossaries(
+        {"translation": {"glossaries": [{"path": str(source), "id": "domain"}]}},
+        output,
+        "German",
+        "Chinese",
+    )
+
+    record = json.loads((output / "glossary_selection.json").read_text(encoding="utf-8"))
+    assert record["mode"] == "explicit"
+    assert record["selected"][0]["source_sha256"] == hashlib.sha256(
+        source.read_bytes()
+    ).hexdigest()
+    assert record["selected"][0]["snapshot_sha256"]
+
+
+def test_unit_glossary_context_contains_only_matching_entries(tmp_path: Path):
+    source = tmp_path / "terms.yaml"
+    output = tmp_path / "output"
+    _write_glossary(
+        source,
+        name="domain",
+        entries=[
+            {"source": "Aufhebung", "target": "扬弃", "policy": "fixed"},
+            {"source": "Dasein", "target": "定在", "policy": "fixed"},
+        ],
+    )
+    bundle = load_selected_glossaries(
+        {"translation": {"glossaries": [str(source)]}},
+        output,
+        "German",
+        "Chinese",
+    )
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    (source_dir / "unit.md").write_text("Das Dasein ist bestimmt.\n", encoding="utf-8")
+
+    contexts = build_unit_glossary_contexts(
+        output, source_dir, bundle.context_files
+    )
+    context = json.loads(contexts["unit.md"].read_text(encoding="utf-8"))
+    assert [entry["source"] for entry in context["entries"]] == ["Dasein"]
+
+
+def test_entity_validation_rejects_conflicting_duplicate_originals():
+    data = {
+        "schema_version": 1,
+        "metadata": {
+            "book_title": "Book",
+            "source_language": "German",
+            "target_language": "Chinese",
+            "extraction_complete": True,
+        },
+        "characters": [{"original": "Hegel", "suggested_translation": "黑格尔"}],
+        "places": [{"original": "Hegel", "suggested_translation": "黑格尔（另一译法）"}],
+        "organizations": [],
+        "terms": [],
+        "races": [],
+        "items": [],
+    }
+
+    errors = validate_entities(data, "Book", "German", "Chinese")
+
+    assert any("conflicts with characters[0]" in error for error in errors)
 
 
 def test_selected_glossaries_reject_conflicting_source_forms(tmp_path: Path):

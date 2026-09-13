@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from re import escape as regex_escape
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional
 
@@ -207,6 +209,172 @@ class GlossaryBundle:
     entries: int
     names: List[str]
     rules: List[str]
+    source_files: Dict[str, Path] = field(default_factory=dict)
+    source_sha256: Dict[str, str] = field(default_factory=dict)
+    metadata: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+
+
+def discover_glossary_candidates(
+    glossary_dir: Path,
+    source_language: str,
+    target_language: str,
+) -> List[Dict[str, Any]]:
+    """Inspect local glossary candidates without selecting any automatically.
+
+    Domain suitability still requires book-level judgment.  This function only
+    performs deterministic file discovery, schema parsing, and language checks,
+    so an agent can present a finite candidate list instead of guessing from
+    filenames.
+    """
+    root = Path(glossary_dir)
+    if not root.is_dir():
+        return []
+    candidates: List[Dict[str, Any]] = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file() or path.suffix.lower() not in SUPPORTED_SUFFIXES:
+            continue
+        try:
+            relative_parts = path.relative_to(root).parts
+        except ValueError:
+            relative_parts = path.parts
+        if any(part.lower() == "output" for part in relative_parts):
+            continue
+        if path.name.lower().startswith("readme") or ".example." in path.name.lower():
+            continue
+        try:
+            glossary = load_glossary(path)
+            metadata = glossary.get("metadata", {})
+            errors = validate_glossary_languages(
+                glossary, source_language, target_language
+            )
+            for field_name in ("domain", "source_language", "target_language"):
+                if not _clean(metadata.get(field_name)):
+                    errors.append(f"metadata.{field_name} is missing")
+            candidates.append(
+                {
+                    "path": str(path),
+                    "name": metadata.get("name"),
+                    "domain": metadata.get("domain"),
+                    "source_language": metadata.get("source_language"),
+                    "target_language": metadata.get("target_language"),
+                    "version": metadata.get("version"),
+                    "entries": len(glossary.get("entries", [])),
+                    "eligible": not errors,
+                    "errors": errors,
+                }
+            )
+        except GlossaryError as exc:
+            candidates.append(
+                {
+                    "path": str(path),
+                    "eligible": False,
+                    "errors": [str(exc)],
+                }
+            )
+    return candidates
+
+
+def _term_occurs(text: str, term: str) -> bool:
+    """Match a glossary form without matching it inside a larger word."""
+    normalized_text = " ".join(text.casefold().split())
+    normalized_term = " ".join(_clean(term).casefold().split())
+    if not normalized_term or len(normalized_term) < 3:
+        return False
+    pattern = r"(?<!\w)" + regex_escape(normalized_term).replace(r"\ ", r"\s+") + r"(?!\w)"
+    return re.search(pattern, normalized_text, flags=re.IGNORECASE) is not None
+
+
+def build_unit_glossary_contexts(
+    output_dir: Path,
+    source_dir: Path,
+    glossary_context_files: Mapping[str, Path],
+    entity_path: Optional[Path] = None,
+) -> Dict[str, Path]:
+    """Write compact, per-unit terminology contexts.
+
+    Full normalized snapshots remain available for audit, while translation
+    prompts can point each Subagent at only the entries occurring in its unit.
+    Exact matching is intentionally conservative; an empty subset is valid and
+    tells the Subagent to fall back to normal translation judgment.
+    """
+    source_dir = Path(source_dir)
+    context_dir = Path(output_dir) / "translation_glossaries" / "unit_contexts"
+    context_dir.mkdir(parents=True, exist_ok=True)
+    domain_entries: List[Dict[str, Any]] = []
+    for name, path in glossary_context_files.items():
+        if not str(name).startswith("domain_glossary_") or not Path(path).is_file():
+            continue
+        try:
+            glossary = load_glossary(path)
+        except GlossaryError:
+            continue
+        for entry in glossary["entries"]:
+            domain_entries.append({"kind": "domain", **entry})
+
+    entity_entries: List[Dict[str, Any]] = []
+    if entity_path and Path(entity_path).is_file():
+        try:
+            data = json.loads(Path(entity_path).read_text(encoding="utf-8"))
+            for collection in ("characters", "places", "organizations", "terms", "races", "items"):
+                for entry in data.get(collection, []) or []:
+                    if isinstance(entry, dict) and entry.get("original") and entry.get("suggested_translation"):
+                        entity_entries.append(
+                            {
+                                "kind": "book_entity",
+                                "category": collection,
+                                "original": entry["original"],
+                                "target": entry["suggested_translation"],
+                                "note": entry.get("description") or entry.get("note", ""),
+                            }
+                        )
+        except (OSError, UnicodeError, json.JSONDecodeError, TypeError):
+            pass
+
+    if not domain_entries and not entity_entries:
+        return {}
+
+    result: Dict[str, Path] = {}
+    for source in sorted(Path(source_dir).glob("*.md")):
+        try:
+            text = source.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            continue
+        selected: List[Dict[str, Any]] = []
+        for entry in domain_entries:
+            forms = [entry.get("source", ""), *entry.get("variants", []), *entry.get("aliases", [])]
+            if any(_term_occurs(text, form) for form in forms):
+                selected.append(entry)
+        for entry in entity_entries:
+            if _term_occurs(text, entry["original"]):
+                selected.append(entry)
+        selected.sort(
+            key=lambda entry: (
+                2 if entry.get("kind") == "domain" else 0,
+                2 if entry.get("policy") == "fixed" else 1,
+                max(
+                    len(str(form))
+                    for form in (
+                        entry.get("source") or entry.get("original") or "",
+                        *entry.get("variants", []),
+                        *entry.get("aliases", []),
+                    )
+                ),
+            ),
+            reverse=True,
+        )
+        context = {
+            "schema_version": 1,
+            "source_file": source.name,
+            "entries": selected,
+            "selection": "exact_source_form_match",
+        }
+        context_path = context_dir / f"{source.stem}.json"
+        context_path.write_text(
+            json.dumps(context, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        result[source.name] = context_path
+    return result
 
 
 def _configured_items(config: Mapping[str, Any]) -> List[Any]:
@@ -251,6 +419,22 @@ def load_selected_glossaries(
     """
     items = _configured_items(config)
     if not items:
+        translation = config.get("translation", {}) or {}
+        selection_path = Path(output_dir) / "glossary_selection.json"
+        selection_path.parent.mkdir(parents=True, exist_ok=True)
+        selection_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "mode": "explicit_none" if "glossaries" in translation else "unconfigured",
+                    "selected": [],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         return GlossaryBundle({}, {}, 0, [], [])
 
     snapshot_dir = Path(output_dir) / "translation_glossaries"
@@ -260,6 +444,10 @@ def load_selected_glossaries(
     names: List[str] = []
     total_entries = 0
     seen_sources: Dict[str, str] = {}
+    source_files: Dict[str, Path] = {}
+    source_sha256: Dict[str, str] = {}
+    metadata_by_context: Dict[str, Dict[str, Any]] = {}
+    selected_records: List[Dict[str, Any]] = []
 
     for index, item in enumerate(items, 1):
         if isinstance(item, str):
@@ -302,6 +490,21 @@ def load_selected_glossaries(
         context_name = f"domain_glossary_{index:03d}"
         context_files[context_name] = snapshot_path
         context_sha256[context_name] = hashlib.sha256(snapshot_path.read_bytes()).hexdigest()
+        source_files[context_name] = source_path
+        source_sha256[context_name] = hashlib.sha256(source_path.read_bytes()).hexdigest()
+        metadata_by_context[context_name] = dict(metadata)
+        selected_records.append(
+            {
+                "context": context_name,
+                "id": glossary_id,
+                "configured_path": str(raw_path),
+                "resolved_path": str(source_path),
+                "source_sha256": source_sha256[context_name],
+                "snapshot": str(snapshot_path),
+                "snapshot_sha256": context_sha256[context_name],
+                "metadata": dict(metadata),
+            }
+        )
         names.append(glossary_id)
         total_entries += len(glossary["entries"])
         for entry in glossary["entries"]:
@@ -321,14 +524,32 @@ def load_selected_glossaries(
         "For entries marked `fixed`, use the listed target translation whenever the source term is used, while respecting grammar and the entry note.",
         "For entries marked `preferred`, use the listed target translation unless the surrounding context clearly requires another form.",
         "Use variants and aliases to recognize source word forms, but do not translate glossary files themselves.",
+        "Terminology precedence is: domain `fixed`, domain `preferred`, then book-specific entities; prefer the longest matching source form and report unresolved conflicts.",
         "Never replace text mechanically in a way that changes HTML tags, attributes, entities, anchors, formulas, or LaTeX commands.",
     ]
+    selection_path = Path(output_dir) / "glossary_selection.json"
+    selection_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "mode": "explicit",
+                "selected": selected_records,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     return GlossaryBundle(
         context_files=context_files,
         context_sha256=context_sha256,
         entries=total_entries,
         names=names,
         rules=rules,
+        source_files=source_files,
+        source_sha256=source_sha256,
+        metadata=metadata_by_context,
     )
 
 
@@ -341,9 +562,9 @@ def validate_translation_context(
     manifest_path = Path(output_dir) / manifest_name
     translation = config.get("translation", {}) or {}
     configured_glossaries = bool(_configured_items(config))
-    require_entities = bool(translation.get("require_entities", True)) and (
-        Path(output_dir) / "entity_subagent_manifest.json"
-    ).is_file()
+    source_language = translation.get("source_language")
+    target_language = translation.get("target_language")
+    require_entities = bool(translation.get("require_entities", True))
     if not manifest_path.is_file():
         errors = []
         if configured_glossaries:
@@ -360,6 +581,8 @@ def validate_translation_context(
     root = Path(output_dir).resolve()
     context_files = manifest.get("context_files", {}) or {}
     context_hashes = manifest.get("context_sha256", {}) or {}
+    unit_context_files = manifest.get("unit_context_files", {}) or {}
+    unit_context_hashes = manifest.get("unit_context_sha256", {}) or {}
     errors: List[str] = []
     entity_path: Optional[Path] = None
     glossary_names: List[str] = []
@@ -383,10 +606,34 @@ def validate_translation_context(
         elif str(name).startswith("domain_glossary_"):
             try:
                 glossary = load_glossary(path)
+                if source_language and target_language:
+                    errors.extend(
+                        validate_glossary_languages(
+                            glossary, source_language, target_language
+                        )
+                    )
                 glossary_names.append(glossary["metadata"]["name"])
                 glossary_entries += len(glossary["entries"])
             except GlossaryError as exc:
                 errors.append(str(exc))
+
+    for unit_name, relative in unit_context_files.items():
+        path = (root / str(relative)).resolve()
+        try:
+            path.relative_to(root)
+        except ValueError:
+            errors.append(
+                f"unit translation context escapes output directory: {relative}"
+            )
+            continue
+        if not path.is_file():
+            errors.append(f"unit translation context is missing: {relative}")
+            continue
+        actual_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+        if unit_context_hashes.get(unit_name) != actual_hash:
+            errors.append(
+                f"unit translation context changed after task preparation: {relative}"
+            )
 
     skipped = set(manifest.get("skipped_context_files", []) or [])
     if require_entities and entity_path is None and "translation_entities" not in skipped:
@@ -396,7 +643,14 @@ def validate_translation_context(
             from pdf2epub.entity_extractor import validate_entities
 
             entity_data = json.loads(entity_path.read_text(encoding="utf-8"))
-            errors.extend(validate_entities(entity_data, config.get("title")))
+            errors.extend(
+                validate_entities(
+                    entity_data,
+                    config.get("title"),
+                    source_language,
+                    target_language,
+                )
+            )
         except (OSError, json.JSONDecodeError) as exc:
             errors.append(f"invalid translation_entities.json: {exc}")
     if configured_glossaries and not any(
@@ -410,5 +664,6 @@ def validate_translation_context(
         "glossaries": glossary_names,
         "glossary_entries": glossary_entries,
         "context_files": context_files,
+        "unit_context_files": unit_context_files,
         "skipped_context_files": sorted(skipped),
     }
