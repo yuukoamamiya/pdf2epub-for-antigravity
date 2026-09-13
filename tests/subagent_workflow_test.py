@@ -21,6 +21,7 @@ from pdf2epub.subagent_workflow import (
     integrate_toc_translation_task,
     prepare_markdown_subagent,
     prepare_toc_translation_subagent,
+    write_batch_handoffs,
     resolve_subagent_model,
     validate_toc_translation_subagent,
     fix_reference_heading_mismatch,
@@ -159,6 +160,92 @@ def test_markdown_validation_excludes_bibliography_from_bilingual_warning(tmp_pa
         file_roles={"unit.md": "bibliography"},
     )
     assert report["bilingual_warnings"] == []
+
+
+def test_markdown_validation_rejects_bibliography_marker_loss(tmp_path: Path):
+    from pdf2epub.subagent_workflow import validate_markdown_subagent
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "refs.md").write_text(
+        "Aristotle, Metaphysics, 2020, pp. 12–15. DOI 10.1234/5678.\n",
+        encoding="utf-8",
+    )
+    (target_dir / "refs.md").write_text(
+        "亚里士多德，《形而上学》，2020，第12页。DOI 10.1234/5678。\n",
+        encoding="utf-8",
+    )
+
+    report = validate_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        target_dir,
+        file_roles={"refs.md": "bibliography"},
+    )
+
+    assert report["all_passed"] is False
+    assert "bibliography numeric marker mismatch" in report["invalid"][0]["reason"]
+
+
+def test_markdown_validation_preserves_index_page_ranges_and_cross_references(
+    tmp_path: Path,
+):
+    from pdf2epub.subagent_workflow import validate_markdown_subagent
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "index.md").write_text(
+        "Being 12–15; see Essence 20.\n",
+        encoding="utf-8",
+    )
+    (target_dir / "index.md").write_text(
+        "存在 12-15；参见本质 20。\n",
+        encoding="utf-8",
+    )
+
+    report = validate_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        target_dir,
+        file_roles={"index.md": "index"},
+    )
+
+    assert report["all_passed"] is True
+    assert report["invalid"] == []
+
+
+def test_markdown_validation_rejects_index_page_mapping_change(tmp_path: Path):
+    from pdf2epub.subagent_workflow import validate_markdown_subagent
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "index.md").write_text(
+        "Being 12–15; see Essence 20.\n",
+        encoding="utf-8",
+    )
+    (target_dir / "index.md").write_text(
+        "存在 12；参见本质。\n",
+        encoding="utf-8",
+    )
+
+    report = validate_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        target_dir,
+        file_roles={"index.md": "index"},
+    )
+
+    assert report["all_passed"] is False
+    assert "index numeric marker mismatch" in report["invalid"][0]["reason"]
 
 
 def test_markdown_validation_includes_structural_diff_summary(tmp_path: Path):
@@ -508,6 +595,78 @@ def test_prepare_markdown_subagent_records_special_file_roles(tmp_path: Path):
     prompt = paths["prompt"].read_text(encoding="utf-8")
     assert manifest["file_roles"] == {"refs.md": "bibliography"}
     assert "preserve author names" in prompt
+
+
+def test_prepare_markdown_subagent_isolates_large_units_and_writes_scoped_handoffs(
+    tmp_path: Path,
+):
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    (source_dir / "small.md").write_text("small", encoding="utf-8")
+    (source_dir / "large.md").write_text("x" * 30_001, encoding="utf-8")
+    paths = prepare_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        tmp_path / "target",
+        "German",
+        "Chinese",
+        config={"subagent": {"batching": {"max_source_tokens": 100_000}}},
+        file_contexts={"large.md": "Kapitel 1 → 1.1 → Große Einheit"},
+    )
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    assert manifest["oversized_files"] == ["large.md"]
+    assert [batch["files"] for batch in manifest["batch_queue"]] == [
+        ["large.md"],
+        ["small.md"],
+    ]
+    assert manifest["file_contexts"]["large.md"].endswith("Große Einheit")
+
+    handoffs = write_batch_handoffs(tmp_path, paths["manifest"], paths["prompt"])
+    assert len(handoffs) == 2
+    assert handoffs[0]["toc_owner"] is True
+    assert handoffs[1]["toc_owner"] is False
+    scoped = json.loads(
+        (tmp_path / handoffs[0]["manifest"]).read_text(encoding="utf-8")
+    )
+    assert scoped["assigned_files"] == ["large.md"]
+    assert scoped["pending_files"] == ["large.md"]
+    assert "Do not process files from any other batch" in (
+        tmp_path / handoffs[0]["prompt"]
+    ).read_text(encoding="utf-8")
+
+
+def test_single_file_validation_preserves_other_validated_units(tmp_path: Path):
+    from pdf2epub.subagent_workflow import validate_markdown_subagent
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    for name, source, target in (
+        ("one.md", "# One\nbody\n", "# 一\n正文\n"),
+        ("two.md", "# Two\nbody\n", "# 二\n正文\n"),
+    ):
+        (source_dir / name).write_text(source, encoding="utf-8")
+        (target_dir / name).write_text(target, encoding="utf-8")
+    validate_markdown_subagent(tmp_path, "translate", source_dir, target_dir)
+    validated = target_dir / "validated"
+    assert {p.name for p in validated.glob("*.md")} == {"one.md", "two.md"}
+
+    report = validate_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        target_dir,
+        selected_files=["one.md"],
+    )
+    assert report["scope"] == "files"
+    assert report["files_checked"] == ["one.md"]
+    assert {p.name for p in validated.glob("*.md")} == {"one.md", "two.md"}
+    ledger = json.loads(
+        (tmp_path / "translate_file_validation.json").read_text(encoding="utf-8")
+    )
+    assert ledger["files"]["one.md"]["valid"] is True
 
 
 def test_prepare_markdown_subagent_records_read_only_context_hash(tmp_path: Path):

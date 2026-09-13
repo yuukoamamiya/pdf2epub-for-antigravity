@@ -24,6 +24,7 @@ DEFAULT_SUBAGENT_MODEL = "gemini-3.6-flash"
 DEFAULT_BATCH_MAX_FILES = 5
 DEFAULT_BATCH_MAX_SOURCE_TOKENS = 12_000
 DEFAULT_BATCH_MAX_CONCURRENCY = 3
+DEFAULT_SINGLE_FILE_MAX_BYTES = 30_000
 
 _REFUSAL_PATTERNS = (
     (
@@ -125,6 +126,60 @@ _REFERENCE_TARGET_LABELS = {
     "尾注",
     "参考资料",
 }
+
+_SPECIAL_ROLE_NUMERIC_MARKER_RE = re.compile(
+    r"(?<![A-Za-z0-9])"
+    r"\d+(?:[./:]\d+)*(?:[-‐‑‒–—]\d+(?:[./:]\d+)*)*"
+    r"(?![A-Za-z0-9])"
+)
+
+
+def _special_role_numeric_markers(text: str) -> list[str]:
+    """Extract stable numeric markers from bibliography/index content.
+
+    Arabic numerals carry bibliographic identity (years, editions, DOI/ISBN
+    fragments) and index navigation (page numbers and ranges).  Normalize
+    Unicode dashes and whitespace around ranges, but keep the marker order and
+    punctuation so a changed mapping is not silently accepted.
+    """
+    import unicodedata
+
+    normalized = unicodedata.normalize("NFKC", text)
+    normalized = re.sub(
+        r"(?<=\d)\s*([-‐‑‒–—])\s*(?=\d)",
+        r"\1",
+        normalized,
+    )
+    return [
+        re.sub(r"[‐‑‒–—]", "-", match.group(0))
+        for match in _SPECIAL_ROLE_NUMERIC_MARKER_RE.finditer(normalized)
+    ]
+
+
+def _validate_special_role_markers(
+    source_text: str, target_text: str, role: str
+) -> list[str]:
+    """Reject loss or alteration of numeric identity markers.
+
+    This is deliberately narrower than a general semantic comparison.  It
+    protects the machine-useful parts of bibliography and index units while
+    allowing names, titles, prose, punctuation and ordinary Markdown to be
+    translated naturally.  Sequence comparison catches both dropped markers
+    and accidental reordering of page mappings.
+    """
+    source_markers = _special_role_numeric_markers(source_text)
+    target_markers = _special_role_numeric_markers(target_text)
+    if source_markers == target_markers:
+        return []
+
+    limit = 12
+    source_preview = source_markers[:limit]
+    target_preview = target_markers[:limit]
+    suffix = " ..." if len(source_markers) > limit or len(target_markers) > limit else ""
+    return [
+        f"{role} numeric marker mismatch: "
+        f"source={source_preview!r}, target={target_preview!r}{suffix}"
+    ]
 
 
 def _plain_markdown_label(line: str) -> str:
@@ -318,6 +373,9 @@ def _batching_config(config: Optional[Mapping[str, Any]]) -> Dict[str, int]:
         "max_concurrency": _positive_int(
             batching.get("max_concurrency"), DEFAULT_BATCH_MAX_CONCURRENCY
         ),
+        "single_file_max_bytes": _positive_int(
+            batching.get("single_file_max_bytes"), DEFAULT_SINGLE_FILE_MAX_BYTES
+        ),
     }
 
 
@@ -325,6 +383,7 @@ def _recommended_batches(
     file_stats: Mapping[str, Mapping[str, int]],
     max_files: int,
     max_source_tokens: int,
+    single_file_max_bytes: int = DEFAULT_SINGLE_FILE_MAX_BYTES,
 ) -> List[List[str]]:
     """Create advisory, file-safe batches without splitting source lines."""
     batches: List[List[str]] = []
@@ -332,6 +391,14 @@ def _recommended_batches(
     current_tokens = 0
     for name, stats in file_stats.items():
         tokens = stats["estimated_tokens"]
+        isolated = (
+            stats.get("size_bytes", 0) > single_file_max_bytes
+            or tokens > max_source_tokens
+        )
+        if isolated and current:
+            batches.append(current)
+            current = []
+            current_tokens = 0
         if current and (
             len(current) >= max_files or current_tokens + tokens > max_source_tokens
         ):
@@ -340,9 +407,9 @@ def _recommended_batches(
             current_tokens = 0
         current.append(name)
         current_tokens += tokens
-        # An oversized file remains alone; the manifest explicitly flags it
-        # so the operator can split it at logical line boundaries if needed.
-        if tokens > max_source_tokens:
+        # A large file remains alone; the manifest explicitly flags it so the
+        # operator can give it an independent Subagent task.
+        if isolated:
             batches.append(current)
             current = []
             current_tokens = 0
@@ -367,6 +434,91 @@ def _batch_queue(
     ]
 
 
+def write_batch_handoffs(
+    output_dir: Path,
+    manifest_path: Path,
+    prompt_path: Path,
+) -> List[Dict[str, Any]]:
+    """Create one explicit, non-overlapping hand-off per pending batch.
+
+    The main manifest remains the resumable inventory.  These scoped hand-offs
+    prevent parallel Subagents from interpreting the global ``pending_files``
+    list as permission to process every batch, and assign TOC writing to one
+    owner only.
+    """
+    output_dir = Path(output_dir)
+    manifest_path = Path(manifest_path)
+    prompt_path = Path(prompt_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    prompt = prompt_path.read_text(encoding="utf-8")
+    queue = manifest.get("batch_queue", [])
+    if not isinstance(queue, list):
+        return []
+
+    handoff_dir = output_dir / "batch_handoffs"
+    handoff_dir.mkdir(parents=True, exist_ok=True)
+    owner_id = queue[0].get("batch_id") if queue else None
+    handoffs: List[Dict[str, Any]] = []
+    for batch in queue:
+        if not isinstance(batch, dict):
+            continue
+        batch_id = str(batch.get("batch_id") or "").strip()
+        files = [str(name) for name in batch.get("files", [])]
+        if not batch_id or not files:
+            continue
+        scoped = dict(manifest)
+        scoped["batch_id"] = batch_id
+        scoped["assigned_files"] = files
+        scoped["pending_files"] = files
+        scoped["completed_files"] = []
+        scoped["batch_queue"] = [dict(batch, status="assigned")]
+        scoped["toc_owner"] = batch_id == owner_id
+        if not scoped["toc_owner"]:
+            scoped.pop("toc_translation", None)
+        scoped_name = f"translate_subagent_manifest_{batch_id}.json"
+        scoped_prompt_name = f"translate_subagent_prompt_{batch_id}.md"
+        scoped_path = handoff_dir / scoped_name
+        scoped_prompt_path = handoff_dir / scoped_prompt_name
+        scoped_path.write_text(
+            json.dumps(scoped, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        toc_instruction = (
+            "You are the sole TOC owner for this task. Complete the required "
+            "TOC translation and write toc_tree_translated.json."
+            if scoped["toc_owner"]
+            else
+            "This batch is not the TOC owner. Do not create or modify "
+            "toc_tree_translated.json."
+        )
+        scoped_prompt_path.write_text(
+            prompt
+            + f"\n\n## Assigned batch: {batch_id}\n\n"
+            + f"Use the scoped manifest `{scoped_name}` in this directory.\n"
+            + f"Process only these files: {', '.join(files)}.\n"
+            + "Do not process files from any other batch, even if they appear "
+            + "in the parent manifest.\n"
+            + toc_instruction
+            + "\n",
+            encoding="utf-8",
+        )
+        handoffs.append(
+            {
+                "batch_id": batch_id,
+                "files": files,
+                "manifest": str(scoped_path.relative_to(output_dir)).replace("\\", "/"),
+                "prompt": str(scoped_prompt_path.relative_to(output_dir)).replace("\\", "/"),
+                "toc_owner": scoped["toc_owner"],
+                "status": "pending",
+            }
+        )
+    manifest["batch_handoffs"] = handoffs
+    manifest["toc_owner_batch_id"] = owner_id
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return handoffs
+
+
 def prepare_markdown_subagent(
     output_dir: Path,
     task: str,
@@ -380,6 +532,7 @@ def prepare_markdown_subagent(
     file_roles: Optional[Mapping[str, str]] = None,
     context_files: Optional[Mapping[str, Path]] = None,
     skipped_context_files: Iterable[str] = (),
+    file_contexts: Optional[Mapping[str, str]] = None,
 ) -> Dict[str, Path]:
     """Write a manifest and prompt for a markdown Subagent task."""
     source_dir = Path(source_dir)
@@ -404,11 +557,15 @@ def prepare_markdown_subagent(
         file_stats,
         batching["max_files"],
         batching["max_source_tokens"],
+        batching["single_file_max_bytes"],
     )
     oversized_files = [
         name
         for name, stats in file_stats.items()
-        if stats["estimated_tokens"] > batching["max_source_tokens"]
+        if (
+            stats["estimated_tokens"] > batching["max_source_tokens"]
+            or stats["size_bytes"] > batching["single_file_max_bytes"]
+        )
     ]
     validated_files = None
     validation: Dict[str, Any] = {}
@@ -431,6 +588,32 @@ def prepare_markdown_subagent(
                 validated_files = set(validation["valid_files"])
         except (OSError, json.JSONDecodeError):
             validated_files = None
+    # Single-file checks are intentionally stored separately so they never
+    # masquerade as a full-book validation report.  They are still valid
+    # resumable checkpoints when their source hash matches.
+    file_validation_path = output_dir / f"{task}_file_validation.json"
+    if file_validation_path.is_file():
+        try:
+            file_ledger = json.loads(file_validation_path.read_text(encoding="utf-8"))
+            file_records = file_ledger.get("files", {}) if isinstance(file_ledger, dict) else {}
+            if isinstance(file_records, dict):
+                if validated_files is None:
+                    validated_files = set()
+                validation_hashes = (
+                    validation.get("source_sha256", {})
+                    if isinstance(validation, dict)
+                    else {}
+                )
+                if not isinstance(validation_hashes, dict):
+                    validation_hashes = {}
+                for name, record in file_records.items():
+                    if not isinstance(record, dict) or not record.get("valid"):
+                        continue
+                    validated_files.add(str(name))
+                    validation_hashes[str(name)] = record.get("source_sha256")
+                validation["source_sha256"] = validation_hashes
+        except (OSError, json.JSONDecodeError, AttributeError, TypeError):
+            pass
     completed_files = []
     pending_files = []
     for source in sources:
@@ -456,11 +639,14 @@ def prepare_markdown_subagent(
         pending_stats,
         batching["max_files"],
         batching["max_source_tokens"],
+        batching["single_file_max_bytes"],
     )
     manifest = {
         "schema_version": 1,
         "workflow": "antigravity-subagent",
         "task": task,
+        "execution_mode": "workspace_subagent_required",
+        "subagent_required": True,
         "source_language": source_language,
         "target_language": target_language,
         "model": model,
@@ -515,6 +701,7 @@ def prepare_markdown_subagent(
             pending_stats,
             batching["max_files"],
             batching["max_source_tokens"],
+            batching["single_file_max_bytes"],
         )
         manifest.update(
             {
@@ -529,6 +716,13 @@ def prepare_markdown_subagent(
     )
     if normalized_skipped_context:
         manifest["skipped_context_files"] = normalized_skipped_context
+    normalized_file_contexts = {
+        str(name): str(context).strip()
+        for name, context in (file_contexts or {}).items()
+        if str(name).strip() and str(context).strip()
+    }
+    if normalized_file_contexts:
+        manifest["file_contexts"] = normalized_file_contexts
     manifest_path = output_dir / f"{task}_subagent_manifest.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -571,6 +765,8 @@ Batching guidance:
 - Keep each batch at or below {batching['max_files']} files and approximately
   {batching['max_source_tokens']} source tokens; keep oversized files in their
   own Subagent task and split them only at complete source-line boundaries.
+- Any file larger than {batching['single_file_max_bytes']} bytes is isolated in
+  its own batch, even when its token estimate would fit beside other files.
 - Keep at most {batching['max_concurrency']} Subagent tasks active at once.
 - Files with no prior validation report are pending, even when a non-empty
   target file already exists.
@@ -586,6 +782,10 @@ File roles (apply only to the named files):
 Context files (read-only; do not modify):
 
 {chr(10).join(f"- `{name}`: `{path}`" for name, path in normalized_context.items()) or "- none"}
+
+Source hierarchy (read-only context for each file):
+
+{chr(10).join(f"- `{name}`: {context}" for name, context in normalized_file_contexts.items()) or "- none"}
 
 Skipped context files:
 
@@ -607,11 +807,23 @@ def validate_markdown_subagent(
     tolerate_duplicate_headings: bool = False,
     validate_footnote_normalization: bool = False,
     fix_reference_headings: bool = False,
+    selected_files: Optional[Iterable[str]] = None,
 ) -> Dict:
     """Validate a Subagent markdown hand-off and optionally stage it."""
     source_dir = Path(source_dir)
     target_dir = Path(target_dir)
-    sources = _markdown_files(source_dir)
+    all_sources = _markdown_files(source_dir)
+    selected = None
+    if selected_files is not None:
+        selected = {str(name) for name in selected_files}
+        available = {path.name for path in all_sources}
+        unknown = sorted(selected - available)
+        if unknown:
+            raise ValueError(f"Unknown Markdown source file(s): {', '.join(unknown)}")
+        sources = [path for path in all_sources if path.name in selected]
+    else:
+        sources = all_sources
+    partial = selected is not None
     missing: List[str] = []
     invalid: List[Dict[str, str]] = []
     safety_blocked: List[str] = []
@@ -630,13 +842,15 @@ def validate_markdown_subagent(
     validated_dir = target_dir / "validated"
     # Never leave a previous successful hand-off usable after a later failed
     # validation.  The validated directory is a generated staging area.
-    if validated_dir.exists():
+    if validated_dir.exists() and not partial:
         shutil.rmtree(validated_dir)
 
     for source in sources:
         target = target_dir / source.name
         if not target.exists():
             missing.append(source.name)
+            if partial:
+                (validated_dir / source.name).unlink(missing_ok=True)
             continue
         source_text = source.read_text(encoding="utf-8")
         source_sha256[source.name] = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
@@ -705,6 +919,16 @@ def validate_markdown_subagent(
             else:
                 valid_files.append(source.name)
 
+        role = normalized_roles.get(source.name)
+        if role in {"bibliography", "index"}:
+            role_errors = _validate_special_role_markers(
+                source_text, target_text, role
+            )
+            for role_error in role_errors:
+                invalid.append({"file": source.name, "reason": role_error})
+            if role_errors and source.name in valid_files:
+                valid_files.remove(source.name)
+
         source_fence_count = source_text.count("```")
         target_fence_count = target_text.count("```")
         if source_fence_count != target_fence_count:
@@ -720,7 +944,14 @@ def validate_markdown_subagent(
             if source.name in valid_files:
                 valid_files.remove(source.name)
 
-    extras = sorted(path.name for path in _markdown_files(target_dir) if path.name not in {p.name for p in sources})
+    extras = [] if partial else sorted(
+        path.name for path in _markdown_files(target_dir)
+        if path.name not in {p.name for p in sources}
+    )
+    if partial:
+        invalid_names = {item["file"] for item in invalid if item.get("file")}
+        for name in invalid_names:
+            (validated_dir / name).unlink(missing_ok=True)
     if extras:
         invalid.extend(
             {"file": name, "reason": "unexpected extra target file"}
@@ -748,11 +979,46 @@ def validate_markdown_subagent(
         "valid_files": valid_files,
         "source_sha256": source_sha256,
         "validated_dir": str(validated_dir),
+        "scope": "files" if partial else "full",
+        "files_checked": [source.name for source in sources],
         "all_passed": bool(sources) and not missing and not invalid and not extras,
     }
-    (output_dir / f"{task}_validation.json").write_text(
-        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+    report_path = (
+        output_dir / f"{task}_file_validation.json"
+        if partial
+        else output_dir / f"{task}_validation.json"
     )
+    if partial:
+        existing: Dict[str, Any] = {}
+        if report_path.is_file():
+            try:
+                loaded = json.loads(report_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    existing = loaded
+            except (OSError, json.JSONDecodeError):
+                existing = {}
+        records = existing.get("files", {})
+        if not isinstance(records, dict):
+            records = {}
+        for name in report["files_checked"]:
+            records[name] = {
+                "valid": name in report["valid_files"] and not report["missing"],
+                "source_sha256": report["source_sha256"].get(name),
+                "invalid": [item for item in report["invalid"] if item["file"] == name],
+                "safety_blocked": name in report["safety_blocked"],
+            }
+        ledger = {
+            "task": task,
+            "scope": "file-checkpoints",
+            "files": records,
+        }
+        report_path.write_text(
+            json.dumps(ledger, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    else:
+        report_path.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
     return report
 
 

@@ -2,6 +2,10 @@
 
 本项目的推荐翻译路径不从 Python 调用 Google 或 Antigravity API。需要判断和翻译的工作交给 Antigravity IDE 中的 Subagent，Python 只做本地文件处理和确定性校验。
 
+执行时以仓库根目录的 `AGENTS.md` 为唯一规范源；本文档只提供背景说明和示例，
+不应被主 Agent 当作独立的简化 SOP。尤其是正文翻译、润色、结构判断和术语提取，
+必须先打开工作区 Subagent；Subagent 入口不可用时应暂停，不得由主 Agent 代做。
+
 ## Subagent 模型配置
 
 在 `config.yaml` 或 `config_epub.yaml` 中设置：
@@ -21,6 +25,8 @@ subagent:
 ## 额度耗尽与断点续传
 
 正文任务按文件拆分。使用 `--resume` 重新准备任务时，manifest 会根据目标目录写出 `completed_files` 和 `pending_files`；提示词要求 Subagent 只处理 `pending_files`。已经通过校验的输出不会被重新覆盖。恢复前建议先运行对应的 `*-validate`，这样可以先发现空文件、行数不一致或标签损坏。
+
+PDF 翻译 manifest 还会在 `batch_handoffs/` 生成按批次隔离的 manifest 和提示词。并发时每个 Subagent 只读取自己批次的 `assigned_files`；超过 30,000 字节的单元自动独立成批。只有第一个批次负责写入 `toc_tree_translated.json`。
 
 元数据是单个 `translated_metadata.json`，必须整体是合法 JSON；如果额度中断留下半个文件，校验会拒绝它，下一次 Subagent 会完整重写。
 
@@ -90,10 +96,12 @@ ocr-pages → refine-prepare → Subagent → refine-local → polish/translate 
 安全检查 OCR 中 Notes/注释章节的 `<sup>N</sup>` 注脚迁移为 `[^N]` 和
 `[^N]: ...`；数学、表格和序数上标不会按注脚处理。
 
-PDF 正文翻译前，建议按以下顺序运行：
+PDF 正文翻译前，建议按以下顺序运行（实体表尚未存在时使用第一条的
+`--skip-entities`；实体表完成后再次运行不带该选项的门禁）：
 
 ```text
-extract-entities → extract-entities-validate → translate → translate-validate
+check-ready --skip-entities → extract-entities → extract-entities-validate →
+check-ready → translate → translate-validate
 ```
 
 `extract-entities` 读取 `translation.source_stage` 实际选中的源稿，并生成
@@ -114,6 +122,16 @@ translate-toc → translate-toc-validate
 ```
 
 这会保持目录树、顺序、页码、层级和元数据不变，只替换书名与章节标题。
+
+翻译 Subagent 完成单个 PDF 单元后可以先做低成本闭环校验：
+
+```text
+translate-validate --file chapter_5.3.2.md
+```
+
+单文件结果会写入 `translate_file_validation.json`，供 `--resume` 使用；它不等同于全书校验，打包前仍须运行不带 `--file` 的完整校验。
+
+参考文献和索引单元会额外进行离线数字标记校验，覆盖年份、版次、DOI/ISBN 片段、页码、页码范围和索引交叉引用；数字标记发生丢失、改写或重排时，校验会拒绝该单元。
 
 Windows 下的批量替换、JSON 写入和正则处理应使用仓库已有的 UTF-8 脚本或可复用
 脚本，不要拼接复杂的 PowerShell `python -c` 内联命令。

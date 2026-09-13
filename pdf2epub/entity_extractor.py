@@ -80,7 +80,12 @@ Do not modify source OCR files, add Markdown fences, or call an API.
 """
 
 
-def validate_entities(data: Any, book_title: str | None = None) -> List[str]:
+def validate_entities(
+    data: Any,
+    book_title: str | None = None,
+    source_language: str | None = None,
+    target_language: str | None = None,
+) -> List[str]:
     """Validate the entity hand-off contract locally."""
     if not isinstance(data, dict):
         return ["translation_entities.json must contain an object"]
@@ -98,6 +103,14 @@ def validate_entities(data: Any, book_title: str | None = None) -> List[str]:
             errors.append("metadata.book_title does not match the configured title")
         if metadata.get("extraction_complete") is not True:
             errors.append("metadata.extraction_complete must be true")
+        if source_language and metadata.get("source_language") != source_language:
+            errors.append(
+                "metadata.source_language does not match the configured source language"
+            )
+        if target_language and metadata.get("target_language") != target_language:
+            errors.append(
+                "metadata.target_language does not match the configured target language"
+            )
     for collection in ENTITY_COLLECTIONS:
         if collection not in data:
             errors.append(f"{collection} must be present")
