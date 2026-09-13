@@ -13,14 +13,14 @@
 ```yaml
 subagent:
   models:
-    translation: gemini-2.5-pro
-    default: gemini-2.5-flash
+    translation: <configured translation model>
+    default: <configured default model>
   # 可选：覆盖某个具体任务
   # task_models:
-  #   refine: gemini-2.5-flash
+  #   refine: <configured task model>
 ```
 
-默认规则是：正文、元数据、目录、小说和 TeX 翻译使用 `translation`；结构分析、OCR 润色和实体提取使用 `default`。每个生成的 `*_subagent_manifest.json` 和提示词都会明确写出推荐模型，供 Antigravity 中的 Subagent 选择。这里是任务合同，不是 Python 对模型 API 的调用或强制切换。
+默认规则是：正文、元数据、目录、小说和 TeX 翻译使用配置中的 `translation`；结构分析、OCR 润色和实体提取使用 `default`。每个生成的 `*_subagent_manifest.json` 和提示词都会明确写出推荐模型，供 Antigravity 中的 Subagent 选择。具体模型版本以当前配置文件为准，本文档不固定版本号。这里是任务合同，不是 Python 对模型 API 的调用或强制切换。
 
 ## 额度耗尽与断点续传
 

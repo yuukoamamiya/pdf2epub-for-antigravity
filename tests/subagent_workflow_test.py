@@ -35,6 +35,20 @@ from pdf2epub.cli import (
 )
 
 
+def test_legacy_workflow_module_reexports_split_contracts():
+    import pdf2epub.subagent_workflow as legacy
+    from pdf2epub.markdown_validation import detect_bilingual_output
+    from pdf2epub.subagent_runtime import estimate_tokens, resolve_subagent_model
+    from pdf2epub.subagent_safety import detect_refusal
+    from pdf2epub.toc_translation_workflow import validate_toc_translation_subagent
+
+    assert legacy.detect_bilingual_output is detect_bilingual_output
+    assert legacy.detect_refusal is detect_refusal
+    assert legacy.estimate_tokens is estimate_tokens
+    assert legacy.resolve_subagent_model is resolve_subagent_model
+    assert legacy.validate_toc_translation_subagent is validate_toc_translation_subagent
+
+
 def test_resolve_subagent_model_uses_translation_and_default_defaults():
     assert resolve_subagent_model({}, "translate") == DEFAULT_TRANSLATION_MODEL
     assert resolve_subagent_model({}, "translate-html") == DEFAULT_TRANSLATION_MODEL

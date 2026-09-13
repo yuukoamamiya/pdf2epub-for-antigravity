@@ -3,6 +3,9 @@
 本文件是本仓库翻译工作的唯一执行规范源。`docs/antigravity-workflow.md` 仅作补充说明；
 执行任务时以本文件为准。
 
+仓库模块职责和依赖方向见 `docs/architecture.md`；该文件仅作架构说明，不改变本文件的
+执行规范和优先级。
+
 ## 0. 最高优先级：Subagent 总闸
 
 用户提出以下任一任务时，必须使用 Antigravity IDE 的**工作区 Subagent**：翻译、润色、

@@ -20,8 +20,8 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, List
 from loguru import logger
 from .utils.logging_config import configure_logging
-from .ocr_backends import ocr_pdf_chunk_mistral, ocr_pdf_chunk_vertex, ocr_pdf_chunk_vllm
 from .ocr.artifacts import OCRPageResult
+from .ocr.backends import get_backend_spec
 
 # Configure logger
 logger = configure_logging()
@@ -88,157 +88,79 @@ def ocr_pdf_chunk(
     Returns:
         Tuple of (markdown_content, images_info, updated_image_counter)
     """
-    global _backend_clients
-
-    # Route to appropriate backend
-    if backend == "mistral":
-        if not api_key:
+    backend = str(backend or "").strip().lower()
+    spec = get_backend_spec(backend)
+    if spec.chunk_processor is not None:
+        if backend == "mistral" and not api_key:
             raise ValueError("Mistral API key is required for mistral backend")
+        if backend == "vertex" and (
+            not session or not project_id or not location
+        ):
+            raise ValueError("session, project_id, and location are required for vertex backend")
+        if backend == "vllm" and config is None:
+            from .utils.common import load_config
+            config = load_config()
 
         kwargs = {
             "pdf_bytes": pdf_bytes,
-            "api_key": api_key,
             "chunk_info": chunk_info,
             "images_dir": images_dir,
             "page_number": page_number,
             "image_counter": image_counter,
             "max_retries": max_retries,
-            "initial_backoff": initial_backoff
+            "initial_backoff": initial_backoff,
         }
+        if backend == "mistral":
+            kwargs.update(api_key=api_key)
+            if base_url:
+                kwargs["base_url"] = base_url
+        elif backend == "vertex":
+            kwargs.update(session=session, project_id=project_id, location=location)
+        else:
+            kwargs["config"] = config
+        return spec.chunk_processor(**kwargs)
 
-        if base_url:
-            kwargs["base_url"] = base_url
-
-        return ocr_pdf_chunk_mistral(**kwargs)
-
-    elif backend == "vertex":
-        if not session or not project_id or not location:
-            raise ValueError("session, project_id, and location are required for vertex backend")
-
-        return ocr_pdf_chunk_vertex(
-            pdf_bytes=pdf_bytes,
-            session=session,
-            project_id=project_id,
-            location=location,
-            chunk_info=chunk_info,
-            images_dir=images_dir,
-            page_number=page_number,
-            image_counter=image_counter,
-            max_retries=max_retries,
-            initial_backoff=initial_backoff
-        )
-
-    elif backend == "vllm":
-        # Load config for vllm backend if not provided
+    if spec.image_page_processor is not None:
         if config is None:
-            from .utils.common import load_config
-            config = load_config()
-
-        return ocr_pdf_chunk_vllm(
-            pdf_bytes=pdf_bytes,
-            config=config,
-            chunk_info=chunk_info,
-            images_dir=images_dir,
-            page_number=page_number,
-            image_counter=image_counter,
-            max_retries=max_retries,
-            initial_backoff=initial_backoff
+            raise ValueError(f"config is required for {backend} backend")
+        result = _process_image_page_backend(
+            spec, pdf_bytes, config, images_dir, page_number, image_counter
         )
+        return result
 
-    elif backend == "azure":
-        # Azure Document Intelligence backend (for Japanese vertical text)
-        if config is None:
-            raise ValueError("config is required for azure backend")
+    raise ValueError(
+        f"Backend {backend!r} only supports native page OCR; use ocr_pdf_page instead"
+    )
 
-        # Convert PDF to image
-        zoom_factor = config.get('vision_ocr_settings', {}).get('zoom_factor', 1.0)
-        img_bytes = pdf_to_image(pdf_bytes, zoom_factor)
 
-        # Initialize client (cached)
-        if 'azure' not in _backend_clients:
-            from .ocr.backends import get_backend
-            init_client_func, _ = get_backend('azure')
-            _backend_clients['azure'] = init_client_func(config)
-            logger.info("Initialized Azure Document Intelligence client")
-
-        # Get process_page function
-        from .ocr.backends import get_backend
-        _, process_page_func = get_backend('azure')
-
-        # Determine base output directory for images
-        base_output_dir = images_dir.parent if images_dir else None
-
-        # Process page
-        result = process_page_func(
-            client=_backend_clients['azure'],
-            img_bytes=img_bytes,
-            page_num=page_number,
-            config=config,
-            base_output_dir=base_output_dir
-        )
-
-        # Extract results
-        markdown = result.get('text', '')
-        illustrations = result.get('illustrations', [])
-
-        # Inject illustrations into markdown if present
-        if illustrations:
-            from .ocr import inject_illustrations_into_text
-            markdown = inject_illustrations_into_text(markdown, illustrations)
-
-        # Count illustrations as images
-        updated_counter = image_counter + len(illustrations)
-
-        return markdown, illustrations, updated_counter
-
-    elif backend == "vision":
-        # Google Cloud Vision API backend (for Japanese vertical text)
-        if config is None:
-            raise ValueError("config is required for vision backend")
-
-        # Convert PDF to image
-        zoom_factor = config.get('vision_ocr_settings', {}).get('zoom_factor', 1.0)
-        img_bytes = pdf_to_image(pdf_bytes, zoom_factor)
-
-        # Initialize client (cached)
-        if 'vision' not in _backend_clients:
-            from .ocr.backends import get_backend
-            init_client_func, _ = get_backend('vision')
-            _backend_clients['vision'] = init_client_func(config)
-            logger.info("Initialized Google Cloud Vision client")
-
-        # Get process_page function
-        from .ocr.backends import get_backend
-        _, process_page_func = get_backend('vision')
-
-        # Determine base output directory for images
-        base_output_dir = images_dir.parent if images_dir else None
-
-        # Process page
-        result = process_page_func(
-            client=_backend_clients['vision'],
-            img_bytes=img_bytes,
-            page_num=page_number,
-            config=config,
-            base_output_dir=base_output_dir
-        )
-
-        # Extract results
-        markdown = result.get('text', '')
-        illustrations = result.get('illustrations', [])
-
-        # Inject illustrations into markdown if present
-        if illustrations:
-            from .ocr import inject_illustrations_into_text
-            markdown = inject_illustrations_into_text(markdown, illustrations)
-
-        # Count illustrations as images
-        updated_counter = image_counter + len(illustrations)
-
-        return markdown, illustrations, updated_counter
-
-    else:
-        raise ValueError(f"Unknown OCR backend: {backend}. Supported: vertex, mistral, vllm, azure, vision, chandra")
+def _process_image_page_backend(
+    spec,
+    pdf_bytes: bytes,
+    config: Dict,
+    images_dir: Optional[Path],
+    page_number: int,
+    image_counter: int,
+) -> Tuple[str, List, int]:
+    """Run an image-oriented registered backend with the shared adapter."""
+    global _backend_clients
+    zoom_factor = config.get("vision_ocr_settings", {}).get("zoom_factor", 1.0)
+    img_bytes = pdf_to_image(pdf_bytes, zoom_factor)
+    if spec.name not in _backend_clients:
+        _backend_clients[spec.name] = spec.init_client(config)
+        logger.info(f"Initialized {spec.name} OCR client")
+    result = spec.image_page_processor(
+        client=_backend_clients[spec.name],
+        img_bytes=img_bytes,
+        page_num=page_number,
+        config=config,
+        base_output_dir=images_dir.parent if images_dir else None,
+    )
+    markdown = result.get("text", "")
+    illustrations = result.get("illustrations", [])
+    if illustrations:
+        from .ocr import inject_illustrations_into_text
+        markdown = inject_illustrations_into_text(markdown, illustrations)
+    return markdown, illustrations, image_counter + len(illustrations)
 
 
 def ocr_pdf_page(
@@ -258,18 +180,26 @@ def ocr_pdf_page(
     config: Dict = None,
 ) -> OCRPageResult:
     """OCR one page while retaining every representation a backend exposes."""
-    if backend == "chandra":
+    backend = str(backend or "").strip().lower()
+    spec = get_backend_spec(backend)
+    if spec.native_page_processor is not None:
         if config is None:
-            raise ValueError("config is required for chandra backend")
-        from .ocr.backends.chandra import process_pdf_page
-
-        return process_pdf_page(
+            raise ValueError(f"config is required for {backend} backend")
+        return spec.native_page_processor(
             pdf_bytes,
             config,
             page_number=page_number,
             images_dir=images_dir,
             image_counter=image_counter,
         )
+
+    if spec.image_page_processor is not None:
+        if config is None:
+            raise ValueError(f"config is required for {backend} backend")
+        tuple_result = _process_image_page_backend(
+            spec, pdf_bytes, config, images_dir, page_number, image_counter
+        )
+        return OCRPageResult.from_tuple(tuple_result, backend=backend)
 
     tuple_result = ocr_pdf_chunk(
         pdf_bytes=pdf_bytes,
@@ -407,6 +337,7 @@ def ocr_full_book_pagewise(
         config: Configuration dict (for retry settings)
         max_workers: Number of parallel OCR requests (default: 5)
     """
+    backend = str(backend or "").strip().lower()
     from concurrent.futures import ThreadPoolExecutor, as_completed
     # Get retry settings from config
     if config is None:

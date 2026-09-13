@@ -23,7 +23,8 @@ from defusedxml import ElementTree as ET
 
 from .epub_parser import EPUBParser
 from .validation import nonempty_lines, tag_mismatch_count
-from pdf2epub.subagent_workflow import detect_refusal, resolve_subagent_model
+from pdf2epub.subagent_runtime import resolve_subagent_model
+from pdf2epub.subagent_safety import detect_refusal
 from pdf2epub.glossary import validate_translation_context
 from pdf2epub.utils.common import sanitize_filename
 from pdf2epub.utils.html_safety import sanitize_html_document

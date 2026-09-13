@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
-from pdf2epub.subagent_workflow import resolve_subagent_model
+from pdf2epub.subagent_runtime import resolve_subagent_model
 from .pagination import build_pagination_map
 from .pdf_outline import extract_pdf_outline
 
