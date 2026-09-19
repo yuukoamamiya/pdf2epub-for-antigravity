@@ -22,6 +22,36 @@ from .markdown_validation import (
 from .subagent_runtime import _markdown_files
 from .subagent_safety import detect_refusal
 from .utils.ocr_artifacts import clean_ocr_page_artifacts
+from .workflow_contracts import atomic_write_text
+
+
+def _structural_mismatch_reason(
+    pattern: str,
+    source_text: str,
+    target_text: str,
+    source_count: int,
+    target_count: int,
+) -> str:
+    """Explain a structural mismatch with useful source/target line numbers."""
+    if pattern == r"^#{1,6}\s":
+        heading_pattern = re.compile(r"^(#{1,6})\s", re.MULTILINE)
+
+        def describe(text: str) -> str:
+            headings = [
+                (text.count("\n", 0, match.start()) + 1, len(match.group(1)))
+                for match in heading_pattern.finditer(text)
+            ]
+            return ", ".join(f"L{line} (level {level})" for line, level in headings) or "none"
+
+        return (
+            "structural marker mismatch: Markdown heading structure mismatch: "
+            f"source={source_count} [{describe(source_text)}]; "
+            f"target={target_count} [{describe(target_text)}]"
+        )
+    return (
+        f"structural marker mismatch: {pattern} "
+        f"(source={source_count}, target={target_count})"
+    )
 
 def validate_markdown_subagent(
     output_dir: Path,
@@ -79,17 +109,36 @@ def validate_markdown_subagent(
             if partial:
                 (validated_dir / source.name).unlink(missing_ok=True)
             continue
-        source_text = source.read_text(encoding="utf-8")
-        source_sha256[source.name] = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
-        target_text = target.read_text(encoding="utf-8")
+        try:
+            source_bytes = source.read_bytes()
+            source_sha256[source.name] = hashlib.sha256(source_bytes).hexdigest()
+            source_text = source_bytes.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            invalid.append(
+                {
+                    "file": source.name,
+                    "reason": f"source UTF-8 decode error: {exc}",
+                }
+            )
+            continue
+        try:
+            target_text = target.read_bytes().decode("utf-8")
+        except UnicodeDecodeError as exc:
+            invalid.append(
+                {
+                    "file": source.name,
+                    "reason": f"UTF-8 decode error (truncated file?): {exc}",
+                }
+            )
+            continue
         target_text, stripped_fence = strip_outer_markdown_fences(target_text)
         if stripped_fence:
-            target.write_text(target_text, encoding="utf-8")
+            atomic_write_text(target, target_text)
             normalized_files.append(source.name)
         if task == "translate" and fix_reference_headings:
             target_text, fixes = fix_reference_heading_mismatch(source_text, target_text)
             if fixes:
-                target.write_text(target_text, encoding="utf-8")
+                atomic_write_text(target, target_text)
                 normalized_files.append(source.name)
                 reference_heading_fixes.extend(
                     {"file": source.name, **fix} for fix in fixes
@@ -113,17 +162,35 @@ def validate_markdown_subagent(
             comparison_source = source_text
             if pattern == r"!\[[^\]]*\]\([^)]+\)":
                 comparison_source = clean_ocr_page_artifacts(source_text)
-            source_count = len(re.findall(pattern, comparison_source, flags=re.MULTILINE))
-            target_count = len(re.findall(pattern, target_text, flags=re.MULTILINE))
+            source_matches = list(re.finditer(pattern, comparison_source, flags=re.MULTILINE))
+            target_matches = list(re.finditer(pattern, target_text, flags=re.MULTILINE))
+            source_count = len(source_matches)
+            target_count = len(target_matches)
+            heading_levels_changed = (
+                pattern == r"^#{1,6}\s"
+                and [len(match.group(0).split()[0]) for match in source_matches]
+                != [len(match.group(0).split()[0]) for match in target_matches]
+            )
             mismatch_allowed = (
                 pattern == r"^#{1,6}\s"
                 and tolerate_duplicate_headings
                 and _heading_reduction_is_duplicate_only(comparison_source, target_text)
             )
-            if source_count != target_count and not mismatch_allowed:
-                invalid.append({"file": source.name, "reason": f"structural marker mismatch: {pattern}"})
+            if (source_count != target_count or heading_levels_changed) and not mismatch_allowed:
+                invalid.append(
+                    {
+                        "file": source.name,
+                        "reason": _structural_mismatch_reason(
+                            pattern,
+                            comparison_source,
+                            target_text,
+                            source_count,
+                            target_count,
+                        ),
+                    }
+                )
                 break
-            if source_count != target_count and mismatch_allowed:
+            if (source_count != target_count or heading_levels_changed) and mismatch_allowed:
                 structural_warnings.append(
                     {
                         "file": source.name,
@@ -239,13 +306,9 @@ def validate_markdown_subagent(
             "scope": "file-checkpoints",
             "files": records,
         }
-        report_path.write_text(
-            json.dumps(ledger, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        atomic_write_text(report_path, json.dumps(ledger, ensure_ascii=False, indent=2))
     else:
-        report_path.write_text(
-            json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        atomic_write_text(report_path, json.dumps(report, ensure_ascii=False, indent=2))
     return report
 
 __all__ = ["validate_markdown_subagent"]

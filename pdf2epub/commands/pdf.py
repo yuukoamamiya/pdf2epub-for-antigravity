@@ -35,7 +35,7 @@ def build_epub_command(args):
     """Handle the build-epub subcommand (toc_tree.json driven)."""
     import asyncio
     from pathlib import Path
-    from .build_epub import build_epub, BuildEpubConfig
+    from ..build_epub import build_epub, BuildEpubConfig
 
     context = load_book_context(args, "build-epub")
     if context is None:

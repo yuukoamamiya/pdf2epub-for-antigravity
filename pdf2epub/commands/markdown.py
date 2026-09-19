@@ -19,6 +19,7 @@ from pdf2epub.commands.sources import (
     _resolve_pdf_markdown_source,
 )
 from pdf2epub.utils.common import book_output_dir, load_config
+from pdf2epub.workflow_contracts import atomic_write_text
 
 
 def _load_pdf_file_roles(output_dir: Path) -> dict:
@@ -476,8 +477,9 @@ def _validate_pdf_markdown_task(args, task: str):
 
 def _persist_full_validation_report(output_dir: Path, task: str, report: dict) -> None:
     """Persist the final report after all book-level gates were evaluated."""
-    (Path(output_dir) / f"{task}_validation.json").write_text(
-        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+    atomic_write_text(
+        Path(output_dir) / f"{task}_validation.json",
+        json.dumps(report, ensure_ascii=False, indent=2),
     )
 
 
@@ -505,13 +507,13 @@ def _persist_file_validation_checkpoint(output_dir: Path, report: dict) -> None:
             ],
             "safety_blocked": name in report.get("safety_blocked", []),
         }
-    path.write_text(
+    atomic_write_text(
+        path,
         json.dumps(
             {"task": "translate", "scope": "file-checkpoints", "files": records},
             ensure_ascii=False,
             indent=2,
         ),
-        encoding="utf-8",
     )
 
 

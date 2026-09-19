@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 
@@ -17,6 +19,27 @@ from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 def sha256_file(path: Path) -> str:
     """Return the SHA-256 digest of a workspace file."""
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def atomic_write_text(path: Path, content: str, *, encoding: str = "utf-8") -> None:
+    """Write text through a sibling temporary file and replace the target atomically."""
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{target.name}.", suffix=".tmp", dir=target.parent
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding=encoding, newline="") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_name, target)
+    except BaseException:
+        try:
+            os.unlink(temporary_name)
+        except OSError:
+            pass
+        raise
 
 
 def load_json_object(path: Path, *, default: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -69,9 +92,15 @@ def is_reusable_checkpoint(
     become resume checkpoints.
     """
     target = Path(target_path)
-    return (
-        target.is_file()
-        and bool(target.read_text(encoding="utf-8").strip())
-        and str(item_id) in set(validated_ids)
-        and recorded_hashes.get(str(item_id)) == source_sha256
-    )
+    if (
+        not target.is_file()
+        or str(item_id) not in set(validated_ids)
+        or recorded_hashes.get(str(item_id)) != source_sha256
+    ):
+        return False
+    try:
+        return bool(target.read_bytes().decode("utf-8").strip())
+    except (OSError, UnicodeError):
+        # A partially written or truncated target is never a resumable
+        # checkpoint, even if an old validation report says it was valid.
+        return False
