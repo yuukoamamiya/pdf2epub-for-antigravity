@@ -98,6 +98,15 @@ def test_pdf_source_stage_selects_only_current_polished_output(tmp_path: Path):
         tmp_path, {"translation": {"source_stage": "auto"}}
     ) == (polished_dir, "polished")
 
+def test_pdf_source_stage_defaults_to_polished(tmp_path: Path):
+    polished_dir = tmp_path / "polished_markdown" / "validated"
+    ocr_dir = tmp_path / "ocr_markdown"
+    polished_dir.mkdir(parents=True)
+    ocr_dir.mkdir()
+    (ocr_dir / "chapter_1.md").write_text("ocr", encoding="utf-8")
+
+    assert _resolve_pdf_markdown_source(tmp_path, {}) == (polished_dir, "polished")
+
 
 def test_pdf_markdown_context_helpers_propagate_roles_and_hierarchy(tmp_path: Path):
     ocr_dir = tmp_path / "ocr_markdown"

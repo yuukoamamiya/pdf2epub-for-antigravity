@@ -55,6 +55,12 @@ def build_epub_command(args):
     if args.translated:
         markdown_dir = output_dir / "translated" / "validated"
         logger.info("Building EPUB from translated markdown...")
+        if source_stage != "polished":
+            logger.error(
+                "Refusing to build translated PDF EPUB: a current validated "
+                "polished source is required. Run polish and polish-validate first."
+            )
+            return 1
         source_validation = _validate_pdf_source_stage(args, source_stage)
         if source_validation != 0:
             logger.error("Refusing to build: the English source stage is not validated")

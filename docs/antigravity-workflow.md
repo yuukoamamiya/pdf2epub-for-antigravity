@@ -75,7 +75,8 @@ html-validate --file <同名文件>.md
 ## PDF 结构精修
 
 ```text
-ocr-pages → refine-prepare → Subagent → refine-local → polish/translate → build-epub
+ocr-pages → refine-prepare → Subagent → refine-local → polish → polish-validate
+  → extract-entities → translate → translate-validate → build-epub
 ```
 
 `refine-prepare` 会在 `output/<title>/` 生成 `refine_subagent_prompt.md` 和 `refine_subagent_manifest.json`。Subagent 阅读 `pages/page_*.md` 后，只负责写入 `toc_tree.json`。随后 `refine-local`：
@@ -96,13 +97,17 @@ ocr-pages → refine-prepare → Subagent → refine-local → polish/translate 
 安全检查 OCR 中 Notes/注释章节的 `<sup>N</sup>` 注脚迁移为 `[^N]` 和
 `[^N]: ...`；数学、表格和序数上标不会按注脚处理。
 
-PDF 正文翻译前，建议按以下顺序运行（实体表尚未存在时使用第一条的
+PDF 正文翻译前，必须按以下顺序运行（实体表尚未存在时使用第一条的
 `--skip-entities`；实体表完成后再次运行不带该选项的门禁）：
 
 ```text
-check-ready --skip-entities → extract-entities → extract-entities-validate →
-check-ready → translate → translate-validate
+polish → polish-validate → check-ready --skip-entities → extract-entities →
+extract-entities-validate → check-ready → translate → translate-validate
 ```
+
+`polish` 用于修复 OCR 换行和明显 OCR 错字。PDF 翻译、实体提取和打包都必须以当前
+且通过 `polish-validate` 的 `polished_markdown/validated/` 为源稿；如果润色稿缺失、
+校验失败或与当前 OCR 源稿不匹配，本地门禁会拒绝继续。
 
 `extract-entities` 读取 `translation.source_stage` 实际选中的源稿，并生成
 `translation_entities.template.json` 和 `translation_entities.json` 的交接契约。

@@ -71,6 +71,13 @@ Subagent 直接写文件 → 单文件校验 → 收集完成结果 → 下一�
 全量校验 → 打包
 ```
 
+对扫描版 PDF，`polish` 是翻译前的必经质量闸门，不是可选的版式优化；只有
+`polish-validate` 通过后，才能提取实体表或准备正文翻译。EPUB、轻小说和 TeX
+流程不使用这一 PDF 润色阶段。
+
+扫描版 PDF 的具体循环为：`ocr-pages → refine-prepare → refine-local → polish →
+polish-validate → extract-entities → translate → translate-validate → build-epub`。
+
 并发任务必须各自使用 handoff 中的 `assigned_files`。超过 30,000 字节的单元必须独立
 成批。TOC 只能由 manifest 指定的唯一 owner 写入，其他 Subagent 只能读取。
 
@@ -102,14 +109,16 @@ Subagent 直接写文件 → 单文件校验 → 收集完成结果 → 下一�
 
    本地程序校验页码范围、父子关系、兄弟节点重叠，并生成 `ocr_markdown/`。
    `tree_progress.json` 会锁定 TOC/OCR 指纹；输入变化后必须重新生成受影响单元。
-6. 若需要版式精修：执行 `polish`，打开工作区 Subagent 读取
+6. 必须执行 `polish`，打开工作区 Subagent 读取
    `polish_subagent_prompt.md` 写入 `polished_markdown/`，然后运行 `polish-validate`。
+   该步骤用于修复 OCR 换行和明显 OCR 错字，并在翻译前锁定经过校验的源稿；未通过
+   `polish-validate` 不得继续实体提取或翻译。
    润色不得把普通粗体、罗马数字、编号或序数上标升级成 Markdown 标题；已确认的
    `<sup>N</sup>` 注脚才可规范化为 `[^N]`。
 
 ### 2.2 术语提取和翻译
 
-实体表尚未存在时，先执行以下结构门禁；此时不得翻译：
+实体表尚未存在时，确认上一步 `polish-validate` 已通过，再执行以下结构门禁；此时不得翻译：
 
 ```text
 uv run pdf2epub -c config.yaml check-ready --stage translate --skip-entities

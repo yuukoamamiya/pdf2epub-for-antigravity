@@ -823,12 +823,26 @@ def test_extract_entities_uses_configured_language_and_selected_source_stage(
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         "title: Book\ntranslation:\n  source_language: French\n"
-        "  target_language: Chinese\n  source_stage: ocr\n",
+        "  target_language: Chinese\n  source_stage: polished\n",
         encoding="utf-8",
     )
     source_dir = tmp_path / "output" / "Book" / "ocr_markdown"
     source_dir.mkdir(parents=True)
     (source_dir / "chapter_001.md").write_text("Bonjour", encoding="utf-8")
+    polished_dir = tmp_path / "output" / "Book" / "polished_markdown" / "validated"
+    polished_dir.mkdir(parents=True)
+    (polished_dir / "chapter_001.md").write_text("Bonjour", encoding="utf-8")
+    (tmp_path / "output" / "Book" / "polish_validation.json").write_text(
+        json.dumps(
+            {
+                "all_passed": True,
+                "source_sha256": {"chapter_001.md": hashlib.sha256(
+                    (source_dir / "chapter_001.md").read_bytes()
+                ).hexdigest()},
+            }
+        ),
+        encoding="utf-8",
+    )
 
     result = extract_entities_command(
         SimpleNamespace(
@@ -844,7 +858,7 @@ def test_extract_entities_uses_configured_language_and_selected_source_stage(
     )
     assert manifest["source_language"] == "French"
     assert manifest["target_language"] == "Chinese"
-    assert manifest["source_stage"] == "ocr"
+    assert manifest["source_stage"] == "polished"
     assert manifest["files"] == ["chapter_001.md"]
     template = json.loads(
         (tmp_path / "output" / "Book" / "translation_entities.template.json").read_text(
@@ -931,6 +945,20 @@ def test_translate_skip_entities_is_recorded_in_prompt_and_manifest(
     source_dir = output_dir / "ocr_markdown"
     source_dir.mkdir(parents=True)
     (source_dir / "chapter.md").write_text("Source", encoding="utf-8")
+    polished_dir = output_dir / "polished_markdown" / "validated"
+    polished_dir.mkdir(parents=True)
+    (polished_dir / "chapter.md").write_text("Source", encoding="utf-8")
+    (output_dir / "polish_validation.json").write_text(
+        json.dumps(
+            {
+                "all_passed": True,
+                "source_sha256": {"chapter.md": hashlib.sha256(
+                    (source_dir / "chapter.md").read_bytes()
+                ).hexdigest()},
+            }
+        ),
+        encoding="utf-8",
+    )
     (output_dir / "toc_tree.json").write_text(
         json.dumps({"book_title": "Book", "chapters": []}), encoding="utf-8"
     )

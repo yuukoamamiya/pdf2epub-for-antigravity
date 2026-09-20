@@ -10,7 +10,10 @@ from pathlib import Path
 from loguru import logger
 
 from pdf2epub.commands.runtime import load_book_context, load_command_config
-from pdf2epub.commands.sources import _resolve_pdf_markdown_source
+from pdf2epub.commands.sources import (
+    _polished_stage_is_current,
+    _resolve_pdf_markdown_source,
+)
 from pdf2epub.utils.common import book_output_dir
 
 
@@ -116,17 +119,21 @@ def extract_entities_command(args):
         return 1
     output_dir = book_output_dir(book_title)
     source_dir, source_stage = _resolve_pdf_markdown_source(output_dir, config)
-    if not source_dir.exists():
-        source_dir = output_dir / "pages"
-        source_stage = "ocr-pages"
     # EPUB terminology is extracted from the compressed translation units so
     # the same book-wide entity contract can be used by both pipelines.
     epub_units = output_dir / "compressed_units"
-    if (
-        list(epub_units.glob("*.md"))
-        and (config.get("input_epub") or (output_dir / "input.epub").is_file())
-    ):
+    is_epub = bool(config.get("input_epub") or (output_dir / "input.epub").is_file())
+    if list(epub_units.glob("*.md")) and is_epub:
         source_dir, source_stage = epub_units, "epub-compressed"
+    elif source_stage != "polished" or not _polished_stage_is_current(
+        output_dir, source_dir, output_dir / "ocr_markdown"
+    ):
+        logger.error(
+            "PDF entity extraction requires a current validated polished source. "
+            "Run polish, let the Subagent write polished_markdown/, then run "
+            "polish-validate before extract-entities."
+        )
+        return 1
     source_language = args.source_lang or config.get("translation", {}).get(
         "source_language", "English"
     )

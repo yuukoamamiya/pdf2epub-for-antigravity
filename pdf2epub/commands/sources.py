@@ -6,9 +6,14 @@ from pathlib import Path
 
 
 def _resolve_pdf_markdown_source(output_dir: Path, config: dict):
-    """Choose the Markdown stage shared by PDF translation and source builds."""
+    """Choose the Markdown stage shared by PDF workflows.
+
+    Polished Markdown is the default source for PDF work.  ``auto`` remains
+    available for diagnostic/legacy source inspection, but translation and
+    readiness gates reject the OCR fallback when polishing is missing.
+    """
     translation = config.get("translation", {}) or {}
-    requested_stage = str(translation.get("source_stage", "auto")).strip().lower()
+    requested_stage = str(translation.get("source_stage", "polished")).strip().lower()
     if requested_stage not in {"auto", "ocr", "polished"}:
         raise ValueError(
             "translation.source_stage must be one of: auto, ocr, polished"

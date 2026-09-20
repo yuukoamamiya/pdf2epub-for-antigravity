@@ -97,7 +97,7 @@ refine-prepare + 工作区 Subagent
   → toc_tree.json
 refine-local
   → ocr_markdown/ + tree_progress.json
-polish + 工作区 Subagent + polish-validate（可选）
+polish + 工作区 Subagent + polish-validate（PDF 翻译必需）
   → polished_markdown/validated/
 extract-entities + 工作区 Subagent + extract-entities-validate
   → translation_entities.json

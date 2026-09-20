@@ -298,7 +298,9 @@ def test_pdf_source_stage_ignores_stale_polished_output(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    assert _resolve_pdf_markdown_source(tmp_path, {}) == (ocr_dir, "ocr")
+    assert _resolve_pdf_markdown_source(
+        tmp_path, {"translation": {"source_stage": "auto"}}
+    ) == (ocr_dir, "ocr")
 
 
 def test_book_metadata_prefers_explicit_values_and_ignores_unknown(tmp_path: Path) -> None:

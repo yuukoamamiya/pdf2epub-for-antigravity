@@ -163,7 +163,13 @@ def _prepare_pdf_markdown_task(args, task: str):
         if content_type and content_type != "auto":
             rules.append(f"Treat this as {content_type} content and preserve its domain-specific conventions.")
     else:
-        source_dir, _ = _resolve_pdf_markdown_source(output_dir, config)
+        source_dir, source_stage = _resolve_pdf_markdown_source(output_dir, config)
+        if source_stage != "polished":
+            logger.error(
+                "PDF translation requires a current validated polished source. "
+                "Run polish and polish-validate before translate."
+            )
+            return 1
         target_dir = output_dir / "translated"
         translation_config = config.get("translation", {})
         require_entities = translation_config.get("require_entities", True)
@@ -623,6 +629,14 @@ def _run_readiness_check(
         if source_ready
         else f"{source_stage} source is missing or not validated",
     )
+    if stage in {"translate", "package"}:
+        record(
+            "polish_required",
+            source_stage == "polished" and source_ready,
+            "PDF translation requires a current validated polished source"
+            if source_stage != "polished" or not source_ready
+            else "current validated polished source is selected",
+        )
 
     translation = config.get("translation", {}) or {}
     require_entities = bool(translation.get("require_entities", True))
