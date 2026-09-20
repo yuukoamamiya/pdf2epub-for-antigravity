@@ -21,6 +21,11 @@ def sha256_file(path: Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def relative_posix_path(path: Path, root: Path) -> str:
+    """Serialize an in-root relative path with POSIX separators everywhere."""
+    return Path(path).resolve().relative_to(Path(root).resolve()).as_posix()
+
+
 def atomic_write_text(path: Path, content: str, *, encoding: str = "utf-8") -> None:
     """Write text through a sibling temporary file and replace the target atomically."""
     target = Path(path)

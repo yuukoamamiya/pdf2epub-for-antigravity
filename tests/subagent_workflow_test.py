@@ -910,6 +910,11 @@ def test_translate_task_integrates_toc_contract_into_main_manifest_and_prompt(tm
     (output_dir / "toc_tree.json").write_text(
         json.dumps({"book_title": "Book", "chapters": []}), encoding="utf-8"
     )
+    toc_paths = prepare_toc_translation_subagent(output_dir, "English", "Chinese")
+    toc_source = json.loads(toc_paths["source"].read_text(encoding="utf-8"))
+    (output_dir / "toc_tree_translated.json").write_text(
+        json.dumps(toc_source["toc"], ensure_ascii=False), encoding="utf-8"
+    )
     source_dir = output_dir / "ocr_markdown"
     source_dir.mkdir()
     (source_dir / "chapter.md").write_text("Source", encoding="utf-8")
@@ -962,6 +967,11 @@ def test_translate_skip_entities_is_recorded_in_prompt_and_manifest(
     (output_dir / "toc_tree.json").write_text(
         json.dumps({"book_title": "Book", "chapters": []}), encoding="utf-8"
     )
+    toc_paths = prepare_toc_translation_subagent(output_dir, "English", "Chinese")
+    toc_source = json.loads(toc_paths["source"].read_text(encoding="utf-8"))
+    (output_dir / "toc_tree_translated.json").write_text(
+        json.dumps(toc_source["toc"], ensure_ascii=False), encoding="utf-8"
+    )
 
     result = _prepare_pdf_markdown_task(
         SimpleNamespace(
@@ -980,8 +990,8 @@ def test_translate_skip_entities_is_recorded_in_prompt_and_manifest(
     )
     prompt = (output_dir / "translate_subagent_prompt.md").read_text(encoding="utf-8")
     assert manifest["skipped_context_files"] == ["translation_entities"]
-    assert manifest["toc_translation"]["output_file"] == "toc_tree_translated.json"
-    assert "Required TOC translation (part of this same task)" in prompt
+    assert len(manifest["worker_handoffs"]) == 1
+    assert "Exact translated TOC heading contract" in prompt
     assert "do not invent or expect a translation_entities.json context file" in prompt
     assert "Read translation_entities.json before translating" not in prompt
 

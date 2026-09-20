@@ -98,14 +98,40 @@ def test_pdf_source_stage_selects_only_current_polished_output(tmp_path: Path):
         tmp_path, {"translation": {"source_stage": "auto"}}
     ) == (polished_dir, "polished")
 
-def test_pdf_source_stage_defaults_to_polished(tmp_path: Path):
+def test_pdf_source_stage_auto_falls_back_to_ocr_without_native_probe(tmp_path: Path):
     polished_dir = tmp_path / "polished_markdown" / "validated"
     ocr_dir = tmp_path / "ocr_markdown"
     polished_dir.mkdir(parents=True)
     ocr_dir.mkdir()
     (ocr_dir / "chapter_1.md").write_text("ocr", encoding="utf-8")
 
-    assert _resolve_pdf_markdown_source(tmp_path, {}) == (polished_dir, "polished")
+    assert _resolve_pdf_markdown_source(tmp_path, {}) == (ocr_dir, "ocr")
+
+
+def test_native_text_probe_does_not_bypass_polished_source(tmp_path: Path):
+    ocr_dir = tmp_path / "ocr_markdown"
+    pages_dir = tmp_path / "pages"
+    ocr_dir.mkdir()
+    pages_dir.mkdir()
+    (ocr_dir / "chapter_1.md").write_text("raw native layout", encoding="utf-8")
+    (pages_dir / "page_001.md").write_text("raw native layout", encoding="utf-8")
+    (tmp_path / "pdf_text_probe.json").write_text(
+        json.dumps(
+            {
+                "classification": "native_text",
+                "recommendation": "use_text_layer",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (pages_dir / "ocr_progress.json").write_text(
+        json.dumps({"mode": "native_text", "failed_pages": []}),
+        encoding="utf-8",
+    )
+
+    # Native extraction skips visual OCR, but the raw page/layout source is
+    # still not a translation-ready semantic-paragraph source.
+    assert _resolve_pdf_markdown_source(tmp_path, {}) == (ocr_dir, "ocr")
 
 
 def test_pdf_markdown_context_helpers_propagate_roles_and_hierarchy(tmp_path: Path):

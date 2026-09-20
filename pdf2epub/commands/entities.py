@@ -57,7 +57,7 @@ def _prepare_entity_subagent_task(
         "source_language": source_language,
         "target_language": target_language,
         "model": model,
-        "source_dir": str(source_dir.relative_to(output_dir)),
+        "source_dir": source_dir.relative_to(output_dir).as_posix(),
         "source_stage": source_stage,
         "files": [path.name for path in source_files],
         "source_sha256": {
@@ -129,9 +129,9 @@ def extract_entities_command(args):
         output_dir, source_dir, output_dir / "ocr_markdown"
     ):
         logger.error(
-            "PDF entity extraction requires a current validated polished source. "
-            "Run polish, let the Subagent write polished_markdown/, then run "
-            "polish-validate before extract-entities."
+            "PDF entity extraction requires a current validated polished source "
+            "for both OCR-derived and native-text PDFs. Run polish and "
+            "polish-validate first."
         )
         return 1
     source_language = args.source_lang or config.get("translation", {}).get(

@@ -71,15 +71,20 @@ Subagent 直接写文件 → 单文件校验 → 收集完成结果 → 下一�
 全量校验 → 打包
 ```
 
-对扫描版 PDF，`polish` 是翻译前的必经质量闸门，不是可选的版式优化；只有
-`polish-validate` 通过后，才能提取实体表或准备正文翻译。EPUB、轻小说和 TeX
-流程不使用这一 PDF 润色阶段。
+对所有 PDF，`polish` 都是翻译前的必经质量闸门，不是可选的版式优化；只有
+`polish-validate` 通过后，才能提取实体表或准备正文翻译。高置信度原生矢量文本 PDF
+只跳过视觉 OCR，仍必须用 `polish` 判断视觉换行与真实段落边界。原生文字稿的 polish
+不得进行无依据的拼写或字形改写，重点是合并软换行并保留真实段落、标题和块级结构。
+EPUB、轻小说和 TeX 流程不使用这一 PDF 润色阶段。
 
-扫描版 PDF 的具体循环为：`ocr-pages → refine-prepare → refine-local → polish →
-polish-validate → extract-entities → translate → translate-validate → build-epub`。
+PDF 的具体循环为：`ocr-pages → refine-prepare → refine-local → polish →
+polish-validate`。
+随后执行 `extract-entities → translate-toc → translate-toc-validate → translate →
+translate-validate → build-epub`。可搜索但由扫描图像叠加 OCR 文字层的 PDF 仍必须重新
+视觉 OCR。
 
-并发任务必须各自使用 handoff 中的 `assigned_files`。超过 30,000 字节的单元必须独立
-成批。TOC 只能由 manifest 指定的唯一 owner 写入，其他 Subagent 只能读取。
+并发任务必须各自使用 worker handoff 中的 `assigned_files`。超过 30,000 字节的单元必须
+独立成批。TOC 必须由正文翻译前的独立 Subagent 完成，正文 worker 不得修改翻译 TOC。
 
 ## 2. PDF 扫描件翻译流程
 
@@ -96,7 +101,8 @@ polish-validate → extract-entities → translate → translate-validate → bu
    uv run pdf2epub -c config.yaml ocr-pages --resume
    ```
 
-   产物是 `output/<title>/pages/page_XXX.md` 及 OCR 布局信息。
+   程序会先生成 `pdf_text_probe.json`。只有高置信度原生矢量文本 PDF 才直接提取文字；
+   扫描 PDF 和可搜索 OCR PDF 都生成视觉 OCR 的 `pages/page_XXX.md`。
 4. 执行 `refine-prepare`。然后打开工作区 Subagent，读取
    `output/<title>/refine_subagent_prompt.md`，结合 `pages/` 写入 `toc_tree.json`。
    Subagent 应从书名页/版权页提取作者和出版社，并按内容标注 `notes`、`bibliography`、
@@ -109,16 +115,18 @@ polish-validate → extract-entities → translate → translate-validate → bu
 
    本地程序校验页码范围、父子关系、兄弟节点重叠，并生成 `ocr_markdown/`。
    `tree_progress.json` 会锁定 TOC/OCR 指纹；输入变化后必须重新生成受影响单元。
-6. 必须执行 `polish`，打开工作区 Subagent 读取
+6. 所有 PDF 都必须执行 `polish`，打开工作区 Subagent 读取
    `polish_subagent_prompt.md` 写入 `polished_markdown/`，然后运行 `polish-validate`。
-   该步骤用于修复 OCR 换行和明显 OCR 错字，并在翻译前锁定经过校验的源稿；未通过
+   对 OCR/混合型 PDF，该步骤用于修复 OCR 换行和明显 OCR 错字；对原生矢量文本 PDF，
+   该步骤用于从视觉行重建语义段落，同时保留原文字符和块级结构。未通过
    `polish-validate` 不得继续实体提取或翻译。
    润色不得把普通粗体、罗马数字、编号或序数上标升级成 Markdown 标题；已确认的
    `<sup>N</sup>` 注脚才可规范化为 `[^N]`。
 
 ### 2.2 术语提取和翻译
 
-实体表尚未存在时，确认上一步 `polish-validate` 已通过，再执行以下结构门禁；此时不得翻译：
+实体表尚未存在时，确认上一步 `polish-validate` 已通过，再执行以下结构门禁；此时不得
+翻译：
 
 ```text
 uv run pdf2epub -c config.yaml check-ready --stage translate --skip-entities
@@ -129,18 +137,20 @@ uv run pdf2epub -c config.yaml check-ready --stage translate --skip-entities
 1. 执行 `extract-entities`，立即打开工作区 Subagent，读取生成的 Prompt 和 manifest，
    写入 `translation_entities.json`。
 2. 执行 `extract-entities-validate`。失败时不得继续。
-3. 执行完整门禁：
+3. 执行 `translate-toc`，打开独立的工作区 Subagent，按目录 Prompt 写入
+   `toc_tree_translated.json`，然后运行 `translate-toc-validate`。TOC 必须在正文翻译
+   worker 启动前完成；正文 worker 不得修改该文件。
+4. 执行完整门禁：
 
    ```text
    uv run pdf2epub -c config.yaml check-ready --stage translate
    ```
 
-4. 执行 `translate`。该命令会生成 `translate_subagent_prompt.md`、manifest 和
-   `batch_handoffs/`。立即打开工作区 Subagent：每个 Subagent 只处理自己 handoff 的
-   `assigned_files`，同名译文写入 `translated/`；大单元单独派发。Prompt 会为每个单元
-   提供精简术语上下文；完整快照只用于审计，不能修改。
-5. 由唯一 TOC owner Subagent 按目录 Prompt 写入 `toc_tree_translated.json`；其他任务
-   不得修改该文件。完成后运行 `translate-toc-validate`。
+5. 执行 `translate`。该命令会生成 `translate_subagent_prompt.md`、manifest 和最多
+   `subagent.batching.max_concurrency` 个 `worker_handoffs/`（默认 3 个）。立即打开
+   工作区 Subagent：每个 Subagent 只处理自己 handoff 的 `assigned_files`，同名译文
+   写入 `translated/`；超过 30,000 字节的大单元仍必须独立派发。Prompt 会为每个单元
+   提供精确的已翻译 TOC 标题/子标题上下文；完整快照只用于审计，不能修改。
 6. 每完成一个单元可运行：
 
    ```text
@@ -224,6 +234,8 @@ uv run pdf2epub -c config.yaml check-ready --stage translate --skip-entities
 - 实体表、TOC、术语上下文或源稿哈希变化后，旧 checkpoint 不得复用。
 - 元数据 JSON 必须整体重写为合法 JSON；拒答/免责声明、缺失文件、结构不匹配或全量
   校验失败时禁止打包。
+- 所有写入 JSON、manifest、Prompt 索引的工作区相对路径必须使用 `/`；读取历史产物时
+  可以兼容 Windows `\\`，但不得继续生成反斜杠路径。
 
 ## 7. 安全、Git 和 Windows 约定
 

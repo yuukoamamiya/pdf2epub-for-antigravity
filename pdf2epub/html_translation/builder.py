@@ -14,7 +14,7 @@ import shutil
 import subprocess
 from collections import Counter
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Mapping, Optional, Set
 from dataclasses import dataclass
 from loguru import logger
@@ -31,6 +31,56 @@ from pdf2epub.utils.html_safety import sanitize_html_document
 
 
 PART_FILE_RE = re.compile(r'^(.+)\.part(\d+)\.md$')
+
+
+class UnsafePackagePath(ValueError):
+    """Raised when an EPUB metadata path escapes its extracted package."""
+
+
+def _safe_package_path(
+    package_root: Path,
+    value: str,
+    *,
+    base: Optional[Path] = None,
+    label: str = "EPUB path",
+) -> Path:
+    """Resolve an EPUB metadata path while keeping it inside ``package_root``.
+
+    EPUB paths use POSIX separators even on Windows.  We still resolve with
+    the host platform's ``Path`` so drive-qualified and backslash paths are
+    rejected by the final containment check as well.
+    """
+    if not isinstance(value, str) or not value or "\x00" in value:
+        raise UnsafePackagePath(f"Invalid {label}: {value!r}")
+
+    root = Path(package_root).resolve()
+    parent = Path(base or root).resolve()
+    try:
+        parent.relative_to(root)
+    except ValueError as exc:
+        raise UnsafePackagePath(f"{label} base escapes extracted EPUB: {parent}") from exc
+
+    posix_value = PurePosixPath(value)
+    if posix_value.is_absolute():
+        raise UnsafePackagePath(f"Absolute {label} is not allowed: {value!r}")
+
+    candidate = (parent / Path(*posix_value.parts)).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError as exc:
+        raise UnsafePackagePath(f"{label} escapes extracted EPUB: {value!r}") from exc
+    return candidate
+
+
+def _safe_existing_package_file(package_root: Path, candidate: Path) -> Optional[Path]:
+    """Return an existing file only when its resolved path stays in the package."""
+    root = Path(package_root).resolve()
+    resolved = Path(candidate).resolve()
+    try:
+        resolved.relative_to(root)
+    except ValueError:
+        return None
+    return resolved if resolved.is_file() else None
 
 
 def sort_title_for_library(title: str) -> str:
@@ -459,7 +509,11 @@ class HTMLEpubBuilder:
         if not container_path.exists():
             # Fallback: glob for any .opf file
             logger.debug("container.xml not found, falling back to glob")
-            opf_candidates = list(extract_dir.rglob("*.opf"))
+            opf_candidates = [
+                safe_path
+                for candidate in extract_dir.rglob("*.opf")
+                if (safe_path := _safe_existing_package_file(extract_dir, candidate))
+            ]
             return opf_candidates[0] if opf_candidates else None
 
         try:
@@ -481,17 +535,32 @@ class HTMLEpubBuilder:
             if rootfile is not None:
                 full_path = rootfile.get('full-path')
                 if full_path:
-                    opf_path = extract_dir / full_path
-                    if opf_path.exists():
+                    opf_path = _safe_package_path(
+                        extract_dir,
+                        full_path,
+                        label="container.xml full-path",
+                    )
+                    if opf_path.is_file():
                         return opf_path
 
             # Fallback to glob
-            opf_candidates = list(extract_dir.rglob("*.opf"))
+            opf_candidates = [
+                safe_path
+                for candidate in extract_dir.rglob("*.opf")
+                if (safe_path := _safe_existing_package_file(extract_dir, candidate))
+            ]
             return opf_candidates[0] if opf_candidates else None
 
+        except UnsafePackagePath as exc:
+            logger.warning(f"Rejected unsafe EPUB package path: {exc}")
+            return None
         except Exception as e:
             logger.debug(f"Error parsing container.xml: {e}, falling back to glob")
-            opf_candidates = list(extract_dir.rglob("*.opf"))
+            opf_candidates = [
+                safe_path
+                for candidate in extract_dir.rglob("*.opf")
+                if (safe_path := _safe_existing_package_file(extract_dir, candidate))
+            ]
             return opf_candidates[0] if opf_candidates else None
 
     def _find_toc_files(self, extract_dir: Path, opf_path: Path) -> Dict[str, Optional[Path]]:
@@ -503,6 +572,10 @@ class HTMLEpubBuilder:
         - 'nav': Path to Nav document (EPUB 3 TOC, properties="nav")
         """
         result = {'ncx': None, 'nav': None}
+        opf_path = _safe_existing_package_file(extract_dir, opf_path)
+        if opf_path is None:
+            logger.warning("Rejected OPF path outside extracted EPUB")
+            return result
         opf_dir = opf_path.parent
 
         try:
@@ -539,15 +612,25 @@ class HTMLEpubBuilder:
 
                 # NCX: identified by media-type
                 if media_type == 'application/x-dtbncx+xml':
-                    ncx_path = opf_dir / href
-                    if ncx_path.exists():
+                    ncx_path = _safe_package_path(
+                        extract_dir,
+                        href,
+                        base=opf_dir,
+                        label="OPF NCX href",
+                    )
+                    if ncx_path.is_file():
                         result['ncx'] = ncx_path
                         logger.debug(f"Found NCX via manifest: {ncx_path}")
 
                 # Nav: identified by properties="nav"
                 if 'nav' in properties.split():
-                    nav_path = opf_dir / href
-                    if nav_path.exists():
+                    nav_path = _safe_package_path(
+                        extract_dir,
+                        href,
+                        base=opf_dir,
+                        label="OPF navigation href",
+                    )
+                    if nav_path.is_file():
                         result['nav'] = nav_path
                         logger.debug(f"Found Nav via manifest: {nav_path}")
 
@@ -568,12 +651,19 @@ class HTMLEpubBuilder:
                             if item.get('id') == toc_id:
                                 href = item.get('href', '')
                                 if href:
-                                    ncx_path = opf_dir / href
-                                    if ncx_path.exists():
+                                    ncx_path = _safe_package_path(
+                                        extract_dir,
+                                        href,
+                                        base=opf_dir,
+                                        label="OPF spine NCX href",
+                                    )
+                                    if ncx_path.is_file():
                                         result['ncx'] = ncx_path
                                         logger.debug(f"Found NCX via spine toc attr: {ncx_path}")
                                 break
 
+        except UnsafePackagePath as exc:
+            logger.warning(f"Rejected unsafe EPUB navigation path: {exc}")
         except Exception as e:
             logger.debug(f"Error parsing OPF for TOC files: {e}")
 
@@ -1415,7 +1505,7 @@ class HTMLEpubPipeline:
         if context_files:
             source["translation_context"] = {
                 "files": {
-                    str(name): str(Path(path).resolve().relative_to(self.output_dir.resolve())).replace("\\", "/")
+                    str(name): Path(path).resolve().relative_to(self.output_dir.resolve()).as_posix()
                     for name, path in context_files.items()
                 },
                 "sha256": {

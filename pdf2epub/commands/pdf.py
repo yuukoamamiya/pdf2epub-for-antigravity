@@ -21,7 +21,11 @@ def _validate_pdf_source_stage(args, source_stage: str) -> int:
         from pdf2epub.commands.markdown import polish_validate_command
 
         return polish_validate_command(args)
-    return 0
+    logger.error(
+        "PDF packaging requires the current validated polished source. "
+        "Run polish and polish-validate before building."
+    )
+    return 1
 
 
 def _validate_translated_pdf(args) -> int:
@@ -58,7 +62,8 @@ def build_epub_command(args):
         if source_stage != "polished":
             logger.error(
                 "Refusing to build translated PDF EPUB: a current validated "
-                "polished source is required. Run polish and polish-validate first."
+                "polished source is required for both OCR-derived and native-text "
+                "PDFs. Run polish and polish-validate first."
             )
             return 1
         source_validation = _validate_pdf_source_stage(args, source_stage)

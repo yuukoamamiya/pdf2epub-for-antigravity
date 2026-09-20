@@ -183,6 +183,55 @@ def test_update_epub3_creators_and_refinements_are_preserved(
     assert title_file_as.text == "Translated title"
 
 
+def test_epub_metadata_paths_cannot_escape_extracted_tree(tmp_path: Path) -> None:
+    extract_dir = tmp_path / "extract"
+    meta_inf = extract_dir / "META-INF"
+    meta_inf.mkdir(parents=True)
+
+    outside_opf = tmp_path / "outside.opf"
+    outside_opf.write_text("<package/>", encoding="utf-8")
+    (meta_inf / "container.xml").write_text(
+        f"""<?xml version="1.0" encoding="UTF-8"?>
+<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles><rootfile full-path="../{outside_opf.name}"
+    media-type="application/oebps-package+xml"/></rootfiles>
+</container>
+""",
+        encoding="utf-8",
+    )
+
+    builder = _builder(tmp_path)
+
+    assert builder._find_opf_path(extract_dir) is None
+    assert outside_opf.read_text(encoding="utf-8") == "<package/>"
+
+
+def test_epub_navigation_paths_cannot_escape_extracted_tree(tmp_path: Path) -> None:
+    extract_dir = tmp_path / "extract"
+    oebps = extract_dir / "OEBPS"
+    oebps.mkdir(parents=True)
+    opf_path = oebps / "content.opf"
+    opf_path.write_text(
+        f"""<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="{OPF_NS}" version="2.0">
+  <manifest>
+    <item id="ncx" href="../../outside.ncx"
+      media-type="application/x-dtbncx+xml"/>
+  </manifest>
+  <spine toc="ncx"/>
+</package>
+""",
+        encoding="utf-8",
+    )
+    outside_ncx = tmp_path / "outside.ncx"
+    outside_ncx.write_text("<ncx/>", encoding="utf-8")
+
+    result = _builder(tmp_path)._find_toc_files(extract_dir, opf_path)
+
+    assert result == {"ncx": None, "nav": None}
+    assert outside_ncx.read_text(encoding="utf-8") == "<ncx/>"
+
+
 def test_update_content_opf_derives_and_creates_library_sort_metadata(
     tmp_path: Path,
 ) -> None:

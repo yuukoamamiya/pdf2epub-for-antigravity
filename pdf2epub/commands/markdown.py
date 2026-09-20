@@ -19,7 +19,7 @@ from pdf2epub.commands.sources import (
     _resolve_pdf_markdown_source,
 )
 from pdf2epub.utils.common import book_output_dir, load_config
-from pdf2epub.workflow_contracts import atomic_write_text
+from pdf2epub.workflow_contracts import atomic_write_text, relative_posix_path
 
 
 def _load_pdf_file_roles(output_dir: Path) -> dict:
@@ -135,6 +135,7 @@ def _prepare_pdf_markdown_task(args, task: str):
     context_files = {}
     skipped_context_files = []
     unit_context_files = {}
+    heading_contexts = {}
     if task == "translate":
         from pdf2epub.glossary import load_selected_glossaries
 
@@ -153,12 +154,16 @@ def _prepare_pdf_markdown_task(args, task: str):
         source_dir = output_dir / "ocr_markdown"
         target_dir = output_dir / "polished_markdown"
         rules = [
-            "Fix OCR line breaks, obvious OCR errors, and formatting while preserving meaning.",
+            "Repair source layout and line wrapping while preserving meaning and document structure.",
             "Preserve Markdown heading levels, image links, footnote references, formulas, and link destinations.",
             "Never add a # heading marker to an ordinary paragraph, bold line, italic line, Roman numeral, or numbered section that does not already begin with #. Preserve the source heading marker and level exactly.",
             "Only remove a heading when it is an obvious duplicated running header; never remove a unique section heading.",
             "When a Notes/注释 section contains numbered endnotes, convert only verified footnote superscripts from <sup>N</sup> to [^N], and convert the matching endnote lines to [^N]: text. Do not convert mathematical, table, ordinal, or other non-footnote superscripts.",
         ]
+        rules.insert(
+            1,
+            "For OCR-derived sources, fix obvious OCR errors and OCR-induced line breaks without inventing content. For native vector-text sources, the shared handoff rules instead require layout-only paragraph reconstruction.",
+        )
         content_type = getattr(args, "content_type", "auto")
         if content_type and content_type != "auto":
             rules.append(f"Treat this as {content_type} content and preserve its domain-specific conventions.")
@@ -166,10 +171,24 @@ def _prepare_pdf_markdown_task(args, task: str):
         source_dir, source_stage = _resolve_pdf_markdown_source(output_dir, config)
         if source_stage != "polished":
             logger.error(
-                "PDF translation requires a current validated polished source. "
-                "Run polish and polish-validate before translate."
+                "PDF translation requires a current validated polished source for "
+                "both OCR-derived and native-text PDFs. Run polish and "
+                "polish-validate before translate."
             )
             return 1
+        from pdf2epub.toc_translation_workflow import (
+            build_toc_heading_contexts,
+            validate_toc_translation_subagent,
+        )
+
+        toc_report = validate_toc_translation_subagent(output_dir)
+        if not toc_report["valid"]:
+            logger.error(
+                "TOC translation must be completed and validated before PDF "
+                "translation: " + "; ".join(toc_report["errors"][:5])
+            )
+            return 1
+        heading_contexts = build_toc_heading_contexts(output_dir)
         target_dir = output_dir / "translated"
         translation_config = config.get("translation", {})
         require_entities = translation_config.get("require_entities", True)
@@ -249,28 +268,17 @@ def _prepare_pdf_markdown_task(args, task: str):
             file_contexts=(
                 _load_pdf_file_contexts(output_dir) if task == "translate" else None
             ),
+            heading_contexts=heading_contexts or None,
             unit_context_files=unit_context_files or None,
         )
         if task == "translate":
-            from pdf2epub.subagent_runtime import write_batch_handoffs
-            from pdf2epub.toc_translation_workflow import (
-                integrate_toc_translation_task,
-                prepare_toc_translation_subagent,
-            )
-            toc_paths = prepare_toc_translation_subagent(
-                output_dir, source_language, target_language, config=config
-            )
-            paths = integrate_toc_translation_task(
-                output_dir,
-                paths["manifest"],
-                paths["prompt"],
-                toc_paths,
-            )
-            handoffs = write_batch_handoffs(
+            from pdf2epub.subagent_runtime import write_worker_handoffs
+
+            handoffs = write_worker_handoffs(
                 output_dir, paths["manifest"], paths["prompt"]
             )
             if handoffs:
-                paths["batch_handoffs"] = output_dir / "batch_handoffs"
+                paths["worker_handoffs"] = output_dir / "worker_handoffs"
     except Exception as exc:
         logger.error(f"Could not prepare {task} task: {exc}")
         return 1
@@ -279,7 +287,7 @@ def _prepare_pdf_markdown_task(args, task: str):
     if task == "translate":
         logger.warning(
             "此步骤只生成交接文件，没有执行翻译；现在必须在 Antigravity 中打开工作区 "
-            "Subagent，并按 batch_handoffs/ 中的 assigned_files 执行。"
+            "Subagent，并按 worker_handoffs/ 中的 assigned_files 执行。TOC 已由独立前置任务完成。"
         )
     logger.info(
         f"在 Antigravity 中让 Subagent 执行提示词，完成后运行 {task}-validate。"
@@ -352,8 +360,9 @@ def _validate_translation_entities(output_dir: Path, config: dict) -> dict:
                 entity_manifest_path.read_text(encoding="utf-8")
             )
             source_dir, _ = _resolve_pdf_markdown_source(output_dir, config)
-            expected_dir = str(source_dir.relative_to(output_dir)).replace("\\", "/")
-            if entity_manifest.get("source_dir") != expected_dir:
+            expected_dir = relative_posix_path(source_dir, output_dir)
+            manifest_source_dir = str(entity_manifest.get("source_dir") or "").replace("\\", "/")
+            if manifest_source_dir != expected_dir:
                 errors.append(
                     "entity glossary was extracted from a different source stage"
                 )
@@ -435,6 +444,14 @@ def _validate_pdf_markdown_task(args, task: str):
             if not toc_report["valid"]:
                 for error in toc_report["errors"]:
                     logger.error(f"TOC: {error}")
+            from pdf2epub.toc_translation_workflow import validate_toc_heading_bindings
+
+            heading_report = validate_toc_heading_bindings(output_dir)
+            report["toc_heading_bindings"] = heading_report
+            report["all_passed"] = report["all_passed"] and heading_report["valid"]
+            if not heading_report["valid"]:
+                for error in heading_report["errors"]:
+                    logger.error(f"TOC heading: {error}")
             from pdf2epub.glossary import validate_translation_context
 
             context_report = validate_translation_context(
@@ -629,13 +646,16 @@ def _run_readiness_check(
         if source_ready
         else f"{source_stage} source is missing or not validated",
     )
-    if stage in {"translate", "package"}:
+    if stage in {"translate", "package"} and not (
+        stage == "translate" and skip_entities
+    ):
         record(
             "polish_required",
             source_stage == "polished" and source_ready,
-            "PDF translation requires a current validated polished source"
+            "PDF translation requires a current validated polished source for "
+            "both OCR-derived and native-text PDFs"
             if source_stage != "polished" or not source_ready
-            else "current validated polished source is selected",
+            else f"current validated {source_stage} source is selected",
         )
 
     translation = config.get("translation", {}) or {}
@@ -690,6 +710,20 @@ def _run_readiness_check(
         glossary_detail = "no external glossary configured"
     record("external_glossaries", glossary_ready, glossary_detail)
 
+    toc_ready = True
+    toc_detail = "not required at this stage"
+    if stage in {"translate", "package"}:
+        from pdf2epub.toc_translation_workflow import validate_toc_translation_subagent
+
+        toc_report = validate_toc_translation_subagent(output_dir)
+        toc_ready = toc_report["valid"]
+        toc_detail = (
+            "translated TOC structure is valid"
+            if toc_ready
+            else "; ".join(toc_report["errors"][:5])
+        )
+        record("translated_toc", toc_ready, toc_detail)
+
     if stage == "package":
         translated_dir = output_dir / "translated" / "validated"
         translated_ready = translated_dir.is_dir() and any(
@@ -702,20 +736,6 @@ def _run_readiness_check(
             if translated_ready
             else "translated/validated is missing",
         )
-        toc_translated = output_dir / "toc_tree_translated.json"
-        toc_ready = False
-        toc_detail = "toc_tree_translated.json is missing"
-        if toc_translated.is_file():
-            from pdf2epub.toc_translation_workflow import validate_toc_translation_subagent
-
-            toc_report = validate_toc_translation_subagent(output_dir)
-            toc_ready = toc_report["valid"]
-            toc_detail = (
-                "translated TOC structure is valid"
-                if toc_ready
-                else "; ".join(toc_report["errors"][:5])
-            )
-        record("translated_toc", toc_ready, toc_detail)
         validation_path = output_dir / "translate_validation.json"
         validation_ready = False
         validation_detail = "translate_validation.json is missing or incomplete"

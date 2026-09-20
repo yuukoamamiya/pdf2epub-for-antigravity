@@ -55,7 +55,7 @@ Subagent 合同层
 和下一步提示：
 
 - `runtime.py`：提供 `BookCommandContext`、配置加载和输出目录解析。
-- `sources.py`：选择 `ocr_markdown` 或已验证的 `polished_markdown`，供 PDF 翻译、实体提取和打包共用。
+- `sources.py`：选择原始 `ocr_markdown` 或已验证的 `polished_markdown`；所有 PDF 的翻译、实体提取和打包都必须使用后者。
 - `ocr.py`：执行唯一允许调用 OCR 服务的工作流入口。
 - `refine.py`：准备结构判断 handoff，或调用本地分页/单元合并。
 - `markdown.py`：PDF Markdown 的 polish、translate、readiness 和 validation 编排。
@@ -92,25 +92,30 @@ Subagent 合同层
 
 ```text
 ocr-pages
-  → pages/
+  → pdf_text_probe.json
+  → pages/ (native text extraction only for high-confidence vector PDFs;
+            searchable OCR and scanned PDFs still use visual OCR)
 refine-prepare + 工作区 Subagent
   → toc_tree.json
 refine-local
   → ocr_markdown/ + tree_progress.json
-polish + 工作区 Subagent + polish-validate（PDF 翻译必需）
+polish + 工作区 Subagent + polish-validate（所有 PDF 必需）
   → polished_markdown/validated/
 extract-entities + 工作区 Subagent + extract-entities-validate
   → translation_entities.json
-translate + 工作区 Subagent
-  → translated/ + toc_tree_translated.json
+translate-toc + 工作区 Subagent + translate-toc-validate
+  → toc_tree_translated.json
+translate + 最多 3 个 worker handoff + 工作区 Subagent
+  → translated/
 translate-validate
   → translate_validation.json
 build-epub --translated
   → 最终 EPUB
 ```
 
-结构判断、润色和翻译不会在本地 Python 进程中完成。每个 Subagent 只处理 manifest 指定的
-文件；大单元单独成批，TOC 由 manifest 指定的唯一 owner 写入。
+结构判断、润色和翻译不会在本地 Python 进程中完成。每个 Subagent 只处理 worker
+manifest 指定的文件；大单元单独成批。翻译 TOC 是正文 worker 启动前的独立前置任务，
+正文 worker 不得修改翻译 TOC。
 
 ### 3.2 高保真 EPUB 工作流
 

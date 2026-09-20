@@ -14,8 +14,9 @@ translation:
   # glossaries:
   #   - path: "glossaries/german-classical-philosophy.yaml"
   #     id: german-classical-philosophy
-  # PDF 翻译必须使用通过校验的 polished_markdown/validated。
-  source_stage: polished
+  # auto 会使用通过校验的 polished_markdown/validated。原生文本 PDF 只跳过视觉 OCR，
+  # 仍需经过 polish 来识别软换行和真实段落；可显式填写 polished 或 ocr。
+  source_stage: auto
 
 # 可选：手动覆盖书名页提取的书目信息
 # metadata:

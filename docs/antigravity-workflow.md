@@ -105,9 +105,11 @@ polish → polish-validate → check-ready --skip-entities → extract-entities 
 extract-entities-validate → check-ready → translate → translate-validate
 ```
 
-`polish` 用于修复 OCR 换行和明显 OCR 错字。PDF 翻译、实体提取和打包都必须以当前
-且通过 `polish-validate` 的 `polished_markdown/validated/` 为源稿；如果润色稿缺失、
-校验失败或与当前 OCR 源稿不匹配，本地门禁会拒绝继续。
+`polish` 对 OCR/混合型 PDF 用于修复 OCR 换行和明显 OCR 错字；对高置信度原生矢量文本
+PDF 用于识别视觉换行与真实段落边界。原生文字稿不得进行无依据的拼写或字形改写。
+PDF 翻译、实体提取和打包都必须以当前且通过 `polish-validate` 的
+`polished_markdown/validated/` 为源稿；如果润色稿缺失、校验失败或与当前源稿不匹配，
+本地门禁会拒绝继续。
 
 `extract-entities` 读取 `translation.source_stage` 实际选中的源稿，并生成
 `translation_entities.template.json` 和 `translation_entities.json` 的交接契约。

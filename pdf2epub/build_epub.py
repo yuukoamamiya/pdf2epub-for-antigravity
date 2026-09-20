@@ -1158,7 +1158,7 @@ def build_epub(config: BuildEpubConfig) -> Path:
                         )
 
                         # Add subchapter anchors for TOC navigation
-                        if 'children' in entry and entry['children']:
+                        if is_first_part and 'children' in entry and entry['children']:
                             # Extract chapter index from unit_id (e.g., "chapter_8" -> 8)
                             try:
                                 from .chapter_identity import ChapterIdentity

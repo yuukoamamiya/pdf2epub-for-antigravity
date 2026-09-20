@@ -3,6 +3,9 @@
 OCR is the only workflow stage allowed to call the configured OCR service.
 """
 
+import json
+import shutil
+
 from loguru import logger
 
 from pdf2epub.commands.runtime import load_book_context
@@ -34,6 +37,45 @@ def ocr_pages_command(args):
         logger.error(f"PDF not found: {pdf_path}")
         logger.info("Specify --input with the path to your PDF file")
         return 1
+
+    # A searchable PDF is not automatically trustworthy: scanned books often
+    # carry a hidden OCR text layer.  Only a conservative native-text probe may
+    # bypass visual OCR; searchable-OCR and mixed PDFs stay on Chandra.
+    from pdf2epub.pdf_text_probe import (
+        extract_native_text_pages,
+        probe_pdf_text_layer,
+    )
+    from pdf2epub.workflow_contracts import atomic_write_text
+
+    try:
+        probe = probe_pdf_text_layer(pdf_path)
+        atomic_write_text(
+            output_dir / "pdf_text_probe.json",
+            json.dumps(probe, ensure_ascii=False, indent=2),
+        )
+    except Exception as exc:
+        logger.warning(f"PDF text probe failed; continuing with visual OCR: {exc}")
+        probe = {"recommendation": "ocr_required", "classification": "probe_failed"}
+
+    if probe.get("recommendation") == "use_text_layer":
+        output_dir.mkdir(parents=True, exist_ok=True)
+        original_copy = output_dir / "input_original.pdf"
+        processed_copy = output_dir / "input.pdf"
+        if not original_copy.exists():
+            shutil.copy2(pdf_path, original_copy)
+        if not processed_copy.exists():
+            shutil.copy2(pdf_path, processed_copy)
+        try:
+            extract_native_text_pages(pdf_path, output_dir, probe)
+        except Exception as exc:
+            logger.error(f"Native PDF text extraction failed; refusing silent fallback: {exc}")
+            return 1
+        logger.success(
+            "Detected a high-confidence native-text PDF; skipped visual OCR and wrote page text."
+        )
+        logger.info(f"Output: {output_dir / 'pages'}")
+        logger.info("Next step: pdf2epub refine-prepare")
+        return 0
 
     # Preprocess PDF: copy to output dir + add page stamps + compress
     from pdf2epub.utils.pdf_utils import preprocess_pdf
