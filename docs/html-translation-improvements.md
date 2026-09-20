@@ -27,6 +27,8 @@ build-html-epub
 生效，可以选择零个、一个或多个 YAML/JSON 文件。原文件只读，程序会把规范化快照
 放入当前书的 `output/<title>/translation_glossaries/` 并记录 SHA-256。Subagent
 同时读取外部领域术语表和当前书实体表；外部术语表中的 `fixed` 译法优先级更高。
+跨语言的学派术语表应配置在 `translation.reference_glossaries`，只作为只读概念参考，
+不参与正式术语优先级，也不能覆盖或修改 `translation.glossaries`。
 
 `html-prepare` 生成正文和元数据任务后，Subagent 必须保持
 每个单元的行数、HTML 标签和属性不变，并将结果写入

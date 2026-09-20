@@ -1560,8 +1560,11 @@ Rules:
    `Vivek Chibber` becomes `Chibber, Vivek`. These are library index values,
    not prose, so do not translate or otherwise rewrite them.
 8. If `{source_filename}` contains a `translation_context` object, read every
-   listed context file before translating. Apply its terminology to the title,
-   TOC, description, and rights, while treating the files as read-only.
+   listed context file before translating. Treat all files as read-only. Apply
+   authoritative `domain_glossary_*` terminology to the title, TOC,
+   description, and rights. Files named `reference_glossary_*` are background
+   conceptual references only: they do not override authoritative terminology,
+   and you must not modify them or write inferred entries back to them.
 9. Return valid JSON only. Do not wrap it in Markdown fences or add commentary.
    If the model refuses a field, do not put the refusal text into the JSON;
    report the blocked metadata task instead.

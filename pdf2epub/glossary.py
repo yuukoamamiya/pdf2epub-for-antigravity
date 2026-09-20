@@ -200,6 +200,27 @@ def validate_glossary_languages(
     return errors
 
 
+def validate_reference_glossary_languages(
+    glossary: Mapping[str, Any],
+    target_language: str,
+) -> List[str]:
+    """Validate a glossary that is explicitly selected as reference-only.
+
+    A reference glossary may use a different source language, but its target
+    language must still match the current translation when it declares one.
+    This keeps cross-language conceptual references opt-in without weakening
+    the strict language contract for authoritative glossaries.
+    """
+    metadata = glossary.get("metadata", {})
+    glossary_target = metadata.get("target_language")
+    if glossary_target and _language_key(glossary_target) != _language_key(target_language):
+        return [
+            f"target language mismatch: glossary={glossary_target!r}, "
+            f"translation={target_language!r}"
+        ]
+    return []
+
+
 @dataclass(frozen=True)
 class GlossaryBundle:
     """Selected glossary snapshots and the prompt rules that describe them."""
@@ -247,9 +268,21 @@ def discover_glossary_candidates(
             errors = validate_glossary_languages(
                 glossary, source_language, target_language
             )
+            reference_errors = validate_reference_glossary_languages(
+                glossary, target_language
+            )
             for field_name in ("domain", "source_language", "target_language"):
                 if not _clean(metadata.get(field_name)):
                     errors.append(f"metadata.{field_name} is missing")
+            for field_name in ("domain", "target_language"):
+                if not _clean(metadata.get(field_name)):
+                    reference_errors.append(f"metadata.{field_name} is missing")
+            reference_reason = ""
+            if not reference_errors and errors:
+                reference_reason = (
+                    "source-language mismatch is allowed only because this is "
+                    "explicitly reference-only"
+                )
             candidates.append(
                 {
                     "path": str(path),
@@ -261,6 +294,9 @@ def discover_glossary_candidates(
                     "entries": len(glossary.get("entries", [])),
                     "eligible": not errors,
                     "errors": errors,
+                    "reference_eligible": not reference_errors,
+                    "reference_errors": reference_errors,
+                    "reference_reason": reference_reason,
                 }
             )
         except GlossaryError as exc:
@@ -269,6 +305,8 @@ def discover_glossary_candidates(
                     "path": str(path),
                     "eligible": False,
                     "errors": [str(exc)],
+                    "reference_eligible": False,
+                    "reference_errors": [str(exc)],
                 }
             )
     return candidates
@@ -377,15 +415,17 @@ def build_unit_glossary_contexts(
     return result
 
 
-def _configured_items(config: Mapping[str, Any]) -> List[Any]:
+def _configured_items(
+    config: Mapping[str, Any], key: str = "glossaries"
+) -> List[Any]:
     translation = config.get("translation", {}) or {}
-    configured = translation.get("glossaries", [])
+    configured = translation.get(key, [])
     if configured is None:
         return []
     if isinstance(configured, (str, Path, dict)):
         return [configured]
     if not isinstance(configured, list):
-        raise GlossaryError("translation.glossaries must be an array")
+        raise GlossaryError(f"translation.{key} must be an array")
     return configured
 
 
@@ -417,8 +457,9 @@ def load_selected_glossaries(
     ``output/<book>/translation_glossaries`` so all Subagent context paths stay
     inside the book workspace and can be hash-locked in a manifest.
     """
-    items = _configured_items(config)
-    if not items:
+    items = _configured_items(config, "glossaries")
+    reference_items = _configured_items(config, "reference_glossaries")
+    if not items and not reference_items:
         translation = config.get("translation", {}) or {}
         selection_path = Path(output_dir) / "glossary_selection.json"
         selection_path.parent.mkdir(parents=True, exist_ok=True)
@@ -426,7 +467,11 @@ def load_selected_glossaries(
             json.dumps(
                 {
                     "schema_version": 1,
-                    "mode": "explicit_none" if "glossaries" in translation else "unconfigured",
+                    "mode": (
+                        "explicit_none"
+                        if "glossaries" in translation or "reference_glossaries" in translation
+                        else "unconfigured"
+                    ),
                     "selected": [],
                 },
                 ensure_ascii=False,
@@ -449,74 +494,86 @@ def load_selected_glossaries(
     metadata_by_context: Dict[str, Dict[str, Any]] = {}
     selected_records: List[Dict[str, Any]] = []
 
-    for index, item in enumerate(items, 1):
-        if isinstance(item, str):
-            raw_path = item
-            configured_id = ""
-        elif isinstance(item, dict):
-            raw_path = item.get("path") or item.get("file")
-            configured_id = _clean(item.get("id"))
-            if not raw_path:
-                raise GlossaryError(
-                    f"translation.glossaries[{index}] requires path"
-                )
-        else:
-            raise GlossaryError(
-                f"translation.glossaries[{index}] must be a path or object"
-            )
-
-        source_path = _resolve_config_path(str(raw_path), config_path)
-        glossary = load_glossary(source_path)
-        language_errors = validate_glossary_languages(
-            glossary, source_language, target_language
-        )
-        if language_errors:
-            raise GlossaryError(
-                f"glossary {source_path.name}: " + "; ".join(language_errors)
-            )
-        metadata = glossary["metadata"]
-        glossary_id = configured_id or _clean(metadata.get("name")) or source_path.stem
-        safe_id = sanitize_filename(glossary_id) or f"glossary_{index:03d}"
-        snapshot_path = snapshot_dir / f"{safe_id}.json"
-        # A duplicate id is ambiguous and could cause one context to replace
-        # another snapshot.
-        if snapshot_path.name in {path.name for path in context_files.values()}:
-            raise GlossaryError(f"duplicate glossary id: {glossary_id}")
-        snapshot_path.write_text(
-            json.dumps(glossary, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-
-        context_name = f"domain_glossary_{index:03d}"
-        context_files[context_name] = snapshot_path
-        context_sha256[context_name] = hashlib.sha256(snapshot_path.read_bytes()).hexdigest()
-        source_files[context_name] = source_path
-        source_sha256[context_name] = hashlib.sha256(source_path.read_bytes()).hexdigest()
-        metadata_by_context[context_name] = dict(metadata)
-        selected_records.append(
-            {
-                "context": context_name,
-                "id": glossary_id,
-                "configured_path": str(raw_path),
-                "resolved_path": str(source_path),
-                "source_sha256": source_sha256[context_name],
-                "snapshot": str(snapshot_path),
-                "snapshot_sha256": context_sha256[context_name],
-                "metadata": dict(metadata),
-            }
-        )
-        names.append(glossary_id)
-        total_entries += len(glossary["entries"])
-        for entry in glossary["entries"]:
-            for form in [entry["source"], *entry.get("variants", []), *entry.get("aliases", [])]:
-                key = _normal_form(form)
-                previous = seen_sources.get(key)
-                if previous is not None and previous != entry["target"]:
+    used_snapshot_names = set()
+    for kind, configured_items in (
+        ("authoritative", items),
+        ("reference", reference_items),
+    ):
+        for index, item in enumerate(configured_items, 1):
+            if isinstance(item, str):
+                raw_path = item
+                configured_id = ""
+            elif isinstance(item, dict):
+                raw_path = item.get("path") or item.get("file")
+                configured_id = _clean(item.get("id"))
+                if not raw_path:
                     raise GlossaryError(
-                        f"selected glossaries conflict for source form {form!r}: "
-                        f"{previous!r} vs {entry['target']!r}"
+                        f"translation.{('glossaries' if kind == 'authoritative' else 'reference_glossaries')}[{index}] requires path"
                     )
-                seen_sources[key] = entry["target"]
+            else:
+                raise GlossaryError(
+                    f"translation.{('glossaries' if kind == 'authoritative' else 'reference_glossaries')}[{index}] must be a path or object"
+                )
+
+            source_path = _resolve_config_path(str(raw_path), config_path)
+            glossary = load_glossary(source_path)
+            language_errors = (
+                validate_glossary_languages(glossary, source_language, target_language)
+                if kind == "authoritative"
+                else validate_reference_glossary_languages(glossary, target_language)
+            )
+            if language_errors:
+                raise GlossaryError(
+                    f"glossary {source_path.name}: " + "; ".join(language_errors)
+                )
+            metadata = glossary["metadata"]
+            glossary_id = configured_id or _clean(metadata.get("name")) or source_path.stem
+            safe_id = sanitize_filename(glossary_id) or f"glossary_{index:03d}"
+            snapshot_name = (
+                f"reference_{safe_id}.json" if kind == "reference" else f"{safe_id}.json"
+            )
+            snapshot_path = snapshot_dir / snapshot_name
+            if snapshot_name in used_snapshot_names:
+                raise GlossaryError(f"duplicate glossary id: {glossary_id}")
+            used_snapshot_names.add(snapshot_name)
+            snapshot_path.write_text(
+                json.dumps(glossary, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
+            prefix = "domain" if kind == "authoritative" else "reference"
+            context_name = f"{prefix}_glossary_{index:03d}"
+            context_files[context_name] = snapshot_path
+            context_sha256[context_name] = hashlib.sha256(snapshot_path.read_bytes()).hexdigest()
+            source_files[context_name] = source_path
+            source_sha256[context_name] = hashlib.sha256(source_path.read_bytes()).hexdigest()
+            metadata_by_context[context_name] = dict(metadata)
+            selected_records.append(
+                {
+                    "kind": kind,
+                    "context": context_name,
+                    "id": glossary_id,
+                    "configured_path": str(raw_path),
+                    "resolved_path": str(source_path),
+                    "source_sha256": source_sha256[context_name],
+                    "snapshot": str(snapshot_path),
+                    "snapshot_sha256": context_sha256[context_name],
+                    "metadata": dict(metadata),
+                }
+            )
+            if kind == "authoritative":
+                names.append(glossary_id)
+                total_entries += len(glossary["entries"])
+                for entry in glossary["entries"]:
+                    for form in [entry["source"], *entry.get("variants", []), *entry.get("aliases", [])]:
+                        key = _normal_form(form)
+                        previous = seen_sources.get(key)
+                        if previous is not None and previous != entry["target"]:
+                            raise GlossaryError(
+                                f"selected glossaries conflict for source form {form!r}: "
+                                f"{previous!r} vs {entry['target']!r}"
+                            )
+                        seen_sources[key] = entry["target"]
 
     rules = [
         "Selected domain glossaries are read-only authoritative terminology context; never modify them.",
@@ -527,6 +584,15 @@ def load_selected_glossaries(
         "Terminology precedence is: domain `fixed`, domain `preferred`, then book-specific entities; prefer the longest matching source form and report unresolved conflicts.",
         "Never replace text mechanically in a way that changes HTML tags, attributes, entities, anchors, formulas, or LaTeX commands.",
     ]
+    if reference_items:
+        rules.extend(
+            [
+                "Reference-only glossaries are read-only background material; never modify the original files or their snapshots.",
+                "Reference-only glossaries do not establish terminology precedence and must never override an authoritative glossary or book-specific entity.",
+                "Consult reference-only glossaries for conceptual correspondences and established target-language names when relevant, especially across source languages; do not mechanically apply a reference entry when the source text does not support the correspondence.",
+                "Do not add inferred variants, translations, or corrections back into any glossary file. If a reference is ambiguous, use normal translation judgment and keep the glossary unchanged.",
+            ]
+        )
     selection_path = Path(output_dir) / "glossary_selection.json"
     selection_path.write_text(
         json.dumps(
@@ -561,13 +627,16 @@ def validate_translation_context(
     """Validate all read-only translation contexts attached to a task."""
     manifest_path = Path(output_dir) / manifest_name
     translation = config.get("translation", {}) or {}
-    configured_glossaries = bool(_configured_items(config))
+    configured_glossaries = bool(_configured_items(config, "glossaries"))
+    configured_reference_glossaries = bool(
+        _configured_items(config, "reference_glossaries")
+    )
     source_language = translation.get("source_language")
     target_language = translation.get("target_language")
     require_entities = bool(translation.get("require_entities", True))
     if not manifest_path.is_file():
         errors = []
-        if configured_glossaries:
+        if configured_glossaries or configured_reference_glossaries:
             errors.append(f"missing translation task manifest: {manifest_name}")
         if require_entities:
             errors.append(f"missing translation task manifest: {manifest_name}")
@@ -587,6 +656,8 @@ def validate_translation_context(
     entity_path: Optional[Path] = None
     glossary_names: List[str] = []
     glossary_entries = 0
+    reference_names: List[str] = []
+    reference_entries = 0
 
     for name, relative in context_files.items():
         path = (root / str(relative)).resolve()
@@ -614,6 +685,19 @@ def validate_translation_context(
                     )
                 glossary_names.append(glossary["metadata"]["name"])
                 glossary_entries += len(glossary["entries"])
+            except GlossaryError as exc:
+                errors.append(str(exc))
+        elif str(name).startswith("reference_glossary_"):
+            try:
+                glossary = load_glossary(path)
+                if target_language:
+                    errors.extend(
+                        validate_reference_glossary_languages(
+                            glossary, target_language
+                        )
+                    )
+                reference_names.append(glossary["metadata"]["name"])
+                reference_entries += len(glossary["entries"])
             except GlossaryError as exc:
                 errors.append(str(exc))
 
@@ -657,12 +741,20 @@ def validate_translation_context(
         str(name).startswith("domain_glossary_") for name in context_files
     ):
         errors.append("configured external glossaries were not attached to the task")
+    if configured_reference_glossaries and not any(
+        str(name).startswith("reference_glossary_") for name in context_files
+    ):
+        errors.append(
+            "configured reference glossaries were not attached to the task"
+        )
 
     return {
         "valid": not errors,
         "errors": errors,
         "glossaries": glossary_names,
         "glossary_entries": glossary_entries,
+        "reference_glossaries": reference_names,
+        "reference_glossary_entries": reference_entries,
         "context_files": context_files,
         "unit_context_files": unit_context_files,
         "skipped_context_files": sorted(skipped),

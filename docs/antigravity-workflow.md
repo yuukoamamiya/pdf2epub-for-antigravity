@@ -48,6 +48,8 @@ html-prepare → Subagent(entity extraction) → html-prepare → Subagent(book_
 - 配置中的 `translation.glossaries` 可以按书选择零个、一个或多个外部 YAML/JSON
   领域术语表；程序会把只读规范化快照放到
   `output/<title>/translation_glossaries/`，并在翻译 manifest 中锁定 SHA-256。
+  跨语言资料应配置在 `translation.reference_glossaries`；它们只作为只读概念参考，
+  不参与正式术语优先级，也不能覆盖 `translation.glossaries`。
 
 Subagent 需要：
 
@@ -124,6 +126,12 @@ PDF 翻译、实体提取和打包都必须以当前且通过 `polish-validate` 
 `glossary_selection.json` 中；外部表中的 `fixed` 译法优先，不同外部表对同一源词
 产生冲突时，准备阶段会拒绝继续。翻译任务还会为每个单元生成精简术语上下文，
 完整快照保留作审计。
+
+跨语言的学派资料（例如德文术语表用于英文思想史书籍）必须单独配置在
+`translation.reference_glossaries`。候选报告会把它们标记为
+`reference_eligible`，但不会自动选择；用户明确选择后，Subagent 只能读取其
+`reference_glossary_*` 快照，用于概念对照和既有目标语定名参考，不能覆盖正式术语表，
+也不能修改原始 YAML、快照或生成自动修订版。
 
 目录翻译保持独立的 JSON 合同，可使用：
 

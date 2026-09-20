@@ -48,7 +48,9 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
 - 只有 `ocr-pages` 可以按 OCR 配置调用 OCR 服务；OCR 服务不得用于翻译或结构判断。
 - 外部术语表只读。先用 `glossary-candidates` 扫描并生成候选报告；程序只做格式和
   语言筛选，不凭文件名猜领域。唯一且明确匹配时才写入 `translation.glossaries`，
-  多个候选或领域不清时先询问用户。忽略 `*.example.*`、README 和 `output/` 快照。
+  多个候选或领域不清时先询问用户。跨语言但相关的表只能由用户明确写入
+  `translation.reference_glossaries`，作为只读参考，不参与正式术语优先级。忽略
+  `*.example.*`、README 和 `output/` 快照。
 - 术语优先级固定为：外部领域表 `fixed` > 外部领域表 `preferred` > 当前书实体表；
   短语优先于其组成部分。若出现无法按此规则解释的冲突，停止翻译并报告，不要临时造译法。
 - 术语准备完成后，检查 `output/<title>/glossary_selection.json`：它记录本次是否明确
@@ -56,7 +58,8 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
   `output/<title>/translation_glossaries/`；按源单元裁剪的上下文位于其下的
   `unit_contexts/`。PDF 和 EPUB 翻译都必须优先读取 manifest 为当前单元列出的上下文，
   完整快照只用于审计和冲突复核，不能修改。没有外部表时也要尊重记录的
-  `explicit_none`/`unconfigured` 状态，不得自行加载目录中的术语表。
+  `explicit_none`/`unconfigured` 状态，不得自行加载目录中的术语表。参考术语表快照
+  使用 `reference_glossary_*` 名称，不能覆盖权威术语表，也不得反向写回原文件。
 - `translate`、`polish`、`refine`、`extract-entities`、`translate-toc` 只准备交接或
   执行本地处理；命令成功不代表正文已经完成。
 - 不删除源文件、输出目录或已有中间结果。额度中断或失败时先校验，再使用原命令的
@@ -186,7 +189,8 @@ uv run pdf2epub -c config.yaml check-ready --stage translate --skip-entities
 1. 检查 `input/` 中的 EPUB（也支持 MOBI/AZW3），在 `config_epub.yaml` 填写书名、输入文件、
    源语言和目标语言。外部术语表按第 1 节规则选择。
 2. 如需选择外部术语表，先执行 `uv run pdf2epub -c config_epub.yaml glossary-candidates`，
-   查看候选报告后再明确写入 `translation.glossaries`。
+   查看候选报告后再明确写入 `translation.glossaries`；跨语言参考表明确写入
+   `translation.reference_glossaries`，只能作为只读参考。
 3. 执行：
 
    ```text

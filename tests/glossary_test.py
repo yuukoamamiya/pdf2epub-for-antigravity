@@ -98,6 +98,21 @@ def test_glossary_candidates_report_language_and_metadata_eligibility(tmp_path: 
     assert any("source language mismatch" in error for error in by_name["wrong-language"]["errors"])
 
 
+def test_glossary_candidates_mark_cross_language_reference_candidate(tmp_path: Path):
+    glossary_dir = tmp_path / "glossaries"
+    glossary_dir.mkdir()
+    source = glossary_dir / "german.yaml"
+    _write_glossary(source, name="german-classical-philosophy")
+
+    candidates = discover_glossary_candidates(glossary_dir, "English", "Chinese")
+
+    candidate = candidates[0]
+    assert candidate["eligible"] is False
+    assert candidate["reference_eligible"] is True
+    assert candidate["reference_errors"] == []
+    assert "source-language mismatch" in candidate["reference_reason"]
+
+
 def test_selected_glossary_writes_provenance_record(tmp_path: Path):
     source = tmp_path / "terms.yaml"
     output = tmp_path / "output"
@@ -116,6 +131,78 @@ def test_selected_glossary_writes_provenance_record(tmp_path: Path):
         source.read_bytes()
     ).hexdigest()
     assert record["selected"][0]["snapshot_sha256"]
+
+
+def test_reference_glossary_is_read_only_and_allows_source_language_mismatch(tmp_path: Path):
+    source = tmp_path / "german-classical-philosophy.yaml"
+    output = tmp_path / "output"
+    _write_glossary(source, name="german-classical-philosophy")
+    original_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+
+    bundle = load_selected_glossaries(
+        {
+            "translation": {
+                "reference_glossaries": [
+                    {"path": str(source), "id": "german-classical-philosophy"}
+                ]
+            }
+        },
+        output,
+        "English",
+        "Chinese",
+    )
+
+    reference_path = bundle.context_files["reference_glossary_001"]
+    assert reference_path.name == "reference_german-classical-philosophy.json"
+    assert hashlib.sha256(source.read_bytes()).hexdigest() == original_hash
+    assert any("reference-only" in rule for rule in bundle.rules)
+    record = json.loads((output / "glossary_selection.json").read_text(encoding="utf-8"))
+    assert record["selected"][0]["kind"] == "reference"
+
+
+def test_reference_glossary_context_validates_without_authoritative_language_match(tmp_path: Path):
+    source = tmp_path / "german.yaml"
+    output = tmp_path / "output"
+    _write_glossary(source, name="german")
+    bundle = load_selected_glossaries(
+        {
+            "translation": {
+                "reference_glossaries": [str(source)],
+                "require_entities": False,
+            }
+        },
+        output,
+        "English",
+        "Chinese",
+    )
+    manifest = {
+        "context_files": {
+            name: path.relative_to(output).as_posix()
+            for name, path in bundle.context_files.items()
+        },
+        "context_sha256": bundle.context_sha256,
+        "skipped_context_files": ["translation_entities"],
+    }
+    manifest_path = output / "translate_subagent_manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    report = validate_translation_context(
+        output,
+        manifest_path.name,
+        {
+            "title": "Book",
+            "translation": {
+                "source_language": "English",
+                "target_language": "Chinese",
+                "require_entities": False,
+                "reference_glossaries": [str(source)],
+            },
+        },
+    )
+
+    assert report["valid"] is True
+    assert report["reference_glossaries"] == ["german"]
+    assert report["reference_glossary_entries"] == 1
 
 
 def test_unit_glossary_context_contains_only_matching_entries(tmp_path: Path):

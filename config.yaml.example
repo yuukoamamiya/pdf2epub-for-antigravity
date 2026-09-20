@@ -14,6 +14,10 @@ translation:
   # glossaries:
   #   - path: "glossaries/german-classical-philosophy.yaml"
   #     id: german-classical-philosophy
+  # 跨语言术语表只能作为只读参考，不参与正式术语优先级，也不会被自动修改：
+  # reference_glossaries:
+  #   - path: "glossaries/german-classical-philosophy.yaml"
+  #     id: german-classical-philosophy
   # auto 会使用通过校验的 polished_markdown/validated。原生文本 PDF 只跳过视觉 OCR，
   # 仍需经过 polish 来识别软换行和真实段落；可显式填写 polished 或 ocr。
   source_stage: auto
