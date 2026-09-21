@@ -310,6 +310,10 @@ def test_update_toc_ncx_translates_epub2_navigation(
       <navLabel><text>Original chapter</text></navLabel>
       <content src="Text/chapter.xhtml"/>
     </navPoint>
+    <navPoint id="ack" playOrder="2">
+      <navLabel><text>Acknowledgments</text></navLabel>
+      <content src="Text/ack.xhtml#ack"/>
+    </navPoint>
   </navMap>
 </ncx>
 """,
@@ -328,6 +332,13 @@ def test_update_toc_ncx_translates_epub2_navigation(
                     "href": "Text/chapter.xhtml",
                     "anchor": None,
                     "level": 1,
+                },
+                {
+                    "original": "Acknowledgments",
+                    "translated": "致谢",
+                    "href": "Text/ack.xhtml",
+                    "anchor": "ack",
+                    "level": 1,
                 }
             ],
         },
@@ -336,13 +347,62 @@ def test_update_toc_ncx_translates_epub2_navigation(
     content = ncx_path.read_text(encoding="utf-8")
     assert "译文书名" in content
     assert "译文章节" in content
+    assert "致谢" in content
     assert "Original title" not in content
     assert "Original chapter" not in content
+    assert "Acknowledgments" not in content
     assert builder.navigation_report["ncx"] == {
         "status": "updated",
         "path": "OEBPS/toc.ncx",
-        "updated_entries": 1,
+        "updated_entries": 2,
     }
+
+
+def test_update_nav_xhtml_matches_metadata_anchor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    nav_path = tmp_path / "OEBPS" / "xhtml" / "nav.xhtml"
+    nav_path.parent.mkdir(parents=True)
+    nav_path.write_text(
+        """<html xmlns:epub="http://www.idpf.org/2007/ops">
+  <body><nav epub:type="toc"><ol>
+    <li><a href="ack.xhtml#ack">Acknowledgments</a></li>
+  </ol></nav></body>
+</html>
+""",
+        encoding="utf-8",
+    )
+
+    builder = _builder(tmp_path)
+    monkeypatch.setattr(
+        builder,
+        "_find_opf_path",
+        lambda _extract_dir: tmp_path / "OEBPS" / "content.opf",
+    )
+    monkeypatch.setattr(
+        builder,
+        "_find_toc_files",
+        lambda _extract_dir, _opf_path: {"ncx": None, "nav": nav_path},
+    )
+
+    builder._update_nav_xhtml(
+        tmp_path,
+        {
+            "toc": [
+                {
+                    "original": "Acknowledgments",
+                    "translated": "致谢",
+                    "href": "xhtml/ack.xhtml",
+                    "anchor": "ack",
+                    "level": 1,
+                }
+            ]
+        },
+    )
+
+    assert "致谢" in nav_path.read_text(encoding="utf-8")
+    assert builder.navigation_report["nav"]["updated_entries"] == 1
 
 
 def test_update_toc_ncx_records_warning_without_aborting_build(

@@ -135,6 +135,20 @@ def _has_local_tag(element: Any, local_name: str) -> bool:
     )
 
 
+def _toc_entry_href(entry: Mapping[str, Any]) -> str:
+    """Return a TOC entry href in the same form used by EPUB navigation.
+
+    Metadata hand-offs intentionally store the file path and fragment in
+    separate fields.  Navigation documents, however, use the combined
+    ``path#fragment`` form, so all matching must use one canonical key.
+    """
+    href = str(entry.get("href") or "")
+    anchor = str(entry.get("anchor") or "").lstrip("#")
+    if anchor:
+        href = f"{href.split('#', 1)[0]}#{anchor}"
+    return href
+
+
 def _make_json_safe(obj: Any) -> Any:
     """Convert nested compressor metadata to JSON-serializable values."""
     from collections.abc import Iterable, Mapping
@@ -937,7 +951,7 @@ class HTMLEpubBuilder:
         href_to_title = {}
         basename_to_title = {}
         for entry in toc_entries:
-            href = entry.get('href', '')
+            href = _toc_entry_href(entry)
             translated = entry.get('translated', '')
             if href and translated:
                 # Full href
@@ -960,15 +974,25 @@ class HTMLEpubBuilder:
 
             # 2. Resolve relative to NCX dir and try again
             if ncx_dir != extract_dir:
-                resolved = (ncx_dir / src).relative_to(extract_dir)
-                resolved_str = resolved.as_posix()
-                if resolved_str in href_to_title:
-                    return href_to_title[resolved_str]
+                src_path, separator, fragment = src.partition('#')
+                try:
+                    resolved = (ncx_dir / src_path).relative_to(extract_dir)
+                except ValueError:
+                    # On Windows, tempfile paths may mix a short 8.3 form
+                    # with the long user-profile form.  The basename fallback
+                    # below is still safe and does not abort the whole NCX.
+                    resolved = None
+                if resolved is not None:
+                    resolved_str = resolved.as_posix()
+                    if separator:
+                        resolved_str += f"#{fragment}"
+                    if resolved_str in href_to_title:
+                        return href_to_title[resolved_str]
 
             # 3. Match by basename + fragment
-            basename = Path(src.split('#')[0]).name
+            basename = Path(src.split('#', 1)[0]).name
             if '#' in src:
-                basename += '#' + src.split('#')[1]
+                basename += '#' + src.split('#', 1)[1]
             if basename in basename_to_title:
                 return basename_to_title[basename]
 
@@ -1079,7 +1103,7 @@ class HTMLEpubBuilder:
         basename_to_title = {}
         original_to_title = {}
         for entry in toc_entries:
-            href = entry.get('href', '')
+            href = _toc_entry_href(entry)
             translated = entry.get('translated', '')
             original = entry.get('original', '')
             if original and translated:
