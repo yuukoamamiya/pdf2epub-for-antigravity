@@ -222,11 +222,19 @@ def _prepare_html_command(args):
                 glossary_bundle.context_files,
                 None if skip_entities else entity_path,
             ),
+            declared_files=pipeline.declared_translation_files(),
+        )
+        from pdf2epub.subagent_runtime import write_worker_handoffs
+
+        worker_handoffs = write_worker_handoffs(
+            output_dir, body_paths["manifest"], body_paths["prompt"]
         )
 
         logger.success("EPUB HTML preparation complete")
         logger.info(f"Output: {output_dir / 'compressed_units'}")
         logger.info(f"Body Subagent prompt: {body_paths['prompt']}")
+        if worker_handoffs:
+            logger.info(f"Worker handoffs: {output_dir / 'worker_handoffs'}")
         logger.info(
             "Recommended models: body/metadata are declared in their manifests "
             "and default to the configured translation model."
@@ -286,6 +294,8 @@ def html_validate_command(args):
     report_path.write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    if file_name:
+        pipeline.persist_file_validation_checkpoint(report)
 
     logger.info("=" * 60)
     logger.info(f"翻译单元验证结果: {book_title}")
@@ -339,6 +349,88 @@ def html_validate_command(args):
     else:
         logger.warning("存在未完成或未通过校验的单元。")
         return 1
+
+
+def html_skeleton_retry_command(args):
+    """Prepare one complex HTML unit for protected-token retry translation."""
+    from pdf2epub.html_translation.skeleton import write_masked_unit
+    from pdf2epub.markdown_handoff import prepare_markdown_subagent
+
+    file_name = str(args.file)
+    candidate = Path(file_name)
+    if candidate.name != file_name or candidate.suffix.lower() != ".md":
+        logger.error("--file must be a direct .md filename")
+        return 1
+    context = _load_html_book_context(args, "html-skeleton-retry")
+    if context is None:
+        return 1
+    config, book_title, output_dir, epub_path = context
+    from pdf2epub.html_translation import HTMLEpubPipeline
+
+    pipeline = HTMLEpubPipeline(epub_path=epub_path, output_dir=output_dir, config=config)
+    if file_name not in pipeline._declared_html_source_names():
+        logger.error(f"Unknown HTML translation unit: {file_name}")
+        return 1
+
+    source_path = pipeline.compressed_units_dir / file_name
+    skeleton_dir = output_dir / "skeleton_units"
+    contract_dir = output_dir / "skeleton_contracts"
+    target_dir = output_dir / "translated_skeleton"
+    write_masked_unit(
+        source_path,
+        skeleton_dir / file_name,
+        contract_dir / f"{Path(file_name).stem}.json",
+    )
+    paths = prepare_markdown_subagent(
+        output_dir,
+        "translate-html-skeleton",
+        skeleton_dir,
+        target_dir,
+        config.get("translation", {}).get("source_language", "English"),
+        config.get("translation", {}).get("target_language", "Chinese"),
+        extra_rules=(
+            "Translate the complete line with its surrounding sentence context.",
+            "Preserve every placeholder such as ⟦HTML_0001⟧ exactly, including count and order.",
+            "Never translate, remove, duplicate, or reorder placeholders.",
+            "Write only the translated masked lines to the assigned target file.",
+        ),
+        config=config,
+        resume=getattr(args, "resume", False),
+        declared_files=[file_name],
+    )
+    logger.success(f"Skeleton retry prompt: {paths['prompt']}")
+    logger.info(
+        "After the Subagent finishes, run html-skeleton-restore and then html-validate --file."
+    )
+    return 0
+
+
+def html_skeleton_restore_command(args):
+    """Restore one validated masked translation into translated_compressed."""
+    from pdf2epub.html_translation.skeleton import restore_unit
+
+    file_name = str(args.file)
+    candidate = Path(file_name)
+    if candidate.name != file_name or candidate.suffix.lower() != ".md":
+        logger.error("--file must be a direct .md filename")
+        return 1
+    context = _load_html_book_context(args, "html-skeleton-restore")
+    if context is None:
+        return 1
+    _config, _book_title, output_dir, _epub_path = context
+    translated_path = output_dir / "translated_skeleton" / file_name
+    contract_path = output_dir / "skeleton_contracts" / f"{Path(file_name).stem}.json"
+    output_path = output_dir / "translated_compressed" / file_name
+    if not translated_path.is_file() or not contract_path.is_file():
+        logger.error("Skeleton translation or restore contract is missing")
+        return 1
+    try:
+        restore_unit(translated_path, contract_path, output_path)
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        logger.error(f"Skeleton restore failed: {exc}")
+        return 1
+    logger.success(f"Restored translated HTML unit: {file_name}")
+    return 0
 
 
 def build_html_epub_command(args):

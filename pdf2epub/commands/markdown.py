@@ -7,6 +7,7 @@ workspace Subagent.
 
 import hashlib
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
@@ -429,7 +430,7 @@ def _validate_pdf_markdown_task(args, task: str):
         # File mode is intentionally cheap: the Subagent can close the loop
         # on one unit without making a book-level TOC/context decision.
         if getattr(args, "file", None):
-            _persist_file_validation_checkpoint(output_dir, report)
+            _persist_file_validation_checkpoint(output_dir, report, task)
         else:
             entity_report = _validate_translation_entities(output_dir, config)
             report["entities"] = entity_report
@@ -464,7 +465,7 @@ def _validate_pdf_markdown_task(args, task: str):
                     logger.error(f"Translation context: {error}")
             _persist_full_validation_report(output_dir, task, report)
     elif getattr(args, "file", None):
-        _persist_file_validation_checkpoint(output_dir, report)
+        _persist_file_validation_checkpoint(output_dir, report, task)
     logger.info(
         f"{task} 校验: {report['completed']}/{report['total']} completed, "
         f"{len(report['invalid'])} invalid"
@@ -506,9 +507,9 @@ def _persist_full_validation_report(output_dir: Path, task: str, report: dict) -
     )
 
 
-def _persist_file_validation_checkpoint(output_dir: Path, report: dict) -> None:
+def _persist_file_validation_checkpoint(output_dir: Path, report: dict, task: str) -> None:
     """Merge a single-file result into the resumable checkpoint ledger."""
-    path = Path(output_dir) / "translate_file_validation.json"
+    path = Path(output_dir) / f"{task}_file_validation.json"
     existing: dict = {}
     if path.is_file():
         try:
@@ -525,6 +526,8 @@ def _persist_file_validation_checkpoint(output_dir: Path, report: dict) -> None:
             "valid": name in report.get("valid_files", [])
             and not report.get("missing"),
             "source_sha256": report.get("source_sha256", {}).get(name),
+            "target_sha256": report.get("target_sha256", {}).get(name),
+            "validated_at": datetime.now(timezone.utc).isoformat(),
             "invalid": [
                 item for item in report.get("invalid", []) if item.get("file") == name
             ],
@@ -533,7 +536,7 @@ def _persist_file_validation_checkpoint(output_dir: Path, report: dict) -> None:
     atomic_write_text(
         path,
         json.dumps(
-            {"task": "translate", "scope": "file-checkpoints", "files": records},
+            {"task": task, "scope": "file-checkpoints", "files": records},
             ensure_ascii=False,
             indent=2,
         ),

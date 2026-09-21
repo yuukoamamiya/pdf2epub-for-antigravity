@@ -16,6 +16,8 @@ DEFAULT_BATCH_MAX_SOURCE_TOKENS = 12_000
 DEFAULT_BATCH_MAX_CONCURRENCY = 3
 MAX_ACTIVE_SUBAGENTS = 3
 DEFAULT_SINGLE_FILE_MAX_BYTES = 30_000
+DEFAULT_LARGE_FILE_TOKEN_THRESHOLD = 12_000
+DEFAULT_EXTREME_FILE_TOKEN_THRESHOLD = 24_000
 
 _TRANSLATION_TASKS = {
     "translate",
@@ -107,7 +109,36 @@ def _batching_config(config: Optional[Mapping[str, Any]]) -> Dict[str, int]:
         "single_file_max_bytes": _positive_int(
             batching.get("single_file_max_bytes"), DEFAULT_SINGLE_FILE_MAX_BYTES
         ),
+        "large_file_token_threshold": _positive_int(
+            batching.get("large_file_token_threshold"), DEFAULT_LARGE_FILE_TOKEN_THRESHOLD
+        ),
+        "extreme_file_token_threshold": _positive_int(
+            batching.get("extreme_file_token_threshold"), DEFAULT_EXTREME_FILE_TOKEN_THRESHOLD
+        ),
     }
+
+
+def effective_max_concurrency(
+    file_stats: Mapping[str, Mapping[str, int]],
+    configured: int,
+    large_threshold: int = DEFAULT_LARGE_FILE_TOKEN_THRESHOLD,
+    extreme_threshold: int = DEFAULT_EXTREME_FILE_TOKEN_THRESHOLD,
+) -> tuple[int, str]:
+    """Choose a conservative worker cap from the pending source inventory."""
+    large = [
+        name for name, stats in file_stats.items()
+        if int(stats.get("estimated_tokens", 0)) >= large_threshold
+    ]
+    extreme = [
+        name for name, stats in file_stats.items()
+        if int(stats.get("estimated_tokens", 0)) >= extreme_threshold
+    ]
+    configured = min(MAX_ACTIVE_SUBAGENTS, max(1, int(configured)))
+    if extreme or len(large) >= 2:
+        return min(configured, 1), "extreme_or_multiple_large_units"
+    if large:
+        return min(configured, 2), "large_unit_present"
+    return configured, "no_large_units"
 
 
 def _recommended_batches(
@@ -294,7 +325,10 @@ def write_worker_handoffs(
     if not isinstance(queue, list):
         return []
     batching = manifest.get("batching", {})
-    max_workers = batching.get("max_concurrency", DEFAULT_BATCH_MAX_CONCURRENCY)
+    max_workers = manifest.get(
+        "effective_max_concurrency",
+        batching.get("max_concurrency", DEFAULT_BATCH_MAX_CONCURRENCY),
+    )
     groups = _worker_groups(queue, max_workers)
     handoff_dir = output_dir / "worker_handoffs"
     handoff_dir.mkdir(parents=True, exist_ok=True)

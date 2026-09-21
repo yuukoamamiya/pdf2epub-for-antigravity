@@ -8,6 +8,8 @@ from pdf2epub.commands.glossary import glossary_candidates_command
 from pdf2epub.commands.html import (
     build_html_epub_command,
     html_prepare_command,
+    html_skeleton_restore_command,
+    html_skeleton_retry_command,
     html_validate_command,
 )
 from pdf2epub.commands.markdown import (
@@ -413,6 +415,21 @@ def register_command_parsers(subparsers) -> None:
         help="Validate one compressed translation unit only (for example 20_Chapter1.md); skips book-level checks",
     )
     html_validate_parser.set_defaults(func=html_validate_command)
+
+    html_skeleton_retry_parser = subparsers.add_parser(
+        "html-skeleton-retry",
+        help="Prepare one complex HTML unit for protected-token retry translation",
+    )
+    html_skeleton_retry_parser.add_argument("--file", required=True)
+    html_skeleton_retry_parser.add_argument("--resume", action="store_true")
+    html_skeleton_retry_parser.set_defaults(func=html_skeleton_retry_command)
+
+    html_skeleton_restore_parser = subparsers.add_parser(
+        "html-skeleton-restore",
+        help="Restore a completed protected-token HTML retry into the normal target",
+    )
+    html_skeleton_restore_parser.add_argument("--file", required=True)
+    html_skeleton_restore_parser.set_defaults(func=html_skeleton_restore_command)
 
     # Build HTML EPUB subcommand (rebuild EPUB with translated HTML)
     build_html_epub_parser = subparsers.add_parser(

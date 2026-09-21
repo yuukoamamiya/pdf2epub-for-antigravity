@@ -586,6 +586,71 @@ def test_html_validation_rejects_path_in_one_file_scope(tmp_path: Path):
         pipeline.validate_translated_units(file_name="nested/chapter.md")
 
 
+def test_html_validation_uses_mapping_inventory_and_ignores_temp_markdown(tmp_path: Path):
+    pipeline = object.__new__(HTMLEpubPipeline)
+    pipeline.output_dir = tmp_path
+    pipeline.compressed_units_dir = tmp_path / "compressed_units"
+    pipeline.translated_dir = tmp_path / "translated_compressed"
+    pipeline.compressed_units_dir.mkdir()
+    pipeline.translated_dir.mkdir()
+    (pipeline.compressed_units_dir / "chapter.md").write_text(
+        "<i>Source</i>\n", encoding="utf-8"
+    )
+    (pipeline.compressed_units_dir / "chapter.mapping.json").write_text(
+        "{}", encoding="utf-8"
+    )
+    (pipeline.compressed_units_dir / "chapter_temp_part1.md").write_text(
+        "temporary\n", encoding="utf-8"
+    )
+    (pipeline.translated_dir / "chapter.md").write_text(
+        "<i>译文</i>\n", encoding="utf-8"
+    )
+
+    report = pipeline.validate_translated_units()
+
+    assert report["total"] == 1
+    assert report["declared_files"] == ["chapter.md"]
+    assert report["ignored_source_files"] == ["chapter_temp_part1.md"]
+
+
+def test_html_single_file_checkpoint_is_written_and_used_for_resume(tmp_path: Path):
+    pipeline = object.__new__(HTMLEpubPipeline)
+    pipeline.output_dir = tmp_path
+    pipeline.compressed_units_dir = tmp_path / "compressed_units"
+    pipeline.translated_dir = tmp_path / "translated_compressed"
+    pipeline.compressed_units_dir.mkdir()
+    pipeline.translated_dir.mkdir()
+    source = pipeline.compressed_units_dir / "chapter.md"
+    target = pipeline.translated_dir / "chapter.md"
+    source.write_text("<i>Source</i>\n", encoding="utf-8")
+    target.write_text("<i>译文</i>\n", encoding="utf-8")
+
+    report = pipeline.validate_translated_units(file_name="chapter.md")
+    pipeline.persist_file_validation_checkpoint(report)
+
+    ledger = json.loads(
+        (tmp_path / "translate-html_file_validation.json").read_text(encoding="utf-8")
+    )
+    assert ledger["files"]["chapter.md"]["valid"] is True
+    target.write_text("<i>changed</i>\n", encoding="utf-8")
+
+    from pdf2epub.markdown_handoff import prepare_markdown_subagent
+
+    paths = prepare_markdown_subagent(
+        tmp_path,
+        "translate-html",
+        pipeline.compressed_units_dir,
+        pipeline.translated_dir,
+        "English",
+        "Chinese",
+        config={"subagent": {"batching": {"max_concurrency": 1}}},
+        resume=True,
+        declared_files=["chapter.md"],
+    )
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    assert manifest["pending_files"] == ["chapter.md"]
+
+
 def test_prepare_markdown_subagent_records_model(tmp_path: Path):
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"

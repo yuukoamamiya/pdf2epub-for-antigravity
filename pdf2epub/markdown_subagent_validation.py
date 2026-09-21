@@ -86,6 +86,7 @@ def validate_markdown_subagent(
     safety_blocked: List[str] = []
     valid_files: List[str] = []
     source_sha256: Dict[str, str] = {}
+    target_sha256: Dict[str, str] = {}
     normalized_files: List[str] = []
     reference_heading_fixes: List[Dict[str, Any]] = []
     diff_summary: Dict[str, Dict[str, Any]] = {}
@@ -122,7 +123,9 @@ def validate_markdown_subagent(
             )
             continue
         try:
-            target_text = target.read_bytes().decode("utf-8")
+            target_bytes = target.read_bytes()
+            target_sha256[source.name] = hashlib.sha256(target_bytes).hexdigest()
+            target_text = target_bytes.decode("utf-8")
         except UnicodeDecodeError as exc:
             invalid.append(
                 {
@@ -272,6 +275,7 @@ def validate_markdown_subagent(
         "extra": extras,
         "valid_files": valid_files,
         "source_sha256": source_sha256,
+        "target_sha256": target_sha256,
         "validated_dir": str(validated_dir),
         "scope": "files" if partial else "full",
         "files_checked": [source.name for source in sources],
@@ -298,6 +302,7 @@ def validate_markdown_subagent(
             records[name] = {
                 "valid": name in report["valid_files"] and not report["missing"],
                 "source_sha256": report["source_sha256"].get(name),
+                "target_sha256": report["target_sha256"].get(name),
                 "invalid": [item for item in report["invalid"] if item["file"] == name],
                 "safety_blocked": name in report["safety_blocked"],
             }

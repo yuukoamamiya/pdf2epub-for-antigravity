@@ -32,6 +32,20 @@ def _builder(
     )
 
 
+def test_package_relative_href_strips_fragment_before_windows_path_comparison(
+    tmp_path: Path,
+) -> None:
+    extract_dir = tmp_path / "epub_content"
+    ncx_dir = extract_dir / "OEBPS"
+    ncx_dir.mkdir(parents=True)
+
+    assert builder_module._package_relative_href(
+        extract_dir,
+        ncx_dir,
+        "ack.xhtml#ack",
+    ) == "OEBPS/ack.xhtml#ack"
+
+
 def test_update_content_opf_preserves_authors_and_namespaced_attrs(
     tmp_path: Path,
 ) -> None:

@@ -5,7 +5,7 @@ import pymupdf
 
 from pdf2epub.markdown_handoff import prepare_markdown_subagent
 from pdf2epub.pdf_text_probe import extract_native_text_pages, probe_pdf_text_layer
-from pdf2epub.subagent_runtime import write_worker_handoffs
+from pdf2epub.subagent_runtime import effective_max_concurrency, write_worker_handoffs
 from pdf2epub.toc_translation_workflow import (
     build_toc_heading_contexts,
     validate_toc_heading_bindings,
@@ -27,6 +27,26 @@ def _make_native_pdf(path: Path, *, full_page_image: bool = False) -> None:
             )
     document.save(path)
     document.close()
+
+
+def test_effective_concurrency_throttles_large_pending_units():
+    small, reason = effective_max_concurrency(
+        {"small.md": {"estimated_tokens": 100}}, 3
+    )
+    one_large, one_reason = effective_max_concurrency(
+        {"large.md": {"estimated_tokens": 12_000}}, 3
+    )
+    multiple_large, multiple_reason = effective_max_concurrency(
+        {
+            "large1.md": {"estimated_tokens": 12_000},
+            "large2.md": {"estimated_tokens": 12_000},
+        },
+        3,
+    )
+
+    assert (small, reason) == (3, "no_large_units")
+    assert (one_large, one_reason) == (2, "large_unit_present")
+    assert (multiple_large, multiple_reason) == (1, "extreme_or_multiple_large_units")
 
 
 def test_pdf_probe_only_accepts_clean_vector_text(tmp_path: Path):

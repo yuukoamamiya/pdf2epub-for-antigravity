@@ -12,6 +12,7 @@ from .subagent_runtime import (
     _batching_config,
     _markdown_files,
     _recommended_batches,
+    effective_max_concurrency,
     estimate_tokens,
     resolve_subagent_model,
 )
@@ -34,11 +35,23 @@ def prepare_markdown_subagent(
     file_contexts: Optional[Mapping[str, str]] = None,
     heading_contexts: Optional[Mapping[str, Mapping[str, Any]]] = None,
     unit_context_files: Optional[Mapping[str, Path]] = None,
+    declared_files: Optional[Iterable[str]] = None,
 ) -> Dict[str, Path]:
     """Write a manifest and prompt for a markdown Subagent task."""
     source_dir = Path(source_dir)
     target_dir = Path(target_dir)
-    sources = _markdown_files(source_dir)
+    if declared_files is None:
+        sources = _markdown_files(source_dir)
+    else:
+        names = list(dict.fromkeys(str(name) for name in declared_files))
+        sources = []
+        for name in names:
+            candidate = source_dir / name
+            if Path(name).name != name or candidate.suffix.lower() != ".md":
+                raise ValueError(f"Invalid declared Markdown filename: {name}")
+            if not candidate.is_file():
+                raise ValueError(f"Declared Markdown source is missing: {name}")
+            sources.append(candidate)
     if not sources:
         raise ValueError(f"No Markdown source units found in {source_dir}")
 
@@ -105,14 +118,23 @@ def prepare_markdown_subagent(
                     if isinstance(validation, dict)
                     else {}
                 )
+                target_hashes = (
+                    validation.get("target_sha256", {})
+                    if isinstance(validation, dict)
+                    else {}
+                )
                 if not isinstance(validation_hashes, dict):
                     validation_hashes = {}
+                if not isinstance(target_hashes, dict):
+                    target_hashes = {}
                 for name, record in file_records.items():
                     if not isinstance(record, dict) or not record.get("valid"):
                         continue
                     validated_files.add(str(name))
                     validation_hashes[str(name)] = record.get("source_sha256")
+                    target_hashes[str(name)] = record.get("target_sha256")
                 validation["source_sha256"] = validation_hashes
+                validation["target_sha256"] = target_hashes
         except (OSError, json.JSONDecodeError, AttributeError, TypeError):
             pass
     completed_files = []
@@ -121,8 +143,11 @@ def prepare_markdown_subagent(
         target = target_dir / source.name
         source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
         validation_hashes = validation.get("source_sha256", {}) if isinstance(validation, dict) else {}
+        target_hashes = validation.get("target_sha256", {}) if isinstance(validation, dict) else {}
         if not isinstance(validation_hashes, Mapping):
             validation_hashes = {}
+        if not isinstance(target_hashes, Mapping):
+            target_hashes = {}
         # A non-empty target is not proof of completion: an interrupted
         # Subagent can leave a truncated file behind.  Only a prior local
         # validation with the same source hash is a resumable checkpoint.
@@ -132,6 +157,7 @@ def prepare_markdown_subagent(
             source_hash,
             validated_files or (),
             validation_hashes,
+            target_hashes,
         ):
             completed_files.append(source.name)
         else:
@@ -139,6 +165,12 @@ def prepare_markdown_subagent(
     pending_stats = {
         name: stats for name, stats in file_stats.items() if name in pending_files
     }
+    effective_concurrency, concurrency_reason = effective_max_concurrency(
+        pending_stats,
+        batching["max_concurrency"],
+        batching["large_file_token_threshold"],
+        batching["extreme_file_token_threshold"],
+    )
     pending_batches = _recommended_batches(
         pending_stats,
         batching["max_files"],
@@ -166,6 +198,9 @@ def prepare_markdown_subagent(
         "oversized_files": oversized_files,
         "completed_files": completed_files,
         "pending_files": pending_files,
+        "scratch_dir": relative_posix_path(output_dir / "scratch" / task, output_dir),
+        "effective_max_concurrency": effective_concurrency,
+        "concurrency_reason": concurrency_reason,
     }
     normalized_roles = {
         str(name): str(role).strip().lower()
@@ -328,9 +363,13 @@ Batching guidance:
   own Subagent task and split them only at complete source-line boundaries.
 - Any file larger than {batching['single_file_max_bytes']} bytes is isolated in
   its own batch, even when its token estimate would fit beside other files.
-- Keep at most {batching['max_concurrency']} Subagent tasks active at once.
+- Keep at most {manifest['effective_max_concurrency']} Subagent tasks active at once
+  for this hand-off (configured ceiling: {batching['max_concurrency']}; reason:
+  {manifest['concurrency_reason']}).
 - Files with no prior validation report are pending, even when a non-empty
   target file already exists.
+- Do not create extra Markdown files in the source or target directory. Put any
+  temporary split or repair artifacts under `{manifest['scratch_dir']}`.
 
 Rules:
 

@@ -12,6 +12,7 @@ import hashlib
 import re
 import shutil
 import subprocess
+from datetime import datetime, timezone
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -28,6 +29,7 @@ from pdf2epub.subagent_safety import detect_refusal
 from pdf2epub.glossary import validate_translation_context
 from pdf2epub.utils.common import sanitize_filename
 from pdf2epub.utils.html_safety import sanitize_html_document
+from pdf2epub.workflow_contracts import atomic_write_text
 
 
 PART_FILE_RE = re.compile(r'^(.+)\.part(\d+)\.md$')
@@ -35,6 +37,30 @@ PART_FILE_RE = re.compile(r'^(.+)\.part(\d+)\.md$')
 
 class UnsafePackagePath(ValueError):
     """Raised when an EPUB metadata path escapes its extracted package."""
+
+
+def _package_relative_href(extract_dir: Path, base_dir: Path, href: str) -> Optional[str]:
+    """Normalize a local EPUB href without treating its fragment as a path.
+
+    ``Path.relative_to`` is sensitive to Windows path spelling, including
+    8.3 aliases.  Resolve both sides before comparing and append the URI
+    fragment only after the filesystem-relative path has been computed.
+    """
+    if not isinstance(href, str) or not href or "://" in href:
+        return None
+    path_part, separator, fragment = href.partition("#")
+    if not path_part:
+        candidate = Path(base_dir).resolve()
+    else:
+        posix_path = PurePosixPath(path_part)
+        if posix_path.is_absolute():
+            return None
+        candidate = (Path(base_dir) / Path(*posix_path.parts)).resolve()
+    try:
+        relative = candidate.relative_to(Path(extract_dir).resolve()).as_posix()
+    except ValueError:
+        return None
+    return relative + (f"#{fragment}" if separator else "")
 
 
 def _safe_package_path(
@@ -223,7 +249,11 @@ class HTMLEpubBuilder:
         relative_path = None
         if path is not None:
             try:
-                relative_path = path.relative_to(extract_dir).as_posix() if extract_dir else path.as_posix()
+                relative_path = (
+                    path.resolve().relative_to(Path(extract_dir).resolve()).as_posix()
+                    if extract_dir
+                    else path.as_posix()
+                )
             except ValueError:
                 relative_path = path.name
         entry: Dict[str, Any] = {
@@ -974,20 +1004,9 @@ class HTMLEpubBuilder:
 
             # 2. Resolve relative to NCX dir and try again
             if ncx_dir != extract_dir:
-                src_path, separator, fragment = src.partition('#')
-                try:
-                    resolved = (ncx_dir / src_path).relative_to(extract_dir)
-                except ValueError:
-                    # On Windows, tempfile paths may mix a short 8.3 form
-                    # with the long user-profile form.  The basename fallback
-                    # below is still safe and does not abort the whole NCX.
-                    resolved = None
-                if resolved is not None:
-                    resolved_str = resolved.as_posix()
-                    if separator:
-                        resolved_str += f"#{fragment}"
-                    if resolved_str in href_to_title:
-                        return href_to_title[resolved_str]
+                resolved_str = _package_relative_href(extract_dir, ncx_dir, src)
+                if resolved_str in href_to_title:
+                    return href_to_title[resolved_str]
 
             # 3. Match by basename + fragment
             basename = Path(src.split('#', 1)[0]).name
@@ -1137,15 +1156,9 @@ class HTMLEpubBuilder:
 
                 # 2. Resolve relative to nav dir
                 if not translated and nav_dir != extract_dir:
-                    try:
-                        resolved = (nav_dir / href.split('#')[0]).relative_to(extract_dir)
-                        resolved_str = resolved.as_posix()
-                        if '#' in href:
-                            resolved_str += '#' + href.split('#')[1]
-                        if resolved_str in href_to_title:
-                            translated = href_to_title[resolved_str]
-                    except ValueError:
-                        pass
+                    resolved_str = _package_relative_href(extract_dir, nav_dir, href)
+                    if resolved_str in href_to_title:
+                        translated = href_to_title[resolved_str]
 
                 # 3. Match by basename + fragment
                 if not translated:
@@ -1347,6 +1360,21 @@ class HTMLEpubPipeline:
         # Handle codes like 'en-US', 'zh-CN'
         base_code = lang_code.split('-')[0].lower()
         return lang_map.get(base_code, 'English')
+
+    def declared_translation_files(self) -> List[str]:
+        """Return the canonical HTML unit inventory from mapping files.
+
+        Mapping files are produced by local extraction and are not writable
+        translation targets.  They therefore provide a stable fallback that
+        ignores ad-hoc Markdown fragments left by a Subagent.
+        """
+        names = []
+        for mapping_path in sorted(self.compressed_units_dir.glob("*.mapping.json")):
+            stem = mapping_path.name[:-len(".mapping.json")]
+            source_path = self.compressed_units_dir / f"{stem}.md"
+            if source_path.is_file():
+                names.append(source_path.name)
+        return names
 
     def _get_language_code(self, language: str) -> str:
         """Convert language name to ISO 639-1 code for EPUB metadata."""
@@ -1895,9 +1923,7 @@ The output must have this shape:
         scope = "file" if file_name is not None else "book"
         requested_file = None
         missing = []
-        if file_name is None:
-            all_sources = sorted(self.compressed_units_dir.glob("*.md"))
-        else:
+        if file_name is not None:
             requested_file = str(file_name)
             candidate = Path(requested_file)
             if (
@@ -1908,17 +1934,30 @@ The output must have this shape:
                 raise ValueError(
                     "file_name must be a direct .md filename inside compressed_units"
                 )
+        declared_names = self._declared_html_source_names()
+        if file_name is None:
+            all_sources = [
+                self.compressed_units_dir / name
+                for name in declared_names
+                if (self.compressed_units_dir / name).is_file()
+            ]
+            missing.extend(
+                name for name in declared_names
+                if not (self.compressed_units_dir / name).is_file()
+            )
+        else:
             source_path = self.compressed_units_dir / requested_file
-            all_sources = [source_path] if source_path.is_file() else []
-            if not all_sources:
+            all_sources = [source_path] if requested_file in declared_names and source_path.is_file() else []
+            if requested_file not in declared_names or not all_sources:
                 missing.append(requested_file)
 
-        total = len(all_sources)
+        total = len(declared_names) if file_name is None else 1
         invalid = []
         safety_blocked = []
         valid = 0
         valid_files = []
         source_sha256 = {}
+        target_sha256 = {}
 
         for src_file in all_sources:
             tgt_file = self.translated_dir / src_file.name
@@ -1929,6 +1968,7 @@ The output must have this shape:
             src_content = src_file.read_text(encoding="utf-8")
             tgt_content = tgt_file.read_text(encoding="utf-8")
             source_sha256[src_file.name] = hashlib.sha256(src_content.encode("utf-8")).hexdigest()
+            target_sha256[src_file.name] = hashlib.sha256(tgt_file.read_bytes()).hexdigest()
 
             refusal = detect_refusal(src_content, tgt_content)
             if refusal:
@@ -2002,11 +2042,64 @@ The output must have this shape:
             "missing": missing,
             "valid_files": valid_files,
             "source_sha256": source_sha256,
+            "target_sha256": target_sha256,
+            "declared_files": declared_names,
+            "ignored_source_files": sorted(
+                path.name for path in self.compressed_units_dir.glob("*.md")
+                if path.name not in set(declared_names)
+            ),
             "metadata": metadata_report,
             "translation_context": context_report,
             "all_passed": all_passed,
             "book_complete": all_passed if scope == "book" else False,
         }
+
+    def _declared_html_source_names(self) -> List[str]:
+        """Load the manifest inventory, falling back to local mappings."""
+        manifest_path = self.output_dir / "translate-html_subagent_manifest.json"
+        if manifest_path.is_file():
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                names = manifest.get("files")
+                if isinstance(names, list) and all(isinstance(name, str) for name in names):
+                    return list(dict.fromkeys(names))
+            except (OSError, json.JSONDecodeError, AttributeError, TypeError):
+                pass
+        names = self.declared_translation_files()
+        return names or sorted(
+            path.name for path in self.compressed_units_dir.glob("*.md") if path.is_file()
+        )
+
+    def persist_file_validation_checkpoint(self, report: Dict[str, Any]) -> None:
+        """Merge an HTML single-file result into the resume ledger."""
+        path = self.output_dir / "translate-html_file_validation.json"
+        records: Dict[str, Any] = {}
+        if path.is_file():
+            try:
+                loaded = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict) and isinstance(loaded.get("files"), dict):
+                    records = loaded["files"]
+            except (OSError, json.JSONDecodeError, AttributeError, TypeError):
+                records = {}
+        for name in report.get("files_checked", [report.get("file")]):
+            if not name:
+                continue
+            records[str(name)] = {
+                "valid": str(name) in report.get("valid_files", []) and not report.get("missing"),
+                "source_sha256": report.get("source_sha256", {}).get(str(name)),
+                "target_sha256": report.get("target_sha256", {}).get(str(name)),
+                "validated_at": datetime.now(timezone.utc).isoformat(),
+                "invalid": [item for item in report.get("invalid", []) if item.get("file") == str(name)],
+                "safety_blocked": str(name) in report.get("safety_blocked", []),
+            }
+        atomic_write_text(
+            path,
+            json.dumps(
+                {"task": "translate-html", "scope": "file-checkpoints", "files": records},
+                ensure_ascii=False,
+                indent=2,
+            ),
+        )
 
     def validate_translated_metadata(self) -> Dict[str, Any]:
         """Validate the subagent metadata hand-off without contacting an LLM."""

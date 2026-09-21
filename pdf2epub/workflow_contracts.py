@@ -89,6 +89,7 @@ def is_reusable_checkpoint(
     source_sha256: str,
     validated_ids: Iterable[str],
     recorded_hashes: Mapping[str, str],
+    recorded_target_hashes: Optional[Mapping[str, str]] = None,
 ) -> bool:
     """Return whether a target is non-empty and backed by matching validation.
 
@@ -104,7 +105,12 @@ def is_reusable_checkpoint(
     ):
         return False
     try:
-        return bool(target.read_bytes().decode("utf-8").strip())
+        target_bytes = target.read_bytes()
+        if recorded_target_hashes:
+            expected_target_hash = recorded_target_hashes.get(str(item_id))
+            if expected_target_hash and hashlib.sha256(target_bytes).hexdigest() != expected_target_hash:
+                return False
+        return bool(target_bytes.decode("utf-8").strip())
     except (OSError, UnicodeError):
         # A partially written or truncated target is never a resumable
         # checkpoint, even if an old validation report says it was valid.
