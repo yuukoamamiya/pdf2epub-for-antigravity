@@ -4,6 +4,17 @@
 title: "Your Book Title"
 input_pdf: "input/your_book.pdf"
 
+# Optional language-neutral PDF -> EPUB conversion.  With this mode, entity
+# extraction, translated TOC, and translation-only readiness gates are skipped;
+# the validated original-language Markdown is packaged directly.  The polish
+# gate remains required for every PDF pipeline.
+# pipeline: epub_conversion
+# (The legacy alias mode: ocr_to_epub is also accepted.)
+# For conversion-only use, the minimal configuration is just:
+# title: "Your Book Title"
+# input_pdf: "input/your_book.pdf"
+# pipeline: epub_conversion
+
 # 语言设置
 translation:
   source_language: English # 或 Japanese / German / French 等

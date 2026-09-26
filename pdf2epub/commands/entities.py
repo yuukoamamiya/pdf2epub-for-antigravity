@@ -14,6 +14,7 @@ from pdf2epub.commands.sources import (
     _polished_stage_is_current,
     _resolve_pdf_markdown_source,
 )
+from pdf2epub.pipeline_policy import PipelinePolicy
 from pdf2epub.utils.common import book_output_dir
 
 
@@ -113,6 +114,12 @@ def _entity_context_is_current(
 def extract_entities_command(args):
     """Prepare entity extraction for an Antigravity Subagent (local only)."""
     config, _ = load_command_config(args)
+    policy = PipelinePolicy.from_config(config)
+    if not policy.requires_entities:
+        logger.info(
+            "This pipeline does not require entity extraction; the hand-off is skipped."
+        )
+        return 0
     book_title = config.get("title") or (Path(args.input).stem if args.input else None)
     if not book_title:
         logger.error("No title found in config.yaml")
@@ -134,12 +141,8 @@ def extract_entities_command(args):
             "polish-validate first."
         )
         return 1
-    source_language = args.source_lang or config.get("translation", {}).get(
-        "source_language", "English"
-    )
-    target_language = args.target_lang or config.get("translation", {}).get(
-        "target_language", "Chinese"
-    )
+    source_language = args.source_lang or policy.source_language or "English"
+    target_language = args.target_lang or policy.target_language or "Chinese"
     try:
         _prepare_entity_subagent_task(
             output_dir,
@@ -164,6 +167,12 @@ def extract_entities_validate_command(args):
     if context is None:
         return 1
     config = context.config
+    policy = PipelinePolicy.from_config(config)
+    if not policy.requires_entities:
+        logger.info(
+            "This pipeline does not require entity extraction; validation skipped."
+        )
+        return 0
     book_title = context.book_title
     entity_path = context.output_dir / "translation_entities.json"
     if not entity_path.exists():
@@ -174,12 +183,11 @@ def extract_entities_validate_command(args):
     except (OSError, json.JSONDecodeError) as exc:
         logger.error(f"Invalid entity JSON: {exc}")
         return 1
-    translation = config.get("translation", {}) or {}
     errors = validate_entities(
         data,
         book_title,
-        translation.get("source_language"),
-        translation.get("target_language"),
+        policy.source_language,
+        policy.target_language,
     )
     manifest_path = entity_path.parent / "entity_subagent_manifest.json"
     if manifest_path.is_file():

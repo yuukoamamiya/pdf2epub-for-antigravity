@@ -3,6 +3,7 @@ Main FootnoteManager class that coordinates all footnote processing.
 """
 
 import html
+import json
 import re
 from pathlib import Path
 from typing import Dict, List, Optional, Set
@@ -132,6 +133,7 @@ class FootnoteManager:
         # Primary definition chapters (for force_global)
         self.primary_definition_chapters: Set[str] = set()
         self.no_colon_definition_chapters: Set[str] = set()
+        self.boundary_bindings = self._load_boundary_bindings()
 
         # Analyze the footnote structure
         self._analyze_footnote_structure()
@@ -272,6 +274,116 @@ class FootnoteManager:
             )
 
 
+    def _load_boundary_bindings(self) -> List[dict]:
+        """Load safe bindings emitted by the deterministic refine stage."""
+        current = self.markdown_dir.resolve()
+        for _ in range(4):
+            path = current / "footnote_boundary_bindings.json"
+            if path.is_file():
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, UnicodeError, json.JSONDecodeError):
+                    data = {}
+                bindings = data.get("bindings", []) if isinstance(data, dict) else []
+                if isinstance(bindings, list):
+                    return [item for item in bindings if isinstance(item, dict)]
+            if current.parent == current:
+                break
+            current = current.parent
+        return []
+
+    @staticmethod
+    def _binding_file_stem(value: str) -> str:
+        return Path(str(value)).stem
+
+    def _boundary_binding_for_reference(
+        self,
+        key: str,
+        source_chapter: str,
+        line_num: Optional[int],
+        occurrence_in_file: Optional[int],
+    ) -> Optional[dict]:
+        page_note = re.match(r"^\d+n(\d+)$", key)
+        keys = {key, page_note.group(1)} if page_note else {key}
+        source_stem = self._binding_file_stem(source_chapter)
+        for binding in self.boundary_bindings:
+            if binding.get("key") not in keys:
+                continue
+            if self._binding_file_stem(binding.get("reference_file", "")) != source_stem:
+                continue
+            if occurrence_in_file is not None and binding.get("reference_occurrence_in_file") == occurrence_in_file:
+                return binding
+            if occurrence_in_file is None and line_num is not None and binding.get("reference_line") == line_num:
+                return binding
+        return None
+
+    def _boundary_binding_for_definition(
+        self,
+        key: str,
+        source_chapter: str,
+        line_num: Optional[int],
+        occurrence_in_file: Optional[int],
+    ) -> Optional[dict]:
+        source_stem = self._binding_file_stem(source_chapter)
+        for binding in self.boundary_bindings:
+            if binding.get("key") != key:
+                continue
+            if self._binding_file_stem(binding.get("definition_file", "")) != source_stem:
+                continue
+            if occurrence_in_file is not None and binding.get("definition_occurrence_in_file") == occurrence_in_file:
+                return binding
+            if occurrence_in_file is None and line_num is not None and binding.get("definition_line") == line_num:
+                return binding
+        return None
+
+    def _boundary_definition_anchor_id(self, binding: dict) -> str:
+        key = str(binding.get("key", ""))
+        definition_stem = self._binding_file_stem(binding.get("definition_file", ""))
+        definition_line = binding.get("definition_line")
+        occurrence = binding.get("definition_occurrence_in_file") or 1
+
+        if self.style == FootnoteStyle.LOCAL:
+            base_chapter = self.get_local_group_id(definition_stem)
+            local_mapping = self.mapper.local_occurrence_mapping.get(base_chapter)
+            if local_mapping:
+                mapped = local_mapping.get("definition_positions", {}).get(
+                    (key, definition_stem, definition_line)
+                )
+                if mapped is not None:
+                    occurrence = mapped
+        else:
+            for (mapped_key, mapped_occurrence), definition in self.mapper.definition_by_occurrence.items():
+                if (
+                    mapped_key == key
+                    and definition.chapter == definition_stem
+                    and definition.line_num == definition_line
+                ):
+                    occurrence = mapped_occurrence
+                    break
+        occurrence = int(occurrence)
+        return self._footnote_definition_id(
+            key, None if occurrence == 1 else occurrence
+        )
+
+    def _boundary_reference_html(self, binding: dict, original_key: str, source_chapter: str) -> str:
+        target_chapter = self._binding_file_stem(binding.get("definition_file", ""))
+        fn_id = self._boundary_definition_anchor_id(binding)
+        occurrence = binding.get("reference_occurrence_in_file") or 1
+        fnref_id = self._fnref_id(source_chapter, original_key, occurrence)
+        html_target = self.get_html_filename(target_chapter)
+        return (
+            f'<sup id="{fnref_id}"><a class="footnote-ref" '
+            f'href="{html_target}#{fn_id}">[{original_key}]</a></sup>'
+        )
+
+    def _boundary_backref_html(self, binding: dict) -> str:
+        source_chapter = self._binding_file_stem(binding.get("reference_file", ""))
+        key = str(binding.get("key", ""))
+        occurrence = binding.get("reference_occurrence_in_file") or 1
+        fnref_id = self._fnref_id(source_chapter, key, occurrence)
+        backref_link = f"{self.get_html_filename(source_chapter)}#{fnref_id}"
+        return self._backref_html(backref_link, key)
+
     def _drop_replaced_heading_references(self) -> bool:
         """
         Remove references from raw first headings that build_epub will replace.
@@ -405,6 +517,7 @@ class FootnoteManager:
             epub_structure: The hierarchical structure from build_epub_structure()
         """
         self.epub_structure = epub_structure
+        self.boundary_bindings = self._load_boundary_bindings()
         self.content_index = ContentAddressIndex.from_structure(epub_structure)
         self.mapper = FootnoteMapper(self.content_index)
         self._chapter_files = self._discover_chapter_files()
@@ -489,6 +602,17 @@ class FootnoteManager:
         line_num: Optional[int] = None,
         occurrence_in_file: Optional[int] = None,
     ) -> str:
+        boundary_binding = self._boundary_binding_for_definition(
+            key, source_chapter, line_num, occurrence_in_file
+        )
+        if boundary_binding:
+            return self._definition_html(
+                self._boundary_definition_anchor_id(boundary_binding),
+                key,
+                content,
+                self._boundary_backref_html(boundary_binding),
+            )
+
         base_chapter = self.get_local_group_id(source_chapter)
         local_mapping = self.mapper.local_occurrence_mapping.get(base_chapter)
         is_multi_part = bool(
@@ -582,6 +706,17 @@ class FootnoteManager:
         line_num: Optional[int] = None,
         occurrence_in_file: Optional[int] = None,
     ) -> str:
+        boundary_binding = self._boundary_binding_for_definition(
+            key, source_chapter, line_num, occurrence_in_file
+        )
+        if boundary_binding:
+            return self._definition_html(
+                self._boundary_definition_anchor_id(boundary_binding),
+                key,
+                content,
+                self._boundary_backref_html(boundary_binding),
+            )
+
         occurrence_num = None
         if occurrence_in_file is not None:
             occurrence_num = self.mapper.definition_occurrence_in_file.get(
@@ -667,6 +802,14 @@ class FootnoteManager:
         page_note_match = re.match(r'^(\d+)n(\d+)$', key)
         if page_note_match:
             key = page_note_match.group(2)
+
+        boundary_binding = self._boundary_binding_for_reference(
+            key, source_chapter, line_num, occurrence_in_file
+        )
+        if boundary_binding:
+            return self._boundary_reference_html(
+                boundary_binding, original_key, source_chapter
+            )
 
         def unlinked_reference() -> str:
             logger.warning(

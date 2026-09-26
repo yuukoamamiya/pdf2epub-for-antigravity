@@ -19,6 +19,7 @@ from pdf2epub.commands.sources import (
     _polished_stage_is_current,
     _resolve_pdf_markdown_source,
 )
+from pdf2epub.pipeline_policy import PipelinePolicy
 from pdf2epub.utils.common import book_output_dir, load_config
 from pdf2epub.workflow_contracts import atomic_write_text, relative_posix_path
 
@@ -123,14 +124,22 @@ def _prepare_pdf_markdown_task(args, task: str):
     if context is None:
         return 1
     config = context.config
+    policy = PipelinePolicy.from_config(config)
+    conversion_pipeline = policy.is_conversion
+    if task == "translate" and conversion_pipeline:
+        logger.error(
+            "pipeline: epub_conversion is language-neutral; remove that setting "
+            "before running translate."
+        )
+        return 1
     book_title = context.book_title
     output_dir = context.output_dir
     translation = config.get("translation", {})
-    source_language = getattr(args, "source_language", None) or translation.get(
-        "source_language", "English"
+    source_language = getattr(args, "source_language", None) or policy.source_language or (
+        "Original" if conversion_pipeline else "English"
     )
-    target_language = getattr(args, "target_language", None) or translation.get(
-        "target_language", "Chinese"
+    target_language = getattr(args, "target_language", None) or policy.target_language or (
+        "Original" if conversion_pipeline else "Chinese"
     )
     glossary_bundle = None
     context_files = {}
@@ -192,8 +201,7 @@ def _prepare_pdf_markdown_task(args, task: str):
             return 1
         heading_contexts = build_toc_heading_contexts(output_dir)
         target_dir = output_dir / "translated"
-        translation_config = config.get("translation", {})
-        require_entities = translation_config.get("require_entities", True)
+        require_entities = PipelinePolicy.from_config(config).requires_entities
         entity_path = output_dir / "translation_entities.json"
         skip_entities = bool(getattr(args, "skip_entities", False))
         if require_entities and not skip_entities:
@@ -279,23 +287,31 @@ def _prepare_pdf_markdown_task(args, task: str):
             heading_contexts=heading_contexts or None,
             unit_context_files=unit_context_files or None,
         )
-        if task == "translate":
-            from pdf2epub.subagent_runtime import write_worker_handoffs
+        from pdf2epub.subagent_runtime import write_worker_handoffs
 
-            handoffs = write_worker_handoffs(
-                output_dir, paths["manifest"], paths["prompt"]
+        handoffs = write_worker_handoffs(
+            output_dir,
+            paths["manifest"],
+            paths["prompt"],
+        )
+        if handoffs:
+            handoff_dir_name = (
+                "worker_handoffs" if task == "translate" else f"{task}_worker_handoffs"
             )
-            if handoffs:
-                paths["worker_handoffs"] = output_dir / "worker_handoffs"
+            paths["worker_handoffs"] = output_dir / handoff_dir_name
     except Exception as exc:
         logger.error(f"Could not prepare {task} task: {exc}")
         return 1
     logger.success(f"Wrote Subagent prompt: {paths['prompt']}")
     logger.info(f"Recommended Antigravity model: {resolve_subagent_model(config, task)}")
-    if task == "translate":
+    if task in {"translate", "polish"}:
+        handoff_dir_label = (
+            "worker_handoffs" if task == "translate" else f"{task}_worker_handoffs"
+        )
         logger.warning(
             "此步骤只生成交接文件，没有执行翻译；现在必须在 Antigravity 中打开工作区 "
-            "Subagent，并按 worker_handoffs/ 中的 assigned_files 执行。TOC 已由独立前置任务完成。"
+            f"Subagent，并按 {handoff_dir_label}/ 中的 assigned_files 执行。"
+            + ("TOC 已由独立前置任务完成。" if task == "translate" else "")
         )
     logger.info(
         f"在 Antigravity 中让 Subagent 执行提示词，完成后运行 {task}-validate。"
@@ -310,8 +326,7 @@ def polish_validate_command(args):
 def _validate_translation_entities(output_dir: Path, config: dict) -> dict:
     """Validate the glossary contract recorded by the translation manifest."""
     manifest_path = output_dir / "translate_subagent_manifest.json"
-    translation = config.get("translation", {})
-    required = translation.get("require_entities", True)
+    required = PipelinePolicy.from_config(config).requires_entities
     if not manifest_path.is_file():
         return {"valid": not required, "errors": ["translation manifest is missing"]}
     try:
@@ -561,6 +576,8 @@ def _run_readiness_check(
     from pdf2epub.refine.main import _pages_fingerprint
 
     config = load_config(config_path)
+    policy = PipelinePolicy.from_config(config)
+    conversion_pipeline = policy.is_conversion
     book_title = config.get("title")
     output_dir = book_output_dir(book_title) if book_title else Path("output")
     checks: Dict[str, dict] = {}
@@ -656,26 +673,33 @@ def _run_readiness_check(
         if source_ready
         else f"{source_stage} source is missing or not validated",
     )
-    if stage in {"translate", "package"} and not (
-        stage == "translate" and skip_entities
-    ):
+    if stage in {"translate", "package"} and policy.requires_polish:
         record(
             "polish_required",
             source_stage == "polished" and source_ready,
-            "PDF translation requires a current validated polished source for "
-            "both OCR-derived and native-text PDFs"
+            (
+                "PDF packaging requires a current validated polished source"
+                if conversion_pipeline
+                else "PDF translation requires a current validated polished source for "
+                "both OCR-derived and native-text PDFs"
+            )
             if source_stage != "polished" or not source_ready
             else f"current validated {source_stage} source is selected",
         )
 
     translation = config.get("translation", {}) or {}
-    require_entities = bool(translation.get("require_entities", True))
-    if require_entities and not skip_entities:
+    if not policy.requires_translation:
+        record(
+            "translation_entities",
+            True,
+            "not applicable for pipeline: epub_conversion",
+        )
+    elif policy.requires_entities and not skip_entities:
         entity_ready = _entity_context_is_current(
             output_dir,
             source_dir,
-            translation.get("source_language"),
-            translation.get("target_language"),
+            policy.source_language,
+            policy.target_language,
         )
         entity_validation_path = output_dir / "translation_entities_validation.json"
         if entity_validation_path.is_file():
@@ -700,15 +724,17 @@ def _run_readiness_check(
 
     glossary_ready = True
     configured_glossaries = translation.get("glossaries", []) or []
-    if configured_glossaries:
+    if not policy.requires_translation:
+        glossary_detail = "not applicable for pipeline: epub_conversion"
+    elif configured_glossaries:
         try:
             from pdf2epub.glossary import load_selected_glossaries
 
             bundle = load_selected_glossaries(
                 config,
                 output_dir,
-                translation.get("source_language", "English"),
-                translation.get("target_language", "Chinese"),
+                policy.source_language or "English",
+                policy.target_language or "Chinese",
                 Path(config_path),
             )
             glossary_ready = all(path.is_file() for path in bundle.context_files.values())
@@ -722,7 +748,7 @@ def _run_readiness_check(
 
     toc_ready = True
     toc_detail = "not required at this stage"
-    if stage in {"translate", "package"}:
+    if stage in {"translate", "package"} and policy.requires_translated_toc:
         from pdf2epub.toc_translation_workflow import validate_toc_translation_subagent
 
         toc_report = validate_toc_translation_subagent(output_dir)
@@ -733,8 +759,10 @@ def _run_readiness_check(
             else "; ".join(toc_report["errors"][:5])
         )
         record("translated_toc", toc_ready, toc_detail)
+    elif stage in {"translate", "package"}:
+        record("translated_toc", True, "not required for pipeline: epub_conversion")
 
-    if stage == "package":
+    if stage == "package" and policy.requires_translation:
         translated_dir = output_dir / "translated" / "validated"
         translated_ready = translated_dir.is_dir() and any(
             translated_dir.glob("*.md")
@@ -766,11 +794,23 @@ def _run_readiness_check(
             except (OSError, json.JSONDecodeError, AttributeError, TypeError):
                 validation_detail = "translate_validation.json is invalid"
         record("translation_validation", validation_ready, validation_detail)
+    elif stage == "package":
+        record(
+            "translated_output",
+            True,
+            "not required for pipeline: epub_conversion",
+        )
+        record(
+            "translation_validation",
+            True,
+            "not required for pipeline: epub_conversion",
+        )
 
     report = {
         "schema_version": 1,
         "stage": stage,
         "book_title": book_title,
+        "pipeline": policy.kind,
         "source_stage": source_stage,
         "ready": not errors,
         "checks": checks,
@@ -802,6 +842,12 @@ def check_ready_command(args):
 
 def translate_command(args):
     """Prepare a local Markdown hand-off for a translation Subagent."""
+    if not PipelinePolicy.from_config(load_config(args.config)).requires_translation:
+        logger.error(
+            "pipeline: epub_conversion is a pure conversion workflow; "
+            "translation hand-off is disabled."
+        )
+        return 1
     readiness = _run_readiness_check(
         args.config,
         "translate",
@@ -814,4 +860,9 @@ def translate_command(args):
         return 1
     return _prepare_pdf_markdown_task(args, "translate")
 def translate_validate_command(args):
+    if not PipelinePolicy.from_config(load_config(args.config)).requires_translation:
+        logger.error(
+            "pipeline: epub_conversion has no translated Markdown to validate."
+        )
+        return 1
     return _validate_pdf_markdown_task(args, "translate")

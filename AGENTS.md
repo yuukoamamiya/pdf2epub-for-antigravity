@@ -62,6 +62,9 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
   使用 `reference_glossary_*` 名称，不能覆盖权威术语表，也不得反向写回原文件。
 - `translate`、`polish`、`refine`、`extract-entities`、`translate-toc` 只准备交接或
   执行本地处理；命令成功不代表正文已经完成。
+- `polish` 会按 `subagent.batching.max_concurrency` 生成
+  `polish_worker_handoffs/`；`translate` 使用 `worker_handoffs/`。每个 worker
+  只能处理自己 manifest 中的 `assigned_files`。
 - 不删除源文件、输出目录或已有中间结果。额度中断或失败时先校验，再使用原命令的
   `--resume`，只处理 pending 项。
 - 本地校验报告中的 `safety_blocked`、拒答或免责声明不得进入 `validated`，也不得通过打包。
@@ -86,6 +89,16 @@ polish-validate`。
 translate-validate → build-epub`。可搜索但由扫描图像叠加 OCR 文字层的 PDF 仍必须重新
 视觉 OCR。
 
+PDF 纯转换模式使用 `pipeline: epub_conversion`（兼容别名
+`mode: ocr_to_epub`），循环为：
+`ocr-pages → refine-prepare → refine-local → polish → polish-validate → build-epub`。
+该模式不读取语言设置，不执行实体提取、翻译 TOC 或正文翻译；但 polish 仍是所有 PDF
+必须通过的结构质量门禁。构建时不得使用 `build-epub --translated`。
+
+统一的 pipeline 能力和门禁定义位于 `pdf2epub/pipeline_policy.py`。命令模块不得重新
+实现 `pipeline`/`mode` 的特殊判断；需要新增流程能力时先更新该策略对象，再更新对应
+的命令合同和测试。
+
 并发任务必须各自使用 worker handoff 中的 `assigned_files`。超过 30,000 字节的单元必须
 独立成批。TOC 必须由正文翻译前的独立 Subagent 完成，正文 worker 不得修改翻译 TOC。
 
@@ -93,8 +106,9 @@ translate-validate → build-epub`。可搜索但由扫描图像叠加 OCR 文�
 
 ### 2.1 准备、OCR 和结构
 
-1. 检查 `input/` 中的 PDF，在 `config.yaml` 填写 `title`、`input_pdf`、源语言、目标语言
-   和 OCR 后端；不要覆盖用户真实配置。
+1. 检查 `input/` 中的 PDF，在 `config.yaml` 填写 `title`、`input_pdf` 和 OCR 后端；
+   翻译模式还需填写源语言、目标语言，纯转换模式只需增加 `pipeline: epub_conversion`；
+   不要覆盖用户真实配置。
 2. 如需选择外部术语表，先执行 `uv run pdf2epub -c config.yaml glossary-candidates`，
    查看 `output/<title>/glossary_candidates.json`，再明确写入配置；没有明确匹配时留空，
    不得因为目录中存在术语表就自动加载。
@@ -119,7 +133,8 @@ translate-validate → build-epub`。可搜索但由扫描图像叠加 OCR 文�
    本地程序校验页码范围、父子关系、兄弟节点重叠，并生成 `ocr_markdown/`。
    `tree_progress.json` 会锁定 TOC/OCR 指纹；输入变化后必须重新生成受影响单元。
 6. 所有 PDF 都必须执行 `polish`，打开工作区 Subagent 读取
-   `polish_subagent_prompt.md` 写入 `polished_markdown/`，然后运行 `polish-validate`。
+   `polish_subagent_prompt.md`，并按 `polish_worker_handoffs/` 中各 manifest 的
+   `assigned_files` 写入 `polished_markdown/`，然后运行 `polish-validate`。
    对 OCR/混合型 PDF，该步骤用于修复 OCR 换行和明显 OCR 错字；对原生矢量文本 PDF，
    该步骤用于从视觉行重建语义段落，同时保留原文字符和块级结构。未通过
    `polish-validate` 不得继续实体提取或翻译。
@@ -183,6 +198,28 @@ uv run pdf2epub -c config.yaml check-ready --stage translate --skip-entities
 - `index` 必须保留条目层级、页码、页码范围、交叉引用和条目数量。
 - `translate-validate` 会额外比对参考文献/索引中的数字标记；发现数字丢失、改写或重排
   时必须返工。`bilingual_warnings` 只是预警，不是单独的阻断条件。
+
+### 2.4 PDF 纯转换流程
+
+纯转换模式不需要伪造 `source_language: Chinese` 和 `target_language: Chinese`。
+最小配置如下：
+
+```yaml
+title: "Your Book Title"
+input_pdf: "input/your_book.pdf"
+pipeline: epub_conversion
+```
+
+完成 `polish-validate` 后可运行：
+
+```text
+uv run pdf2epub -c config.yaml check-ready --stage package
+uv run pdf2epub -c config.yaml build-epub
+```
+
+`extract-entities` 和 `translate-toc-validate` 在该模式下会明确标记为不适用；
+`translate`、`translate-validate` 和 `build-epub --translated` 会被拒绝。该模式生成
+原语言 EPUB，不生成 `translation_entities.json` 或 `toc_tree_translated.json`。
 
 ## 3. EPUB 高保真翻译流程
 

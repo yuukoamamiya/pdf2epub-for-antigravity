@@ -9,6 +9,7 @@ and correct before producing ``toc_tree.json``.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -24,6 +25,7 @@ def _empty_draft(pdf_path: Path, total_pages: int, warning: str) -> Dict[str, An
         "entry_count": 0,
         "chapters": [],
         "warnings": [warning],
+        "heuristic_normalization": {"applied": False, "operations": []},
     }
 
 
@@ -37,6 +39,100 @@ def _assign_end_pages(nodes: List[Dict[str, Any]], parent_end: int) -> None:
             node["start_page"], min(parent_end, next_start - 1)
         )
         _assign_end_pages(node["children"], node["end_page"])
+
+
+_OUTLINE_CONTAINER_RE = re.compile(
+    r"(?:^|\b)(?:table\s+of\s+contents|contents|list\s+of\s+figures|"
+    r"list\s+of\s+tables|目录|图表目录|附录|appendix)(?:$|\b)",
+    re.IGNORECASE,
+)
+_NUMBERED_ENTRY_RE = re.compile(r"^\s*(?:\d+(?:\.\d+)*|[IVXLCDM]+)[.)]?\s+\S", re.IGNORECASE)
+_PAGE_SUFFIX_RE = re.compile(r"(?:\s|\.\.\.)\d{1,4}\s*$")
+
+
+def _outline_parallel_score(children: List[Dict[str, Any]]) -> float:
+    """Estimate whether children look like a flat TOC/list entry run."""
+    if not children:
+        return 0.0
+    numbered = 0
+    page_suffixes = 0
+    for child in children:
+        title = str(child.get("title") or "").strip()
+        numbered += bool(_NUMBERED_ENTRY_RE.match(title))
+        page_suffixes += bool(_PAGE_SUFFIX_RE.search(title))
+    levels = [child.get("level") for child in children]
+    same_level = len(set(levels)) == 1
+    return max(
+        numbered / len(children),
+        page_suffixes / len(children),
+        1.0 if same_level and len(children) >= 8 else 0.0,
+    )
+
+
+def _shift_outline_levels(node: Dict[str, Any], delta: int) -> None:
+    level = node.get("level")
+    if isinstance(level, int):
+        node["level"] = max(1, level + delta)
+    for child in node.get("children", []) or []:
+        _shift_outline_levels(child, delta)
+
+
+def _heuristic_unflatten(
+    nodes: List[Dict[str, Any]],
+    total_pages: int,
+    warnings: List[str],
+) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Promote obviously mis-parented native-outline entry runs.
+
+    This is intentionally conservative: a wrapper must be a recognizable
+    contents/list/appendix label, span over at least half the book, and contain
+    at least eight parallel children.  The Subagent still reviews the result.
+    """
+    result: List[Dict[str, Any]] = []
+    applied: List[Dict[str, Any]] = []
+    for node in nodes:
+        children, nested_applied = _heuristic_unflatten(
+            node.get("children", []) or [], total_pages, warnings
+        )
+        node["children"] = children
+        applied.extend(nested_applied)
+        title = str(node.get("title") or "").strip()
+        span = max(0, int(node.get("end_page", 0)) - int(node.get("start_page", 0)) + 1)
+        is_container = bool(_OUTLINE_CONTAINER_RE.search(title))
+        is_large_appendix = bool(re.search(r"(?:附录|appendix)", title, re.IGNORECASE))
+        score = _outline_parallel_score(children)
+        should_unflatten = (
+            bool(children)
+            and span / max(1, total_pages) >= 0.5
+            and len(children) >= 8
+            and score >= 0.6
+            and (is_container or is_large_appendix)
+        )
+        if not should_unflatten:
+            result.append(node)
+            continue
+
+        promoted_level = int(node.get("level") or 1)
+        promoted = []
+        for child in children:
+            old_level = int(child.get("level") or promoted_level + 1)
+            _shift_outline_levels(child, promoted_level - old_level)
+            promoted.append(child)
+        warning = (
+            f"Heuristically unflattened {len(promoted)} entries from outline "
+            f"container '{title}' (span={span}/{total_pages}, score={score:.2f})"
+        )
+        warnings.append(warning)
+        applied.append(
+            {
+                "title": title,
+                "promoted_entries": len(promoted),
+                "span_pages": span,
+                "parallel_score": round(score, 3),
+            }
+        )
+        result.extend(promoted)
+    return result, applied
 
 
 def extract_pdf_outline(
@@ -116,9 +212,12 @@ def extract_pdf_outline(
             chapters.append(node)
         stack.append((level, node))
 
+    normalization: List[Dict[str, Any]] = []
     if not chapters:
         warnings.append("PDF contains no usable native outline entries")
     else:
+        _assign_end_pages(chapters, usable_pages)
+        chapters, normalization = _heuristic_unflatten(chapters, usable_pages, warnings)
         _assign_end_pages(chapters, usable_pages)
 
     draft = {
@@ -131,6 +230,10 @@ def extract_pdf_outline(
         "entry_count": sum(1 for _ in _walk(chapters)),
         "chapters": chapters,
         "warnings": warnings,
+        "heuristic_normalization": {
+            "applied": bool(normalization),
+            "operations": normalization,
+        },
     }
     output_path.write_text(json.dumps(draft, ensure_ascii=False, indent=2), encoding="utf-8")
     return draft

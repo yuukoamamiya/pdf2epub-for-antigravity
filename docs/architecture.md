@@ -13,6 +13,8 @@
 - 源文件、原始输入和已通过校验的中间结果不可被普通流程覆盖或删除。
 - manifest、prompt、validation report 和源文件 SHA-256 共同构成可恢复的任务合同。
 - 各工作流通过共享契约复用能力，但不直接互相调用另一种格式的业务实现。
+- PDF 翻译与纯转换共享源稿准备、polish、校验和 EPUB 构建；流程差异由统一的
+  `PipelinePolicy` 声明，不在各 command handler 中重复判断。
 
 ## 2. 分层结构
 
@@ -22,6 +24,7 @@ cli.py
     └── commands/*.py                命令编排与用户可见返回值
         ├── commands/runtime.py      配置、书名、输出目录、日志上下文
         ├── commands/sources.py      PDF 源稿阶段选择
+        ├── pipeline_policy.py       PDF pipeline 能力和门禁策略
         └── 领域工作流模块
             ├── refine/              PDF 结构、分页和单元生成
             ├── html_translation/    EPUB HTML 解析、压缩、校验和重建
@@ -67,6 +70,12 @@ Subagent 合同层
 - `tex.py`：编排 arXiv/本地 TeX 项目准备、校验和编译。
 - `glossary.py`：扫描外部术语表候选，并区分严格匹配的权威表与显式选择的跨语言只读参考表；不自动选择模糊候选。
 
+`pipeline_policy.py` 是 PDF pipeline 的策略边界。`PipelinePolicy.from_config()` 将缺省
+配置视为传统翻译流程，将 `pipeline: epub_conversion` 和兼容别名
+`mode: ocr_to_epub` 规范化为纯转换流程，并声明是否需要翻译、实体表、翻译 TOC 和
+polish。`commands/markdown.py`、`entities.py`、`toc.py` 和 `pdf.py` 均应依赖该策略；
+不要在这些模块重新解析 `pipeline` 或 `mode`。
+
 新命令应优先使用 `runtime.py` 的公共上下文；不要从 `cli.py` 导入业务函数，也不要把
 配置解析和输出目录推断复制到每个 handler 中。
 
@@ -101,21 +110,25 @@ refine-local
   → ocr_markdown/ + tree_progress.json
 polish + 工作区 Subagent + polish-validate（所有 PDF 必需）
   → polished_markdown/validated/
+
+翻译分支：
 extract-entities + 工作区 Subagent + extract-entities-validate
   → translation_entities.json
 translate-toc + 工作区 Subagent + translate-toc-validate
   → toc_tree_translated.json
-translate + 最多 3 个 worker handoff + 工作区 Subagent
+translate + 最多 3 个 worker_handoffs + 工作区 Subagent
   → translated/
-translate-validate
-  → translate_validation.json
-build-epub --translated
-  → 最终 EPUB
+translate-validate → translate_validation.json
+build-epub --translated → 最终译文 EPUB
+
+纯转换分支（`pipeline: epub_conversion`）：
+check-ready --stage package → build-epub → 原语言 EPUB
 ```
 
 结构判断、润色和翻译不会在本地 Python 进程中完成。每个 Subagent 只处理 worker
-manifest 指定的文件；大单元单独成批。翻译 TOC 是正文 worker 启动前的独立前置任务，
-正文 worker 不得修改翻译 TOC。
+manifest 指定的文件；大单元单独成批。polish 使用 `polish_worker_handoffs/`，正文翻译
+使用 `worker_handoffs/`。翻译 TOC 是正文 worker 启动前的独立前置任务，正文 worker
+不得修改翻译 TOC。纯转换分支不生成实体表或翻译 TOC，但仍必须通过 polish。
 
 ### 3.2 高保真 EPUB 工作流
 
@@ -148,6 +161,7 @@ HTML 单元要求非空内容一一对应；标签、属性、实体、容器和
 ```text
 CLI → command registry → command handlers
                          ├→ command runtime/context
+                         ├→ pipeline policy
                          ├→ format workflow services
                          └→ Subagent contract modules
 
@@ -183,7 +197,8 @@ Format workflow services  → shared utilities/domain services
 2. 将可复用的纯逻辑放入对应的共享模块，不复制到多个 command handler。
 3. 在 `commands/registry.py` 注册参数和 handler。
 4. 为模块边界、旧导入兼容性、失败恢复和结构校验增加测试。
-5. 更新本文件中的模块地图；只有外部执行顺序或安全边界变化时才更新 `AGENTS.md`。
+5. 更新本文件中的模块地图；如果 pipeline 选择、Subagent 总闸、校验门禁或恢复规则
+   发生变化，同时更新 `AGENTS.md`。
 
 测试入口为 `uv run pytest -q`。代码重构不应读取、改写或重新生成用户的书稿和译文输出；
 涉及实际翻译时必须重新遵守 [`AGENTS.md`](../AGENTS.md) 的 Subagent 总闸和开工检查。

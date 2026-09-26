@@ -20,7 +20,12 @@ from PIL import Image
 import pymupdf as fitz
 from loguru import logger
 from tqdm import tqdm
+from .utils.encoding import configure_utf8_stdio
 from .utils.logging_config import configure_logging
+
+# This module is also used as a standalone utility and may print filenames
+# containing characters outside the Windows active code page.
+configure_utf8_stdio()
 
 # Configure logger
 logger = configure_logging()

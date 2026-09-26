@@ -9,6 +9,12 @@ from pathlib import Path
 from typing import Dict, Optional, Any, Union, Iterable, Sequence
 
 from loguru import logger
+from pdf2epub.pipeline_policy import PipelinePolicy
+
+
+def is_epub_conversion_pipeline(config: Optional[dict]) -> bool:
+    """Return whether the config requests a language-neutral PDF conversion."""
+    return PipelinePolicy.from_config(config).is_conversion
 
 
 def resolve_input_path(path: Optional[Union[str, Path]]) -> Optional[Path]:

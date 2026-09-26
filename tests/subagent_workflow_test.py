@@ -1433,6 +1433,29 @@ def test_extract_pdf_outline_builds_nested_reviewable_ranges(tmp_path: Path):
     )["source"] == "pdf-native-outline"
 
 
+def test_extract_pdf_outline_unflattens_large_contents_wrapper(tmp_path: Path):
+    import pymupdf as fitz
+
+    pdf_path = tmp_path / "book.pdf"
+    document = fitz.open()
+    for _ in range(20):
+        document.new_page()
+    toc = [[1, "Contents", 1]]
+    toc.extend(
+        [[2, f"{index}. Entry {index} {index + 1}", index + 1] for index in range(1, 9)]
+    )
+    document.set_toc(toc)
+    document.save(pdf_path)
+    document.close()
+
+    draft = extract_pdf_outline(pdf_path, tmp_path / "outline.json", total_pages=20)
+
+    assert draft["heuristic_normalization"]["applied"] is True
+    assert len(draft["chapters"]) == 8
+    assert all(node["level"] == 1 for node in draft["chapters"])
+    assert any("unflattened" in warning for warning in draft["warnings"])
+
+
 def test_refine_local_splits_a_parent_when_children_cover_its_range(tmp_path: Path):
     pages_dir = tmp_path / "pages"
     pages_dir.mkdir()

@@ -10,9 +10,8 @@ from loguru import logger
 
 from pdf2epub.commands.runtime import load_book_context
 from pdf2epub.commands.sources import _resolve_pdf_markdown_source
-from pdf2epub.utils.common import (
-    sanitize_filename,
-)
+from pdf2epub.pipeline_policy import PipelinePolicy
+from pdf2epub.utils.common import sanitize_filename
 
 
 def _validate_pdf_source_stage(args, source_stage: str) -> int:
@@ -45,6 +44,13 @@ def build_epub_command(args):
     if context is None:
         return 1
     config = context.config
+    policy = PipelinePolicy.from_config(config)
+    if args.translated and not policy.requires_translation:
+        logger.error(
+            "pipeline: epub_conversion builds the original-language EPUB; "
+            "--translated is not available."
+        )
+        return 1
     book_title = context.book_title
     output_dir = context.output_dir
     toc_tree_path = output_dir / "toc_tree.json"
@@ -113,12 +119,14 @@ def build_epub_command(args):
                     break
 
     # Get target language from config
-    target_language = config.get("translation", {}).get("target_language", "Chinese")
+    target_language = (
+        (policy.target_language or "Original")
+        if not policy.requires_translation
+        else (policy.target_language or "Chinese")
+    )
 
     if args.translated:
-        source_language = config.get("translation", {}).get(
-            "source_language", "English"
-        )
+        source_language = policy.source_language or "English"
         safe_title = sanitize_filename(book_title)
         english_epub = output_dir / f"{safe_title}_en.epub"
         english_config = BuildEpubConfig(

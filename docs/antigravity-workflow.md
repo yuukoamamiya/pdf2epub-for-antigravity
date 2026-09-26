@@ -26,7 +26,10 @@ subagent:
 
 正文任务按文件拆分。使用 `--resume` 重新准备任务时，manifest 会根据目标目录写出 `completed_files` 和 `pending_files`；提示词要求 Subagent 只处理 `pending_files`。已经通过校验的输出不会被重新覆盖。恢复前建议先运行对应的 `*-validate`，这样可以先发现空文件、行数不一致或标签损坏。
 
-PDF 翻译 manifest 还会在 `batch_handoffs/` 生成按批次隔离的 manifest 和提示词。并发时每个 Subagent 只读取自己批次的 `assigned_files`；超过 30,000 字节的单元自动独立成批。只有第一个批次负责写入 `toc_tree_translated.json`。
+PDF 的 `translate` manifest 会在 `worker_handoffs/` 生成按 worker 隔离的 manifest 和提示词；
+`polish` 使用独立的 `polish_worker_handoffs/`，避免不同阶段的任务被误认。并发时每个
+Subagent 只读取自己 handoff 的 `assigned_files`；超过 30,000 字节的单元自动独立成批。
+`translate-toc` 是正文 worker 启动前的独立任务，不由任何正文 worker 写入。
 
 元数据是单个 `translated_metadata.json`，必须整体是合法 JSON；如果额度中断留下半个文件，校验会拒绝它，下一次 Subagent 会完整重写。
 
@@ -78,7 +81,29 @@ html-validate --file <同名文件>.md
 
 ```text
 ocr-pages → refine-prepare → Subagent → refine-local → polish → polish-validate
-  → extract-entities → translate → translate-validate → build-epub
+```
+
+翻译模式在 polish 之后继续：
+
+```text
+extract-entities → extract-entities-validate → translate-toc → translate-toc-validate
+  → translate（worker_handoffs/）→ translate-validate → build-epub --translated
+```
+
+纯转换模式使用 `pipeline: epub_conversion`（兼容 `mode: ocr_to_epub`），跳过所有
+翻译专属步骤：
+
+```text
+check-ready --stage package → build-epub
+```
+
+它不要求语言配置，不生成实体表或翻译 TOC，但仍必须完成 polish 和
+`polish-validate`。转换配置最小形式是：
+
+```yaml
+title: "Your Book Title"
+input_pdf: "input/your_book.pdf"
+pipeline: epub_conversion
 ```
 
 `refine-prepare` 会在 `output/<title>/` 生成 `refine_subagent_prompt.md` 和 `refine_subagent_manifest.json`。Subagent 阅读 `pages/page_*.md` 后，只负责写入 `toc_tree.json`。随后 `refine-local`：
@@ -89,6 +114,11 @@ ocr-pages → refine-prepare → Subagent → refine-local → polish → polish
 - 对超过 15,000 tokens 的 Notes、Bibliography 和 Index 单元按完整条目/段落
   自动生成 `chapter_N.partM.md` 分片，默认目标为 12,000 tokens；
 - 不创建 LLM client、不发送 PDF、不消耗 API 配额。
+
+`refine-local` 完成物理切分后会运行边界注脚扫描器，将安全匹配的跨文件引用/定义记录
+到 `footnote_boundary_bindings.json`；EPUB 构建时由 `FootnoteManager` 消费。原始 PDF 书签
+草稿还会对明显的“大跨度目录/附录包装节点”执行保守的层级解构，Subagent 只需复核
+结果。
 
 `refine` 是 `refine-prepare` 的别名，不再存在 provider/API 实现。
 
@@ -153,6 +183,9 @@ translate-validate --file chapter_5.3.2.md
 
 Windows 下的批量替换、JSON 写入和正则处理应使用仓库已有的 UTF-8 脚本或可复用
 脚本，不要拼接复杂的 PowerShell `python -c` 内联命令。
+
+pipeline 的能力矩阵由 `pdf2epub/pipeline_policy.py` 维护。命令模块应使用该策略判断
+实体、翻译 TOC、正文翻译和 polish 门禁，不要各自解析 `pipeline`/`mode`。
 
 ## 安全边界
 

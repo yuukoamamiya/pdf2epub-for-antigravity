@@ -12,6 +12,7 @@ from pdf2epub.epub.footnotes import (
 )
 from pdf2epub.epub.footnotes.content_index import ContentAddressIndex
 from pdf2epub.markdown_to_html import convert_markdown_to_html
+from pdf2epub.refine.footnote_stitcher import scan_boundary_footnotes
 
 
 def _entry(unit_id: str, *part_files: Path, children=None, entry_type=None) -> dict:
@@ -140,6 +141,23 @@ def test_unbalanced_local_occurrences_degrade_to_visible_unlinked_refs(
 
     assert report["forward_hrefs"] == 1
     assert report["unlinked_sup_count"] == 1
+
+
+def test_refine_boundary_stitcher_links_one_safe_adjacent_reference(tmp_path: Path):
+    first = tmp_path / "chapter_1.md"
+    second = tmp_path / "chapter_2.md"
+    first.write_text("\n".join(["Body"] * 19 + ["Cross-boundary [^1]."]), encoding="utf-8")
+    second.write_text("[^1]: Definition in the following unit.\n", encoding="utf-8")
+    report = scan_boundary_footnotes(tmp_path, [first.name, second.name])
+
+    assert len(report["bindings"]) == 1
+    structure = [_entry("chapter_1", first), _entry("chapter_2", second)]
+    manager = FootnoteManager(tmp_path, epub_structure=structure)
+    rendered = _render(structure, manager)
+    graph = validate_footnote_graph(rendered)
+
+    assert graph["forward_hrefs"] == 1
+    assert graph["backref_hrefs"] == 1
 
 
 def test_global_occurrence_mapping_without_semantic_sections_is_valid(

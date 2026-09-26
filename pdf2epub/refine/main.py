@@ -13,6 +13,7 @@ from .toc_tree import TOCNode, dict_list_to_toc_tree
 from .page_merger import PageMerger
 from .subagent_workflow import page_numbers, validate_toc_tree_data
 from .unit_splitter import split_markdown_unit
+from .footnote_stitcher import scan_boundary_footnotes
 
 # Initialize tokenizer
 tokenizer = tiktoken.get_encoding("cl100k_base")
@@ -420,5 +421,21 @@ class RefinedBreakdown:
             unit_metadata.append(metadata)
 
             logger.debug(f"Saved {unit['unit_id']}: {unit['token_count']} tokens")
+
+        ordered_files = [
+            name
+            for metadata in unit_metadata
+            for name in metadata.get("part_files") or [metadata["file"]]
+        ]
+        footnote_report = scan_boundary_footnotes(
+            output_dir,
+            ordered_files,
+            output_dir.parent / "footnote_boundary_bindings.json",
+        )
+        if footnote_report["bindings"]:
+            logger.info(
+                "Stitched %d safe footnote boundary binding(s)",
+                len(footnote_report["bindings"]),
+            )
 
         return unit_metadata

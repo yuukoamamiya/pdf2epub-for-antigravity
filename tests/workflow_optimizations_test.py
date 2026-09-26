@@ -4,12 +4,14 @@ from pathlib import Path
 import pymupdf
 
 from pdf2epub.markdown_handoff import prepare_markdown_subagent
+from pdf2epub.pipeline_policy import PipelinePolicy
 from pdf2epub.pdf_text_probe import extract_native_text_pages, probe_pdf_text_layer
 from pdf2epub.subagent_runtime import effective_max_concurrency, write_worker_handoffs
 from pdf2epub.toc_translation_workflow import (
     build_toc_heading_contexts,
     validate_toc_heading_bindings,
 )
+from pdf2epub.utils.common import is_epub_conversion_pipeline
 
 
 def _make_native_pdf(path: Path, *, full_page_image: bool = False) -> None:
@@ -62,6 +64,42 @@ def test_pdf_probe_only_accepts_clean_vector_text(tmp_path: Path):
     assert native_report["recommendation"] == "use_text_layer"
     assert searchable_report["classification"] == "searchable_ocr_or_mixed"
     assert searchable_report["recommendation"] == "ocr_required"
+
+
+def test_epub_conversion_pipeline_is_language_neutral():
+    assert is_epub_conversion_pipeline({"pipeline": "epub_conversion"}) is True
+    assert is_epub_conversion_pipeline({"mode": "ocr_to_epub"}) is True
+    assert is_epub_conversion_pipeline({"pipeline": "translation"}) is False
+    assert is_epub_conversion_pipeline({}) is False
+
+
+def test_pipeline_policy_centralizes_conversion_and_translation_requirements():
+    conversion = PipelinePolicy.from_config({"mode": "ocr_to_epub"})
+    assert conversion.kind == "epub_conversion"
+    assert conversion.is_conversion is True
+    assert conversion.requires_translation is False
+    assert conversion.requires_entities is False
+    assert conversion.requires_translated_toc is False
+    assert conversion.requires_polish is True
+    assert conversion.source_language is None
+    assert conversion.target_language is None
+
+    translation = PipelinePolicy.from_config(
+        {
+            "pipeline": "translation",
+            "translation": {
+                "source_language": "German",
+                "target_language": "Chinese",
+                "require_entities": False,
+            },
+        }
+    )
+    assert translation.kind == "translation"
+    assert translation.requires_translation is True
+    assert translation.requires_entities is False
+    assert translation.requires_translated_toc is True
+    assert translation.source_language == "German"
+    assert translation.target_language == "Chinese"
 
 
 def test_native_text_extraction_writes_page_contract(tmp_path: Path):
@@ -142,6 +180,33 @@ def test_worker_handoffs_balance_pending_batches_and_keep_files_disjoint(tmp_pat
     assert all(item["manifest"].startswith("worker_handoffs/") for item in handoffs)
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
     assert len(manifest["worker_queue"]) == 3
+
+
+def test_polish_worker_handoffs_are_task_scoped(tmp_path: Path):
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    for index in range(6):
+        (source_dir / f"unit_{index}.md").write_text("polish me", encoding="utf-8")
+
+    paths = prepare_markdown_subagent(
+        tmp_path,
+        "polish",
+        source_dir,
+        target_dir,
+        "Original",
+        "Original",
+        config={"subagent": {"batching": {"max_files": 2, "max_concurrency": 3}}},
+    )
+    handoffs = write_worker_handoffs(tmp_path, paths["manifest"], paths["prompt"])
+
+    assert len(handoffs) == 3
+    assert all(item["manifest"].startswith("polish_worker_handoffs/") for item in handoffs)
+    assert all(
+        (tmp_path / item["manifest"]).name.startswith("polish_subagent_manifest_")
+        for item in handoffs
+    )
 
 
 def test_toc_heading_contexts_and_validation_use_first_unit_part(tmp_path: Path):
