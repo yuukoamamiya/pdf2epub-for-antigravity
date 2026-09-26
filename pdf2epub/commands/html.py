@@ -216,6 +216,11 @@ def _prepare_html_command(args):
             resume=getattr(args, "resume", False),
             context_files=context_files or None,
             skipped_context_files=skipped_context_files,
+            prompt_context_files={
+                name: path
+                for name, path in context_files.items()
+                if str(name).startswith("reference_glossary_")
+            },
             unit_context_files=build_unit_glossary_contexts(
                 output_dir,
                 output_dir / "compressed_units",

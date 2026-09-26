@@ -137,6 +137,7 @@ def _prepare_pdf_markdown_task(args, task: str):
     skipped_context_files = []
     unit_context_files = {}
     heading_contexts = {}
+    prompt_context_files = None
     if task == "translate":
         from pdf2epub.glossary import load_selected_glossaries
 
@@ -232,7 +233,7 @@ def _prepare_pdf_markdown_task(args, task: str):
             )
         else:
             rules.append(
-                "Read the unit-specific terminology context listed for each file before translating. Use translation_entities.json only as read-only audit context or when the unit context does not resolve an entity; do not modify either file."
+                "Read the unit-specific or worker-deduplicated terminology context before translating. Full entity and domain snapshots are audit-only; consult them only to resolve an explicit context gap or conflict, not as routine input. Do not modify any context file."
             )
         if glossary_bundle and glossary_bundle.rules:
             rules.extend(glossary_bundle.rules)
@@ -252,6 +253,11 @@ def _prepare_pdf_markdown_task(args, task: str):
             glossary_bundle.context_files if glossary_bundle else {},
             None if skip_entities else entity_path,
         )
+        prompt_context_files = {
+            name: path
+            for name, path in context_files.items()
+            if str(name).startswith("reference_glossary_")
+        }
     try:
         paths = prepare_markdown_subagent(
             output_dir,
@@ -266,6 +272,7 @@ def _prepare_pdf_markdown_task(args, task: str):
             file_roles=_load_pdf_file_roles(output_dir) if task == "translate" else None,
             context_files=context_files or None,
             skipped_context_files=skipped_context_files,
+            prompt_context_files=prompt_context_files,
             file_contexts=(
                 _load_pdf_file_contexts(output_dir) if task == "translate" else None
             ),

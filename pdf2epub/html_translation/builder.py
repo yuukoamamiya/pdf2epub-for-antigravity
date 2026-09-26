@@ -1554,15 +1554,60 @@ class HTMLEpubPipeline:
             },
             "toc": toc,
         }
+        metadata_context_files = {}
+        metadata_audit_context_files = {}
         if context_files:
+            from pdf2epub.glossary import build_metadata_glossary_context
+
+            metadata_text = "\n".join(
+                [
+                    self.book_title,
+                    description,
+                    rights,
+                    *(entry.get("title", "") for entry in toc),
+                ]
+            )
+            compact_context = build_metadata_glossary_context(
+                self.output_dir,
+                context_files,
+                metadata_text,
+            )
+            if compact_context:
+                metadata_context_files["metadata_glossary"] = compact_context
+            # Reference-only glossaries intentionally remain available to the
+            # metadata task because their conceptual correspondences cannot be
+            # selected reliably by exact source-form matching.
+            metadata_context_files.update(
+                {
+                    str(name): Path(path)
+                    for name, path in context_files.items()
+                    if str(name).startswith("reference_glossary_")
+                }
+            )
+            metadata_audit_context_files = {
+                str(name): Path(path) for name, path in context_files.items()
+            }
+
+        if metadata_context_files:
             source["translation_context"] = {
                 "files": {
                     str(name): Path(path).resolve().relative_to(self.output_dir.resolve()).as_posix()
-                    for name, path in context_files.items()
+                    for name, path in metadata_context_files.items()
                 },
                 "sha256": {
                     str(name): hashlib.sha256(Path(path).read_bytes()).hexdigest()
-                    for name, path in context_files.items()
+                    for name, path in metadata_context_files.items()
+                },
+            }
+        if metadata_audit_context_files:
+            source["translation_audit_context"] = {
+                "files": {
+                    str(name): Path(path).resolve().relative_to(self.output_dir.resolve()).as_posix()
+                    for name, path in metadata_audit_context_files.items()
+                },
+                "sha256": {
+                    str(name): hashlib.sha256(Path(path).read_bytes()).hexdigest()
+                    for name, path in metadata_audit_context_files.items()
                 },
             }
 
@@ -1612,11 +1657,13 @@ Rules:
    `Vivek Chibber` becomes `Chibber, Vivek`. These are library index values,
    not prose, so do not translate or otherwise rewrite them.
 8. If `{source_filename}` contains a `translation_context` object, read every
-   listed context file before translating. Treat all files as read-only. Apply
-   authoritative `domain_glossary_*` terminology to the title, TOC,
-   description, and rights. Files named `reference_glossary_*` are background
-   conceptual references only: they do not override authoritative terminology,
-   and you must not modify them or write inferred entries back to them.
+   listed operational context file before translating. Treat all files as
+   read-only. Apply authoritative terminology from `metadata_glossary` to the
+   title, TOC, description, and rights. Files named `reference_glossary_*`
+   are background conceptual references only: they do not override
+   authoritative terminology, and you must not modify them or write inferred
+   entries back to them. Any `translation_audit_context` is for provenance
+   only; do not load it unless the operational context has an explicit gap.
 9. Return valid JSON only. Do not wrap it in Markdown fences or add commentary.
    If the model refuses a field, do not put the refusal text into the JSON;
    report the blocked metadata task instead.
@@ -2122,8 +2169,10 @@ The output must have this shape:
             source = json.loads(source_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             return {"valid": False, "errors": [f"invalid metadata source JSON: {exc}"]}
-        translation_context = source.get("translation_context", {})
-        if translation_context:
+        for context_label in ("translation_context", "translation_audit_context"):
+            translation_context = source.get(context_label, {})
+            if not translation_context:
+                continue
             context_files = translation_context.get("files", {})
             context_hashes = translation_context.get("sha256", {})
             root = self.output_dir.resolve()
@@ -2132,15 +2181,19 @@ The output must have this shape:
                 try:
                     context_path.relative_to(root)
                 except ValueError:
-                    errors.append(f"metadata translation context escapes output directory: {relative}")
+                    errors.append(
+                        f"metadata {context_label} escapes output directory: {relative}"
+                    )
                     continue
                 if not context_path.is_file():
-                    errors.append(f"metadata translation context is missing: {relative}")
+                    errors.append(
+                        f"metadata {context_label} is missing: {relative}"
+                    )
                     continue
                 actual_hash = hashlib.sha256(context_path.read_bytes()).hexdigest()
                 if context_hashes.get(name) != actual_hash:
                     errors.append(
-                        f"metadata translation context changed after preparation: {relative}"
+                        f"metadata {context_label} changed after preparation: {relative}"
                     )
         try:
             translated = json.loads(translated_path.read_text(encoding="utf-8"))

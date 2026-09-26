@@ -26,6 +26,7 @@ from pdf2epub.subagent_workflow import (
     validate_toc_translation_subagent,
     fix_reference_heading_mismatch,
 )
+from pdf2epub.subagent_runtime import write_worker_handoffs
 from pdf2epub.footnote_normalization import validate_polish_footnote_normalization
 from pdf2epub.cli import (
     _prepare_pdf_markdown_task,
@@ -785,6 +786,49 @@ def test_prepare_markdown_subagent_isolates_large_units_and_writes_scoped_handof
     assert scoped["assigned_files"] == ["large.md"]
     assert scoped["pending_files"] == ["large.md"]
     assert "Do not process files from any other batch" in (
+        tmp_path / handoffs[0]["prompt"]
+    ).read_text(encoding="utf-8")
+
+
+def test_worker_handoff_deduplicates_unit_terminology_contexts(tmp_path: Path):
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    for name in ("a.md", "b.md"):
+        (source_dir / name).write_text("source", encoding="utf-8")
+    glossary_dir = tmp_path / "translation_glossaries" / "unit_contexts"
+    glossary_dir.mkdir(parents=True)
+    shared = {"kind": "book_entity", "original": "Hegel", "target": "黑格尔"}
+    for name, entries in (("a.json", [shared]), ("b.json", [shared, {"kind": "book_entity", "original": "Marx", "target": "马克思"}])):
+        (glossary_dir / name).write_text(
+            json.dumps({"schema_version": 1, "entries": entries}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+    paths = prepare_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        tmp_path / "target",
+        "English",
+        "Chinese",
+        config={"subagent": {"batching": {"max_concurrency": 1}}},
+        unit_context_files={
+            "a.md": glossary_dir / "a.json",
+            "b.md": glossary_dir / "b.json",
+        },
+    )
+
+    handoffs = write_worker_handoffs(tmp_path, paths["manifest"], paths["prompt"])
+
+    assert len(handoffs) == 1
+    scoped_path = tmp_path / handoffs[0]["manifest"]
+    scoped = json.loads(scoped_path.read_text(encoding="utf-8"))
+    worker_context_path = tmp_path / next(iter(scoped["worker_context_files"].values()))
+    worker_context = json.loads(worker_context_path.read_text(encoding="utf-8"))
+    assert len(worker_context["entries"]) == 2
+    assert worker_context["files"]["a.md"] == [0]
+    assert worker_context["files"]["b.md"] == [0, 1]
+    assert "worker-deduplicated terminology context" in (
         tmp_path / handoffs[0]["prompt"]
     ).read_text(encoding="utf-8")
 

@@ -362,7 +362,11 @@ def build_unit_glossary_contexts(
                                 "category": collection,
                                 "original": entry["original"],
                                 "target": entry["suggested_translation"],
-                                "note": entry.get("description") or entry.get("note", ""),
+                                **(
+                                    {"note": entry.get("description") or entry.get("note", "")}
+                                    if entry.get("description") or entry.get("note")
+                                    else {}
+                                ),
                             }
                         )
         except (OSError, UnicodeError, json.JSONDecodeError, TypeError):
@@ -408,11 +412,104 @@ def build_unit_glossary_contexts(
         }
         context_path = context_dir / f"{source.stem}.json"
         context_path.write_text(
-            json.dumps(context, ensure_ascii=False, indent=2) + "\n",
+            json.dumps(context, ensure_ascii=False, separators=(",", ":")) + "\n",
             encoding="utf-8",
         )
         result[source.name] = context_path
     return result
+
+
+def build_metadata_glossary_context(
+    output_dir: Path,
+    context_files: Mapping[str, Path],
+    source_text: str,
+) -> Optional[Path]:
+    """Write a small terminology context for EPUB metadata translation.
+
+    Full snapshots remain attached to the task for provenance and validation,
+    but metadata translation only needs entries occurring in the title, TOC,
+    description, or rights fields.  Reference-only glossaries are handled by
+    the caller because their cross-language entries cannot be selected safely
+    by exact source-form matching.
+    """
+    selected: List[Dict[str, Any]] = []
+    for name, path in context_files.items():
+        if not Path(path).is_file():
+            continue
+        if str(name).startswith("domain_glossary_"):
+            try:
+                glossary = load_glossary(path)
+            except GlossaryError:
+                continue
+            for entry in glossary["entries"]:
+                forms = [
+                    entry.get("source", ""),
+                    *entry.get("variants", []),
+                    *entry.get("aliases", []),
+                ]
+                if any(_term_occurs(source_text, form) for form in forms):
+                    selected.append({"kind": "domain", **entry})
+        elif str(name) == "translation_entities":
+            try:
+                data = json.loads(Path(path).read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError, TypeError):
+                continue
+            for collection in (
+                "characters",
+                "places",
+                "organizations",
+                "terms",
+                "races",
+                "items",
+            ):
+                for entry in data.get(collection, []) or []:
+                    if not isinstance(entry, dict):
+                        continue
+                    original = entry.get("original")
+                    target = entry.get("suggested_translation")
+                    if original and target and _term_occurs(source_text, original):
+                        item = {
+                            "kind": "book_entity",
+                            "category": collection,
+                            "original": original,
+                            "target": target,
+                        }
+                        note = entry.get("description") or entry.get("note")
+                        if note:
+                            item["note"] = note
+                        selected.append(item)
+
+    if not selected:
+        return None
+
+    selected.sort(
+        key=lambda entry: (
+            2 if entry.get("kind") == "domain" else 0,
+            2 if entry.get("policy") == "fixed" else 1,
+            max(
+                len(str(form))
+                for form in (
+                    entry.get("source") or entry.get("original") or "",
+                    *entry.get("variants", []),
+                    *entry.get("aliases", []),
+                )
+            ),
+        ),
+        reverse=True,
+    )
+    context = {
+        "schema_version": 1,
+        "purpose": "metadata_translation",
+        "entries": selected,
+        "selection": "exact_source_form_match",
+    }
+    context_path = Path(output_dir) / "translation_glossaries" / "metadata_context.json"
+    context_path.parent.mkdir(parents=True, exist_ok=True)
+    context_path.write_text(
+        json.dumps(context, ensure_ascii=False, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    return context_path
 
 
 def _configured_items(

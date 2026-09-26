@@ -6,6 +6,7 @@ import pytest
 
 from pdf2epub.glossary import (
     GlossaryError,
+    build_metadata_glossary_context,
     build_unit_glossary_contexts,
     discover_glossary_candidates,
     load_selected_glossaries,
@@ -231,6 +232,72 @@ def test_unit_glossary_context_contains_only_matching_entries(tmp_path: Path):
     )
     context = json.loads(contexts["unit.md"].read_text(encoding="utf-8"))
     assert [entry["source"] for entry in context["entries"]] == ["Dasein"]
+
+
+def test_unit_glossary_context_is_compact_and_omits_empty_entity_notes(tmp_path: Path):
+    output = tmp_path / "output"
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    (source_dir / "unit.md").write_text("Hegel appears here.\n", encoding="utf-8")
+    entity_path = output / "translation_entities.json"
+    entity_path.parent.mkdir(parents=True)
+    entity_path.write_text(
+        json.dumps(
+            {
+                "characters": [{"original": "Hegel", "suggested_translation": "黑格尔"}],
+                "places": [],
+                "organizations": [],
+                "terms": [],
+                "races": [],
+                "items": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    contexts = build_unit_glossary_contexts(output, source_dir, {}, entity_path)
+
+    raw = contexts["unit.md"].read_text(encoding="utf-8")
+    assert raw.count("\n") == 1
+    context = json.loads(raw)
+    assert context["entries"] == [
+        {
+            "kind": "book_entity",
+            "category": "characters",
+            "original": "Hegel",
+            "target": "黑格尔",
+        }
+    ]
+
+
+def test_metadata_glossary_context_selects_only_matching_entries(tmp_path: Path):
+    output = tmp_path / "output"
+    glossary = tmp_path / "terms.yaml"
+    _write_glossary(
+        glossary,
+        name="domain",
+        entries=[
+            {"source": "Aufhebung", "target": "扬弃", "policy": "fixed"},
+            {"source": "Dasein", "target": "定在", "policy": "fixed"},
+        ],
+    )
+    bundle = load_selected_glossaries(
+        {"translation": {"glossaries": [str(glossary)]}},
+        output,
+        "German",
+        "Chinese",
+    )
+
+    context_path = build_metadata_glossary_context(
+        output,
+        bundle.context_files,
+        "Aufhebung in the title",
+    )
+
+    assert context_path is not None
+    context = json.loads(context_path.read_text(encoding="utf-8"))
+    assert [entry["source"] for entry in context["entries"]] == ["Aufhebung"]
 
 
 def test_entity_validation_rejects_conflicting_duplicate_originals():
