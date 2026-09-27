@@ -111,6 +111,49 @@ def _load_pdf_file_contexts(output_dir: Path) -> dict:
     return contexts
 
 
+def _load_pdf_chapter_groups(output_dir: Path, source_dir: Path) -> dict:
+    """Group PDF units by top-level chapter, including split part files."""
+    from pdf2epub.chapter_identity import ChapterIdentity
+
+    source_names = [path.name for path in sorted(Path(source_dir).glob("*.md"))]
+    groups = {}
+
+    def chapter_id(name: str) -> str:
+        identity = ChapterIdentity.parse(name)
+        if identity is None:
+            return f"unit:{name}"
+        if identity.number:
+            return f"{identity.prefix}_{identity.index_path[0]}"
+        return identity.prefix
+
+    # tree_progress is the authoritative source for split membership.  The
+    # filename fallback below keeps old/refined outputs usable when the
+    # progress file predates part_files.
+    progress_path = Path(output_dir) / "ocr_markdown" / "tree_progress.json"
+    if progress_path.is_file():
+        try:
+            progress = json.loads(progress_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            progress = {}
+        for unit in progress.get("units", []) or []:
+            if not isinstance(unit, dict):
+                continue
+            names = unit.get("part_files") or [unit.get("file")]
+            names = [str(name) for name in names if name]
+            if not names:
+                continue
+            group = groups.setdefault(chapter_id(names[0]), [])
+            for name in names:
+                if name in source_names and name not in group:
+                    group.append(name)
+
+    for name in source_names:
+        group = groups.setdefault(chapter_id(name), [])
+        if name not in group:
+            group.append(name)
+    return groups
+
+
 def polish_command(args):
     """Prepare a local Markdown hand-off for a polishing Subagent."""
     return _prepare_pdf_markdown_task(args, "polish")
@@ -146,6 +189,7 @@ def _prepare_pdf_markdown_task(args, task: str):
     skipped_context_files = []
     unit_context_files = {}
     heading_contexts = {}
+    global_toc_outline = ""
     prompt_context_files = None
     if task == "translate":
         from pdf2epub.glossary import load_selected_glossaries
@@ -188,9 +232,11 @@ def _prepare_pdf_markdown_task(args, task: str):
             )
             return 1
         from pdf2epub.toc_translation_workflow import (
+            build_global_toc_outline,
             build_toc_heading_contexts,
             validate_toc_translation_subagent,
         )
+        from pdf2epub.subagent_runtime import _batching_config
 
         toc_report = validate_toc_translation_subagent(output_dir)
         if not toc_report["valid"]:
@@ -200,6 +246,10 @@ def _prepare_pdf_markdown_task(args, task: str):
             )
             return 1
         heading_contexts = build_toc_heading_contexts(output_dir)
+        global_toc_outline = build_global_toc_outline(
+            output_dir,
+            token_budget=_batching_config(config)["global_toc_tokens"],
+        )
         target_dir = output_dir / "translated"
         require_entities = PipelinePolicy.from_config(config).requires_entities
         entity_path = output_dir / "translation_entities.json"
@@ -241,7 +291,7 @@ def _prepare_pdf_markdown_task(args, task: str):
             )
         else:
             rules.append(
-                "Read the unit-specific or worker-deduplicated terminology context before translating. Full entity and domain snapshots are audit-only; consult them only to resolve an explicit context gap or conflict, not as routine input. Do not modify any context file."
+                "Read the chapter-scoped terminology context before translating. It contains only terms matched in this chapter; apply its direct entries consistently to every assigned unit. Full entity and domain snapshots are audit-only; consult them only to resolve an explicit context gap or conflict, not as routine input. Do not modify any context file."
             )
         if glossary_bundle and glossary_bundle.rules:
             rules.extend(glossary_bundle.rules)
@@ -285,7 +335,13 @@ def _prepare_pdf_markdown_task(args, task: str):
                 _load_pdf_file_contexts(output_dir) if task == "translate" else None
             ),
             heading_contexts=heading_contexts or None,
+            global_toc_outline=global_toc_outline or None,
             unit_context_files=unit_context_files or None,
+            chapter_groups=(
+                _load_pdf_chapter_groups(output_dir, source_dir)
+                if task == "translate"
+                else None
+            ),
         )
         from pdf2epub.subagent_runtime import write_worker_handoffs
 

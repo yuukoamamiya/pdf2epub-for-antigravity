@@ -15,6 +15,10 @@ subagent:
   models:
     translation: <configured translation model>
     default: <configured default model>
+  batching:
+    # Optional PDF whole-book TOC orientation budget; the exact chapter TOC
+    # contract remains separate and authoritative.
+    global_toc_tokens: 1200
   # 可选：覆盖某个具体任务
   # task_models:
   #   refine: <configured task model>
@@ -26,10 +30,12 @@ subagent:
 
 正文任务按文件拆分。使用 `--resume` 重新准备任务时，manifest 会根据目标目录写出 `completed_files` 和 `pending_files`；提示词要求 Subagent 只处理 `pending_files`。已经通过校验的输出不会被重新覆盖。恢复前建议先运行对应的 `*-validate`，这样可以先发现空文件、行数不一致或标签损坏。
 
-PDF 的 `translate` manifest 会在 `worker_handoffs/` 生成按 worker 隔离的 manifest 和提示词；
-`polish` 使用独立的 `polish_worker_handoffs/`，避免不同阶段的任务被误认。并发时每个
-Subagent 只读取自己 handoff 的 `assigned_files`；超过 30,000 字节的单元自动独立成批。
-`translate-toc` 是正文 worker 启动前的独立任务，不由任何正文 worker 写入。
+PDF 的 `translate` manifest 会在 `worker_handoffs/` 按顶层章节生成隔离的 manifest 和提示词；
+`polish` 使用独立的 `polish_worker_handoffs/`，避免不同阶段的任务被误认。每个 Subagent
+只读取自己 handoff 的 `assigned_files`；超过 30,000 字节的单元自动独立成批，但不能与
+其他章节合并。章节术语上下文在普通章节中只注入一次；大章节拆分时使用
+`shared_entries` 和当前分片的 `local_entries`。`translate-toc` 是正文 worker 启动前的
+独立任务，不由任何正文 worker 写入。
 
 元数据是单个 `translated_metadata.json`，必须整体是合法 JSON；如果额度中断留下半个文件，校验会拒绝它，下一次 Subagent 会完整重写。
 
@@ -154,8 +160,12 @@ PDF 翻译、实体提取和打包都必须以当前且通过 `polish-validate` 
 实体表分开管理，可以不配置，也可以同时配置多个；可先运行 `glossary-candidates`
 生成候选报告，程序不会仅凭文件名自动选择。每次明确选择会记录在
 `glossary_selection.json` 中；外部表中的 `fixed` 译法优先，不同外部表对同一源词
-产生冲突时，准备阶段会拒绝继续。翻译任务还会为每个单元生成精简术语上下文，
-完整快照保留作审计。
+产生冲突时，准备阶段会拒绝继续。翻译任务会先为每个源单元生成精简术语上下文，再由
+worker handoff 按顶层章节聚合；普通章节使用章节级 `entries`，大章节拆分使用
+`shared_entries`/`local_entries`，完整快照只保留作审计。PDF 正文 Prompt 还会读取已验证的
+`toc_tree_translated.json`，生成一个方向性全书 TOC 轮廓。轮廓按实际 TOC 的深度、分支规模
+和 `global_toc_tokens` 预算自适应压缩，不固定规定保留几级标题；它只帮助理解全书结构，
+当前章节的精确 TOC heading contract 才能决定正文中的标题文字。
 
 跨语言的学派资料（例如德文术语表用于英文思想史书籍）必须单独配置在
 `translation.reference_glossaries`。候选报告会把它们标记为

@@ -7,7 +7,9 @@ from pdf2epub.markdown_handoff import prepare_markdown_subagent
 from pdf2epub.pipeline_policy import PipelinePolicy
 from pdf2epub.pdf_text_probe import extract_native_text_pages, probe_pdf_text_layer
 from pdf2epub.subagent_runtime import effective_max_concurrency, write_worker_handoffs
+from pdf2epub.subagent_runtime import _batching_config
 from pdf2epub.toc_translation_workflow import (
+    build_global_toc_outline,
     build_toc_heading_contexts,
     validate_toc_heading_bindings,
 )
@@ -182,6 +184,129 @@ def test_worker_handoffs_balance_pending_batches_and_keep_files_disjoint(tmp_pat
     assert len(manifest["worker_queue"]) == 3
 
 
+def test_chapter_handoffs_keep_chapters_separate_and_aggregate_context_once(
+    tmp_path: Path,
+):
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    for name in ("chapter_1.md", "chapter_1.1.md", "chapter_2.md"):
+        (source_dir / name).write_text("source", encoding="utf-8")
+    context_dir = tmp_path / "translation_glossaries" / "unit_contexts"
+    context_dir.mkdir(parents=True)
+    contexts = {
+        "chapter_1.md": [{"kind": "book_entity", "original": "Hegel", "target": "黑格尔"}],
+        "chapter_1.1.md": [{"kind": "book_entity", "original": "Marx", "target": "马克思"}],
+        "chapter_2.md": [{"kind": "book_entity", "original": "Kant", "target": "康德"}],
+    }
+    context_files = {}
+    for name, entries in contexts.items():
+        path = context_dir / f"{Path(name).stem}.json"
+        path.write_text(json.dumps({"entries": entries}, ensure_ascii=False), encoding="utf-8")
+        context_files[name] = path
+
+    paths = prepare_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        tmp_path / "target",
+        "English",
+        "Chinese",
+        config={"subagent": {"batching": {"max_concurrency": 3}}},
+        unit_context_files=context_files,
+        heading_contexts={
+            "chapter_1.md": {"toc_title": "Chapter One", "children": []},
+            "chapter_2.md": {"toc_title": "Chapter Two", "children": []},
+        },
+        chapter_groups={
+            "chapter_1": ["chapter_1.md", "chapter_1.1.md"],
+            "chapter_2": ["chapter_2.md"],
+        },
+    )
+
+    handoffs = write_worker_handoffs(tmp_path, paths["manifest"], paths["prompt"])
+
+    assert len(handoffs) == 2
+    assert {item["chapter_id"] for item in handoffs} == {"chapter_1", "chapter_2"}
+    assert {tuple(item["files"]) for item in handoffs} == {
+        ("chapter_1.md", "chapter_1.1.md"),
+        ("chapter_2.md",),
+    }
+    first = next(item for item in handoffs if item["chapter_id"] == "chapter_1")
+    first_manifest = json.loads((tmp_path / first["manifest"]).read_text(encoding="utf-8"))
+    context_path = tmp_path / next(iter(first_manifest["worker_context_files"].values()))
+    chapter_context = json.loads(context_path.read_text(encoding="utf-8"))
+    assert chapter_context["selection"] == "chapter_sparse_direct_context"
+    assert chapter_context["assigned_files"] == ["chapter_1.md", "chapter_1.1.md"]
+    assert {entry["original"] for entry in chapter_context["entries"]} == {"Hegel", "Marx"}
+    assert "Apply every entry in its `entries` list" in (
+        tmp_path / first["prompt"]
+    ).read_text(encoding="utf-8")
+    first_prompt = (tmp_path / first["prompt"]).read_text(encoding="utf-8")
+    assert '"toc_title": "Chapter One"' in first_prompt
+    assert '"toc_title": "Chapter Two"' not in first_prompt
+    assert "Unit-specific terminology contexts (read-only; use these for the matching file):\n- none" in first_prompt
+
+
+def test_large_chapter_splits_without_mixing_chapter_contexts(tmp_path: Path):
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    for name in ("chapter_1.1.md", "chapter_1.2.md", "chapter_2.md"):
+        (source_dir / name).write_text("source", encoding="utf-8")
+    context_dir = tmp_path / "translation_glossaries" / "unit_contexts"
+    context_dir.mkdir(parents=True)
+    context_files = {}
+    for name, term in (
+        ("chapter_1.1.md", "Hegel"),
+        ("chapter_1.2.md", "Marx"),
+        ("chapter_2.md", "Kant"),
+    ):
+        path = context_dir / f"{Path(name).stem}.json"
+        path.write_text(
+            json.dumps({"entries": [{"original": term, "target": term}]}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        context_files[name] = path
+
+    paths = prepare_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        tmp_path / "target",
+        "English",
+        "Chinese",
+        config={"subagent": {"batching": {"max_files": 1}}},
+        unit_context_files=context_files,
+        chapter_groups={
+            "chapter_1": ["chapter_1.1.md", "chapter_1.2.md"],
+            "chapter_2": ["chapter_2.md"],
+        },
+    )
+
+    handoffs = write_worker_handoffs(tmp_path, paths["manifest"], paths["prompt"])
+
+    chapter_one = [item for item in handoffs if item["chapter_id"] == "chapter_1"]
+    assert len(chapter_one) == 2
+    assert all(
+        item["chapter_files"] == ["chapter_1.1.md", "chapter_1.2.md"]
+        for item in chapter_one
+    )
+    for item in chapter_one:
+        scoped = json.loads(
+            (tmp_path / item["manifest"]).read_text(encoding="utf-8")
+        )
+        context = json.loads(
+            (
+                tmp_path
+                / next(iter(scoped["worker_context_files"].values()))
+            ).read_text(encoding="utf-8")
+        )
+        assert context["chapter_files"] == ["chapter_1.1.md", "chapter_1.2.md"]
+        assert context["selection"] == "chapter_shared_local_direct_context"
+        assert context["shared_entries"] == []
+        assigned_term = "Hegel" if item["files"] == ["chapter_1.1.md"] else "Marx"
+        assert [entry["original"] for entry in context["local_entries"]] == [assigned_term]
+
+
 def test_polish_worker_handoffs_are_task_scoped(tmp_path: Path):
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"
@@ -260,3 +385,85 @@ def test_toc_heading_contexts_and_validation_use_first_unit_part(tmp_path: Path)
     contexts = build_toc_heading_contexts(output)
     assert set(contexts) == {"chapter_1.part1.md"}
     assert validate_toc_heading_bindings(output)["valid"] is True
+
+
+def test_global_toc_outline_keeps_complete_small_tree(tmp_path: Path):
+    output = tmp_path / "output"
+    output.mkdir()
+    (output / "toc_tree_translated.json").write_text(
+        json.dumps(
+            {
+                "chapters": [
+                    {
+                        "title": "Part One",
+                        "children": [
+                            {"title": "Chapter One", "children": []},
+                            {"title": "Chapter Two", "children": []},
+                        ],
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    outline = build_global_toc_outline(output, token_budget=200)
+
+    assert "- Part One" in outline
+    assert "  - Chapter One" in outline
+    assert "  - Chapter Two" in outline
+    assert "deeper entries" not in outline
+
+
+def test_global_toc_outline_adapts_to_deep_and_wide_trees(tmp_path: Path):
+    output = tmp_path / "output"
+    output.mkdir()
+    deep = {"title": "Level 5", "children": []}
+    for index in range(4, 0, -1):
+        deep = {"title": f"Level {index}", "children": [deep]}
+    roots = [
+        {"title": f"Top {index}", "children": [deep]}
+        for index in range(1, 12)
+    ]
+    (output / "toc_tree_translated.json").write_text(
+        json.dumps({"chapters": roots}, ensure_ascii=False), encoding="utf-8"
+    )
+
+    outline = build_global_toc_outline(output, token_budget=35)
+
+    assert "- Top 1" in outline
+    assert "deeper entries" in outline or "top-level entries omitted" in outline
+    assert "Level 5" not in outline
+
+
+def test_global_toc_outline_is_injected_into_prompt_and_hashed(tmp_path: Path):
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "chapter_1.md").write_text("source", encoding="utf-8")
+
+    paths = prepare_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        target_dir,
+        "English",
+        "Chinese",
+        global_toc_outline="- Part One\n  - Chapter One",
+    )
+
+    prompt = paths["prompt"].read_text(encoding="utf-8")
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    assert "Global book outline (orientation only" in prompt
+    assert "- Part One\n  - Chapter One" in prompt
+    assert manifest["global_toc_outline_sha256"]
+
+
+def test_global_toc_token_budget_is_configurable():
+    batching = _batching_config(
+        {"subagent": {"batching": {"global_toc_tokens": 321}}}
+    )
+
+    assert batching["global_toc_tokens"] == 321

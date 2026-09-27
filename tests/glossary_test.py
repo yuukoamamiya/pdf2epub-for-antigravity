@@ -271,6 +271,116 @@ def test_unit_glossary_context_is_compact_and_omits_empty_entity_notes(tmp_path:
     ]
 
 
+def test_unit_glossary_matching_normalizes_unicode_allows_short_terms_and_writes_audit(
+    tmp_path: Path,
+):
+    output = tmp_path / "output"
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    (source_dir / "unit.md").write_text(
+        "AI appears with Hegel’s name and machine\nlearning.\n"
+        "`secret` https://example.test/secret\n",
+        encoding="utf-8",
+    )
+    glossary = tmp_path / "terms.yaml"
+    glossary.write_text(
+        "schema_version: 1\n"
+        "metadata:\n"
+        "  name: test\n"
+        "  source_language: English\n"
+        "  target_language: Chinese\n"
+        "entries:\n"
+        "  - source: AI\n"
+        "    target: 人工智能\n"
+        "    policy: fixed\n"
+        "    allow_short: true\n"
+        "  - source: Hegel's name\n"
+        "    target: 黑格尔之名\n"
+        "    policy: preferred\n"
+        "  - source: machine learning\n"
+        "    target: 机器学习\n"
+        "    policy: preferred\n"
+        "  - source: learning\n"
+        "    target: 学习\n"
+        "    policy: preferred\n"
+        "  - source: secret\n"
+        "    target: 秘密\n"
+        "    policy: preferred\n",
+        encoding="utf-8",
+    )
+    bundle = load_selected_glossaries(
+        {"translation": {"glossaries": [str(glossary)]}},
+        output,
+        "English",
+        "Chinese",
+    )
+
+    contexts = build_unit_glossary_contexts(output, source_dir, bundle.context_files)
+    context = json.loads(contexts["unit.md"].read_text(encoding="utf-8"))
+    assert [entry["source"] for entry in context["entries"]] == [
+        "AI",
+        "machine learning",
+        "Hegel's name",
+    ]
+    report = json.loads(
+        (output / "translation_glossaries" / "keyword_hits" / "unit.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert {hit["source"] for hit in report["hits"]} == {
+        "AI",
+        "machine learning",
+        "Hegel's name",
+    }
+    assert "secret" not in {hit["source"] for hit in report["hits"]}
+    suppressed = {item["source"]: item for item in report["suppressed_hits"]}
+    assert suppressed["learning"]["winner"] == "machine learning"
+
+
+def test_entity_aliases_and_variants_are_used_for_unit_matching(tmp_path: Path):
+    output = tmp_path / "output"
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    (source_dir / "unit.md").write_text("Georg Hegel and Hegelian ideas.\n", encoding="utf-8")
+    entity_path = output / "translation_entities.json"
+    entity_path.parent.mkdir(parents=True)
+    entity_path.write_text(
+        json.dumps(
+            {
+                "metadata": {"book_title": "Book", "extraction_complete": True},
+                "characters": [
+                    {
+                        "original": "Hegel",
+                        "aliases": ["Georg Hegel"],
+                        "variants": ["Hegelian"],
+                        "suggested_translation": "黑格尔",
+                    }
+                ],
+                "places": [],
+                "organizations": [],
+                "terms": [],
+                "races": [],
+                "items": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    contexts = build_unit_glossary_contexts(output, source_dir, {}, entity_path)
+    context = json.loads(contexts["unit.md"].read_text(encoding="utf-8"))
+    assert context["entries"] == [
+        {
+            "kind": "book_entity",
+            "category": "characters",
+            "original": "Hegel",
+            "target": "黑格尔",
+            "variants": ["Hegelian"],
+            "aliases": ["Georg Hegel"],
+        }
+    ]
+
+
 def test_metadata_glossary_context_selects_only_matching_entries(tmp_path: Path):
     output = tmp_path / "output"
     glossary = tmp_path / "terms.yaml"

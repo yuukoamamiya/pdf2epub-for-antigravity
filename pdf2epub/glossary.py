@@ -11,8 +11,10 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
+from functools import lru_cache
 from re import escape as regex_escape
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional
 
@@ -58,6 +60,104 @@ def _language_key(value: Any) -> str:
 
 def _normal_form(value: str) -> str:
     return " ".join(_clean(value).casefold().split())
+
+
+_MATCH_PUNCTUATION = str.maketrans(
+    {
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201b": "'",
+        "\u2032": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+        "\u201f": '"',
+        "\u2033": '"',
+        "\u2010": "-",
+        "\u2011": "-",
+        "\u2012": "-",
+        "\u2013": "-",
+        "\u2014": "-",
+        "\u2212": "-",
+        "\u00ad": "",
+    }
+)
+
+
+def _normalize_match_text(value: Any) -> str:
+    """Normalize text for deterministic, literal glossary matching."""
+    value = unicodedata.normalize("NFKC", str(value or ""))
+    value = value.translate(_MATCH_PUNCTUATION).casefold()
+    return " ".join(value.split())
+
+
+def _matchable_source_text(text: str) -> str:
+    """Keep visible Markdown text while ignoring structural/non-prose data."""
+    lines = []
+    fence_character = None
+    for line in str(text or "").splitlines():
+        fence = re.match(r"^\s{0,3}(`{3,}|~{3,})", line)
+        if fence:
+            character = fence.group(1)[0]
+            if fence_character is None:
+                fence_character = character
+            elif fence_character == character:
+                fence_character = None
+            continue
+        if fence_character is None:
+            lines.append(line)
+    value = "\n".join(lines)
+    value = re.sub(r"<!--.*?-->", " ", value, flags=re.DOTALL)
+    value = re.sub(r"`[^`\n]*`", " ", value)
+    value = re.sub(r"!\[([^\]]*)\]\([^)]*\)", r" \1 ", value)
+    value = re.sub(r"\[([^\]]+)\]\([^)]*\)", r" \1 ", value)
+    value = re.sub(r"https?://\S+", " ", value, flags=re.IGNORECASE)
+    value = re.sub(r"<[^>]+>", " ", value)
+    return value
+
+
+def _term_forms(entry: Mapping[str, Any]) -> List[str]:
+    """Return all source forms that can identify one context entry."""
+    original = entry.get("source") or entry.get("original") or ""
+    forms = [original, *_optional_match_forms(entry.get("variants")), *_optional_match_forms(entry.get("aliases"))]
+    result = []
+    seen = set()
+    for form in forms:
+        cleaned = _clean(form)
+        key = _normalize_match_text(cleaned)
+        if key and key not in seen:
+            seen.add(key)
+            result.append(cleaned)
+    return result
+
+
+def _optional_match_forms(value: Any) -> List[str]:
+    if isinstance(value, str):
+        return [_clean(value)] if _clean(value) else []
+    if isinstance(value, list):
+        return [_clean(item) for item in value if _clean(item)]
+    return []
+
+
+def _entry_priority(entry: Mapping[str, Any]) -> int:
+    if entry.get("kind") == "domain":
+        return 3 if entry.get("policy") == "fixed" else 2
+    return 1
+
+
+def _entry_max_form_length(entry: Mapping[str, Any]) -> int:
+    return max((len(_normalize_match_text(form)) for form in _term_forms(entry)), default=0)
+
+
+def sort_glossary_entries(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Order context entries by precedence, then by longest source form."""
+    return sorted(
+        entries,
+        key=lambda entry: (
+            -_entry_priority(entry),
+            -_entry_max_form_length(entry),
+            _normalize_match_text(entry.get("source") or entry.get("original")),
+        ),
+    )
 
 
 def _as_string_list(value: Any, field: str, entry_index: int) -> List[str]:
@@ -131,6 +231,13 @@ def normalize_glossary(data: Any, source_path: Optional[Path] = None) -> Dict[st
             "target": target,
             "policy": policy,
         }
+        if "allow_short" in raw:
+            if not isinstance(raw["allow_short"], bool):
+                raise GlossaryError(
+                    f"entries[{index}].allow_short must be a boolean"
+                )
+            if raw["allow_short"]:
+                item["allow_short"] = True
         if variants:
             item["variants"] = variants
         if aliases:
@@ -312,14 +419,173 @@ def discover_glossary_candidates(
     return candidates
 
 
-def _term_occurs(text: str, term: str) -> bool:
+@lru_cache(maxsize=4096)
+def _compile_term_pattern(
+    normalized_term: str,
+    allow_short: bool,
+) -> Optional[re.Pattern]:
+    """Compile and cache one normalized literal term pattern."""
+    if not normalized_term or len(normalized_term) < (2 if allow_short else 3):
+        return None
+    pattern = (
+        r"(?<!\w)"
+        + regex_escape(normalized_term).replace(r"\ ", r"\s+")
+        + r"(?!\w)"
+    )
+    return re.compile(pattern)
+
+
+def _find_term_matches(
+    normalized_text: str,
+    term: str,
+    *,
+    allow_short: bool = False,
+) -> List[re.Match]:
+    """Find literal normalized term matches with Unicode word boundaries."""
+    normalized_term = _normalize_match_text(term)
+    pattern = _compile_term_pattern(normalized_term, allow_short)
+    if pattern is None:
+        return []
+    return list(pattern.finditer(normalized_text))
+
+
+def _term_occurs(text: str, term: str, *, allow_short: bool = False) -> bool:
     """Match a glossary form without matching it inside a larger word."""
-    normalized_text = " ".join(text.casefold().split())
-    normalized_term = " ".join(_clean(term).casefold().split())
-    if not normalized_term or len(normalized_term) < 3:
-        return False
-    pattern = r"(?<!\w)" + regex_escape(normalized_term).replace(r"\ ", r"\s+") + r"(?!\w)"
-    return re.search(pattern, normalized_text, flags=re.IGNORECASE) is not None
+    normalized_text = _normalize_match_text(_matchable_source_text(text))
+    return bool(_find_term_matches(normalized_text, term, allow_short=allow_short))
+
+
+def _entry_match_kind(entry: Mapping[str, Any], form: str) -> str:
+    original = _normalize_match_text(entry.get("source") or entry.get("original"))
+    normalized = _normalize_match_text(form)
+    if normalized == original:
+        return "source"
+    if normalized in {
+        _normalize_match_text(value)
+        for value in _optional_match_forms(entry.get("variants"))
+    }:
+        return "variant"
+    return "alias"
+
+
+def _select_matching_entries(
+    text: str,
+    entries: List[Dict[str, Any]],
+) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Select entries and return selected plus suppressed hit audit trails."""
+    normalized_text = _normalize_match_text(_matchable_source_text(text))
+    candidates = []
+    for index, entry in enumerate(entries):
+        for form in _term_forms(entry):
+            normalized_form = _normalize_match_text(form)
+            for match in _find_term_matches(
+                normalized_text,
+                normalized_form,
+                allow_short=bool(entry.get("allow_short")),
+            ):
+                candidates.append(
+                    {
+                        "entry_index": index,
+                        "entry": entry,
+                        "form": form,
+                        "start": match.start(),
+                        "end": match.end(),
+                        "length": len(normalized_form),
+                    }
+                )
+
+    # Resolve overlap deterministically: domain fixed > preferred > book
+    # entity, then longest source form.  A short term may still be selected
+    # when it occurs elsewhere without overlapping a longer term.
+    candidates.sort(
+        key=lambda item: (
+            -_entry_priority(item["entry"]),
+            -item["length"],
+            item["start"],
+            item["end"],
+            item["entry_index"],
+        )
+    )
+    occupied = []
+    selected: Dict[int, Dict[str, Any]] = {}
+    suppressed = []
+    suppressed_keys = set()
+    for candidate in candidates:
+        start, end = candidate["start"], candidate["end"]
+        overlapping = next(
+            (
+                winner
+                for other_start, other_end, winner in occupied
+                if start < other_end and other_start < end
+            ),
+            None,
+        )
+        if overlapping is not None:
+            if overlapping["entry_index"] != candidate["entry_index"]:
+                key = (
+                    candidate["entry_index"],
+                    candidate["form"],
+                    overlapping["entry_index"],
+                    overlapping["form"],
+                )
+                if key not in suppressed_keys:
+                    suppressed_keys.add(key)
+                    suppressed.append(
+                        {
+                            "source": candidate["entry"].get("source")
+                            or candidate["entry"].get("original"),
+                            "target": candidate["entry"].get("target")
+                            or candidate["entry"].get("suggested_translation"),
+                            "kind": candidate["entry"].get("kind", "domain"),
+                            "matched_form": candidate["form"],
+                            "reason": "overlapped_by_higher_priority_or_longer_term",
+                            "winner": overlapping["entry"].get("source")
+                            or overlapping["entry"].get("original"),
+                            "winner_form": overlapping["form"],
+                        }
+                    )
+            continue
+        occupied.append((start, end, candidate))
+        index = candidate["entry_index"]
+        hit = selected.setdefault(
+            index,
+            {
+                "entry": candidate["entry"],
+                "matched_forms": [],
+                "match_types": [],
+            },
+        )
+        form = candidate["form"]
+        if form not in hit["matched_forms"]:
+            hit["matched_forms"].append(form)
+        match_type = _entry_match_kind(candidate["entry"], form)
+        if match_type not in hit["match_types"]:
+            hit["match_types"].append(match_type)
+
+    selected_hits = [selected[index] for index in sorted(selected)]
+    selected_entries = sort_glossary_entries(
+        [hit["entry"] for hit in selected_hits]
+    )
+    selected_by_key = {
+        json.dumps(entry, ensure_ascii=False, sort_keys=True): entry
+        for entry in selected_entries
+    }
+    ordered_hits = []
+    for hit in selected_hits:
+        entry = hit["entry"]
+        key = json.dumps(entry, ensure_ascii=False, sort_keys=True)
+        if key not in selected_by_key:
+            continue
+        ordered_hits.append(
+            {
+                "source": entry.get("source") or entry.get("original"),
+                "target": entry.get("target") or entry.get("suggested_translation"),
+                "kind": entry.get("kind", "domain"),
+                "matched_forms": hit["matched_forms"],
+                "match_types": hit["match_types"],
+            }
+        )
+    return selected_entries, ordered_hits, suppressed
 
 
 def build_unit_glossary_contexts(
@@ -363,6 +629,21 @@ def build_unit_glossary_contexts(
                                 "original": entry["original"],
                                 "target": entry["suggested_translation"],
                                 **(
+                                    {"allow_short": True}
+                                    if entry.get("allow_short") is True
+                                    else {}
+                                ),
+                                **(
+                                    {"variants": _optional_match_forms(entry.get("variants"))}
+                                    if _optional_match_forms(entry.get("variants"))
+                                    else {}
+                                ),
+                                **(
+                                    {"aliases": _optional_match_forms(entry.get("aliases"))}
+                                    if _optional_match_forms(entry.get("aliases"))
+                                    else {}
+                                ),
+                                **(
                                     {"note": entry.get("description") or entry.get("note", "")}
                                     if entry.get("description") or entry.get("note")
                                     else {}
@@ -381,38 +662,38 @@ def build_unit_glossary_contexts(
             text = source.read_text(encoding="utf-8")
         except (OSError, UnicodeError):
             continue
-        selected: List[Dict[str, Any]] = []
+        candidates: List[Dict[str, Any]] = []
         for entry in domain_entries:
-            forms = [entry.get("source", ""), *entry.get("variants", []), *entry.get("aliases", [])]
-            if any(_term_occurs(text, form) for form in forms):
-                selected.append(entry)
+            candidates.append(entry)
         for entry in entity_entries:
-            if _term_occurs(text, entry["original"]):
-                selected.append(entry)
-        selected.sort(
-            key=lambda entry: (
-                2 if entry.get("kind") == "domain" else 0,
-                2 if entry.get("policy") == "fixed" else 1,
-                max(
-                    len(str(form))
-                    for form in (
-                        entry.get("source") or entry.get("original") or "",
-                        *entry.get("variants", []),
-                        *entry.get("aliases", []),
-                    )
-                ),
-            ),
-            reverse=True,
-        )
+            candidates.append(entry)
+        selected, hits, suppressed_hits = _select_matching_entries(text, candidates)
         context = {
             "schema_version": 1,
             "source_file": source.name,
             "entries": selected,
-            "selection": "exact_source_form_match",
+            "selection": "normalized_exact_source_form_match",
         }
         context_path = context_dir / f"{source.stem}.json"
         context_path.write_text(
             json.dumps(context, ensure_ascii=False, separators=(",", ":")) + "\n",
+            encoding="utf-8",
+        )
+        report_dir = Path(output_dir) / "translation_glossaries" / "keyword_hits"
+        report_dir.mkdir(parents=True, exist_ok=True)
+        (report_dir / f"{source.stem}.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "source_file": source.name,
+                    "selection": "normalized_exact_source_form_match",
+                    "hits": hits,
+                    "suppressed_hits": suppressed_hits,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
             encoding="utf-8",
         )
         result[source.name] = context_path
@@ -432,7 +713,7 @@ def build_metadata_glossary_context(
     the caller because their cross-language entries cannot be selected safely
     by exact source-form matching.
     """
-    selected: List[Dict[str, Any]] = []
+    candidates: List[Dict[str, Any]] = []
     for name, path in context_files.items():
         if not Path(path).is_file():
             continue
@@ -442,13 +723,7 @@ def build_metadata_glossary_context(
             except GlossaryError:
                 continue
             for entry in glossary["entries"]:
-                forms = [
-                    entry.get("source", ""),
-                    *entry.get("variants", []),
-                    *entry.get("aliases", []),
-                ]
-                if any(_term_occurs(source_text, form) for form in forms):
-                    selected.append({"kind": "domain", **entry})
+                candidates.append({"kind": "domain", **entry})
         elif str(name) == "translation_entities":
             try:
                 data = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -467,36 +742,27 @@ def build_metadata_glossary_context(
                         continue
                     original = entry.get("original")
                     target = entry.get("suggested_translation")
-                    if original and target and _term_occurs(source_text, original):
+                    if original and target:
                         item = {
                             "kind": "book_entity",
                             "category": collection,
                             "original": original,
                             "target": target,
                         }
+                        variants = _optional_match_forms(entry.get("variants"))
+                        aliases = _optional_match_forms(entry.get("aliases"))
+                        if variants:
+                            item["variants"] = variants
+                        if aliases:
+                            item["aliases"] = aliases
                         note = entry.get("description") or entry.get("note")
                         if note:
                             item["note"] = note
-                        selected.append(item)
+                        candidates.append(item)
 
+    selected, _hits, _suppressed_hits = _select_matching_entries(source_text, candidates)
     if not selected:
         return None
-
-    selected.sort(
-        key=lambda entry: (
-            2 if entry.get("kind") == "domain" else 0,
-            2 if entry.get("policy") == "fixed" else 1,
-            max(
-                len(str(form))
-                for form in (
-                    entry.get("source") or entry.get("original") or "",
-                    *entry.get("variants", []),
-                    *entry.get("aliases", []),
-                )
-            ),
-        ),
-        reverse=True,
-    )
     context = {
         "schema_version": 1,
         "purpose": "metadata_translation",

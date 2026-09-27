@@ -26,7 +26,9 @@ build-html-epub
 外部领域术语表通过配置中的 `translation.glossaries` 按书选择。它们不会默认全局
 生效，可以选择零个、一个或多个 YAML/JSON 文件。原文件只读，程序会把规范化快照
 放入当前书的 `output/<title>/translation_glossaries/` 并记录 SHA-256。Subagent
-同时读取外部领域术语表和当前书实体表；外部术语表中的 `fixed` 译法优先级更高。
+正文 worker 读取按顶层 TOC 分支裁剪并聚合的稀疏上下文；外部领域术语表中的 `fixed`
+译法优先级更高。普通分支使用一次章节级条目，大分支拆分时使用跨分片的共享条目和
+当前分片的局部条目，不把其他分支的术语表重复注入。
 跨语言的学派术语表应配置在 `translation.reference_glossaries`，只作为只读概念参考，
 不参与正式术语优先级，也不能覆盖或修改 `translation.glossaries`。
 

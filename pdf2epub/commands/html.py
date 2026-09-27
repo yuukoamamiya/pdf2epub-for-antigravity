@@ -5,7 +5,7 @@ delegated to the workspace Subagent through the generated hand-off.
 """
 
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from loguru import logger
 
@@ -56,6 +56,46 @@ def _load_html_book_context(args, operation: str):
         )
         return None
     return config, book_title, output_dir, epub_path
+
+
+def _load_html_chapter_groups(pipeline, declared_files):
+    """Group compressed EPUB units by top-level TOC entry."""
+    from pdf2epub.html_translation.toc_extractor import TOCExtractor
+
+    files_by_stem = {Path(name).stem: str(name) for name in declared_files}
+    groups = {}
+    used = set()
+
+    def file_for_href(href):
+        path = str(href or "").split("#", 1)[0]
+        return files_by_stem.get(PurePosixPath(path).stem)
+
+    def collect(entry, names):
+        name = file_for_href(getattr(entry, "href", ""))
+        if name and name not in names:
+            names.append(name)
+        for child in getattr(entry, "children", []) or []:
+            collect(child, names)
+
+    try:
+        toc_entries = TOCExtractor(pipeline.parser).toc
+    except Exception:
+        toc_entries = []
+    for index, entry in enumerate(toc_entries, 1):
+        names = []
+        collect(entry, names)
+        names = [name for name in names if name not in used]
+        if names:
+            groups[f"toc_{index:03d}"] = names
+            used.update(names)
+
+    # A malformed or incomplete TOC must not leave a translation unit outside
+    # the chapter-level contract; such units become one-file fallback groups.
+    for name in declared_files:
+        name = str(name)
+        if name not in used:
+            groups[f"unit:{name}"] = [name]
+    return groups
 
 
 def _prepare_html_command(args):
@@ -195,6 +235,7 @@ def _prepare_html_command(args):
         # Create the body translation contract alongside the metadata contract.
         # Both are workspace Subagent tasks; this command never translates.
         from pdf2epub.markdown_handoff import prepare_markdown_subagent
+        declared_files = pipeline.declared_translation_files()
         body_paths = prepare_markdown_subagent(
             output_dir,
             "translate-html",
@@ -227,7 +268,8 @@ def _prepare_html_command(args):
                 glossary_bundle.context_files,
                 None if skip_entities else entity_path,
             ),
-            declared_files=pipeline.declared_translation_files(),
+            declared_files=declared_files,
+            chapter_groups=_load_html_chapter_groups(pipeline, declared_files),
         )
         from pdf2epub.subagent_runtime import write_worker_handoffs
 

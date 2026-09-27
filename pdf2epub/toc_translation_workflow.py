@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional
 
 
-from .subagent_runtime import resolve_subagent_model
+from .subagent_runtime import estimate_tokens, resolve_subagent_model
 from .workflow_contracts import relative_posix_path
 
 
@@ -310,6 +310,113 @@ def build_toc_heading_contexts(output_dir: Path) -> Dict[str, Dict[str, Any]]:
     return contexts
 
 
+def build_global_toc_outline(
+    output_dir: Path,
+    token_budget: int = 1_200,
+) -> str:
+    """Build an adaptive, orientation-only outline from the translated TOC.
+
+    The summary does not use fixed heading levels. It expands the deepest
+    prefix that fits the token budget and represents deeper branches with a
+    compact count plus child-title preview. This preserves the book's global
+    shape without turning the exact per-file heading contract into a global
+    prompt payload.
+    """
+    toc_path = Path(output_dir) / "toc_tree_translated.json"
+    try:
+        toc = json.loads(toc_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return ""
+    if not isinstance(toc, dict) or not isinstance(toc.get("chapters"), list):
+        return ""
+
+    def title(node: Mapping[str, Any]) -> str:
+        value = str(node.get("title") or "").strip()
+        # Titles are document data.  Collapse line breaks so one malicious or
+        # malformed TOC field cannot escape the outline item's indentation.
+        value = re.sub(r"\s+", " ", value)
+        return value or "(untitled section)"
+
+    def subtree_size(node: Mapping[str, Any]) -> int:
+        children = node.get("children", [])
+        if not isinstance(children, list):
+            return 1
+        return 1 + sum(
+            subtree_size(child) for child in children if isinstance(child, Mapping)
+        )
+
+    def max_depth(nodes: List[Any], depth: int = 1) -> int:
+        result = depth
+        for node in nodes:
+            if not isinstance(node, Mapping):
+                continue
+            children = node.get("children", [])
+            if isinstance(children, list) and children:
+                result = max(result, max_depth(children, depth + 1))
+        return result
+
+    def render(nodes: List[Any], depth_limit: int) -> List[str]:
+        lines: List[str] = []
+
+        def visit(items: List[Any], depth: int) -> None:
+            for node in items:
+                if not isinstance(node, Mapping):
+                    continue
+                node_title = title(node)
+                lines.append(f"{'  ' * (depth - 1)}- {node_title}")
+                children = [
+                    child for child in (node.get("children", []) or [])
+                    if isinstance(child, Mapping)
+                ]
+                if not children:
+                    continue
+                if depth < depth_limit:
+                    visit(children, depth + 1)
+                    continue
+                count = sum(subtree_size(child) for child in children)
+                preview = "; ".join(title(child) for child in children[:3])
+                if len(children) > 3:
+                    preview += "; …"
+                suffix = f"[{count} deeper entries"
+                if preview:
+                    suffix += f": {preview}"
+                suffix += "]"
+                lines.append(f"{'  ' * depth}- {suffix}")
+
+        visit(nodes, 1)
+        return lines
+
+    chapters = [node for node in toc["chapters"] if isinstance(node, Mapping)]
+    if not chapters:
+        return ""
+    budget = max(1, int(token_budget))
+    deepest = max_depth(chapters)
+    chosen_lines = render(chapters, deepest)
+    if estimate_tokens("\n".join(chosen_lines)) > budget:
+        chosen_lines = []
+        for depth_limit in range(1, deepest + 1):
+            candidate = render(chapters, depth_limit)
+            if estimate_tokens("\n".join(candidate)) <= budget:
+                chosen_lines = candidate
+            else:
+                break
+
+    if not chosen_lines:
+        # Even an unusually broad top-level TOC should remain useful. Keep
+        # complete root titles until the budget is exhausted, then summarize.
+        chosen_lines = []
+        omitted = 0
+        for node in chapters:
+            candidate = f"- {title(node)}"
+            if estimate_tokens("\n".join(chosen_lines + [candidate])) <= budget:
+                chosen_lines.append(candidate)
+            else:
+                omitted += 1
+        if omitted:
+            chosen_lines.append(f"- [… {omitted} top-level entries omitted]")
+    return "\n".join(chosen_lines)
+
+
 def validate_toc_heading_bindings(output_dir: Path) -> Dict[str, Any]:
     """Check exact translated TOC labels in the first unit parts."""
     output_dir = Path(output_dir)
@@ -362,6 +469,7 @@ def validate_toc_heading_bindings(output_dir: Path) -> Dict[str, Any]:
 
 __all__ = [
     "integrate_toc_translation_task",
+    "build_global_toc_outline",
     "build_toc_heading_contexts",
     "validate_toc_heading_bindings",
     "prepare_toc_translation_subagent",

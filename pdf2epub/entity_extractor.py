@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
@@ -78,8 +79,10 @@ Use this shape:
 }}
 
 For each entity include non-empty `original` and `suggested_translation` fields.
-When applicable, also include a reading, romanization, category, and short
-description.
+When applicable, also include aliases or variants for source-language forms,
+along with a reading, romanization, category, and short description. Keep
+aliases and variants as arrays of non-empty strings. For ambiguous two-letter
+or two-character entities, `allow_short: true` may be added explicitly.
 The `suggested_translation` values form the canonical terminology reference for
 the later translation task. Prefer one stable translation for the same entity;
 record meaningful variants in a separate note rather than creating duplicate
@@ -98,7 +101,7 @@ def validate_entities(
     if not isinstance(data, dict):
         return ["translation_entities.json must contain an object"]
     errors: List[str] = []
-    seen_originals: Dict[str, tuple[str, str]] = {}
+    seen_forms: Dict[str, tuple[str, str, str]] = {}
     if data.get("schema_version", 1) != 1:
         errors.append("schema_version must be 1")
     metadata = data.get("metadata")
@@ -138,16 +141,43 @@ def validate_entities(
                     errors.append(f"{path}.{field} must be a non-empty string")
             original = entity.get("original")
             target = entity.get("suggested_translation")
-            if isinstance(original, str) and original.strip() and isinstance(target, str) and target.strip():
-                key = " ".join(re.sub(r"\s+", " ", original).casefold().split())
-                previous = seen_originals.get(key)
-                if previous and previous[1] != target.strip():
-                    errors.append(
-                        f"{path}.original conflicts with {previous[0]}: "
-                        f"{original!r} maps to {previous[1]!r} and {target.strip()!r}"
+            if "allow_short" in entity and not isinstance(entity["allow_short"], bool):
+                errors.append(f"{path}.allow_short must be a boolean")
+            valid_forms = []
+            if isinstance(original, str) and original.strip():
+                valid_forms.append(("original", original))
+            for field in ("aliases", "variants"):
+                forms = entity.get(field)
+                if forms is None:
+                    continue
+                if not isinstance(forms, list):
+                    errors.append(f"{path}.{field} must be an array of strings")
+                    continue
+                for form_index, form in enumerate(forms):
+                    if not isinstance(form, str) or not form.strip():
+                        errors.append(
+                            f"{path}.{field}[{form_index}] must be a non-empty string"
+                        )
+                    elif form.strip():
+                        valid_forms.append((field, form))
+            if isinstance(target, str) and target.strip():
+                target_value = target.strip()
+                for field, form in valid_forms:
+                    key = " ".join(
+                        re.sub(
+                            r"\s+",
+                            " ",
+                            unicodedata.normalize("NFKC", form),
+                        ).casefold().split()
                     )
-                else:
-                    seen_originals[key] = (path, target.strip())
+                    previous = seen_forms.get(key)
+                    if previous and previous[1] != target_value:
+                        errors.append(
+                            f"{path}.{field} conflicts with {previous[0]}: "
+                            f"{form!r} maps to {previous[1]!r} and {target_value!r}"
+                        )
+                    else:
+                        seen_forms[key] = (path, target_value, field)
     return errors
 
 

@@ -87,9 +87,10 @@ polish。`commands/markdown.py`、`entities.py`、`toc.py` 和 `pdf.py` 均应�
 - `markdown_subagent_validation.py`：检查目标文件、结构标记、拒答、哈希和特殊角色内容，
   并在通过后复制到 `validated/`。
 - `markdown_validation.py`：提供纯函数式的 Markdown 风险检测和规范化辅助函数。
-- `subagent_runtime.py`：提供模型配置解析、token 估算、批次规划及按批次隔离的 handoff。
+- `subagent_runtime.py`：提供模型配置解析、token 估算、批次规划及按章节/批次隔离的 handoff。
 - `subagent_safety.py`：集中处理拒答和免责声明检测，避免各工作流使用不同规则。
-- `toc_translation_workflow.py`：维护 TOC 的原始结构、节点数量、非标题字段和翻译结果校验。
+- `toc_translation_workflow.py`：维护 TOC 的原始结构、节点数量、非标题字段和翻译结果校验，
+  并从已验证的译文 TOC 生成按 token 预算自适应的全书方向性轮廓。
 
 旧代码可能仍从 [`subagent_workflow.py`](../pdf2epub/subagent_workflow.py) 导入这些函数。
 该文件现在是兼容门面。新代码应直接导入具体模块；如果移动公共函数，必须保留门面转出
@@ -116,7 +117,8 @@ extract-entities + 工作区 Subagent + extract-entities-validate
   → translation_entities.json
 translate-toc + 工作区 Subagent + translate-toc-validate
   → toc_tree_translated.json
-translate + 最多 3 个 worker_handoffs + 工作区 Subagent
+translate + 按顶层章节划分的 worker_handoffs + 工作区 Subagent
+  （超大章节只在章节内部拆分；Prompt 另含预算化的全书 TOC 方向性轮廓）
   → translated/
 translate-validate → translate_validation.json
 build-epub --translated → 最终译文 EPUB
@@ -127,8 +129,11 @@ check-ready --stage package → build-epub → 原语言 EPUB
 
 结构判断、润色和翻译不会在本地 Python 进程中完成。每个 Subagent 只处理 worker
 manifest 指定的文件；大单元单独成批。polish 使用 `polish_worker_handoffs/`，正文翻译
-使用 `worker_handoffs/`。翻译 TOC 是正文 worker 启动前的独立前置任务，正文 worker
-不得修改翻译 TOC。纯转换分支不生成实体表或翻译 TOC，但仍必须通过 polish。
+使用按顶层章节隔离的 `worker_handoffs/`。同一章节拆分时，worker 共享章节级术语上下文，
+但不读取其他章节的上下文。翻译 TOC 是正文 worker 启动前的独立前置任务，正文 worker
+不得修改翻译 TOC。PDF 正文还接收一个按 `global_toc_tokens` 预算压缩的全书方向性轮廓，
+但当前章节的精确 TOC heading contract 始终优先。纯转换分支不生成实体表或翻译 TOC，
+但仍必须通过 polish。
 
 ### 3.2 高保真 EPUB 工作流
 

@@ -825,10 +825,13 @@ def test_worker_handoff_deduplicates_unit_terminology_contexts(tmp_path: Path):
     scoped = json.loads(scoped_path.read_text(encoding="utf-8"))
     worker_context_path = tmp_path / next(iter(scoped["worker_context_files"].values()))
     worker_context = json.loads(worker_context_path.read_text(encoding="utf-8"))
-    assert len(worker_context["entries"]) == 2
-    assert worker_context["files"]["a.md"] == [0]
-    assert worker_context["files"]["b.md"] == [0, 1]
-    assert "worker-deduplicated terminology context" in (
+    assert worker_context["selection"] == "worker_sparse_direct_file_contexts"
+    assert worker_context["files"]["a.md"] == [shared]
+    assert worker_context["files"]["b.md"] == [
+        shared,
+        {"kind": "book_entity", "original": "Marx", "target": "马克思"},
+    ]
+    assert "worker-scoped direct terminology context" in (
         tmp_path / handoffs[0]["prompt"]
     ).read_text(encoding="utf-8")
 

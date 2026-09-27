@@ -56,15 +56,18 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
 - 术语准备完成后，检查 `output/<title>/glossary_selection.json`：它记录本次是否明确
   选择外部表、配置路径、源文件哈希和工作区快照哈希。规范化只读快照位于
   `output/<title>/translation_glossaries/`；按源单元裁剪的上下文位于其下的
-  `unit_contexts/`。PDF 和 EPUB 翻译都必须优先读取 manifest 为当前单元列出的上下文，
-  完整快照只用于审计和冲突复核，不能修改。没有外部表时也要尊重记录的
+  `unit_contexts/`。PDF 和 EPUB 翻译都必须优先读取 worker handoff 为当前顶层章节
+  列出的稀疏上下文；普通章节把该章节命中的条目聚合为一次 `entries` 注入，超大章节
+  拆分时使用跨多个分片的 `shared_entries` 加当前分片的 `local_entries`。不得把不同
+  顶层章节的术语上下文混用。完整快照只用于审计和冲突复核，不能修改。没有外部表时也要尊重记录的
   `explicit_none`/`unconfigured` 状态，不得自行加载目录中的术语表。参考术语表快照
   使用 `reference_glossary_*` 名称，不能覆盖权威术语表，也不得反向写回原文件。
 - `translate`、`polish`、`refine`、`extract-entities`、`translate-toc` 只准备交接或
   执行本地处理；命令成功不代表正文已经完成。
 - `polish` 会按 `subagent.batching.max_concurrency` 生成
   `polish_worker_handoffs/`；`translate` 使用 `worker_handoffs/`。每个 worker
-  只能处理自己 manifest 中的 `assigned_files`。
+  只能处理自己 manifest 中的 `assigned_files`。PDF `translate` 按顶层章节生成
+  handoff；超出文件/字节/token 限制的章节才在章节内部拆分，不能与其他章节合并。
 - 不删除源文件、输出目录或已有中间结果。额度中断或失败时先校验，再使用原命令的
   `--resume`，只处理 pending 项。
 - 本地校验报告中的 `safety_blocked`、拒答或免责声明不得进入 `validated`，也不得通过打包。
@@ -101,6 +104,10 @@ PDF 纯转换模式使用 `pipeline: epub_conversion`（兼容别名
 
 并发任务必须各自使用 worker handoff 中的 `assigned_files`。超过 30,000 字节的单元必须
 独立成批。TOC 必须由正文翻译前的独立 Subagent 完成，正文 worker 不得修改翻译 TOC。
+PDF 正文 Prompt 还会从已验证的 `toc_tree_translated.json` 生成一个全书方向性轮廓：
+它依据实际树深、分支规模和 `subagent.batching.global_toc_tokens`（默认 1,200）
+自适应压缩，不固定保留某几个标题级别。该轮廓只用于理解全书主题推进，当前章节的
+精确 `toc_heading_contexts` 才是可见标题和措辞的权威来源；完整 TOC 不得重复注入每个章节。
 
 ## 2. PDF 扫描件翻译流程
 
@@ -164,11 +171,12 @@ uv run pdf2epub -c config.yaml check-ready --stage translate --skip-entities
    uv run pdf2epub -c config.yaml check-ready --stage translate
    ```
 
-5. 执行 `translate`。该命令会生成 `translate_subagent_prompt.md`、manifest 和最多
-   `subagent.batching.max_concurrency` 个 `worker_handoffs/`（默认 3 个）。立即打开
-   工作区 Subagent：每个 Subagent 只处理自己 handoff 的 `assigned_files`，同名译文
-   写入 `translated/`；超过 30,000 字节的大单元仍必须独立派发。Prompt 会为每个单元
-   提供精确的已翻译 TOC 标题/子标题上下文；完整快照只用于审计，不能修改。
+5. 执行 `translate`。该命令会生成 `translate_subagent_prompt.md`、manifest 和按
+   顶层章节划分的 `worker_handoffs/`。立即打开工作区 Subagent：每个 Subagent 只处理
+   自己 handoff 的 `assigned_files`，同名译文写入 `translated/`；超过 30,000 字节的大
+   单元仍必须独立派发，但不得跨章节合并。Prompt 会同时提供一次按预算稀释的全书 TOC
+   轮廓，以及当前章节精确的已翻译 TOC 标题/子标题上下文；后者对输出标题具有最高权威。
+   术语上下文按章节 worker 聚合，完整快照只用于审计，不能修改。
 6. 每完成一个单元可运行：
 
    ```text
@@ -240,6 +248,8 @@ uv run pdf2epub -c config.yaml build-epub
    确实不需要实体表时才使用 `html-prepare --skip-entities`。
 5. 读取第二次生成的 `translate-html_subagent_prompt.md` 和 manifest，打开工作区
    Subagent，将同名译文写入 `translated_compressed/`。只处理 `pending_files`。
+   正文 worker 按顶层 TOC 分支隔离稀疏术语上下文；大分支拆分时使用
+   `shared_entries` 和 `local_entries`，不得读取或混用其他分支的上下文。
 6. EPUB 正文必须保持非空翻译单元 1:1 对齐；不得在单元内部增加换行；HTML 标签、属性、
    实体、占位符、`<div>` 容器、`<i>` 数量/顺序/嵌套必须原样保留。
 7. Subagent 按 `metadata_translation_prompt.md` 写入 `translated_metadata.json`：
