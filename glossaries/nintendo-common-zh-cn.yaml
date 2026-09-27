@@ -1,0 +1,265 @@
+# 从 Nintendo 相关书内实体表整理。
+# 覆盖人物、作品、硬件和组织名称；不与 CRPG 领域术语表混用。
+schema_version: 1
+metadata:
+  name: nintendo-common-zh-cn
+  domain: Nintendo games, hardware, characters, and organizations
+  source_language: English
+  target_language: Chinese
+  version: '2026-09-27'
+entries:
+- id: yoshitaka-amano
+  source: Yoshitaka Amano
+  target: 天野喜孝
+  category: character
+  policy: fixed
+- id: yoshinori-kitase
+  source: Yoshinori Kitase
+  target: 北濑佳范
+  category: character
+  policy: fixed
+- id: eiji-aonuma
+  source: Eiji Aonuma
+  target: 青沼英二
+  category: character
+  policy: fixed
+- id: takashi-tezuka
+  source: Takashi Tezuka
+  target: 手冢卓志
+  category: character
+  policy: fixed
+- id: kensuke-tanabe
+  source: Kensuke Tanabe
+  target: 田边贤辅
+  category: character
+  policy: fixed
+- id: shuhei-yoshida
+  source: Shuhei Yoshida
+  target: 吉田修平
+  category: character
+  policy: fixed
+- id: osamu-tezuka
+  source: Osamu Tezuka
+  target: 手冢治虫
+  category: character
+  policy: fixed
+- id: mario
+  source: Mario
+  target: 马力欧
+  category: character
+  policy: fixed
+- id: luigi
+  source: Luigi
+  target: 路易吉
+  category: character
+  policy: fixed
+- id: princess-peach
+  source: Princess Peach
+  target: 碧姬公主
+  category: character
+  policy: fixed
+- id: princess-toadstool
+  source: Princess Toadstool
+  target: 桃花公主
+  category: character
+  policy: fixed
+- id: bowser
+  source: Bowser
+  target: 酷霸王
+  category: character
+  policy: fixed
+- id: donkey-kong-jr
+  source: Donkey Kong Jr.
+  target: 小森喜刚
+  category: character
+  policy: fixed
+- id: toad
+  source: Toad
+  target: 奇诺比奥
+  category: character
+  policy: fixed
+- id: yoshi
+  source: Yoshi
+  target: 耀西
+  category: character
+  policy: fixed
+- id: link
+  source: Link
+  target: 林克
+  category: character
+  policy: fixed
+- id: princess-zelda
+  source: Princess Zelda
+  target: 塞尔达公主
+  category: character
+  policy: fixed
+- id: ganon
+  source: Ganon
+  target: 加侬
+  category: character
+  policy: fixed
+- id: ganondorf
+  source: Ganondorf
+  target: 加侬多夫
+  category: character
+  policy: fixed
+- id: blinky
+  source: Blinky
+  target: 红鬼 Blinky
+  category: character
+  policy: fixed
+- id: slippy-toad
+  source: Slippy Toad
+  target: 斯利比
+  category: character
+  policy: fixed
+- id: super-mario-bros
+  source: Super Mario Bros.
+  target: 《超级马力欧兄弟》
+  category: title
+  policy: fixed
+- id: super-mario-bros-2
+  source: Super Mario Bros. 2
+  target: 《超级马力欧兄弟 2》
+  category: title
+  policy: fixed
+- id: super-mario-bros-2-for-super-players
+  source: Super Mario Bros. 2 For Super Players
+  target: 《超级马力欧兄弟 2：金牌选手》
+  category: title
+  policy: fixed
+- id: super-mario-bros-3
+  source: Super Mario Bros. 3
+  target: 《超级马力欧兄弟 3》
+  category: title
+  policy: fixed
+- id: super-mario-world
+  source: Super Mario World
+  target: 《超级马力欧世界》
+  category: title
+  policy: fixed
+- id: super-mario-64
+  source: Super Mario 64
+  target: 《超级马力欧 64》
+  category: title
+  policy: fixed
+- id: super-mario-sunshine
+  source: Super Mario Sunshine
+  target: 《超级马力欧 阳光》
+  category: title
+  policy: fixed
+- id: super-mario-kart
+  source: Super Mario Kart
+  target: 《超级马力欧卡丁车》
+  category: title
+  policy: fixed
+- id: super-mario-land
+  source: Super Mario Land
+  target: 《超级马力欧乐园》
+  category: title
+  policy: fixed
+- id: donkey-kong
+  source: Donkey Kong
+  target: 森喜刚
+  category: title
+  policy: fixed
+- id: donkey-kong-junior
+  source: Donkey Kong Junior
+  target: 《小森喜刚街机版》
+  category: title
+  policy: fixed
+- id: donkey-kong-country
+  source: Donkey Kong Country
+  target: 《超级大金刚》
+  category: title
+  policy: fixed
+- id: donkey-konga
+  source: Donkey Konga
+  target: 《大金刚鼓》
+  category: title
+  policy: fixed
+- id: the-legend-of-zelda
+  source: The Legend of Zelda
+  target: 《塞尔达传说》
+  category: title
+  policy: fixed
+- id: zelda-ii-the-adventure-of-link
+  source: 'Zelda II: The Adventure of Link'
+  target: 《塞尔达传说 2：林克的冒险》
+  category: title
+  policy: fixed
+- id: a-link-to-the-past
+  source: A Link to the Past
+  target: 《塞尔达传说：众神的三角力量》
+  category: title
+  policy: fixed
+- id: mario-bros
+  source: Mario Bros.
+  target: 《马力欧兄弟》
+  category: title
+  policy: fixed
+- id: nintendogs
+  source: Nintendogs
+  target: 《任天狗》
+  category: title
+  policy: fixed
+- id: famicom
+  source: Famicom
+  target: 红白机
+  category: hardware
+  policy: fixed
+- id: nintendo-entertainment-system
+  source: Nintendo Entertainment System
+  target: 任天堂娱乐系统
+  category: hardware
+  policy: fixed
+- id: super-famicom
+  source: Super Famicom
+  target: 超级任天堂
+  category: hardware
+  policy: fixed
+- id: nintendo-64
+  source: Nintendo 64
+  target: 任天堂 64
+  category: hardware
+  policy: fixed
+- id: nintendo-gamecube
+  source: Nintendo GameCube
+  target: 任天堂 GameCube
+  category: hardware
+  policy: fixed
+- id: nintendo-ds
+  source: Nintendo DS
+  target: 任天堂 DS
+  category: hardware
+  policy: fixed
+- id: famicom-disk-system
+  source: Famicom Disk System
+  target: 红白机磁碟机
+  category: hardware
+  policy: fixed
+- id: game-boy-link-cable
+  source: Game Boy Link Cable
+  target: Game Boy 通信连接线
+  category: hardware
+  policy: fixed
+- id: triforce
+  source: Triforce
+  target: 三角力量
+  category: item
+  policy: fixed
+- id: nintendo
+  source: Nintendo
+  target: 任天堂
+  category: organization
+  policy: fixed
+- id: nintendo-of-america
+  source: Nintendo of America
+  target: 美国任天堂
+  category: organization
+  policy: fixed
+- id: nintendo-power
+  source: Nintendo Power
+  target: 任天堂力量杂志
+  category: organization
+  policy: fixed

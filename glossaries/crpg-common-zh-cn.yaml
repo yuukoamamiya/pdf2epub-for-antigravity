@@ -1,0 +1,555 @@
+# 从 Dungeons and Desktops 的书内实体表整理，并经过通行中文名筛选。
+# 游戏标题采用简体中文语境中通行的译名；本表只覆盖游戏、系列和桌游规则名称，
+# 不覆盖人物、阵营、地点或一般游戏机制。
+schema_version: 1
+metadata:
+  name: crpg-common-zh-cn
+  domain: computer role-playing games and CRPG history
+  source_language: English
+  target_language: Chinese
+  version: '2026-09-27'
+entries:
+- id: dungeons-and-dragons
+  source: Dungeons & Dragons
+  variants:
+  - D&D
+  - D&amp;D
+  - Dungeons &amp; Dragons
+  target: 《龙与地下城》
+  policy: fixed
+- id: advanced-dungeons-and-dragons
+  source: Advanced Dungeons & Dragons
+  variants:
+  - AD&D
+  - AD&amp;D
+  - Advanced Dungeons &amp; Dragons
+  target: 《高级龙与地下城》
+  policy: fixed
+- id: gold-box-games
+  source: Gold Box Games
+  target: 金盒系列游戏
+  policy: fixed
+- id: ultima-series
+  source: Ultima series
+  variants:
+  - Ultima
+  target: 《创世纪》系列
+  policy: fixed
+- id: wizardry-series
+  source: Wizardry series
+  variants:
+  - Wizardry
+  target: 《巫术》系列
+  policy: fixed
+- id: might-and-magic-series
+  source: Might and Magic series
+  variants:
+  - Might and Magic
+  - Might & Magic
+  - Might &amp; Magic
+  target: 《魔法门》系列
+  policy: fixed
+- id: the-bards-tale-series
+  source: The Bard's Tale series
+  variants:
+  - The Bard's Tale
+  - Bard's Tale
+  target: 《冰城传奇》系列
+  policy: fixed
+- id: wasteland
+  source: Wasteland
+  target: 《废土》
+  policy: fixed
+- id: fallout-series
+  source: Fallout series
+  variants:
+  - Fallout
+  target: 《辐射》系列
+  policy: fixed
+- id: baldurs-gate-series
+  source: Baldur's Gate series
+  variants:
+  - Baldur's Gate
+  target: 《博德之门》系列
+  policy: fixed
+- id: planescape-torment
+  source: 'Planescape: Torment'
+  target: 《异域镇魂曲》
+  policy: fixed
+- id: icewind-dale-series
+  source: Icewind Dale series
+  variants:
+  - Icewind Dale
+  target: 《冰风谷》系列
+  policy: fixed
+- id: diablo-series
+  source: Diablo series
+  variants:
+  - Diablo
+  target: 《暗黑破坏神》系列
+  policy: fixed
+- id: elder-scrolls-series
+  source: The Elder Scrolls series
+  variants:
+  - The Elder Scrolls
+  target: 《上古卷轴》系列
+  policy: fixed
+- id: neverwinter-nights
+  source: Neverwinter Nights
+  target: 《无冬之夜》
+  policy: fixed
+- id: system-shock
+  source: System Shock
+  target: 《网络奇兵》
+  policy: fixed
+- id: deus-ex
+  source: Deus Ex
+  target: 《杀出重围》
+  policy: fixed
+- id: arcanum
+  source: 'Arcanum: Of Steamworks and Magick Obscura'
+  target: 《奥秘：蒸汽与魔法》
+  policy: fixed
+- id: vampire-the-masquerade-bloodlines
+  source: 'Vampire: The Masquerade – Bloodlines'
+  variants:
+  - 'Vampire: The Masquerade - Bloodlines'
+  target: 《吸血鬼：避世血族》
+  policy: fixed
+- id: knights-of-the-old-republic
+  source: 'Star Wars: Knights of the Old Republic'
+  target: 《星球大战：旧共和国武士》
+  policy: fixed
+- id: mass-effect-series
+  source: Mass Effect series
+  variants:
+  - Mass Effect
+  target: 《质量效应》系列
+  policy: fixed
+- id: dragon-age-origins
+  source: 'Dragon Age: Origins'
+  target: 《龙腾世纪：起源》
+  policy: fixed
+- id: witcher-series
+  source: The Witcher series
+  variants:
+  - The Witcher
+  target: 《巫师》系列
+  policy: fixed
+- id: pillars-of-eternity-series
+  source: Pillars of Eternity series
+  variants:
+  - Pillars of Eternity
+  target: 《永恒之柱》系列
+  policy: fixed
+- id: divinity-original-sin-series
+  source: 'Divinity: Original Sin series'
+  variants:
+  - 'Divinity: Original Sin'
+  target: 《神界：原罪》系列
+  policy: fixed
+- id: torment-tides-of-numenera
+  source: 'Torment: Tides of Numenera'
+  target: 《折磨：扭蒙拉之潮》
+  policy: fixed
+- id: world-of-warcraft
+  source: World of Warcraft
+  target: 《魔兽世界》
+  policy: fixed
+- id: everquest
+  source: EverQuest
+  target: 《无尽的任务》
+  policy: fixed
+- id: final-fantasy-series
+  source: Final Fantasy series
+  variants:
+  - Final Fantasy
+  target: 《最终幻想》系列
+  policy: fixed
+- id: dragon-quest-series
+  source: Dragon Quest series
+  variants:
+  - Dragon Quest
+  target: 《勇者斗恶龙》系列
+  policy: fixed
+- id: legend-of-zelda-series
+  source: The Legend of Zelda series
+  variants:
+  - The Legend of Zelda
+  target: 《塞尔达传说》系列
+  policy: fixed
+- id: dark-souls-series
+  source: Dark Souls series
+  variants:
+  - Dark Souls
+  target: 《黑暗之魂》系列
+  policy: fixed
+- id: aion
+  source: Aion
+  target: 《永恒之塔》
+  policy: fixed
+- id: baldurs-gate-ii-shadows-of-amn
+  source: 'Baldur''s Gate II: Shadows of Amn'
+  target: 《博德之门 II：安姆的阴影》
+  policy: fixed
+- id: baldurs-gate-iii
+  source: Baldur's Gate III
+  variants:
+  - Baldur's Gate 3
+  target: 《博德之门 3》
+  policy: fixed
+- id: banner-saga
+  source: Banner Saga
+  variants:
+  - The Banner Saga
+  target: 《旗帜的传说》
+  policy: fixed
+- id: broken-age
+  source: Broken Age
+  target: 《破碎时代》
+  policy: fixed
+- id: call-of-cthulhu
+  source: Call of Cthulhu
+  target: 《克苏鲁的呼唤》
+  policy: fixed
+- id: chrono-trigger
+  source: Chrono Trigger
+  target: 《时空之轮》
+  policy: fixed
+- id: command-and-conquer
+  source: Command & Conquer
+  variants:
+  - Command &amp; Conquer
+  target: 《命令与征服》
+  policy: fixed
+- id: cyberpunk-2077
+  source: Cyberpunk 2077
+  target: 《赛博朋克 2077》
+  policy: fixed
+- id: darkest-dungeon
+  source: Darkest Dungeon
+  target: 《暗黑地牢》
+  policy: fixed
+- id: das-schwarze-auge
+  source: Das Schwarze Auge
+  target: 《黑暗之眼》
+  policy: fixed
+- id: dragon-age
+  source: Dragon Age
+  variants:
+  - Dragon Age series
+  target: 《龙腾世纪》
+  policy: fixed
+- id: dragon-age-ii
+  source: Dragon Age II
+  target: 《龙腾世纪 2》
+  policy: fixed
+- id: dragon-age-inquisition
+  source: 'Dragon Age: Inquisition'
+  target: 《龙腾世纪：审判》
+  policy: fixed
+- id: dragons-dogma
+  source: Dragon's Dogma
+  target: 《龙之信条》
+  policy: fixed
+- id: dragons-dogma-dark-arisen
+  source: "Dragon's Dogma: Dark Arisen"
+  target: 《龙之信条：黑暗觉者》
+  policy: fixed
+- id: dungeon-keeper
+  source: Dungeon Keeper
+  target: 《地下城守护者》
+  policy: fixed
+- id: dungeon-keeper-2
+  source: Dungeon Keeper 2
+  target: 《地下城守护者 2》
+  policy: fixed
+- id: dungeon-master
+  source: Dungeon Master
+  target: 《地下城主》
+  policy: fixed
+- id: dungeon-siege
+  source: Dungeon Siege
+  target: 《地牢围攻》
+  policy: fixed
+- id: dungeon-siege-ii
+  source: Dungeon Siege II
+  target: 《地牢围攻 2》
+  policy: fixed
+- id: dungeon-siege-iii
+  source: Dungeon Siege III
+  target: 《地牢围攻 3》
+  policy: fixed
+- id: elder-scrolls-arena
+  source: 'Elder Scrolls: Arena'
+  variants:
+  - 'The Elder Scrolls: Arena'
+  target: 《上古卷轴：竞技场》
+  policy: fixed
+- id: elder-scrolls-ii-daggerfall
+  source: 'Elder Scrolls II: Daggerfall'
+  variants:
+  - 'The Elder Scrolls II: Daggerfall'
+  target: 《上古卷轴 II：匕首雨》
+  policy: fixed
+- id: elder-scrolls-iii-morrowind
+  source: 'Elder Scrolls III: Morrowind'
+  variants:
+  - 'The Elder Scrolls III: Morrowind'
+  - Morrowind
+  target: 《上古卷轴 III：晨风》
+  policy: fixed
+- id: elder-scrolls-iv-oblivion
+  source: 'Elder Scrolls IV: Oblivion'
+  variants:
+  - 'The Elder Scrolls IV: Oblivion'
+  - Oblivion
+  target: 《上古卷轴 IV：湮没》
+  policy: fixed
+- id: elder-scrolls-v-skyrim
+  source: 'Elder Scrolls V: Skyrim'
+  variants:
+  - 'The Elder Scrolls V: Skyrim'
+  target: 《上古卷轴 V：天际》
+  policy: fixed
+- id: everquest-ii
+  source: EverQuest II
+  target: 《无尽的任务 II》
+  policy: fixed
+- id: fable
+  source: Fable
+  target: 《神鬼寓言》
+  policy: fixed
+- id: fallout-2
+  source: Fallout 2
+  target: 《辐射 2》
+  policy: fixed
+- id: fallout-3
+  source: Fallout 3
+  target: 《辐射 3》
+  policy: fixed
+- id: fallout-4
+  source: Fallout 4
+  target: 《辐射 4》
+  policy: fixed
+- id: fallout-new-vegas
+  source: 'Fallout: New Vegas'
+  target: 《辐射：新维加斯》
+  policy: fixed
+- id: fallout-tactics
+  source: 'Fallout Tactics: Brotherhood of Steel'
+  target: 《辐射战略版：钢铁兄弟会》
+  policy: fixed
+- id: fighting-fantasy
+  source: Fighting Fantasy
+  target: 《战斗幻想》
+  policy: fixed
+- id: forgotten-realms
+  source: Forgotten Realms
+  target: 《被遗忘的国度》
+  policy: fixed
+- id: gothic
+  source: Gothic
+  target: 《哥特王朝》
+  policy: fixed
+- id: grim-dawn
+  source: Grim Dawn
+  target: 《恐怖黎明》
+  policy: fixed
+- id: guild-wars
+  source: Guild Wars
+  target: 《激战》
+  policy: fixed
+- id: icewind-dale-ii
+  source: Icewind Dale II
+  target: 《冰风谷 II》
+  policy: fixed
+- id: jade-empire
+  source: Jade Empire
+  target: 《翡翠帝国》
+  policy: fixed
+- id: kingdom-come-deliverance
+  source: 'Kingdom Come: Deliverance'
+  target: 《天国：拯救》
+  policy: fixed
+- id: kingdoms-of-amalur-reckoning
+  source: 'Kingdoms of Amalur: Reckoning'
+  variants:
+  - 'Kingdoms of Amular: Reckoning'
+  target: 《阿玛拉王国：惩罚》
+  policy: fixed
+- id: legend-of-grimrock
+  source: Legend of Grimrock
+  target: 《魔岩山传说》
+  policy: fixed
+- id: mass-effect-2
+  source: Mass Effect 2
+  target: 《质量效应 2》
+  policy: fixed
+- id: mass-effect-3
+  source: Mass Effect 3
+  target: 《质量效应 3》
+  policy: fixed
+- id: mass-effect-andromeda
+  source: 'Mass Effect: Andromeda'
+  target: 《质量效应：仙女座》
+  policy: fixed
+- id: might-and-magic-ii
+  source: 'Might and Magic II: Gates to Another World'
+  target: 《魔法门 II：异界之门》
+  policy: fixed
+- id: might-and-magic-iii
+  source: 'Might and Magic III: Isles of Terra'
+  target: 《魔法门 III：泰坦岛》
+  policy: fixed
+- id: might-and-magic-vi
+  source: 'Might and Magic VI: The Mandate of Heaven'
+  target: 《魔法门 VI：天堂之令》
+  policy: fixed
+- id: might-and-magic-viii
+  source: 'Might and Magic VIII: Day of the Destroyer'
+  target: 《魔法门 VIII：毁灭者之日》
+  policy: fixed
+- id: nox
+  source: Nox
+  target: 《诺克斯》
+  policy: fixed
+- id: ocarina-of-time
+  source: Ocarina of Time
+  variants:
+  - The Ocarina of Time
+  target: 《塞尔达传说：时之笛》
+  policy: fixed
+- id: path-of-exile
+  source: Path of Exile
+  target: 《流放之路》
+  policy: fixed
+- id: pathfinder-kingmaker
+  source: 'Pathfinder: Kingmaker'
+  target: 《开拓者：拥王者》
+  policy: fixed
+- id: persona
+  source: Persona
+  target: 《女神异闻录》
+  policy: fixed
+- id: phantasy-star
+  source: Phantasy Star
+  target: 《梦幻之星》
+  policy: fixed
+- id: pillars-of-eternity-ii
+  source: 'Pillars of Eternity II: Deadfire'
+  target: 《永恒之柱 2：死亡之火》
+  policy: fixed
+- id: pool-of-radiance
+  source: Pool of Radiance
+  target: 《光芒之池》
+  policy: fixed
+- id: ragnarok
+  source: Ragnarok
+  target: 《仙境传说》
+  policy: fixed
+- id: sacred
+  source: Sacred
+  target: 《圣域》
+  policy: fixed
+- id: secret-of-mana
+  source: Secret of Mana
+  target: 《圣剑传说》
+  policy: fixed
+- id: shadowrun
+  source: Shadowrun
+  target: 《暗影狂奔》
+  policy: fixed
+- id: shadowrun-returns
+  source: Shadowrun Returns
+  target: 《暗影狂奔：归来》
+  policy: fixed
+- id: shadowrun-dragonfall
+  source: 'Shadowrun: Dragonfall'
+  target: 《暗影狂奔：龙陨》
+  policy: fixed
+- id: shadowrun-hong-kong
+  source: 'Shadowrun: Hong Kong'
+  target: 《暗影狂奔：香港》
+  policy: fixed
+- id: shenmue
+  source: Shenmue
+  target: 《莎木》
+  policy: fixed
+- id: sid-meiers-pirates
+  source: "Sid Meier's Pirates!"
+  target: 《席德·梅尔的海盗》
+  policy: fixed
+- id: system-shock-2
+  source: System Shock 2
+  target: 《网络奇兵 2》
+  policy: fixed
+- id: temple-of-elemental-evil
+  source: 'Temple of Elemental Evil, The'
+  variants:
+  - 'The Temple of Elemental Evil'
+  target: 《元素邪神的神殿》
+  policy: fixed
+- id: thief-the-dark-project
+  source: 'Thief: The Dark Project'
+  target: 《神偷：黑暗计划》
+  policy: fixed
+- id: titan-quest
+  source: Titan Quest
+  target: 《泰坦之旅》
+  policy: fixed
+- id: torchlight
+  source: Torchlight
+  target: 《火炬之光》
+  policy: fixed
+- id: torchlight-ii
+  source: Torchlight II
+  target: 《火炬之光 2》
+  policy: fixed
+- id: tyranny
+  source: Tyranny
+  target: 《暴政》
+  policy: fixed
+- id: undertale
+  source: Undertale
+  target: 《传说之下》
+  policy: fixed
+- id: vampire-the-masquerade-redemption
+  source: 'Vampire: The Masquerade—Redemption'
+  variants:
+  - 'Vampire: The Masquerade - Redemption'
+  target: 《吸血鬼：避世血族——救赎》
+  policy: fixed
+- id: wasteland-2
+  source: Wasteland 2
+  target: 《废土 2》
+  policy: fixed
+- id: wasteland-3
+  source: Wasteland 3
+  target: 《废土 3》
+  policy: fixed
+- id: witcher-2
+  source: 'Witcher 2: Assassins of Kings'
+  variants:
+  - 'The Witcher 2: Assassins of Kings'
+  target: 《巫师 2：国王刺客》
+  policy: fixed
+- id: witcher-3
+  source: 'Witcher 3: Wild Hunt'
+  variants:
+  - 'The Witcher 3: Wild Hunt'
+  target: 《巫师 3：狂猎》
+  policy: fixed
+- id: x-com-enemy-unknown
+  source: 'X-Com: Enemy Unknown'
+  variants:
+  - 'X-COM: Enemy Unknown'
+  target: 《幽浮：未知敌人》
+  policy: fixed
+- id: gurps
+  source: GURPS
+  variants:
+  - Generic Universal RolePlaying System
+  - 'GURPS (Generic Universal RolePlaying System'
+  target: 《泛用无界角色扮演系统》
+  policy: fixed
