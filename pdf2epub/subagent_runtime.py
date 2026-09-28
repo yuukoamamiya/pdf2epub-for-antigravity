@@ -350,6 +350,148 @@ def _scope_worker_prompt(
     return before + heading_header + scoped_section + heading_end + after
 
 
+def _compact_glossary_entry(entry: Mapping[str, Any]) -> Dict[str, Any]:
+    """Keep only fields that a translation worker needs at inference time.
+
+    The normalized snapshots remain the source of truth.  Worker contexts do
+    not need audit identifiers, entity categories, or unbounded explanatory
+    prose; they do need the source/target pair, precedence policy, and all
+    alternate source forms used for matching.
+    """
+    compact: Dict[str, Any] = {}
+    for key in (
+        "source",
+        "original",
+        "target",
+        "kind",
+        "policy",
+        "allow_short",
+        "variants",
+        "aliases",
+    ):
+        value = entry.get(key)
+        if value in (None, "", [], False):
+            continue
+        compact[key] = value
+    note = entry.get("note")
+    if isinstance(note, str) and note.strip() and len(note) <= 320:
+        compact["note"] = note.strip()
+    return compact
+
+
+def _worker_manifest_projection(
+    manifest: Mapping[str, Any],
+    *,
+    worker_id: str,
+    files: List[str],
+    batches: List[Mapping[str, Any]],
+    chapter_mode: bool,
+    group: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Build the small operational manifest handed to one worker.
+
+    The parent manifest remains the complete audit/resume inventory.  Copying
+    it into every worker used to repeat the full book's file stats, contexts,
+    queues, and chapter map in every model input.
+    """
+    files = list(files)
+    assigned = set(files)
+    projected: Dict[str, Any] = {}
+    for key in (
+        "schema_version",
+        "workflow",
+        "task",
+        "execution_mode",
+        "subagent_required",
+        "source_language",
+        "target_language",
+        "model",
+        "source_dir",
+        "target_dir",
+        "scratch_dir",
+        "batching",
+        "effective_max_concurrency",
+        "concurrency_reason",
+        "global_toc_outline_sha256",
+        "skipped_context_files",
+    ):
+        if key in manifest:
+            projected[key] = manifest[key]
+
+    projected.update(
+        {
+            # Keep ``files`` for older worker tooling, but scope it exactly as
+            # tightly as the explicit assignment fields.
+            "files": files,
+            "assigned_files": files,
+            "pending_files": files,
+            "completed_files": [],
+            "pending_batches": [list(batch.get("files", [])) for batch in batches],
+            "batch_queue": [dict(batch, status="assigned") for batch in batches],
+            "worker_id": worker_id,
+            "worker_queue": [
+                {
+                    "worker_id": worker_id,
+                    "status": "assigned",
+                    "batch_ids": [batch.get("batch_id") for batch in batches],
+                }
+            ],
+            "toc_owner": False,
+        }
+    )
+
+    for key in ("file_stats", "file_roles", "file_contexts", "toc_heading_contexts"):
+        value = manifest.get(key)
+        if isinstance(value, Mapping):
+            subset = {name: value[name] for name in files if name in value}
+            if subset:
+                projected[key] = subset
+
+    for key in ("unit_context_files", "unit_context_sha256"):
+        value = manifest.get(key)
+        if isinstance(value, Mapping):
+            subset = {name: value[name] for name in files if name in value}
+            if subset:
+                projected[key] = subset
+
+    oversized = manifest.get("oversized_files")
+    if isinstance(oversized, list):
+        projected["oversized_files"] = [name for name in oversized if name in assigned]
+
+    # Reference-only contexts are operationally readable; authoritative
+    # snapshots/entities stay out of worker manifests and remain parent-level
+    # provenance for validation.  Generic non-translation callers without an
+    # audit split retain their small context map for compatibility.
+    prompt_contexts = manifest.get("prompt_context_files")
+    if isinstance(prompt_contexts, Mapping):
+        projected["prompt_context_files"] = dict(prompt_contexts)
+        context_hashes = manifest.get("context_sha256")
+        if isinstance(context_hashes, Mapping):
+            projected["context_sha256"] = {
+                name: context_hashes[name]
+                for name in prompt_contexts
+                if name in context_hashes
+            }
+    elif "audit_only_context_files" not in manifest:
+        context_files = manifest.get("context_files")
+        if isinstance(context_files, Mapping):
+            projected["context_files"] = dict(context_files)
+            context_hashes = manifest.get("context_sha256")
+            if isinstance(context_hashes, Mapping):
+                projected["context_sha256"] = dict(context_hashes)
+
+    if chapter_mode:
+        projected.update(
+            {
+                "chapter_id": group.get("chapter_id"),
+                "chapter_split": bool(group.get("chapter_split")),
+                "chapter_part_count": int(group.get("chapter_part_count", 1)),
+                "chapter_file_count": int(group.get("chapter_file_count", len(files))),
+            }
+        )
+    return projected
+
+
 def _chapter_worker_groups(manifest: Mapping[str, Any]) -> List[Dict[str, Any]]:
     """Turn chapter groups into one hand-off per chapter (or chapter part).
 
@@ -400,7 +542,8 @@ def _chapter_worker_groups(manifest: Mapping[str, Any]) -> List[Dict[str, Any]]:
                 {
                     "worker_id": batch_id,
                     "chapter_id": str(chapter_id),
-                    "chapter_files": chapter_files,
+                    "chapter_context_files": chapter_files,
+                    "chapter_file_count": len(chapter_files),
                     "chapter_split": chapter_split,
                     "chapter_part_count": len(batches),
                     "batches": [
@@ -470,23 +613,14 @@ def write_worker_handoffs(
     for group in groups:
         worker_id = group["worker_id"]
         files = list(group["files"])
-        scoped = dict(manifest)
-        scoped.update(
-            {
-                "worker_id": worker_id,
-                "assigned_files": files,
-                "pending_files": files,
-                "completed_files": [],
-                "batch_queue": [dict(batch, status="assigned") for batch in group["batches"]],
-                "worker_queue": [
-                    {"worker_id": worker_id, "status": "assigned", "batch_ids": [
-                        batch.get("batch_id") for batch in group["batches"]
-                    ]}
-                ],
-                "toc_owner": False,
-            }
+        scoped = _worker_manifest_projection(
+            manifest,
+            worker_id=worker_id,
+            files=files,
+            batches=group["batches"],
+            chapter_mode=chapter_mode,
+            group=group,
         )
-        scoped.pop("toc_translation", None)
         # Worker manifests must expose only their assigned unit contexts.  The
         # parent manifest may contain every unit, but that inventory is not a
         # permission for this worker to inspect other files.
@@ -518,7 +652,7 @@ def write_worker_handoffs(
             # the chapter.  This avoids repeating the same glossary entries
             # for every sub-unit while keeping the context local to one task.
             context_names = (
-                group.get("chapter_files", files)
+                group.get("chapter_context_files", files)
                 if chapter_mode
                 else files
             )
@@ -573,28 +707,42 @@ def write_worker_handoffs(
 
                     if group.get("chapter_split"):
                         assigned_set = set(files)
-                        shared_entries = sort_glossary_entries(
-                            [
-                                entry_by_key[key]
-                                for key, names in entry_files.items()
-                                if len(names) > 1 and names & assigned_set
-                            ]
-                        )
+                        shared_entries = [
+                            _compact_glossary_entry(entry)
+                            for entry in sort_glossary_entries(
+                                [
+                                    entry_by_key[key]
+                                    for key, names in entry_files.items()
+                                    if len(names) > 1 and names & assigned_set
+                                ]
+                            )
+                        ]
                         shared_keys = {
                             key
                             for key, names in entry_files.items()
                             if len(names) > 1 and names & assigned_set
                         }
-                        local_entries = sort_glossary_entries(
-                            [
-                                entry_by_key[key]
-                                for key, names in entry_files.items()
-                                if names & assigned_set and key not in shared_keys
-                            ]
-                        )
+                        local_entries = [
+                            _compact_glossary_entry(entry)
+                            for entry in sort_glossary_entries(
+                                [
+                                    entry_by_key[key]
+                                    for key, names in entry_files.items()
+                                    if names & assigned_set and key not in shared_keys
+                                ]
+                            )
+                        ]
                         has_context = bool(shared_entries or local_entries)
                     else:
-                        chapter_entries = sort_glossary_entries(chapter_entries)
+                        chapter_entries = [
+                            _compact_glossary_entry(entry)
+                            for entry in sort_glossary_entries(chapter_entries)
+                        ]
+                elif not chapter_mode:
+                    file_entries = {
+                        filename: [_compact_glossary_entry(entry) for entry in entries]
+                        for filename, entries in file_entries.items()
+                    }
                 worker_context_path = (
                     output_dir
                     / "translation_glossaries"
@@ -608,7 +756,7 @@ def write_worker_handoffs(
                         "worker_id": worker_id,
                         "selection": "chapter_shared_local_direct_context",
                         "chapter_id": group.get("chapter_id"),
-                        "chapter_files": group.get("chapter_files", files),
+                        "chapter_file_count": group.get("chapter_file_count", len(files)),
                         "assigned_files": files,
                         "shared_entries": shared_entries,
                         "local_entries": local_entries,
@@ -619,7 +767,7 @@ def write_worker_handoffs(
                         "worker_id": worker_id,
                         "selection": "chapter_sparse_direct_context",
                         "chapter_id": group.get("chapter_id"),
-                        "chapter_files": group.get("chapter_files", files),
+                        "chapter_file_count": group.get("chapter_file_count", len(files)),
                         "assigned_files": files,
                         "entries": chapter_entries,
                     }
@@ -713,7 +861,7 @@ def write_worker_handoffs(
             **(
                 {
                     "chapter_id": group.get("chapter_id"),
-                    "chapter_files": group.get("chapter_files", files),
+                    "chapter_file_count": group.get("chapter_file_count", len(files)),
                 }
                 if chapter_mode
                 else {}

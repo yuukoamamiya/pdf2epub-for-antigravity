@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 
@@ -237,6 +238,8 @@ def test_chapter_handoffs_keep_chapters_separate_and_aggregate_context_once(
     chapter_context = json.loads(context_path.read_text(encoding="utf-8"))
     assert chapter_context["selection"] == "chapter_sparse_direct_context"
     assert chapter_context["assigned_files"] == ["chapter_1.md", "chapter_1.1.md"]
+    assert chapter_context["chapter_file_count"] == 2
+    assert "chapter_files" not in chapter_context
     assert {entry["original"] for entry in chapter_context["entries"]} == {"Hegel", "Marx"}
     assert "Apply every entry in its `entries` list" in (
         tmp_path / first["prompt"]
@@ -287,7 +290,7 @@ def test_large_chapter_splits_without_mixing_chapter_contexts(tmp_path: Path):
     chapter_one = [item for item in handoffs if item["chapter_id"] == "chapter_1"]
     assert len(chapter_one) == 2
     assert all(
-        item["chapter_files"] == ["chapter_1.1.md", "chapter_1.2.md"]
+        item["chapter_file_count"] == 2
         for item in chapter_one
     )
     for item in chapter_one:
@@ -300,11 +303,155 @@ def test_large_chapter_splits_without_mixing_chapter_contexts(tmp_path: Path):
                 / next(iter(scoped["worker_context_files"].values()))
             ).read_text(encoding="utf-8")
         )
-        assert context["chapter_files"] == ["chapter_1.1.md", "chapter_1.2.md"]
+        assert context["chapter_file_count"] == 2
+        assert "chapter_files" not in context
         assert context["selection"] == "chapter_shared_local_direct_context"
         assert context["shared_entries"] == []
         assigned_term = "Hegel" if item["files"] == ["chapter_1.1.md"] else "Marx"
         assert [entry["original"] for entry in context["local_entries"]] == [assigned_term]
+
+
+def test_worker_manifest_is_a_minimal_assignment_projection(tmp_path: Path):
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    for name in ("a.md", "b.md", "c.md"):
+        (source_dir / name).write_text("source", encoding="utf-8")
+
+    paths = prepare_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        tmp_path / "target",
+        "English",
+        "Chinese",
+        file_contexts={
+            "a.md": "Chapter A",
+            "b.md": "Chapter B",
+            "c.md": "Chapter C",
+        },
+        chapter_groups={"chapter": ["a.md", "b.md", "c.md"]},
+    )
+    handoffs = write_worker_handoffs(tmp_path, paths["manifest"], paths["prompt"])
+
+    assert len(handoffs) == 1
+    scoped = json.loads((tmp_path / handoffs[0]["manifest"]).read_text(encoding="utf-8"))
+    assert scoped["files"] == ["a.md", "b.md", "c.md"]
+    assert set(scoped["file_stats"]) == set(scoped["assigned_files"])
+    assert set(scoped["file_contexts"]) == set(scoped["assigned_files"])
+    assert "chapter_groups" not in scoped
+    assert "recommended_batches" not in scoped
+    assert "worker_handoffs" not in scoped
+
+
+def test_worker_context_keeps_matching_fields_but_drops_audit_metadata(tmp_path: Path):
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    (source_dir / "unit.md").write_text("Baldur's Gate", encoding="utf-8")
+    context_dir = tmp_path / "translation_glossaries" / "unit_contexts"
+    context_dir.mkdir(parents=True)
+    context = {
+        "entries": [
+            {
+                "kind": "domain",
+                "source": "Baldur's Gate",
+                "target": "《博德之门》",
+                "policy": "fixed",
+                "variants": ["Baldur's Gate series"],
+                "aliases": ["BG"],
+                "id": "crpg.baldurs-gate",
+                "category": "game",
+                "scope": "series",
+                "note": "x" * 1000,
+            }
+        ]
+    }
+    context_path = context_dir / "unit.json"
+    context_path.write_text(json.dumps(context, ensure_ascii=False), encoding="utf-8")
+
+    paths = prepare_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        tmp_path / "target",
+        "English",
+        "Chinese",
+        unit_context_files={"unit.md": context_path},
+    )
+    handoffs = write_worker_handoffs(tmp_path, paths["manifest"], paths["prompt"])
+    scoped = json.loads((tmp_path / handoffs[0]["manifest"]).read_text(encoding="utf-8"))
+    worker_context = json.loads(
+        (tmp_path / next(iter(scoped["worker_context_files"].values()))).read_text(
+            encoding="utf-8"
+        )
+    )
+    entry = worker_context["files"]["unit.md"][0]
+    assert entry == {
+        "source": "Baldur's Gate",
+        "target": "《博德之门》",
+        "kind": "domain",
+        "policy": "fixed",
+        "variants": ["Baldur's Gate series"],
+        "aliases": ["BG"],
+    }
+
+
+def test_resume_only_invalidates_units_with_changed_context(tmp_path: Path):
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    context_dir = tmp_path / "translation_glossaries" / "unit_contexts"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    context_dir.mkdir(parents=True)
+    for name in ("a.md", "b.md"):
+        (source_dir / name).write_text(f"source {name}", encoding="utf-8")
+
+    context_files = {}
+    for name, term in (("a.md", "Alpha"), ("b.md", "Beta")):
+        path = context_dir / f"{Path(name).stem}.json"
+        path.write_text(json.dumps({"entries": [{"source": term, "target": term}]}), encoding="utf-8")
+        context_files[name] = path
+
+    first = prepare_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        target_dir,
+        "English",
+        "Chinese",
+        unit_context_files=context_files,
+    )
+    validation_records = {}
+    for name in ("a.md", "b.md"):
+        target = target_dir / name
+        target.write_text("validated", encoding="utf-8")
+        validation_records[name] = {
+            "valid": True,
+            "source_sha256": hashlib.sha256((source_dir / name).read_bytes()).hexdigest(),
+            "target_sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
+        }
+    (tmp_path / "translate_file_validation.json").write_text(
+        json.dumps({"files": validation_records}), encoding="utf-8"
+    )
+
+    # Change only the projected context for a.md.  The external/full context
+    # snapshot is intentionally not part of this test: resume is unit-scoped.
+    context_files["a.md"].write_text(
+        json.dumps({"entries": [{"source": "Alpha", "target": "阿尔法"}]}),
+        encoding="utf-8",
+    )
+    resumed = prepare_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        target_dir,
+        "English",
+        "Chinese",
+        resume=True,
+        unit_context_files=context_files,
+    )
+    manifest = json.loads(resumed["manifest"].read_text(encoding="utf-8"))
+    assert manifest["pending_files"] == ["a.md"]
+    assert manifest["completed_files"] == ["b.md"]
 
 
 def test_polish_worker_handoffs_are_task_scoped(tmp_path: Path):

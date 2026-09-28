@@ -97,6 +97,77 @@ def prepare_markdown_subagent(
                 previous_manifest = loaded_manifest
         except (OSError, json.JSONDecodeError):
             previous_manifest = {}
+
+    normalized_context = {}
+    context_sha256 = {}
+    for name, path in (context_files or {}).items():
+        context_path = Path(path).resolve()
+        try:
+            relative_path = context_path.relative_to(output_dir.resolve())
+        except ValueError as exc:
+            raise ValueError(f"Context file must be inside output directory: {path}") from exc
+        if not context_path.is_file():
+            raise ValueError(f"Context file not found: {context_path}")
+        relative_name = relative_path.as_posix()
+        normalized_context[str(name)] = relative_name
+        context_sha256[str(name)] = hashlib.sha256(context_path.read_bytes()).hexdigest()
+
+    # Unit context hashes are deliberately prepared before checkpoint
+    # selection.  A changed book-wide glossary/entity snapshot only matters
+    # to units whose projected context changed; invalidating the whole book
+    # here would waste a full translation pass on unaffected units.
+    normalized_unit_contexts = {}
+    unit_context_sha256 = {}
+    for name, path in (unit_context_files or {}).items():
+        context_path = Path(path).resolve()
+        try:
+            relative_path = context_path.relative_to(output_dir.resolve())
+        except ValueError as exc:
+            raise ValueError(
+                f"Unit context file must be inside output directory: {path}"
+            ) from exc
+        if not context_path.is_file():
+            raise ValueError(f"Unit context file not found: {context_path}")
+        relative_name = relative_path.as_posix()
+        normalized_unit_contexts[str(name)] = relative_name
+        unit_context_sha256[str(name)] = hashlib.sha256(
+            context_path.read_bytes()
+        ).hexdigest()
+
+    normalized_heading_contexts = {
+        str(name): dict(context)
+        for name, context in (heading_contexts or {}).items()
+        if str(name).strip() and isinstance(context, Mapping)
+    }
+
+    def _unit_context_is_current(name: str) -> bool:
+        previous_unit_hashes = previous_manifest.get("unit_context_sha256", {})
+        if not isinstance(previous_unit_hashes, Mapping):
+            previous_unit_hashes = {}
+        # Older manifests did not record per-unit projections.  If their
+        # book-wide context changed, there is no safe way to identify the
+        # affected units, so conservatively rebuild the old checkpoint set.
+        if (
+            resume
+            and context_sha256
+            and previous_manifest.get("context_sha256", {}) != context_sha256
+            and not previous_unit_hashes
+        ):
+            return False
+        if name in unit_context_sha256:
+            if previous_unit_hashes.get(name) != unit_context_sha256[name]:
+                return False
+        elif name in previous_unit_hashes:
+            return False
+
+        previous_heading_contexts = previous_manifest.get("toc_heading_contexts", {})
+        if not isinstance(previous_heading_contexts, Mapping):
+            previous_heading_contexts = {}
+        current_heading = normalized_heading_contexts.get(name)
+        previous_heading = previous_heading_contexts.get(name)
+        if current_heading != previous_heading:
+            return False
+        return True
     validation_path = output_dir / f"{task}_validation.json"
     if resume and validation_path.is_file():
         try:
@@ -154,7 +225,7 @@ def prepare_markdown_subagent(
         # A non-empty target is not proof of completion: an interrupted
         # Subagent can leave a truncated file behind.  Only a prior local
         # validation with the same source hash is a resumable checkpoint.
-        if resume and is_reusable_checkpoint(
+        if resume and _unit_context_is_current(source.name) and is_reusable_checkpoint(
             target,
             source.name,
             source_hash,
@@ -212,47 +283,11 @@ def prepare_markdown_subagent(
     }
     if normalized_roles:
         manifest["file_roles"] = normalized_roles
-    normalized_context = {}
-    context_sha256 = {}
-    for name, path in (context_files or {}).items():
-        context_path = Path(path).resolve()
-        try:
-            relative_path = context_path.relative_to(output_dir.resolve())
-        except ValueError as exc:
-            raise ValueError(f"Context file must be inside output directory: {path}") from exc
-        if not context_path.is_file():
-            raise ValueError(f"Context file not found: {context_path}")
-        relative_name = relative_path.as_posix()
-        normalized_context[str(name)] = relative_name
-        context_sha256[str(name)] = hashlib.sha256(context_path.read_bytes()).hexdigest()
     if normalized_context:
         manifest["context_files"] = normalized_context
         manifest["context_sha256"] = context_sha256
     context_is_current = previous_manifest.get("context_sha256", {}) == context_sha256
     manifest["context_is_current"] = context_is_current
-    if resume and not context_is_current:
-        # A translation checkpoint is only reusable with the same read-only
-        # terminology/entity context.  A changed glossary must cause all
-        # affected units to be handed back to the Subagent.
-        completed_files = []
-        pending_files = [path.name for path in sources]
-        pending_stats = {
-            name: stats for name, stats in file_stats.items() if name in pending_files
-        }
-        pending_batches = _recommended_batches(
-            pending_stats,
-            batching["max_files"],
-            batching["max_source_tokens"],
-            batching["single_file_max_bytes"],
-        )
-        manifest.update(
-            {
-                "pending_batches": pending_batches,
-                "batch_queue": _batch_queue(pending_batches, pending_stats),
-                "completed_files": completed_files,
-                "pending_files": pending_files,
-            }
-        )
     normalized_skipped_context = sorted(
         {str(name) for name in skipped_context_files if str(name).strip()}
     )
@@ -265,34 +300,12 @@ def prepare_markdown_subagent(
     }
     if normalized_file_contexts:
         manifest["file_contexts"] = normalized_file_contexts
-    normalized_heading_contexts = {
-        str(name): dict(context)
-        for name, context in (heading_contexts or {}).items()
-        if str(name).strip() and isinstance(context, Mapping)
-    }
     if normalized_heading_contexts:
         manifest["toc_heading_contexts"] = normalized_heading_contexts
     normalized_global_toc_outline = str(global_toc_outline or "").strip()
     if normalized_global_toc_outline:
         manifest["global_toc_outline_sha256"] = hashlib.sha256(
             normalized_global_toc_outline.encode("utf-8")
-        ).hexdigest()
-    normalized_unit_contexts = {}
-    unit_context_sha256 = {}
-    for name, path in (unit_context_files or {}).items():
-        context_path = Path(path).resolve()
-        try:
-            relative_path = context_path.relative_to(output_dir.resolve())
-        except ValueError as exc:
-            raise ValueError(
-                f"Unit context file must be inside output directory: {path}"
-            ) from exc
-        if not context_path.is_file():
-            raise ValueError(f"Unit context file not found: {context_path}")
-        relative_name = relative_path.as_posix()
-        normalized_unit_contexts[str(name)] = relative_name
-        unit_context_sha256[str(name)] = hashlib.sha256(
-            context_path.read_bytes()
         ).hexdigest()
     if normalized_unit_contexts:
         manifest["unit_context_files"] = normalized_unit_contexts

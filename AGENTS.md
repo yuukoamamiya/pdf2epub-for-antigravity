@@ -68,8 +68,16 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
   `polish_worker_handoffs/`；`translate` 使用 `worker_handoffs/`。每个 worker
   只能处理自己 manifest 中的 `assigned_files`。PDF `translate` 按顶层章节生成
   handoff；超出文件/字节/token 限制的章节才在章节内部拆分，不能与其他章节合并。
+- 父级 manifest 保留全书文件、统计、章节映射和上下文哈希，供审计与恢复使用；worker
+  manifest 只能是当前 worker 的最小投影（当前文件、当前批次、当前文件统计/层级/术语哈希
+  和必要的章节元数据），不得复制全书 `file_stats`、`chapter_groups`、推荐队列或审计快照路径。
+  章节术语上下文只记录 `chapter_file_count`，不得重复写入完整 `chapter_files` 列表。
 - 不删除源文件、输出目录或已有中间结果。额度中断或失败时先校验，再使用原命令的
   `--resume`，只处理 pending 项。
+- 新 manifest 的 `--resume` 按单元比较 `unit_context_sha256` 和该单元的精确 TOC 上下文；
+  只有源文件、校验 checkpoint 和该单元上下文都未变化时才复用。全书上下文哈希变化不会
+  自动使所有单元失效；缺少单元哈希的旧 manifest 无法安全定位影响范围时，才采用整批重做
+  的兼容兜底。
 - 本地校验报告中的 `safety_blocked`、拒答或免责声明不得进入 `validated`，也不得通过打包。
 
 标准调度循环：

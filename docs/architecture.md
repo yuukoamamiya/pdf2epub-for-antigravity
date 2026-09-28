@@ -188,11 +188,13 @@ Format workflow services  → shared utilities/domain services
 
 1. 目标文件非空且结构校验通过；
 2. validation report 记录了对应源文件的 SHA-256；
-3. 当前源文件、TOC、实体表和术语上下文仍与记录一致；
+3. 当前源文件、该单元的 TOC 上下文、实体/术语投影和对应记录一致；全书级上下文变化不再默认使未受影响单元失效；
 4. 全量流程的报告通过后，才允许打包。
 
-单文件校验只提供 checkpoint，不能替代全量校验。任何源稿、实体表、TOC 或术语上下文
-变化都必须使受影响的 checkpoint 重新进入 `pending`。
+单文件校验只提供 checkpoint，不能替代全量校验。源稿、实体表、TOC 或术语上下文变化
+只应使受影响的 checkpoint 重新进入 `pending`；旧 manifest 没有单元级上下文哈希时，
+为安全起见按整批重新处理。父 manifest 是完整审计/恢复索引，worker handoff 则是只含
+当前 assignment 的最小运行投影。
 
 ## 6. 扩展和维护约定
 
