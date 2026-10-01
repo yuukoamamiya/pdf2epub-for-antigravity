@@ -1,0 +1,1038 @@
+# Derived from output/拉康精神分析介绍性辞典/拉康精神分析介绍性辞典.epub.
+# The dictionary contains a small number of non-English headword forms; these are retained as cross-language variants.
+schema_version: 1
+metadata:
+  name: lacanian-psychoanalysis-en-zh
+  domain: Lacanian psychoanalysis
+  source_language: English
+  target_language: Chinese
+  version: '2026-09-27'
+entries:
+- id: absence
+  source: absence
+  target: 缺位
+  policy: fixed
+- id: anxiety
+  source: anxiety
+  target: 焦虑
+  variants:
+  - angoisse
+  - Angst
+  policy: fixed
+- id: aphanisis
+  source: aphanisis
+  target: 消失
+  policy: fixed
+- id: art
+  source: art
+  target: 艺术
+  policy: fixed
+- id: autonomous-ego
+  source: autonomous ego
+  target: 自主的自我
+  policy: fixed
+- id: act
+  source: act
+  target: 行动
+  variants:
+  - acte
+  policy: fixed
+- id: acting-out
+  source: acting out
+  target: 行动搬演
+  variants:
+  - Agieren
+  policy: fixed
+- id: affect
+  source: affect
+  target: 情感
+  variants:
+  - Affekt
+  policy: fixed
+- id: aggressivity
+  source: aggressivity
+  target: 侵凌性
+  variants:
+  - agressivité
+  policy: fixed
+- id: algebra
+  source: algebra
+  target: 代数学
+  variants:
+  - algèbre
+  policy: fixed
+- id: alienation
+  source: alienation
+  target: 异化
+  variants:
+  - aliénation
+  - Entfremdung
+  policy: fixed
+- id: bar
+  source: bar
+  target: 杠
+  variants:
+  - barre
+  policy: fixed
+- id: beautiful-soul
+  source: beautiful soul
+  target: 美的灵魂
+  variants:
+  - belle âme
+  - schöne Seele
+  policy: fixed
+- id: being
+  source: being
+  target: 存在
+  variants:
+  - être
+  - Sein
+  policy: fixed
+- id: bejahung
+  source: Bejahung
+  target: 肯定
+  policy: fixed
+- id: biology
+  source: biology
+  target: 生物学
+  variants:
+  - biologie
+  policy: fixed
+- id: borromean-knot
+  source: Borromean knot
+  target: 博洛米结
+  variants:
+  - nœud borroméen
+  policy: fixed
+- id: captation
+  source: captation
+  target: 捕获
+  policy: fixed
+- id: counterpart
+  source: counterpart
+  target: 相似者
+  variants:
+  - semblable
+  policy: fixed
+- id: contertransference
+  source: contertransference
+  target: 反转移
+  variants:
+  - contre-transfert
+  policy: fixed
+- id: cartel
+  source: cartel
+  target: 卡特尔
+  policy: fixed
+- id: castration-complex
+  source: castration complex
+  target: 阉割情结
+  variants:
+  - complexe de castration
+  policy: fixed
+- id: cause
+  source: cause
+  target: 原因/事业
+  policy: fixed
+- id: chance
+  source: chance
+  target: 偶然
+  policy: fixed
+- id: code
+  source: code
+  target: 编码
+  policy: fixed
+- id: cogito
+  source: cogito
+  target: 我思
+  policy: fixed
+- id: communication
+  source: communication
+  target: 交流
+  policy: fixed
+- id: complex
+  source: complex
+  target: 情结
+  variants:
+  - complexe
+  - Komplex
+  policy: fixed
+- id: disavowal
+  source: disavowal
+  target: 拒认
+  variants:
+  - déni
+  - Verleugnung
+  policy: fixed
+- id: discourse
+  source: discourse
+  target: 话语
+  variants:
+  - discours
+  policy: fixed
+- id: drive
+  source: drive
+  target: 冲动
+  variants:
+  - pulsion
+  - Trieb
+  policy: fixed
+- id: dual-relation
+  source: dual relation
+  target: 二元关系
+  variants:
+  - relation duelle
+  policy: fixed
+- id: death-drive
+  source: death drive
+  target: 死亡冲动
+  variants:
+  - pulsion de mort
+  - Todestriebe
+  policy: fixed
+- id: defence
+  source: defence
+  target: 防御
+  variants:
+  - défense
+  - Abwehr
+  policy: fixed
+- id: delusion
+  source: delusion
+  target: 妄想
+  variants:
+  - délire
+  policy: fixed
+- id: demand
+  source: demand
+  target: 要求/请求
+  variants:
+  - demande
+  policy: fixed
+- id: desire
+  source: desire
+  target: 欲望
+  variants:
+  - désir
+  - Wunsch
+  - Begierde
+  policy: fixed
+- id: desire-of-the-analyst
+  source: desire of the analyst
+  target: 分析家的欲望
+  variants:
+  - désir de l’analyste
+  policy: fixed
+- id: development
+  source: development
+  target: 发展
+  variants:
+  - développement
+  policy: fixed
+- id: dialectic
+  source: dialectic
+  target: 辩证法
+  variants:
+  - dialectique
+  policy: fixed
+- id: ego
+  source: ego
+  target: 自我
+  variants:
+  - moi
+  - Ich
+  policy: fixed
+- id: ego-ideal
+  source: ego-ideal
+  target: 自我理想
+  variants:
+  - idéal du moi
+  - Ich-ideal
+  policy: fixed
+- id: ego-psychology
+  source: ego-psychology
+  target: 自我心理学
+  variants:
+  - psychologie du moi
+  policy: fixed
+- id: end-of-analysis
+  source: end of analysis
+  target: 分析的结束
+  variants:
+  - fin d’analyse
+  policy: fixed
+- id: enunciation
+  source: enunciation
+  target: 能述
+  variants:
+  - énonciation
+  policy: fixed
+- id: ethics
+  source: ethics
+  target: 伦理学
+  variants:
+  - éthique
+  policy: fixed
+- id: existence
+  source: existence
+  target: 存在/实存
+  variants:
+  - Existenz
+  policy: fixed
+- id: extimacy
+  source: extimacy
+  target: 外心性/外密性
+  variants:
+  - extimité
+  policy: fixed
+- id: factor-c
+  source: factor c
+  target: c 因素
+  variants:
+  - facteur c
+  policy: fixed
+- id: frustration
+  source: frustration
+  target: 挫折
+  variants:
+  - Versagung
+  policy: fixed
+- id: fantasy
+  source: fantasy
+  target: 幻想
+  variants:
+  - fantasmé
+  policy: fixed
+- id: father
+  source: father
+  target: 父亲
+  variants:
+  - père
+  policy: fixed
+- id: fetishism
+  source: fetishism
+  target: 恋物癖
+  variants:
+  - fétichisme
+  - Fetischismus
+  policy: fixed
+- id: foreclosure
+  source: foreclosure
+  target: 排除/除权
+  variants:
+  - forclusion
+  - Verwerfung
+  policy: fixed
+- id: founding-speech
+  source: founding speech
+  target: 基底言语
+  variants:
+  - parole fondant
+  policy: fixed
+- id: fragmented-body
+  source: fragmented body
+  target: 碎裂的身体
+  variants:
+  - corps morcelé
+  policy: fixed
+- id: freud-return-to
+  source: Freud, return to
+  target: 回到弗洛伊德
+  variants:
+  - Freud, retour à
+  policy: fixed
+- id: gap
+  source: gap
+  target: 缺口
+  variants:
+  - béance
+  policy: fixed
+- id: gaze
+  source: gaze
+  target: 目光
+  variants:
+  - regard
+  policy: fixed
+- id: genital
+  source: genital
+  target: 生殖
+  variants:
+  - génital
+  policy: fixed
+- id: gestalt
+  source: Gestalt
+  target: 格式塔
+  policy: fixed
+- id: graph-of-desire
+  source: graph of desire
+  target: 欲望图解
+  variants:
+  - graphe du désir
+  policy: fixed
+- id: hallucination
+  source: hallucination
+  target: 幻觉
+  policy: fixed
+- id: helplessness
+  source: helplessness
+  target: 无助
+  variants:
+  - détresse
+  - Hilflosigkeit
+  policy: fixed
+- id: hysteria
+  source: hysteria
+  target: 癔症
+  variants:
+  - hystérie
+  - Hysterie
+  policy: fixed
+- id: id
+  source: id
+  target: 它/它我
+  variants:
+  - ça
+  - das Es
+  policy: fixed
+- id: introjection
+  source: introjection
+  target: 内摄
+  variants:
+  - Introjektion
+  policy: fixed
+- id: inversion
+  source: inversion
+  target: 颠倒
+  policy: fixed
+- id: identification
+  source: identification
+  target: 认同
+  variants:
+  - Identifizierung
+  policy: fixed
+- id: imaginary
+  source: imaginary
+  target: 想象界
+  variants:
+  - imaginaire
+  policy: fixed
+- id: imago
+  source: imago
+  target: 意象
+  policy: fixed
+- id: index
+  source: index
+  target: 指示符
+  policy: fixed
+- id: instinct
+  source: instinct
+  target: 本能
+  variants:
+  - Instinkt
+  policy: fixed
+- id: international-psycho-analytical-association
+  source: International Psycho-Analytical Association
+  target: 国际精神分析协会
+  policy: fixed
+- id: interpretation
+  source: interpretation
+  target: 解释
+  variants:
+  - interprétation
+  policy: fixed
+- id: intersubjectivity
+  source: intersubjectivity
+  target: 主体间性
+  variants:
+  - intersubjectivité
+  policy: fixed
+- id: jouissance
+  source: jouissance
+  target: 享乐
+  policy: fixed
+- id: kleinian-psychoanalysis
+  source: Kleinian psychoanalysis
+  target: 克莱因派精神分析
+  policy: fixed
+- id: knowledge
+  source: knowledge
+  target: 认识/知识
+  variants:
+  - connaissance
+  - savoir
+  policy: fixed
+- id: lack
+  source: lack
+  target: 缺失
+  variants:
+  - manque
+  policy: fixed
+- id: language
+  source: language
+  target: 语言
+  variants:
+  - langue
+  - langage
+  policy: fixed
+- id: law
+  source: law
+  target: 法则
+  variants:
+  - loi
+  policy: fixed
+- id: letter
+  source: letter
+  target: 字符
+  variants:
+  - lettre
+  policy: fixed
+- id: libido
+  source: libido
+  target: 力比多
+  policy: fixed
+- id: linguistics
+  source: linguistics
+  target: 语言学
+  variants:
+  - linguistique
+  policy: fixed
+- id: love
+  source: love
+  target: 爱
+  variants:
+  - amour
+  policy: fixed
+- id: lure
+  source: lure
+  target: 引诱
+  variants:
+  - leurre
+  policy: fixed
+- id: madness
+  source: madness
+  target: 疯癫
+  variants:
+  - folie
+  policy: fixed
+- id: metonymy
+  source: metonymy
+  target: 换喻
+  variants:
+  - métonymie
+  policy: fixed
+- id: mirror-stage
+  source: mirror stage
+  target: 镜子阶段
+  variants:
+  - stade du miroir
+  policy: fixed
+- id: moebius-strip
+  source: moebius strip
+  target: 莫比乌斯带
+  variants:
+  - bande de moebius
+  policy: fixed
+- id: mother
+  source: mother
+  target: 母亲
+  variants:
+  - mère
+  policy: fixed
+- id: master
+  source: master
+  target: 主人
+  variants:
+  - maître
+  policy: fixed
+- id: materialism
+  source: materialism
+  target: 唯物主义
+  variants:
+  - matérialisme
+  policy: fixed
+- id: mathematics
+  source: mathematics
+  target: 数学
+  variants:
+  - mathématiques
+  policy: fixed
+- id: matheme
+  source: matheme
+  target: 数元/数学型
+  variants:
+  - mathème
+  policy: fixed
+- id: meconnaissance
+  source: méconnaissance
+  target: 误认
+  policy: fixed
+- id: memory
+  source: memory
+  target: 记忆
+  variants:
+  - mémoire
+  policy: fixed
+- id: metalanguage
+  source: metalanguage
+  target: 元语言
+  variants:
+  - métalangage
+  policy: fixed
+- id: metaphor
+  source: metaphor
+  target: 隐喻
+  variants:
+  - métaphore
+  policy: fixed
+- id: name-of-the-father
+  source: Name-of-the-Father
+  target: 父亲的名义
+  variants:
+  - Nom-du-père ①
+  policy: fixed
+- id: narcissism
+  source: narcissism
+  target: 自恋
+  variants:
+  - narcissisme
+  - Narzissmus
+  policy: fixed
+- id: nature
+  source: nature
+  target: 自然
+  policy: fixed
+- id: need
+  source: need
+  target: 需要
+  variants:
+  - besoin
+  policy: fixed
+- id: negation
+  source: negation
+  target: 否定
+  variants:
+  - dénégation
+  - Verneinung
+  policy: fixed
+- id: neurosis
+  source: neurosis
+  target: 神经症
+  variants:
+  - névrose
+  - Neurose
+  policy: fixed
+- id: object-relations-theory
+  source: object-relations theory
+  target: 对象关系理论
+  variants:
+  - théorie du relation d’objet
+  policy: fixed
+- id: objet-petit-a
+  source: objet petit a
+  target: 对象小 a
+  policy: fixed
+- id: obsessional-neurosis
+  source: obsessional neurosis
+  target: 强迫型神经症
+  variants:
+  - névrose obsessionnelle
+  policy: fixed
+- id: oedipus-complex
+  source: Oedipus complex
+  target: 俄狄浦斯情结
+  variants:
+  - complexe d’Œdipe
+  - Ödipuskomplex
+  policy: fixed
+- id: optical-model
+  source: optical model
+  target: 光学模型
+  variants:
+  - modèle optique
+  policy: fixed
+- id: order
+  source: order
+  target: 秩序
+  variants:
+  - ordre
+  policy: fixed
+- id: other
+  source: other
+  target: 小他者/大他者
+  variants:
+  - Other
+  - autre
+  - Autre
+  policy: fixed
+- id: pleasure-principle
+  source: pleasure principle
+  target: 快乐原则
+  variants:
+  - principe de plaisir
+  - Lustprinzip
+  policy: fixed
+- id: point-de-capiton
+  source: point de capiton
+  target: 结扣点
+  policy: fixed
+- id: preoedipal-phase
+  source: preoedipal phase
+  target: 前俄狄浦斯期
+  variants:
+  - stade préœdipien
+  policy: fixed
+- id: privation
+  source: privation
+  target: 剥夺
+  policy: fixed
+- id: progress
+  source: progress
+  target: 进展
+  variants:
+  - progrès
+  policy: fixed
+- id: projection
+  source: projection
+  target: 投射
+  variants:
+  - Projektion
+  policy: fixed
+- id: psychoanalysis
+  source: psychoanalysis
+  target: 精神分析
+  variants:
+  - psychanalyser
+  - Psychoanalyse
+  policy: fixed
+- id: psychology
+  source: psychology
+  target: 心理学
+  variants:
+  - psychologie
+  policy: fixed
+- id: psychosis
+  source: psychosis
+  target: 精神病
+  variants:
+  - psychose
+  - Psychose
+  policy: fixed
+- id: punctuation
+  source: punctuation
+  target: 标点
+  policy: fixed
+- id: part-object
+  source: part-object
+  target: 部分对象
+  variants:
+  - objet partiel
+  - Partialobjekt
+  policy: fixed
+- id: passage-to-the-act
+  source: passage to the act
+  target: 行动宣泄
+  variants:
+  - passage à l’act
+  policy: fixed
+- id: paternal-metaphor
+  source: paternal metaphor
+  target: 父性隐喻
+  variants:
+  - métaphore paternelle
+  policy: fixed
+- id: perversion
+  source: perversion
+  target: 性倒错
+  variants:
+  - Perversion
+  policy: fixed
+- id: phallus
+  source: phallus
+  target: 阳具
+  variants:
+  - Phallus
+  policy: fixed
+- id: philosophy
+  source: philosophy
+  target: 哲学
+  variants:
+  - philosophie
+  policy: fixed
+- id: phobia
+  source: phobia
+  target: 恐怖症
+  variants:
+  - phobie
+  policy: fixed
+- id: quaternary
+  source: quaternary
+  target: 四元组
+  variants:
+  - quaternaire
+  policy: fixed
+- id: real
+  source: real
+  target: 实在界
+  variants:
+  - réal
+  policy: fixed
+- id: reality-principle
+  source: reality principle
+  target: 现实原则
+  variants:
+  - principe de réalité
+  - Realitätsprinzip
+  policy: fixed
+- id: recollection
+  source: recollection
+  target: 回忆
+  variants:
+  - remémoration
+  policy: fixed
+- id: regression
+  source: regression
+  target: 退行
+  variants:
+  - régression
+  - Regression
+  policy: fixed
+- id: religion
+  source: religion
+  target: 宗教
+  policy: fixed
+- id: repetition
+  source: repetition
+  target: 重复
+  variants:
+  - répétition
+  policy: fixed
+- id: repression
+  source: repression
+  target: 压抑
+  variants:
+  - refoulement
+  - Verdrängung
+  policy: fixed
+- id: resistance
+  source: resistance
+  target: 阻抗
+  variants:
+  - résistance
+  - Widerstand
+  policy: fixed
+- id: sadism
+  source: sadism
+  target: 施虐狂/受虐狂
+  variants:
+  - masochism
+  - sadisme
+  - masochisme
+  policy: fixed
+- id: shifter
+  source: shifter
+  target: 转换词
+  policy: fixed
+- id: sign
+  source: sign
+  target: 符号
+  variants:
+  - signé
+  policy: fixed
+- id: signified
+  source: signified
+  target: 所指
+  variants:
+  - signifié
+  policy: fixed
+- id: signifier
+  source: signifier
+  target: 能指
+  variants:
+  - signifiant
+  policy: fixed
+- id: signifying-chain
+  source: signifying chain
+  target: 能指链条
+  variants:
+  - chaîne signifiante
+  - chaîne du signifiant
+  policy: fixed
+- id: sinthome
+  source: sinthome
+  target: 圣状
+  policy: fixed
+- id: slip
+  source: slip
+  target: 滑动
+  variants:
+  - glisser[动词]
+  - glissement[名词]
+  policy: fixed
+- id: specular-image
+  source: specular image
+  target: 镜像
+  variants:
+  - image spéculaire
+  policy: fixed
+- id: speech
+  source: speech
+  target: 言语
+  variants:
+  - parole
+  policy: fixed
+- id: scene
+  source: scene
+  target: 场景
+  variants:
+  - scène
+  policy: fixed
+- id: split
+  source: split
+  target: 分裂
+  variants:
+  - refente
+  policy: fixed
+- id: structure
+  source: structure
+  target: 结构
+  policy: fixed
+- id: subject
+  source: subject
+  target: 主体
+  variants:
+  - sujet
+  policy: fixed
+- id: subject-supposed-to-know
+  source: subject supposed to know
+  target: 假设知道的主体
+  variants:
+  - sujet supposé savoir
+  policy: fixed
+- id: sublimation
+  source: sublimation
+  target: 升华
+  variants:
+  - Sublimierung
+  policy: fixed
+- id: suggestion
+  source: suggestion
+  target: 暗示
+  policy: fixed
+- id: superego
+  source: superego
+  target: 超我
+  variants:
+  - surmoi
+  - Über-Ich
+  policy: fixed
+- id: symbolic
+  source: symbolic
+  target: 象征界
+  variants:
+  - symbolique
+  policy: fixed
+- id: symptom
+  source: symptom
+  target: 症状
+  variants:
+  - symptôme
+  policy: fixed
+- id: schema-l
+  source: schema L
+  target: L图式
+  variants:
+  - schéma L
+  policy: fixed
+- id: school
+  source: school
+  target: 学派
+  variants:
+  - école
+  policy: fixed
+- id: science
+  source: science
+  target: 科学
+  variants:
+  - Wissenschaft
+  policy: fixed
+- id: semblance
+  source: semblance
+  target: 假相
+  variants:
+  - semblant
+  policy: fixed
+- id: seminar
+  source: seminar
+  target: 研讨班
+  variants:
+  - séminaire
+  policy: fixed
+- id: sexual-relationship
+  source: sexual relationship
+  target: 性别关系
+  variants:
+  - rapport sexuel
+  policy: fixed
+- id: thing
+  source: Thing
+  target: 原物/大写之物
+  variants:
+  - chose
+  - das Ding
+  policy: fixed
+- id: time
+  source: time
+  target: 时间
+  variants:
+  - temps
+  policy: fixed
+- id: topology
+  source: topology
+  target: 拓扑学
+  variants:
+  - topologie
+  policy: fixed
+- id: torus
+  source: torus
+  target: 圆环面
+  variants:
+  - tore
+  policy: fixed
+- id: transference
+  source: transference
+  target: 转移
+  variants:
+  - transfert
+  - Übertragung
+  policy: fixed
+- id: transitivism
+  source: transitivism
+  target: 互易感觉
+  variants:
+  - transitivisme
+  policy: fixed
+- id: treatment
+  source: treatment
+  target: 治疗
+  variants:
+  - cure
+  policy: fixed
+- id: truth
+  source: truth
+  target: 真理
+  variants:
+  - vérité
+  policy: fixed
+- id: unconscious
+  source: unconscious
+  target: 无意识
+  variants:
+  - inconscient
+  - das Unbewußte
+  policy: fixed
+- id: woman
+  source: woman
+  target: 女人
+  variants:
+  - femme
+  policy: fixed
