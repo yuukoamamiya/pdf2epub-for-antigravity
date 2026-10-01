@@ -68,6 +68,8 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
   `polish_worker_handoffs/`；`translate` 使用 `worker_handoffs/`。每个 worker
   只能处理自己 manifest 中的 `assigned_files`。PDF `translate` 按顶层章节生成
   handoff；超出文件/字节/token 限制的章节才在章节内部拆分，不能与其他章节合并。
+  `max_files` 默认值为 5，配置值的有效上限为 8；文件数、字节数和 token 数任一达到
+  限制都必须拆批。
 - 父级 manifest 保留全书文件、统计、章节映射和上下文哈希，供审计与恢复使用；worker
   manifest 只能是当前 worker 的最小投影（当前文件、当前批次、当前文件统计/层级/术语哈希
   和必要的章节元数据），不得复制全书 `file_stats`、`chapter_groups`、推荐队列或审计快照路径。
@@ -78,7 +80,18 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
   只有源文件、校验 checkpoint 和该单元上下文都未变化时才复用。全书上下文哈希变化不会
   自动使所有单元失效；缺少单元哈希的旧 manifest 无法安全定位影响范围时，才采用整批重做
   的兼容兜底。
+- 中文目标语言的普通正文翻译必须通过目标语言内容审计：高置信度的原文长段落未变化、
+  中文密度明显不足或模型敷衍套话都会进入失败报告。`bibliography` 和 `index` 文件
+  不使用中文密度门禁，但仍保留数字标记与拒答检测。
 - 本地校验报告中的 `safety_blocked`、拒答或免责声明不得进入 `validated`，也不得通过打包。
+- 阻断必须区分处理：`retry_required` 是 Subagent 通常可以修复的明确错误，主 Agent 应直接按清单
+  重新派发；首次出现的 `review_required`（疑似原文引用、疑似页边装饰等）也先用 `--resume`
+  交给 Subagent 复核；同一文件在该轮复核后仍触发 review 信号时，报告进入
+  `human_review_required`，必须停止自动重试并询问人工。只有确认是合法例外并完成复核后，才可显式
+  使用对应校验命令的 `--allow-review-warnings`，且该次放行会写入报告和 checkpoint。信息性记录
+  （如 TOC 的安全格式规范化、已确认的重复标题消歧和高置信度参考文献标题修复）不属于阻断。
+  人工明确要求再试时，才可在准备命令上使用 `--retry-after-human-review`；该开关只允许再次
+  派发 Subagent，不等于接受 warning。
 
 标准调度循环：
 
@@ -92,6 +105,10 @@ Subagent 直接写文件 → 单文件校验 → 收集完成结果 → 下一�
 `polish-validate` 通过后，才能提取实体表或准备正文翻译。高置信度原生矢量文本 PDF
 只跳过视觉 OCR，仍必须用 `polish` 判断视觉换行与真实段落边界。原生文字稿的 polish
 不得进行无依据的拼写或字形改写，重点是合并软换行并保留真实段落、标题和块级结构。
+`polish-validate` 还会报告高置信度的残留页码/页边行；这些候选默认进入
+`review_required`；首次出现时必须先让 Subagent 重新判断，复核后仍存在则升级为
+`human_review_required`，不授权本地脚本自动删除或继续。仅在明确确认合法保留后使用
+`--allow-review-warnings`。
 EPUB、轻小说和 TeX 流程不使用这一 PDF 润色阶段。
 
 PDF 的具体循环为：`ocr-pages → refine-prepare → refine-local → polish →
@@ -116,6 +133,9 @@ PDF 正文 Prompt 还会从已验证的 `toc_tree_translated.json` 生成一个�
 它依据实际树深、分支规模和 `subagent.batching.global_toc_tokens`（默认 1,200）
 自适应压缩，不固定保留某几个标题级别。该轮廓只用于理解全书主题推进，当前章节的
 精确 `toc_heading_contexts` 才是可见标题和措辞的权威来源；完整 TOC 不得重复注入每个章节。
+TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引号做规范化容差；近义词或
+独立改译仍必须失败。worker Prompt 必须把当前文件的标题锚定清单置于 assigned 任务附近，
+要求对应的第一个匹配标题逐字使用 TOC 文本，但不强制其成为物理首行。
 
 ## 2. PDF 扫描件翻译流程
 
@@ -153,6 +173,9 @@ PDF 正文 Prompt 还会从已验证的 `toc_tree_translated.json` 生成一个�
    对 OCR/混合型 PDF，该步骤用于修复 OCR 换行和明显 OCR 错字；对原生矢量文本 PDF，
    该步骤用于从视觉行重建语义段落，同时保留原文字符和块级结构。未通过
    `polish-validate` 不得继续实体提取或翻译。
+   polish 还必须清除已确认的页眉、页脚、独立印刷页码和人工 OCR 页码标记；
+   诸如 `Preface XII` 的短标题加页码组合在确认属于页边装饰后应整行删除。
+   正文数字、标题编号、日期、引用、脚注、参考文献和索引中的页码不得删除。
    润色不得把普通粗体、罗马数字、编号或序数上标升级成 Markdown 标题；已确认的
    `<sup>N</sup>` 注脚才可规范化为 `[^N]`。
 
@@ -184,7 +207,8 @@ uv run pdf2epub -c config.yaml check-ready --stage translate --skip-entities
    自己 handoff 的 `assigned_files`，同名译文写入 `translated/`；超过 30,000 字节的大
    单元仍必须独立派发，但不得跨章节合并。Prompt 会同时提供一次按预算稀释的全书 TOC
    轮廓，以及当前章节精确的已翻译 TOC 标题/子标题上下文；后者对输出标题具有最高权威。
-   术语上下文按章节 worker 聚合，完整快照只用于审计，不能修改。
+   术语上下文按章节 worker 聚合，完整快照只用于审计，不能修改。标题绑定允许安全的
+   格式规范化，但不允许近义词替换。
 6. 每完成一个单元可运行：
 
    ```text
@@ -192,8 +216,10 @@ uv run pdf2epub -c config.yaml check-ready --stage translate --skip-entities
    ```
 
    单文件结果只作为 checkpoint，不能替代最终全量校验。
-7. 所有单元完成后运行 `translate-validate`。失败时按报告将具体文件重新交给 Subagent，
-   直到全量通过。
+7. 所有单元完成后运行 `translate-validate`。`retry_required` 中的明确错误直接重新交给
+   Subagent；首次 `review_required` 也重新派发。若报告出现 `human_review_required`，必须暂停
+   并询问人工，不能继续自动重试。只有完成复核后才可显式使用
+   `translate-validate --allow-review-warnings` 放行。
 8. 执行打包：
 
    ```text
@@ -201,6 +227,16 @@ uv run pdf2epub -c config.yaml check-ready --stage translate --skip-entities
    ```
 
    默认拒绝不完整译文；`--allow-partial` 仅用于明确的预览。
+
+若已有译文只需要修复页眉、页脚或印刷页码，不要直接用脚本改写 `translated/`，也不必
+因此重译全书。可使用一次性的 `repair-page-furniture`：本地命令会快照现有译文，生成
+Prompt、manifest 和 worker handoff。准备阶段会扫描译文和对应润色稿，只把疑似页眉页脚的
+编号、短标题加页码行及重复短行的局部窗口写入 `repair_candidates`；worker 按候选窗口
+分批，而不是按全文 token 分批。工作区 Subagent 只删除确认属于页边装饰的内容，并直接
+写回同名译文。完成后运行 `repair-page-furniture-validate`，通过后再运行
+`build-epub --translated`。该修复不得改写正文、术语、标题、脚注、参考文献或索引页码；
+不确定的候选必须保留并报告。候选窗口只是判断提示，不是本地自动删除授权；没有候选的
+文件应保持不变。
 
 若确实不需要书内实体表，必须显式使用 `translate --skip-entities`，并让 manifest 记录
 这一选择。不得默默跳过实体提取。
@@ -213,7 +249,10 @@ uv run pdf2epub -c config.yaml check-ready --stage translate --skip-entities
 - `bibliography` 必须保留作者、书名、年份、版次、DOI/URL/ISBN、页码和引用标点。
 - `index` 必须保留条目层级、页码、页码范围、交叉引用和条目数量。
 - `translate-validate` 会额外比对参考文献/索引中的数字标记；发现数字丢失、改写或重排
-  时必须返工。`bilingual_warnings` 只是预警，不是单独的阻断条件。
+  时必须返工。普通中文正文中的 `untranslated_source_detected` 和目标语言审计失败是
+  阻断条件；普通正文中的 `bilingual_warnings` 首次进入 `review_required` 并重新派发，
+  同一文件复核后仍存在则进入 `human_review_required`，不再出现“打印 warning 后无事发生”的
+  隐式继续。参考文献和索引仍按其专门规则校验。
 
 ### 2.4 PDF 纯转换流程
 

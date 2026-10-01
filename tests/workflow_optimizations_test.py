@@ -7,7 +7,11 @@ import pymupdf
 from pdf2epub.markdown_handoff import prepare_markdown_subagent
 from pdf2epub.pipeline_policy import PipelinePolicy
 from pdf2epub.pdf_text_probe import extract_native_text_pages, probe_pdf_text_layer
-from pdf2epub.subagent_runtime import effective_max_concurrency, write_worker_handoffs
+from pdf2epub.subagent_runtime import (
+    MAX_BATCH_FILES,
+    effective_max_concurrency,
+    write_worker_handoffs,
+)
 from pdf2epub.subagent_runtime import _batching_config
 from pdf2epub.toc_translation_workflow import (
     build_global_toc_outline,
@@ -245,6 +249,7 @@ def test_chapter_handoffs_keep_chapters_separate_and_aggregate_context_once(
         tmp_path / first["prompt"]
     ).read_text(encoding="utf-8")
     first_prompt = (tmp_path / first["prompt"]).read_text(encoding="utf-8")
+    assert "Heading binding checklist" in first_prompt
     assert '"toc_title": "Chapter One"' in first_prompt
     assert '"toc_title": "Chapter Two"' not in first_prompt
     assert "Unit-specific terminology contexts (read-only; use these for the matching file):\n- none" in first_prompt
@@ -430,7 +435,7 @@ def test_resume_only_invalidates_units_with_changed_context(tmp_path: Path):
             "target_sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
         }
     (tmp_path / "translate_file_validation.json").write_text(
-        json.dumps({"files": validation_records}), encoding="utf-8"
+        json.dumps({"schema_version": 2, "files": validation_records}), encoding="utf-8"
     )
 
     # Change only the projected context for a.md.  The external/full context
@@ -532,6 +537,46 @@ def test_toc_heading_contexts_and_validation_use_first_unit_part(tmp_path: Path)
     contexts = build_toc_heading_contexts(output)
     assert set(contexts) == {"chapter_1.part1.md"}
     assert validate_toc_heading_bindings(output)["valid"] is True
+
+
+def test_toc_heading_binding_allows_whitespace_and_outer_quote_variants(tmp_path: Path):
+    output = tmp_path / "output"
+    output.mkdir()
+    (output / "translate_subagent_manifest.json").write_text(
+        json.dumps(
+            {
+                "toc_heading_contexts": {
+                    "chapter.md": {
+                        "toc_title": "Chapter One",
+                        "children": [
+                            {"title": "Exact Child", "anchor": "toc-1-1"}
+                        ],
+                    }
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    validated = output / "translated" / "validated"
+    validated.mkdir(parents=True)
+    (validated / "chapter.md").write_text(
+        "# Chapter  One\n\n《Exact Child》\n", encoding="utf-8"
+    )
+
+    report = validate_toc_heading_bindings(output)
+
+    assert report["valid"] is True
+    assert len(report["normalized_matches"]) == 2
+    assert {item["match"] for item in report["checked"]} == {"normalized"}
+
+
+def test_batching_caps_configured_worker_file_count():
+    batching = _batching_config(
+        {"subagent": {"batching": {"max_files": MAX_BATCH_FILES + 20}}}
+    )
+
+    assert batching["max_files"] == MAX_BATCH_FILES == 8
 
 
 def test_global_toc_outline_keeps_complete_small_tree(tmp_path: Path):

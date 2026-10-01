@@ -1,6 +1,9 @@
 from pathlib import Path
 
-from pdf2epub.utils.ocr_artifacts import clean_ocr_page_artifacts
+from pdf2epub.utils.ocr_artifacts import (
+    clean_ocr_page_artifacts,
+    remove_printed_page_number_lines,
+)
 from pdf2epub.refine.page_merger import PageMerger
 from pdf2epub.refine.toc_tree import TOCNode
 
@@ -18,6 +21,26 @@ def test_clean_ocr_page_artifacts_keeps_real_image_and_text():
     content = "![Figure 1](../images/page_004_img_001.png)\nA real figure."
 
     assert clean_ocr_page_artifacts(content) == content
+
+
+def test_remove_printed_page_number_lines_removes_edge_labels_only():
+    lines = ["XII", "A paragraph with the number 12 in its prose.", "42"]
+
+    assert remove_printed_page_number_lines(lines) == [
+        "A paragraph with the number 12 in its prose."
+    ]
+
+
+def test_remove_printed_page_number_lines_removes_synthetic_stamp_but_not_body_number():
+    lines = ["PDF Page: 7", "A body paragraph.", "The answer is 7."]
+
+    assert remove_printed_page_number_lines(lines) == lines[1:]
+
+
+def test_remove_printed_page_number_lines_leaves_mixed_running_title_for_polish():
+    lines = ["Preface XII", "A paragraph."]
+
+    assert remove_printed_page_number_lines(lines) == lines
 
 
 def test_page_merger_removes_repeated_h2_header_and_keeps_blank_page_cleaned(tmp_path: Path):

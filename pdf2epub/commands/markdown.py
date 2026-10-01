@@ -21,7 +21,11 @@ from pdf2epub.commands.sources import (
 )
 from pdf2epub.pipeline_policy import PipelinePolicy
 from pdf2epub.utils.common import book_output_dir, load_config
-from pdf2epub.workflow_contracts import atomic_write_text, relative_posix_path
+from pdf2epub.workflow_contracts import (
+    MARKDOWN_VALIDATION_SCHEMA_VERSION,
+    atomic_write_text,
+    relative_posix_path,
+)
 
 
 def _load_pdf_file_roles(output_dir: Path) -> dict:
@@ -211,6 +215,8 @@ def _prepare_pdf_markdown_task(args, task: str):
         rules = [
             "Repair source layout and line wrapping while preserving meaning and document structure.",
             "Preserve Markdown heading levels, image links, footnote references, formulas, and link destinations.",
+            "Remove confirmed printed page furniture from the polished text: standalone Arabic or Roman page labels, synthetic labels such as `PDF Page: N`, and page-edge running headers or footers that are clearly repeated layout artifacts. A short running title combined with a page label (for example `Preface XII`) must be removed when it is clearly page furniture, not translated as prose.",
+            "Do not remove numbers that belong to prose, headings, lists, dates, citations, formulas, footnotes, bibliography entries, or index entries. Bibliography and index page numbers are semantic content and must be preserved.",
             "Never add a # heading marker to an ordinary paragraph, bold line, italic line, Roman numeral, or numbered section that does not already begin with #. Preserve the source heading marker and level exactly.",
             "Only remove a heading when it is an obvious duplicated running header; never remove a unique section heading.",
             "When a Notes/注释 section contains numbered endnotes, convert only verified footnote superscripts from <sup>N</sup> to [^N], and convert the matching endnote lines to [^N]: text. Do not convert mathematical, table, ordinal, or other non-footnote superscripts.",
@@ -327,7 +333,10 @@ def _prepare_pdf_markdown_task(args, task: str):
             rules,
             config=config,
             resume=getattr(args, "resume", False),
-            file_roles=_load_pdf_file_roles(output_dir) if task == "translate" else None,
+            allow_human_review_retry=bool(
+                getattr(args, "retry_after_human_review", False)
+            ),
+            file_roles=_load_pdf_file_roles(output_dir) if task in {"translate", "polish"} else None,
             context_files=context_files or None,
             skipped_context_files=skipped_context_files,
             prompt_context_files=prompt_context_files,
@@ -470,6 +479,12 @@ def _validate_pdf_markdown_task(args, task: str):
     config = context.config
     book_title = context.book_title
     output_dir = context.output_dir
+    policy = PipelinePolicy.from_config(config)
+    target_language = (
+        getattr(args, "target_language", None)
+        or policy.target_language
+        or "Chinese"
+    )
     if task == "polish":
         source_dir = output_dir / "ocr_markdown"
         target_dir = output_dir / "polished_markdown"
@@ -496,13 +511,17 @@ def _validate_pdf_markdown_task(args, task: str):
             r"!\[[^\]]*\]\([^)]+\)",
             *( () if task == "polish" else (r"\[\^[^\]]+\]",) ),
         ),
-        file_roles=_load_pdf_file_roles(output_dir) if task == "translate" else None,
+        file_roles=_load_pdf_file_roles(output_dir) if task in {"translate", "polish"} else None,
         tolerate_duplicate_headings=task == "polish",
         validate_footnote_normalization=task == "polish",
         fix_reference_headings=task == "translate" and bool(
             getattr(args, "fix_reference_heading", False)
         ),
         selected_files=[selected_file] if selected_file else None,
+        target_language=target_language if task == "translate" else None,
+        allow_review_warnings=bool(
+            getattr(args, "allow_review_warnings", False)
+        ),
     )
     if task == "translate":
         # File mode is intentionally cheap: the Subagent can close the loop
@@ -556,10 +575,15 @@ def _validate_pdf_markdown_task(args, task: str):
         logger.error(
             f"Safety/refusal blocked units: {report['safety_blocked'][:10]}"
         )
+    if report.get("target_language_blocked"):
+        logger.error(
+            "Target-language audit blocked units: "
+            f"{report['target_language_blocked'][:10]}"
+        )
     if report.get("bilingual_warnings"):
         logger.warning(
             f"Bilingual output warnings: {len(report['bilingual_warnings'])} "
-            "(warning only; inspect the validation JSON before building)"
+            "(these require Subagent review for ordinary translation units)"
         )
     if report.get("structural_warnings"):
         logger.warning(
@@ -570,6 +594,48 @@ def _validate_pdf_markdown_task(args, task: str):
         logger.warning(
             f"Applied {len(report['reference_heading_fixes'])} high-confidence "
             "reference-heading repair(s); inspect the validation JSON"
+        )
+    if report.get("polish_page_furniture_warnings"):
+        logger.warning(
+            "Polish residual page-furniture candidates: "
+            f"{len(report['polish_page_furniture_warnings'])}; "
+            "these require Subagent or human review before continuing"
+        )
+    first_pass_review_retries = [
+        item
+        for item in report.get("retry_required", [])
+        if item.get("kind") in {"bilingual_output", "polish_page_furniture"}
+    ]
+    if first_pass_review_retries and not report.get(
+        "review_warnings_acknowledged"
+    ):
+        logger.error(
+            "Subagent rework required for review signals: these files were not "
+            "staged in validated/. Reassign them with --resume; if the signal "
+            "persists, the next result will require human review."
+        )
+        for item in first_pass_review_retries[:20]:
+            logger.error(
+                f"Subagent retry: {item.get('file')}: "
+                f"{item.get('reason', item.get('kind', 'warning'))}"
+            )
+    if report.get("human_review_required") and not report.get(
+        "review_warnings_acknowledged"
+    ):
+        logger.error(
+            "Human review required: the same review signal persisted after a "
+            "Subagent retry. Stop automatic retries and ask for a decision; "
+            "do not use --allow-review-warnings without that decision."
+        )
+        for item in report["human_review_required"][:20]:
+            logger.error(
+                f"Human decision: {item.get('file')}: "
+                f"{item.get('reason', item.get('kind', 'warning'))}"
+            )
+    if report.get("review_warnings_acknowledged"):
+        logger.warning(
+            "Review warnings were explicitly acknowledged; continuing and staging "
+            "the reviewed files."
         )
     if report["all_passed"]:
         logger.success(f"{task} Subagent output validated: {report['validated_dir']}")
@@ -601,6 +667,7 @@ def _persist_file_validation_checkpoint(output_dir: Path, report: dict, task: st
         records = {}
     for name in report.get("files_checked", []):
         records[name] = {
+            "schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION,
             "valid": name in report.get("valid_files", [])
             and not report.get("missing"),
             "source_sha256": report.get("source_sha256", {}).get(name),
@@ -610,11 +677,44 @@ def _persist_file_validation_checkpoint(output_dir: Path, report: dict, task: st
                 item for item in report.get("invalid", []) if item.get("file") == name
             ],
             "safety_blocked": name in report.get("safety_blocked", []),
+            "target_language_blocked": name in report.get(
+                "target_language_blocked", []
+            ),
+            "target_language_audit": report.get(
+                "target_language_audits", {}
+            ).get(name),
+            "review_required": [
+                item
+                for item in report.get("review_required", [])
+                if item.get("file") == name
+            ],
+            "retry_required": [
+                item
+                for item in report.get("retry_required", [])
+                if item.get("file") == name
+            ],
+            "human_review_required": [
+                item
+                for item in report.get("human_review_required", [])
+                if item.get("file") == name
+            ],
+            "review_warnings_acknowledged": bool(
+                report.get("review_warnings_acknowledged")
+                and any(
+                    item.get("file") == name
+                    for item in report.get("review_required", [])
+                )
+            ),
         }
     atomic_write_text(
         path,
         json.dumps(
-            {"task": task, "scope": "file-checkpoints", "files": records},
+            {
+                "schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION,
+                "task": task,
+                "scope": "file-checkpoints",
+                "files": records,
+            },
             ensure_ascii=False,
             indent=2,
         ),
@@ -841,11 +941,16 @@ def _run_readiness_check(
                     path.name: hashlib.sha256(path.read_bytes()).hexdigest()
                     for path in source_files
                 }
-                validation_ready = validation.get("all_passed") is True and recorded == current
+                validation_ready = (
+                    validation.get("schema_version")
+                    == MARKDOWN_VALIDATION_SCHEMA_VERSION
+                    and validation.get("all_passed") is True
+                    and recorded == current
+                )
                 validation_detail = (
                     "full translation validation matches the current source snapshot"
                     if validation_ready
-                    else "full translation validation is stale or failed"
+                    else "full translation validation is stale, failed, or uses an old gate"
                 )
             except (OSError, json.JSONDecodeError, AttributeError, TypeError):
                 validation_detail = "translate_validation.json is invalid"

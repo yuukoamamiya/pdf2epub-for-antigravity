@@ -4,6 +4,8 @@ import hashlib
 import json
 from pathlib import Path
 
+from pdf2epub.workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION
+
 
 def _resolve_pdf_markdown_source(output_dir: Path, config: dict):
     """Choose the Markdown stage shared by PDF workflows.
@@ -82,7 +84,11 @@ def _polished_stage_is_current(
         report = json.loads(report_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return False
-    if not isinstance(report, dict) or not report.get("all_passed"):
+    if (
+        not isinstance(report, dict)
+        or report.get("schema_version") != MARKDOWN_VALIDATION_SCHEMA_VERSION
+        or not report.get("all_passed")
+    ):
         return False
     recorded_hashes = report.get("source_sha256")
     if not isinstance(recorded_hashes, dict):

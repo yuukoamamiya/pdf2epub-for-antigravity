@@ -10,7 +10,11 @@ from typing import List
 from loguru import logger
 
 from .toc_tree import TOCNode
-from ..utils.ocr_artifacts import clean_ocr_page_artifacts, remove_repeated_page_header
+from ..utils.ocr_artifacts import (
+    clean_ocr_page_artifacts,
+    remove_printed_page_number_lines,
+    remove_repeated_page_header,
+)
 
 
 class PageMerger:
@@ -79,6 +83,7 @@ class PageMerger:
             page_content = '\n'.join(lines)
             page_content = clean_ocr_page_artifacts(page_content)
             lines = page_content.split('\n')
+            lines = remove_printed_page_number_lines(lines)
             lines, current_header = remove_repeated_page_header(lines, previous_header)
             if current_header is not None and current_header == previous_header:
                 logger.debug(f"Removed repeated running header on page {page_num}")
@@ -143,6 +148,7 @@ class PageMerger:
             page_content = '\n'.join(lines)
             page_content = clean_ocr_page_artifacts(page_content)
             lines = page_content.split('\n')
+            lines = remove_printed_page_number_lines(lines)
             lines, current_header = remove_repeated_page_header(lines, previous_header)
             if current_header is not None and current_header == previous_header:
                 logger.debug(f"Removed repeated running header on page {page_num}")

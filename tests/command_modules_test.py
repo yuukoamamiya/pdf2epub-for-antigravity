@@ -25,6 +25,7 @@ def test_command_package_exposes_workflow_modules_without_eager_exports():
         "markdown",
         "novel",
         "ocr",
+        "page_furniture",
         "pdf",
         "refine",
         "runtime",
@@ -53,6 +54,8 @@ def test_command_registry_registers_every_workflow_command():
             "html-skeleton-restore",
             "html-validate",
         "ocr-pages",
+        "repair-page-furniture",
+        "repair-page-furniture-validate",
         "polish",
         "polish-validate",
         "refine",
@@ -90,6 +93,7 @@ def test_pdf_source_stage_selects_only_current_polished_output(tmp_path: Path):
     (tmp_path / "polish_validation.json").write_text(
         json.dumps(
             {
+                "schema_version": 2,
                 "all_passed": True,
                 "source_sha256": {source.name: sha256_file(source)},
             }

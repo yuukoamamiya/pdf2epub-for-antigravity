@@ -73,6 +73,16 @@ _REFUSAL_PATTERNS = (
             r"(?:安全|内容|使用)政策"
         ),
     ),
+    (
+        "Chinese translation placeholder",
+        re.compile(
+            r"(?:这是|以下是|以下为|这里是)"
+            r"(?:一份|本次|对原文的|对该段(?:文字|内容)?的|"
+            r"纯正(?:的)?学术)?"
+            r"(?:中文)?(?:翻译结果|翻译内容|翻译文本)"
+            r"(?:。|！|!|：|:|$)"
+        ),
+    ),
 )
 
 
@@ -110,6 +120,12 @@ def detect_refusal(source_text: str, translated_text: str) -> Optional[str]:
         source_line = source_lines[index] if index < len(source_lines) else ""
         source_line = _normalize_detection_text(source_line)
         if any(pattern.search(source_line) for _label, pattern in _REFUSAL_PATTERNS):
+            continue
+        if any(target_match[1].search(_normalize_detection_text(s)) for s in source_lines):
+            continue
+        start_win = max(0, index - 30)
+        end_win = min(len(source_lines), index + 31)
+        if any(pattern.search(_normalize_detection_text(source_lines[w])) for w in range(start_win, end_win) for _label, pattern in _REFUSAL_PATTERNS):
             continue
         return f"{target_match[0]} detected at non-empty line {index + 1}"
     return None

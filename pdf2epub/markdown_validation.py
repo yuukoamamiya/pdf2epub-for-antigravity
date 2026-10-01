@@ -6,6 +6,25 @@ import re
 from typing import Any, Dict, Optional
 
 
+_CHINESE_TARGET_LANGUAGE_ALIASES = {
+    "chinese",
+    "中文",
+    "简体中文",
+    "繁体中文",
+    "zh",
+    "zh-cn",
+    "zh-hans",
+    "zh-hant",
+    "中文（简体）",
+    "中文（繁體）",
+}
+_CJK_CHAR_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+_LATIN_CHAR_RE = re.compile(r"[A-Za-z]")
+_LANGUAGE_AUDIT_MIN_SOURCE_LETTERS = 120
+_LANGUAGE_AUDIT_MIN_TARGET_LETTERS = 80
+_LANGUAGE_AUDIT_MIN_CJK_RATIO = 0.60
+
+
 _REFERENCE_SOURCE_LABELS = {
     "references",
     "reference",
@@ -59,7 +78,11 @@ def _special_role_numeric_markers(text: str) -> list[str]:
 
 
 def _validate_special_role_markers(
-    source_text: str, target_text: str, role: str
+    source_text: str,
+    target_text: str,
+    role: str,
+    *,
+    allow_page_furniture_deletion: bool = False,
 ) -> list[str]:
     """Reject loss or alteration of numeric identity markers.
 
@@ -73,6 +96,33 @@ def _validate_special_role_markers(
     target_markers = _special_role_numeric_markers(target_text)
     if source_markers == target_markers:
         return []
+
+    if allow_page_furniture_deletion:
+        import difflib
+        from .page_furniture_repair import _candidate_for_line
+
+        furniture_numbers = []
+        for line in source_text.splitlines():
+            if _candidate_for_line(line):
+                furniture_numbers.extend(_special_role_numeric_markers(line))
+        matcher = difflib.SequenceMatcher(None, source_markers, target_markers)
+        mismatch = False
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+            if tag == "equal":
+                continue
+            if tag == "delete":
+                deleted = source_markers[i1:i2]
+                for num in deleted:
+                    if num not in furniture_numbers:
+                        mismatch = True
+                        break
+                if mismatch:
+                    break
+            else:
+                mismatch = True
+                break
+        if not mismatch:
+            return []
 
     limit = 12
     source_preview = source_markers[:limit]
@@ -206,6 +256,97 @@ def strip_outer_markdown_fences(text: str) -> tuple[str, bool]:
     return cleaned, True
 
 
+def _language_audit_text(text: str) -> str:
+    """Remove non-prose regions before measuring target-language density."""
+    text = re.sub(r"```.*?```", " ", text, flags=re.DOTALL)
+    text = re.sub(r"!?\[[^\]]*\]\([^)]*\)", " ", text)
+    text = re.sub(r"https?://\S+|www\.\S+", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"`[^`]*`", " ", text)
+    text = re.sub(r"\$\$?.*?\$\$?", " ", text, flags=re.DOTALL)
+    return text
+
+
+def _is_chinese_target_language(target_language: Optional[str]) -> bool:
+    if not target_language:
+        return False
+    normalized = re.sub(r"\s+", " ", str(target_language).strip().casefold())
+    return normalized in {value.casefold() for value in _CHINESE_TARGET_LANGUAGE_ALIASES}
+
+
+def target_language_ratio_check(
+    source_text: str,
+    target_text: str,
+    target_language: Optional[str],
+    *,
+    threshold: float = _LANGUAGE_AUDIT_MIN_CJK_RATIO,
+    min_source_letters: int = _LANGUAGE_AUDIT_MIN_SOURCE_LETTERS,
+    min_target_letters: int = _LANGUAGE_AUDIT_MIN_TARGET_LETTERS,
+) -> Dict[str, Any]:
+    """Audit Chinese target-language density without judging special units.
+
+    This is intentionally scoped to Chinese for now.  Other target languages
+    need their own script detectors; treating Latin text as untranslated would
+    incorrectly reject translations between European languages.
+    """
+    result: Dict[str, Any] = {
+        "applicable": _is_chinese_target_language(target_language),
+        "target_language": str(target_language or ""),
+        "threshold": threshold,
+        "source_latin_letters": 0,
+        "target_cjk_letters": 0,
+        "target_latin_letters": 0,
+        "target_letters": 0,
+        "target_cjk_ratio": None,
+        "blocked": False,
+    }
+    if not result["applicable"]:
+        return result
+
+    source_visible = _language_audit_text(source_text)
+    target_visible = _language_audit_text(target_text)
+    source_latin = len(_LATIN_CHAR_RE.findall(source_visible))
+    target_cjk = len(_CJK_CHAR_RE.findall(target_visible))
+    target_latin = len(_LATIN_CHAR_RE.findall(target_visible))
+    target_letters = target_cjk + target_latin
+    result.update(
+        {
+            "source_latin_letters": source_latin,
+            "target_cjk_letters": target_cjk,
+            "target_latin_letters": target_latin,
+            "target_letters": target_letters,
+        }
+    )
+    if source_latin < min_source_letters or target_letters < min_target_letters:
+        return result
+    ratio = target_cjk / target_letters
+    result["target_cjk_ratio"] = round(ratio, 4)
+    if ratio < threshold:
+        result["blocked"] = True
+        result["reason"] = (
+            "untranslated_source_detected: target-language density is below "
+            f"{threshold:.0%} ({ratio:.1%})"
+        )
+    return result
+
+
+def detect_polish_page_furniture(text: str) -> list[Dict[str, Any]]:
+    """Report high-confidence page-furniture candidates left after polishing.
+
+    The candidates are review signals.  Layout judgment belongs to the
+    polishing Subagent, so this function never edits text; the caller decides
+    whether an unresolved candidate blocks the hand-off.
+    """
+    from .page_furniture_repair import _candidate_for_line
+
+    findings: list[Dict[str, Any]] = []
+    for line_number, line in enumerate(text.splitlines(), 1):
+        candidate = _candidate_for_line(line)
+        if not candidate or candidate.get("confidence") != "high":
+            continue
+        findings.append({"line": line_number, **candidate})
+    return findings
+
+
 def translation_diff_summary(source_text: str, target_text: str) -> Dict[str, Any]:
     """Return structural and translation-risk counters for a Markdown unit."""
     heading_pattern = re.compile(r"^#{1,6}\s", re.MULTILINE)
@@ -225,11 +366,13 @@ def translation_diff_summary(source_text: str, target_text: str) -> Dict[str, An
 
 
 def detect_bilingual_output(source_text: str, target_text: str) -> Optional[Dict[str, Any]]:
-    """Warn when a translation appears to contain a long unchanged source span.
+    """Report when a translation appears to contain a long unchanged source span.
 
     This is deliberately advisory: names, formulas, URLs and references can be
-    legitimately unchanged, so the validator reports a warning and never makes
-    the unit fail solely on this heuristic.
+    legitimately unchanged, so the validator exposes the exact span for
+    Subagent/human review instead of silently treating it as a translation
+    failure.  The Markdown hand-off validator may turn this signal into a
+    ``review_required`` gate for ordinary translation units.
     """
     source_lines = source_text.splitlines()
     target_lines = target_text.splitlines()
@@ -257,7 +400,9 @@ def detect_bilingual_output(source_text: str, target_text: str) -> Optional[Dict
 
 __all__ = [
     "detect_bilingual_output",
+    "detect_polish_page_furniture",
     "fix_reference_heading_mismatch",
     "strip_outer_markdown_fences",
+    "target_language_ratio_check",
     "translation_diff_summary",
 ]

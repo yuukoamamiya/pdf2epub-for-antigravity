@@ -12,6 +12,7 @@ __all__ = [
     "markdown",
     "novel",
     "ocr",
+    "page_furniture",
     "pdf",
     "refine",
     "runtime",

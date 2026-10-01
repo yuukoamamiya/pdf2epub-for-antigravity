@@ -16,6 +16,11 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 
 
+# Validation reports written before the review-warning gate was introduced
+# must not be reused as successful checkpoints.
+MARKDOWN_VALIDATION_SCHEMA_VERSION = 2
+
+
 def sha256_file(path: Path) -> str:
     """Return the SHA-256 digest of a workspace file."""
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()

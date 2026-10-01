@@ -15,14 +15,25 @@ from .markdown_validation import (
     _special_role_numeric_markers,
     _validate_special_role_markers,
     detect_bilingual_output,
+    detect_polish_page_furniture,
     fix_reference_heading_mismatch,
     strip_outer_markdown_fences,
+    target_language_ratio_check,
     translation_diff_summary,
 )
 from .subagent_runtime import _markdown_files
 from .subagent_safety import detect_refusal
 from .utils.ocr_artifacts import clean_ocr_page_artifacts
-from .workflow_contracts import atomic_write_text
+from .workflow_contracts import (
+    MARKDOWN_VALIDATION_SCHEMA_VERSION,
+    atomic_write_text,
+)
+
+
+# Changing the warning gate is a validation-contract change.  Older reports
+# were allowed to stage files while carrying advisory warnings, so callers
+# must not treat a pre-v2 report as proof that the new gate was evaluated.
+VALIDATION_SCHEMA_VERSION = MARKDOWN_VALIDATION_SCHEMA_VERSION
 
 
 def _structural_mismatch_reason(
@@ -65,10 +76,36 @@ def validate_markdown_subagent(
     validate_footnote_normalization: bool = False,
     fix_reference_headings: bool = False,
     selected_files: Optional[Iterable[str]] = None,
+    target_language: Optional[str] = None,
+    allow_review_warnings: bool = False,
 ) -> Dict:
     """Validate a Subagent markdown hand-off and optionally stage it."""
     source_dir = Path(source_dir)
     target_dir = Path(target_dir)
+    previous_review_files: set[str] = set()
+    previous_review_keys: set[tuple[str, str]] = set()
+    previous_manifest_path = output_dir / f"{task}_subagent_manifest.json"
+    if previous_manifest_path.is_file():
+        try:
+            loaded_manifest = json.loads(
+                previous_manifest_path.read_text(encoding="utf-8")
+            )
+            if isinstance(loaded_manifest, dict):
+                previous_review = loaded_manifest.get("previous_review_required", {})
+                if isinstance(previous_review, Mapping):
+                    for name, items in previous_review.items():
+                        file_name = str(name)
+                        if not file_name.strip():
+                            continue
+                        previous_review_files.add(file_name)
+                        if isinstance(items, list):
+                            for item in items:
+                                if isinstance(item, Mapping) and item.get("kind"):
+                                    previous_review_keys.add(
+                                        (file_name, str(item["kind"]))
+                                    )
+        except (OSError, json.JSONDecodeError, UnicodeError):
+            previous_review_files = set()
     all_sources = _markdown_files(source_dir)
     selected = None
     if selected_files is not None:
@@ -91,6 +128,10 @@ def validate_markdown_subagent(
     reference_heading_fixes: List[Dict[str, Any]] = []
     diff_summary: Dict[str, Dict[str, Any]] = {}
     structural_warnings: List[Dict[str, Any]] = []
+    target_language_audits: Dict[str, Dict[str, Any]] = {}
+    target_language_blocked: List[str] = []
+    polish_page_furniture_warnings: List[Dict[str, Any]] = []
+    review_required: List[Dict[str, Any]] = []
     normalized_roles = {
         str(name): str(role).strip().lower()
         for name, role in (file_roles or {}).items()
@@ -150,6 +191,20 @@ def validate_markdown_subagent(
         if not target_text.strip():
             invalid.append({"file": source.name, "reason": "target is empty"})
             continue
+        role = normalized_roles.get(source.name)
+        if task == "translate" and role not in {"bibliography", "index"}:
+            language_audit = target_language_ratio_check(
+                source_text, target_text, target_language
+            )
+            target_language_audits[source.name] = language_audit
+            if language_audit.get("blocked"):
+                invalid.append(
+                    {
+                        "file": source.name,
+                        "reason": str(language_audit["reason"]),
+                    }
+                )
+                target_language_blocked.append(source.name)
         refusal = detect_refusal(source_text, target_text)
         if refusal:
             invalid.append(
@@ -158,9 +213,36 @@ def validate_markdown_subagent(
             safety_blocked.append(source.name)
             continue
         warning = detect_bilingual_output(source_text, target_text)
-        if warning and source.name not in normalized_roles:
+        language_audit = target_language_audits.get(source.name, {})
+        if (
+            warning
+            and task == "translate"
+            and language_audit.get("applicable")
+            and source.name not in target_language_blocked
+        ):
+            invalid.append(
+                {
+                    "file": source.name,
+                    "reason": (
+                        "untranslated_source_detected: long unchanged source "
+                        f"span at lines {warning['start_line']}-{warning['end_line']}"
+                    ),
+                }
+            )
+            target_language_blocked.append(source.name)
+        elif warning and source.name not in normalized_roles:
             warning["file"] = source.name
             bilingual_warnings.append(warning)
+            if task == "translate":
+                review_required.append(
+                    {
+                        "file": source.name,
+                        "kind": "bilingual_output",
+                        "reason": warning["reason"],
+                        "start_line": warning["start_line"],
+                        "end_line": warning["end_line"],
+                    }
+                )
         for pattern in structural_patterns:
             comparison_source = source_text
             if pattern == r"!\[[^\]]*\]\([^)]+\)":
@@ -216,15 +298,35 @@ def validate_markdown_subagent(
             else:
                 valid_files.append(source.name)
 
-        role = normalized_roles.get(source.name)
         if role in {"bibliography", "index"}:
             role_errors = _validate_special_role_markers(
-                source_text, target_text, role
+                source_text,
+                target_text,
+                role,
+                allow_page_furniture_deletion=True,
             )
             for role_error in role_errors:
                 invalid.append({"file": source.name, "reason": role_error})
             if role_errors and source.name in valid_files:
                 valid_files.remove(source.name)
+
+        if task == "polish" and role not in {"bibliography", "index"}:
+            for finding in detect_polish_page_furniture(target_text):
+                item = {"file": source.name, **finding}
+                polish_page_furniture_warnings.append(item)
+                review_required.append(
+                    {
+                        "file": source.name,
+                        "kind": "polish_page_furniture",
+                        "reason": (
+                            "high-confidence page-furniture candidate remains after polish"
+                        ),
+                        **finding,
+                    }
+                )
+
+        if source.name in target_language_blocked and source.name in valid_files:
+            valid_files.remove(source.name)
 
         source_fence_count = source_text.count("```")
         target_fence_count = target_text.count("```")
@@ -245,28 +347,117 @@ def validate_markdown_subagent(
         path.name for path in _markdown_files(target_dir)
         if path.name not in {p.name for p in sources}
     )
-    if partial:
-        invalid_names = {item["file"] for item in invalid if item.get("file")}
-        for name in invalid_names:
-            (validated_dir / name).unlink(missing_ok=True)
     if extras:
         invalid.extend(
             {"file": name, "reason": "unexpected extra target file"}
             for name in extras
         )
-    if create_validated_copy and not missing and not invalid:
+    review_required_files = sorted(
+        {str(item["file"]) for item in review_required if item.get("file")}
+    )
+    human_review_required = [
+        {
+            **item,
+            "action": "ask_human",
+            "reason": (
+                "the same review signal persisted after a Subagent retry; "
+                "automatic retries are paused"
+            ),
+        }
+        for item in review_required
+        if (
+            str(item.get("file") or "") in previous_review_files
+            and (
+                not previous_review_keys
+                or (
+                    str(item.get("file") or ""),
+                    str(item.get("kind") or ""),
+                )
+                in previous_review_keys
+            )
+        )
+    ]
+    human_review_keys = {
+        (str(item.get("file") or ""), str(item.get("kind") or ""))
+        for item in human_review_required
+    }
+    retry_required = [
+        {
+            "file": name,
+            "kind": "missing_output",
+            "action": "retry_subagent",
+            "reason": "Subagent did not write the assigned target file",
+        }
+        for name in missing
+    ]
+    retry_required.extend(
+        {
+            **item,
+            "kind": "invalid_output",
+            "action": "retry_subagent",
+        }
+        for item in invalid
+    )
+    retry_required.extend(
+        {
+            **item,
+            "action": "retry_subagent",
+        }
+        for item in review_required
+        if (
+            str(item.get("file") or ""), str(item.get("kind") or "")
+        ) not in human_review_keys
+    )
+    retry_required_files = sorted(
+        {str(item["file"]) for item in retry_required if item.get("file")}
+    )
+    human_review_required_files = sorted(
+        {
+            str(item["file"])
+            for item in human_review_required
+            if item.get("file")
+        }
+    )
+    if not allow_review_warnings:
+        for name in review_required_files:
+            if name in valid_files:
+                valid_files.remove(name)
+    if partial:
+        invalid_names = {item["file"] for item in invalid if item.get("file")}
+        if not allow_review_warnings:
+            invalid_names.update(review_required_files)
+        for name in invalid_names:
+            (validated_dir / name).unlink(missing_ok=True)
+    if create_validated_copy and not missing and not invalid and (
+        allow_review_warnings or not review_required
+    ):
         validated_dir.mkdir(parents=True, exist_ok=True)
         for source in sources:
             shutil.copy2(target_dir / source.name, validated_dir / source.name)
 
     report = {
+        "schema_version": VALIDATION_SCHEMA_VERSION,
         "task": task,
         "total": len(sources),
         "completed": len(sources) - len(missing),
         "missing": missing,
         "invalid": invalid,
         "safety_blocked": safety_blocked,
+        "target_language_blocked": target_language_blocked,
+        "target_language_audits": target_language_audits,
         "bilingual_warnings": bilingual_warnings,
+        "polish_page_furniture_warnings": polish_page_furniture_warnings,
+        "review_required": review_required,
+        "review_required_files": review_required_files,
+        "retry_required": retry_required,
+        "retry_required_files": retry_required_files,
+        "human_review_required": human_review_required,
+        "human_review_required_files": human_review_required_files,
+        "previous_review_files": sorted(previous_review_files),
+        "allow_review_warnings": bool(allow_review_warnings),
+        "review_warnings_acknowledged": bool(
+            allow_review_warnings and review_required
+        ),
         "normalized_files": normalized_files,
         "reference_heading_fixes": reference_heading_fixes,
         "structural_warnings": structural_warnings,
@@ -279,7 +470,13 @@ def validate_markdown_subagent(
         "validated_dir": str(validated_dir),
         "scope": "files" if partial else "full",
         "files_checked": [source.name for source in sources],
-        "all_passed": bool(sources) and not missing and not invalid and not extras,
+        "all_passed": (
+            bool(sources)
+            and not missing
+            and not invalid
+            and not extras
+            and (allow_review_warnings or not review_required)
+        ),
     }
     report_path = (
         output_dir / f"{task}_file_validation.json"
@@ -300,13 +497,39 @@ def validate_markdown_subagent(
             records = {}
         for name in report["files_checked"]:
             records[name] = {
+                "schema_version": VALIDATION_SCHEMA_VERSION,
                 "valid": name in report["valid_files"] and not report["missing"],
                 "source_sha256": report["source_sha256"].get(name),
                 "target_sha256": report["target_sha256"].get(name),
                 "invalid": [item for item in report["invalid"] if item["file"] == name],
                 "safety_blocked": name in report["safety_blocked"],
+                "target_language_blocked": name in report["target_language_blocked"],
+                "target_language_audit": report["target_language_audits"].get(name),
+                "review_required": [
+                    item
+                    for item in report["review_required"]
+                    if item.get("file") == name
+                ],
+                "retry_required": [
+                    item
+                    for item in report["retry_required"]
+                    if item.get("file") == name
+                ],
+                "human_review_required": [
+                    item
+                    for item in report["human_review_required"]
+                    if item.get("file") == name
+                ],
+                "review_warnings_acknowledged": bool(
+                    report.get("allow_review_warnings")
+                    and any(
+                        item.get("file") == name
+                        for item in report["review_required"]
+                    )
+                ),
             }
         ledger = {
+            "schema_version": VALIDATION_SCHEMA_VERSION,
             "task": task,
             "scope": "file-checkpoints",
             "files": records,

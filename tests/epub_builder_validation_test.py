@@ -275,7 +275,11 @@ def test_pdf_source_stage_can_be_auto_selected_or_explicit(tmp_path: Path) -> No
     ).hexdigest()
     (tmp_path / "polish_validation.json").write_text(
         json.dumps(
-            {"all_passed": True, "source_sha256": {"chapter_1.md": source_hash}}
+                {
+                    "schema_version": 2,
+                    "all_passed": True,
+                    "source_sha256": {"chapter_1.md": source_hash},
+                }
         ),
         encoding="utf-8",
     )

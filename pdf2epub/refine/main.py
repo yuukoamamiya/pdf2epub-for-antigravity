@@ -19,7 +19,7 @@ from .footnote_stitcher import scan_boundary_footnotes
 tokenizer = tiktoken.get_encoding("cl100k_base")
 
 
-REFINE_CHECKPOINT_SCHEMA = 3
+REFINE_CHECKPOINT_SCHEMA = 4
 DEFAULT_OVERSIZED_SPLIT_THRESHOLD = 15_000
 DEFAULT_OVERSIZED_SPLIT_TARGET = 12_000
 DEFAULT_OVERSIZED_SPLIT_TYPES = ("all",)

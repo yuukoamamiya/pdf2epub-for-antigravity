@@ -62,6 +62,7 @@ Subagent 合同层
 - `ocr.py`：执行唯一允许调用 OCR 服务的工作流入口。
 - `refine.py`：准备结构判断 handoff，或调用本地分页/单元合并。
 - `markdown.py`：PDF Markdown 的 polish、translate、readiness 和 validation 编排。
+- `page_furniture.py`：已有 PDF 译文的页眉页脚修复交接和校验编排。
 - `entities.py`：生成和校验书内实体表 handoff。
 - `toc.py`：生成和校验独立的 PDF TOC 翻译 handoff。
 - `pdf.py`：校验源稿/译稿并构建 PDF 路径 EPUB。
@@ -86,9 +87,10 @@ polish。`commands/markdown.py`、`entities.py`、`toc.py` 和 `pdf.py` 均应�
 - `markdown_handoff.py`：扫描源单元、计算统计信息、恢复 checkpoint、生成 manifest 和 prompt。
 - `markdown_subagent_validation.py`：检查目标文件、结构标记、拒答、哈希和特殊角色内容，
   并在通过后复制到 `validated/`。
-- `markdown_validation.py`：提供纯函数式的 Markdown 风险检测和规范化辅助函数。
-- `subagent_runtime.py`：提供模型配置解析、token 估算、批次规划及按章节/批次隔离的 handoff。
-- `subagent_safety.py`：集中处理拒答和免责声明检测，避免各工作流使用不同规则。
+- `markdown_validation.py`：提供纯函数式的 Markdown 风险检测、目标语言审计和规范化辅助函数。
+- `subagent_runtime.py`：提供模型配置解析、token 估算、批次规划及按章节/批次隔离的 handoff；
+  worker 文件数的有效上限为 8。
+- `subagent_safety.py`：集中处理拒答、免责声明和翻译占位套话检测，避免各工作流使用不同规则。
 - `toc_translation_workflow.py`：维护 TOC 的原始结构、节点数量、非标题字段和翻译结果校验，
   并从已验证的译文 TOC 生成按 token 预算自适应的全书方向性轮廓。
 
@@ -109,7 +111,7 @@ refine-prepare + 工作区 Subagent
   → toc_tree.json
 refine-local
   → ocr_markdown/ + tree_progress.json
-polish + 工作区 Subagent + polish-validate（所有 PDF 必需）
+polish + 工作区 Subagent + polish-validate（所有 PDF 必需；review_required 默认阻断，持续则人工）
   → polished_markdown/validated/
 
 翻译分支：
@@ -120,7 +122,13 @@ translate-toc + 工作区 Subagent + translate-toc-validate
 translate + 按顶层章节划分的 worker_handoffs + 工作区 Subagent
   （超大章节只在章节内部拆分；Prompt 另含预算化的全书 TOC 方向性轮廓）
   → translated/
-translate-validate → translate_validation.json
+translate-validate → translate_validation.json（retry_required 自动返工；持续 review 升级人工）
+build-epub --translated → 最终译文 EPUB
+
+已有译文的单次页眉页脚修复：
+repair-page-furniture（候选片段扫描/worker handoff） + 工作区 Subagent
+→ translated/（同名文件定点修复）
+repair-page-furniture-validate → translated/validated/
 build-epub --translated → 最终译文 EPUB
 
 纯转换分支（`pipeline: epub_conversion`）：
@@ -132,8 +140,9 @@ manifest 指定的文件；大单元单独成批。polish 使用 `polish_worker_
 使用按顶层章节隔离的 `worker_handoffs/`。同一章节拆分时，worker 共享章节级术语上下文，
 但不读取其他章节的上下文。翻译 TOC 是正文 worker 启动前的独立前置任务，正文 worker
 不得修改翻译 TOC。PDF 正文还接收一个按 `global_toc_tokens` 预算压缩的全书方向性轮廓，
-但当前章节的精确 TOC heading contract 始终优先。纯转换分支不生成实体表或翻译 TOC，
-但仍必须通过 polish。
+但当前章节的精确 TOC heading contract 始终优先；标题绑定只容忍安全的展示格式差异，
+不容忍语义改写。普通中文正文还必须通过目标语言内容审计。纯转换分支不生成实体表或
+翻译 TOC，但仍必须通过 polish。
 
 ### 3.2 高保真 EPUB 工作流
 
@@ -189,7 +198,7 @@ Format workflow services  → shared utilities/domain services
 1. 目标文件非空且结构校验通过；
 2. validation report 记录了对应源文件的 SHA-256；
 3. 当前源文件、该单元的 TOC 上下文、实体/术语投影和对应记录一致；全书级上下文变化不再默认使未受影响单元失效；
-4. 全量流程的报告通过后，才允许打包。
+4. 普通正文的目标语言审计、特殊角色数字保护、TOC 绑定和全量流程报告全部通过后，才允许打包。
 
 单文件校验只提供 checkpoint，不能替代全量校验。源稿、实体表、TOC 或术语上下文变化
 只应使受影响的 checkpoint 重新进入 `pending`；旧 manifest 没有单元级上下文哈希时，

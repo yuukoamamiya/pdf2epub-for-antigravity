@@ -16,8 +16,12 @@ from .subagent_runtime import (
     estimate_tokens,
     resolve_subagent_model,
 )
-from .workflow_contracts import atomic_write_text, is_reusable_checkpoint
-from .workflow_contracts import relative_posix_path
+from .workflow_contracts import (
+    MARKDOWN_VALIDATION_SCHEMA_VERSION,
+    atomic_write_text,
+    is_reusable_checkpoint,
+    relative_posix_path,
+)
 
 def prepare_markdown_subagent(
     output_dir: Path,
@@ -39,6 +43,7 @@ def prepare_markdown_subagent(
     chapter_groups: Optional[Mapping[str, Iterable[str]]] = None,
     prompt_context_files: Optional[Mapping[str, Path]] = None,
     declared_files: Optional[Iterable[str]] = None,
+    allow_human_review_retry: bool = False,
 ) -> Dict[str, Path]:
     """Write a manifest and prompt for a markdown Subagent task."""
     source_dir = Path(source_dir)
@@ -87,6 +92,8 @@ def prepare_markdown_subagent(
     validated_files = None
     validation: Dict[str, Any] = {}
     previous_manifest: Dict[str, Any] = {}
+    previous_review_required: Dict[str, List[Dict[str, Any]]] = {}
+    previous_human_review_files: set[str] = set()
     previous_manifest_path = output_dir / f"{task}_subagent_manifest.json"
     if resume and previous_manifest_path.is_file():
         try:
@@ -172,8 +179,22 @@ def prepare_markdown_subagent(
     if resume and validation_path.is_file():
         try:
             validation = json.loads(validation_path.read_text(encoding="utf-8"))
-            if isinstance(validation, dict) and isinstance(validation.get("valid_files"), list):
+            if (
+                isinstance(validation, dict)
+                and validation.get("schema_version") == MARKDOWN_VALIDATION_SCHEMA_VERSION
+                and isinstance(validation.get("valid_files"), list)
+            ):
                 validated_files = set(validation["valid_files"])
+                for item in validation.get("review_required", []) or []:
+                    if isinstance(item, Mapping) and item.get("file"):
+                        previous_review_required.setdefault(
+                            str(item["file"]), []
+                        ).append(dict(item))
+                for item in validation.get("human_review_required", []) or []:
+                    if isinstance(item, Mapping) and item.get("file"):
+                        previous_human_review_files.add(str(item["file"]))
+            else:
+                validation = {}
         except (OSError, json.JSONDecodeError):
             validated_files = None
     # Single-file checks are intentionally stored separately so they never
@@ -184,7 +205,10 @@ def prepare_markdown_subagent(
         try:
             file_ledger = json.loads(file_validation_path.read_text(encoding="utf-8"))
             file_records = file_ledger.get("files", {}) if isinstance(file_ledger, dict) else {}
-            if isinstance(file_records, dict):
+            if (
+                file_ledger.get("schema_version") == MARKDOWN_VALIDATION_SCHEMA_VERSION
+                and isinstance(file_records, dict)
+            ):
                 if validated_files is None:
                     validated_files = set()
                 validation_hashes = (
@@ -202,7 +226,16 @@ def prepare_markdown_subagent(
                 if not isinstance(target_hashes, dict):
                     target_hashes = {}
                 for name, record in file_records.items():
-                    if not isinstance(record, dict) or not record.get("valid"):
+                    if not isinstance(record, dict):
+                        continue
+                    for item in record.get("review_required", []) or []:
+                        if isinstance(item, Mapping):
+                            previous_review_required.setdefault(str(name), []).append(
+                                dict(item)
+                            )
+                    if record.get("human_review_required"):
+                        previous_human_review_files.add(str(name))
+                    if not record.get("valid"):
                         continue
                     validated_files.add(str(name))
                     validation_hashes[str(name)] = record.get("source_sha256")
@@ -236,8 +269,23 @@ def prepare_markdown_subagent(
             completed_files.append(source.name)
         else:
             pending_files.append(source.name)
+    blocked_human_review_files = sorted(
+        previous_human_review_files & set(pending_files)
+    )
+    if resume and blocked_human_review_files and not allow_human_review_retry:
+        raise ValueError(
+            "Human review is required before another automatic retry for: "
+            + ", ".join(blocked_human_review_files)
+            + ". Ask for a decision first, then use --retry-after-human-review "
+            "only if another Subagent retry is explicitly authorized."
+        )
     pending_stats = {
         name: stats for name, stats in file_stats.items() if name in pending_files
+    }
+    previous_review_required = {
+        name: items
+        for name, items in previous_review_required.items()
+        if name in pending_files and items
     }
     effective_concurrency, concurrency_reason = effective_max_concurrency(
         pending_stats,
@@ -288,6 +336,8 @@ def prepare_markdown_subagent(
         manifest["context_sha256"] = context_sha256
     context_is_current = previous_manifest.get("context_sha256", {}) == context_sha256
     manifest["context_is_current"] = context_is_current
+    if previous_review_required:
+        manifest["previous_review_required"] = previous_review_required
     normalized_skipped_context = sorted(
         {str(name) for name in skipped_context_files if str(name).strip()}
     )
@@ -509,6 +559,21 @@ Global book outline (orientation only; never copy headings from another branch):
 Use this adaptive outline only to understand the book's overall structure and
 topic progression. The current chapter's exact TOC contract above is
 authoritative for visible headings and output wording.
+
+Previous local validation review signals:
+
+{chr(10).join(
+    f"- `{name}`: " + "; ".join(
+        f"{item.get('kind', 'review')}: {item.get('reason', 'review required')}"
+        for item in items
+    )
+    for name, items in previous_review_required.items()
+) or "- none"}
+
+For every file listed above, perform a fresh full-file review before writing the
+replacement. Resolve the reported issue when it is a real defect; when the
+content is a legitimate exception, preserve it deliberately and report why in
+the hand-off result so the local validator can be explicitly acknowledged.
 
 Skipped context files:
 

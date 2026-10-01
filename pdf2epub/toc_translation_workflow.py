@@ -417,8 +417,31 @@ def build_global_toc_outline(
     return "\n".join(chosen_lines)
 
 
+_TOC_OUTER_MARK_PAIRS = {
+    ("《", "》"),
+    ("〈", "〉"),
+    ("「", "」"),
+    ("『", "』"),
+    ("“", "”"),
+    ("‘", "’"),
+    ('"', '"'),
+    ("'", "'"),
+}
+
+
+def _normalize_toc_heading_for_binding(value: str) -> str:
+    """Normalize harmless presentation differences without changing wording."""
+    normalized = re.sub(r"\s+", " ", str(value).strip())
+    normalized = re.sub(r"^[*_`]+|[*_`]+$", "", normalized).strip()
+    while len(normalized) >= 2 and (
+        normalized[0], normalized[-1]
+    ) in _TOC_OUTER_MARK_PAIRS:
+        normalized = normalized[1:-1].strip()
+    return normalized
+
+
 def validate_toc_heading_bindings(output_dir: Path) -> Dict[str, Any]:
-    """Check exact translated TOC labels in the first unit parts."""
+    """Check translated TOC labels with conservative presentation tolerance."""
     output_dir = Path(output_dir)
     manifest_path = output_dir / "translate_subagent_manifest.json"
     if not manifest_path.is_file():
@@ -435,6 +458,7 @@ def validate_toc_heading_bindings(output_dir: Path) -> Dict[str, Any]:
     target_dir = output_dir / "translated" / "validated"
     errors = []
     checked = []
+    normalized_matches: List[Dict[str, str]] = []
     for name, context in contexts.items():
         target = target_dir / str(name)
         if not target.is_file():
@@ -447,6 +471,7 @@ def validate_toc_heading_bindings(output_dir: Path) -> Dict[str, Any]:
             continue
 
         candidates = set()
+        normalized_candidates = set()
         for line in lines:
             value = line.strip()
             if not value or value.startswith("```"):
@@ -454,6 +479,7 @@ def validate_toc_heading_bindings(output_dir: Path) -> Dict[str, Any]:
             value = re.sub(r"^#{1,6}\s+", "", value)
             value = re.sub(r"[*_`]+", "", value).strip()
             candidates.add(value)
+            normalized_candidates.add(_normalize_toc_heading_for_binding(value))
         expected = []
         title = str(context.get("toc_title") or "").strip()
         if title:
@@ -462,10 +488,30 @@ def validate_toc_heading_bindings(output_dir: Path) -> Dict[str, Any]:
             if isinstance(child, dict) and str(child.get("title") or "").strip():
                 expected.append((f"TOC child {child.get('anchor', '')}".strip(), str(child["title"]).strip()))
         for label, value in expected:
-            checked.append({"file": name, "label": label, "title": value})
-            if value not in candidates:
+            normalized_value = _normalize_toc_heading_for_binding(value)
+            match_mode = "exact" if value in candidates else None
+            if match_mode is None and normalized_value in normalized_candidates:
+                match_mode = "normalized"
+            checked.append(
+                {
+                    "file": name,
+                    "label": label,
+                    "title": value,
+                    "match": match_mode or "missing",
+                }
+            )
+            if match_mode == "normalized":
+                normalized_matches.append(
+                    {"file": name, "label": label, "title": value}
+                )
+            if match_mode is None:
                 errors.append(f"{name}: exact {label} not found: {value!r}")
-    return {"valid": not errors, "errors": errors, "checked": checked}
+    return {
+        "valid": not errors,
+        "errors": errors,
+        "checked": checked,
+        "normalized_matches": normalized_matches,
+    }
 
 __all__ = [
     "integrate_toc_translation_task",

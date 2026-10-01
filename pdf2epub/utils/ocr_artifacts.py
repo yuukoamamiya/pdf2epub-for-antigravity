@@ -6,6 +6,13 @@ import re
 
 
 _MARKDOWN_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
+_PRINTED_PAGE_LABEL_RE = re.compile(
+    r"^(?:page\s*[:#-]?\s*)?(\d{1,4}|[ivxlcdm]{1,12})$",
+    re.IGNORECASE,
+)
+_SYNTHETIC_PAGE_STAMP_RE = re.compile(
+    r"^pdf\s+page\s*[:#-]?\s*\d{1,4}$", re.IGNORECASE
+)
 _BLANK_PAGE_TEXT_RE = re.compile(
     r"(?:\bblank\s+(?:white\s+)?page\b|"
     r"\bscan\s+of\s+a\s+blank\s+page\b|"
@@ -64,6 +71,45 @@ def clean_ocr_page_artifacts(content: str) -> str:
                 continue
         cleaned.append(line)
     return "\n".join(cleaned)
+
+
+def remove_printed_page_number_lines(
+    lines: list[str], *, edge_window: int = 4
+) -> list[str]:
+    """Remove unambiguous page labels at the physical page edges.
+
+    Page-level OCR and native PDF extraction can expose a printed Arabic or
+    Roman page label as a standalone Markdown line.  The same is true for the
+    synthetic ``PDF Page: N`` labels added to scanned-PDF preprocessing.  Only
+    short labels in the first or last few non-empty lines are removed; numbers
+    inside prose, citations, lists, footnotes, bibliography, and index entries
+    are left untouched.
+
+    This deliberately does not remove a running title such as ``Preface XII``.
+    That requires layout judgment and remains part of the Subagent polish gate.
+    """
+    if not lines or edge_window <= 0:
+        return list(lines)
+
+    non_empty = [index for index, line in enumerate(lines) if line.strip()]
+    if not non_empty:
+        return list(lines)
+    edge_indexes = set(non_empty[:edge_window] + non_empty[-edge_window:])
+
+    def is_page_label(line: str) -> bool:
+        stripped = line.strip().strip("|•·—–-").strip()
+        if not stripped or stripped.startswith(("#", "!", "[")):
+            return False
+        return bool(
+            _PRINTED_PAGE_LABEL_RE.fullmatch(stripped)
+            or _SYNTHETIC_PAGE_STAMP_RE.fullmatch(stripped)
+        )
+
+    return [
+        line
+        for index, line in enumerate(lines)
+        if index not in edge_indexes or not is_page_label(line)
+    ]
 
 
 def heading_signature(line: str) -> tuple[int, str] | None:

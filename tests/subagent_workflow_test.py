@@ -3,6 +3,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from pdf2epub.html_translation.builder import HTMLEpubPipeline
 from pdf2epub.refine.main import RefinedBreakdown
 from pdf2epub.refine.subagent_workflow import (
@@ -27,6 +29,7 @@ from pdf2epub.subagent_workflow import (
     fix_reference_heading_mismatch,
 )
 from pdf2epub.subagent_runtime import write_worker_handoffs
+from pdf2epub.markdown_validation import target_language_ratio_check
 from pdf2epub.footnote_normalization import validate_polish_footnote_normalization
 from pdf2epub.cli import (
     _prepare_pdf_markdown_task,
@@ -94,6 +97,16 @@ def test_detect_refusal_flags_chinese_disclaimer():
     assert "Chinese refusal" in reason
 
 
+def test_detect_refusal_flags_chinese_translation_placeholder():
+    reason = detect_refusal(
+        "Dies ist ein gewöhnlicher Absatz.",
+        "这是纯正学术中文翻译内容。 Dies ist ein gewöhnlicher Absatz.",
+    )
+
+    assert reason is not None
+    assert "placeholder" in reason
+
+
 def test_detect_refusal_does_not_treat_chinese_noun_tail_as_first_person():
     source = "The real-estate owner refused to complete the sale after learning they were Japanese."
     target = "房地产老板得知他们是日本人时，拒绝完成交易。"
@@ -136,6 +149,29 @@ def test_detect_bilingual_output_is_advisory_for_long_unchanged_spans():
     assert warning["end_line"] == 2
 
 
+def test_target_language_ratio_blocks_latin_source_left_in_chinese_target():
+    source = " ".join(
+        [
+            "Dies ist ein längerer philosophischer Absatz über die Geschichte "
+            "der spekulativen Vernunft und ihre begriffliche Entwicklung."
+        ]
+        * 4
+    )
+    report = target_language_ratio_check(source, source, "Chinese")
+
+    assert report["applicable"] is True
+    assert report["blocked"] is True
+    assert report["target_cjk_ratio"] == 0
+
+
+def test_target_language_ratio_ignores_non_chinese_target_languages():
+    text = "This is a sufficiently long ordinary source paragraph. " * 8
+    report = target_language_ratio_check(text, text, "German")
+
+    assert report["applicable"] is False
+    assert report["blocked"] is False
+
+
 def test_strip_outer_markdown_fences_only_removes_wrapping_fence():
     cleaned, changed = strip_outer_markdown_fences("```markdown\n# 标题\n正文\n```\n")
     assert changed is True
@@ -145,7 +181,7 @@ def test_strip_outer_markdown_fences_only_removes_wrapping_fence():
     assert unchanged == "正文\n```\n内部\n"
 
 
-def test_markdown_validation_reports_bilingual_warning_without_failing(tmp_path: Path):
+def test_markdown_validation_requires_review_for_bilingual_warning(tmp_path: Path):
     from pdf2epub.subagent_workflow import validate_markdown_subagent
 
     source_dir = tmp_path / "source"
@@ -156,8 +192,102 @@ def test_markdown_validation_reports_bilingual_warning_without_failing(tmp_path:
     (source_dir / "unit.md").write_text(f"{line}\n{line}\n", encoding="utf-8")
     (target_dir / "unit.md").write_text(f"{line}\n{line}\n", encoding="utf-8")
     report = validate_markdown_subagent(tmp_path, "translate", source_dir, target_dir)
-    assert report["all_passed"] is True
+    assert report["all_passed"] is False
     assert report["bilingual_warnings"][0]["file"] == "unit.md"
+    assert report["review_required_files"] == ["unit.md"]
+    assert not (target_dir / "validated" / "unit.md").exists()
+
+    from pdf2epub.subagent_workflow import prepare_markdown_subagent
+
+    retry_paths = prepare_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        target_dir,
+        "English",
+        "German",
+        resume=True,
+    )
+    retry_manifest = json.loads(
+        retry_paths["manifest"].read_text(encoding="utf-8")
+    )
+    assert retry_manifest["pending_files"] == ["unit.md"]
+    assert retry_manifest["previous_review_required"]["unit.md"][0]["kind"] == (
+        "bilingual_output"
+    )
+    assert "Previous local validation review signals" in retry_paths[
+        "prompt"
+    ].read_text(encoding="utf-8")
+
+    persistent = validate_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        target_dir,
+    )
+    assert persistent["retry_required"] == []
+    assert persistent["human_review_required_files"] == ["unit.md"]
+
+    with pytest.raises(ValueError, match="Human review is required"):
+        prepare_markdown_subagent(
+            tmp_path,
+            "translate",
+            source_dir,
+            target_dir,
+            "English",
+            "German",
+            resume=True,
+        )
+    prepare_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        target_dir,
+        "English",
+        "German",
+        resume=True,
+        allow_human_review_retry=True,
+    )
+
+    acknowledged = validate_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        target_dir,
+        allow_review_warnings=True,
+    )
+    assert acknowledged["all_passed"] is True
+    assert acknowledged["review_warnings_acknowledged"] is True
+    assert (target_dir / "validated" / "unit.md").exists()
+
+
+def test_markdown_validation_blocks_bilingual_output_for_chinese_target(tmp_path: Path):
+    from pdf2epub.subagent_workflow import validate_markdown_subagent
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    line = "This is a deliberately long English paragraph that remains unchanged in the output."
+    (source_dir / "unit.md").write_text(f"{line}\n{line}\n", encoding="utf-8")
+    (target_dir / "unit.md").write_text(f"{line}\n{line}\n", encoding="utf-8")
+
+    report = validate_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        target_dir,
+        target_language="Chinese",
+    )
+
+    assert report["all_passed"] is False
+    assert report["target_language_blocked"] == ["unit.md"]
+    assert report["retry_required_files"] == ["unit.md"]
+    assert report["human_review_required"] == []
+    assert any(
+        "untranslated_source_detected" in item["reason"]
+        for item in report["invalid"]
+    )
 
 
 def test_markdown_validation_excludes_bibliography_from_bilingual_warning(tmp_path: Path):
@@ -175,6 +305,65 @@ def test_markdown_validation_excludes_bibliography_from_bilingual_warning(tmp_pa
         file_roles={"unit.md": "bibliography"},
     )
     assert report["bilingual_warnings"] == []
+
+
+def test_markdown_validation_excludes_bibliography_from_target_language_gate(
+    tmp_path: Path,
+):
+    from pdf2epub.subagent_workflow import validate_markdown_subagent
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    text = "A long unchanged bibliographic entry with an author, title, and publisher. " * 4
+    (source_dir / "unit.md").write_text(text, encoding="utf-8")
+    (target_dir / "unit.md").write_text(text, encoding="utf-8")
+
+    report = validate_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        target_dir,
+        file_roles={"unit.md": "bibliography"},
+        target_language="Chinese",
+    )
+
+    assert report["all_passed"] is True
+    assert report["target_language_audits"] == {}
+
+
+def test_polish_requires_review_for_page_furniture(tmp_path: Path):
+    from pdf2epub.subagent_workflow import validate_markdown_subagent
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    text = "Preface XII\n\nA normal paragraph.\n"
+    (source_dir / "unit.md").write_text(text, encoding="utf-8")
+    (target_dir / "unit.md").write_text(text, encoding="utf-8")
+
+    report = validate_markdown_subagent(
+        tmp_path, "polish", source_dir, target_dir
+    )
+
+    assert report["all_passed"] is False
+    assert report["polish_page_furniture_warnings"][0]["kind"] == (
+        "running_title_plus_page_label"
+    )
+    assert report["review_required_files"] == ["unit.md"]
+    assert not (target_dir / "validated" / "unit.md").exists()
+
+    acknowledged = validate_markdown_subagent(
+        tmp_path,
+        "polish",
+        source_dir,
+        target_dir,
+        allow_review_warnings=True,
+    )
+    assert acknowledged["all_passed"] is True
+    assert (target_dir / "validated" / "unit.md").exists()
 
 
 def test_markdown_validation_rejects_bibliography_marker_loss(tmp_path: Path):
@@ -947,6 +1136,7 @@ def test_extract_entities_uses_configured_language_and_selected_source_stage(
     (tmp_path / "output" / "Book" / "polish_validation.json").write_text(
         json.dumps(
             {
+                    "schema_version": 2,
                 "all_passed": True,
                 "source_sha256": {"chapter_001.md": hashlib.sha256(
                     (source_dir / "chapter_001.md").read_bytes()
@@ -1068,6 +1258,7 @@ def test_translate_skip_entities_is_recorded_in_prompt_and_manifest(
     (output_dir / "polish_validation.json").write_text(
         json.dumps(
             {
+                    "schema_version": 2,
                 "all_passed": True,
                 "source_sha256": {"chapter.md": hashlib.sha256(
                     (source_dir / "chapter.md").read_bytes()
@@ -1146,6 +1337,7 @@ def test_prepare_markdown_subagent_accepts_only_matching_validated_checkpoint(
     (tmp_path / "translate_validation.json").write_text(
         json.dumps(
             {
+                    "schema_version": 2,
                 "valid_files": ["unit.md"],
                 "source_sha256": {
                     "unit.md": hashlib.sha256(source.read_bytes()).hexdigest()

@@ -24,6 +24,10 @@ from pdf2epub.commands.novel import (
     translate_novel_command,
     translate_novel_validate_command,
 )
+from pdf2epub.commands.page_furniture import (
+    repair_page_furniture_command,
+    repair_page_furniture_validate_command,
+)
 from pdf2epub.commands.ocr import ocr_pages_command
 from pdf2epub.commands.pdf import build_epub_command
 from pdf2epub.commands.refine import (
@@ -186,13 +190,52 @@ def register_command_parsers(subparsers) -> None:
         action="store_true",
         help="Keep existing non-empty Subagent outputs and prepare only pending files",
     )
+    polish_parser.add_argument(
+        "--retry-after-human-review",
+        action="store_true",
+        help=(
+            "Allow another Subagent retry only after a human has reviewed a "
+            "persistent warning"
+        ),
+    )
     polish_parser.set_defaults(func=polish_command)
 
     polish_validate_parser = subparsers.add_parser(
         "polish-validate",
         help="Validate and stage Subagent polishing output (no API calls)",
     )
+    polish_validate_parser.add_argument(
+        "--allow-review-warnings",
+        action="store_true",
+        help=(
+            "Explicitly acknowledge residual page-furniture warnings after "
+            "Subagent or human review and stage the files anyway"
+        ),
+    )
     polish_validate_parser.set_defaults(func=polish_validate_command)
+
+    repair_page_furniture_parser = subparsers.add_parser(
+        "repair-page-furniture",
+        help="Prepare a one-time Subagent repair for existing translated PDF Markdown",
+        description=(
+            "Snapshot current translated Markdown and create a scoped workspace-"
+            "Subagent hand-off for removing confirmed page headers and footers."
+        ),
+    )
+    repair_page_furniture_parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Keep files already passed by repair-page-furniture-validate",
+    )
+    repair_page_furniture_parser.set_defaults(func=repair_page_furniture_command)
+
+    repair_page_furniture_validate_parser = subparsers.add_parser(
+        "repair-page-furniture-validate",
+        help="Validate and stage the one-time page-furniture repair",
+    )
+    repair_page_furniture_validate_parser.set_defaults(
+        func=repair_page_furniture_validate_command
+    )
 
     # Translate subcommand
     translate_parser = subparsers.add_parser(
@@ -212,6 +255,14 @@ def register_command_parsers(subparsers) -> None:
         "--resume",
         action="store_true",
         help="Keep existing non-empty Subagent outputs and prepare only pending files",
+    )
+    translate_parser.add_argument(
+        "--retry-after-human-review",
+        action="store_true",
+        help=(
+            "Allow another Subagent retry only after a human has reviewed a "
+            "persistent warning"
+        ),
     )
     translate_parser.add_argument(
         "--skip-entities",
@@ -258,6 +309,14 @@ def register_command_parsers(subparsers) -> None:
         help=(
             "Repair only a high-confidence extra Markdown heading for a plain "
             "end-of-book references label"
+        ),
+    )
+    translate_validate_parser.add_argument(
+        "--allow-review-warnings",
+        action="store_true",
+        help=(
+            "Explicitly acknowledge bilingual-review warnings after Subagent or "
+            "human review and stage the files anyway"
         ),
     )
     translate_validate_parser.set_defaults(func=translate_validate_command)
