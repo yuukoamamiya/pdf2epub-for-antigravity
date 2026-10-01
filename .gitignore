@@ -44,5 +44,16 @@ test_*.py
 test_ocr.png
 scripts/realign_*.py
 
+# Local workbench artifacts.  Keep disposable scripts, extracted snippets,
+# ad-hoc reports, and translation experiments under .work/<task>/ instead of
+# the repository root.  The legacy paths remain ignored while old workspaces
+# are being migrated.
+/.work/
+/scratch/
+/tmp_chunks/
+/.pytest-local-temp/
+/deepsec-*.json
+/*.b64
+
 # Security & Local Private files
 deepsec-report.json
