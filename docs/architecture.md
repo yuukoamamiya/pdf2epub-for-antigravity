@@ -218,3 +218,11 @@ Format workflow services  → shared utilities/domain services
 
 测试入口为 `uv run pytest -q`。代码重构不应读取、改写或重新生成用户的书稿和译文输出；
 涉及实际翻译时必须重新遵守 [`AGENTS.md`](../AGENTS.md) 的 Subagent 总闸和开工检查。
+
+### 本地工作文件归档
+
+仓库根目录只保留源码、配置模板、文档和可重复运行的测试。一次性翻译脚本、实验切片、
+比对结果、审计报告和调试输出统一放在 `.work/<task>/`；`.work/` 是本地工作台，不进入 Git。
+PDF/EPUB 流程自己的 scratch 文件放在 `output/<title>/scratch/<task>/`，而 `scripts/` 只放
+可复用且准备纳入仓库的工具。正式术语表仍属于 `glossaries/`，不应被移动到工作台。历史
+临时文件迁移时要先确认用途，并采用可恢复的移动，不得批量删除未知文件。
