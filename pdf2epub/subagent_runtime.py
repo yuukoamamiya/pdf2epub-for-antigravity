@@ -457,6 +457,7 @@ def _worker_manifest_projection(
     )
 
     for key in (
+        "source_sha256",
         "file_stats",
         "repair_file_stats",
         "file_roles",

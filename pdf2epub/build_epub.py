@@ -1074,17 +1074,12 @@ def build_epub(config: BuildEpubConfig) -> Path:
     )
     builder = EpubBuilder(minimal_config)
 
-    # Create ContentConverter for cleanup operations
+    # Validated Markdown is an immutable staging contract.  Do not run
+    # heuristic heading cleanup here: those helpers write back to
+    # ``config.markdown_dir`` and would make the packaged EPUB differ from
+    # the content that just passed translate/polish validation.  Structural
+    # cleanup belongs before validation (or in a separate generated copy).
     converter = ContentConverter(minimal_config)
-
-    # Clean up markdown content before conversion
-    removed_headings = converter.clean_invalid_headings()
-    if removed_headings > 0:
-        logger.info(f"Cleaned {removed_headings} invalid headings")
-
-    removed_duplicates = converter.remove_duplicate_titles()
-    if removed_duplicates > 0:
-        logger.info(f"Removed {removed_duplicates} duplicate titles")
 
     if config.combined_markdown_path:
         write_combined_markdown(epub_structure, config.combined_markdown_path)

@@ -2,6 +2,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from lxml import etree
+import pytest
 
 from pdf2epub.cli import _convert_txt_to_xhtml
 
@@ -152,3 +153,28 @@ def test_novel_xhtml_rebuild_regroups_inline_source_formatting_lines(
     assert paragraph.get("class") == "indent"
     assert paragraph.find("x:ruby", ns) is not None
     assert paragraph.find("x:span/x:span", ns) is not None
+
+
+def test_novel_xhtml_rebuild_refuses_missing_translation_file(tmp_path: Path):
+    source_dir = tmp_path / "novel_units"
+    translated_dir = tmp_path / "translated_novel"
+    xhtml_dir = tmp_path / "final_xhtml"
+    source_dir.mkdir()
+    translated_dir.mkdir()
+    xhtml_dir.mkdir()
+    source_path = source_dir / "001_page.txt"
+    source_path.write_text("原文", encoding="utf-8")
+    unit = SimpleNamespace(
+        text_path=source_path,
+        has_content=True,
+        source_href="item/xhtml/page.xhtml",
+        file_name="page",
+    )
+
+    with pytest.raises(FileNotFoundError, match="Missing translated novel unit"):
+        _convert_txt_to_xhtml(
+            units=[unit],
+            translated_dir=translated_dir,
+            xhtml_dir=xhtml_dir,
+            parser=_ParserStub("<html><body><p>原文</p></body></html>"),
+        )

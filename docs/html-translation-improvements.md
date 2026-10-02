@@ -38,5 +38,34 @@ build-html-epub
 简介、版权说明和目录可以翻译；作者名和出版社由输入文件提供，必须逐字复制。
 
 `html-validate` 只做本地检查。它会拒绝缺失单元、空文件、行数不一致、标签
-结构变化以及元数据保护字段变化。只有校验通过后，`build-html-epub` 才会
-恢复压缩结构并重新打包；`--allow-partial` 仅用于明确的预览需求。
+结构变化以及元数据保护字段变化。它还会锁定 `compressed_units` 的文件集合、
+源文件 SHA-256 和准备阶段的 `input.epub` 快照；输入发生变化时必须重新运行
+`html-prepare`。中文目标语言的长段落若仍保持原文，也会进入失败报告。只有校验
+通过后，`build-html-epub` 才会恢复压缩结构并重新打包；构建前会清空旧的
+`final_xhtml/`，避免旧章节混入新构建。若已有 NCX 或 nav 文档的更新发生异常，
+构建会默认阻断，并在 `translation_report.json` 中记录具体导航文件和错误；只有
+人工检查报告后，才可显式使用 `--allow-navigation-warnings` 放行。EPUB 只存在
+其中一种导航格式时，缺少另一种会记录为 `not_found`，不会被误判为失败。
+`--allow-partial` 和 `--allow-navigation-warnings` 都仅用于明确审查过的预览或兼容性
+场景。测试还会用 PyMuPDF 打开最终 EPUB，检查页数、文本位置、非空渲染和像素稳定性，
+覆盖“打包结果能否被阅读器渲染”这一结构校验之外的环节。
+
+## 一致性和成品门禁
+
+实体表 handoff 的 freshness 由两部分共同决定：实体 manifest 中的源文件哈希，以及当前
+源目录的完整 `*.md` 文件集合。只要新增、删除或改动源文件，就必须重新执行实体提取，
+不能因为旧 manifest 中已有文件仍然匹配就复用实体表。
+
+OCR 配置在进入流程前统一校验。`ocr.secondary.enabled: true` 必须同时提供
+`ocr.secondary.backend`；配置不完整时直接失败，不进入一个看似需要纠错、实际无法执行的
+中间状态。CLI 中的 `ocr-correct` 只在第二套 OCR 开启时执行，关闭时跳过整个纠错子流程。
+
+构建导航时，NCX 和 nav 的更新异常会进入 `translation_report.json` 的导航报告，并阻断
+默认打包；缺少某一种导航格式本身不是错误。人工确认报告后，才允许使用
+`--allow-navigation-warnings`。这和 `epubcheck` 的严格程度是两条独立门禁：导航 warning
+的显式确认不能代替 EPUB 结构校验。
+
+最终视觉测试使用固定 EPUB 夹具生成成品，再由 PyMuPDF 打开成品检查页数、页面尺寸、目标
+文本、文本版心位置、非空像素和与预期渲染的像素签名；同一个成品重复渲染也必须保持一致。
+它覆盖本地“最终压缩包能否被阅读器引擎打开”的回归，但不声称替代 Kindle、Apple Books
+等具体阅读器和设备的兼容性测试。

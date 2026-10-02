@@ -208,7 +208,11 @@ def parse_llm_json(
 def load_config(config_path: str = "config.yaml") -> Dict:
     """Load the current nested YAML configuration without migration."""
     with Path(config_path).open("r", encoding="utf-8") as file:
-        return yaml.safe_load(file) or {}
+        config = yaml.safe_load(file) or {}
+    from pdf2epub.ocr_consensus import validate_ocr_config
+
+    validate_ocr_config(config)
+    return config
 
 
 def ensure_directory(directory_path: Path) -> None:

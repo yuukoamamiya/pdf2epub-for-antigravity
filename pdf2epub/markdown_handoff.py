@@ -70,9 +70,11 @@ def prepare_markdown_subagent(
     model = resolve_subagent_model(config, task)
     batching = _batching_config(config)
     file_stats: Dict[str, Dict[str, int]] = {}
+    source_sha256: Dict[str, str] = {}
     for source in sources:
         raw = source.read_bytes()
         text = raw.decode("utf-8")
+        source_sha256[source.name] = hashlib.sha256(raw).hexdigest()
         file_stats[source.name] = {
             "size_bytes": len(raw),
             "line_count": len(text.splitlines()),
@@ -316,6 +318,7 @@ def prepare_markdown_subagent(
         "source_dir": relative_posix_path(source_dir, output_dir),
         "target_dir": relative_posix_path(target_dir, output_dir),
         "files": [path.name for path in sources],
+        "source_sha256": source_sha256,
         "file_stats": file_stats,
         "batching": batching,
         "recommended_batches": recommended_batches,

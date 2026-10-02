@@ -17,6 +17,31 @@ _ARXIV_ID_RE = re.compile(
     re.IGNORECASE,
 )
 _ARXIV_URL_RE = re.compile(r"arxiv\.org/(?:abs|pdf|e-print)/(?P<id>[^?#]+)", re.IGNORECASE)
+_ARXIV_HOSTS = frozenset({"arxiv.org", "www.arxiv.org", "export.arxiv.org"})
+
+
+def _validated_arxiv_url(value: str) -> str:
+    """Return an arXiv URL only when its scheme, host, and path are trusted."""
+    parsed = urllib.parse.urlsplit(value)
+    host = (parsed.hostname or "").lower().rstrip(".")
+    if parsed.scheme.lower() != "https" or host not in _ARXIV_HOSTS:
+        raise ValueError("Only HTTPS URLs hosted by arxiv.org are allowed")
+    match = re.fullmatch(
+        r"/(?:abs|pdf|e-print)/(?P<id>[^/?#]+?)(?:\.pdf)?",
+        parsed.path,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        raise ValueError("Not a supported arXiv URL")
+    return urllib.parse.unquote(match.group("id"))
+
+
+class _ArxivRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Keep redirects on the same small arXiv host allowlist."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _validated_arxiv_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 @dataclass(frozen=True)
@@ -88,11 +113,11 @@ class ArxivSourceResolver:
         archive_path = destination.parent / f".{slugify_source_id(arxiv_id)}.download"
         try:
             tls_context = _tls_context()
-            with urllib.request.urlopen(
-                request,
-                timeout=120,
-                context=tls_context,
-            ) as response:
+            opener = urllib.request.build_opener(
+                _ArxivRedirectHandler(),
+                urllib.request.HTTPSHandler(context=tls_context),
+            )
+            with opener.open(request, timeout=120) as response:
                 total = 0
                 with archive_path.open("wb") as output:
                     while chunk := response.read(1024 * 1024):
@@ -140,11 +165,15 @@ class ArxivSourceResolver:
 def normalize_arxiv_id(value: str) -> str:
     """Normalize ``arXiv:...`` and arxiv.org URLs to a source identifier."""
     cleaned = value.strip()
-    url_match = _ARXIV_URL_RE.search(cleaned)
-    if url_match:
-        cleaned = urllib.parse.unquote(url_match.group("id"))
-        if cleaned.lower().endswith(".pdf"):
-            cleaned = cleaned[:-4]
+    parsed = urllib.parse.urlsplit(cleaned)
+    if parsed.scheme or parsed.netloc:
+        cleaned = _validated_arxiv_url(cleaned)
+    else:
+        url_match = _ARXIV_URL_RE.search(cleaned)
+        if url_match:
+            cleaned = urllib.parse.unquote(url_match.group("id"))
+            if cleaned.lower().endswith(".pdf"):
+                cleaned = cleaned[:-4]
     match = _ARXIV_ID_RE.fullmatch(cleaned)
     if not match:
         raise ValueError(f"Not a local source or valid arXiv identifier/URL: {value}")

@@ -27,6 +27,7 @@ from .validation import nonempty_lines, tag_mismatch_count
 from pdf2epub.subagent_runtime import resolve_subagent_model
 from pdf2epub.subagent_safety import detect_refusal
 from pdf2epub.glossary import validate_translation_context
+from pdf2epub.markdown_validation import target_language_ratio_check
 from pdf2epub.utils.common import sanitize_filename
 from pdf2epub.utils.html_safety import sanitize_html_document
 from pdf2epub.workflow_contracts import atomic_write_text
@@ -37,6 +38,10 @@ PART_FILE_RE = re.compile(r'^(.+)\.part(\d+)\.md$')
 
 class UnsafePackagePath(ValueError):
     """Raised when an EPUB metadata path escapes its extracted package."""
+
+
+class NavigationUpdateError(RuntimeError):
+    """Raised when translated EPUB navigation could not be updated safely."""
 
 
 def _package_relative_href(extract_dir: Path, base_dir: Path, href: str) -> Optional[str]:
@@ -199,6 +204,7 @@ class BuildConfig:
     epubcheck_mode: str = "warn"  # off, warn, or strict
     epubcheck_path: Optional[str] = None
     navigation_report: Optional[Dict[str, Any]] = None
+    allow_navigation_warnings: bool = False
 
 
 class HTMLEpubBuilder:
@@ -227,14 +233,26 @@ class HTMLEpubBuilder:
         self._reset_navigation_report()
 
     def _reset_navigation_report(self) -> None:
-        """Reset the non-blocking NCX/nav build diagnostics."""
+        """Reset NCX/nav diagnostics for one build attempt."""
         self.navigation_report.clear()
         self.navigation_report.update(
             {
                 "ncx": {"status": "not_attempted", "path": None, "updated_entries": 0},
                 "nav": {"status": "not_attempted", "path": None, "updated_entries": 0},
+                "build_blocked": False,
+                "navigation_warnings_acknowledged": False,
             }
         )
+
+    def _navigation_warnings(self) -> List[str]:
+        """Return navigation components that failed to update."""
+        return [
+            kind
+            for kind, result in self.navigation_report.items()
+            if kind in {"ncx", "nav"}
+            and isinstance(result, dict)
+            and result.get("status") == "warning"
+        ]
 
     def _record_navigation(
         self,
@@ -245,7 +263,7 @@ class HTMLEpubBuilder:
         updated_entries: int = 0,
         error: Optional[str] = None,
     ) -> None:
-        """Store structured navigation diagnostics without affecting the build."""
+        """Store structured navigation diagnostics for the build report."""
         relative_path = None
         if path is not None:
             try:
@@ -292,6 +310,22 @@ class HTMLEpubBuilder:
                 self._update_content_opf(extract_dir, self.config.translated_metadata)
                 self._update_toc_ncx(extract_dir, self.config.translated_metadata)
                 self._update_nav_xhtml(extract_dir, self.config.translated_metadata)
+
+                navigation_warnings = self._navigation_warnings()
+                if navigation_warnings:
+                    acknowledged = bool(self.config.allow_navigation_warnings)
+                    self.navigation_report["build_blocked"] = not acknowledged
+                    self.navigation_report[
+                        "navigation_warnings_acknowledged"
+                    ] = acknowledged
+                    warning_text = ", ".join(navigation_warnings)
+                    if not acknowledged:
+                        raise NavigationUpdateError(
+                            "Translated EPUB navigation update failed for "
+                            f"{warning_text}; refusing to package. "
+                            "Re-run with --allow-navigation-warnings only after "
+                            "reviewing the navigation report."
+                        )
 
             # Step 4: Normalize fragile source CSS before packaging
             self._normalize_css(extract_dir)
@@ -945,7 +979,7 @@ class HTMLEpubBuilder:
             tree.write(str(opf_path), encoding='utf-8', xml_declaration=True)
 
         except Exception as e:
-            logger.warning(f"Failed to update content.opf: {e}")
+            logger.warning("Failed to update content.opf: {}", e)
 
     def _update_toc_ncx(self, extract_dir: Path, metadata: Dict):
         """Update toc.ncx with translated chapter titles."""
@@ -1079,7 +1113,7 @@ class HTMLEpubBuilder:
             )
 
         except Exception as e:
-            logger.warning(f"Failed to update toc.ncx: {e}")
+            logger.warning("Failed to update toc.ncx: {}", e)
             self._record_navigation(
                 "ncx", "warning", ncx_path, extract_dir, error=str(e)
             )
@@ -1247,7 +1281,7 @@ class HTMLEpubBuilder:
             self._record_navigation("nav", "updated", nav_path, extract_dir, updated_count)
 
         except Exception as e:
-            logger.warning(f"Failed to update nav.xhtml: {e}")
+            logger.warning("Failed to update nav.xhtml: {}", e)
             self._record_navigation(
                 "nav", "warning", nav_path, extract_dir, error=str(e)
             )
@@ -1262,6 +1296,7 @@ def build_html_epub(
     epubcheck_mode: str = "warn",
     epubcheck_path: Optional[str] = None,
     navigation_report: Optional[Dict[str, Any]] = None,
+    allow_navigation_warnings: bool = False,
 ) -> Path:
     """
     Convenience function to build translated EPUB.
@@ -1274,6 +1309,7 @@ def build_html_epub(
         translated_metadata: Optional dict with translated_title and toc entries
         epubcheck_mode: Final validation mode: off, warn, or strict
         epubcheck_path: Optional explicit path to the EPUBCheck executable
+        allow_navigation_warnings: Explicitly acknowledge NCX/nav update warnings
 
     Returns:
         Path to the built EPUB file
@@ -1290,6 +1326,7 @@ def build_html_epub(
         navigation_report=navigation_report,
         epubcheck_mode=epubcheck_mode,
         epubcheck_path=epubcheck_path,
+        allow_navigation_warnings=allow_navigation_warnings,
     )
 
     builder = HTMLEpubBuilder(config)
@@ -1982,6 +2019,67 @@ The output must have this shape:
                     "file_name must be a direct .md filename inside compressed_units"
                 )
         declared_names = self._declared_html_source_names()
+        mapping_names = self.declared_translation_files()
+        manifest_path = self.output_dir / "translate-html_subagent_manifest.json"
+        manifest: Dict[str, Any] = {}
+        snapshot_errors: List[str] = []
+        snapshot_expected_hashes: Dict[str, str] = {}
+        if manifest_path.is_file():
+            try:
+                loaded_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                if isinstance(loaded_manifest, dict):
+                    manifest = loaded_manifest
+                else:
+                    snapshot_errors.append("HTML translation manifest is not a JSON object")
+            except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+                snapshot_errors.append(f"invalid HTML translation manifest: {exc}")
+        elif file_name is None:
+            # Direct object-level tests and pre-contract diagnostic runs may
+            # not have a hand-off yet.  A real full-book workflow always has
+            # one because html-prepare is the source of the inventory.
+            snapshot_errors.append("translate-html_subagent_manifest.json is missing")
+
+        if manifest:
+            manifest_files = manifest.get("files")
+            if not isinstance(manifest_files, list) or not all(
+                isinstance(name, str) for name in manifest_files
+            ):
+                snapshot_errors.append("HTML manifest files inventory is invalid")
+                manifest_files = []
+            manifest_files = list(dict.fromkeys(manifest_files))
+            if set(manifest_files) != set(mapping_names):
+                snapshot_errors.append(
+                    "HTML mapping inventory differs from the Subagent manifest"
+                )
+            expected_hashes = manifest.get("source_sha256")
+            if not isinstance(expected_hashes, dict):
+                snapshot_errors.append("HTML manifest has no source_sha256 snapshot")
+                expected_hashes = {}
+            snapshot_expected_hashes = {
+                str(name): str(value)
+                for name, value in expected_hashes.items()
+                if isinstance(name, str) and isinstance(value, str)
+            }
+            if set(snapshot_expected_hashes) != set(manifest_files):
+                snapshot_errors.append(
+                    "HTML source_sha256 inventory differs from the manifest files"
+                )
+            canonical_input = self.output_dir / "input.epub"
+            expected_input_hash = manifest.get("input_epub_sha256")
+            if not isinstance(expected_input_hash, str) or not expected_input_hash:
+                snapshot_errors.append("HTML manifest has no input EPUB snapshot")
+            elif not canonical_input.is_file():
+                snapshot_errors.append("canonical output/input.epub is missing")
+            elif hashlib.sha256(canonical_input.read_bytes()).hexdigest() != expected_input_hash:
+                snapshot_errors.append("input EPUB changed after html-prepare")
+
+        source_snapshot = {
+            "valid": not snapshot_errors,
+            "manifest": str(manifest_path),
+            "expected_files": sorted(snapshot_expected_hashes),
+            "actual_files": sorted(mapping_names),
+            "errors": snapshot_errors,
+        }
         if file_name is None:
             all_sources = [
                 self.compressed_units_dir / name
@@ -2005,6 +2103,10 @@ The output must have this shape:
         valid_files = []
         source_sha256 = {}
         target_sha256 = {}
+        target_language_audits: Dict[str, Dict[str, Any]] = {}
+        target_language = (
+            (getattr(self, "config", {}) or {}).get("translation", {}) or {}
+        ).get("target_language", "Chinese")
 
         for src_file in all_sources:
             tgt_file = self.translated_dir / src_file.name
@@ -2014,8 +2116,16 @@ The output must have this shape:
 
             src_content = src_file.read_text(encoding="utf-8")
             tgt_content = tgt_file.read_text(encoding="utf-8")
-            source_sha256[src_file.name] = hashlib.sha256(src_content.encode("utf-8")).hexdigest()
+            source_sha256[src_file.name] = hashlib.sha256(src_file.read_bytes()).hexdigest()
             target_sha256[src_file.name] = hashlib.sha256(tgt_file.read_bytes()).hexdigest()
+
+            expected_source_hash = snapshot_expected_hashes.get(src_file.name)
+            if expected_source_hash and source_sha256[src_file.name] != expected_source_hash:
+                invalid.append({
+                    "file": src_file.name,
+                    "reason": "source changed after html-prepare",
+                })
+                continue
 
             refusal = detect_refusal(src_content, tgt_content)
             if refusal:
@@ -2047,6 +2157,20 @@ The output must have this shape:
             if "```" in tgt_content:
                 invalid.append({"file": src_file.name, "reason": "Markdown code fence is not allowed"})
                 continue
+            language_audit = target_language_ratio_check(
+                src_content,
+                tgt_content,
+                target_language,
+            )
+            target_language_audits[src_file.name] = language_audit
+            if language_audit.get("blocked"):
+                invalid.append({
+                    "file": src_file.name,
+                    "reason": language_audit.get(
+                        "reason", "target-language audit failed"
+                    ),
+                })
+                continue
             else:
                 valid += 1
                 valid_files.append(src_file.name)
@@ -2074,6 +2198,7 @@ The output must have this shape:
             len(missing) == 0
             and len(invalid) == 0
             and total > 0
+            and source_snapshot["valid"]
             and metadata_report["valid"]
             and context_report["valid"]
         )
@@ -2090,6 +2215,13 @@ The output must have this shape:
             "valid_files": valid_files,
             "source_sha256": source_sha256,
             "target_sha256": target_sha256,
+            "source_snapshot": source_snapshot,
+            "target_language_audits": target_language_audits,
+            "target_language_blocked": sorted(
+                name
+                for name, audit in target_language_audits.items()
+                if audit.get("blocked")
+            ),
             "declared_files": declared_names,
             "ignored_source_files": sorted(
                 path.name for path in self.compressed_units_dir.glob("*.md")
@@ -2109,7 +2241,19 @@ The output must have this shape:
                 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
                 names = manifest.get("files")
                 if isinstance(names, list) and all(isinstance(name, str) for name in names):
-                    return list(dict.fromkeys(names))
+                    # A manifest is local workflow data, but it can be left
+                    # behind by an interrupted or manually edited run. Keep
+                    # path traversal names out of the source/target resolver;
+                    # the validator will report the resulting inventory
+                    # mismatch instead of reading outside compressed_units.
+                    return list(
+                        dict.fromkeys(
+                            name
+                            for name in names
+                            if Path(name).name == name
+                            and Path(name).suffix.lower() == ".md"
+                        )
+                    )
             except (OSError, json.JSONDecodeError, AttributeError, TypeError):
                 pass
         names = self.declared_translation_files()
@@ -2310,6 +2454,7 @@ The output must have this shape:
         self,
         output_epub: Optional[Path] = None,
         allow_partial: bool = False,
+        allow_navigation_warnings: bool = False,
     ) -> Path:
         """
         Decompress translated content and build final EPUB.
@@ -2346,6 +2491,13 @@ The output must have this shape:
 
         compressor = HTMLCompressor()
 
+        # ``final_xhtml`` is generated staging, never a source of truth. A
+        # prior partial build must not leave an old chapter available for a
+        # later build that has a different unit inventory.
+        if self.final_dir.exists():
+            shutil.rmtree(self.final_dir)
+        self.final_dir.mkdir(parents=True, exist_ok=True)
+
         # First, merge any split part files
         merged_parts = self._merge_part_files()
         if merged_parts:
@@ -2380,19 +2532,29 @@ The output must have this shape:
             else:
                 output_epub = self.output_dir / f"translated_{self.epub_path.name}"
 
-        result_path = build_html_epub(
-            original_epub=self.epub_path,
-            translated_dir=self.final_dir,
-            output_path=output_epub,
-            book_title=self.book_title,
-            translated_metadata=translated_metadata,
-            navigation_report=self.navigation_report,
-            epubcheck_mode=self.config.get('html_translation', {}).get(
-                'epubcheck_mode', 'warn'
-            ),
-            epubcheck_path=self.config.get('html_translation', {}).get(
-                'epubcheck_path'
-            ),
-        )
+        try:
+            result_path = build_html_epub(
+                original_epub=self.epub_path,
+                translated_dir=self.final_dir,
+                output_path=output_epub,
+                book_title=self.book_title,
+                translated_metadata=translated_metadata,
+                navigation_report=self.navigation_report,
+                epubcheck_mode=self.config.get('html_translation', {}).get(
+                    'epubcheck_mode', 'warn'
+                ),
+                epubcheck_path=self.config.get('html_translation', {}).get(
+                    'epubcheck_path'
+                ),
+                allow_navigation_warnings=allow_navigation_warnings,
+            )
+        except NavigationUpdateError:
+            # Preserve the diagnostic report even though no EPUB should be
+            # produced.  This gives the next run a concrete review target.
+            self.write_translation_report(
+                output_epub=output_epub,
+                phase="build_blocked",
+            )
+            raise
         self.write_translation_report(output_epub=result_path, phase="build")
         return result_path

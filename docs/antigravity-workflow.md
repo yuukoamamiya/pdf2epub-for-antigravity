@@ -82,6 +82,29 @@ html-validate --file <同名文件>.md
 `--file` 的全量校验。
 
 元数据规则：书名、目录、简介和版权说明可以翻译；作者名和出版社必须原样复制。`html-validate` 会检查元数据结构、目录顺序、链接锚点以及作者/出版社是否被修改。校验不通过时，`build-html-epub` 默认拒绝打包。
+打包阶段如果已有 NCX 或 nav 导航文档更新失败，也会默认拒绝生成 EPUB，并把导航文件、错误和阻断状态写入
+`translation_report.json`；仅在人工检查后，才可显式使用
+`build-html-epub --allow-navigation-warnings` 放行。EPUB 只提供其中一种导航格式时，另一种记录为
+`not_found` 属于正常情况。最终构建测试还会通过 PyMuPDF 打开成品并检查页数、文本版心位置和像素稳定性。
+
+### HTML handoff 的 freshness 和构建报告
+
+实体表不是只看 manifest 中已有文件是否匹配。校验会同时比较 manifest 的源文件哈希和当前
+`compressed_units/` 或其他源目录的完整文件集合；新增、删除或修改源文件都会使旧实体表
+失效。正文 HTML 校验同样锁定源单元集合、源哈希和准备阶段的 `input.epub` 快照。
+
+第二套 OCR 的配置在配置加载阶段校验：`ocr.secondary.enabled: true` 时必须有
+`ocr.secondary.backend`。配置关闭第二套 OCR 时，流程直接跳过 `ocr-correct` 和
+`ocr-correct-validate`，CLI help 也会明确这一前置条件。
+
+`translation_report.json` 会保留导航更新结果和打包阻断状态。导航格式缺失和导航更新异常
+必须区分处理：前者在仅有 EPUB 2 或 EPUB 3 导航时属于正常记录，后者必须先人工检查再决定
+是否使用 `--allow-navigation-warnings`。放行 warning 不会替代 `html-validate` 或
+`epubcheck` 门禁。
+
+项目测试还会构造一个固定 EPUB，经过真实的最终打包路径后交给 PyMuPDF 渲染，比较页数、
+文本版心和像素签名，并验证重复渲染稳定。这是本地阅读器引擎级别的回归，不等同于所有
+商业阅读器和硬件设备的兼容性认证。
 
 ## PDF 结构精修
 

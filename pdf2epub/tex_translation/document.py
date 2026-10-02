@@ -56,6 +56,12 @@ _IMPORT_RE = re.compile(
 _PARAGRAPH_RE = re.compile(r".*?(?:\n[ \t]*\n|\Z)", re.DOTALL)
 _COMMAND_NAME_RE = re.compile(r"\\[A-Za-z@]+")
 _COMMENT_RE = re.compile(r"(?m)(?<!\\)%.*$")
+_STRUCTURE_TOKEN_RE = re.compile(
+    r"\\(?:label|ref|pageref|eqref|cite[A-Za-z]*)\s*"
+    r"(?:\[[^\]\n]*\]\s*)?\{[^{}\n]*\}"
+    r"|\\(?:begin|end)\s*\{[^{}\n]*\}"
+    r"|\$\$|\\\[|\\\]|(?<!\\)\$"
+)
 
 CJK_PACKAGE_PREAMBLE = (
     "\n% Added by pdf2epub for Unicode CJK translation.\n"
@@ -136,6 +142,19 @@ class TexProjectDocument:
 
     def render(self, translations: dict[str, str]) -> dict[str, str]:
         """Render every tracked source from immutable text plus unit replacements."""
+        expected_ids = {unit.id for unit in self.units}
+        missing_ids = sorted(expected_ids - set(translations))
+        extra_ids = sorted(set(translations) - expected_ids)
+        if missing_ids:
+            raise ValueError(
+                "Cannot render TeX project with missing translations: "
+                + ", ".join(missing_ids[:10])
+            )
+        if extra_ids:
+            raise ValueError(
+                "Cannot render TeX project with unknown translation units: "
+                + ", ".join(extra_ids[:10])
+            )
         rendered: dict[str, str] = {}
         units_by_file: dict[str, list[TranslationUnit]] = {}
         for unit in self.units:
@@ -145,7 +164,7 @@ class TexProjectDocument:
             replacements = units_by_file.get(relative_path, [])
             result = source
             for unit in sorted(replacements, key=lambda item: item.start, reverse=True):
-                replacement = translations.get(unit.id, unit.source_text)
+                replacement = translations[unit.id]
                 result = result[: unit.start] + replacement + result[unit.end :]
             rendered[relative_path] = result
         return rendered
@@ -507,3 +526,8 @@ def _sha256_json(payload: object) -> str:
         payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def tex_structure_tokens(text: str) -> list[str]:
+    """Extract TeX tokens whose identity must survive translation."""
+    return _STRUCTURE_TOKEN_RE.findall(str(text or ""))

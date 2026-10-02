@@ -271,6 +271,27 @@ def _prepare_html_command(args):
             declared_files=declared_files,
             chapter_groups=_load_html_chapter_groups(pipeline, declared_files),
         )
+        from pdf2epub.workflow_contracts import atomic_write_text, sha256_file
+
+        manifest_path = Path(body_paths["manifest"])
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        canonical_input = output_dir / "input.epub"
+        if not canonical_input.is_file():
+            canonical_input = epub_path
+        try:
+            manifest["input_epub"] = canonical_input.resolve().relative_to(
+                output_dir.resolve()
+            ).as_posix()
+        except ValueError:
+            # Normal preparation always creates output/input.epub. Keep a
+            # diagnostic absolute path for unusual conversion backends while
+            # letting validation reject a non-canonical snapshot later.
+            manifest["input_epub"] = str(canonical_input.resolve())
+        manifest["input_epub_sha256"] = sha256_file(canonical_input)
+        atomic_write_text(
+            manifest_path,
+            json.dumps(manifest, ensure_ascii=False, indent=2),
+        )
         from pdf2epub.subagent_runtime import write_worker_handoffs
 
         worker_handoffs = write_worker_handoffs(
@@ -532,6 +553,9 @@ def build_html_epub_command(args):
         result_path = pipeline.postprocess_and_build(
             output_epub,
             allow_partial=args.allow_partial,
+            allow_navigation_warnings=getattr(
+                args, "allow_navigation_warnings", False
+            ),
         )
 
         logger.success(f"EPUB created: {result_path}")

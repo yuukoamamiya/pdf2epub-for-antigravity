@@ -5,12 +5,41 @@ translation itself remains delegated to the workspace Subagent.
 """
 
 import json
+import re
+import shutil
 from pathlib import Path
 
 from loguru import logger
 
 from pdf2epub.commands.runtime import load_book_context
 from pdf2epub.utils.common import resolve_book_input_path
+
+
+_NOVEL_IMAGE_MARKER_RE = re.compile(r"\[Image:\s*([^\]]+)\]")
+
+
+def _novel_content_source_names(source_dir: Path) -> set[str]:
+    """Return source units that still contain translatable content."""
+    names: set[str] = set()
+    for path in Path(source_dir).glob("*.txt"):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            continue
+        visible = _NOVEL_IMAGE_MARKER_RE.sub("", text)
+        if any(character.isalpha() or "\u3400" <= character <= "\u9fff" for character in visible):
+            names.add(path.name)
+    return names
+
+
+def _novel_child_dir(output_dir: Path, relative_name: object, label: str) -> Path:
+    """Resolve a manifest directory without allowing it outside the run."""
+    candidate = (Path(output_dir) / str(relative_name)).resolve()
+    try:
+        candidate.relative_to(Path(output_dir).resolve())
+    except ValueError as exc:
+        raise ValueError(f"{label} escapes the novel output directory") from exc
+    return candidate
 
 
 def translate_novel_command(args):
@@ -24,7 +53,6 @@ def translate_novel_command(args):
         validated_checkpoint_data,
     )
 
-    import shutil
     from pdf2epub.html_translation.epub_parser import EPUBParser
     from pdf2epub.html_translation.novel_extractor import NovelExtractor
     from pdf2epub.html_translation.builder import HTMLEpubPipeline
@@ -59,6 +87,25 @@ def translate_novel_command(args):
         parser = EPUBParser(str(epub_path))
         units = NovelExtractor(parser).extract_all(output_dir / "novel_units")
         content_units = [unit for unit in units if unit.has_content]
+        source_sha256 = {
+            unit.text_path.name: sha256_file(unit.text_path)
+            for unit in content_units
+            if unit.text_path is not None and unit.text_path.is_file()
+        }
+        source_image_markers = {
+            unit.text_path.name: _NOVEL_IMAGE_MARKER_RE.findall(
+                unit.text_path.read_text(encoding="utf-8")
+            )
+            for unit in content_units
+            if unit.text_path is not None and unit.text_path.is_file()
+        }
+        source_line_counts = {
+            unit.text_path.name: len(
+                [line for line in unit.text_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            )
+            for unit in content_units
+            if unit.text_path is not None and unit.text_path.is_file()
+        }
         metadata_pipeline = HTMLEpubPipeline(epub_path, output_dir, config)
         metadata_pipeline.create_metadata_translation_source(
             target_language=args.target_language
@@ -76,6 +123,11 @@ def translate_novel_command(args):
             "source_dir": "novel_units",
             "target_dir": "translated_novel",
             "files": [unit.text_path.name for unit in content_units],
+            "source_sha256": source_sha256,
+            "source_image_markers": source_image_markers,
+            "source_line_counts": source_line_counts,
+            "input_epub": "input.epub",
+            "input_epub_sha256": sha256_file(input_epub),
         }
         translated_dir = output_dir / "translated_novel"
         completed_files = []
@@ -140,6 +192,7 @@ validation reports them as invalid.
 def translate_novel_validate_command(args):
     """Validate novel text and metadata written by the Subagent."""
     from pdf2epub.subagent_safety import detect_refusal
+    from pdf2epub.markdown_validation import target_language_ratio_check
     from pdf2epub.workflow_contracts import sha256_file
     from pdf2epub.html_translation.epub_parser import EPUBParser
     from pdf2epub.html_translation.novel_extractor import NovelExtractor
@@ -157,23 +210,80 @@ def translate_novel_validate_command(args):
         return 1
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        source_dir = output_dir / manifest["source_dir"]
-        target_dir = output_dir / manifest["target_dir"]
+        source_dir = _novel_child_dir(output_dir, manifest["source_dir"], "source_dir")
+        target_dir = _novel_child_dir(output_dir, manifest["target_dir"], "target_dir")
+        raw_files = manifest.get("files", [])
+        source_snapshot_errors = []
+        if not isinstance(raw_files, list) or not all(
+            isinstance(name, str)
+            and Path(name).name == name
+            and Path(name).suffix.lower() == ".txt"
+            for name in raw_files
+        ):
+            source_snapshot_errors.append("novel manifest contains an unsafe files inventory")
+            expected_files = []
+        else:
+            expected_files = list(dict.fromkeys(raw_files))
+        expected_source_hashes = manifest.get("source_sha256")
+        if not isinstance(expected_source_hashes, dict):
+            source_snapshot_errors.append("novel manifest has no source_sha256 snapshot")
+            expected_source_hashes = {}
+        expected_source_hashes = {
+            str(name): str(value)
+            for name, value in expected_source_hashes.items()
+            if isinstance(name, str) and isinstance(value, str)
+        }
+        if set(expected_source_hashes) != set(expected_files):
+            source_snapshot_errors.append(
+                "novel source_sha256 inventory differs from manifest files"
+            )
+        actual_source_files = _novel_content_source_names(source_dir)
+        if actual_source_files != set(expected_files):
+            source_snapshot_errors.append(
+                "novel source unit inventory changed after preparation"
+            )
+        actual_target_files = {
+            path.name for path in target_dir.glob("*.txt") if path.is_file()
+        }
+        if actual_target_files != set(expected_files):
+            source_snapshot_errors.append(
+                "novel translated unit inventory contains missing or extra files"
+            )
+        current_input_hash = sha256_file(epub_path)
+        if manifest.get("input_epub_sha256") != current_input_hash:
+            source_snapshot_errors.append("input EPUB changed after translate-novel")
         missing = [
-            name for name in manifest.get("files", [])
+            name for name in expected_files
             if not (source_dir / name).exists() or not (target_dir / name).exists()
             or not (target_dir / name).read_text(encoding="utf-8").strip()
         ]
         refusal_files = []
-        for name in manifest.get("files", []):
+        invalid_files = []
+        target_language_audits = {}
+        for name in expected_files:
             if name in missing:
                 continue
             source_text = (source_dir / name).read_text(encoding="utf-8")
             target_text = (target_dir / name).read_text(encoding="utf-8")
+            source_hash = sha256_file(source_dir / name)
+            if expected_source_hashes.get(name) != source_hash:
+                invalid_files.append(
+                    {"file": name, "reason": "source changed after translate-novel"}
+                )
+                continue
             refusal = detect_refusal(source_text, target_text)
             source_fence_count = source_text.count("```")
             target_fence_count = target_text.count("```")
-            if refusal or source_fence_count != target_fence_count:
+            source_line_count = len(source_text.splitlines())
+            target_line_count = len(target_text.splitlines())
+            source_images = _NOVEL_IMAGE_MARKER_RE.findall(source_text)
+            target_images = _NOVEL_IMAGE_MARKER_RE.findall(target_text)
+            if (
+                refusal
+                or source_fence_count != target_fence_count
+                or source_images != target_images
+                or source_line_count != target_line_count
+            ):
                 refusal_files.append(
                     {
                         "file": name,
@@ -183,18 +293,41 @@ def translate_novel_validate_command(args):
                             else (
                                 "Markdown code fence mismatch: "
                                 f"expected {source_fence_count}, got {target_fence_count}"
+                            ) if source_fence_count != target_fence_count else (
+                                "inline image marker mismatch: "
+                                f"expected {source_images!r}, got {target_images!r}"
+                            ) if source_images != target_images else (
+                                "line count mismatch: "
+                                f"expected {source_line_count}, got {target_line_count}"
                             )
                         ),
                     }
                 )
+                continue
+            target_language_audit = target_language_ratio_check(
+                source_text,
+                target_text,
+                manifest.get("target_language", "Chinese"),
+            )
+            target_language_audits[name] = target_language_audit
+            if target_language_audit.get("blocked"):
+                invalid_files.append(
+                    {
+                        "file": name,
+                        "reason": target_language_audit.get(
+                            "reason", "target-language audit failed"
+                        ),
+                    }
+                )
         valid_files = [
-            name
-            for name in manifest.get("files", [])
-            if name not in missing and not any(item["file"] == name for item in refusal_files)
+            name for name in expected_files
+            if name not in missing
+            and not any(item["file"] == name for item in refusal_files)
+            and not any(item["file"] == name for item in invalid_files)
         ]
         source_sha256 = {
             name: sha256_file(source_dir / name)
-            for name in manifest.get("files", [])
+            for name in expected_files
             if (source_dir / name).is_file()
         }
         metadata_report = HTMLEpubPipeline(
@@ -206,18 +339,43 @@ def translate_novel_validate_command(args):
             logger.error(f"Novel translations containing refusal/disclaimer text: {refusal_files[:10]}")
         if not metadata_report["valid"]:
             logger.error(f"Invalid novel metadata: {metadata_report['errors']}")
-        if missing or refusal_files or not metadata_report["valid"]:
+        all_passed = (
+            not missing
+            and not refusal_files
+            and not invalid_files
+            and not source_snapshot_errors
+            and metadata_report["valid"]
+        )
+        if not all_passed:
             (output_dir / "translate-novel_validation.json").write_text(
                 json.dumps(
                     {
                         "task": "translate-novel",
                         "valid_files": valid_files,
                         "source_sha256": source_sha256,
+                        "target_sha256": {
+                            name: sha256_file(target_dir / name)
+                            for name in expected_files
+                            if (target_dir / name).is_file()
+                        },
+                        "source_snapshot": {
+                            "valid": not source_snapshot_errors,
+                            "expected_files": sorted(expected_files),
+                            "actual_files": sorted(actual_source_files),
+                            "actual_target_files": sorted(actual_target_files),
+                            "errors": source_snapshot_errors,
+                        },
+                        "target_language_audits": target_language_audits,
+                        "target_language_blocked": sorted(
+                            name
+                            for name, audit in target_language_audits.items()
+                            if audit.get("blocked")
+                        ),
                         "missing": missing,
-                        "invalid": refusal_files,
+                        "invalid": refusal_files + invalid_files,
                         "safety_blocked": [item["file"] for item in refusal_files],
                         "metadata": metadata_report,
-                        "all_passed": not missing and not refusal_files and metadata_report["valid"],
+                        "all_passed": False,
                     },
                     ensure_ascii=False,
                     indent=2,
@@ -227,15 +385,29 @@ def translate_novel_validate_command(args):
             return 1
         (output_dir / "translate-novel_validation.json").write_text(
             json.dumps(
-                {
-                    "task": "translate-novel",
-                    "valid_files": valid_files,
-                    "source_sha256": source_sha256,
-                    "missing": [],
-                    "invalid": [],
-                    "safety_blocked": [],
-                    "metadata": metadata_report,
-                    "all_passed": True,
+                    {
+                        "task": "translate-novel",
+                        "valid_files": valid_files,
+                        "source_sha256": source_sha256,
+                        "target_sha256": {
+                            name: sha256_file(target_dir / name)
+                            for name in expected_files
+                            if (target_dir / name).is_file()
+                        },
+                        "source_snapshot": {
+                            "valid": True,
+                            "expected_files": sorted(expected_files),
+                            "actual_files": sorted(actual_source_files),
+                            "actual_target_files": sorted(actual_target_files),
+                            "errors": [],
+                        },
+                        "target_language_audits": target_language_audits,
+                        "target_language_blocked": [],
+                        "missing": [],
+                        "invalid": [],
+                        "safety_blocked": [],
+                        "metadata": metadata_report,
+                        "all_passed": all_passed,
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -279,15 +451,23 @@ def build_novel_epub_command(args):
 
         translated_dir = output_dir / "translated_novel"
         xhtml_dir = output_dir / "final_xhtml"
+        if xhtml_dir.exists():
+            shutil.rmtree(xhtml_dir)
         xhtml_dir.mkdir(parents=True, exist_ok=True)
 
         # Validation above guarantees that every content unit has a Subagent
         # output; this conversion therefore never silently falls back to source.
-        _convert_txt_to_xhtml(units, translated_dir, xhtml_dir, parser_obj)
+        converted_count = _convert_txt_to_xhtml(
+            units, translated_dir, xhtml_dir, parser_obj
+        )
 
-        translated_count = sum(1 for u in units if u.has_content and (translated_dir / u.text_path.name).exists())
         total_content = sum(1 for u in units if u.has_content)
-        logger.info(f"Translated {translated_count}/{total_content} content units")
+        logger.info(f"Translated {converted_count}/{total_content} content units")
+        if converted_count != total_content:
+            raise ValueError(
+                f"Novel conversion count mismatch: converted={converted_count}, "
+                f"expected={total_content}"
+            )
 
         metadata_path = output_dir / "translated_metadata.json"
         translated_metadata = None
@@ -436,6 +616,7 @@ def _convert_txt_to_xhtml(units, translated_dir, xhtml_dir, parser):
     extractor = NovelExtractor(parser)
     xhtml_dir.mkdir(parents=True, exist_ok=True)
 
+    converted_count = 0
     for unit in units:
         if not unit.text_path:
             continue
@@ -446,7 +627,9 @@ def _convert_txt_to_xhtml(units, translated_dir, xhtml_dir, parser):
 
         txt_path = translated_dir / unit.text_path.name
         if not txt_path.exists():
-            continue
+            raise FileNotFoundError(
+                f"Missing translated novel unit: {txt_path.name}"
+            )
 
         if not unit.source_href:
             raise ValueError(f"Missing source XHTML href for {unit.file_name}")
@@ -513,3 +696,6 @@ def _convert_txt_to_xhtml(units, translated_dir, xhtml_dir, parser):
             out_name = f"{unit.file_name}.xhtml"
 
         (xhtml_dir / out_name).write_text(xhtml, encoding='utf-8')
+        converted_count += 1
+
+    return converted_count

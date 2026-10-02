@@ -4,6 +4,7 @@ These handlers materialize and validate TeX translation units locally;
 translation remains delegated to the workspace Subagent.
 """
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -120,6 +121,9 @@ def translate_arxiv_command(args):
             "project_dir": "project",
             "main_tex": document.main_tex,
             "unit_chars": unit_chars,
+            "source_fingerprint": document.source_fingerprint,
+            "layout_fingerprint": document.layout_fingerprint,
+            "unit_ids": [entry["id"] for entry in unit_entries],
             "units": unit_entries,
             "resume": getattr(args, "resume", False),
             "completed_units": completed_units,
@@ -166,7 +170,7 @@ def translate_arxiv_validate_command(args):
 
     from pdf2epub.subagent_safety import detect_refusal
     from pdf2epub.tex_translation.compiler import TexCompiler
-    from pdf2epub.tex_translation.document import scan_project
+    from pdf2epub.tex_translation.document import scan_project, tex_structure_tokens
     from pdf2epub.workflow_contracts import sha256_file
 
     if not args.output_dir:
@@ -193,22 +197,55 @@ def translate_arxiv_validate_command(args):
             target_language=manifest.get("target_language", "Simplified Chinese"),
         )
         document_units = {unit.id: unit for unit in document.units}
+        run_root = run_dir.resolve()
+
+        def safe_run_path(relative_name: str) -> Path:
+            target = (run_root / str(relative_name)).resolve()
+            target.relative_to(run_root)
+            return target
+
+        expected_entries = manifest.get("units", [])
+        expected_entries = expected_entries if isinstance(expected_entries, list) else []
+        expected_ids = [
+            entry.get("id") for entry in expected_entries
+            if isinstance(entry, dict) and entry.get("id")
+        ]
+        snapshot_errors = []
+        if manifest.get("source_fingerprint") != document.source_fingerprint:
+            snapshot_errors.append("TeX source fingerprint changed after preparation")
+        if manifest.get("layout_fingerprint") != document.layout_fingerprint:
+            snapshot_errors.append("TeX unit layout fingerprint changed after preparation")
+        if manifest.get("unit_ids") != expected_ids:
+            snapshot_errors.append("TeX manifest unit_ids do not match units")
+        if set(expected_ids) != set(document_units) or len(expected_ids) != len(document_units):
+            snapshot_errors.append("TeX source unit ID set changed after preparation")
+        expected_target_names = {
+            Path(entry.get("target_file", "")).name
+            for entry in expected_entries
+            if isinstance(entry, dict) and entry.get("target_file")
+        }
+        translated_dir = safe_run_path(
+            manifest.get("target_dir", "translated_tex_units")
+        )
+        actual_target_names = {
+            path.name for path in translated_dir.glob("*.md") if path.is_file()
+        }
+        if actual_target_names != expected_target_names:
+            snapshot_errors.append(
+                "translated_tex_units contains missing or extra unit files"
+            )
         translated = {}
         missing_units = []
         invalid_units = []
         safety_blocked_units = []
         completed_units = []
-        run_root = run_dir.resolve()
-
-        def safe_run_path(relative_name: str) -> Path:
-            target = (run_root / relative_name).resolve()
-            target.relative_to(run_root)
-            return target
-
-        for entry in manifest.get("units", []):
+        for entry in expected_entries:
             unit_id = entry.get("id", "unknown")
             if unit_id not in document_units:
                 invalid_units.append(f"{unit_id}: no matching source unit")
+                continue
+            if document_units[unit_id].source_sha256 != entry.get("source_sha256"):
+                invalid_units.append(f"{unit_id}: source content changed")
                 continue
             source_path = safe_run_path(entry["source_file"])
             target_path = safe_run_path(entry["target_file"])
@@ -217,7 +254,9 @@ def translate_arxiv_validate_command(args):
                 continue
             source_text = source_path.read_text(encoding="utf-8")
             target_text = target_path.read_text(encoding="utf-8")
-            if sha256_file(source_path) != entry.get("source_sha256"):
+            if hashlib.sha256(source_text.encode("utf-8")).hexdigest() != entry.get(
+                "source_sha256"
+            ):
                 invalid_units.append(f"{unit_id}: source unit changed")
                 continue
             if not target_text.strip():
@@ -230,6 +269,13 @@ def translate_arxiv_validate_command(args):
                 continue
             if "```" in target_text:
                 invalid_units.append(f"{unit_id}: Markdown fence is not allowed")
+                continue
+            source_tokens = tex_structure_tokens(source_text)
+            target_tokens = tex_structure_tokens(target_text)
+            if source_tokens != target_tokens:
+                invalid_units.append(
+                    f"{unit_id}: TeX structural tokens changed"
+                )
                 continue
             translated[unit_id] = target_text
             completed_units.append(unit_id)
@@ -247,7 +293,9 @@ def translate_arxiv_validate_command(args):
         manifest_path.write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
         )
-        if missing_units or invalid_units:
+        if snapshot_errors or missing_units or invalid_units:
+            if snapshot_errors:
+                logger.error(f"Invalid TeX source snapshot: {snapshot_errors[:10]}")
             if missing_units:
                 logger.error(f"Missing translated TeX units: {missing_units[:10]}")
             if invalid_units:

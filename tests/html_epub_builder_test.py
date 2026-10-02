@@ -6,7 +6,12 @@ import pytest
 from lxml import etree
 
 from pdf2epub.html_translation import builder as builder_module
-from pdf2epub.html_translation.builder import BuildConfig, HTMLEpubBuilder, HTMLEpubPipeline
+from pdf2epub.html_translation.builder import (
+    BuildConfig,
+    HTMLEpubBuilder,
+    HTMLEpubPipeline,
+    NavigationUpdateError,
+)
 
 
 OPF_NS = "http://www.idpf.org/2007/opf"
@@ -442,6 +447,86 @@ def test_update_toc_ncx_records_warning_without_aborting_build(
     assert result["status"] == "warning"
     assert result["path"] == "toc.ncx"
     assert "error" in result
+
+
+def test_build_blocks_navigation_warning_by_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    builder = _builder(tmp_path)
+    monkeypatch.setattr(
+        builder,
+        "_extract_epub",
+        lambda extract_dir: extract_dir.mkdir(parents=True),
+    )
+    monkeypatch.setattr(builder, "_replace_xhtml_files", lambda _extract_dir: 0)
+    monkeypatch.setattr(builder, "_update_content_opf", lambda *_args: None)
+
+    def fail_navigation(extract_dir: Path, _metadata: dict) -> None:
+        builder._record_navigation(
+            "ncx",
+            "warning",
+            extract_dir / "OEBPS/toc.ncx",
+            extract_dir,
+            error="malformed NCX",
+        )
+
+    monkeypatch.setattr(builder, "_update_toc_ncx", fail_navigation)
+    monkeypatch.setattr(builder, "_update_nav_xhtml", lambda *_args: None)
+    packaged = False
+
+    def package(_extract_dir: Path) -> None:
+        nonlocal packaged
+        packaged = True
+
+    monkeypatch.setattr(builder, "_package_epub", package)
+
+    with pytest.raises(NavigationUpdateError, match="ncx"):
+        builder.config.translated_metadata = {
+            "translated_title": "译文书名",
+            "toc": [{"href": "chapter.xhtml", "translated": "译文"}],
+        }
+        builder.build()
+
+    assert not packaged
+    assert builder.navigation_report["build_blocked"] is True
+    assert builder.navigation_report["navigation_warnings_acknowledged"] is False
+
+
+def test_build_allows_navigation_warning_only_with_explicit_acknowledgement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    builder = _builder(tmp_path)
+    builder.config.allow_navigation_warnings = True
+    monkeypatch.setattr(
+        builder,
+        "_extract_epub",
+        lambda extract_dir: extract_dir.mkdir(parents=True),
+    )
+    monkeypatch.setattr(builder, "_replace_xhtml_files", lambda _extract_dir: 0)
+    monkeypatch.setattr(builder, "_update_content_opf", lambda *_args: None)
+    monkeypatch.setattr(
+        builder,
+        "_update_toc_ncx",
+        lambda extract_dir, _metadata: builder._record_navigation(
+            "ncx",
+            "warning",
+            extract_dir / "OEBPS/toc.ncx",
+            extract_dir,
+            error="malformed NCX",
+        ),
+    )
+    monkeypatch.setattr(builder, "_update_nav_xhtml", lambda *_args: None)
+    monkeypatch.setattr(builder, "_package_epub", lambda _extract_dir: builder.output_path.write_bytes(b"epub"))
+
+    builder.config.translated_metadata = {
+        "translated_title": "译文书名",
+        "toc": [{"href": "chapter.xhtml", "translated": "译文"}],
+    }
+    assert builder.build() == builder.output_path
+    assert builder.navigation_report["build_blocked"] is False
+    assert builder.navigation_report["navigation_warnings_acknowledged"] is True
 
 
 def test_translation_report_includes_navigation_diagnostics(tmp_path: Path) -> None:

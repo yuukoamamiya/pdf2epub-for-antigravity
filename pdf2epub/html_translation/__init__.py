@@ -5,7 +5,12 @@ does not expose an in-process translation client.
 """
 
 from .compressor import HTMLCompressor
-from .builder import HTMLEpubBuilder, HTMLEpubPipeline, build_html_epub
+from .builder import (
+    HTMLEpubBuilder,
+    HTMLEpubPipeline,
+    NavigationUpdateError,
+    build_html_epub,
+)
 
 __all__ = [
     # Compression
@@ -13,5 +18,6 @@ __all__ = [
     # Building
     "HTMLEpubBuilder",
     "HTMLEpubPipeline",
+    "NavigationUpdateError",
     "build_html_epub",
 ]

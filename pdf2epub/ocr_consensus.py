@@ -94,6 +94,18 @@ def secondary_backend_name(config: Mapping[str, Any]) -> Optional[str]:
     return value or None
 
 
+def validate_ocr_config(config: Mapping[str, Any]) -> None:
+    """Reject an enabled structured secondary OCR block without a backend."""
+    ocr = _ocr_config(config)
+    secondary = ocr.get("secondary")
+    if not isinstance(secondary, Mapping):
+        return
+    if secondary_ocr_enabled(config) and not str(secondary.get("backend") or "").strip():
+        raise ValueError(
+            "ocr.secondary.enabled is true but ocr.secondary.backend is missing"
+        )
+
+
 def consensus_settings(config: Mapping[str, Any]) -> Dict[str, Any]:
     ocr = _ocr_config(config)
     value = ocr.get("consensus", {})
@@ -430,6 +442,7 @@ __all__ = [
     "review_required_files",
     "secondary_ocr_enabled",
     "secondary_backend_name",
+    "validate_ocr_config",
     "secondary_config_hash",
     "secondary_page_dir",
     "write_page_consensus",

@@ -331,6 +331,10 @@ uv run pdf2epub -c config.yaml build-epub
    uv run pdf2epub -c config_epub.yaml build-html-epub
    ```
 
+   如果构建报告出现导航更新 warning，暂停并检查报告；确认可以接受后，才可显式使用
+   `build-html-epub --allow-navigation-warnings` 放行。不要默认放行 warning。完成后运行
+   项目的最终 EPUB 渲染回归测试。
+
 ## 4. 轻小说 EPUB 流程
 
 1. 执行 `translate-novel -i <input.epub>`，生成 `novel_units/`、manifest 和 Prompt。

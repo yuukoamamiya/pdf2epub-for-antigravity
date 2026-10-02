@@ -559,6 +559,14 @@ def register_command_parsers(subparsers) -> None:
         action="store_true",
         help="Build despite missing/invalid units or metadata (unsafe; for previews only)",
     )
+    build_html_epub_parser.add_argument(
+        "--allow-navigation-warnings",
+        action="store_true",
+        help=(
+            "Build despite NCX/nav update warnings after reviewing the navigation report "
+            "(unsafe; explicit acknowledgement required)"
+        ),
+    )
     build_html_epub_parser.set_defaults(func=build_html_epub_command)
 
     # Novel Translation subcommand (text-mode for light novels)

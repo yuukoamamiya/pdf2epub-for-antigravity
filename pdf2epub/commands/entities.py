@@ -103,7 +103,13 @@ def _entity_context_is_current(
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         if Path(manifest.get("source_dir", "")).as_posix() != source_dir.relative_to(output_dir).as_posix():
             return False
-        for name, expected in (manifest.get("source_sha256", {}) or {}).items():
+        expected_hashes = manifest.get("source_sha256", {}) or {}
+        if not isinstance(expected_hashes, dict) or not expected_hashes:
+            return False
+        actual_names = {path.name for path in source_dir.glob("*.md") if path.is_file()}
+        if set(expected_hashes) != actual_names:
+            return False
+        for name, expected in expected_hashes.items():
             path = source_dir / name
             if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
                 return False
@@ -195,6 +201,13 @@ def extract_entities_validate_command(args):
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             source_dir = entity_path.parent / manifest.get("source_dir", "")
             expected_hashes = manifest.get("source_sha256", {})
+            actual_names = {
+                path.name for path in source_dir.glob("*.md") if path.is_file()
+            }
+            if set(expected_hashes) != actual_names:
+                errors.append(
+                    "entity source file set changed after extraction"
+                )
             for name, expected in expected_hashes.items():
                 source_path = source_dir / name
                 if not source_path.is_file():
