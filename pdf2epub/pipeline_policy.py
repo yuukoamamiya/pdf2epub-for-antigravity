@@ -9,6 +9,8 @@ set of ``pipeline`` special cases.
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
+from pdf2epub.ocr_consensus import secondary_ocr_enabled
+
 
 CONVERSION_PIPELINE_NAMES = frozenset({"epub_conversion", "ocr_to_epub"})
 
@@ -24,6 +26,7 @@ class PipelinePolicy:
     requires_polish: bool
     source_language: Optional[str]
     target_language: Optional[str]
+    requires_ocr_correction: bool = True
 
     @property
     def is_conversion(self) -> bool:
@@ -67,6 +70,11 @@ class PipelinePolicy:
             requires_translation=requires_translation,
             requires_entities=requires_entities,
             requires_translated_toc=requires_translation,
+            # The optional second OCR pass and its visual correction gate are
+            # one feature: enabling the secondary backend requires correction
+            # for scanned PDFs. With one OCR backend, raw pages remain the
+            # selected source for backwards-compatible single-pass runs.
+            requires_ocr_correction=secondary_ocr_enabled(config),
             # Every PDF workflow must pass the polish gate, including pure
             # conversion.  Translation-specific gates are separate flags.
             requires_polish=True,

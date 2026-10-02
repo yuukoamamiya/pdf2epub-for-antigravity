@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import difflib
+import math
 import re
 from typing import Any, Dict, Optional
+
+from .utils.ocr_artifacts import clean_ocr_page_artifacts
 
 
 _CHINESE_TARGET_LANGUAGE_ALIASES = {
@@ -263,6 +267,7 @@ def _language_audit_text(text: str) -> str:
     text = re.sub(r"https?://\S+|www\.\S+", " ", text, flags=re.IGNORECASE)
     text = re.sub(r"`[^`]*`", " ", text)
     text = re.sub(r"\$\$?.*?\$\$?", " ", text, flags=re.DOTALL)
+    text = re.sub(r"<[^>]+>", " ", text)
     return text
 
 
@@ -347,6 +352,86 @@ def detect_polish_page_furniture(text: str) -> list[Dict[str, Any]]:
     return findings
 
 
+def polish_content_integrity_check(
+    source_text: str,
+    target_text: str,
+) -> Dict[str, Any]:
+    """Detect substantial source-content loss during full-text polishing.
+
+    Polish is allowed to reflow paragraphs, remove confirmed page furniture,
+    and normalize verified footnote superscripts. It is not allowed to drop a
+    substantial amount of visible prose, numbers, or punctuation. This check
+    is deliberately a blocking signal so an accidental truncated Subagent
+    output cannot become the next source stage.
+    """
+
+    def tokens(text: str) -> list[str]:
+        from .page_furniture_repair import _candidate_for_line
+
+        visible_lines: list[str] = []
+        for line in clean_lines(text):
+            candidate = _candidate_for_line(line)
+            if candidate and candidate.get("confidence") == "high":
+                continue
+            visible_lines.append(line)
+        value = "\n".join(visible_lines)
+        value = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", value)
+        value = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", value)
+        value = re.sub(r"<sup>\s*(\d+)\s*</sup>", r"[^\1]", value, flags=re.IGNORECASE)
+        value = re.sub(r"\[\^\s*(\d+)\s*\]", r"[^\1]", value)
+        value = re.sub(r"^\s*#{1,6}\s+", "", value, flags=re.MULTILINE)
+        value = value.replace("**", "").replace("__", "")
+        value = value.replace("*", "").replace("_", "")
+        value = re.sub(r"\s+", " ", value).strip()
+        return re.findall(r"\w+|[^\w\s]", value, flags=re.UNICODE)
+
+    def clean_lines(text: str) -> list[str]:
+        return clean_ocr_page_artifacts(str(text or "")).splitlines()
+
+    source_tokens = tokens(source_text)
+    target_tokens = tokens(target_text)
+    matcher = difflib.SequenceMatcher(None, source_tokens, target_tokens, autojunk=False)
+    removed_tokens = 0
+    removed_characters = 0
+    for tag, i1, i2, _j1, _j2 in matcher.get_opcodes():
+        if tag in {"delete", "replace"}:
+            removed_tokens += i2 - i1
+            removed_characters += sum(len(token) for token in source_tokens[i1:i2])
+
+    numeric_token_re = re.compile(r"\d+(?:[./:-]\d+)*")
+    source_numbers = [token for token in source_tokens if numeric_token_re.fullmatch(token)]
+    target_numbers = [token for token in target_tokens if numeric_token_re.fullmatch(token)]
+    target_number_iterator = iter(target_numbers)
+    missing_numbers = [
+        number
+        for number in source_numbers
+        if not any(candidate == number for candidate in target_number_iterator)
+    ]
+    loss_threshold = max(8, math.ceil(len(source_tokens) * 0.02))
+    errors: list[str] = []
+    if removed_tokens >= loss_threshold:
+        ratio = removed_tokens / max(1, len(source_tokens))
+        errors.append(
+            "polish content integrity loss: "
+            f"{removed_tokens}/{len(source_tokens)} source tokens ({ratio:.1%}) disappeared"
+        )
+    if missing_numbers:
+        errors.append(
+            "polish content integrity loss: source numeric markers are missing "
+            f"from polished output: {missing_numbers[:12]!r}"
+        )
+    return {
+        "valid": not errors,
+        "source_token_count": len(source_tokens),
+        "target_token_count": len(target_tokens),
+        "removed_token_count": removed_tokens,
+        "removed_character_count": removed_characters,
+        "removed_token_ratio": round(removed_tokens / max(1, len(source_tokens)), 6),
+        "missing_numeric_markers": missing_numbers,
+        "errors": errors,
+    }
+
+
 def translation_diff_summary(source_text: str, target_text: str) -> Dict[str, Any]:
     """Return structural and translation-risk counters for a Markdown unit."""
     heading_pattern = re.compile(r"^#{1,6}\s", re.MULTILINE)
@@ -402,6 +487,7 @@ __all__ = [
     "detect_bilingual_output",
     "detect_polish_page_furniture",
     "fix_reference_heading_mismatch",
+    "polish_content_integrity_check",
     "strip_outer_markdown_fences",
     "target_language_ratio_check",
     "translation_diff_summary",

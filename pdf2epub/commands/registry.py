@@ -28,7 +28,11 @@ from pdf2epub.commands.page_furniture import (
     repair_page_furniture_command,
     repair_page_furniture_validate_command,
 )
-from pdf2epub.commands.ocr import ocr_pages_command
+from pdf2epub.commands.ocr import (
+    ocr_correct_command,
+    ocr_correct_validate_command,
+    ocr_pages_command,
+)
 from pdf2epub.commands.pdf import build_epub_command
 from pdf2epub.commands.refine import (
     refine_command,
@@ -116,7 +120,53 @@ def register_command_parsers(subparsers) -> None:
         default=None,
         help="Number of parallel OCR workers (default: from config or 5)"
     )
+    ocr_pages_parser.add_argument(
+        "--allow-empty-pages",
+        action="store_true",
+        help=(
+            "Explicitly acknowledge OCR pages with no detected payload after "
+            "manual inspection"
+        ),
+    )
+    ocr_pages_parser.add_argument(
+        "--retry-pages",
+        help=(
+            "Comma-separated physical page numbers to OCR again even when "
+            "their checkpoint is complete"
+        ),
+    )
     ocr_pages_parser.set_defaults(func=ocr_pages_command)
+
+    ocr_correct_parser = subparsers.add_parser(
+        "ocr-correct",
+        help="Prepare visual OCR correction for an Antigravity Subagent",
+        description=(
+            "Render page images and create a page-scoped Subagent hand-off. "
+            "The Subagent compares OCR text with the matching page image."
+        ),
+    )
+    ocr_correct_parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Reuse current review images and validated page checkpoints when possible",
+    )
+    ocr_correct_parser.add_argument(
+        "--dpi",
+        type=int,
+        default=None,
+        help="Review-image resolution (default: ocr_correction.review_dpi or 150)",
+    )
+    ocr_correct_parser.set_defaults(func=ocr_correct_command)
+
+    ocr_correct_validate_parser = subparsers.add_parser(
+        "ocr-correct-validate",
+        help="Validate and stage visual OCR-correction output",
+    )
+    ocr_correct_validate_parser.add_argument(
+        "--file",
+        help="Validate one page as a checkpoint instead of the full OCR correction",
+    )
+    ocr_correct_validate_parser.set_defaults(func=ocr_correct_validate_command)
 
     # Refine subcommand (refined breakdown with boundary verification)
     refine_parser = subparsers.add_parser(

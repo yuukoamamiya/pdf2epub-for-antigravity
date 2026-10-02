@@ -86,8 +86,55 @@ html-validate --file <同名文件>.md
 ## PDF 结构精修
 
 ```text
-ocr-pages → refine-prepare → Subagent → refine-local → polish → polish-validate
+ocr-pages →（若启用第二套 OCR：ocr-correct → ocr-correct-validate）→ refine-prepare → Subagent → refine-local → polish → polish-validate
 ```
+
+OCR 完成不是“有几个 `page_*.md` 文件”就算通过。`ocr_progress.json` 会记录源 PDF
+哈希、真实物理页数、已处理页、失败页、缺失页和空结果页；失败、缺页或未确认的空结果
+会使 `ocr-pages` 返回非零，并阻断 `refine-prepare`、`refine-local` 和后续 readiness
+检查。网络/服务失败可直接使用 `ocr-pages --resume` 重试；如果某页虽然已标记完成但
+需要重新识别，可使用 `ocr-pages --resume --retry-pages 12,15`。确认某页确实是物理空白页
+后，才可使用 `--allow-empty-pages` 显式放行，并保留该决定在 checkpoint 中。修复 OCR
+后运行 `refine-local --resume`，页面指纹变化会使下游 polish/翻译 checkpoint 重新进入
+待处理状态。
+
+只有 `ocr.secondary.enabled: true` 时才执行 `ocr-correct`。本地程序会从原始 PDF 渲染一张
+与每个物理页对应的审阅图，并生成 `ocr-correct_worker_handoffs/`；工作区 Subagent 只能处理
+自己 manifest 的 `assigned_files`，对照同名页图修正有直接视觉证据的识别错误，结果写入
+`ocr_corrected_pages/`，并为每页写入 `ocr_correction_reviews/page_NNN.json`。随后运行
+`ocr-correct-validate`，它会检查 UTF-8、输出完整性、逐页审阅记录、行数不减少、Markdown
+结构标记和原始页哈希，并将通过的结果暂存到 `ocr_corrected_pages/validated/`。原始 `pages/`
+永不覆盖；纠错结果缺失、过期或未通过校验时，`refine-prepare` 和 `refine-local` 会阻断。
+第二套 OCR 关闭时直接使用主 OCR 的 `pages/`，不生成“已纠错”检查点；高置信度原生文字 PDF
+同样不适用该阶段。
+
+可选的双 OCR 配置可以在 `ocr-pages` 阶段启用本地 PaddleOCR；开关同时决定是否进入视觉
+Subagent 纠错阶段：
+
+```yaml
+ocr:
+  backend: chandra
+  secondary:
+    enabled: true
+    backend: paddle
+  backends:
+    paddle:
+      lang: en
+
+ocr_correction:
+  review_dpi: 150
+```
+
+本地依赖可用 `uv sync --extra ocr-local` 安装；PaddleOCR 的语言模型必须与原书语言匹配。
+
+安装本地引擎后，`ocr-pages` 会把主 OCR 和 PaddleOCR 的结果按页做规范化比较，忽略纯粹的
+Markdown 换行/标记差异，但保留字符、数字、标点和缺行差异。报告写入 `ocr_consensus.json`；
+没有实质差异的页面直接自动接受，只有 `action: visual_review` 的页面才进入
+`ocr-correct_worker_handoffs/`。双 OCR 只是筛查，不把任一 OCR 结果当作绝对真值；两个引擎
+共同犯错由两层机制补充拦截：默认每 20 页抽查一页，并把内部文本密度显著低于相邻页的页面
+标记为风险页。这些信号只扩大视觉复核范围，不自动修改文本；它们仍不能证明两个 OCR 没有
+共同犯错。`ocr.secondary.enabled: false` 时不运行第二套 OCR，也不运行
+视觉 OCR 纠错，主 OCR 结果直接进入后续结构整理。
 
 翻译模式在 polish 之后继续：
 
@@ -112,7 +159,7 @@ input_pdf: "input/your_book.pdf"
 pipeline: epub_conversion
 ```
 
-`refine-prepare` 会在 `output/<title>/` 生成 `refine_subagent_prompt.md` 和 `refine_subagent_manifest.json`。Subagent 阅读 `pages/page_*.md` 后，只负责写入 `toc_tree.json`。随后 `refine-local`：
+`refine-prepare` 会在 `output/<title>/` 生成 `refine_subagent_prompt.md` 和 `refine_subagent_manifest.json`。视觉 OCR PDF 中，Subagent 阅读经过校验的 `ocr_corrected_pages/validated/page_*.md`；原生文字 PDF 仍读取 `pages/page_*.md`。它只负责写入 `toc_tree.json`。随后 `refine-local`：
 
 - 校验页码范围、层级、父子包含关系和兄弟节点重叠；
 - 用本地 tokenizer 估算单元大小；
@@ -135,16 +182,21 @@ pipeline: epub_conversion
 安全检查 OCR 中 Notes/注释章节的 `<sup>N</sup>` 注脚迁移为 `[^N]` 和
 `[^N]: ...`；数学、表格和序数上标不会按注脚处理。
 
-PDF 正文翻译前，必须按以下顺序运行（实体表尚未存在时使用第一条的
+启用第二套 OCR 时，PDF 正文翻译前必须按以下顺序运行（实体表尚未存在时使用第一条的
 `--skip-entities`；实体表完成后再次运行不带该选项的门禁）：
 
 ```text
-polish → polish-validate → check-ready --skip-entities → extract-entities →
+ocr-pages → ocr-correct → ocr-correct-validate → polish → polish-validate → check-ready --skip-entities → extract-entities →
 extract-entities-validate → check-ready → translate → translate-validate
 ```
 
-`polish` 对 OCR/混合型 PDF 用于修复 OCR 换行和明显 OCR 错字；对高置信度原生矢量文本
-PDF 用于识别视觉换行与真实段落边界。原生文字稿不得进行无依据的拼写或字形改写。
+`polish` 在启用第二套 OCR 时只处理前置 OCR 纠错之后的换行、段落边界和块级结构；已通过
+`ocr-correct-validate` 的字符、词语和符号视为权威，不再进行 OCR 字符、拼写或措辞改写。
+若仍疑似有 OCR 错误，应退回 `ocr-correct`。关闭第二套 OCR 时跳过 `ocr-correct`，主 OCR
+结果直接进入 polish；polish 仍只处理结构，不应静默改写 OCR 字符。对高置信度原生矢量文本 PDF，polish 用于识别视觉换行与真实
+段落边界；原生文字稿也不得进行无依据的拼写或字形改写。`polish-validate` 还会对源稿和
+润色稿做忽略换行、Markdown 外层标记及已确认页边装饰的内容保真比较；正文 token 或数字
+标记大量丢失时会阻断，而不是把不完整润色稿交给后续翻译。
 PDF 翻译、实体提取和打包都必须以当前且通过 `polish-validate` 的
 `polished_markdown/validated/` 为源稿；如果润色稿缺失、校验失败或与当前源稿不匹配，
 本地门禁会拒绝继续。

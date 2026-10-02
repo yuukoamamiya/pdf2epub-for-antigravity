@@ -59,7 +59,7 @@ Subagent 合同层
 
 - `runtime.py`：提供 `BookCommandContext`、配置加载和输出目录解析。
 - `sources.py`：选择原始 `ocr_markdown` 或已验证的 `polished_markdown`；所有 PDF 的翻译、实体提取和打包都必须使用后者。
-- `ocr.py`：执行唯一允许调用 OCR 服务的工作流入口。
+- `ocr.py`：执行唯一允许调用 OCR 服务的入口，并可在同一阶段运行本地 PaddleOCR 共识筛查；只把差异页交给工作区 Subagent 做视觉纠错。
 - `refine.py`：准备结构判断 handoff，或调用本地分页/单元合并。
 - `markdown.py`：PDF Markdown 的 polish、translate、readiness 和 validation 编排。
 - `page_furniture.py`：已有 PDF 译文的页眉页脚修复交接和校验编排。
@@ -107,11 +107,16 @@ ocr-pages
   → pdf_text_probe.json
   → pages/ (native text extraction only for high-confidence vector PDFs;
             searchable OCR and scanned PDFs still use visual OCR)
+ocr-pages 可选：主 OCR + PaddleOCR → ocr_consensus.json
+（仅当 ocr.secondary.enabled=true）ocr-correct + 工作区 Subagent + ocr-correct-validate
+（只复核差异页、共同漏检风险页和确定性抽样页；一致页其余页面自动接受；原生文字跳过）
+  → ocr_corrected_pages/validated/
+（ocr.secondary.enabled=false 时直接使用 pages/，不运行 OCR 纠错）
 refine-prepare + 工作区 Subagent
   → toc_tree.json
 refine-local
   → ocr_markdown/ + tree_progress.json
-polish + 工作区 Subagent + polish-validate（所有 PDF 必需；review_required 默认阻断，持续则人工）
+polish + 工作区 Subagent + polish-validate（所有 PDF 必需；review_required 默认阻断，持续则人工；另做内容保真检查）
   → polished_markdown/validated/
 
 翻译分支：

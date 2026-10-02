@@ -29,7 +29,10 @@ from pdf2epub.subagent_workflow import (
     fix_reference_heading_mismatch,
 )
 from pdf2epub.subagent_runtime import write_worker_handoffs
-from pdf2epub.markdown_validation import target_language_ratio_check
+from pdf2epub.markdown_validation import (
+    polish_content_integrity_check,
+    target_language_ratio_check,
+)
 from pdf2epub.footnote_normalization import validate_polish_footnote_normalization
 from pdf2epub.cli import (
     _prepare_pdf_markdown_task,
@@ -170,6 +173,17 @@ def test_target_language_ratio_ignores_non_chinese_target_languages():
 
     assert report["applicable"] is False
     assert report["blocked"] is False
+
+
+def test_target_language_ratio_ignores_html_tags():
+    source = "Dies ist ein längerer philosophischer Absatz über die Geschichte der Vernunft. " * 4
+    target = "<table><tr><td>这是一个很长的哲学段落，讨论理性与概念的发展演变历程。</td></tr></table>" * 4
+    report = target_language_ratio_check(source, target, "Chinese")
+
+    assert report["applicable"] is True
+    assert report["blocked"] is False
+    assert report["target_latin_letters"] == 0
+    assert report["target_cjk_ratio"] == 1.0
 
 
 def test_strip_outer_markdown_fences_only_removes_wrapping_fence():
@@ -660,6 +674,26 @@ def test_polish_validation_still_rejects_unique_heading_removal(tmp_path: Path):
 
     assert report["all_passed"] is False
     assert "structural marker mismatch" in report["invalid"][0]["reason"]
+
+
+def test_polish_content_integrity_rejects_substantial_source_loss():
+    source = " ".join(f"word{i}" for i in range(100))
+    target = " ".join(f"word{i}" for i in range(50))
+
+    report = polish_content_integrity_check(source, target)
+
+    assert report["valid"] is False
+    assert report["removed_token_count"] == 50
+    assert any("content integrity loss" in error for error in report["errors"])
+
+
+def test_polish_content_integrity_allows_reflow_and_footnote_normalization():
+    source = "First paragraph with enough words.\ncontinued here.<sup>1</sup>\n\n[^1]: Note."
+    target = "First paragraph with enough words. continued here.[^1]\n\n[^1]: Note."
+
+    report = polish_content_integrity_check(source, target)
+
+    assert report["valid"] is True
 
 
 def test_polish_footnote_normalization_accepts_verified_legacy_notes():

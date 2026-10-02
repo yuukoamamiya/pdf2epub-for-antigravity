@@ -20,6 +20,11 @@ from pdf2epub.commands.sources import (
     _resolve_pdf_markdown_source,
 )
 from pdf2epub.pipeline_policy import PipelinePolicy
+from pdf2epub.ocr_correction import (
+    ocr_correction_is_current,
+    select_refinement_pages,
+)
+from pdf2epub.ocr_progress import assess_progress
 from pdf2epub.utils.common import book_output_dir, load_config
 from pdf2epub.workflow_contracts import (
     MARKDOWN_VALIDATION_SCHEMA_VERSION,
@@ -221,10 +226,6 @@ def _prepare_pdf_markdown_task(args, task: str):
             "Only remove a heading when it is an obvious duplicated running header; never remove a unique section heading.",
             "When a Notes/注释 section contains numbered endnotes, convert only verified footnote superscripts from <sup>N</sup> to [^N], and convert the matching endnote lines to [^N]: text. Do not convert mathematical, table, ordinal, or other non-footnote superscripts.",
         ]
-        rules.insert(
-            1,
-            "For OCR-derived sources, fix obvious OCR errors and OCR-induced line breaks without inventing content. For native vector-text sources, the shared handoff rules instead require layout-only paragraph reconstruction.",
-        )
         content_type = getattr(args, "content_type", "auto")
         if content_type and content_type != "auto":
             rules.append(f"Treat this as {content_type} content and preserve its domain-specific conventions.")
@@ -753,34 +754,63 @@ def _run_readiness_check(
         )
         return report
 
-    pages_dir = output_dir / "pages"
-    available = page_numbers(pages_dir) if pages_dir.is_dir() else []
-    progress_path = pages_dir / "ocr_progress.json"
-    failed_pages = []
-    processed = []
-    if progress_path.is_file():
+    raw_pages_dir = output_dir / "pages"
+    probe_path = output_dir / "pdf_text_probe.json"
+    expected_total_pages = None
+    expected_source_sha256 = None
+    if probe_path.is_file():
         try:
-            progress = json.loads(progress_path.read_text(encoding="utf-8"))
-            failed_pages = progress.get("failed_pages", []) or []
-            processed = sorted(set(progress.get("pages_processed", []) or []))
+            probe = json.loads(probe_path.read_text(encoding="utf-8"))
+            expected_total_pages = probe.get("page_count")
+            expected_source_sha256 = probe.get("source_sha256")
         except (OSError, json.JSONDecodeError, AttributeError):
-            failed_pages = ["invalid ocr_progress.json"]
-    expected_pages = list(range(1, max(available) + 1)) if available else []
-    page_ready = (
-        bool(available)
-        and available == expected_pages
-        and processed == available
-        and not failed_pages
+            pass
+    ocr_report = assess_progress(
+        raw_pages_dir,
+        expected_total_pages=expected_total_pages,
+        expected_source_sha256=expected_source_sha256,
+        require_sidecars=True,
     )
+    available = ocr_report["available_pages"]
+    page_ready = ocr_report["ready"]
     record(
         "ocr_pages",
         page_ready,
-        (
-            f"{len(available)} contiguous OCR pages; {len(processed)} marked processed"
-            if page_ready
-            else "OCR pages are missing, non-contiguous, failed, or progress is unavailable"
+        f"{len(available)} OCR pages are complete"
+        if page_ready
+        else "; ".join(ocr_report["errors"][:5]),
+    )
+
+    probe = {}
+    try:
+        value = json.loads(probe_path.read_text(encoding="utf-8"))
+        if isinstance(value, dict):
+            probe = value
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        pass
+    native_text = (
+        probe.get("classification") == "native_text"
+        and probe.get("recommendation") == "use_text_layer"
+    )
+    correction_ready = native_text or not policy.requires_ocr_correction or ocr_correction_is_current(
+        output_dir, config
+    )
+    record(
+        "ocr_correction",
+        correction_ready,
+        "not applicable for a high-confidence native-text PDF"
+        if native_text
+        else (
+            "not required because secondary OCR consensus is disabled"
+            if not policy.requires_ocr_correction
+            else (
+                "validated visual OCR correction matches the current page set"
+                if correction_ready
+                else "visual OCR correction is missing, stale, or unvalidated; run ocr-correct and ocr-correct-validate"
+            )
         ),
     )
+    pages_dir, _page_source_kind = select_refinement_pages(output_dir, config=config)
 
     toc_path = output_dir / "toc_tree.json"
     toc_errors: list[str] = []

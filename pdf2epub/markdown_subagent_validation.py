@@ -17,6 +17,7 @@ from .markdown_validation import (
     detect_bilingual_output,
     detect_polish_page_furniture,
     fix_reference_heading_mismatch,
+    polish_content_integrity_check,
     strip_outer_markdown_fences,
     target_language_ratio_check,
     translation_diff_summary,
@@ -131,6 +132,7 @@ def validate_markdown_subagent(
     target_language_audits: Dict[str, Dict[str, Any]] = {}
     target_language_blocked: List[str] = []
     polish_page_furniture_warnings: List[Dict[str, Any]] = []
+    polish_content_integrity: Dict[str, Dict[str, Any]] = {}
     review_required: List[Dict[str, Any]] = []
     normalized_roles = {
         str(name): str(role).strip().lower()
@@ -310,7 +312,16 @@ def validate_markdown_subagent(
             if role_errors and source.name in valid_files:
                 valid_files.remove(source.name)
 
-        if task == "polish" and role not in {"bibliography", "index"}:
+        if task == "polish":
+            integrity = polish_content_integrity_check(source_text, target_text)
+            polish_content_integrity[source.name] = integrity
+            if not integrity["valid"]:
+                invalid.extend(
+                    {"file": source.name, "reason": reason}
+                    for reason in integrity["errors"]
+                )
+                if source.name in valid_files:
+                    valid_files.remove(source.name)
             for finding in detect_polish_page_furniture(target_text):
                 item = {"file": source.name, **finding}
                 polish_page_furniture_warnings.append(item)
@@ -447,6 +458,7 @@ def validate_markdown_subagent(
         "target_language_audits": target_language_audits,
         "bilingual_warnings": bilingual_warnings,
         "polish_page_furniture_warnings": polish_page_furniture_warnings,
+        "polish_content_integrity": polish_content_integrity,
         "review_required": review_required,
         "review_required_files": review_required_files,
         "retry_required": retry_required,
@@ -527,6 +539,7 @@ def validate_markdown_subagent(
                         for item in report["review_required"]
                     )
                 ),
+                "polish_content_integrity": polish_content_integrity.get(name),
             }
         ledger = {
             "schema_version": VALIDATION_SCHEMA_VERSION,

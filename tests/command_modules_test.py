@@ -54,6 +54,8 @@ def test_command_registry_registers_every_workflow_command():
             "html-skeleton-restore",
             "html-validate",
         "ocr-pages",
+        "ocr-correct",
+        "ocr-correct-validate",
         "repair-page-furniture",
         "repair-page-furniture-validate",
         "polish",

@@ -4,9 +4,48 @@ TOC hand-off preparation and local unit generation are deterministic workflow
 steps; structural judgment remains delegated to the workspace Subagent.
 """
 
+import json
+
 from loguru import logger
 
 from pdf2epub.commands.runtime import load_book_context
+from pdf2epub.ocr_correction import select_refinement_pages
+from pdf2epub.ocr_progress import assess_progress
+
+
+def _require_complete_ocr(output_dir) -> bool:
+    """Stop structure work until the physical OCR page set is complete."""
+    probe = {}
+    probe_path = output_dir / "pdf_text_probe.json"
+    if probe_path.is_file():
+        try:
+            probe = json.loads(probe_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            probe = {}
+    report = assess_progress(
+        output_dir / "pages",
+        expected_total_pages=probe.get("page_count"),
+        expected_source_sha256=probe.get("source_sha256"),
+        require_sidecars=True,
+    )
+    if report["ready"]:
+        return True
+    logger.error("OCR is incomplete; structure refinement is blocked")
+    for error in report["errors"][:10]:
+        logger.error(f"OCR readiness: {error}")
+    return False
+
+
+def _select_refinement_pages(output_dir, config):
+    try:
+        return select_refinement_pages(
+            output_dir,
+            require_correction=True,
+            config=config,
+        )
+    except ValueError as exc:
+        logger.error(str(exc))
+        return None, None
 
 
 def refine_command(args):
@@ -24,10 +63,21 @@ def refine_prepare_command(args):
     config = context.config
     book_title = context.book_title
     output_dir = context.output_dir
+    if not _require_complete_ocr(output_dir):
+        return 1
+    pages_dir, _page_source_kind = _select_refinement_pages(output_dir, config)
+    if pages_dir is None:
+        return 1
     refine_config = config.get("refine", {})
     max_tokens = args.max_tokens or refine_config.get("max_tokens", 8000)
     try:
-        paths = prepare_refine_subagent(output_dir, book_title, max_tokens, config=config)
+        paths = prepare_refine_subagent(
+            output_dir,
+            book_title,
+            max_tokens,
+            config=config,
+            pages_dir=pages_dir,
+        )
     except Exception as exc:
         logger.error(f"Could not prepare refine task: {exc}")
         return 1
@@ -51,6 +101,11 @@ def refine_local_command(args):
     config = context.config
     book_title = context.book_title
     output_dir = context.output_dir
+    if not _require_complete_ocr(output_dir):
+        return 1
+    pages_dir, _page_source_kind = _select_refinement_pages(output_dir, config)
+    if pages_dir is None:
+        return 1
     refine_config = config.get("refine", {})
     max_tokens = args.max_tokens or refine_config.get("max_tokens", 8000)
     try:
@@ -63,6 +118,7 @@ def refine_local_command(args):
             output_dir=output_dir,
             book_title=book_title,
             resume=args.resume,
+            pages_dir=pages_dir,
         )
     except Exception as exc:
         logger.error(f"Local refine failed: {exc}")

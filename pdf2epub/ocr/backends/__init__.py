@@ -27,7 +27,7 @@ class OCRBackendSpec:
     native_page_processor: Optional[Callable] = None
 
 
-_BACKEND_NAMES = ("mistral", "vertex", "vllm", "azure", "vision", "chandra")
+_BACKEND_NAMES = ("mistral", "vertex", "vllm", "azure", "vision", "chandra", "paddle")
 
 
 def get_backend(backend_name: str) -> Tuple[Callable, Callable]:
@@ -85,6 +85,15 @@ def get_backend_spec(backend_name: str) -> OCRBackendSpec:
         from .chandra import process_pdf_page
 
         return OCRBackendSpec(name=name, native_page_processor=process_pdf_page)
+
+    if name == "paddle":
+        from .paddle import init_client, process_page
+
+        return OCRBackendSpec(
+            name=name,
+            init_client=init_client,
+            image_page_processor=process_page,
+        )
 
     init_client, process_page = get_backend(name)
     return OCRBackendSpec(

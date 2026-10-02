@@ -16,6 +16,7 @@ def test_registry_exposes_all_page_ocr_backends():
         "azure",
         "vision",
         "chandra",
+        "paddle",
     }
     assert get_backend_spec("mistral").chunk_processor is not None
     assert get_backend_spec("vertex").chunk_processor is not None
@@ -23,6 +24,7 @@ def test_registry_exposes_all_page_ocr_backends():
     assert get_backend_spec("azure").image_page_processor is not None
     assert get_backend_spec("vision").image_page_processor is not None
     assert get_backend_spec("chandra").native_page_processor is not None
+    assert get_backend_spec("paddle").image_page_processor is not None
 
 
 def test_registry_normalizes_names_and_rejects_unknown_backend():

@@ -418,6 +418,9 @@ def _worker_manifest_projection(
         "concurrency_reason",
         "global_toc_outline_sha256",
         "skipped_context_files",
+        "visual_review_dir",
+        "review_output_dir",
+        "secondary_source_dir",
     ):
         if key in manifest:
             projected[key] = manifest[key]
@@ -860,6 +863,13 @@ def write_worker_handoffs(
                 "This worker only repairs existing translated Markdown page "
                 "furniture; do not translate, polish, or modify source/reference "
                 "files or any other translation artifact."
+            )
+        elif task == "ocr-correct":
+            task_boundary_instruction = (
+                "This worker only corrects visually evidenced OCR errors in its "
+                "assigned page files; do not translate, polish, merge pages, "
+                "modify toc_tree.json, or change any other artifact. Write only "
+                "the assigned page-review JSON records required by the prompt."
             )
         else:
             task_boundary_instruction = (

@@ -134,6 +134,7 @@ class RefinedBreakdown:
         output_dir: Path,
         book_title: str,
         resume: bool = False,
+        pages_dir: Path = None,
     ) -> List[Dict]:
         """Generate units from a subagent-produced ``toc_tree.json`` locally.
 
@@ -142,7 +143,7 @@ class RefinedBreakdown:
         ``ocr_markdown`` artifacts used by the local build pipeline.
         """
         output_dir.mkdir(parents=True, exist_ok=True)
-        pages_dir = output_dir / "pages"
+        pages_dir = Path(pages_dir) if pages_dir is not None else output_dir / "pages"
         available = page_numbers(pages_dir)
         if not available:
             raise ValueError(f"Pages not found in {pages_dir}. Run 'pdf2epub ocr-pages' first.")

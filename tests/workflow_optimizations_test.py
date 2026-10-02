@@ -87,6 +87,7 @@ def test_pipeline_policy_centralizes_conversion_and_translation_requirements():
     assert conversion.requires_translation is False
     assert conversion.requires_entities is False
     assert conversion.requires_translated_toc is False
+    assert conversion.requires_ocr_correction is False
     assert conversion.requires_polish is True
     assert conversion.source_language is None
     assert conversion.target_language is None
@@ -107,6 +108,14 @@ def test_pipeline_policy_centralizes_conversion_and_translation_requirements():
     assert translation.requires_translated_toc is True
     assert translation.source_language == "German"
     assert translation.target_language == "Chinese"
+
+    consensus_translation = PipelinePolicy.from_config(
+        {
+            "translation": {"source_language": "German", "target_language": "Chinese"},
+            "ocr": {"secondary": {"enabled": True, "backend": "paddle"}},
+        }
+    )
+    assert consensus_translation.requires_ocr_correction is True
 
 
 def test_native_text_extraction_writes_page_contract(tmp_path: Path):

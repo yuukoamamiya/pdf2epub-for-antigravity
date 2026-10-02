@@ -18,6 +18,7 @@ from typing import Any, Dict
 import pymupdf
 
 from .workflow_contracts import atomic_write_text
+from .ocr_progress import OCR_PROGRESS_SCHEMA_VERSION
 
 
 _REPLACEMENT_RE = re.compile("\\ufffd")
@@ -189,12 +190,17 @@ def extract_native_text_pages(
         pages_dir / "ocr_progress.json",
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": OCR_PROGRESS_SCHEMA_VERSION,
                 "mode": "native_text",
+                "backend": "native_text",
+                "source_sha256": probe["source_sha256"],
+                "total_pages": len(pages_processed),
                 "pages_processed": pages_processed,
                 "failed_pages": [],
+                "empty_pages": [],
+                "allowed_empty_pages": [],
+                "missing_pages": [],
                 "global_image_counter": sum(item["image_count"] for item in page_stats.values()),
-                "source_sha256": probe["source_sha256"],
             },
             ensure_ascii=False,
             indent=2,

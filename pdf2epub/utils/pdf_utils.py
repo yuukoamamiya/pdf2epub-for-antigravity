@@ -7,6 +7,7 @@ Provides:
 """
 
 import shutil
+import hashlib
 import tempfile
 import os
 from pathlib import Path
@@ -224,6 +225,15 @@ def preprocess_pdf(input_pdf, output_dir):
     # Define paths
     processed_pdf = output_dir / "input.pdf"
     original_pdf = output_dir / "input_original.pdf"
+
+    if original_pdf.exists():
+        input_hash = hashlib.sha256(Path(input_pdf).read_bytes()).hexdigest()
+        original_hash = hashlib.sha256(original_pdf.read_bytes()).hexdigest()
+        if input_hash != original_hash:
+            raise ValueError(
+                "The configured input PDF differs from output/input_original.pdf; "
+                "use a new output title or archive the old run before starting a new book"
+            )
 
     # If already processed, verify stamps are present before reusing
     if processed_pdf.exists() and original_pdf.exists():

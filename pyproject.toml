@@ -51,6 +51,12 @@ Homepage = "https://github.com/yuukoamamiya/pdf2epub-for-antigravity"
 Repository = "https://github.com/yuukoamamiya/pdf2epub-for-antigravity.git"
 "Upstream Repository" = "https://github.com/ShenSheiBot/pdf2epub"
 
+[project.optional-dependencies]
+ocr-local = [
+    "paddleocr>=2.7.0",
+    "paddlepaddle>=2.6.0",
+]
+
 [project.scripts]
 pdf2epub = "pdf2epub.cli:main"
 pdf2epub-for-antigravity = "pdf2epub.cli:main"

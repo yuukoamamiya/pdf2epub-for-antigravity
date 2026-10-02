@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 
+from pdf2epub.ocr_progress import assess_progress
 from pdf2epub.workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION
 
 
@@ -49,13 +50,11 @@ def _native_text_stage_is_current(output_dir: Path, pages_dir: Path) -> bool:
         return False
     try:
         probe = json.loads(probe_path.read_text(encoding="utf-8"))
-        progress = json.loads(progress_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return False
     if (
         probe.get("recommendation") != "use_text_layer"
         or probe.get("classification") != "native_text"
-        or progress.get("mode") != "native_text"
     ):
         return False
     original_pdf = output_dir / "input_original.pdf"
@@ -66,7 +65,13 @@ def _native_text_stage_is_current(output_dir: Path, pages_dir: Path) -> bool:
             return False
         if current_hash != probe.get("source_sha256"):
             return False
-    return bool(list(pages_dir.glob("page_*.md"))) and not progress.get("failed_pages")
+    report = assess_progress(
+        pages_dir,
+        expected_total_pages=probe.get("page_count"),
+        expected_source_sha256=probe.get("source_sha256"),
+        require_sidecars=False,
+    )
+    return report["progress"].get("mode") == "native_text" and report["ready"]
 
 
 def _polished_stage_is_current(

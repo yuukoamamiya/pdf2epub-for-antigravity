@@ -35,6 +35,7 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
 `compressed_units/` 内容之前，必须确认：
 
 - [ ] 已确定使用 PDF、EPUB、轻小说或 TeX 流程；
+- [ ] 若 `ocr.secondary.enabled: true`，已完成 `ocr-correct-validate`；若关闭第二套 OCR，已明确接受单 OCR 不做视觉纠错；或已确认是高置信度原生文字 PDF；
 - [ ] 已运行本地准备命令并生成 manifest 和 Prompt；
 - [ ] 已打开工作区 Subagent，并把对应 Prompt/manifest 交给它；
 - [ ] 已明确本批次的 `pending_files` 或 `pending_units`；
@@ -111,15 +112,14 @@ Subagent 直接写文件 → 单文件校验 → 收集完成结果 → 下一�
 `--allow-review-warnings`。
 EPUB、轻小说和 TeX 流程不使用这一 PDF 润色阶段。
 
-PDF 的具体循环为：`ocr-pages → refine-prepare → refine-local → polish →
-polish-validate`。
+PDF 的具体循环为：`ocr-pages →（若启用第二套 OCR：ocr-correct → ocr-correct-validate）→ refine-prepare → refine-local → polish → polish-validate`。
 随后执行 `extract-entities → translate-toc → translate-toc-validate → translate →
 translate-validate → build-epub`。可搜索但由扫描图像叠加 OCR 文字层的 PDF 仍必须重新
 视觉 OCR。
 
 PDF 纯转换模式使用 `pipeline: epub_conversion`（兼容别名
 `mode: ocr_to_epub`），循环为：
-`ocr-pages → refine-prepare → refine-local → polish → polish-validate → build-epub`。
+`ocr-pages →（若启用第二套 OCR：ocr-correct → ocr-correct-validate）→ refine-prepare → refine-local → polish → polish-validate → build-epub`。
 该模式不读取语言设置，不执行实体提取、翻译 TOC 或正文翻译；但 polish 仍是所有 PDF
 必须通过的结构质量门禁。构建时不得使用 `build-epub --translated`。
 
@@ -154,12 +154,25 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
    ```
 
    程序会先生成 `pdf_text_probe.json`。只有高置信度原生矢量文本 PDF 才直接提取文字；
-   扫描 PDF 和可搜索 OCR PDF 都生成视觉 OCR 的 `pages/page_XXX.md`。
-4. 执行 `refine-prepare`。然后打开工作区 Subagent，读取
-   `output/<title>/refine_subagent_prompt.md`，结合 `pages/` 写入 `toc_tree.json`。
+   扫描 PDF 和可搜索 OCR PDF 都生成视觉 OCR 的 `pages/page_XXX.md`。当
+   `ocr.secondary.enabled: true` 且 `ocr.secondary.backend: paddle` 时，此命令还会用本地
+   PaddleOCR 逐页复核主 OCR，生成 `ocr_secondary/` 和 `ocr_consensus.json`；一致页自动接受，
+   只有两个 OCR 有实质差异，或被共同漏检哨兵选中的页面才进入下一步视觉 Subagent。
+   哨兵默认每 20 页抽查一页，并把内部文本密度显著低于相邻页的页面列为风险页；这些规则
+   只增加复核，不会自动改写页面。`enabled: false` 时只运行主 OCR，不进行 OCR 纠错。
+4. 仅当 `ocr.secondary.enabled: true` 时执行 `ocr-correct`。然后打开工作区 Subagent，读取
+   生成的 Prompt，按 `ocr-correct_worker_handoffs/` 中 manifest 的 `assigned_files` 对照同名页图；
+   该 handoff 自动只包含 `ocr_consensus.json` 标记的差异页。将纠错后的同名文件写入
+   `ocr_corrected_pages/`，并为每页写入 `ocr_correction_reviews/page_NNN.json`，再运行
+   `ocr-correct-validate`。校验会拒绝缺少审阅记录、标记为不确定、或比原始 OCR 少行的页面。
+   原始 `pages/` 不得覆盖；未通过该校验不得继续。高置信度原生矢量文本 PDF 跳过该阶段；
+   第二套 OCR 开关关闭时也跳过。
+5. 执行 `refine-prepare`。然后打开工作区 Subagent，读取
+   `output/<title>/refine_subagent_prompt.md`，视觉 OCR 使用经过校验的
+   `ocr_corrected_pages/validated/`，原生文字 PDF 使用 `pages/`，写入 `toc_tree.json`。
    Subagent 应从书名页/版权页提取作者和出版社，并按内容标注 `notes`、`bibliography`、
    `index`；普通正文节点不写 `type`。
-5. 执行：
+6. 执行：
 
    ```text
    uv run pdf2epub -c config.yaml refine-local --resume
@@ -167,11 +180,15 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
 
    本地程序校验页码范围、父子关系、兄弟节点重叠，并生成 `ocr_markdown/`。
    `tree_progress.json` 会锁定 TOC/OCR 指纹；输入变化后必须重新生成受影响单元。
-6. 所有 PDF 都必须执行 `polish`，打开工作区 Subagent 读取
+7. 所有 PDF 都必须执行 `polish`，打开工作区 Subagent 读取
    `polish_subagent_prompt.md`，并按 `polish_worker_handoffs/` 中各 manifest 的
    `assigned_files` 写入 `polished_markdown/`，然后运行 `polish-validate`。
-   对 OCR/混合型 PDF，该步骤用于修复 OCR 换行和明显 OCR 错字；对原生矢量文本 PDF，
-   该步骤用于从视觉行重建语义段落，同时保留原文字符和块级结构。未通过
+   若启用第二套 OCR，对 OCR/混合型 PDF，前置 `ocr-correct` 通过校验后的字符、词语和符号视为权威；
+   该步骤只处理残留换行、段落边界和块级结构，不再纠正 OCR 字符、拼写或措辞。若仍疑似有 OCR 错误，应退回
+   `ocr-correct`，不得在 polish 中改写。若只启用一套 OCR，则没有 page-level 视觉纠错闸门，polish 仍只处理
+   结构，不应静默改写 OCR 字符。对原生矢量文本 PDF，该步骤用于从视觉行重建语义段落，同时保留
+   原文字符和块级结构。`polish-validate` 还会将源稿与润色稿按忽略换行、Markdown 外层标记和已确认页边装饰的
+   方式做内容保真比较；正文 token 或数字标记大量丢失时会阻断。未通过
    `polish-validate` 不得继续实体提取或翻译。
    polish 还必须清除已确认的页眉、页脚、独立印刷页码和人工 OCR 页码标记；
    诸如 `Preface XII` 的短标题加页码组合在确认属于页边装饰后应整行删除。
