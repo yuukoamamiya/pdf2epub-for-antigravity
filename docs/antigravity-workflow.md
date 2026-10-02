@@ -126,6 +126,9 @@ ocr_correction:
 ```
 
 本地依赖可用 `uv sync --extra ocr-local` 安装；PaddleOCR 的语言模型必须与原书语言匹配。
+项目将 `albumentations` 固定在 1.4.x（`<2.0.0`），因为 Windows 下 2.x 会在导入阶段
+主动加载 PyTorch，可能触发与 PaddlePaddle 冲突的 DLL 加载错误。不要通过预加载 `torch`
+来绕过该问题；若本地依赖安装不完整，应重新运行上述同步命令。
 
 安装本地引擎后，`ocr-pages` 会把主 OCR 和 PaddleOCR 的结果按页做规范化比较，忽略纯粹的
 Markdown 换行/标记差异，但保留字符、数字、标点和缺行差异。报告写入 `ocr_consensus.json`；
@@ -164,9 +167,19 @@ pipeline: epub_conversion
 - 校验页码范围、层级、父子包含关系和兄弟节点重叠；
 - 用本地 tokenizer 估算单元大小；
 - 用 `PageMerger` 合并页面并生成 `ocr_markdown/`；
+- 处理页内章节边界：`toc_tree.json` 中的 `boundary_info.start_line` 使用对应
+  `page_XXX.md` 的 1-based 行号，`end_line` 是不包含该行的结束位置。若新章节从
+  下一页的中部开始，上一章节会自动拥有该页标题之前的前缀；若父章节标题和首个
+  子章节同页，父标题/导语会保留在首个子章节单元中，不会被前一章节吞并或丢失；
 - 对超过 15,000 tokens 的 Notes、Bibliography 和 Index 单元按完整条目/段落
   自动生成 `chapter_N.partM.md` 分片，默认目标为 12,000 tokens；
 - 不创建 LLM client、不发送 PDF、不消耗 API 配额。
+
+结构 Subagent 必须区分“换页”和“页内换章”：不能因为章节标题出现在某页中部，
+就把上一章节的 `end_page` 提前到上一页。若父章节与首个子章节共享起始页，必须同时
+提供父节点和首个子节点的 `boundary_info.start_line`；本地校验会拒绝缺少这两个锚点的
+结构结果。这样 `polish` 收到的源稿仍保持完整句子和正确章节归属，polish 只负责换行、
+段落和块级结构，不会通过删除半句来“修复”错误的章节切分。
 
 `refine-local` 完成物理切分后会运行边界注脚扫描器，将安全匹配的跨文件引用/定义记录
 到 `footnote_boundary_bindings.json`；EPUB 构建时由 `FootnoteManager` 消费。原始 PDF 书签
@@ -196,7 +209,9 @@ extract-entities-validate → check-ready → translate → translate-validate
 结果直接进入 polish；polish 仍只处理结构，不应静默改写 OCR 字符。对高置信度原生矢量文本 PDF，polish 用于识别视觉换行与真实
 段落边界；原生文字稿也不得进行无依据的拼写或字形改写。`polish-validate` 还会对源稿和
 润色稿做忽略换行、Markdown 外层标记及已确认页边装饰的内容保真比较；正文 token 或数字
-标记大量丢失时会阻断，而不是把不完整润色稿交给后续翻译。
+标记大量丢失，或结构性空父标题下的子章节正文被重复复制时会阻断，而不是把不完整或
+重复的润色稿交给后续翻译。父标题可以没有正文，但必须只保留标题本身；子章节正文只
+出现一次并归属于最近的子标题。
 PDF 翻译、实体提取和打包都必须以当前且通过 `polish-validate` 的
 `polished_markdown/validated/` 为源稿；如果润色稿缺失、校验失败或与当前源稿不匹配，
 本地门禁会拒绝继续。

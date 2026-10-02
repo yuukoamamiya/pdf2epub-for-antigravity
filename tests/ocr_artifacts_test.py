@@ -65,3 +65,46 @@ def test_page_merger_removes_repeated_h2_header_and_keeps_blank_page_cleaned(tmp
     assert "Second page text." in result
     assert "blank page" not in result.lower()
     assert "graphical elements" not in result.lower()
+
+
+def test_page_merger_uses_absolute_start_and_end_lines_on_one_page(tmp_path: Path):
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    (pages / "page_001.md").write_text(
+        "line 1\nline 2\nline 3\nline 4\nline 5", encoding="utf-8"
+    )
+
+    node = TOCNode(
+        "Section",
+        1,
+        1,
+        1,
+        boundary_info={"start_line": 2, "end_line": 5},
+    )
+    result = PageMerger().merge_node_content(node, pages)
+
+    assert result == "line 2\nline 3\nline 4"
+
+
+def test_page_merger_keeps_prefix_before_next_midpage_section(tmp_path: Path):
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    (pages / "page_001.md").write_text("Previous page.", encoding="utf-8")
+    (pages / "page_002.md").write_text(
+        "The previous sentence continues.\nIt ends here.\n# Next section\nNext text.",
+        encoding="utf-8",
+    )
+
+    previous = TOCNode("Previous", 1, 1, 2)
+    next_node = TOCNode(
+        "Next",
+        1,
+        2,
+        2,
+        boundary_info={"start_line": 3},
+    )
+    result = PageMerger().merge_node_content(previous, pages, next_node)
+
+    assert "The previous sentence continues." in result
+    assert "It ends here." in result
+    assert "# Next section" not in result

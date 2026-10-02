@@ -57,28 +57,34 @@ class PageMerger:
             page_content = page_file.read_text(encoding='utf-8')
             lines = page_content.split('\n')
 
-            # Handle first page - start from start_line if set
+            # Boundary line numbers are absolute within the original page.
+            # Compute both offsets before slicing so a node that starts and
+            # ends on one page does not apply end_line to an already-trimmed
+            # list (which used to retain/drop the wrong lines).
+            start_index = 0
+            end_index = len(lines)
             if page_num == node.start_page:
                 start_line = boundary.get('start_line')
-                if start_line is not None and start_line > 1:
-                    # start_line is 1-indexed, so we slice from start_line-1
-                    lines = lines[start_line - 1:]
+                if isinstance(start_line, int) and start_line > 1:
+                    start_index = start_line - 1
                     logger.debug(f"Node '{node.title}' starts at line {start_line}")
 
             # Handle last page - end at end_line if set, or at next_node's start_line
             if page_num == node.end_page:
                 end_line = boundary.get('end_line')
-                if end_line is not None:
-                    # end_line is 1-indexed, we want lines before this line
-                    lines = lines[:end_line - 1]
+                if isinstance(end_line, int):
+                    # end_line is 1-indexed and exclusive.
+                    end_index = min(end_index, end_line - 1)
                     logger.debug(f"Node '{node.title}' ends at line {end_line}")
                 elif next_node and next_node.start_page == node.end_page:
                     # Next section starts on same page - cut before it
                     next_boundary = next_node.boundary_info or {}
                     next_start_line = next_boundary.get('start_line')
-                    if next_start_line is not None:
-                        lines = lines[:next_start_line - 1]
+                    if isinstance(next_start_line, int):
+                        end_index = min(end_index, next_start_line - 1)
                         logger.debug(f"Cutting before next section at line {next_start_line}")
+
+            lines = lines[start_index:end_index] if end_index >= start_index else []
 
             page_content = '\n'.join(lines)
             page_content = clean_ocr_page_artifacts(page_content)
@@ -133,17 +139,26 @@ class PageMerger:
             lines = page_content.split('\n')
 
             # Handle first page of first node
+            start_index = 0
+            end_index = len(lines)
             if page_num == start_page:
                 start_line = first_boundary.get('start_line')
-                if start_line is not None and start_line > 1:
-                    lines = lines[start_line - 1:]
+                if isinstance(start_line, int) and start_line > 1:
+                    start_index = start_line - 1
 
-            # Handle last page - end at next_node's start_line if on same page
+            # Handle last page - apply the node boundary and then the next
+            # unit boundary, both measured against the original page.
+            if page_num == end_page:
+                end_line = first_boundary.get('end_line')
+                if isinstance(end_line, int):
+                    end_index = min(end_index, end_line - 1)
             if page_num == end_page and next_node and next_node.start_page == end_page:
                 next_boundary = next_node.boundary_info or {}
                 next_start_line = next_boundary.get('start_line')
-                if next_start_line is not None:
-                    lines = lines[:next_start_line - 1]
+                if isinstance(next_start_line, int):
+                    end_index = min(end_index, next_start_line - 1)
+
+            lines = lines[start_index:end_index] if end_index >= start_index else []
 
             page_content = '\n'.join(lines)
             page_content = clean_ocr_page_artifacts(page_content)

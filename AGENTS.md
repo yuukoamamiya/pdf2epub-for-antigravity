@@ -160,6 +160,9 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
    只有两个 OCR 有实质差异，或被共同漏检哨兵选中的页面才进入下一步视觉 Subagent。
    哨兵默认每 20 页抽查一页，并把内部文本密度显著低于相邻页的页面列为风险页；这些规则
    只增加复核，不会自动改写页面。`enabled: false` 时只运行主 OCR，不进行 OCR 纠错。
+   本地 PaddleOCR 依赖使用 `uv sync --extra ocr-local` 安装；该 extra 将
+   `albumentations` 固定在 1.4.x（`<2.0.0`），避免 Windows 下 2.x 导入 PyTorch 时与
+   PaddlePaddle 发生 DLL 冲突。不得通过预加载 `torch` 掩盖依赖安装问题。
 4. 仅当 `ocr.secondary.enabled: true` 时执行 `ocr-correct`。然后打开工作区 Subagent，读取
    生成的 Prompt，按 `ocr-correct_worker_handoffs/` 中 manifest 的 `assigned_files` 对照同名页图；
    该 handoff 自动只包含 `ocr_consensus.json` 标记的差异页。将纠错后的同名文件写入
@@ -179,7 +182,12 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
    ```
 
    本地程序校验页码范围、父子关系、兄弟节点重叠，并生成 `ocr_markdown/`。
-   `tree_progress.json` 会锁定 TOC/OCR 指纹；输入变化后必须重新生成受影响单元。
+   `toc_tree.json` 中的 `boundary_info.start_line`/`end_line` 是对应
+   `page_XXX.md` 的 1-based 行号，其中 `start_line` 包含该行、`end_line` 不包含该行。
+   新章节从页面中部开始时，上一单元保留同页标题前的前缀；父标题和首个子标题同页时，
+   两者都必须提供 `start_line`，本地步骤把父标题/导语放入首个子章节单元。已有明确
+   `end_line` 的上一单元不得被自动延伸或覆盖。`tree_progress.json` 会锁定 TOC/OCR 指纹；
+   输入变化后必须重新生成受影响单元。
 7. 所有 PDF 都必须执行 `polish`，打开工作区 Subagent 读取
    `polish_subagent_prompt.md`，并按 `polish_worker_handoffs/` 中各 manifest 的
    `assigned_files` 写入 `polished_markdown/`，然后运行 `polish-validate`。
@@ -188,8 +196,9 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
    `ocr-correct`，不得在 polish 中改写。若只启用一套 OCR，则没有 page-level 视觉纠错闸门，polish 仍只处理
    结构，不应静默改写 OCR 字符。对原生矢量文本 PDF，该步骤用于从视觉行重建语义段落，同时保留
    原文字符和块级结构。`polish-validate` 还会将源稿与润色稿按忽略换行、Markdown 外层标记和已确认页边装饰的
-   方式做内容保真比较；正文 token 或数字标记大量丢失时会阻断。未通过
-   `polish-validate` 不得继续实体提取或翻译。
+   方式做内容保真比较；正文 token 或数字标记大量丢失，或结构性空父标题下的子章节正文
+   被复制多次时会阻断。父标题可以没有正文，但只能保留标题本身，子章节正文必须只出现
+   一次并归属于最近的子标题。未通过 `polish-validate` 不得继续实体提取或翻译。
    polish 还必须清除已确认的页眉、页脚、独立印刷页码和人工 OCR 页码标记；
    诸如 `Preface XII` 的短标题加页码组合在确认属于页边装饰后应整行删除。
    正文数字、标题编号、日期、引用、脚注、参考文献和索引中的页码不得删除。

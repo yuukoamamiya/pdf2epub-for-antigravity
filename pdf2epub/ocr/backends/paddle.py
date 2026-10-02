@@ -18,10 +18,12 @@ def init_client(config: Mapping[str, Any]):
     """Create a PaddleOCR client lazily so Paddle stays optional."""
     try:
         from paddleocr import PaddleOCR
-    except ImportError as exc:  # pragma: no cover - depends on optional install
+    except (ImportError, OSError) as exc:  # pragma: no cover - optional dependency/platform specific
         raise RuntimeError(
-            "PaddleOCR is configured as a secondary OCR backend but is not "
-            "installed. Install the optional local OCR dependencies first."
+            "PaddleOCR is configured as a secondary OCR backend but its optional "
+            "dependencies could not be imported. Install the locked local OCR "
+            "dependencies with `uv sync --extra ocr-local` and check the platform "
+            "runtime/DLL requirements."
         ) from exc
 
     settings = _backend_config(config)

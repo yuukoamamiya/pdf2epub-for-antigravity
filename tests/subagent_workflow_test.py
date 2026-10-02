@@ -696,6 +696,21 @@ def test_polish_content_integrity_allows_reflow_and_footnote_normalization():
     assert report["valid"] is True
 
 
+def test_polish_content_integrity_rejects_duplicate_child_prose_under_empty_parent():
+    body = (
+        "This paragraph belongs only to the first child section and must not be "
+        "copied into the empty parent heading."
+    )
+    source = f"# 4. Chapter\n\n## 4.1 First section\n\n{body}\n"
+    target = f"# 4. Chapter\n\n{body}\n\n## 4.1 First section\n\n{body}\n"
+
+    report = polish_content_integrity_check(source, target)
+
+    assert report["valid"] is False
+    assert report["duplicated_prose_blocks"]
+    assert any("duplication" in error for error in report["errors"])
+
+
 def test_polish_footnote_normalization_accepts_verified_legacy_notes():
     source = """Body<sup>1</sup> and another<sup>2</sup>.
 
@@ -915,6 +930,7 @@ def test_prepare_markdown_translation_prompt_has_immutable_heading_guard(tmp_pat
     assert "Markdown heading structure is immutable" in prompt
     assert "must begin with exactly the same number" in prompt
     assert "Never keep the original-language heading" in prompt
+    assert "parent heading may be structural-only" in prompt
 
 
 def test_prepare_markdown_subagent_records_file_sizes_and_batches(tmp_path: Path):
@@ -1688,7 +1704,10 @@ def test_extract_pdf_outline_unflattens_large_contents_wrapper(tmp_path: Path):
 def test_refine_local_splits_a_parent_when_children_cover_its_range(tmp_path: Path):
     pages_dir = tmp_path / "pages"
     pages_dir.mkdir()
-    for number in range(1, 5):
+    (pages_dir / "page_001.md").write_text(
+        "Container heading\nFirst heading\nPage 1 content", encoding="utf-8"
+    )
+    for number in range(2, 5):
         (pages_dir / f"page_{number:03d}.md").write_text(
             f"Page {number} content", encoding="utf-8"
         )
@@ -1699,8 +1718,15 @@ def test_refine_local_splits_a_parent_when_children_cover_its_range(tmp_path: Pa
                 "level": 1,
                 "start_page": 1,
                 "end_page": 4,
+                "boundary_info": {"start_line": 1},
                 "children": [
-                    {"title": "First", "level": 2, "start_page": 1, "end_page": 2},
+                    {
+                        "title": "First",
+                        "level": 2,
+                        "start_page": 1,
+                        "end_page": 2,
+                        "boundary_info": {"start_line": 2},
+                    },
                     {"title": "Second", "level": 2, "start_page": 3, "end_page": 4},
                 ],
             }]
@@ -1711,6 +1737,111 @@ def test_refine_local_splits_a_parent_when_children_cover_its_range(tmp_path: Pa
         tmp_path / "input.pdf", tmp_path, "Book"
     )
     assert [unit["unit_id"] for unit in units] == ["chapter_1.1", "chapter_1.2"]
+
+
+def test_refine_local_preserves_midpage_parent_and_previous_prefix(tmp_path: Path):
+    pages_dir = tmp_path / "pages"
+    pages_dir.mkdir()
+    (pages_dir / "page_001.md").write_text("Previous page.", encoding="utf-8")
+    (pages_dir / "page_002.md").write_text(
+        "The previous sentence continues.\n"
+        "It ends here.\n"
+        "3 Frankfurt\n"
+        "3.1 Family tutor life and social relations\n"
+        "The new section starts here.",
+        encoding="utf-8",
+    )
+    (tmp_path / "toc_tree.json").write_text(
+        json.dumps(
+            {
+                "chapters": [
+                    {
+                        "title": "Previous",
+                        "level": 1,
+                        "start_page": 1,
+                        "end_page": 1,
+                    },
+                    {
+                        "title": "Frankfurt",
+                        "level": 1,
+                        "start_page": 2,
+                        "end_page": 2,
+                        "boundary_info": {"start_line": 3},
+                        "children": [
+                            {
+                                "title": "Family tutor life and social relations",
+                                "level": 2,
+                                "start_page": 2,
+                                "end_page": 2,
+                                "boundary_info": {"start_line": 4},
+                            }
+                        ],
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    units = RefinedBreakdown(config={}, max_tokens=8000).process_from_toc(
+        tmp_path / "input.pdf", tmp_path, "Book"
+    )
+
+    previous = (tmp_path / "ocr_markdown" / "chapter_1.md").read_text(encoding="utf-8")
+    first_child = (tmp_path / "ocr_markdown" / "chapter_2.1.md").read_text(encoding="utf-8")
+    assert [unit["unit_id"] for unit in units] == ["chapter_1", "chapter_2.1"]
+    assert "The previous sentence continues." in previous
+    assert "It ends here." in previous
+    assert "3 Frankfurt" not in previous
+    assert first_child.startswith("3 Frankfurt\n3.1 Family tutor life")
+    assert "The new section starts here." in first_child
+
+
+def test_refine_local_keeps_explicit_previous_end_boundary(tmp_path: Path):
+    pages_dir = tmp_path / "pages"
+    pages_dir.mkdir()
+    (pages_dir / "page_001.md").write_text(
+        "Previous heading\nPrevious body\nExcluded page furniture\nStill excluded",
+        encoding="utf-8",
+    )
+    (pages_dir / "page_002.md").write_text(
+        "Continuation before next heading\nAnother prefix line\nNext heading\nNext body",
+        encoding="utf-8",
+    )
+    (tmp_path / "toc_tree.json").write_text(
+        json.dumps(
+            {
+                "chapters": [
+                    {
+                        "title": "Previous",
+                        "level": 1,
+                        "start_page": 1,
+                        "end_page": 1,
+                        "boundary_info": {"end_line": 3},
+                    },
+                    {
+                        "title": "Next",
+                        "level": 1,
+                        "start_page": 2,
+                        "end_page": 2,
+                        "boundary_info": {"start_line": 3},
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    RefinedBreakdown(config={}, max_tokens=8000).process_from_toc(
+        tmp_path / "input.pdf", tmp_path, "Book"
+    )
+
+    previous = (tmp_path / "ocr_markdown" / "chapter_1.md").read_text(encoding="utf-8")
+    assert "Previous body" in previous
+    assert "Excluded page furniture" not in previous
+    assert "Continuation before next heading" not in previous
 
 
 def test_refine_local_splits_oversized_notes_into_entry_safe_parts(tmp_path: Path):
@@ -1906,6 +2037,31 @@ def test_validate_toc_tree_rejects_overlapping_siblings_and_bad_child():
     errors = validate_toc_tree_data(data, 8, range(1, 9))
     assert any("overlaps" in error for error in errors)
     assert any("outside its parent" in error for error in errors)
+
+
+def test_validate_toc_tree_requires_same_page_parent_child_boundaries():
+    data = {
+        "chapters": [
+            {
+                "title": "Chapter",
+                "level": 1,
+                "start_page": 1,
+                "end_page": 2,
+                "children": [
+                    {
+                        "title": "Section",
+                        "level": 2,
+                        "start_page": 1,
+                        "end_page": 2,
+                    }
+                ],
+            }
+        ]
+    }
+
+    errors = validate_toc_tree_data(data, 2, range(1, 3))
+
+    assert any("both parent and child" in error for error in errors)
 
 
 def test_local_refine_generates_units_without_constructing_model(tmp_path: Path):

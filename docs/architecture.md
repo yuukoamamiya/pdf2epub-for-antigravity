@@ -60,7 +60,8 @@ Subagent 合同层
 - `runtime.py`：提供 `BookCommandContext`、配置加载和输出目录解析。
 - `sources.py`：选择原始 `ocr_markdown` 或已验证的 `polished_markdown`；所有 PDF 的翻译、实体提取和打包都必须使用后者。
 - `ocr.py`：执行唯一允许调用 OCR 服务的入口，并可在同一阶段运行本地 PaddleOCR 共识筛查；只把差异页交给工作区 Subagent 做视觉纠错。
-- `refine.py`：准备结构判断 handoff，或调用本地分页/单元合并。
+- `refine.py`：准备结构判断 handoff，或调用本地分页/单元合并；页内章节边界通过
+  `boundary_info.start_line`/`end_line` 保留，避免把同页标题前的句子误归入新章节。
 - `markdown.py`：PDF Markdown 的 polish、translate、readiness 和 validation 编排。
 - `page_furniture.py`：已有 PDF 译文的页眉页脚修复交接和校验编排。
 - `entities.py`：生成和校验书内实体表 handoff。
@@ -87,7 +88,8 @@ polish。`commands/markdown.py`、`entities.py`、`toc.py` 和 `pdf.py` 均应�
 - `markdown_handoff.py`：扫描源单元、计算统计信息、恢复 checkpoint、生成 manifest 和 prompt。
 - `markdown_subagent_validation.py`：检查目标文件、结构标记、拒答、哈希和特殊角色内容，
   并在通过后复制到 `validated/`。
-- `markdown_validation.py`：提供纯函数式的 Markdown 风险检测、目标语言审计和规范化辅助函数。
+- `markdown_validation.py`：提供纯函数式的 Markdown 风险检测、目标语言审计、规范化辅助
+  函数和 polish 内容保真检查；它会阻断结构性空父标题导致的重复正文。
 - `subagent_runtime.py`：提供模型配置解析、token 估算、批次规划及按章节/批次隔离的 handoff；
   worker 文件数的有效上限为 8。
 - `subagent_safety.py`：集中处理拒答、免责声明和翻译占位套话检测，避免各工作流使用不同规则。

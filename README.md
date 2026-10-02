@@ -71,6 +71,10 @@ ocr:
 双 OCR 模式还会默认每 20 页抽查一页，并标记内部文本量明显低于相邻页面的风险页，用来
 补充拦截两个 OCR 同时漏掉内容的情况；这些页面会增加视觉复核，但不会被脚本自动改写。
 
+Windows 用户安装本地 OCR 依赖时请使用 `uv sync --extra ocr-local`。项目固定了
+`albumentations<2.0.0`，避免其 2.x 版本在导入时加载 PyTorch 并与 PaddlePaddle 发生 DLL
+冲突；不需要额外预加载 `torch`。
+
 不要把原书放在 `output` 文件夹，也不要删除或改动原书。
 
 ## 第四步：告诉 AI 翻译

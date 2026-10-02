@@ -5,6 +5,7 @@ from __future__ import annotations
 import difflib
 import math
 import re
+from collections import Counter
 from typing import Any, Dict, Optional
 
 from .utils.ocr_artifacts import clean_ocr_page_artifacts
@@ -388,6 +389,43 @@ def polish_content_integrity_check(
     def clean_lines(text: str) -> list[str]:
         return clean_ocr_page_artifacts(str(text or "")).splitlines()
 
+    def prose_blocks(text: str) -> list[str]:
+        """Extract substantial prose blocks while ignoring heading-only lines.
+
+        A structural parent heading may legitimately have no body.  If a
+        polish worker copies a child's paragraph under that empty parent, the
+        same prose block appears twice in the target even though all source
+        tokens are still present.  This lightweight check catches that case
+        without treating repeated headings or short labels as duplication.
+        """
+        blocks: list[str] = []
+        current: list[str] = []
+        heading_pattern = re.compile(r"^\s{0,3}#{1,6}\s+\S")
+
+        def flush() -> None:
+            if not current:
+                return
+            value = "\n".join(current)
+            value = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", value)
+            value = re.sub(r"<sup>\s*\d+\s*</sup>", " ", value, flags=re.IGNORECASE)
+            value = re.sub(r"\[\^\s*\d+\s*\]", " ", value)
+            value = re.sub(r"<[^>]+>", " ", value)
+            value = re.sub(r"\s+", " ", value).strip()
+            word_count = len(re.findall(r"\w+", value, flags=re.UNICODE))
+            if len(value) >= 24 or word_count >= 8:
+                blocks.append(value)
+            current.clear()
+
+        for line in clean_lines(text):
+            if heading_pattern.match(line):
+                flush()
+            elif line.strip():
+                current.append(line)
+            else:
+                flush()
+        flush()
+        return blocks
+
     source_tokens = tokens(source_text)
     target_tokens = tokens(target_text)
     matcher = difflib.SequenceMatcher(None, source_tokens, target_tokens, autojunk=False)
@@ -420,6 +458,22 @@ def polish_content_integrity_check(
             "polish content integrity loss: source numeric markers are missing "
             f"from polished output: {missing_numbers[:12]!r}"
         )
+    source_blocks = Counter(prose_blocks(source_text))
+    target_blocks = Counter(prose_blocks(target_text))
+    duplicated_blocks = [
+        {
+            "text": block[:160],
+            "source_count": source_blocks[block],
+            "target_count": target_blocks[block],
+        }
+        for block in sorted(target_blocks)
+        if target_blocks[block] > source_blocks[block]
+    ]
+    if duplicated_blocks:
+        errors.append(
+            "polish content integrity duplication: prose block appears more times "
+            f"in polished output than in source ({len(duplicated_blocks)} block(s))"
+        )
     return {
         "valid": not errors,
         "source_token_count": len(source_tokens),
@@ -428,6 +482,7 @@ def polish_content_integrity_check(
         "removed_character_count": removed_characters,
         "removed_token_ratio": round(removed_tokens / max(1, len(source_tokens)), 6),
         "missing_numeric_markers": missing_numbers,
+        "duplicated_prose_blocks": duplicated_blocks,
         "errors": errors,
     }
 

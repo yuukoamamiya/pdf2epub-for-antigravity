@@ -22,8 +22,10 @@ class TOCNode:
     end_page: int
     children: List['TOCNode'] = field(default_factory=list)
 
-    # Populated after boundary verification
-    # Contains: start_line (int), end_line (int) - for mid-page splits
+    # Populated after boundary verification.  Line numbers are 1-based within
+    # the physical page; start_line is inclusive and end_line is exclusive.
+    # Both are absolute page positions, even when a node starts and ends on
+    # the same page.
     boundary_info: Optional[Dict] = None
 
     # For notes chapters

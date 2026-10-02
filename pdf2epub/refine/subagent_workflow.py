@@ -127,9 +127,14 @@ the OCR-only procedure below.
 
 Use 1-based inclusive OCR page numbers.  Identify the book's real chapters and
 sections from the page text, including nested sections.  Keep nodes ordered by
-their first page.  Sibling nodes must not overlap; a section may contain its
-children.  If two sections begin on the same page, include `boundary_info`
-with a 1-based `start_line` where needed.
+their first page.  Sibling nodes must not overlap except for one explicitly
+bounded shared page; a section may contain its children.  A heading that
+starts below the top of a physical page is a mid-page boundary, not a page
+break.  For every such node, include `boundary_info.start_line`, counted
+against the exact `page_XXX.md` file.  `start_line` is the first line belonging
+to the node.  If the node ends before another node on its last page,
+`boundary_info.end_line` may record the first line after the node; `end_line`
+is exclusive.
 
 Required output shape:
 
@@ -162,6 +167,21 @@ Rules:
   range, and use integer values.
 - `level` starts at 1 and increases for nested children.
 - Preserve meaningful title text from the OCR; do not invent page numbers.
+- When a sibling starts on a later line of the same page, let the preceding
+  sibling include that same physical page and provide the new heading's
+  `start_line`; do not force the preceding sibling to end on the previous
+  page.  If the next heading is on a later page but not on its first line,
+  still provide its `start_line`: the local step will assign that page prefix
+  to the preceding unit.
+- When a parent heading and its first child begin on the same page, provide
+  `start_line` for both nodes.  The local step keeps the parent's heading and
+  introductory prose with the first emitted child unit, so neither the
+  parent preamble nor the preceding chapter is lost.
+- A parent heading may have no body at all.  When a parent heading is
+  immediately followed by its first child heading, record the parent as a
+  structural container and do not treat the child's paragraphs as parent
+  prose.  The descendant text must remain represented once, under the
+  descendant section.
 - Inspect the title page, copyright page, and front matter for bibliographic metadata.
   Copy the author and publisher exactly as printed; do not translate, normalize,
   or guess them. Use an empty string only when the information is genuinely not
@@ -215,6 +235,33 @@ def validate_toc_tree_data(
             level = node.get("level")
             start = node.get("start_page")
             end = node.get("end_page")
+            boundary = node.get("boundary_info")
+            if boundary is not None and not isinstance(boundary, dict):
+                errors.append(f"{node_path}.boundary_info must be an object")
+                boundary = {}
+            if isinstance(boundary, dict):
+                for key in ("start_line", "end_line"):
+                    if key in boundary and (
+                        not isinstance(boundary[key], int) or boundary[key] < 1
+                    ):
+                        errors.append(
+                            f"{node_path}.boundary_info.{key} must be a positive integer"
+                        )
+                start_line = boundary.get("start_line")
+                end_line = boundary.get("end_line")
+                if (
+                    start == end
+                    and isinstance(start_line, int)
+                    and isinstance(end_line, int)
+                    and end_line <= start_line
+                ):
+                    errors.append(
+                        f"{node_path}.boundary_info.end_line must be after start_line "
+                        "when both boundaries are on one page"
+                    )
+            else:
+                start_line = None
+                end_line = None
             if not isinstance(title, str) or not title.strip():
                 errors.append(f"{node_path}.title must be a non-empty string")
             if not isinstance(level, int) or isinstance(level, bool) or level < 1:
@@ -232,33 +279,42 @@ def validate_toc_tree_data(
                     errors.append(f"{node_path} is outside its parent page range")
                 if isinstance(level, int) and level <= parent.get("level", 0):
                     errors.append(f"{node_path}.level must be deeper than its parent")
+                if index == 0 and start == parent.get("start_page"):
+                    parent_boundary = parent.get("boundary_info") or {}
+                    parent_start_line = parent_boundary.get("start_line")
+                    if not isinstance(start_line, int) or not isinstance(parent_start_line, int):
+                        errors.append(
+                            f"{node_path} starts on its parent's first page; "
+                            "both parent and child boundary_info.start_line values are required"
+                        )
+                    elif start_line <= parent_start_line:
+                        errors.append(
+                            f"{node_path}.boundary_info.start_line must be after "
+                            "the parent's start_line for a same-page first child"
+                        )
             if previous is not None:
                 if start < previous["start_page"]:
                     errors.append(f"{node_path} is out of page order after {previous_path}")
                 elif start < previous["end_page"]:
-                    current_boundary = node.get("boundary_info") or {}
+                    errors.append(f"{node_path} overlaps {previous_path}")
+                elif start == previous["end_page"]:
                     previous_boundary = previous.get("boundary_info") or {}
-                    same_page_split = (
-                        start == previous.get("start_page") == previous.get("end_page")
-                        and start == end
-                        and isinstance(current_boundary.get("start_line"), int)
-                        and isinstance(previous_boundary.get("start_line"), int)
-                        and current_boundary["start_line"] > previous_boundary["start_line"]
-                    )
-                    if not same_page_split:
-                        errors.append(f"{node_path} overlaps {previous_path}")
+                    previous_end_line = previous_boundary.get("end_line")
+                    if not isinstance(start_line, int):
+                        errors.append(
+                            f"{node_path} shares page {start} with {previous_path}; "
+                            "boundary_info.start_line is required"
+                        )
+                    elif (
+                        isinstance(previous_end_line, int)
+                        and start_line < previous_end_line
+                    ):
+                        errors.append(
+                            f"{node_path}.boundary_info.start_line precedes the "
+                            f"end of {previous_path} on shared page {start}"
+                        )
             previous = node
             previous_path = node_path
-
-            boundary = node.get("boundary_info")
-            if boundary is not None and not isinstance(boundary, dict):
-                errors.append(f"{node_path}.boundary_info must be an object")
-            elif isinstance(boundary, dict):
-                for key in ("start_line", "end_line"):
-                    if key in boundary and (
-                        not isinstance(boundary[key], int) or boundary[key] < 1
-                    ):
-                        errors.append(f"{node_path}.boundary_info.{key} must be a positive integer")
 
             visit(node.get("children", []), node, f"{node_path}.children")
 

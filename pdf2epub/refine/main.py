@@ -3,6 +3,7 @@
 import json
 import hashlib
 import shutil
+from copy import copy
 from pathlib import Path
 from typing import Any, List, Dict
 from loguru import logger
@@ -19,7 +20,7 @@ from .footnote_stitcher import scan_boundary_footnotes
 tokenizer = tiktoken.get_encoding("cl100k_base")
 
 
-REFINE_CHECKPOINT_SCHEMA = 4
+REFINE_CHECKPOINT_SCHEMA = 5
 DEFAULT_OVERSIZED_SPLIT_THRESHOLD = 15_000
 DEFAULT_OVERSIZED_SPLIT_TARGET = 12_000
 DEFAULT_OVERSIZED_SPLIT_TYPES = ("all",)
@@ -216,6 +217,7 @@ class RefinedBreakdown:
                 self._generate_units_recursive(chapter, pages_dir, [chapter_idx + 1])
             )
 
+        self._apply_inter_unit_page_boundaries(work_units)
         logger.info(f"Saving {len(work_units)} work units...")
         unit_metadata = self._save_units(work_units, pages_dir, ocr_markdown_dir)
         tree_progress_file.write_text(
@@ -259,7 +261,8 @@ class RefinedBreakdown:
         self,
         node: TOCNode,
         pages_dir: Path,
-        index_path: List[int]
+        index_path: List[int],
+        inherited_start_line: int = None,
     ) -> List[Dict]:
         """
         Recursively generate work units from a node.
@@ -275,6 +278,13 @@ class RefinedBreakdown:
         - If has children and total <= max_tokens: create unit for whole node
         - If has children and total > max_tokens: recurse into children
         """
+        # A parent heading and its first child can start on the same physical
+        # page.  Leaf-only output is still intentional, but the first leaf
+        # must retain the parent's heading/preamble instead of beginning at
+        # the child's heading and silently dropping the intervening lines.
+        if inherited_start_line is not None:
+            node = self._node_with_start_line(node, inherited_start_line)
+
         # Case 1: Leaf node
         if node.is_leaf():
             if node.estimated_tokens <= self.max_tokens:
@@ -306,24 +316,117 @@ class RefinedBreakdown:
             if not children_cover_parent:
                 # Preserve parent-only introductory material in one file.
                 return [self._create_unit(node, index_path, include_children=True)]
-            return [
-                unit
-                for child_idx, child in enumerate(node.children)
-                for unit in self._generate_units_recursive(
-                    child, pages_dir, index_path + [child_idx + 1]
+            units = []
+            for child_idx, child in enumerate(node.children):
+                child_start_line = self._parent_preamble_start_line(node, child, child_idx)
+                units.extend(
+                    self._generate_units_recursive(
+                        child,
+                        pages_dir,
+                        index_path + [child_idx + 1],
+                        inherited_start_line=child_start_line,
+                    )
                 )
-            ]
+            return units
         else:
             # Recurse into children
             units = []
             for child_idx, child in enumerate(node.children):
                 # Build child's index path by appending 1-based child index
                 child_index_path = index_path + [child_idx + 1]
+                child_start_line = self._parent_preamble_start_line(node, child, child_idx)
                 child_units = self._generate_units_recursive(
-                    child, pages_dir, child_index_path
+                    child,
+                    pages_dir,
+                    child_index_path,
+                    inherited_start_line=child_start_line,
                 )
                 units.extend(child_units)
             return units
+
+    @staticmethod
+    def _node_with_start_line(node: TOCNode, start_line: int) -> TOCNode:
+        """Return a shallow node copy with an inherited content start line."""
+        adjusted = copy(node)
+        boundary = dict(node.boundary_info or {})
+        existing = boundary.get("start_line")
+        if existing is None or start_line < existing:
+            boundary["start_line"] = start_line
+        adjusted.boundary_info = boundary
+        return adjusted
+
+    @staticmethod
+    def _parent_preamble_start_line(
+        parent: TOCNode,
+        child: TOCNode,
+        child_index: int,
+    ) -> int:
+        """Return a same-page parent's start line for its first emitted leaf.
+
+        A parent with children is normally represented by its leaf units.  If
+        the first child begins later on the same page, the parent's heading
+        and any introductory prose must travel with that first leaf.  The
+        Subagent must provide both line anchors; without them we leave the
+        contract invalid rather than guessing and stealing text from the
+        preceding chapter.
+        """
+        if child_index != 0 or child.start_page != parent.start_page:
+            return None
+        parent_boundary = parent.boundary_info or {}
+        child_boundary = child.boundary_info or {}
+        parent_start = parent_boundary.get("start_line")
+        child_start = child_boundary.get("start_line")
+        if (
+            isinstance(parent_start, int)
+            and isinstance(child_start, int)
+            and parent_start < child_start
+        ):
+            return parent_start
+        return None
+
+    @staticmethod
+    def _apply_inter_unit_page_boundaries(work_units: List[Dict]) -> None:
+        """Make every mid-page unit transition lossless before merging pages.
+
+        TOC producers often write the preceding node's inclusive end page as
+        ``next.start_page - 1``.  That is correct only when the next heading
+        is the first line of its page.  When it starts lower on the page, the
+        preceding unit owns the page prefix.  Extend that node by one page and
+        record the next heading's line as an exclusive end boundary.
+        """
+        for previous, current in zip(work_units, work_units[1:]):
+            previous_node = previous["node"]
+            current_node = current["node"]
+            current_boundary = current_node.boundary_info or {}
+            start_line = current_boundary.get("start_line")
+            if not isinstance(start_line, int) or start_line <= 1:
+                continue
+
+            previous_end = previous_node.end_page
+            if current_node.start_page not in (previous_end, previous_end + 1):
+                continue
+
+            previous_boundary = dict(previous_node.boundary_info or {})
+            # An explicit end_line is authoritative on the previous node's
+            # current end page. Do not replace it with the next node's start
+            # line merely because that node begins lower on the following
+            # page; doing so would re-include text the Subagent excluded.
+            if isinstance(previous_boundary.get("end_line"), int):
+                continue
+
+            if current_node.start_page == previous_end + 1:
+                previous_node.end_page = current_node.start_page
+                previous["end_page"] = previous_node.end_page
+
+            previous_boundary["end_line"] = start_line
+            previous_node.boundary_info = previous_boundary
+            logger.debug(
+                "Bound %s before %s at page %s line %s",
+                previous.get("unit_id"),
+                current.get("unit_id"),
+                current_node.start_page,
+                start_line,
+            )
 
     def _create_unit(
         self,
@@ -406,6 +509,8 @@ class RefinedBreakdown:
                 'token_count': unit['token_count'],
                 'file': part_files[0],
             }
+            if node.boundary_info:
+                metadata["boundary_info"] = dict(node.boundary_info)
             if len(part_files) > 1:
                 metadata.update(
                     {
