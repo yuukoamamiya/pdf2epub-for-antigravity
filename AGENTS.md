@@ -135,20 +135,33 @@ Subagent 直接写文件 → 单文件校验 → 收集完成结果 → 下一�
 
 ### 1.1 主 Agent 的快速执行表
 
-开始 PDF 任务时先读取配置中的 `ocr.secondary.enabled`，并把它作为整条结构流水线的
-唯一 OCR 证据模式：
+开始 PDF 任务时先看 `output/<title>/pdf_text_probe.json` 和
+`pages/ocr_progress.json`，再决定证据路径。`ocr.secondary.enabled` 只控制视觉 OCR
+PDF 的单 OCR/双 OCR；它不能把原生文字 PDF 变成双 OCR：
 
-| 配置 | 证据模式 | 处理方式 |
-|---|---|---|
-| `false` | `single_ocr` | 只使用 `pages/` 的主 OCR；忽略旧的 `ocr_consensus.json`，不运行 OCR 纠错。 |
-| `true` | `two_ocr` | 必须配置 `ocr.secondary.backend`；`ocr-pages` 生成 Paddle 结果和共识报告，差异页进入 Subagent 复核。 |
+| 页面来源 | 配置 | 实际证据模式 | 处理方式 |
+|---|---|---|---|
+| `native_text` | 忽略 `ocr.secondary.enabled` | 原生 PDF layout；报告兼容字段为 `single_ocr` | 不运行视觉 OCR、Paddle、`ocr-correct` 或共识检查；使用 `pages/page_*.ocr.json` 的 PDF 坐标和字体证据。 |
+| 视觉 OCR | `false` | `single_ocr` | 使用 `pages/` 的主 OCR；忽略旧的 `ocr_consensus.json`，不运行 OCR 纠错。 |
+| 视觉 OCR | `true` | `two_ocr` | 必须配置 `ocr.secondary.backend`；`ocr-pages` 生成次 OCR 和当前共识报告，差异页进入 Subagent 复核。 |
+
+原生文字 PDF 的判定由 `ocr-pages` 中的 `pdf_text_probe` 保守完成，不要只因 PDF 可以复制
+文字就认定它是原生稿。只有高置信度矢量文字层才走 `native_text`；扫描图、图片上叠加的
+隐藏 OCR 层和混合稿仍走视觉 OCR。原生路径的关键检查是：
+
+- `pdf_text_probe.json` 的 `classification` 为 `native_text`；
+- `pages/ocr_progress.json` 的 `mode` 和 `backend` 为 `native_text`；
+- 每一页都有 `pages/page_NNN.ocr.json`，sidecar 的 `source_kind` 为 `native_text`、
+  `coordinate_system` 为 `page_points`；
+- 即使配置中残留 `ocr.secondary.enabled: true`，也不要求 `ocr_consensus.json`，并且
+  `footnote-prepare` 只使用原生 sidecar。
 
 当前支持的双 OCR 组合是 Chandra + Paddle。Paddle 输出与 Chandra 对齐的 layout sidecar；
 它只在“页底几何位置 + 明确数字开头”足够可靠时生成 `Footnote`/`footnote-def`，并把脚注定义
 规范化成 `[^N]: ...`。它不会把普通上标、序数或行内数字引用臆测成脚注，也不生成 Chandra
 的图片描述。两套 OCR 的文本、脚注标签、编号和垂直范围仍然独立比较；任一差异都应进入视觉复核。
 
-脚注和整页插图也读取同一个开关。双 OCR 模式下，`footnote-prepare` 和
+对视觉 OCR，脚注和整页插图读取同一个开关。原生文字 PDF 使用独立的原生版面证据；双 OCR 模式下，`footnote-prepare` 和
 `illustration-prepare` 必须看到当前共识检查点；主/次 OCR 的候选差异不能由本地脚本自动
 选择，必须进入工作区 Subagent。切换模式后，旧的脚注决定、插图绑定和 `refine-local`
 检查点不能复用。
@@ -207,7 +220,7 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
 独立改译仍必须失败。worker Prompt 必须把当前文件的标题锚定清单置于 assigned 任务附近，
 要求对应的第一个匹配标题逐字使用 TOC 文本，但不强制其成为物理首行。
 
-## 2. PDF 扫描件翻译流程
+## 2. PDF 翻译流程（扫描/混合稿与原生文字稿）
 
 ### 2.1 准备、OCR 和结构
 
@@ -224,20 +237,24 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
    ```
 
    程序会先生成 `pdf_text_probe.json`。只有高置信度原生矢量文本 PDF 才直接提取文字；
-   扫描 PDF 和可搜索 OCR PDF 都生成视觉 OCR 的 `pages/page_XXX.md`。当
+   扫描 PDF、可搜索 OCR PDF 和混合稿都生成视觉 OCR 的 `pages/page_XXX.md`。原生文字稿
+   同样生成 `pages/page_XXX.md`，但另外为每页生成 `pages/page_XXX.ocr.json` 原生 layout
+   sidecar（`source_kind: native_text`、`coordinate_system: page_points`），供脚注和插图
+   使用 PDF 坐标、文本块、字号和字体信息。若
+   `pages/ocr_progress.json` 的 `mode` 为 `native_text`，不要再执行任何视觉 OCR。当
    `ocr.secondary.enabled: true` 且 `ocr.secondary.backend: paddle` 时，此命令还会用本地
    PaddleOCR 逐页复核主 OCR，生成 `ocr_secondary/` 和 `ocr_consensus.json`；一致页自动接受，
    只有两个 OCR 有实质差异，或被共同漏检哨兵选中的页面才进入下一步视觉 Subagent。
    哨兵默认每 20 页抽查一页，并把内部文本密度显著低于相邻页的页面列为风险页；这些规则
    只增加复核，不会自动改写页面。`enabled: false` 时只运行主 OCR，不进行 OCR 纠错。
    本地 PaddleOCR 依赖使用 `uv sync --extra ocr-local` 安装。
-4. 仅当 `ocr.secondary.enabled: true` 时执行 `ocr-correct`。然后打开工作区 Subagent，读取
+4. 仅对视觉 OCR PDF 且 `ocr.secondary.enabled: true` 时执行 `ocr-correct`。然后打开工作区 Subagent，读取
    生成的 Prompt，按 `ocr-correct_worker_handoffs/` 中 manifest 的 `assigned_files` 对照同名页图；
    该 handoff 自动只包含 `ocr_consensus.json` 标记的差异页。将纠错后的同名文件写入
    `ocr_corrected_pages/`，并为每页写入 `ocr_correction_reviews/page_NNN.json`，再运行
    `ocr-correct-validate`。校验会拒绝缺少审阅记录、标记为不确定、或比原始 OCR 少行的页面。
-   原始 `pages/` 不得覆盖；未通过该校验不得继续。高置信度原生矢量文本 PDF 跳过该阶段；
-   第二套 OCR 开关关闭时也跳过。
+   原始 `pages/` 不得覆盖；未通过该校验不得继续。高置信度原生矢量文本 PDF 无论配置如何
+   都跳过该阶段；第二套 OCR 开关关闭时也跳过。
 5. 执行 `refine-prepare`。然后打开工作区 Subagent，读取
    `output/<title>/refine_subagent_prompt.md`，视觉 OCR 使用经过校验的
    `ocr_corrected_pages/validated/`，原生文字 PDF 使用 `pages/`，写入 `toc_tree.json`。
@@ -289,12 +306,34 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
    uv run pdf2epub -c config.yaml footnote-apply
    ```
 
+   对原生文字 PDF，页底以数字开头的文本块只是候选：底部坐标、相对正文的字号、字体名和
+   原生上标都是证据，不能单独自动判定为脚注。纯数字页码会被本地候选器排除；所有原生
+   候选默认进入 Subagent 复核。Subagent 必须在脚注、引用、参考文献、普通正文和不确定项
+   之间作出决定，不确定时使用 `review_required`，不要猜测。原生上标引用在 `pages/` 中
+   保留为 `<sup>…</sup>`，后续只有确认存在对应脚注定义时才转换为 `[^N]`。
+
    `footnote-apply` 只移动已确认的 `footnote_start`、`footnote_continuation` 和
    `footnote_definition`；`citation`、`bibliography` 和 `body` 保持原位。脚注按实际
    `tree_progress.json` 单元的完整 `unit_id` 归并到单元末尾，不使用顶层 TOC 作为唯一范围，
    因而能处理同一章内脚注编号重启。跨页脚注按页面实际顺序拼接，允许出现“正文 → 上一脚注续文
    → 新脚注”，不会默认把续文放到下一页开头。双 OCR 模式会再次检查当前共识报告和次 OCR
-   sidecar；切换到单 OCR 后旧双 OCR 报告不会被使用。
+   sidecar；原生文字稿的 `ocr_evidence_mode` 虽为兼容性的 `single_ocr`，但其实际证据是
+   native layout，不能读取旧的双 OCR 报告。切换页面来源、OCR 模式或 PDF 后，旧的脚注
+   决定不能复用。
+
+   脚注阶段至少核对以下产物后才能继续 polish：
+
+   - `footnote_candidates.json`：`source_kind`、`ocr_evidence_mode`、`sidecar_sha256`、
+     `review_pages` 与候选数量；原生稿还要确认候选带有 `font_size_ratio`/`font_names` 等
+     可用的版面证据；
+   - `footnote_subagent_manifest.json`：`status`、`review_candidate_count` 和
+     `unit_context_files`；`pending_review` 时不能跳过 Subagent；
+   - `footnote_decision_validation.json`：必须是 `valid: true` 且 `status: validated`，
+     或明确的 `no_subagent_review_required`；`retry_required` 和 `human_review_required`
+     都阻断；
+   - `footnote_normalization.json`：必须存在且 `valid: true`、`status: validated`，其源稿、
+     候选报告和决定校验哈希必须通过当前性检查；不能只凭 `footnote_normalized/` 中有文件
+     判断完成。
 9. 所有 PDF 都必须执行 `polish`，打开工作区 Subagent 读取
    `polish_subagent_prompt.md`，并按 `polish_worker_handoffs/` 中各 manifest 的
    `assigned_files` 写入 `polished_markdown/`，然后运行 `polish-validate`。
@@ -468,6 +507,15 @@ uv run pdf2epub -c config.yaml build-epub
   `--resume` 重建 manifest；只重试 pending 或 invalid 项。
 - 不要凭目标文件非空判断完成；必须有同源文件 SHA-256 匹配的本地校验记录。
 - 实体表、TOC、术语上下文或源稿哈希变化后，旧 checkpoint 不得复用。
+- 原生文字 PDF 若是旧运行生成的、没有 `pages/page_*.ocr.json` 的页面，只能重新运行
+  `ocr-pages --resume` 生成 sidecar；不能把旧的 `pages/*.md` 当作有版面证据的原生稿。
+  如果 PDF、页源、TOC 或已确认插图绑定发生变化，按顺序重新检查
+  `illustration-validate`/`illustration-apply`、`refine-local --resume`、
+  `footnote-prepare`、`footnote-validate` 和 `footnote-apply`，不要直接复用旧的
+  `footnote_decisions.json` 或 `footnote_normalization.json`。
+- 出现 `No page layout sidecars found`、`source_kind` 不一致、sidecar 哈希过期、原生
+  page/block 地址无法唯一定位或缺少正文命中时，保留现有产物，先修复源阶段并用原命令的
+  `--resume` 重建；不要手工编辑决定文件来绕过校验。
 - 元数据 JSON 必须整体重写为合法 JSON；拒答/免责声明、缺失文件、结构不匹配或全量
   校验失败时禁止打包。
 - 所有写入 JSON、manifest、Prompt 索引的工作区相对路径必须使用 `/`；读取历史产物时

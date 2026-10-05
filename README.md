@@ -56,7 +56,8 @@ ocr:
 正确；整页插图、脚注归属和引用/参考文献区分仍由 Subagent 复核。
 
 Chandra 是当前主 OCR，Paddle 是可选的本地次 OCR。Paddle 会输出与 Chandra 对齐的页面
-sidecar，并对明确的页底脚注定义使用相同的 `footnote-def`/`[^N]: ...` 语义；它不会把普通
+sidecar，并对明确的页底脚注定义使用相同的 `footnote-def`/`[^N]: ...` 语义；高置信度原生
+文字 PDF 则由原生提取器输出带坐标和字体元数据的 layout sidecar。两种来源都不会把普通
 上标、序数或行内数字引用自动判成脚注。双 OCR 的作用是缩小视觉复核范围，不是让一个引擎
 静默覆盖另一个引擎。
 

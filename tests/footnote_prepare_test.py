@@ -34,6 +34,42 @@ def _write_sidecar(
     )
 
 
+def _write_native_sidecar(output_dir: Path, page: int, blocks: list[dict]) -> None:
+    pages_dir = output_dir / "pages"
+    pages_dir.mkdir(parents=True, exist_ok=True)
+    (pages_dir / "ocr_progress.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "mode": "native_text",
+                "backend": "native_text",
+                "total_pages": page,
+                "pages_processed": list(range(1, page + 1)),
+                "failed_pages": [],
+                "empty_pages": [],
+                "allowed_empty_pages": [],
+                "missing_pages": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (pages_dir / f"page_{page:03d}.ocr.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "page_number": page,
+                "backend": "native_text",
+                "source_kind": "native_text",
+                "coordinate_system": "page_points",
+                "page_box": [0, 0, 612, 792],
+                "blocks": blocks,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+
 def _block(text: str, order: int, *, label: str = "Text", y0: int = 100) -> dict:
     return {
         "order": order,
@@ -41,6 +77,117 @@ def _block(text: str, order: int, *, label: str = "Text", y0: int = 100) -> dict
         "bbox": [80, y0, 920, min(1000, y0 + 50)],
         "html": text,
     }
+
+
+def _native_block(
+    text: str,
+    order: int,
+    *,
+    y0: float,
+    y1: float | None = None,
+    font_size: float = 10.0,
+) -> dict:
+    return {
+        "order": order,
+        "label": "Text",
+        "bbox": [72, y0, 540, y1 or y0 + 18],
+        "text": text,
+        "font_size": font_size,
+    }
+
+
+def test_native_layout_candidates_use_page_coordinates_and_ignore_page_numbers(
+    tmp_path: Path,
+):
+    _write_native_sidecar(
+        tmp_path,
+        1,
+        [
+            _native_block("Body text", 0, y0=90),
+            _native_block("125", 1, y0=752, y1=764, font_size=9),
+            _native_block("36 Native footnote text", 2, y0=680, font_size=8),
+        ],
+    )
+
+    report = prepare_footnote_candidates(
+        tmp_path,
+        config={"ocr": {"secondary": {"enabled": True, "backend": "paddle"}}},
+    )
+
+    assert report["source_kind"] == "native_text"
+    assert report["ocr_evidence_mode"] == "single_ocr"
+    assert report["high_confidence_candidate_count"] == 0
+    assert report["review_candidate_count"] == 1
+    assert report["pages"][0]["candidates"][0]["key"] == "36"
+    assert report["pages"][0]["candidates"][0]["review_reason"] == "native_layout_candidate"
+
+
+def test_native_footnote_decision_reuses_existing_normalization_pipeline(
+    tmp_path: Path,
+):
+    _write_native_sidecar(
+        tmp_path,
+        1,
+        [
+            _native_block("Body text 36", 0, y0=90),
+            _native_block("36 Native footnote text", 1, y0=680, font_size=8),
+        ],
+    )
+    (tmp_path / "toc_tree.json").write_text("{}", encoding="utf-8")
+    source = tmp_path / "ocr_markdown"
+    source.mkdir()
+    (source / "chapter_1.md").write_text(
+        "Body text <sup>36</sup>\n\n36 Native footnote text\n",
+        encoding="utf-8",
+    )
+    (source / "tree_progress.json").write_text(
+        json.dumps(
+            {
+                "units": [
+                    {
+                        "unit_id": "chapter_1",
+                        "index_path": [1],
+                        "file": "chapter_1.md",
+                        "page_range": [1, 1],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = {"ocr": {"secondary": {"enabled": True, "backend": "paddle"}}}
+    prepare_footnote_subagent(tmp_path, book_title="Native Test", config=config)
+    (tmp_path / "footnote_decisions.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "decisions": [
+                    {
+                        "page": 1,
+                        "block": 1,
+                        "role": "footnote_start",
+                        "key": "36",
+                        "confidence": "high",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    validation = validate_footnote_decisions(tmp_path, config=config)
+    assert validation["valid"] is True
+
+    result = apply_footnote_normalization(tmp_path, config=config)
+
+    assert result["valid"] is True
+    normalized = (tmp_path / "footnote_normalized" / "chapter_1.md").read_text(
+        encoding="utf-8"
+    )
+    assert "Body text [^36]" in normalized
+    assert "[^36]: Native footnote text" in normalized
+    assert "36 Native footnote text" not in normalized
 
 
 def test_candidate_report_preserves_body_then_continuation_then_new_note_order(

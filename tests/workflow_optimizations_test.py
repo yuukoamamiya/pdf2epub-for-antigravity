@@ -131,6 +131,16 @@ def test_native_text_extraction_writes_page_contract(tmp_path: Path):
     assert progress["mode"] == "native_text"
     assert progress["pages_processed"] == [1, 2, 3, 4]
     assert (tmp_path / "book" / "pages" / "page_001.md").read_text(encoding="utf-8").strip()
+    sidecar = json.loads(
+        (tmp_path / "book" / "pages" / "page_001.ocr.json").read_text(encoding="utf-8")
+    )
+    assert sidecar["source_kind"] == "native_text"
+    assert sidecar["coordinate_system"] == "page_points"
+    assert sidecar["page_box"][2] > 0
+    assert sidecar["blocks"]
+    assert json.loads(
+        (tmp_path / "book" / "pages" / "page_stats.json").read_text(encoding="utf-8")
+    )["1"]["artifact_file"] == "pages/page_001.ocr.json"
 
 
 def test_native_polish_prompt_requires_paragraph_reconstruction(tmp_path: Path):

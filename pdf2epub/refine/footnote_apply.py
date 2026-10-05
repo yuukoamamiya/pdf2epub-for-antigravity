@@ -18,8 +18,9 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
-from ..ocr_consensus import consensus_is_current, ocr_evidence_mode
+from ..ocr_consensus import consensus_is_current
 from ..workflow_contracts import atomic_write_text
+from .footnote_prepare import footnote_evidence_mode
 
 
 FOOTNOTE_NORMALIZATION_SCHEMA_VERSION = 1
@@ -507,7 +508,7 @@ def apply_footnote_normalization(
     report_mode = str(report.get("ocr_evidence_mode") or "single_ocr")
     validation_mode = str(validation.get("ocr_evidence_mode") or report_mode)
     if config is not None:
-        configured_mode = ocr_evidence_mode(config)
+        configured_mode = footnote_evidence_mode(output_dir, config)
         if report_mode != configured_mode or validation_mode != configured_mode:
             return _write_failure(
                 output_dir,
@@ -718,6 +719,7 @@ def apply_footnote_normalization(
     target_hashes = _markdown_inventory(target_dir)
     result = {
         "schema_version": FOOTNOTE_NORMALIZATION_SCHEMA_VERSION,
+        "source_kind": report.get("source_kind", "ocr"),
         "ocr_evidence_mode": report_mode,
         "status": "validated",
         "valid": True,
@@ -776,7 +778,7 @@ def footnote_normalization_is_current(
         if report_mode != validation_mode:
             return False
         if config is not None:
-            configured_mode = ocr_evidence_mode(config)
+            configured_mode = footnote_evidence_mode(output_dir, config)
             if report_mode != configured_mode:
                 return False
             if configured_mode == "two_ocr" and not consensus_is_current(output_dir, config):

@@ -92,6 +92,21 @@ def _bbox(value: Any) -> Optional[list[float]]:
 def _normalised_bbox(block: Mapping[str, Any], sidecar: Mapping[str, Any]) -> Optional[list[float]]:
     """Return a block bbox as x0/y0/x1/y1 page ratios."""
     normalized = _bbox(block.get("bbox"))
+    coordinate_system = str(sidecar.get("coordinate_system") or "").strip().lower()
+    if coordinate_system in {"page", "page_points", "pdf_points", "points"}:
+        page = _bbox(sidecar.get("page_box"))
+        if normalized is None or page is None:
+            return None
+        width = page[2] - page[0]
+        height = page[3] - page[1]
+        if width <= 0 or height <= 0:
+            return None
+        return [
+            max(0.0, min(1.0, (normalized[0] - page[0]) / width)),
+            max(0.0, min(1.0, (normalized[1] - page[1]) / height)),
+            max(0.0, min(1.0, (normalized[2] - page[0]) / width)),
+            max(0.0, min(1.0, (normalized[3] - page[1]) / height)),
+        ]
     if normalized is not None and max(normalized) <= 1000:
         return [max(0.0, min(1.0, value / 1000.0)) for value in normalized]
 

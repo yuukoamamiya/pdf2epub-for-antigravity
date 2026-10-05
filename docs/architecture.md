@@ -100,8 +100,10 @@ PDF 精修的核心领域模块如下：
   不自行判断普通插图是否应该移动。
 - `refine/page_merger.py`：消费已验证的整页插图绑定，恢复“前页半句 → 插图页 → 后页续句”，
   并把图片及说明放回连续正文之后。
-- `refine/footnote_prepare.py`：按 OCR sidecar 的底部位置、标签和编号生成脚注候选；双 OCR
-  模式还比较主/次候选差异。它不直接改写 Markdown，也不把引用推断成脚注。
+- `refine/footnote_prepare.py`：按页面 layout sidecar 生成脚注候选。视觉 OCR 使用标签、底部
+  位置和编号；原生文字 PDF 使用 PDF 坐标、文本块和字体元数据，并将页底编号候选交给复核。
+  两种来源共享决定、校验和归一化后端；双 OCR 模式还比较主/次候选差异。它不直接改写
+  Markdown，也不把引用推断成脚注。
 - `refine/footnote_apply.py`：只消费已验证的脚注决定，按完整 TOC `unit_id` 合并脚注到单元末尾，
   保留 `citation`、`bibliography` 和普通正文原位。
 
@@ -192,16 +194,21 @@ manifest 指定的文件；大单元单独成批。polish 使用 `polish_worker_
 
 ### 3.1.1 OCR 证据模式和结构闸门
 
-`ocr.secondary.enabled` 是结构判断的单一开关，不应在脚注或插图模块中再添加平行开关：
+`ocr.secondary.enabled` 是视觉 OCR 结构判断的单一开关，不应在脚注或插图模块中再添加平行
+开关。原生文字 PDF 先由 `pdf_text_probe` 分类，使用独立的 native layout 证据；它不属于
+双 OCR，也不因配置残留而运行第二套 OCR：
 
-| 模式 | 主 OCR | 次 OCR/共识 | 结构阶段行为 |
+| 页面来源 | 配置 | 主/次证据 | 结构阶段行为 |
 |---|---|---|---|
-| `single_ocr` | 使用 `pages/` | 忽略旧共识产物 | 候选只来自主 OCR；高置信度脚注可以本地接受，疑难候选交给 Subagent。 |
-| `two_ocr` | 使用 `pages/` | 必须由当前配置生成 `ocr_secondary/` 和 `ocr_consensus.json` | 共识报告和次 OCR sidecar 参与脚注/插图候选比较；差异页必须复核。 |
+| `native_text` | 忽略 `ocr.secondary.enabled` | PDF 原生文本块/坐标/字体；报告兼容字段为 `single_ocr` | 不运行视觉 OCR、Paddle、`ocr-correct` 或 OCR 共识；页底编号全部作为 Subagent 复核候选。 |
+| 视觉 OCR | `false` | 只有 `pages/` 主 OCR | 忽略旧共识产物；明确的高置信度 OCR 脚注可本地接受，疑难候选交给 Subagent。 |
+| 视觉 OCR | `true` | 当前 `ocr_secondary/` + `ocr_consensus.json` | 共识报告和次 OCR sidecar 参与脚注/插图候选比较；差异页必须复核。 |
 
-准备阶段把模式写入候选报告和 manifest。校验/应用阶段比较当前配置、候选报告、主/次
-sidecar 哈希和共识检查点；任何一项变化都阻断旧结果。这样单 OCR 运行不会误读上一次双
-OCR 的 `ocr_consensus.json`，双 OCR 运行也不会因为文件存在就跳过当前共识。
+准备阶段把 `source_kind` 和 `ocr_evidence_mode` 写入候选报告和 manifest。对视觉 OCR，
+校验/应用阶段比较当前配置、候选报告、主/次 sidecar 哈希和共识检查点；对原生文字稿，
+比较原生 sidecar 哈希，并明确排除次 OCR 文件。任何一项变化都阻断旧结果。这样单 OCR
+运行不会误读上一次双 OCR 的 `ocr_consensus.json`，原生文字运行也不会因为目录中存在旧
+共识文件而切换证据路径。
 
 整页插图只在 `illustration_bindings.json` 中出现 `full_page_insert` 时影响 `PageMerger`；
 脚注只在 Subagent 将候选标记为 `footnote_start`、`footnote_continuation` 或
@@ -209,15 +216,16 @@ OCR 的 `ocr_consensus.json`，双 OCR 运行也不会因为文件存在就跳�
 而不是顶层 TOC；相同数字在不同实际单元中可以重新开始。跨页顺序由页面和 block 顺序保留，
 所以“正文 → A 脚注 → B 正文 → A 脚注续文 → B 脚注”不会被错误重排。
 
-### 3.1.2 OCR sidecar 和共识比较
+### 3.1.2 页面 layout sidecar 和共识比较
 
-每个视觉 OCR 页面至少有以下文件：
+每个页面至少有以下文件；原生文字 PDF 的 sidecar 使用相同文件名合同，但其 `backend` 和
+`source_kind` 为 `native_text`，坐标单位为 PDF page points：
 
 ```text
 pages/page_001.md          # 主 OCR 的工作流文本
 pages/page_001.html        # 有 layout 时的 HTML
 pages/page_001.raw.html    # 原始模型 HTML（如后端提供）
-pages/page_001.ocr.json    # OCRPageResult 的 sidecar
+pages/page_001.ocr.json    # OCR 或 native-text layout sidecar
 ```
 
 双 OCR 时，次 OCR 使用同样的文件名写入 `ocr_secondary/`，`ocr_consensus/` 保存逐页比较，
@@ -233,6 +241,74 @@ pages/page_001.ocr.json    # OCRPageResult 的 sidecar
 `agree` 只表示该页通过筛查；`review_required` 表示必须把页图、主 OCR 和次 OCR 一起交给
 `ocr-correct` 的 Subagent。任何后端都不能在共识阶段自动取代主 OCR。共同漏检由固定抽样和
 页面密度异常信号补充发现。
+
+#### 3.1.2.1 原生文字 PDF sidecar 合同
+
+高置信度原生 PDF 由 `pdf_text_probe` 选择直接文本提取。`extract_native_text_pages()`
+仍生成与 OCR 页相同的 `pages/page_NNN.md`，但同时生成带源坐标的
+`pages/page_NNN.ocr.json`。该 sidecar 是脚注和整页插图的版面证据，不是另一套 OCR 结果，
+也不是让本地脚本直接替代 Subagent 判断的标签。
+
+最小结构如下（字段值为示意）：
+
+```json
+{
+  "schema_version": 1,
+  "page_number": 125,
+  "backend": "native_text",
+  "source_kind": "native_text",
+  "coordinate_system": "page_points",
+  "page_box": [0, 0, 612, 792],
+  "body_font_size": 10.2,
+  "formats": {"markdown": "page_125.md"},
+  "blocks": [
+    {
+      "order": 3,
+      "label": "Text",
+      "bbox": [72, 690, 540, 735],
+      "text": "12 A note definition...",
+      "html": "12 A note definition...",
+      "line_count": 2,
+      "source_block": 4,
+      "font_size": 8.4,
+      "font_names": ["MinionPro-Regular"],
+      "flags": 0
+    }
+  ],
+  "assets": []
+}
+```
+
+维护约定：
+
+- `page_box` 和 `blocks[].bbox` 使用 PyMuPDF/PDF page points；原生稿不能套用 OCR 的
+  `0..1000` 坐标启发式。`footnote_prepare._normalise_bbox()` 先按 page box 转成 `0..1`
+  比例，再进行底部位置判断。
+- `body_font_size` 是该页文本 span 字号的中位数。它只用于计算候选块的
+  `font_size_ratio`；字号小不等于脚注。
+- 每个原生文本 block 的 `source_block` 指向 PDF 原始 block，`order` 保持页面阅读顺序。
+  原生文本提取会在一个 PDF block 内按“页底数字开头”拆成多个 layout block，使同页多条
+  脚注可以独立复核和定位。
+- 识别到的短数字/符号上标在 Markdown 中保留为 `<sup>…</sup>`；sidecar 的原始 `text`
+  不被改写。PDF superscript flag 和“字号明显小且位于行上方”只提供上标证据。
+- 原生候选检测要求块位于页面底部、以数字加分隔符开头且不是纯数字页码；它生成
+  `review_required` 候选，不生成可直接搬移的决定。页底坐标、字号、字体和上标必须由
+  Subagent 结合正文上下文确认。
+
+脚注准备报告还记录 `sidecar_sha256`。`footnote_decisions.json` 只能引用候选报告中的
+`page`/`block` 地址；`footnote-validate` 会检查 source kind、sidecar 哈希、决定覆盖率、
+脚注键和 continuation 的可追溯性。`footnote-apply` 再用相同地址在当前章稿中唯一定位
+文本，定位不到、定位到多个或命中正文不唯一时阻断，不猜测替换。
+
+两类来源之所以可以复用同一套 apply 后端，是因为它们都最终提供：
+
+1. 有序的 `page`/`block` 地址和紧凑 review window；
+2. 相同的 decision roles（`body`、`citation`、`bibliography`、三种脚注角色）；
+3. `tree_progress.json` 的完整 `unit_id` 作用域与跨页顺序；
+4. sidecar/source/checkpoint 哈希，可在 apply 前重新验证。
+
+来源差异只停留在“如何生成候选”和“需要多少 Subagent 复核”：OCR layout 可以在明确
+标签和几何证据下产生高置信度候选，native layout 的页底编号全部保守地进入复核。
 
 ### 3.1.3 公式输出契约
 
@@ -311,10 +387,39 @@ Format workflow services  → shared utilities/domain services
 哈希未变，也必须重新生成实体 handoff。OCR 的第二套后端则在配置加载阶段完成一致性校验，
 避免策略层、命令层和实际 OCR 执行层对同一开关产生不同解释。
 
-脚注候选报告至少绑定主 OCR sidecar 哈希、证据模式和（双 OCR 时）次 OCR sidecar 哈希；
-脚注决定只能引用当前候选报告中的 page/block 地址。插图绑定还绑定候选报告哈希、源页哈希、
-sidecar 哈希和证据模式。`refine-local`、`footnote-apply` 和插图加载阶段都会重新检查这些
-绑定；配置从单 OCR 切换到双 OCR，或反向切换时，必须重新准备对应阶段。
+脚注候选报告至少绑定主 OCR sidecar 哈希、`source_kind`、证据模式和（双 OCR 时）次 OCR
+sidecar 哈希；原生文字稿还必须保留 `coordinate_system: page_points` 的 sidecar。脚注决定
+只能引用当前候选报告中的 page/block 地址。插图绑定还绑定候选报告哈希、源页哈希、sidecar
+哈希和证据模式。`refine-local`、`footnote-apply` 和插图加载阶段都会重新检查这些绑定；
+配置从单 OCR 切换到双 OCR，或反向切换时，必须重新准备对应阶段。
+
+### 5.1 原生文字脚注的恢复合同
+
+原生文字运行的最小恢复链是：
+
+```text
+ocr-pages --resume
+→ refine-local --resume
+→ footnote-prepare
+→ [Subagent 写 footnote_decisions.json]
+→ footnote-validate
+→ footnote-apply
+```
+
+其中：
+
+- 旧运行若没有 `pages/page_*.ocr.json`，即使 `pages/*.md` 仍在，也必须重新运行
+  `ocr-pages --resume`；不能从 Markdown 反推 PDF 坐标和字体。
+- PDF 源哈希、页 sidecar、TOC 或已应用的整页插图发生变化时，`tree_progress.json` 和
+  脚注的 page/block 地址可能失效。先让 `refine-local --resume` 更新单元，再重新准备
+  脚注候选；不直接重用旧决定。
+- `footnote_candidates.json` 是候选事实和哈希快照，
+  `footnote_subagent_manifest.json` 是 handoff 索引，`footnote_decisions.json` 是唯一的
+  人工/模型决定来源，`footnote_decision_validation.json` 是决定门禁，
+  `footnote_normalization.json` 是 apply 后的结果检查点。它们的职责不能互换。
+- `No page layout sidecars found`、`source_kind`/`coordinate_system` 不一致、sidecar
+  hash 过期、page/block 地址无法唯一命中或缺少正文命中，都是源阶段/定位失败，应阻断并
+  重建候选；不能用手工改 JSON 或 `--allow-review-warnings` 绕过。
 
 单文件校验只提供 checkpoint，不能替代全量校验。源稿、实体表、TOC 或术语上下文变化
 只应使受影响的 checkpoint 重新进入 `pending`；旧 manifest 没有单元级上下文哈希时，

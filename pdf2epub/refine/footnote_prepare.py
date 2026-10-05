@@ -48,6 +48,8 @@ _FOOTNOTE_KEY_RE = re.compile(
     r"^\s*(?:<sup>\s*)?(?P<key>\d{1,4})(?:\s*</sup>)?\s*(?=\D|$)",
     re.IGNORECASE,
 )
+_NATIVE_NUMERIC_ONLY_RE = re.compile(r"^\s*\d{1,4}\s*$")
+_NATIVE_KEY_START_RE = re.compile(r"^\s*(?P<key>\d{1,3})(?=\s|[.)、，:：])")
 
 
 def _sha256(path: Path) -> str:
@@ -110,10 +112,24 @@ def _normalise_bbox(block: Mapping[str, Any], sidecar: Mapping[str, Any]) -> Opt
     else:
         page_width = page_height = 0
 
+    coordinate_system = str(sidecar.get("coordinate_system") or "").strip().lower()
+    # Native PDF extraction stores coordinates in the PDF page coordinate
+    # system.  This check must happen before the historical ``<= 1000``
+    # heuristic because a US Letter page is only 612x792 points.
+    if coordinate_system in {"page", "page_points", "pdf_points", "points"}:
+        if page_width <= 0 or page_height <= 0:
+            return None
+        return [
+            max(0.0, min(1.0, (bbox[0] - page_box[0]) / page_width)),
+            max(0.0, min(1.0, (bbox[1] - page_box[1]) / page_height)),
+            max(0.0, min(1.0, (bbox[2] - page_box[0]) / page_width)),
+            max(0.0, min(1.0, (bbox[3] - page_box[1]) / page_height)),
+        ]
+
     # Chandra stores normalized 0..1000 coordinates.  Paddle commonly stores
     # pixel coordinates.  A sidecar with no page dimensions cannot be safely
     # normalized, so it is sent for review rather than guessed.
-    if max(bbox) <= 1000:
+    if coordinate_system in {"normalized", "normalised", "ratio"} or max(bbox) <= 1000:
         return [max(0.0, min(1.0, value / 1000.0)) for value in bbox]
     if page_width > 0 and page_height > 0:
         return [
@@ -218,6 +234,8 @@ def _window_for_page(
                 "bbox": _normalise_bbox(block, sidecar),
                 "text": _text_from_block(block)[:240],
                 "candidate": index in candidate_indexes,
+                "font_size": block.get("font_size"),
+                "font_names": block.get("font_names"),
             }
         )
     return {"page": page_number, "blocks": compact_blocks}
@@ -321,6 +339,78 @@ def _validate_two_ocr_checkpoint(output_dir: Path, config: Mapping[str, Any]) ->
         )
 
 
+def _is_native_text_source(output_dir: Path) -> bool:
+    """Return whether the current page set came from native PDF text."""
+    try:
+        progress = json.loads(
+            (Path(output_dir) / "pages" / "ocr_progress.json").read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return False
+    return isinstance(progress, Mapping) and progress.get("mode") == "native_text"
+
+
+def footnote_evidence_mode(
+    output_dir: Path,
+    config: Optional[Mapping[str, Any]] = None,
+) -> str:
+    """Resolve the evidence mode for the current footnote layout source.
+
+    Native text has its own trustworthy page layout evidence and deliberately
+    bypasses visual OCR, even when a stale configuration enables a secondary
+    OCR backend.  The report still uses the historical ``single_ocr`` value
+    for compatibility with downstream checkpoint contracts.
+    """
+    if _is_native_text_source(output_dir):
+        return "single_ocr"
+    return ocr_evidence_mode(config)
+
+
+def _candidate_for_native_block(
+    page_number: int,
+    block_index: int,
+    block: Mapping[str, Any],
+    sidecar: Mapping[str, Any],
+    *,
+    bottom_ratio: float,
+) -> Optional[dict[str, Any]]:
+    """Find conservative native-text candidates for workspace review.
+
+    Native extraction has no semantic OCR labels.  A bottom numbered block is
+    therefore always a review candidate rather than a locally accepted note.
+    A page-number-only block is excluded because it is common page furniture.
+    """
+    text = _text_from_block(block)
+    key_match = _NATIVE_KEY_START_RE.match(text)
+    if not text or _NATIVE_NUMERIC_ONLY_RE.fullmatch(text) or key_match is None:
+        return None
+    try:
+        font_size = float(block.get("font_size"))
+        body_font_size = float(sidecar.get("body_font_size"))
+    except (TypeError, ValueError):
+        font_size = body_font_size = 0.0
+    candidate = _candidate_for_block(
+        page_number,
+        block_index,
+        block,
+        sidecar,
+        bottom_ratio=bottom_ratio,
+        force_review=True,
+    )
+    if candidate is None:
+        return None
+    candidate["key"] = key_match.group("key")
+    candidate["source_kind"] = "native_text"
+    candidate["review_reason"] = "native_layout_candidate"
+    if block.get("font_size") is not None:
+        candidate["font_size"] = block.get("font_size")
+    if font_size > 0 and body_font_size > 0:
+        candidate["font_size_ratio"] = round(font_size / body_font_size, 3)
+    if block.get("font_names"):
+        candidate["font_names"] = block.get("font_names")
+    return candidate
+
+
 def _write_unit_contexts(
     output_dir: Path,
     report: Mapping[str, Any],
@@ -378,14 +468,16 @@ def prepare_footnote_candidates(
 
     No Markdown or translated file is changed.  High-confidence candidates
     are recorded for deterministic later materialization; only review windows
-    are intended for a Subagent.  The function reads OCR sidecars, not the
-    full book text, which keeps the hand-off small.
+    are intended for a Subagent.  The function reads compact page-layout
+    sidecars, not the full book text, which keeps the hand-off small. Visual
+    OCR and native-text PDFs use source-specific candidate detectors but share
+    the same decision contract.
     """
     output_dir = Path(output_dir)
     pages_dir = output_dir / "pages"
     sidecars = sorted(pages_dir.glob("page_*.ocr.json"))
     if not sidecars:
-        raise ValueError(f"No OCR sidecars found in {pages_dir}")
+        raise ValueError(f"No page layout sidecars found in {pages_dir}")
     if not 0.5 <= float(bottom_ratio) < 1.0:
         raise ValueError("bottom_ratio must be between 0.5 and 1.0")
     try:
@@ -393,7 +485,9 @@ def prepare_footnote_candidates(
     except (TypeError, ValueError):
         context_blocks = DEFAULT_CONTEXT_BLOCKS
 
-    evidence_mode = ocr_evidence_mode(config)
+    native_text_source = _is_native_text_source(output_dir)
+    source_kind = "native_text" if native_text_source else "ocr"
+    evidence_mode = footnote_evidence_mode(output_dir, config)
     # The CLI always supplies config.  The config-less path is retained for
     # old library callers/tests; only that compatibility path may consult a
     # legacy consensus file.  A real single-OCR run must ignore stale
@@ -407,7 +501,7 @@ def prepare_footnote_candidates(
     secondary_sidecar_hashes: dict[str, str] = {}
     consensus_review_pages = (
         _load_consensus_review_pages(output_dir)
-        if legacy_consensus or evidence_mode == "two_ocr"
+        if not native_text_source and (legacy_consensus or evidence_mode == "two_ocr")
         else set()
     )
     review_pages: set[int] = set()
@@ -425,18 +519,27 @@ def prepare_footnote_candidates(
         for block_index, block in enumerate(sidecar["blocks"]):
             if not isinstance(block, Mapping):
                 continue
-            candidate = _candidate_for_block(
-                page_number,
-                block_index,
-                block,
-                sidecar,
-                bottom_ratio=float(bottom_ratio),
-                force_review=(
-                    page_number in consensus_review_pages
-                    if legacy_consensus
-                    else False
-                ),
-            )
+            if native_text_source:
+                candidate = _candidate_for_native_block(
+                    page_number,
+                    block_index,
+                    block,
+                    sidecar,
+                    bottom_ratio=float(bottom_ratio),
+                )
+            else:
+                candidate = _candidate_for_block(
+                    page_number,
+                    block_index,
+                    block,
+                    sidecar,
+                    bottom_ratio=float(bottom_ratio),
+                    force_review=(
+                        page_number in consensus_review_pages
+                        if legacy_consensus
+                        else False
+                    ),
+                )
             if candidate is None:
                 continue
             candidates.append(candidate)
@@ -538,6 +641,7 @@ def prepare_footnote_candidates(
     report = {
         "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
         "source_dir": "pages",
+        "source_kind": source_kind,
         "ocr_evidence_mode": evidence_mode,
         "bottom_ratio": float(bottom_ratio),
         "context_blocks": context_blocks,
@@ -577,6 +681,7 @@ def prepare_footnote_subagent(
         "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
         "task": "footnote-prepare",
         "book_title": book_title,
+        "source_kind": report["source_kind"],
         "ocr_evidence_mode": report["ocr_evidence_mode"],
         "candidate_report": "footnote_candidates.json",
         "review_pages": report["review_pages"],
@@ -600,7 +705,7 @@ def prepare_footnote_subagent(
     page_lines = []
     for page in review_pages:
         page_report = page_reports.get(int(page), {})
-        primary = f"`pages/page_{int(page):03d}.ocr.json`"
+        primary = f"`{page_report.get('sidecar', f'pages/page_{int(page):03d}.ocr.json')}`"
         secondary = page_report.get("secondary_sidecar")
         line = f"- primary: {primary}"
         if secondary:
@@ -611,7 +716,14 @@ def prepare_footnote_subagent(
             line += " (primary/secondary footnote candidate evidence differs)"
         page_lines.append(line)
     page_text = "\n".join(page_lines) or "- 无需 Subagent 复核；仅保留本地高置信度候选。"
-    prompt = f"""# Footnote layout review\n\nBook: {book_title}\n\nRead `footnote_subagent_manifest.json` and `footnote_candidates.json`. The local script has selected compact bottom-of-page candidate windows. Review only the listed windows; do not reread or rewrite the whole book. If a page is marked as an OCR-consensus visual review, treat the local label as untrusted even when it says `Footnote`; compare the primary and secondary sidecars and the page image before deciding.\n\nCandidate page sidecars:\n{page_text}\n\nUse these meanings strictly:\n- `footnote_start`: the beginning of a real page footnote; it will be moved to the end of its logical chapter.\n- `footnote_continuation`: text continuing a real footnote from an earlier page; it will be joined to that footnote.\n- `footnote_definition`: a complete footnote definition already presented as a note block.\n- `citation`: an in-text citation, quoted source, parenthetical/numeric reference, or other scholarly reference; it must stay in the body and must never be moved.\n- `bibliography`: a reference-list/bibliography entry; it must stay in place and must never be moved.\n- `body`: ordinary prose or an uncertain block that is not a footnote.\n\nFor each candidate block, assign exactly one role. Keep the block's page and block number. For `footnote_start` and `footnote_definition`, copy the visible numeric key when present. For `footnote_continuation`, provide the key of the footnote it continues. A continuation may appear after ordinary body blocks on the next page; preserve visual order and attach it only when the page image/layout supports that decision. Do not assume that a next-page footnote continuation is at the top of the page. A numeric marker alone is not enough to call something a footnote: if it is a citation or reference, use `citation` or `bibliography`.\n\nWrite only valid JSON to `footnote_decisions.json` with this shape:\n\n```json\n{{\n  "schema_version": {FOOTNOTE_PREPARE_SCHEMA_VERSION},\n  "decisions": [\n    {{\n      "page": 125,\n      "block": 8,\n      "role": "footnote_continuation",\n      "key": "36",\n      "confidence": "high"\n    }}\n  ]\n}}\n```\n\nIf a candidate is genuinely ambiguous, use `role: "review_required"` and explain it in `reason`; do not guess.\n"""
+    source_guidance = (
+        "For native-text pages, use the recorded coordinates and font metadata as layout evidence. "
+        "A bottom numbered block is only a candidate, not an automatic footnote; distinguish it from "
+        "citations, page furniture, and ordinary numbered prose."
+        if report["source_kind"] == "native_text"
+        else "If a page is marked as an OCR-consensus visual review, treat the local label as untrusted even when it says `Footnote`; compare the primary and secondary sidecars and the page image before deciding."
+    )
+    prompt = f"""# Footnote layout review\n\nBook: {book_title}\n\nRead `footnote_subagent_manifest.json` and `footnote_candidates.json`. The local script has selected compact bottom-of-page candidate windows. Review only the listed windows; do not reread or rewrite the whole book. {source_guidance}\n\nCandidate page layout sidecars:\n{page_text}\n\nUse these meanings strictly:\n- `footnote_start`: the beginning of a real page footnote; it will be moved to the end of its logical chapter.\n- `footnote_continuation`: text continuing a real footnote from an earlier page; it will be joined to that footnote.\n- `footnote_definition`: a complete footnote definition already presented as a note block.\n- `citation`: an in-text citation, quoted source, parenthetical/numeric reference, or other scholarly reference; it must stay in the body and must never be moved.\n- `bibliography`: a reference-list/bibliography entry; it must stay in place and must never be moved.\n- `body`: ordinary prose or an uncertain block that is not a footnote.\n\nFor each candidate block, assign exactly one role. Keep the block's page and block number. For `footnote_start` and `footnote_definition`, copy the visible numeric key when present. For `footnote_continuation`, provide the key of the footnote it continues. A continuation may appear after ordinary body blocks on the next page; preserve visual order and attach it only when the page image/layout supports that decision. Do not assume that a next-page footnote continuation is at the top of the page. A numeric marker alone is not enough to call something a footnote: if it is a citation or reference, use `citation` or `bibliography`.\n\nWrite only valid JSON to `footnote_decisions.json` with this shape:\n\n```json\n{{\n  "schema_version": {FOOTNOTE_PREPARE_SCHEMA_VERSION},\n  "decisions": [\n    {{\n      "page": 125,\n      "block": 8,\n      "role": "footnote_continuation",\n      "key": "36",\n      "confidence": "high"\n    }}\n  ]\n}}\n```\n\nIf a candidate is genuinely ambiguous, use `role: "review_required"` and explain it in `reason`; do not guess.\n"""
     prompt += "\n\nDo not reread or rewrite the whole book.\n"
     prompt_path = output_dir / "footnote_subagent_prompt.md"
     atomic_write_text(prompt_path, prompt)
@@ -669,12 +781,15 @@ def validate_footnote_decisions(
         )
         return result
 
+    source_kind = str(report.get("source_kind") or "ocr")
     evidence_mode = str(report.get("ocr_evidence_mode") or "single_ocr")
     errors: list[str] = []
+    if source_kind not in {"ocr", "native_text"}:
+        errors.append("candidate report has an unsupported page source kind")
     if evidence_mode not in {"single_ocr", "two_ocr"}:
         errors.append("candidate report has an unsupported OCR evidence mode")
     if config is not None:
-        configured_mode = ocr_evidence_mode(config)
+        configured_mode = footnote_evidence_mode(output_dir, config)
         if evidence_mode != configured_mode:
             errors.append(
                 f"candidate report was prepared in {evidence_mode}, but configuration requires {configured_mode}"
@@ -710,6 +825,7 @@ def validate_footnote_decisions(
     if errors:
         result = {
             "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
+            "source_kind": source_kind,
             "ocr_evidence_mode": evidence_mode,
             "valid": False,
             "status": "retry_required",
@@ -731,6 +847,7 @@ def validate_footnote_decisions(
     if not required:
         result = {
             "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
+            "source_kind": source_kind,
             "ocr_evidence_mode": evidence_mode,
             "valid": True,
             "status": "no_subagent_review_required",
@@ -839,6 +956,7 @@ def validate_footnote_decisions(
         status = "validated"
     result = {
         "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
+        "source_kind": source_kind,
         "ocr_evidence_mode": evidence_mode,
         "valid": not errors and not human_review_required,
         "status": status,
@@ -887,6 +1005,7 @@ def load_footnote_unit_contexts(output_dir: Path) -> dict[str, Path]:
 __all__ = [
     "DEFAULT_BOTTOM_RATIO",
     "FOOTNOTE_PREPARE_SCHEMA_VERSION",
+    "footnote_evidence_mode",
     "load_footnote_unit_contexts",
     "prepare_footnote_candidates",
     "prepare_footnote_subagent",

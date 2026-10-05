@@ -14,6 +14,8 @@
 
 - 默认 PDF 主 OCR 是 Chandra；可选第二套 OCR 是本地 PaddleOCR 3.7.0 + PaddlePaddle 3.3.1。
 - `ocr.secondary.enabled` 是单 OCR/双 OCR 的唯一开关，同时约束 OCR 纠错、脚注候选和整页插图候选。
+- 高置信度矢量文字 PDF 使用 `native_text` 页面源和 PDF page-point layout sidecar；它跳过视觉
+  OCR/共识，但仍必须经过 `refine-local`、脚注门禁和 polish。
 - Chandra 和 Paddle 都写入 Chandra-shaped layout sidecar；Paddle 只保守识别页底脚注定义，
   不把普通序数、上标或行内数字引用升级成脚注。
 - EPUB 公式使用 Unicode 优先、MathML 回退方案；当前没有 SVG 公式渲染器，也不要求
@@ -120,6 +122,31 @@ html-validate --file <同名文件>.md
 项目测试还会构造一个固定 EPUB，经过真实的最终打包路径后交给 PyMuPDF 渲染，比较页数、
 文本版心和像素签名，并验证重复渲染稳定。这是本地阅读器引擎级别的回归，不等同于所有
 商业阅读器和硬件设备的兼容性认证。
+
+### PDF 源类型分支
+
+`ocr-pages` 先写 `pdf_text_probe.json`，再按保守分类选择页面源：
+
+```text
+ocr-pages
+  → pdf_text_probe.json
+  → native_text: pages/*.md + pages/*.ocr.json + pages/ocr_progress.json(mode=native_text)
+  → visual OCR: pages/*.md + OCR layout sidecars
+```
+
+只有 `classification: native_text` 才走原生分支。可搜索但实际内容来自整页图像的 PDF、
+隐藏 OCR 层和混合稿仍必须走视觉 OCR；不能仅凭复制文字或目录中已有 Markdown 判断。
+
+原生分支的 sidecar 是版面证据，不是 OCR 结果。每页 sidecar 应包含
+`backend: native_text`、`source_kind: native_text`、`coordinate_system: page_points`、
+`page_box`、`body_font_size` 和有序 `blocks[]`。block 至少保留 `bbox`、`text`、
+`font_size`、`font_names` 和 `source_block`。这里的坐标是 PDF page points，不能使用视觉
+OCR 的 `0..1000` 坐标解释。
+
+原生分支不运行视觉 OCR、Paddle、`ocr-correct`、`ocr-correct-validate` 或
+`ocr_consensus.json`。即使 `ocr.secondary.enabled: true` 残留在配置中，原生脚注仍走
+native layout；候选报告中的 `ocr_evidence_mode: single_ocr` 只是下游兼容字段，不代表
+调用了 OCR 或可以读取旧的双 OCR 检查点。
 
 ## PDF 结构精修
 
@@ -281,13 +308,16 @@ pipeline: epub_conversion
 草稿还会对明显的“大跨度目录/附录包装节点”执行保守的层级解构，Subagent 只需复核
 结果。
 
-对于扫描 PDF，在 `refine-local` 后、`polish` 前运行
-`footnote-prepare`。该命令只读取 `pages/page_*.ocr.json` 的版面 sidecar，在本地筛选
-带有脚注标签、底部坐标和编号起始的高置信度候选，并按页面内的实际顺序生成稀疏的
-`footnote_contexts/`。只有没有明确标签、跨页续文或正文/脚注交错的候选窗口才交给工作区
+对于所有 PDF，在 `refine-local` 后、`polish` 前运行 `footnote-prepare`。扫描 PDF 使用
+OCR layout sidecar；高置信度原生文字 PDF 在 `ocr-pages` 阶段生成带 PDF 坐标、文本块和字体
+元数据的 native layout sidecar。两种来源在本地使用不同的候选筛选器，但都按页面内实际顺序
+生成稀疏的 `footnote_contexts/`，并共享 Subagent 决策、校验和 `footnote-apply`。原生文字的
+页底编号候选默认必须交给 Subagent 复核，不因底部位置单独自动判为脚注；字号、坐标和正文
+上标只作为证据。扫描 PDF 中只有没有明确标签、跨页续文或正文/脚注交错的候选窗口交给工作区
 Subagent；双 OCR 模式下，任何被 OCR 共识标为 `visual_review`、或主/次候选结果不同的页面
 都会禁用本地高置信度自动接受，并把主、次两套 sidecar 一起交给 Subagent。Subagent 只写
-`footnote_decisions.json`，随后用 `footnote-validate` 校验；单 OCR 模式不会读取遗留共识报告。
+`footnote_decisions.json`，随后用 `footnote-validate` 校验；原生文字 PDF 不运行视觉 OCR
+共识，即使配置残留次 OCR 开关，也只使用原生版面证据。
 这里必须区分脚注和引用：正文中的作者—年份/编号引用、引文来源以及
 `bibliography`/`reference` 条目使用 `citation` 或 `bibliography` 角色，脚本不会搬移它们。
 脚注候选必须保留“正文 → 上一脚注续文 → 新脚注”的页内顺序，不能把跨页续文默认移动到
@@ -303,6 +333,52 @@ Subagent；双 OCR 模式下，任何被 OCR 共识标为 `visual_review`、或�
 最新共识检查点，主/次 OCR 对候选的差异会进入工作区 Subagent 复核。`footnote-validate`、
 `footnote-apply`、`illustration-validate`、`illustration-apply` 和 `refine-local` 都会再次
 检查这个模式及其哈希，因此切换开关后不能复用旧的脚注或插图绑定。
+
+### 原生文字 PDF 的脚注 handoff
+
+原生候选器的职责是缩小复核范围，不是替 Subagent 读懂脚注。它按以下顺序工作：
+
+1. 读取 `pages/page_NNN.ocr.json`，按 `page_box` 将 PDF page points 的 block bbox 归一化到
+   `0..1` 页面比例；不能把 Letter/A4 的 point 数值误当成 OCR 的 `0..1000` 坐标。
+2. 只关注页面下部（当前默认 `bottom_ratio: 0.64`）、以一至三位数字和空格/标点开头的
+   文本块；纯数字块排除为印刷页码候选。原生 PDF 没有可靠的 OCR 语义标签，因此所有
+   保留下来的原生候选都标为 `review_required`。
+3. 原生提取器依据 PDF 文本 block 内的行顺序，在新的页底数字开头处拆分 layout block，
+   因而同一页的多条脚注各自拥有稳定的 `page`/`block` 地址。`body_font_size`、block
+   `font_size`、`font_names` 和上标 flag/位置只作为复核证据。
+4. Subagent 只读取 manifest 列出的 `footnote_contexts/*.json` 和 sidecar 窗口，逐个候选
+   写入 `footnote_decisions.json`。它必须区分 `footnote_start`、
+   `footnote_continuation`、`footnote_definition`、`citation`、`bibliography`、`body` 和
+   `review_required`；数字开头本身不是决定理由。跨页续文仍按视觉顺序处理，不能默认贴到
+   下一页开头。
+
+`footnote-prepare` 完成后维护者应按下表解释产物：
+
+| 产物 | 作用 | 不能替代 |
+|---|---|---|
+| `footnote_candidates.json` | 候选窗口、来源类型、证据模式、sidecar 哈希和 review pages | Subagent 决定 |
+| `footnote_subagent_manifest.json` | 当前复核页、单位上下文和 pending 状态 | 决定校验 |
+| `footnote_decisions.json` | Subagent 对候选 block 的角色决定 | sidecar 或候选事实 |
+| `footnote_decision_validation.json` | 决定地址、角色、键、覆盖率和哈希门禁 | apply 结果 |
+| `footnote_normalization.json` | apply 后的定位、归并和输出检查点 | 上游候选报告 |
+
+原生脚注的典型失败包括 `No page layout sidecars found`、`source_kind` 或
+`coordinate_system` 不一致、sidecar hash 过期、决定引用不存在/重复的 page/block，及脚注
+块在章稿中无法唯一命中。它们都应回到源阶段恢复，而不是手工改决定 JSON。旧运行没有
+sidecar 时，恢复顺序为：
+
+```text
+ocr-pages --resume
+→ refine-local --resume
+→ footnote-prepare
+→ [Subagent 写 footnote_decisions.json]
+→ footnote-validate
+→ footnote-apply
+```
+
+如果源 PDF、TOC、页合并或插图绑定改变，必须重新生成受影响的 `tree_progress.json` 单元
+和脚注上下文；只有当前 `sidecar_sha256`、候选报告和单元作用域都匹配时才可恢复旧的
+Subagent 输出。
 
 ### 公式和 EPUB 阅读器兼容性
 
