@@ -36,6 +36,8 @@ subagent:
     # Optional PDF whole-book TOC orientation budget; the exact chapter TOC
     # contract remains separate and authoritative.
     global_toc_tokens: 1200
+    pack_adjacent_chapters: true
+    max_chapters_per_worker: 3
   # 可选：覆盖某个具体任务
   # task_models:
   #   refine: <configured task model>
@@ -47,14 +49,86 @@ subagent:
 
 正文任务按文件拆分。使用 `--resume` 重新准备任务时，manifest 会根据目标目录写出 `completed_files` 和 `pending_files`；提示词要求 Subagent 只处理 `pending_files`。已经通过校验的输出不会被重新覆盖。新 manifest 还会按单元比较 `unit_context_sha256` 和精确 TOC 上下文，因此外部术语表变化只会使受影响单元重新进入 `pending`；没有单元哈希的旧 manifest 才采用整批重做的兼容策略。恢复前建议先运行对应的 `*-validate`，这样可以先发现空文件、行数不一致或标签损坏。
 
-PDF 的 `translate` manifest 会在 `worker_handoffs/` 按顶层章节生成隔离的最小 manifest 和提示词；父级 manifest 保留完整审计索引，worker 只接收自己的文件、批次、上下文哈希和必要的章节元数据，不重复携带全书文件统计、章节映射或审计快照路径；
+PDF/EPUB 的 `translate` manifest 会在 `worker_handoffs/` 按 TOC 顺序为相邻短章节装箱，生成隔离的最小 manifest 和提示词；父级 manifest 保留完整审计索引，worker 只接收自己的文件、批次、上下文哈希和必要的章节元数据，不重复携带全书文件统计、章节映射或审计快照路径；
 `polish` 使用独立的 `polish_worker_handoffs/`，避免不同阶段的任务被误认。每个 Subagent
 只读取自己 handoff 的 `assigned_files`；超过 30,000 字节的单元自动独立成批，但不能与
-其他章节合并。章节术语上下文在普通章节中只注入一次；大章节拆分时使用
-`shared_entries` 和当前分片的 `local_entries`。`translate-toc` 是正文 worker 启动前的
+其他章节合并。普通单章节 worker 的术语上下文只注入一次；相邻章节合并 worker 使用按
+文件分区的直接上下文；大章节拆分时使用 `shared_entries` 和当前分片的 `local_entries`。
+`translate-toc` 是正文 worker 启动前的
 独立任务，不由任何正文 worker 写入。
 
 元数据是单个 `translated_metadata.json`，必须整体是合法 JSON；如果额度中断留下半个文件，校验会拒绝它，下一次 Subagent 会完整重写。
+
+## 章节组与 worker 装箱合同
+
+PDF 和 EPUB 的正文翻译有两个不能混淆的范围：`chapter_groups` 是语义范围，
+`worker_handoffs` 是执行范围。一个章节组可以包含一个章节的多个 Markdown/HTML 单元；
+一个 worker handoff 可以包含多个相邻的短章节组，但不能因此改变源文件、TOC 或输出文件
+的边界。
+
+### 装箱规则
+
+运行时按 `chapter_groups` 的 TOC 顺序从前往后装箱，默认受以下限制约束：
+
+| 设置 | 作用 |
+| --- | --- |
+| `pack_adjacent_chapters` | 是否允许相邻顶层章节组进入同一 worker，默认 `true` |
+| `max_chapters_per_worker` | 一个 worker 最多容纳的章节组数量，默认 `3` |
+| `max_files` | 一个 worker 的源文件数量上限，硬上限为 `8` |
+| `max_source_tokens` | 一个 worker 的源 token 预算 |
+| `single_file_max_bytes` | 单个文件超过该值时必须独立成批，默认 `30000` |
+
+装箱具有以下硬边界：
+
+1. 一个章节组如果自身需要多个批次，先结束当前短章节装箱，再按章节内部拆出的
+   part 文件分别派发；这些 part 不得与其他章节组混合。
+2. 一个章节组只要包含超过 `max_source_tokens` 或 `single_file_max_bytes` 的文件，
+   即使运行时只生成一个 part，也视为 oversized，不能与相邻章节合并。
+3. 文件数、token 数或章节数即将超出预算时，先提交当前 worker，再从下一个章节组开始
+   新 worker。装箱只允许连续相邻章节，不做跨章节重排或负载均衡重排。
+4. `--resume` 时，已经完成而被跳过的章节组是相邻性屏障；不能把它前后的两个待处理章节
+   重新拼成一个 worker。
+
+父级 `translate_subagent_manifest.json` 保留完整的 `chapter_groups`、`pending_files`、
+`batch_queue` 和审计信息。真正交给 Subagent 的 scoped manifest 只保留当前 worker 的
+`assigned_files`、文件统计、上下文哈希和必要章节元数据。单章节 worker 保留兼容字段
+`chapter_id`/`chapter_file_count`；合并 worker 使用：
+
+```json
+{
+  "chapter_ids": ["toc_001", "toc_002"],
+  "chapter_count": 2,
+  "chapter_file_counts": {"toc_001": 1, "toc_002": 2},
+  "assigned_files": ["chapter_1.md", "chapter_2.md", "chapter_3.md"]
+}
+```
+
+`assigned_files` 是 worker 的唯一执行授权。父级 manifest 中其他文件的存在，不代表当前
+Subagent 可以读取、修改或翻译它们。
+
+### 术语上下文格式
+
+worker handoff 生成的 `worker_contexts/` 依据任务范围选择格式：
+
+| 场景 | `selection` | Subagent 的使用方式 |
+| --- | --- | --- |
+| 普通单章节 | `chapter_sparse_direct_context` | 使用一次 `entries`，作用于该章节的 assigned 文件 |
+| 单个大章节的分片 | `chapter_shared_local_direct_context` | 所有分片一致使用 `shared_entries`；只对匹配分片使用 `local_entries` |
+| 相邻多章节合并 | `adjacent_chapter_direct_file_contexts` | 从 `files` 映射读取当前文件的条目，不能把条目广播到其他文件 |
+| 没有章节分组的普通 Markdown 任务 | `worker_sparse_direct_file_contexts` | 从 `files` 映射读取每个文件的直接条目 |
+
+合并章节时，同一个 Subagent 可以通过同一任务上下文保持措辞和风格连续，但术语作用域仍
+按文件隔离。完整领域术语表、实体表和审计快照不是 worker 的日常输入，不得用它们替换
+handoff 指定的稀疏上下文。
+
+### 维护时的验证重点
+
+- 调整装箱逻辑时，同时覆盖“短章合并”“预算溢出封箱”“大章内部拆分”“resume 跳过章节
+  作为屏障”和“术语不串章”五类测试。
+- 不要把多个源文件物理合并后再交给 Subagent；输出仍必须与源文件保持一一对应，才能让
+  `translate-validate --file` 和断点恢复按单元工作。
+- 如果新增 worker context schema，必须更新 `AGENTS.md` 的读取规则、此处的 schema 表和
+  `tests/workflow_optimizations_test.py` 的合同测试。
 
 TeX 使用独立的 `tex_units/` 和 `translated_tex_units/` 文件。校验时本地程序检查每个单元都存在，再从这些单元重建 `project/` 并编译，因此不会把初始原文工程误判为“已经翻完”。TeX 流程中的 XeLaTeX 只用于 `translate-arxiv-validate` 的项目编译门禁，不代表 EPUB 公式也会走 XeLaTeX。
 
@@ -312,12 +386,20 @@ pipeline: epub_conversion
 OCR layout sidecar；高置信度原生文字 PDF 在 `ocr-pages` 阶段生成带 PDF 坐标、文本块和字体
 元数据的 native layout sidecar。两种来源在本地使用不同的候选筛选器，但都按页面内实际顺序
 生成稀疏的 `footnote_contexts/`，并共享 Subagent 决策、校验和 `footnote-apply`。原生文字的
-页底编号候选默认必须交给 Subagent 复核，不因底部位置单独自动判为脚注；字号、坐标和正文
-上标只作为证据。扫描 PDF 中只有没有明确标签、跨页续文或正文/脚注交错的候选窗口交给工作区
+页底编号候选不会仅因底部位置自动判为脚注；默认只有同页对应上标引用和小字号双重匹配的
+候选本地接受，其余候选交 Subagent 复核。扫描/OCR PDF 中明确标签且版面位置可靠的高置信度候选
+默认同样本地接受，只有没有明确标签、跨页续文或正文/脚注交错的候选窗口交给工作区
 Subagent；双 OCR 模式下，任何被 OCR 共识标为 `visual_review`、或主/次候选结果不同的页面
 都会禁用本地高置信度自动接受，并把主、次两套 sidecar 一起交给 Subagent。Subagent 只写
 `footnote_decisions.json`，随后用 `footnote-validate` 校验；原生文字 PDF 不运行视觉 OCR
 共识，即使配置残留次 OCR 开关，也只使用原生版面证据。
+
+脚注和整页插图的证据选择由同一套本地边界负责：`refine/pdf_evidence.py` 统一判断
+`native_text`、`single_ocr` 和 `two_ocr`，`refine/layout_evidence.py` 统一读取 sidecar、
+清理 block 文本并归一化坐标。两个阶段可以拥有不同的候选器和 Subagent 角色，但不得各自
+实现一套 OCR 模式判断或 bbox 归一化；这样原生 PDF 不会在某个阶段意外读入旧的双 OCR 报告。
+脚注配置的默认值、校验和 CLI 覆盖统一由 `resolve_footnote_options()` 处理，命令 handler
+不再复制这些默认值。
 这里必须区分脚注和引用：正文中的作者—年份/编号引用、引文来源以及
 `bibliography`/`reference` 条目使用 `citation` 或 `bibliography` 角色，脚本不会搬移它们。
 脚注候选必须保留“正文 → 上一脚注续文 → 新脚注”的页内顺序，不能把跨页续文默认移动到
@@ -336,18 +418,21 @@ Subagent；双 OCR 模式下，任何被 OCR 共识标为 `visual_review`、或�
 
 ### 原生文字 PDF 的脚注 handoff
 
-原生候选器的职责是缩小复核范围，不是替 Subagent 读懂脚注。它按以下顺序工作：
+原生候选器的职责是缩小复核范围，不是替 Subagent 读懂脚注。默认采用保守的本地接受规则，
+只放过版面证据同时满足的候选；其余候选仍进入 Subagent。它按以下顺序工作：
 
 1. 读取 `pages/page_NNN.ocr.json`，按 `page_box` 将 PDF page points 的 block bbox 归一化到
    `0..1` 页面比例；不能把 Letter/A4 的 point 数值误当成 OCR 的 `0..1000` 坐标。
 2. 只关注页面下部（当前默认 `bottom_ratio: 0.64`）、以一至三位数字和空格/标点开头的
-   文本块；纯数字块排除为印刷页码候选。原生 PDF 没有可靠的 OCR 语义标签，因此所有
-   保留下来的原生候选都标为 `review_required`。
+   文本块；纯数字块排除为印刷页码候选。原生 PDF 没有可靠的 OCR 语义标签，因此只有
+   同页更早位置存在对应 `<sup>N</sup>` 引用、且字号比例不超过默认 `0.88` 的候选标为
+   `confidence: high`，其余保留下来的候选标为 `review_required`。
 3. 原生提取器依据 PDF 文本 block 内的行顺序，在新的页底数字开头处拆分 layout block，
    因而同一页的多条脚注各自拥有稳定的 `page`/`block` 地址。`body_font_size`、block
    `font_size`、`font_names` 和上标 flag/位置只作为复核证据。
 4. Subagent 只读取 manifest 列出的 `footnote_contexts/*.json` 和 sidecar 窗口，逐个候选
-   写入 `footnote_decisions.json`。它必须区分 `footnote_start`、
+   写入 `footnote_decisions.json`。本地已标记 `confidence: high` 的候选不需要重复决定；
+   它必须区分 `footnote_start`、
    `footnote_continuation`、`footnote_definition`、`citation`、`bibliography`、`body` 和
    `review_required`；数字开头本身不是决定理由。跨页续文仍按视觉顺序处理，不能默认贴到
    下一页开头。
@@ -379,6 +464,19 @@ ocr-pages --resume
 如果源 PDF、TOC、页合并或插图绑定改变，必须重新生成受影响的 `tree_progress.json` 单元
 和脚注上下文；只有当前 `sidecar_sha256`、候选报告和单元作用域都匹配时才可恢复旧的
 Subagent 输出。
+
+脚注本地接受规则可通过配置统一控制两种 PDF 来源：
+
+```yaml
+footnotes:
+  auto_accept: true
+  native_max_font_ratio: 0.88
+```
+
+需要扫描/OCR PDF 和原生文字 PDF 都逐候选复核时，设置推荐写法
+`footnotes.auto_accept: false`。命令行 `footnote-prepare --review-all` 是同等的临时覆盖。
+无论是否本地接受，候选报告都会保留 `same_page_superscript`、`font_size_ratio` 和哈希证据，
+便于审计。
 
 ### 公式和 EPUB 阅读器兼容性
 
@@ -437,8 +535,9 @@ PDF 翻译、实体提取和打包都必须以当前且通过 `polish-validate` 
 生成候选报告，程序不会仅凭文件名自动选择。每次明确选择会记录在
 `glossary_selection.json` 中；外部表中的 `fixed` 译法优先，不同外部表对同一源词
 产生冲突时，准备阶段会拒绝继续。翻译任务会先为每个源单元生成精简术语上下文，再由
-worker handoff 按顶层章节聚合；普通章节使用章节级 `entries`，大章节拆分使用
-`shared_entries`/`local_entries`，完整快照只保留作审计。PDF 正文 Prompt 还会读取已验证的
+worker handoff 按 TOC 顺序装箱；普通单章节使用章节级 `entries`，相邻短章节使用按文件
+分区的直接上下文，大章节拆分使用 `shared_entries`/`local_entries`，完整快照只保留作审计。
+PDF 正文 Prompt 还会读取已验证的
 `toc_tree_translated.json`，生成一个方向性全书 TOC 轮廓。轮廓按实际 TOC 的深度、分支规模
 和 `global_toc_tokens` 预算自适应压缩，不固定规定保留几级标题；它只帮助理解全书结构，
 当前章节的精确 TOC heading contract 才能决定正文中的标题文字。

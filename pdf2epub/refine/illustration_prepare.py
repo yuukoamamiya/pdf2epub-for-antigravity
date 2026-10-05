@@ -11,7 +11,6 @@ the candidate pages and their neighbours, and materializes only validated
 from __future__ import annotations
 
 import hashlib
-import html
 import json
 import os
 import re
@@ -21,10 +20,12 @@ from typing import Any, Mapping, Optional
 
 from ..workflow_contracts import atomic_write_text, relative_posix_path, sha256_file
 from ..subagent_runtime import resolve_subagent_model
-from ..ocr_consensus import (
-    consensus_is_current,
-    ocr_evidence_mode,
+from .layout_evidence import (
+    load_layout_sidecar,
+    normalized_bbox as _normalised_bbox,
+    text_from_block as _text_from_block,
 )
+from .pdf_evidence import pdf_evidence_mode, require_current_consensus
 
 
 ILLUSTRATION_PREPARE_SCHEMA_VERSION = 1
@@ -54,78 +55,6 @@ def _sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
-def _text_from_block(block: Mapping[str, Any]) -> str:
-    value = block.get("text")
-    if value is None:
-        value = block.get("html", "")
-    value = html.unescape(str(value or ""))
-    value = re.sub(r"<[^>]+>", " ", value)
-    return re.sub(r"\s+", " ", value).strip()
-
-
-def _bbox(value: Any) -> Optional[list[float]]:
-    if not isinstance(value, (list, tuple)):
-        return None
-    if len(value) == 4 and all(isinstance(item, (int, float)) for item in value):
-        x0, y0, x1, y1 = (float(item) for item in value)
-        if x1 > x0 and y1 > y0:
-            return [x0, y0, x1, y1]
-        return None
-    points: list[tuple[float, float]] = []
-    for point in value:
-        if isinstance(point, Mapping):
-            x, y = point.get("x"), point.get("y")
-        elif isinstance(point, (list, tuple)) and len(point) >= 2:
-            x, y = point[0], point[1]
-        else:
-            continue
-        if isinstance(x, (int, float)) and isinstance(y, (int, float)):
-            points.append((float(x), float(y)))
-    if len(points) < 2:
-        return None
-    xs = [point[0] for point in points]
-    ys = [point[1] for point in points]
-    result = [min(xs), min(ys), max(xs), max(ys)]
-    return result if result[2] > result[0] and result[3] > result[1] else None
-
-
-def _normalised_bbox(block: Mapping[str, Any], sidecar: Mapping[str, Any]) -> Optional[list[float]]:
-    """Return a block bbox as x0/y0/x1/y1 page ratios."""
-    normalized = _bbox(block.get("bbox"))
-    coordinate_system = str(sidecar.get("coordinate_system") or "").strip().lower()
-    if coordinate_system in {"page", "page_points", "pdf_points", "points"}:
-        page = _bbox(sidecar.get("page_box"))
-        if normalized is None or page is None:
-            return None
-        width = page[2] - page[0]
-        height = page[3] - page[1]
-        if width <= 0 or height <= 0:
-            return None
-        return [
-            max(0.0, min(1.0, (normalized[0] - page[0]) / width)),
-            max(0.0, min(1.0, (normalized[1] - page[1]) / height)),
-            max(0.0, min(1.0, (normalized[2] - page[0]) / width)),
-            max(0.0, min(1.0, (normalized[3] - page[1]) / height)),
-        ]
-    if normalized is not None and max(normalized) <= 1000:
-        return [max(0.0, min(1.0, value / 1000.0)) for value in normalized]
-
-    pixels = _bbox(block.get("bbox_px"))
-    page = _bbox(sidecar.get("page_box"))
-    if pixels is None or page is None:
-        return None
-    width = page[2] - page[0]
-    height = page[3] - page[1]
-    if width <= 0 or height <= 0:
-        return None
-    return [
-        max(0.0, min(1.0, (pixels[0] - page[0]) / width)),
-        max(0.0, min(1.0, (pixels[1] - page[1]) / height)),
-        max(0.0, min(1.0, (pixels[2] - page[0]) / width)),
-        max(0.0, min(1.0, (pixels[3] - page[1]) / height)),
-    ]
-
-
 def _visible_markdown_text(value: str) -> str:
     value = _IMAGE_RE.sub(" ", str(value or ""))
     value = _HTML_IMAGE_RE.sub(" ", value)
@@ -135,15 +64,7 @@ def _visible_markdown_text(value: str) -> str:
 
 
 def _load_sidecar(path: Path) -> dict[str, Any]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise ValueError(f"Invalid OCR sidecar {path}: {exc}") from exc
-    if not isinstance(value, dict):
-        raise ValueError(f"OCR sidecar must be an object: {path}")
-    if not isinstance(value.get("blocks", []), list):
-        raise ValueError(f"OCR sidecar blocks must be an array: {path}")
-    return value
+    return load_layout_sidecar(path, require_blocks=False)
 
 
 def _page_number(path: Path) -> Optional[int]:
@@ -313,14 +234,10 @@ def prepare_illustration_subagent(
         raise ValueError("large_block_area must be between 0.2 and 1.0")
     if not 72 <= int(review_dpi) <= 400:
         raise ValueError("illustration.review_dpi must be between 72 and 400")
-    evidence_mode = ocr_evidence_mode(config)
+    evidence_mode = pdf_evidence_mode(output_dir, config)
     secondary_dir = output_dir / "ocr_secondary"
     if evidence_mode == "two_ocr":
-        if not consensus_is_current(output_dir, config):
-            raise ValueError(
-                "two-OCR illustration review requires a current ocr_consensus.json; "
-                "rerun ocr-pages and ocr-correct-validate first"
-            )
+        require_current_consensus(output_dir, config, stage="illustration")
     max_text_chars = max(0, int(max_text_chars))
 
     candidates: list[dict[str, Any]] = []
@@ -569,15 +486,16 @@ def validate_illustration_decisions(
     if report.get("ocr_evidence_mode") not in {"single_ocr", "two_ocr"}:
         errors.append("illustration candidate report has no valid OCR evidence mode")
     elif config is not None:
-        configured_mode = ocr_evidence_mode(config)
+        configured_mode = pdf_evidence_mode(output_dir, config)
         if report.get("ocr_evidence_mode") != configured_mode:
             errors.append(
                 "illustration candidate report was prepared with a different OCR evidence mode"
             )
-        elif configured_mode == "two_ocr" and not consensus_is_current(output_dir, config):
-            errors.append(
-                "two-OCR illustration review requires a current ocr_consensus.json"
-            )
+        elif configured_mode == "two_ocr":
+            try:
+                require_current_consensus(output_dir, config, stage="illustration")
+            except ValueError as exc:
+                errors.append(str(exc))
 
     expected_pages = sorted(int(item["page"]) for item in report.get("candidate_pages", []) if isinstance(item, Mapping) and str(item.get("page", "")).isdigit())
     source_pages, source_sidecars, source_secondary = _current_source_hashes(output_dir, report)
@@ -671,11 +589,17 @@ def load_current_illustration_pages(
     if candidate_report.get("report_sha256") != _report_digest(candidate_report):
         raise ValueError("illustration candidate report hash mismatch; rerun illustration-prepare")
     if config is not None:
-        configured_mode = ocr_evidence_mode(config)
+        configured_mode = pdf_evidence_mode(output_dir, config)
         if candidate_report.get("ocr_evidence_mode") != configured_mode:
             raise ValueError("illustration bindings were prepared with a different OCR evidence mode; rerun illustration-prepare")
-        if configured_mode == "two_ocr" and not consensus_is_current(output_dir, config):
-            raise ValueError("illustration bindings require a current ocr_consensus.json; rerun illustration-prepare")
+        if configured_mode == "two_ocr":
+            try:
+                require_current_consensus(output_dir, config, stage="illustration binding")
+            except ValueError as exc:
+                raise ValueError(
+                    "illustration bindings require a current ocr_consensus.json; "
+                    "rerun illustration-prepare"
+                ) from exc
     if bindings.get("schema_version") != ILLUSTRATION_BINDINGS_SCHEMA_VERSION or bindings.get("status") != "validated":
         raise ValueError("illustration_bindings.json is not a validated checkpoint")
     if bindings.get("ocr_evidence_mode") != candidate_report.get("ocr_evidence_mode"):

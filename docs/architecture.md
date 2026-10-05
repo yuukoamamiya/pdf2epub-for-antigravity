@@ -80,6 +80,10 @@ Subagent 合同层
 - `ocr/backends/paddle.py`：可选的本地次 OCR。它输出 Chandra-shaped layout sidecar，脚注
   只按保守的页底几何和数字开头推导；明确的定义块使用相同 `footnote-def`/`[^N]:` 语义，
   但不臆测普通上标、序数或行内引用。
+- `refine/pdf_evidence.py`：统一决定当前页面集合使用 `native_text` 版面证据、`single_ocr`
+  还是 `two_ocr` 共识，并集中校验共识检查点；脚注和插图阶段不得各自重新解释这个选择。
+- `refine/layout_evidence.py`：统一加载 layout sidecar、清理 block 文本和归一化 bbox；它只
+  处理几何/文本证据，不包含脚注或插图的语义判断。
 - `refine.py`：编排 TOC、整页插图和脚注的结构闸门，并调用本地分页/单元合并；页内章节
   边界通过 `boundary_info.start_line`/`end_line` 保留，避免把同页标题前的句子误归入新章节。
 - `markdown.py`：PDF Markdown 的 polish、translate、readiness 和 validation 编排。
@@ -101,9 +105,10 @@ PDF 精修的核心领域模块如下：
 - `refine/page_merger.py`：消费已验证的整页插图绑定，恢复“前页半句 → 插图页 → 后页续句”，
   并把图片及说明放回连续正文之后。
 - `refine/footnote_prepare.py`：按页面 layout sidecar 生成脚注候选。视觉 OCR 使用标签、底部
-  位置和编号；原生文字 PDF 使用 PDF 坐标、文本块和字体元数据，并将页底编号候选交给复核。
-  两种来源共享决定、校验和归一化后端；双 OCR 模式还比较主/次候选差异。它不直接改写
-  Markdown，也不把引用推断成脚注。
+  位置和编号；原生文字 PDF 使用 PDF 坐标、文本块和字体元数据，并只把低置信度页底编号候选
+ 交给复核。`footnotes.auto_accept` 是两种来源共用的本地接受策略；双 OCR 模式还比较
+ 主/次候选差异。`resolve_footnote_options()` 集中处理配置默认值和 CLI 覆盖。它不直接
+ 改写 Markdown，也不把引用推断成脚注。
 - `refine/footnote_apply.py`：只消费已验证的脚注决定，按完整 TOC `unit_id` 合并脚注到单元末尾，
   保留 `citation`、`bibliography` 和普通正文原位。
 
@@ -134,6 +139,52 @@ polish。`commands/markdown.py`、`entities.py`、`toc.py` 和 `pdf.py` 均应�
 旧代码可能仍从 [`subagent_workflow.py`](../pdf2epub/subagent_workflow.py) 导入这些函数。
 该文件现在是兼容门面。新代码应直接导入具体模块；如果移动公共函数，必须保留门面转出
 并增加兼容性测试。
+
+### 2.4 按 TOC 章节装箱的实现边界
+
+正文翻译的“章节”与“worker”是两个不同的概念。`chapter_groups` 是稳定的语义索引：
+有序地把一个顶层 TOC 分支映射到它拥有的源单元文件；`worker_handoffs` 是本次运行按
+额度和断点状态生成的执行投影。前者用于恢复、审计和术语作用域，后者用于授权某个
+Subagent 实际读写哪些文件。两者不能互相替代。
+
+章节映射由格式命令建立：
+
+- PDF 的 `commands.markdown._load_pdf_chapter_groups()` 优先读取
+  `ocr_markdown/tree_progress.json` 的完整单元/part 关系，再用 `ChapterIdentity` 作为旧
+  产物的文件名回退；因此同一大章节的 part 文件仍属于一个语义组。
+- EPUB 的 `commands.html._load_html_chapter_groups()` 通过 `TOCExtractor` 把目录 href
+  映射到压缩单元文件，并递归收集子目录单元。一个文件只归入第一次命中的 TOC 分支；
+  没有被目录覆盖的文件会生成 `unit:<filename>` 的单文件回退组，不能静默丢失。
+- `markdown_handoff.prepare_markdown_subagent()` 只把声明过的源文件写入映射，并把不在
+  映射中的源文件补成单文件组。它同时计算源哈希、单元上下文哈希和 `pending_files`，
+  所以装箱器不需要重新猜测哪些文件可用。
+
+`subagent_runtime._chapter_worker_groups()` 的处理顺序是固定的：先按 TOC 顺序读取待处理
+章节，对每个章节单独运行 `_recommended_batches()`；若章节需要多个批次，或任一文件超过
+字节/token 上限，就先冲刷当前短章节队列，再只在该章节内部生成 part worker。普通短章节
+才会进入连续装箱，装箱同时受 `max_chapters_per_worker`、`max_files` 和
+`max_source_tokens` 约束。已完成而被 `--resume` 跳过的章节会冲刷当前队列，作为相邻性
+屏障；这保证恢复时不会把两个原本不相邻的章节拼到一起。这个过程只合并 worker 的文件
+清单和上下文，不把源 Markdown/HTML 物理拼接。
+
+`write_worker_handoffs()` 随后把父级 manifest 投影为每个 worker 的最小 manifest：
+
+1. `assigned_files`、对应的 file stats、单元/TOC 上下文哈希和必要的章节元数据被保留；
+   父级的全书 `file_stats`、`chapter_groups`、推荐队列和审计快照路径不作为 worker 权限。
+2. 单章节 handoff 保留兼容字段 `chapter_id`、`chapter_file_count`；多章节 handoff 使用
+   `chapter_ids`、`chapter_count` 和 `chapter_file_counts`，方便日志、校验和恢复识别边界。
+3. 合并章节使用 `adjacent_chapter_direct_file_contexts`，把术语条目写成
+   `files: {filename: entries}`；普通单章节使用 `chapter_sparse_direct_context`，大章节
+   分片使用 `chapter_shared_local_direct_context`。上下文 schema 的选择由 handoff 范围
+   决定，不能由 Subagent 自行改用完整术语快照。
+4. worker prompt 再次列出同一组 `assigned_files`，并明确不得读取或修改其他 worker 的
+   文件。翻译输出仍是每个源文件一个同名目标文件，因此单文件校验和 `--resume` 可以继续
+   精确到单元。
+
+这一设计的可维护不变量是：TOC 顺序不变、章节组不跨越大单元硬边界、worker 不拥有组外
+文件权限、术语上下文不跨文件广播、输出文件集合与源文件集合保持一一对应。任何改变装箱
+或 context schema 的代码，都必须同时更新 `AGENTS.md`、`docs/antigravity-workflow.md`、
+相应格式维护文档和 `tests/workflow_optimizations_test.py` 的合同测试。
 
 ## 3. 主要工作流的数据流
 
@@ -167,8 +218,8 @@ extract-entities + 工作区 Subagent + extract-entities-validate
   → translation_entities.json
 translate-toc + 工作区 Subagent + translate-toc-validate
   → toc_tree_translated.json
-translate + 按顶层章节划分的 worker_handoffs + 工作区 Subagent
-  （超大章节只在章节内部拆分；Prompt 另含预算化的全书 TOC 方向性轮廓）
+translate + 按 TOC 顺序装箱的 worker_handoffs + 工作区 Subagent
+  （相邻短章节可合并；超大章节只在章节内部拆分；Prompt 另含预算化的全书 TOC 方向性轮廓）
   → translated/
 translate-validate → translate_validation.json（retry_required 自动返工；持续 review 升级人工）
 build-epub --translated → 最终译文 EPUB
@@ -185,26 +236,30 @@ check-ready --stage package → build-epub → 原语言 EPUB
 
 结构判断、润色和翻译不会在本地 Python 进程中完成。每个 Subagent 只处理 worker
 manifest 指定的文件；大单元单独成批。polish 使用 `polish_worker_handoffs/`，正文翻译
-使用按顶层章节隔离的 `worker_handoffs/`。同一章节拆分时，worker 共享章节级术语上下文，
-但不读取其他章节的上下文。翻译 TOC 是正文 worker 启动前的独立前置任务，正文 worker
-不得修改翻译 TOC。PDF 正文还接收一个按 `global_toc_tokens` 预算压缩的全书方向性轮廓，
-但当前章节的精确 TOC heading contract 始终优先；标题绑定只容忍安全的展示格式差异，
-不容忍语义改写。普通中文正文还必须通过目标语言内容审计。纯转换分支不生成实体表或
+使用按 TOC 顺序装箱的 `worker_handoffs/`。相邻短章节可以共享一个 worker，但每个
+章节仍是独立的语义组；合并 worker 使用按文件分区的直接术语上下文，避免不同章节
+串词。同一大章节拆分时，worker 共享章节级术语上下文，但不读取其他章节的上下文。
+翻译 TOC 是正文 worker 启动前的独立前置任务，正文 worker 不得修改翻译 TOC。PDF 正文
+还接收一个按 `global_toc_tokens` 预算压缩的全书方向性轮廓，但当前章节的精确 TOC
+heading contract 始终优先；标题绑定只容忍安全的展示格式差异，不容忍语义改写。普通中文正文还必须通过目标语言内容审计。纯转换分支不生成实体表或
 翻译 TOC，但仍必须通过 polish。
 
 ### 3.1.1 OCR 证据模式和结构闸门
 
 `ocr.secondary.enabled` 是视觉 OCR 结构判断的单一开关，不应在脚注或插图模块中再添加平行
-开关。原生文字 PDF 先由 `pdf_text_probe` 分类，使用独立的 native layout 证据；它不属于
+开关。`refine/pdf_evidence.py` 是脚注和插图共同使用的证据选择边界；原生文字 PDF 先由
+`pdf_text_probe` 分类，使用独立的 native layout 证据；它不属于
 双 OCR，也不因配置残留而运行第二套 OCR：
 
 | 页面来源 | 配置 | 主/次证据 | 结构阶段行为 |
 |---|---|---|---|
-| `native_text` | 忽略 `ocr.secondary.enabled` | PDF 原生文本块/坐标/字体；报告兼容字段为 `single_ocr` | 不运行视觉 OCR、Paddle、`ocr-correct` 或 OCR 共识；页底编号全部作为 Subagent 复核候选。 |
+| `native_text` | 忽略 `ocr.secondary.enabled` | PDF 原生文本块/坐标/字体；报告兼容字段为 `single_ocr` | 不运行视觉 OCR、Paddle、`ocr-correct` 或 OCR 共识；同页上标+小字号的高置信度候选本地接受，其余候选交 Subagent。 |
 | 视觉 OCR | `false` | 只有 `pages/` 主 OCR | 忽略旧共识产物；明确的高置信度 OCR 脚注可本地接受，疑难候选交给 Subagent。 |
 | 视觉 OCR | `true` | 当前 `ocr_secondary/` + `ocr_consensus.json` | 共识报告和次 OCR sidecar 参与脚注/插图候选比较；差异页必须复核。 |
 
-准备阶段把 `source_kind` 和 `ocr_evidence_mode` 写入候选报告和 manifest。对视觉 OCR，
+准备阶段把 `source_kind` 和 `ocr_evidence_mode` 写入候选报告和 manifest。脚注和插图都从
+同一个 `pdf_evidence_mode()` 获取该值，并通过 `require_current_consensus()` 检查双 OCR
+检查点；它们不直接依赖彼此的 prepare 模块。对视觉 OCR，
 校验/应用阶段比较当前配置、候选报告、主/次 sidecar 哈希和共识检查点；对原生文字稿，
 比较原生 sidecar 哈希，并明确排除次 OCR 文件。任何一项变化都阻断旧结果。这样单 OCR
 运行不会误读上一次双 OCR 的 `ocr_consensus.json`，原生文字运行也不会因为目录中存在旧
@@ -291,9 +346,14 @@ pages/page_001.ocr.json    # OCR 或 native-text layout sidecar
   脚注可以独立复核和定位。
 - 识别到的短数字/符号上标在 Markdown 中保留为 `<sup>…</sup>`；sidecar 的原始 `text`
   不被改写。PDF superscript flag 和“字号明显小且位于行上方”只提供上标证据。
-- 原生候选检测要求块位于页面底部、以数字加分隔符开头且不是纯数字页码；它生成
-  `review_required` 候选，不生成可直接搬移的决定。页底坐标、字号、字体和上标必须由
-  Subagent 结合正文上下文确认。
+- 原生候选检测要求块位于页面底部、以数字加分隔符开头且不是纯数字页码。默认只有同页
+  更早位置存在对应 `<sup>N</sup>` 引用、且 `font_size / body_font_size <= 0.88` 的候选
+  标记为 `confidence: high`/`local_candidate`，由 apply 后端按 `footnote_start` 处理；
+  其他候选标记为 `review_required`。字号、坐标、字体和上标仍只是证据，不能把普通上标或
+  引用单独升级成脚注。
+- `footnotes.auto_accept: false` 会对扫描/OCR 与原生文字两种 PDF 统一关闭本地高置信度接受，
+  让所有候选进入 Subagent。CLI 的 `--review-all` 也会临时关闭两种来源的本地接受。
+  `footnotes.native_max_font_ratio`（默认 `0.88`）仍只调节原生 PDF 的字号门槛。
 
 脚注准备报告还记录 `sidecar_sha256`。`footnote_decisions.json` 只能引用候选报告中的
 `page`/`block` 地址；`footnote-validate` 会检查 source kind、sidecar 哈希、决定覆盖率、
@@ -308,7 +368,24 @@ pages/page_001.ocr.json    # OCR 或 native-text layout sidecar
 4. sidecar/source/checkpoint 哈希，可在 apply 前重新验证。
 
 来源差异只停留在“如何生成候选”和“需要多少 Subagent 复核”：OCR layout 可以在明确
-标签和几何证据下产生高置信度候选，native layout 的页底编号全部保守地进入复核。
+标签和几何证据下产生高置信度候选，native layout 则只自动接受同页上标与字号双重匹配的
+候选，其余候选保留给 Subagent。
+
+### 3.1.4 PDF 阶段的复用边界
+
+PDF 结构阶段采用“共享证据、分离语义”的边界：
+
+| 共享层 | 负责 | 不负责 |
+|---|---|---|
+| `pdf_evidence.py` | 页面来源、OCR 证据模式、共识检查点 freshness | 脚注/插图候选的语义判断 |
+| `layout_evidence.py` | sidecar JSON、block 文本、bbox 和坐标系归一化 | 修改 Markdown、决定是否移动内容 |
+| `footnote_prepare.py` | 脚注候选、稀疏窗口和脚注角色 handoff | 插图分类、页面物理合并 |
+| `illustration_prepare.py` | 整页插图候选、图片复核窗口和页面角色 handoff | 脚注归并、章节末尾注释 |
+| `footnote_apply.py` / `page_merger.py` | 消费已验证决定并生成派生源稿 | 再次猜测 Subagent 决定 |
+
+新增 PDF 结构信号时，先判断它是共享的几何/证据事实还是某个领域的语义规则。前者进入
+共享模块并补一组跨阶段测试，后者只进入对应的 prepare/apply 模块。命令 handler 只读取
+配置、传递 CLI 覆盖和报告状态，不复制 sidecar 解析、证据模式或 checkpoint 校验。
 
 ### 3.1.3 公式输出契约
 
@@ -343,6 +420,17 @@ HTML 单元要求非空内容一一对应；标签、属性、实体、容器和
 HTML 构建还会把 NCX/nav 更新结果写入导航报告；已有导航文档更新失败时默认阻断打包，
 只有显式确认参数才能放行。EPUB 只提供其中一种导航格式时，另一种记录为缺失而不是异常。
 最终成品通过固定夹具的 PyMuPDF 渲染回归测试，检查打包结果能否被阅读器引擎稳定打开。
+
+EPUB 正文也使用 2.4 节的章节装箱器。`html-prepare` 先依据原始 TOC 生成
+`chapter_groups`，再让 `write_worker_handoffs()` 按 TOC 顺序装入 `worker_handoffs/`；
+默认允许相邻短分支共享一个 worker，超过文件数、token、单文件字节数或章节数上限时封箱。
+大分支只能在自己的单元列表内拆分，不能和邻章拼接。元数据翻译始终是独立的
+`translated_metadata.json` 任务，不计入正文 worker 的章节装箱。
+
+EPUB 的“合并”只影响 Subagent 的工作上下文：`adjacent_chapter_direct_file_contexts`
+按文件提供术语条目，同时允许同一个 Subagent 维持相邻章节的风格连续；恢复和校验仍以
+`compressed_units/<name>.md` 与 `translated_compressed/<name>.md` 为粒度。这样不会因为
+共享 worker 而破坏 HTML 单元 1:1、目录 href/anchor 或构建时的文件映射。
 
 ### 3.3 轻小说和 TeX 工作流
 

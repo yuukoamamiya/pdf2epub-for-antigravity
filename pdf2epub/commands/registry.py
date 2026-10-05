@@ -293,6 +293,20 @@ def register_command_parsers(subparsers) -> None:
         default=None,
         help="Neighboring OCR blocks included around each candidate (default: 2)",
     )
+    footnote_prepare_parser.add_argument(
+        "--native-max-font-ratio",
+        type=float,
+        default=None,
+        help=(
+            "Native PDF local-acceptance font/body ratio (default: 0.88); "
+            "lower is stricter"
+        ),
+    )
+    footnote_prepare_parser.add_argument(
+        "--review-all",
+        action="store_true",
+        help="Disable local auto-acceptance and send every PDF candidate to the workspace Subagent",
+    )
     footnote_prepare_parser.set_defaults(func=footnote_prepare_command)
 
     footnote_validate_parser = subparsers.add_parser(

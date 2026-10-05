@@ -34,7 +34,13 @@ def _write_sidecar(
     )
 
 
-def _write_native_sidecar(output_dir: Path, page: int, blocks: list[dict]) -> None:
+def _write_native_sidecar(
+    output_dir: Path,
+    page: int,
+    blocks: list[dict],
+    *,
+    body_font_size: float = 10.0,
+) -> None:
     pages_dir = output_dir / "pages"
     pages_dir.mkdir(parents=True, exist_ok=True)
     (pages_dir / "ocr_progress.json").write_text(
@@ -62,6 +68,7 @@ def _write_native_sidecar(output_dir: Path, page: int, blocks: list[dict]) -> No
                 "source_kind": "native_text",
                 "coordinate_system": "page_points",
                 "page_box": [0, 0, 612, 792],
+                "body_font_size": body_font_size,
                 "blocks": blocks,
             },
             ensure_ascii=False,
@@ -122,6 +129,123 @@ def test_native_layout_candidates_use_page_coordinates_and_ignore_page_numbers(
     assert report["pages"][0]["candidates"][0]["review_reason"] == "native_layout_candidate"
 
 
+def test_native_candidate_with_same_page_superscript_is_locally_accepted(
+    tmp_path: Path,
+):
+    _write_native_sidecar(
+        tmp_path,
+        1,
+        [
+            _native_block("Body text", 0, y0=90, font_size=10),
+            _native_block("36 Native footnote text", 1, y0=680, font_size=8),
+        ],
+    )
+    (tmp_path / "pages" / "page_001.md").write_text(
+        "Body text <sup>36</sup>\n\n36 Native footnote text\n",
+        encoding="utf-8",
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    candidate = report["pages"][0]["candidates"][0]
+    assert candidate["confidence"] == "high"
+    assert candidate["disposition"] == "local_candidate"
+    assert candidate["same_page_superscript"] is True
+    assert report["high_confidence_candidate_count"] == 1
+    assert report["review_candidate_count"] == 0
+    assert report["review_required"] is False
+
+
+def test_native_definition_number_is_not_its_own_superscript_evidence(
+    tmp_path: Path,
+):
+    _write_native_sidecar(
+        tmp_path,
+        1,
+        [_native_block("36 Native footnote text", 0, y0=680, font_size=8)],
+    )
+    (tmp_path / "pages" / "page_001.md").write_text(
+        "<sup>36</sup> Native footnote text\n",
+        encoding="utf-8",
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    candidate = report["pages"][0]["candidates"][0]
+    assert candidate["same_page_superscript"] is False
+    assert candidate["confidence"] == "review"
+
+
+def test_auto_accept_can_be_disabled(tmp_path: Path):
+    _write_native_sidecar(
+        tmp_path,
+        1,
+        [
+            _native_block("Body", 0, y0=90, font_size=10),
+            _native_block("36 Native footnote text", 1, y0=680, font_size=8),
+        ],
+    )
+    (tmp_path / "pages" / "page_001.md").write_text(
+        "Body <sup>36</sup>\n\n36 Native footnote text\n",
+        encoding="utf-8",
+    )
+
+    report = prepare_footnote_candidates(tmp_path, auto_accept=False)
+
+    candidate = report["pages"][0]["candidates"][0]
+    assert candidate["same_page_superscript"] is True
+    assert candidate["confidence"] == "review"
+    assert report["auto_accept"] is False
+
+
+def test_footnote_auto_accept_config_applies_to_ocr_pdf(
+    tmp_path: Path,
+):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [_block("36 OCR footnote text", 0, label="Footnote", y0=820)],
+    )
+
+    report = prepare_footnote_candidates(
+        tmp_path,
+        config={"footnotes": {"auto_accept": False}},
+    )
+
+    candidate = report["pages"][0]["candidates"][0]
+    assert candidate["confidence"] == "review"
+    assert candidate["disposition"] == "review_required"
+    assert candidate["review_reason"] == "local_auto_accept_disabled"
+    assert report["auto_accept"] is False
+
+
+def test_footnote_auto_accept_config_applies_to_native_pdf(
+    tmp_path: Path,
+):
+    _write_native_sidecar(
+        tmp_path,
+        1,
+        [
+            _native_block("Body", 0, y0=90, font_size=10),
+            _native_block("36 Native footnote text", 1, y0=680, font_size=8),
+        ],
+    )
+    (tmp_path / "pages" / "page_001.md").write_text(
+        "Body <sup>36</sup>\n\n36 Native footnote text\n",
+        encoding="utf-8",
+    )
+
+    report = prepare_footnote_candidates(
+        tmp_path,
+        config={"footnotes": {"auto_accept": False}},
+    )
+
+    candidate = report["pages"][0]["candidates"][0]
+    assert candidate["same_page_superscript"] is True
+    assert candidate["confidence"] == "review"
+    assert report["auto_accept"] is False
+
+
 def test_native_footnote_decision_reuses_existing_normalization_pipeline(
     tmp_path: Path,
 ):
@@ -132,6 +256,10 @@ def test_native_footnote_decision_reuses_existing_normalization_pipeline(
             _native_block("Body text 36", 0, y0=90),
             _native_block("36 Native footnote text", 1, y0=680, font_size=8),
         ],
+    )
+    (tmp_path / "pages" / "page_001.md").write_text(
+        "Body text <sup>36</sup>\n\n36 Native footnote text\n",
+        encoding="utf-8",
     )
     (tmp_path / "toc_tree.json").write_text("{}", encoding="utf-8")
     source = tmp_path / "ocr_markdown"
@@ -157,27 +285,15 @@ def test_native_footnote_decision_reuses_existing_normalization_pipeline(
     )
 
     config = {"ocr": {"secondary": {"enabled": True, "backend": "paddle"}}}
-    prepare_footnote_subagent(tmp_path, book_title="Native Test", config=config)
-    (tmp_path / "footnote_decisions.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "decisions": [
-                    {
-                        "page": 1,
-                        "block": 1,
-                        "role": "footnote_start",
-                        "key": "36",
-                        "confidence": "high",
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
+    manifest_paths = prepare_footnote_subagent(
+        tmp_path, book_title="Native Test", config=config
     )
+    manifest = json.loads(manifest_paths["manifest"].read_text(encoding="utf-8"))
+    assert manifest["status"] == "no_subagent_review_required"
 
     validation = validate_footnote_decisions(tmp_path, config=config)
     assert validation["valid"] is True
+    assert validation["status"] == "no_subagent_review_required"
 
     result = apply_footnote_normalization(tmp_path, config=config)
 
@@ -355,7 +471,7 @@ def test_two_ocr_candidate_difference_is_sent_to_review(tmp_path: Path, monkeypa
     )
     (secondary / "page_001.md").write_text("Bottom body", encoding="utf-8")
     monkeypatch.setattr(
-        "pdf2epub.refine.footnote_prepare.consensus_is_current",
+        "pdf2epub.refine.pdf_evidence.consensus_is_current",
         lambda output_dir, config: True,
     )
     config = {"ocr": {"secondary": {"enabled": True, "backend": "paddle"}}}

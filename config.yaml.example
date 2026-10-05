@@ -51,6 +51,10 @@ subagent:
     # Units larger than this are always assigned to a single Subagent.
     single_file_max_bytes: 30000
     max_concurrency: 3
+    # Pack adjacent short top-level chapters into one worker while preserving
+    # per-chapter terminology scopes.
+    pack_adjacent_chapters: true
+    max_chapters_per_worker: 3
   # 可选：按任务覆盖上面的默认值，例如 refine / polish / translate-html。
   # task_models:
   #   refine: gemini-3.6-flash
@@ -91,6 +95,12 @@ ocr:
       use_doc_unwarping: false
       use_textline_orientation: false
       max_workers: 1
+
+# 脚注候选的本地高置信度接受策略；false 时扫描/OCR 和原生文字 PDF 都交给 Subagent 复核。
+footnotes:
+  auto_accept: true
+  # 原生文字 PDF 的字号证据门槛；只影响 native layout 候选。
+  native_max_font_ratio: 0.88
 
 # 整页彩页/插页复核（只影响疑似候选页，不会自动把普通插图移位）
 illustration:

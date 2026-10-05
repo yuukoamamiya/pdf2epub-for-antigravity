@@ -9,7 +9,6 @@ and ordinary body blocks stay in their original unit.
 
 from __future__ import annotations
 
-import hashlib
 import html
 import json
 import re
@@ -18,9 +17,8 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
-from ..ocr_consensus import consensus_is_current
-from ..workflow_contracts import atomic_write_text
-from .footnote_prepare import footnote_evidence_mode
+from ..workflow_contracts import atomic_write_text, sha256_file
+from .pdf_evidence import pdf_evidence_mode, require_current_consensus
 
 
 FOOTNOTE_NORMALIZATION_SCHEMA_VERSION = 1
@@ -34,17 +32,9 @@ _HTML_SUP_RE_TEMPLATE = r"<sup\b[^>]*>\s*{key}\s*</sup>"
 _SUPERSCRIPT_DIGITS = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789")
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _markdown_inventory(directory: Path) -> dict[str, str]:
     return {
-        path.name: _sha256(path)
+        path.name: sha256_file(path)
         for path in sorted(Path(directory).glob("*.md"))
         if path.is_file()
     }
@@ -209,8 +199,8 @@ def _corrected_block_text(
     if not isinstance(source_hashes, Mapping) or not isinstance(target_hashes, Mapping):
         return None
     if (
-        source_hashes.get(raw_path.name) != _sha256(raw_path)
-        or target_hashes.get(corrected_path.name) != _sha256(corrected_path)
+        source_hashes.get(raw_path.name) != sha256_file(raw_path)
+        or target_hashes.get(corrected_path.name) != sha256_file(corrected_path)
     ):
         return None
 
@@ -508,7 +498,7 @@ def apply_footnote_normalization(
     report_mode = str(report.get("ocr_evidence_mode") or "single_ocr")
     validation_mode = str(validation.get("ocr_evidence_mode") or report_mode)
     if config is not None:
-        configured_mode = footnote_evidence_mode(output_dir, config)
+        configured_mode = pdf_evidence_mode(output_dir, config)
         if report_mode != configured_mode or validation_mode != configured_mode:
             return _write_failure(
                 output_dir,
@@ -517,13 +507,16 @@ def apply_footnote_normalization(
                     "rerun footnote-prepare and footnote-validate",
                 ],
             )
-        if configured_mode == "two_ocr" and not consensus_is_current(output_dir, config):
-            return _write_failure(
-                output_dir,
-                [
-                    "two-OCR footnote checkpoint is stale; rerun ocr-pages and footnote-prepare",
-                ],
-            )
+        if configured_mode == "two_ocr":
+            try:
+                require_current_consensus(output_dir, config, stage="footnote")
+            except ValueError:
+                return _write_failure(
+                    output_dir,
+                    [
+                        "two-OCR footnote checkpoint is stale; rerun ocr-pages and footnote-prepare",
+                    ],
+                )
 
     if validation.get("valid") is not True or validation.get("status") not in {
         "validated",
@@ -727,8 +720,8 @@ def apply_footnote_normalization(
         "target_dir": "footnote_normalized",
         "source_sha256": source_hashes,
         "target_sha256": target_hashes,
-        "candidate_report_sha256": _sha256(output_dir / "footnote_candidates.json"),
-        "decision_validation_sha256": _sha256(
+        "candidate_report_sha256": sha256_file(output_dir / "footnote_candidates.json"),
+        "decision_validation_sha256": sha256_file(
             output_dir / "footnote_decision_validation.json"
         ),
         "moved_count": len(resolved),
@@ -778,22 +771,25 @@ def footnote_normalization_is_current(
         if report_mode != validation_mode:
             return False
         if config is not None:
-            configured_mode = footnote_evidence_mode(output_dir, config)
+            configured_mode = pdf_evidence_mode(output_dir, config)
             if report_mode != configured_mode:
                 return False
-            if configured_mode == "two_ocr" and not consensus_is_current(output_dir, config):
-                return False
+            if configured_mode == "two_ocr":
+                try:
+                    require_current_consensus(output_dir, config, stage="footnote")
+                except ValueError:
+                    return False
         source_dir = output_dir / "ocr_markdown"
         target_dir = output_dir / "footnote_normalized"
         if report.get("source_sha256") != _markdown_inventory(source_dir):
             return False
         if report.get("target_sha256") != _markdown_inventory(target_dir):
             return False
-        if report.get("candidate_report_sha256") != _sha256(
+        if report.get("candidate_report_sha256") != sha256_file(
             output_dir / "footnote_candidates.json"
         ):
             return False
-        return report.get("decision_validation_sha256") == _sha256(
+        return report.get("decision_validation_sha256") == sha256_file(
             output_dir / "footnote_decision_validation.json"
         )
     except (OSError, UnicodeError, ValueError, TypeError):

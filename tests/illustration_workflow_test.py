@@ -140,3 +140,22 @@ def test_no_candidate_does_not_require_subagent(tmp_path: Path):
     assert manifest["status"] == "no_review_required"
     assert validate_illustration_decisions(tmp_path)["valid"] is True
     assert apply_illustration_bindings(tmp_path)["bindings"] == []
+
+
+def test_native_pdf_uses_native_evidence_for_illustration_review(tmp_path: Path):
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    (pages / "page_001.md").write_text("Ordinary body text.", encoding="utf-8")
+    (pages / "ocr_progress.json").write_text(
+        json.dumps({"mode": "native_text"}),
+        encoding="utf-8",
+    )
+
+    paths = prepare_illustration_subagent(
+        tmp_path,
+        book_title="Book",
+        config={"ocr": {"secondary": {"enabled": True, "backend": "paddle"}}},
+    )
+    report = json.loads(paths["report"].read_text(encoding="utf-8"))
+
+    assert report["ocr_evidence_mode"] == "single_ocr"

@@ -88,24 +88,39 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
 - 术语准备完成后，检查 `output/<title>/glossary_selection.json`：它记录本次是否明确
   选择外部表、配置路径、源文件哈希和工作区快照哈希。规范化只读快照位于
   `output/<title>/translation_glossaries/`；按源单元裁剪的上下文位于其下的
-  `unit_contexts/`。PDF 和 EPUB 翻译都必须优先读取 worker handoff 为当前顶层章节
-  列出的稀疏上下文；普通章节把该章节命中的条目聚合为一次 `entries` 注入，超大章节
-  拆分时使用跨多个分片的 `shared_entries` 加当前分片的 `local_entries`。不得把不同
-  顶层章节的术语上下文混用。完整快照只用于审计和冲突复核，不能修改。没有外部表时也要尊重记录的
+  `unit_contexts/`。PDF 和 EPUB 翻译都必须优先读取 worker handoff 为当前分配章节
+  列出的稀疏上下文；普通单章节 worker 把该章节命中的条目聚合为一次 `entries` 注入，
+  相邻短章节合并时改用按文件分区的直接上下文，超大章节拆分时使用跨多个分片的
+  `shared_entries` 加当前分片的 `local_entries`。不得把不同顶层章节的术语上下文混用。
+  完整快照只用于审计和冲突复核，不能修改。没有外部表时也要尊重记录的
   `explicit_none`/`unconfigured` 状态，不得自行加载目录中的术语表。参考术语表快照
   使用 `reference_glossary_*` 名称，不能覆盖权威术语表，也不得反向写回原文件。
 - `translate`、`polish`、`refine`、`extract-entities`、`translate-toc` 只准备交接或
   执行本地处理；命令成功不代表正文已经完成。
 - `polish` 会按 `subagent.batching.max_concurrency` 生成
   `polish_worker_handoffs/`；`translate` 使用 `worker_handoffs/`。每个 worker
-  只能处理自己 manifest 中的 `assigned_files`。PDF `translate` 按顶层章节生成
-  handoff；超出文件/字节/token 限制的章节才在章节内部拆分，不能与其他章节合并。
+  只能处理自己 manifest 中的 `assigned_files`。PDF/EPUB `translate` 按 TOC 顺序把
+  相邻短章节装入同一个 handoff，受文件/字节/token 和 `max_chapters_per_worker`
+  限制；超出限制的章节在章节内部拆分，并且不能与其他章节合并。
   `max_files` 默认值为 5，配置值的有效上限为 8；文件数、字节数和 token 数任一达到
   限制都必须拆批。
+- `chapter_groups` 是语义分组，不等于 worker 数量。`pack_adjacent_chapters: true`
+  时，运行时按 `chapter_groups` 的 TOC 顺序连续装箱；`max_chapters_per_worker` 默认
+  为 3。单个章节只要需要内部拆分，或包含超过单文件字节/token 限制的文件，就必须
+  独立成批；不能为了凑满 worker 跨过它。
+- 章节 worker 的术语上下文按 handoff 类型读取：单章节使用 `entries`，单个大章节
+  的分片使用 `shared_entries` + `local_entries`，相邻多章节 worker 使用 `files` 映射，
+  只能应用匹配文件的条目。相邻章节可以共享同一个 Subagent 的风格上下文，但不得把
+  一个章节的术语广播到另一个章节。
+- `worker_handoffs/` 中各 scoped manifest 的 `assigned_files` 是执行权限边界；父级
+  manifest 的 `pending_files`、`batch_queue` 和 `chapter_groups` 只用于审计和恢复，不能
+  作为某个 worker 额外读取文件的授权。`chapter_ids`/`chapter_file_counts` 是合并 worker
+  的必要章节元数据，不要把完整全书章节列表复制进 scoped manifest。
 - 父级 manifest 保留全书文件、统计、章节映射和上下文哈希，供审计与恢复使用；worker
   manifest 只能是当前 worker 的最小投影（当前文件、当前批次、当前文件统计/层级/术语哈希
   和必要的章节元数据），不得复制全书 `file_stats`、`chapter_groups`、推荐队列或审计快照路径。
-  章节术语上下文只记录 `chapter_file_count`，不得重复写入完整 `chapter_files` 列表。
+  章节术语上下文只记录 `chapter_file_count` 或 `chapter_file_counts`，不得重复写入完整
+  `chapter_files` 列表。
 - 不删除源文件、输出目录或已有中间结果。额度中断或失败时先校验，再使用原命令的
   `--resume`，只处理 pending 项。
 - 新 manifest 的 `--resume` 按单元比较 `unit_context_sha256` 和该单元的精确 TOC 上下文；
@@ -165,6 +180,10 @@ PDF 的单 OCR/双 OCR；它不能把原生文字 PDF 变成双 OCR：
 `illustration-prepare` 必须看到当前共识检查点；主/次 OCR 的候选差异不能由本地脚本自动
 选择，必须进入工作区 Subagent。切换模式后，旧的脚注决定、插图绑定和 `refine-local`
 检查点不能复用。
+
+脚注和整页插图共享 `pdf2epub/refine/pdf_evidence.py` 的页面来源/证据模式判断，以及
+`pdf2epub/refine/layout_evidence.py` 的 sidecar 文本和坐标归一化；不要在新的 PDF 阶段复制
+这两类逻辑。共享层只提供证据事实，脚注/插图模块仍分别负责自己的候选语义和 Subagent 决定。
 
 PDF 结构阶段按以下顺序执行：
 
@@ -307,10 +326,15 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
    ```
 
    对原生文字 PDF，页底以数字开头的文本块只是候选：底部坐标、相对正文的字号、字体名和
-   原生上标都是证据，不能单独自动判定为脚注。纯数字页码会被本地候选器排除；所有原生
-   候选默认进入 Subagent 复核。Subagent 必须在脚注、引用、参考文献、普通正文和不确定项
-   之间作出决定，不确定时使用 `review_required`，不要猜测。原生上标引用在 `pages/` 中
-   保留为 `<sup>…</sup>`，后续只有确认存在对应脚注定义时才转换为 `[^N]`。
+   原生上标都是证据，不能单独自动判定为脚注。默认情况下，只有“同页更早位置存在对应
+   `<sup>N</sup>` 引用，且脚注块字号不超过正文字号 0.88 倍”的候选本地接受；其余候选
+   进入 Subagent 复核。扫描/OCR PDF 的明确高置信度脚注候选也默认本地接受，疑难候选才复核。
+   纯数字页码会被本地候选器排除。需要让两种 PDF 都采用最保守模式时，在配置中设置推荐的
+   `footnotes.auto_accept: false`。也可以运行 `footnote-prepare --review-all` 临时关闭两种来源
+   的本地接受。
+   Subagent 必须在脚注、引用、参考文献、普通正文和不确定项之间作出决定，不确定时使用
+   `review_required`，不要猜测。原生上标引用在 `pages/` 中保留为 `<sup>…</sup>`，后续
+   只有确认存在对应脚注定义时才转换为 `[^N]`。
 
    `footnote-apply` 只移动已确认的 `footnote_start`、`footnote_continuation` 和
    `footnote_definition`；`citation`、`bibliography` 和 `body` 保持原位。脚注按实际
@@ -373,13 +397,16 @@ uv run pdf2epub -c config.yaml check-ready --stage translate --skip-entities
    uv run pdf2epub -c config.yaml check-ready --stage translate
    ```
 
-5. 执行 `translate`。该命令会生成 `translate_subagent_prompt.md`、manifest 和按
-   顶层章节划分的 `worker_handoffs/`。立即打开工作区 Subagent：每个 Subagent 只处理
-   自己 handoff 的 `assigned_files`，同名译文写入 `translated/`；超过 30,000 字节的大
-   单元仍必须独立派发，但不得跨章节合并。Prompt 会同时提供一次按预算稀释的全书 TOC
-   轮廓，以及当前章节精确的已翻译 TOC 标题/子标题上下文；后者对输出标题具有最高权威。
-   术语上下文按章节 worker 聚合，完整快照只用于审计，不能修改。标题绑定允许安全的
-   格式规范化，但不允许近义词替换。
+5. 执行 `translate`。该命令会生成 `translate_subagent_prompt.md`、父级 manifest 和
+   `worker_handoffs/`。先检查父级 manifest 的 `pending_files`、`batching`、
+   `chapter_groups` 和 `worker_handoffs`；随后逐个打开 handoff 对应的工作区 Subagent。
+   每个 Subagent 只处理自己 scoped manifest 的 `assigned_files`，同名译文写入
+   `translated/`，不得读取或修改其他 worker 的文件。超过 30,000 字节的大单元仍必须
+   独立派发；相邻短章节可以在预算内共享一个 worker，但不能把大章节与其他章节合并。
+   Prompt 会同时提供一次按预算稀释的全书 TOC 轮廓，以及当前 assigned 文件精确的已翻译
+   TOC 标题/子标题上下文；后者对输出标题具有最高权威。术语上下文按 handoff 类型读取：
+   合并章节使用 `files` 映射并按文件应用，完整快照只用于审计，不能修改。标题绑定允许
+   安全的格式规范化，但不允许近义词替换。
 6. 每完成一个单元可运行：
 
    ```text
@@ -466,10 +493,12 @@ uv run pdf2epub -c config.yaml build-epub
 4. 立即打开工作区 Subagent，读取实体 Prompt/manifest，写入 `translation_entities.json`；
    完成后再次运行 `html-prepare`，让正文和元数据任务挂载当前实体表及外部术语表。
    确实不需要实体表时才使用 `html-prepare --skip-entities`。
-5. 读取第二次生成的 `translate-html_subagent_prompt.md` 和 manifest，打开工作区
-   Subagent，将同名译文写入 `translated_compressed/`。只处理 `pending_files`。
-   正文 worker 按顶层 TOC 分支隔离稀疏术语上下文；大分支拆分时使用
-   `shared_entries` 和 `local_entries`，不得读取或混用其他分支的上下文。
+5. 读取第二次生成的 `translate-html_subagent_prompt.md`、父级 manifest 和
+   `worker_handoffs/`，打开每个 handoff 对应的工作区 Subagent，将同名译文写入
+   `translated_compressed/`。只处理 scoped manifest 的 `assigned_files`。
+   正文 worker 按 TOC 顺序把相邻短分支装入同一任务；合并任务使用 `files` 映射并按文件
+   应用稀疏术语上下文，大分支拆分时使用 `shared_entries` 和 `local_entries`，不得读取
+   或混用其他分支的上下文。不得把多个 HTML 单元合并成一个输出文件。
 6. EPUB 正文必须保持非空翻译单元 1:1 对齐；不得在单元内部增加换行；HTML 标签、属性、
    实体、占位符、`<div>` 容器、`<i>` 数量/顺序/嵌套必须原样保留。
 7. Subagent 按 `metadata_translation_prompt.md` 写入 `translated_metadata.json`：

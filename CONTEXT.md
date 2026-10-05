@@ -10,3 +10,8 @@
 ## Structural rule
 
 页面位置只能产生脚注候选，不能单独证明一个编号块是脚注。只有明确判定为 `footnote_start`、`footnote_continuation` 或 `footnote_definition` 的块才能被归一化为章末注；`citation`、`bibliography`、`body` 和未解决的块保持原位。
+
+## Translation handoff
+
+- **章节组（chapter group）**：按顶层 TOC 组织的语义范围，包含该章节及其拆分单元；术语上下文默认以章节组为边界。
+- **worker 批次（worker batch）**：交给同一个工作区 Subagent 的相邻章节组集合。它是执行范围，不改变章节组之间的目录和术语边界。

@@ -22,6 +22,8 @@ DEFAULT_SINGLE_FILE_MAX_BYTES = 30_000
 DEFAULT_LARGE_FILE_TOKEN_THRESHOLD = 12_000
 DEFAULT_EXTREME_FILE_TOKEN_THRESHOLD = 24_000
 DEFAULT_GLOBAL_TOC_TOKENS = 1_200
+DEFAULT_PACK_ADJACENT_CHAPTERS = True
+DEFAULT_MAX_CHAPTERS_PER_WORKER = 3
 
 _TRANSLATION_TASKS = {
     "translate",
@@ -94,7 +96,7 @@ def _positive_int(value: Any, default: int) -> int:
     return value if value > 0 else default
 
 
-def _batching_config(config: Optional[Mapping[str, Any]]) -> Dict[str, int]:
+def _batching_config(config: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
     subagent = config.get("subagent", {}) if isinstance(config, Mapping) else {}
     batching = subagent.get("batching", {}) if isinstance(subagent, Mapping) else {}
     if not isinstance(batching, Mapping):
@@ -124,6 +126,17 @@ def _batching_config(config: Optional[Mapping[str, Any]]) -> Dict[str, int]:
         ),
         "global_toc_tokens": _positive_int(
             batching.get("global_toc_tokens"), DEFAULT_GLOBAL_TOC_TOKENS
+        ),
+        "pack_adjacent_chapters": (
+            batching.get("pack_adjacent_chapters", DEFAULT_PACK_ADJACENT_CHAPTERS)
+            is not False
+        ),
+        "max_chapters_per_worker": min(
+            MAX_BATCH_FILES,
+            _positive_int(
+                batching.get("max_chapters_per_worker"),
+                DEFAULT_MAX_CHAPTERS_PER_WORKER,
+            ),
         ),
     }
 
@@ -536,24 +549,45 @@ def _worker_manifest_projection(
                 projected["context_sha256"] = dict(context_hashes)
 
     if chapter_mode:
+        chapter_ids = [
+            str(value)
+            for value in (group.get("chapter_ids") or [])
+            if str(value).strip()
+        ]
+        if not chapter_ids and group.get("chapter_id"):
+            chapter_ids = [str(group["chapter_id"])]
         projected.update(
             {
-                "chapter_id": group.get("chapter_id"),
+                "chapter_ids": chapter_ids,
+                "chapter_count": int(group.get("chapter_count", len(chapter_ids) or 1)),
                 "chapter_split": bool(group.get("chapter_split")),
                 "chapter_part_count": int(group.get("chapter_part_count", 1)),
-                "chapter_file_count": int(group.get("chapter_file_count", len(files))),
             }
         )
+        if len(chapter_ids) == 1:
+            projected.update(
+                {
+                    "chapter_id": chapter_ids[0],
+                    "chapter_file_count": int(
+                        group.get("chapter_file_count", len(files))
+                    ),
+                }
+            )
+        else:
+            projected["chapter_file_counts"] = {
+                str(chapter_id): int(count)
+                for chapter_id, count in (group.get("chapter_file_counts") or {}).items()
+            }
     return projected
 
 
 def _chapter_worker_groups(manifest: Mapping[str, Any]) -> List[Dict[str, Any]]:
-    """Turn chapter groups into one hand-off per chapter (or chapter part).
+    """Turn ordered chapter groups into scoped worker hand-offs.
 
-    A normal chapter is deliberately kept as one Subagent task.  The existing
-    source-size limits still apply inside a chapter, so an unusually large
-    chapter becomes several tasks that share the same chapter terminology
-    context instead of being mixed with neighbouring chapters.
+    A normal chapter remains an atomic semantic group, but adjacent groups may
+    be packed into one worker while the combined source stays within the
+    configured file/token budget.  A chapter that already needs multiple
+    batches is always isolated and split only within itself.
     """
     chapter_groups = manifest.get("chapter_groups")
     if not isinstance(chapter_groups, Mapping):
@@ -573,7 +607,88 @@ def _chapter_worker_groups(manifest: Mapping[str, Any]) -> List[Dict[str, Any]]:
     max_bytes = int(
         batching.get("single_file_max_bytes", DEFAULT_SINGLE_FILE_MAX_BYTES)
     )
+    pack_adjacent = batching.get(
+        "pack_adjacent_chapters", DEFAULT_PACK_ADJACENT_CHAPTERS
+    ) is not False
+    max_chapters = min(
+        MAX_BATCH_FILES,
+        _positive_int(
+            batching.get("max_chapters_per_worker"),
+            DEFAULT_MAX_CHAPTERS_PER_WORKER,
+        ),
+    )
+
+    def make_group(
+        chapter_records: List[Dict[str, Any]],
+        batch_files: List[str],
+        *,
+        part_index: int = 1,
+        part_count: int = 1,
+        chapter_split: bool = False,
+    ) -> Dict[str, Any]:
+        chapter_ids = [str(record["chapter_id"]) for record in chapter_records]
+        chapter_file_counts = {
+            str(record["chapter_id"]): int(record["chapter_file_count"])
+            for record in chapter_records
+        }
+        if len(chapter_ids) == 1:
+            safe_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", chapter_ids[0]).strip("_")
+            safe_id = safe_id or "chapter"
+            worker_id = f"chapter_{safe_id}_part_{part_index:03d}"
+        else:
+            safe_ids = [
+                re.sub(r"[^A-Za-z0-9_.-]+", "_", chapter_id).strip("_") or "chapter"
+                for chapter_id in chapter_ids
+            ]
+            worker_id = (
+                f"chapters_{safe_ids[0]}_to_{safe_ids[-1]}"
+                f"_part_{part_index:03d}"
+            )
+        batch_id = worker_id
+        estimated_tokens = sum(
+            int(file_stats[name].get("estimated_tokens", 0)) for name in batch_files
+        )
+        group: Dict[str, Any] = {
+            "worker_id": worker_id,
+            "chapter_ids": chapter_ids,
+            "chapter_records": chapter_records,
+            "chapter_file_counts": chapter_file_counts,
+            "chapter_count": len(chapter_ids),
+            "chapter_split": chapter_split,
+            "chapter_part_count": part_count,
+            "batches": [
+                {
+                    "batch_id": batch_id,
+                    "chapter_ids": chapter_ids,
+                    "files": batch_files,
+                    "estimated_tokens": estimated_tokens,
+                    "status": "assigned",
+                }
+            ],
+            "files": batch_files,
+            "estimated_tokens": estimated_tokens,
+        }
+        # Preserve the old singular fields for consumers and manifests that
+        # handle a single chapter.  Packed workers use the plural fields.
+        if len(chapter_ids) == 1:
+            group["chapter_id"] = chapter_ids[0]
+            group["chapter_file_count"] = chapter_file_counts[chapter_ids[0]]
+            group["chapter_context_files"] = chapter_records[0]["files"]
+        return group
+
     groups: List[Dict[str, Any]] = []
+    current_records: List[Dict[str, Any]] = []
+    current_files: List[str] = []
+    current_tokens = 0
+
+    def flush_current() -> None:
+        nonlocal current_records, current_files, current_tokens
+        if current_records:
+            groups.append(make_group(current_records, current_files))
+            current_records = []
+            current_files = []
+            current_tokens = 0
+
     for chapter_id, raw_names in chapter_groups.items():
         if isinstance(raw_names, Mapping):
             raw_names = raw_names.get("files", [])
@@ -582,47 +697,61 @@ def _chapter_worker_groups(manifest: Mapping[str, Any]) -> List[Dict[str, Any]]:
         chapter_files = [str(name) for name in raw_names]
         assigned = [name for name in chapter_files if name in pending]
         if not assigned:
+            # Keep completed chapters as adjacency barriers on resume; do not
+            # silently pack two pending chapters across a skipped TOC branch.
+            flush_current()
             continue
         stats = {
             name: file_stats[name]
             for name in assigned
             if isinstance(file_stats.get(name), Mapping)
         }
-        batches = _recommended_batches(
-            stats, max_files, max_tokens, max_bytes
-        )
+        batches = _recommended_batches(stats, max_files, max_tokens, max_bytes)
         chapter_split = len(batches) > 1
-        safe_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(chapter_id)).strip("_")
-        safe_id = safe_id or "chapter"
-        for part_index, batch_files in enumerate(batches, 1):
-            batch_id = f"chapter_{safe_id}_part_{part_index:03d}"
-            groups.append(
-                {
-                    "worker_id": batch_id,
-                    "chapter_id": str(chapter_id),
-                    "chapter_context_files": chapter_files,
-                    "chapter_file_count": len(chapter_files),
-                    "chapter_split": chapter_split,
-                    "chapter_part_count": len(batches),
-                    "batches": [
-                        {
-                            "batch_id": batch_id,
-                            "chapter_id": str(chapter_id),
-                            "files": batch_files,
-                            "estimated_tokens": sum(
-                                int(stats[name].get("estimated_tokens", 0))
-                                for name in batch_files
-                            ),
-                            "status": "assigned",
-                        }
-                    ],
-                    "files": batch_files,
-                    "estimated_tokens": sum(
-                        int(stats[name].get("estimated_tokens", 0))
-                        for name in batch_files
-                    ),
-                }
-            )
+        chapter_oversized = any(
+            int(stats[name].get("estimated_tokens", 0)) > max_tokens
+            or int(stats[name].get("size_bytes", 0)) > max_bytes
+            for name in assigned
+        )
+        record = {
+            "chapter_id": str(chapter_id),
+            "files": chapter_files,
+            "chapter_file_count": len(chapter_files),
+        }
+
+        # A split or oversized chapter is a hard boundary.  Flush any short
+        # chapters before it, then keep every part isolated from neighbours.
+        if chapter_split or chapter_oversized or not pack_adjacent:
+            flush_current()
+            for part_index, batch_files in enumerate(batches, 1):
+                groups.append(
+                    make_group(
+                        [record],
+                        list(batch_files),
+                        part_index=part_index,
+                        part_count=len(batches),
+                        chapter_split=chapter_split,
+                    )
+                )
+            continue
+
+        batch_files = list(batches[0])
+        chapter_tokens = sum(
+            int(stats[name].get("estimated_tokens", 0)) for name in batch_files
+        )
+        can_pack = (
+            current_records
+            and len(current_records) < max_chapters
+            and len(current_files) + len(batch_files) <= max_files
+            and current_tokens + chapter_tokens <= max_tokens
+        )
+        if current_records and not can_pack:
+            flush_current()
+        current_records.append(record)
+        current_files.extend(batch_files)
+        current_tokens += chapter_tokens
+
+    flush_current()
     return groups
 
 
@@ -671,6 +800,7 @@ def write_worker_handoffs(
     for group in groups:
         worker_id = group["worker_id"]
         files = list(group["files"])
+        chapter_pack = chapter_mode and int(group.get("chapter_count", 1)) > 1
         scoped = _worker_manifest_projection(
             manifest,
             worker_id=worker_id,
@@ -707,11 +837,12 @@ def write_worker_handoffs(
         worker_context_hashes = {}
         if isinstance(unit_contexts, Mapping):
             # In chapter mode, aggregate the matching unit contexts once for
-            # the chapter.  This avoids repeating the same glossary entries
-            # for every sub-unit while keeping the context local to one task.
+            # the chapter.  Packed adjacent chapters intentionally retain
+            # direct file scopes so one chapter's terms cannot leak into the
+            # next chapter.
             context_names = (
                 group.get("chapter_context_files", files)
-                if chapter_mode
+                if chapter_mode and not chapter_pack
                 else files
             )
             file_entries: Dict[str, List[Dict[str, Any]]] = {}
@@ -747,20 +878,28 @@ def write_worker_handoffs(
                         if key not in seen_chapter_entries:
                             seen_chapter_entries.add(key)
                             chapter_entries.append(entry)
-                if not chapter_mode:
+                if not chapter_mode or chapter_pack:
                     file_entries[filename] = entries
 
-            has_context = (
-                any(set(files) & names for names in entry_files.values())
-                if chapter_mode and group.get("chapter_split")
-                else bool(chapter_entries)
-                if chapter_mode
-                else any(file_entries.values())
-            )
+            if chapter_pack:
+                has_context = any(file_entries.values())
+            elif chapter_mode and group.get("chapter_split"):
+                has_context = any(
+                    set(files) & names for names in entry_files.values()
+                )
+            elif chapter_mode:
+                has_context = bool(chapter_entries)
+            else:
+                has_context = any(file_entries.values())
             if has_context:
                 shared_entries = []
                 local_entries = []
-                if chapter_mode:
+                if chapter_pack:
+                    file_entries = {
+                        filename: [_compact_glossary_entry(entry) for entry in entries]
+                        for filename, entries in file_entries.items()
+                    }
+                elif chapter_mode:
                     from .glossary import sort_glossary_entries
 
                     if group.get("chapter_split"):
@@ -796,7 +935,7 @@ def write_worker_handoffs(
                             _compact_glossary_entry(entry)
                             for entry in sort_glossary_entries(chapter_entries)
                         ]
-                elif not chapter_mode:
+                else:
                     file_entries = {
                         filename: [_compact_glossary_entry(entry) for entry in entries]
                         for filename, entries in file_entries.items()
@@ -808,7 +947,16 @@ def write_worker_handoffs(
                     / f"{manifest.get('task', 'translate')}_{worker_id}.json"
                 )
                 worker_context_path.parent.mkdir(parents=True, exist_ok=True)
-                if chapter_mode and group.get("chapter_split"):
+                if chapter_pack:
+                    worker_context = {
+                        "schema_version": 4,
+                        "worker_id": worker_id,
+                        "selection": "adjacent_chapter_direct_file_contexts",
+                        "chapter_ids": group.get("chapter_ids", []),
+                        "chapter_file_counts": group.get("chapter_file_counts", {}),
+                        "files": file_entries,
+                    }
+                elif chapter_mode and group.get("chapter_split"):
                     worker_context = {
                         "schema_version": 3,
                         "worker_id": worker_id,
@@ -862,13 +1010,22 @@ def write_worker_handoffs(
         if worker_context_files:
             worker_context_instruction = (
                 (
-                    "Read the chapter-scoped terminology context "
+                    "Read the adjacent-chapter direct terminology context "
+                    if chapter_pack
+                    else "Read the chapter-scoped terminology context "
                     if chapter_mode
                     else "Read the worker-scoped direct terminology context "
                 )
                 + f"`{next(iter(worker_context_files.values()))}` once before processing "
                 + (
                     (
+                        "the assigned files. Its `files` map contains complete direct "
+                        "entries for each filename. Apply only the entries for the "
+                        "matching file; use the same worker context to keep style "
+                        "consistent across these adjacent chapters, but do not let "
+                        "terms leak across files.\n"
+                        if chapter_pack
+                        else
                         "the assigned files. Apply every `shared_entries` item "
                         "consistently, then apply `local_entries` to the matching "
                         "assigned files. Do not load another chapter's context.\n"
@@ -978,8 +1135,22 @@ def write_worker_handoffs(
             "worker_id": worker_id,
             **(
                 {
-                    "chapter_id": group.get("chapter_id"),
-                    "chapter_file_count": group.get("chapter_file_count", len(files)),
+                    "chapter_ids": group.get("chapter_ids", []),
+                    "chapter_count": group.get("chapter_count", 1),
+                    **(
+                        {
+                            "chapter_id": group.get("chapter_id"),
+                            "chapter_file_count": group.get(
+                                "chapter_file_count", len(files)
+                            ),
+                        }
+                        if len(group.get("chapter_ids", [])) <= 1
+                        else {
+                            "chapter_file_counts": group.get(
+                                "chapter_file_counts", {}
+                            )
+                        }
+                    ),
                 }
                 if chapter_mode
                 else {}
@@ -1008,6 +1179,8 @@ __all__ = [
     "DEFAULT_SUBAGENT_MODEL",
     "DEFAULT_TRANSLATION_MODEL",
     "DEFAULT_GLOBAL_TOC_TOKENS",
+    "DEFAULT_PACK_ADJACENT_CHAPTERS",
+    "DEFAULT_MAX_CHAPTERS_PER_WORKER",
     "estimate_tokens",
     "resolve_subagent_model",
     "write_batch_handoffs",

@@ -312,6 +312,7 @@ def _native_page_artifacts(
                         "label": "Text",
                         "bbox": group_bbox or bbox,
                         "text": block_text,
+                        "markdown_text": "\n".join(markdown_lines),
                         "html": block_text,
                         "line_count": len(group),
                         "source_block": block_index,

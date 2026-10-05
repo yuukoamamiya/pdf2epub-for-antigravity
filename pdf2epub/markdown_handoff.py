@@ -570,11 +570,13 @@ Batching guidance:
 - Keep at most {manifest['effective_max_concurrency']} Subagent tasks active at once
   for this hand-off (configured ceiling: {batching['max_concurrency']}; reason:
   {manifest['concurrency_reason']}).
-- When `chapter_groups` is present, each top-level chapter group is handed to
-  its own Subagent task so its terminology context is injected once per
-  chapter. A chapter larger than the batching limits may be split into
-  multiple tasks; those tasks share the same chapter context and must not be
-  merged with another chapter.
+- When `chapter_groups` is present, adjacent top-level chapter groups may be
+  packed into one Subagent task when `pack_adjacent_chapters` is enabled. A
+  packed task contains at most {batching['max_chapters_per_worker']} chapters
+  and still obeys the file/token limits. Its terminology context is scoped per
+  source file so terms cannot leak between chapters. A chapter larger than the
+  batching limits is always split only within itself and must not be packed with
+  another chapter.
 - Files with no prior validation report are pending, even when a non-empty
   target file already exists.
 - Do not create extra Markdown files in the source or target directory. Put any

@@ -311,7 +311,14 @@ def test_chapter_handoffs_keep_chapters_separate_and_aggregate_context_once(
         tmp_path / "target",
         "English",
         "Chinese",
-        config={"subagent": {"batching": {"max_concurrency": 3}}},
+        config={
+            "subagent": {
+                "batching": {
+                    "max_concurrency": 3,
+                    "pack_adjacent_chapters": False,
+                }
+            }
+        },
         unit_context_files=context_files,
         heading_contexts={
             "chapter_1.md": {"toc_title": "Chapter One", "children": []},
@@ -348,6 +355,72 @@ def test_chapter_handoffs_keep_chapters_separate_and_aggregate_context_once(
     assert '"toc_title": "Chapter One"' in first_prompt
     assert '"toc_title": "Chapter Two"' not in first_prompt
     assert "Unit-specific terminology contexts (read-only; use these for the matching file):\n- none" in first_prompt
+
+
+def test_adjacent_short_chapters_pack_with_file_scoped_contexts(tmp_path: Path):
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    chapter_names = ["chapter_1.md", "chapter_2.md", "chapter_3.md"]
+    for name in chapter_names:
+        (source_dir / name).write_text("source", encoding="utf-8")
+
+    context_dir = tmp_path / "translation_glossaries" / "unit_contexts"
+    context_dir.mkdir(parents=True)
+    context_files = {}
+    for name, term in zip(chapter_names, ("Hegel", "Marx", "Kant")):
+        path = context_dir / f"{Path(name).stem}.json"
+        path.write_text(
+            json.dumps(
+                {"entries": [{"original": term, "target": term}]},
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        context_files[name] = path
+
+    paths = prepare_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        tmp_path / "target",
+        "English",
+        "Chinese",
+        config={
+            "subagent": {
+                "batching": {
+                    "max_files": 3,
+                    "max_source_tokens": 100,
+                    "max_chapters_per_worker": 2,
+                    "max_concurrency": 3,
+                }
+            }
+        },
+        unit_context_files=context_files,
+        chapter_groups={
+            "chapter_1": ["chapter_1.md"],
+            "chapter_2": ["chapter_2.md"],
+            "chapter_3": ["chapter_3.md"],
+        },
+    )
+
+    handoffs = write_worker_handoffs(tmp_path, paths["manifest"], paths["prompt"])
+
+    assert [item["files"] for item in handoffs] == [
+        ["chapter_1.md", "chapter_2.md"],
+        ["chapter_3.md"],
+    ]
+    assert handoffs[0]["chapter_ids"] == ["chapter_1", "chapter_2"]
+    assert handoffs[0]["chapter_count"] == 2
+    scoped = json.loads((tmp_path / handoffs[0]["manifest"]).read_text(encoding="utf-8"))
+    assert scoped["chapter_ids"] == ["chapter_1", "chapter_2"]
+    assert scoped["chapter_file_counts"] == {"chapter_1": 1, "chapter_2": 1}
+    context_path = tmp_path / next(iter(scoped["worker_context_files"].values()))
+    context = json.loads(context_path.read_text(encoding="utf-8"))
+    assert context["selection"] == "adjacent_chapter_direct_file_contexts"
+    assert {entry["original"] for entry in context["files"]["chapter_1.md"]} == {"Hegel"}
+    assert {entry["original"] for entry in context["files"]["chapter_2.md"]} == {"Marx"}
+    prompt = (tmp_path / handoffs[0]["prompt"]).read_text(encoding="utf-8")
+    assert "do not let terms leak across files" in prompt
 
 
 def test_large_chapter_splits_without_mixing_chapter_contexts(tmp_path: Path):
@@ -672,6 +745,8 @@ def test_batching_caps_configured_worker_file_count():
     )
 
     assert batching["max_files"] == MAX_BATCH_FILES == 8
+    assert batching["pack_adjacent_chapters"] is True
+    assert batching["max_chapters_per_worker"] == 3
 
 
 def test_global_toc_outline_keeps_complete_small_tree(tmp_path: Path):

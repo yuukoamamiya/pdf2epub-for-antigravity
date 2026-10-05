@@ -48,9 +48,10 @@ build-html-epub
 外部领域术语表通过配置中的 `translation.glossaries` 按书选择。它们不会默认全局
 生效，可以选择零个、一个或多个 YAML/JSON 文件。原文件只读，程序会把规范化快照
 放入当前书的 `output/<title>/translation_glossaries/` 并记录 SHA-256。Subagent
-正文 worker 读取按顶层 TOC 分支裁剪并聚合的稀疏上下文；外部领域术语表中的 `fixed`
-译法优先级更高。普通分支使用一次章节级条目，大分支拆分时使用跨分片的共享条目和
-当前分片的局部条目，不把其他分支的术语表重复注入。
+正文 worker 读取按 TOC 分支裁剪并聚合的稀疏上下文；外部领域术语表中的 `fixed`
+译法优先级更高。相邻短分支可以装入同一个 worker，但合并 worker 改用按文件分区的
+直接上下文；普通单分支使用一次章节级条目，大分支拆分时使用跨分片的共享条目和
+当前分片的局部条目，不把其他分支的术语表错误广播。
 跨语言的学派术语表应配置在 `translation.reference_glossaries`，只作为只读概念参考，
 不参与正式术语优先级，也不能覆盖或修改 `translation.glossaries`。
 
@@ -58,6 +59,48 @@ build-html-epub
 每个单元的行数、HTML 标签和属性不变，并将结果写入
 `translated_compressed/`。元数据单独写入 `translated_metadata.json`：书名、
 简介、版权说明和目录可以翻译；作者名和出版社由输入文件提供，必须逐字复制。
+
+## EPUB 章节装箱与 worker handoff
+
+EPUB 正文的任务边界来自原始 TOC，而不是压缩单元的文件名排序。
+`_load_html_chapter_groups()` 会把每个顶层目录项递归映射到其压缩单元文件；同一文件只
+归入第一次命中的目录分支。若目录损坏或没有覆盖某个文件，则为该文件生成
+`unit:<filename>` 回退组，保证它仍会进入翻译队列。这个映射写入父级
+`translate-html_subagent_manifest.json` 的 `chapter_groups`，供审计和 `--resume` 使用。
+
+正文 handoff 默认按 TOC 顺序连续装箱相邻短分支。配置项如下：
+
+| 配置 | 默认值 | 作用 |
+| --- | ---: | --- |
+| `subagent.batching.pack_adjacent_chapters` | `true` | 是否允许相邻短分支共享 worker |
+| `subagent.batching.max_chapters_per_worker` | `3` | 一个 worker 最多覆盖的顶层分支数 |
+| `subagent.batching.max_files` | `5`（硬上限 `8`） | 一个 worker 的源文件数 |
+| `subagent.batching.max_source_tokens` | 配置默认值 | 一个 worker 的源 token 预算 |
+| `subagent.batching.single_file_max_bytes` | `30000` | 超过该值的单文件必须独立成批 |
+
+章节装箱有三条硬边界：需要多个批次的分支只能在自身单元列表内拆分；任一文件超过
+字节/token 限制的分支即使最终只有一个 part 也不能和邻章合并；`--resume` 时已经没有
+待处理文件的分支会冲刷当前装箱队列，不能让它前后的两个待处理分支跨过已完成分支重新
+合并。配置 `pack_adjacent_chapters: false` 时则每个分支单独成为 worker。
+
+父级 manifest 保存全书文件、章节映射、pending 状态和审计哈希。真正给 Subagent 的
+`worker_handoffs/translate-html_subagent_manifest_<worker>.json` 只保存当前 worker 的
+`assigned_files`、文件统计、上下文哈希和必要章节元数据；合并 worker 使用
+`chapter_ids`/`chapter_file_counts`，单分支 worker 保留 `chapter_id`/
+`chapter_file_count` 兼容字段。`assigned_files` 是唯一执行授权，父级 manifest 中其他
+文件即使可见也不能读取、修改或翻译。
+
+合并不会把多个 HTML 单元拼成一个文件。Subagent 仍须逐文件写入
+`translated_compressed/`，每个非空源单元对应一个同名译文文件。合并 worker 的术语上下文
+使用 `adjacent_chapter_direct_file_contexts`：从 `files` 映射读取当前文件的条目，条目
+不能广播到同一 worker 中的其他章节；共享 worker 只提供风格连续性。普通单分支使用
+`chapter_sparse_direct_context`，大分支拆分使用 `shared_entries` 加当前分片的
+`local_entries`。
+
+因此，维护或排查 EPUB 装箱时应先看父级 manifest 的 `chapter_groups`、`pending_files`、
+`batching` 和 `worker_handoffs`，再只打开对应 scoped manifest 和 prompt。不要根据
+`compressed_units/` 中是否存在文件、worker 数量或 Subagent 的聊天确认判断完成；完成证据
+仍是目标文件写入后通过 `html-validate --file`，最后通过全量 `html-validate`。
 
 `html-validate` 只做本地检查。它会拒绝缺失单元、空文件、行数不一致、标签
 结构变化以及元数据保护字段变化。它还会锁定 `compressed_units` 的文件集合、

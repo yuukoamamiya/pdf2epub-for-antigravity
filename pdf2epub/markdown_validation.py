@@ -390,6 +390,7 @@ def polish_content_integrity_check(
         value = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", value)
         value = re.sub(r"<sup>\s*(\d+)\s*</sup>", r"[^\1]", value, flags=re.IGNORECASE)
         value = re.sub(r"\[\^\s*(\d+)\s*\]", r"[^\1]", value)
+        value = re.sub(r"<[^>]+>", " ", value)
         value = re.sub(r"^\s*#{1,6}\s+", "", value, flags=re.MULTILINE)
         value = value.replace("**", "").replace("__", "")
         value = value.replace("*", "").replace("_", "")
@@ -478,7 +479,7 @@ def polish_content_integrity_check(
             "target_count": target_blocks[block],
         }
         for block in sorted(target_blocks)
-        if target_blocks[block] > source_blocks[block]
+        if target_blocks[block] > 1 and target_blocks[block] > source_blocks[block]
     ]
     if duplicated_blocks:
         errors.append(

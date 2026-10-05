@@ -247,15 +247,12 @@ def footnote_prepare_command(args):
         logger.error("footnote-prepare requires ocr_markdown; run refine-local first")
         return 1
 
-    footnote_config = context.config.get("footnotes", {})
-    if not isinstance(footnote_config, dict):
-        footnote_config = {}
     bottom_ratio = getattr(args, "bottom_ratio", None)
-    if bottom_ratio is None:
-        bottom_ratio = footnote_config.get("bottom_ratio", 0.64)
     context_blocks = getattr(args, "context_blocks", None)
-    if context_blocks is None:
-        context_blocks = footnote_config.get("context_blocks", 2)
+    native_max_font_ratio = getattr(args, "native_max_font_ratio", None)
+    # Let the preparation layer resolve the config. The CLI flag is an
+    # explicit override for this command only.
+    auto_accept = False if bool(getattr(args, "review_all", False)) else None
     try:
         paths = prepare_footnote_subagent(
             output_dir,
@@ -263,6 +260,8 @@ def footnote_prepare_command(args):
             config=context.config,
             bottom_ratio=bottom_ratio,
             context_blocks=context_blocks,
+            auto_accept=auto_accept,
+            native_max_font_ratio=native_max_font_ratio,
         )
     except Exception as exc:
         logger.error(f"Could not prepare footnote task: {exc}")

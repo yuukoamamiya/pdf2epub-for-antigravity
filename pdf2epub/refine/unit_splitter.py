@@ -88,6 +88,32 @@ def _split_by_lines(
     return parts or [text]
 
 
+_FOOTNOTE_DEF_LINE_RE = re.compile(
+    r"^\s*(?:<sup>\s*(?P<sup_key>\d{1,4})\s*</sup>|\[\^(?P<md_key>[\w-]+)\]:)"
+)
+_FOOTNOTE_REF_INLINE_RE = re.compile(
+    r"<sup>\s*(\d{1,4})\s*</sup>|\[\^([\w-]+)\](?!:)"
+)
+
+
+def _unresolved_footnote_markers(blocks: List[str], known_defs: set[str]) -> bool:
+    """Return True if blocks contain footnote markers whose definitions have not yet appeared."""
+    if not known_defs:
+        return False
+    text = "".join(blocks)
+    defs: set[str] = set()
+    for line in text.splitlines():
+        match = _FOOTNOTE_DEF_LINE_RE.match(line)
+        if match:
+            defs.add(match.group("sup_key") or match.group("md_key"))
+    refs: set[str] = set()
+    for match in _FOOTNOTE_REF_INLINE_RE.finditer(text):
+        key = match.group(1) or match.group(2)
+        if key:
+            refs.add(key)
+    return bool((refs & known_defs) - defs)
+
+
 def split_markdown_unit(
     text: str,
     target_tokens: int,
@@ -113,6 +139,12 @@ def split_markdown_unit(
     if not blocks:
         return SplitMarkdownResult([text], "none")
 
+    known_defs: set[str] = set()
+    for line in text.splitlines():
+        match = _FOOTNOTE_DEF_LINE_RE.match(line)
+        if match:
+            known_defs.add(match.group("sup_key") or match.group("md_key"))
+
     parts: List[str] = []
     current: List[str] = []
     current_tokens = 0
@@ -134,7 +166,10 @@ def split_markdown_unit(
 
         candidate = "".join(current) + block
         candidate_tokens = estimate_tokens(candidate)
-        if current and candidate_tokens > target_tokens:
+        if current and candidate_tokens > target_tokens and (
+            candidate_tokens > int(target_tokens * 1.5)
+            or not _unresolved_footnote_markers(current, known_defs)
+        ):
             parts.append("".join(current))
             current = []
             current_tokens = 0
