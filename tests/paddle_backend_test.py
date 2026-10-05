@@ -111,4 +111,28 @@ def test_process_page_emits_chandra_shaped_layout_blocks():
     assert result["blocks"][1]["label"] == "Footnote"
     assert result["blocks"][1]["bbox"] == [100, 700, 800, 900]
     assert result["blocks"][1]["bbox_px"] == [10, 70, 80, 90]
+    assert result["text"] == "body\n[^1]: note"
+    assert '<sup class="footnote-def">1</sup> note' in result["blocks"][1]["html"]
     assert 'data-label="Footnote"' in result["html"]
+
+
+def test_process_page_does_not_promote_bottom_ordinals_to_footnotes():
+    image_buffer = io.BytesIO()
+    Image.new("RGB", (100, 100), "white").save(image_buffer, format="PNG")
+
+    class FakeClient:
+        def predict(self, image):
+            return [{
+                "rec_texts": ["2nd edition"],
+                "rec_boxes": [[10, 70, 80, 90]],
+            }]
+
+    result = paddle.process_page(
+        client=FakeClient(),
+        img_bytes=image_buffer.getvalue(),
+        page_num=1,
+        config={},
+    )
+
+    assert result["blocks"][0]["label"] == "Text"
+    assert "footnote-def" not in result["blocks"][0]["html"]

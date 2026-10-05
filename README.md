@@ -4,6 +4,9 @@
 和 AZW3 处理成结构可靠、可校验、可继续执行的 EPUB；需要翻译或判断版面结构的部分由
 Antigravity 工作区 Subagent 完成，本地程序负责文件整理、校验和打包。
 
+这是一个“文件交接 + 本地门禁”的工具，不是聊天窗口里的即时翻译器：Subagent 直接写入
+工作区文件，Python 只负责确定性处理和验证。完整操作规程见 [AGENTS.md](AGENTS.md)。
+
 ## 能做什么
 
 - 扫描 PDF OCR：支持主 OCR，并可选用 PaddleOCR 做第二套 OCR 交叉筛查。
@@ -52,12 +55,53 @@ ocr:
 检查点，旧的脚注决定和插图绑定不会被静默复用。两套 OCR 一致只代表通过筛查，不代表一定
 正确；整页插图、脚注归属和引用/参考文献区分仍由 Subagent 复核。
 
+Chandra 是当前主 OCR，Paddle 是可选的本地次 OCR。Paddle 会输出与 Chandra 对齐的页面
+sidecar，并对明确的页底脚注定义使用相同的 `footnote-def`/`[^N]: ...` 语义；它不会把普通
+上标、序数或行内数字引用自动判成脚注。双 OCR 的作用是缩小视觉复核范围，不是让一个引擎
+静默覆盖另一个引擎。
+
+## 当前输出和公式策略
+
+- PDF 页面结果保存在 `pages/`，双 OCR 结果保存在 `ocr_secondary/`，比较记录保存在
+  `ocr_consensus.json`。
+- 目录、页面合并、脚注和插图决定分别有 manifest、prompt、decision 和 validation report，
+  可以中断后从 pending 项恢复。
+- EPUB 公式采用 Unicode 优先、复杂公式使用 MathML 的方案；目前不要求安装 XeLaTeX、
+  `dvisvgm` 或额外 SVG 工具链。MathML 已够用时不会引入更重的系统依赖。
+- 表格会在 EPUB 中使用滚动容器，宽表才启用不换行策略；代码块和公式会在 Markdown 预处理
+  时受到保护，避免被误识别成强调或 HTML。
+
+## 按输入选择流程
+
+| 输入 | 适合的流程 | 是否翻译 | 主要入口 |
+| --- | --- | --- | --- |
+| 扫描 PDF / 原生文字 PDF | PDF 精修 | 可选 | `ocr-pages` → `refine-*` → `polish` → `build-epub` |
+| PDF，只想转成 EPUB | `pipeline: epub_conversion` | 否 | `ocr-pages` → `refine-*` → `polish` → `build-epub` |
+| EPUB / MOBI / AZW3 | 高保真 HTML | 是 | `html-prepare` → `html-validate` → `build-html-epub` |
+| 轻小说 EPUB | 小说文本流程 | 是 | `translate-novel` → `translate-novel-validate` → `build-novel-epub` |
+| arXiv / 本地 TeX | TeX 单元流程 | 是 | `translate-arxiv` → `translate-arxiv-validate` |
+
+PDF 纯转换模式仍必须经过 OCR、结构整理和 polish；它只跳过实体、目录翻译和正文翻译，
+不会把“未整理的 OCR 文本”直接打包。
+
 ## 快速开始
 
 ### 1. 准备项目
 
 需要 Windows、Python/`uv`、Antigravity，以及一本你有权处理的图书。把原书放进项目的
 `input/`，建议一次只放一本。不要把原书放进 `output/`，不要把密钥写入配置或提交到 Git。
+
+安装基础依赖：
+
+```text
+uv sync
+```
+
+如果配置启用了 `ocr.secondary.enabled: true`，额外安装锁定版本的本地 PaddleOCR：
+
+```text
+uv sync --extra ocr-local
+```
 
 首次打开项目后，让 Antigravity 先执行：
 
@@ -113,6 +157,26 @@ input_pdf: "input/your_book.pdf"
 pipeline: epub_conversion
 ```
 
+## 常用命令顺序
+
+PDF 翻译或精修的完整顺序是：
+
+```text
+ocr-pages --resume
+→ [双 OCR] ocr-correct → ocr-correct-validate
+→ refine-prepare → Subagent 写 toc_tree.json → refine-local --resume
+→ illustration-prepare → [必要时 validate/apply]
+→ footnote-prepare → [必要时 Subagent + validate] → footnote-apply
+→ polish → Subagent 写 polished_markdown/ → polish-validate
+→ extract-entities → extract-entities-validate
+→ translate-toc → translate-toc-validate
+→ check-ready --stage translate → translate → translate-validate
+→ build-epub --translated
+```
+
+方括号中的阶段由配置和候选报告决定。任何 `*_subagent_prompt.md` 或 manifest 出现后，
+都要先交给工作区 Subagent，再运行后续校验；不要跳过中间门禁。
+
 ## 结果在哪里
 
 最终文件通常位于：
@@ -137,5 +201,8 @@ output/<书名>/<书名>.epub
 更详细的执行规则见 [AGENTS.md](AGENTS.md)；实现和产物契约见
 [`docs/architecture.md`](docs/architecture.md)，流程示例和维护说明见
 [`docs/antigravity-workflow.md`](docs/antigravity-workflow.md)。
+
+维护 EPUB HTML 交接时另读 [`docs/html-translation-improvements.md`](docs/html-translation-improvements.md)；
+它记录压缩单元、元数据、导航和视觉回归测试的维护合同。
 
 本项目基于 MIT License 发布。请只处理你有权使用和翻译的内容。

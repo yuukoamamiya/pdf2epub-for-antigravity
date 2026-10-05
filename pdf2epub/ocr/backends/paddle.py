@@ -217,10 +217,53 @@ def _extract_new_api(result: Any) -> List[Tuple[Any, str]]:
     return rows
 
 
-_FOOTNOTE_KEY_RE = re.compile(r"^\s*(?:<sup>\s*)?(\d{1,4})(?:\s*</sup>)?\s*(?=\D|$)")
+_FOOTNOTE_KEY_RE = re.compile(
+    r"^\s*(?:<sup>\s*)?(\d{1,4})(?:\s*</sup>)?(?=\s+|[.)\]:;,*\u2020\u2021]|$)"
+)
 _FOOTNOTE_BOTTOM_RATIO = 0.64
 _PAGE_HEADER_RATIO = 0.08
 _PAGE_FOOTER_RATIO = 0.90
+
+
+def _footnote_definition_parts(text: str) -> Tuple[str, str] | None:
+    """Return a conservative numeric footnote key and its visible body."""
+    match = _FOOTNOTE_KEY_RE.match(str(text or ""))
+    if not match:
+        return None
+    return match.group(1), str(text or "")[match.end() :].strip()
+
+
+def _paddle_block_inner_html(label: str, text: str) -> str:
+    """Render the shared Chandra-shaped semantic subset for Paddle output.
+
+    Paddle does not preserve enough typography to identify inline references or
+    ordinary superscripts reliably.  Only a numeric marker at the beginning of
+    a geometry-labelled footnote block is materialized as a definition marker.
+    """
+    if label == "Footnote":
+        parts = _footnote_definition_parts(text)
+        if parts is not None:
+            key, body = parts
+            marker = f'<sup class="footnote-def">{html.escape(key)}</sup>'
+            if body:
+                marker += f" {html.escape(body)}"
+            return f"<p>{marker}</p>"
+    return f"<p>{html.escape(text)}</p>"
+
+
+def _paddle_markdown(blocks: List[Dict[str, Any]]) -> str:
+    """Use Chandra-compatible syntax for conservative footnote definitions."""
+    lines: List[str] = []
+    for block in blocks:
+        text = str(block.get("text") or "")
+        if block.get("label") == "Footnote":
+            parts = _footnote_definition_parts(text)
+            if parts is not None:
+                key, body = parts
+                text = f"[^{key}]: {body}".rstrip()
+        if text:
+            lines.append(text)
+    return "\n".join(lines)
 
 
 def _box_to_bbox(box: Any) -> List[int] | None:
@@ -274,8 +317,10 @@ def _label_paddle_blocks(rows: List[Tuple[Any, str]], width: int, height: int) -
 
     Paddle does not emit semantic layout labels.  ``Footnote`` is therefore
     only inferred from the block's own geometry and a visible numeric start;
-    continuation lines are labelled as such only after that local signal.
-    This keeps Paddle independent enough to expose a Chandra-only label error.
+    continuation lines are labelled as such only after that local signal.  The
+    resulting HTML/Markdown uses the same explicit definition marker as
+    Chandra, while ordinary superscripts and inline references remain plain
+    text because Paddle cannot identify them safely.
     """
     blocks: List[Dict[str, Any]] = []
     in_footnote = False
@@ -301,7 +346,7 @@ def _label_paddle_blocks(rows: List[Tuple[Any, str]], width: int, height: int) -
                     in_footnote = False
 
         normalized = " ".join(str(text or "").split())
-        inner_html = f"<p>{html.escape(normalized)}</p>"
+        inner_html = _paddle_block_inner_html(label, normalized)
         bbox_attribute = (
             f' data-bbox="{" ".join(str(value) for value in bbox)}"'
             if bbox is not None
@@ -353,7 +398,7 @@ def process_page(
     blocks = _label_paddle_blocks(rows, width, height)
     html_blocks = [block.pop("_html_block") for block in blocks]
     return {
-        "text": "\n".join(text for _box, text in rows),
+        "text": _paddle_markdown(blocks),
         "illustrations": [],
         "html": "".join(html_blocks),
         "blocks": blocks,

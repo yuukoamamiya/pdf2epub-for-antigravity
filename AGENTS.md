@@ -6,6 +6,37 @@
 仓库模块职责和依赖方向见 `docs/architecture.md`；该文件仅作架构说明，不改变本文件的
 执行规范和优先级。
 
+## 0.1 Agent 快速上手
+
+每次接手仓库任务，按下面顺序做，不要先猜流程或直接处理书稿：
+
+1. 先运行 `git status --short`，确认已有改动和未跟踪文件；不删除、不覆盖不属于本次任务的文件。
+2. 判断输入和目标：
+   - PDF → 第 2 节的 PDF 流程；只转换不翻译时使用 `pipeline: epub_conversion`；
+   - EPUB/MOBI/AZW3 → 第 3 节的高保真 HTML 流程；
+   - 轻小说 EPUB → 第 4 节的小说流程；
+   - arXiv 或本地 TeX → 第 5 节的 TeX 流程。
+3. 读取对应配置和 `ocr.secondary.enabled`。双 OCR 开启时必须安装并使用配置的次 OCR，
+   单 OCR 时忽略遗留的共识报告；不要用文件是否存在来猜当前模式。
+4. 所有本地命令使用 `uv run pdf2epub -c <配置> <命令>`。准备命令只会生成 prompt、manifest
+   和本地中间结果，不代表 Subagent 工作已经完成。
+5. 每个准备命令成功后立即检查其 prompt、manifest 和 `pending_files`/`pending_units`，
+   打开 Antigravity 工作区 Subagent，让它直接写入指定目录；主 Agent 不在聊天中翻译或代写译文。
+6. Subagent 完成后先跑对应的单文件校验，再跑全量校验；只有当前源哈希、checkpoint、
+   结构校验和安全审计都通过，才可进入下一阶段或打包。
+7. 中断或失败时保留已有产物，先校验，再使用原命令的 `--resume`；只重做 pending/invalid 项。
+
+常用验收命令：
+
+```text
+uv run pytest -q
+git diff --check
+```
+
+这三层文档的职责不同：本文件规定 Agent 必须怎么做；`README.md` 供使用者了解能力和快速
+开始；`docs/` 记录模块边界、产物合同和维护细节。修改流程、命令、配置或产物时，三层文档
+都要检查，但执行优先级始终是本文件最高。
+
 ## 0. 最高优先级：Subagent 总闸
 
 用户提出以下任一任务时，必须使用 Antigravity IDE 的**工作区 Subagent**：翻译、润色、
@@ -111,6 +142,11 @@ Subagent 直接写文件 → 单文件校验 → 收集完成结果 → 下一�
 |---|---|---|
 | `false` | `single_ocr` | 只使用 `pages/` 的主 OCR；忽略旧的 `ocr_consensus.json`，不运行 OCR 纠错。 |
 | `true` | `two_ocr` | 必须配置 `ocr.secondary.backend`；`ocr-pages` 生成 Paddle 结果和共识报告，差异页进入 Subagent 复核。 |
+
+当前支持的双 OCR 组合是 Chandra + Paddle。Paddle 输出与 Chandra 对齐的 layout sidecar；
+它只在“页底几何位置 + 明确数字开头”足够可靠时生成 `Footnote`/`footnote-def`，并把脚注定义
+规范化成 `[^N]: ...`。它不会把普通上标、序数或行内数字引用臆测成脚注，也不生成 Chandra
+的图片描述。两套 OCR 的文本、脚注标签、编号和垂直范围仍然独立比较；任一差异都应进入视觉复核。
 
 脚注和整页插图也读取同一个开关。双 OCR 模式下，`footnote-prepare` 和
 `illustration-prepare` 必须看到当前共识检查点；主/次 OCR 的候选差异不能由本地脚本自动
@@ -340,6 +376,8 @@ Prompt、manifest 和 worker handoff。准备阶段会扫描译文和对应润�
 ### 2.3 PDF 翻译保真规则
 
 - 保持 Markdown 标题层级、公式 `$...$`、脚注 `[^...]`、图片链接和表格结构。
+- EPUB 公式目前使用 Unicode 优先、`latex2mathml` 复杂公式回退的 MathML 路径；不要默认引入
+  XeLaTeX/`dvisvgm` SVG 渲染或新增系统依赖。只有用户明确要求并完成独立依赖设计时，才可另立任务评估。
 - 源文件末尾的 `REFERENCES`、`Literatur`、`Notes` 等若不是标题，译文也不得升级为标题；
   只有高置信度的单个末尾标签可用 `--fix-reference-heading` 修复。
 - `bibliography` 必须保留作者、书名、年份、版次、DOI/URL/ISBN、页码和引用标点。

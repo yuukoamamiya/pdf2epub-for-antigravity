@@ -49,6 +49,24 @@ def test_materializer_preserves_blocks_and_crops_nested_table_images(tmp_path):
     assert "<table>" in markdown
 
 
+def test_layout_to_markdown_preserves_footnote_semantics_and_image_boundaries():
+    html = """
+<div data-label="Text"><p>Body<sup class="footnote-ref">1</sup> and <sup>2</sup>.</p></div>
+<div data-label="Footnote"><p><sup class="footnote-def">1</sup> Definition.</p><p>Continuation.</p></div>
+<div data-label="Image"><img src="../images/page_001_img_001.png" alt="generated diagram description"/><p>Generated description.</p></div>
+<div data-label="Caption"><p>Printed caption.</p></div>
+""".strip()
+
+    markdown = layout_to_markdown(html, include_headers_footers=False)
+
+    assert "Body[^1]" in markdown
+    assert "[^1]: Definition. Continuation." in markdown
+    assert "[^2]" not in markdown
+    assert "<sup>2</sup>" in markdown
+    assert "Generated description" not in markdown
+    assert "Printed caption" in markdown
+
+
 def test_save_page_artifacts_writes_all_views_and_raw_layout(tmp_path):
     result = OCRPageResult(
         markdown="Body",

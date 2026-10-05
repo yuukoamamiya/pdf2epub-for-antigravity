@@ -6,6 +6,21 @@
 不应被主 Agent 当作独立的简化 SOP。尤其是正文翻译、润色、结构判断和术语提取，
 必须先打开工作区 Subagent；Subagent 入口不可用时应暂停，不得由主 Agent 代做。
 
+本文是维护者用的阶段合同文档：它解释每个命令生成什么、Subagent 读取什么、校验器如何
+判断 freshness，以及下一阶段消费哪个目录。使用者快速了解功能和流程请看
+[`README.md`](../README.md)；需要直接执行任务时只看 [`AGENTS.md`](../AGENTS.md)。
+
+## 当前实现基线
+
+- 默认 PDF 主 OCR 是 Chandra；可选第二套 OCR 是本地 PaddleOCR 3.7.0 + PaddlePaddle 3.3.1。
+- `ocr.secondary.enabled` 是单 OCR/双 OCR 的唯一开关，同时约束 OCR 纠错、脚注候选和整页插图候选。
+- Chandra 和 Paddle 都写入 Chandra-shaped layout sidecar；Paddle 只保守识别页底脚注定义，
+  不把普通序数、上标或行内数字引用升级成脚注。
+- EPUB 公式使用 Unicode 优先、MathML 回退方案；当前没有 SVG 公式渲染器，也不要求
+  `dvisvgm`、XeLaTeX 或 TeX Live 参与普通 EPUB 构建。
+- 任何“存在文件即可继续”的旧流程都不再成立：必须检查当前源哈希、manifest、validation
+  report 和证据模式。
+
 ## Subagent 模型配置
 
 在 `config.yaml` 或 `config_epub.yaml` 中设置：
@@ -39,7 +54,7 @@ PDF 的 `translate` manifest 会在 `worker_handoffs/` 按顶层章节生成隔�
 
 元数据是单个 `translated_metadata.json`，必须整体是合法 JSON；如果额度中断留下半个文件，校验会拒绝它，下一次 Subagent 会完整重写。
 
-TeX 使用独立的 `tex_units/` 和 `translated_tex_units/` 文件。校验时本地程序检查每个单元都存在，再从这些单元重建 `project/` 并编译，因此不会把初始原文工程误判为“已经翻完”。
+TeX 使用独立的 `tex_units/` 和 `translated_tex_units/` 文件。校验时本地程序检查每个单元都存在，再从这些单元重建 `project/` 并编译，因此不会把初始原文工程误判为“已经翻完”。TeX 流程中的 XeLaTeX 只用于 `translate-arxiv-validate` 的项目编译门禁，不代表 EPUB 公式也会走 XeLaTeX。
 
 ## EPUB 高保真翻译
 
@@ -209,8 +224,10 @@ Markdown 换行/标记差异，但保留字符、数字、标点和缺行差异�
 
 当主 OCR 使用 Chandra 时，PaddleOCR 还会把每个识别行物化为与 Chandra 相同的 layout
 sidecar：`blocks[].order`、`label`、归一化 `bbox`、像素 `bbox_px` 和 HTML block。
-Paddle 没有原生语义标签，因此 `Footnote` 只由它自己的底部位置和数字开头信号保守推导，
-不会复制 Chandra 的标签。`ocr_consensus.json` 除整页文本外，还记录两套 sidecar 的脚注
+Paddle 没有原生语义标签，因此 `Footnote` 只由它自己的底部位置和数字开头信号保守推导；
+在这个明确的定义块场景下，它会使用与 Chandra 相同的 `footnote-def` HTML 标记和
+`[^N]: ...` Markdown 形式，但不会把普通上标或行内数字引用臆测为脚注，也不会复制
+Chandra 的图片描述。`ocr_consensus.json` 除整页文本外，还记录两套 sidecar 的脚注
 存在性、脚注编号序列和脚注垂直范围；任一项不一致都会进入视觉复核。这使“一个 OCR 把
 底部正文误标成脚注”的情况被筛出，但两套 OCR 一致仍只是通过筛查，不是正确性证明。
 脚注和整页插图阶段还会检查证据模式与 sidecar 哈希：单 OCR 模式忽略遗留的
@@ -286,6 +303,21 @@ Subagent；双 OCR 模式下，任何被 OCR 共识标为 `visual_review`、或�
 最新共识检查点，主/次 OCR 对候选的差异会进入工作区 Subagent 复核。`footnote-validate`、
 `footnote-apply`、`illustration-validate`、`illustration-apply` 和 `refine-local` 都会再次
 检查这个模式及其哈希，因此切换开关后不能复用旧的脚注或插图绑定。
+
+### 公式和 EPUB 阅读器兼容性
+
+`preprocess_markdown()` 处理公式时先保护代码和已有公式片段，再执行 Markdown 处理：
+
+```text
+简单行内 LaTeX → unicodeitplus → Unicode 文本
+复杂行内/块级 LaTeX → latex2mathml → MathML
+原始 <math>...</math> → latex2mathml → MathML
+转换失败 → 可读的 LaTeX 退路并记录日志
+```
+
+MathML 是当前默认策略，因为它不增加系统级 TeX 依赖，已满足当前成品需求。维护者不要
+为了“更像浏览器”直接把公式改成 SVG；若未来必须支持某个不支持 MathML 的阅读器，应先
+做独立的可选渲染器设计，并把工具探测、SVG 白名单清洗、缓存、超时和跨平台测试纳入同一变更。
 
 `refine` 是 `refine-prepare` 的别名，不再存在 provider/API 实现。
 

@@ -7,6 +7,10 @@ EPUB 翻译已经改为 Antigravity 工作区 Subagent 文件交接，Python 不
 [`architecture.md`](architecture.md) 记录模块边界；这里记录 HTML 交接合同、freshness、
 导航构建和回归测试。修改 EPUB 流程时，必须同时检查这四处文档是否仍然一致。
 
+本文只覆盖 EPUB/MOBI/AZW3 的“保留原 HTML 结构”路径，不覆盖 PDF OCR、PDF polish、轻小说
+文本模式或 TeX 项目。维护时首先确认输入类型，避免把 `build-html-epub` 当成 PDF 的
+`build-epub` 使用。HTML 路径不需要 OCR，也不使用 PDF 的双 OCR 共识开关。
+
 ```text
 html-prepare
   ↓
@@ -20,6 +24,20 @@ html-validate
   ↓
 build-html-epub
 ```
+
+## 命令、目录和所有权
+
+| 阶段 | 本地命令负责 | Subagent 负责 | 关键产物 |
+| --- | --- | --- | --- |
+| 准备 | 解包、压缩、建立映射、生成 prompt/manifest | 不参与 | `compressed_units/`、`mapping.json`、实体 handoff |
+| 实体 | 校验实体 JSON | 从当前书提取实体和术语 | `translation_entities.json` |
+| 正文/元数据 | 生成带上下文的 handoff | 写入译文单元和元数据 JSON | `translated_compressed/`、`translated_metadata.json` |
+| 校验 | 检查 1:1 单元、HTML 骨架、保护字段、语言审计 | 不参与 | `translate-html_validation.json` |
+| 构建 | 恢复 XHTML、更新导航、打包 | 不参与 | `*_translated.epub` |
+
+本地命令不应修改 `compressed_units/` 的源单元来“修复”译文；复杂单元应走
+`html-skeleton-retry`/`html-skeleton-restore` 的受保护 token 流程。Subagent 也不能修改
+原始 EPUB、映射文件或元数据保护字段。
 
 `html-prepare` 负责解析 XHTML、压缩结构并生成映射文件。默认情况下，它还会生成
 `entity_subagent_prompt.md`，要求 Subagent 从整本书的压缩单元提取
@@ -53,6 +71,18 @@ build-html-epub
 `--allow-partial` 和 `--allow-navigation-warnings` 都仅用于明确审查过的预览或兼容性
 场景。测试还会用 PyMuPDF 打开最终 EPUB，检查页数、文本位置、非空渲染和像素稳定性，
 覆盖“打包结果能否被阅读器渲染”这一结构校验之外的环节。
+
+## HTML 结构合同
+
+正文翻译单元的非空行必须保持 1:1 对齐。Subagent 可以翻译文本节点，但不得改变：
+
+- 标签数量、顺序、嵌套和容器边界；
+- 属性、链接 href、锚点 id、实体和占位符；
+- `<i>`、图片、表格、脚注标记和目录导航所依赖的结构；
+- 受保护的作者、出版社、原书名和版权字段。
+
+校验器会在单元级报告明确指出缺失、额外、结构损坏或保护字段变化；不要用
+`--allow-partial` 把这些错误隐藏后交付正式 EPUB。
 
 ## 一致性和成品门禁
 

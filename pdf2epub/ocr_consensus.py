@@ -147,6 +147,11 @@ def _comparable_text(text: str) -> str:
     value = unicodedata.normalize("NFKC", str(text or ""))
     value = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", value)
     value = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", value)
+    # Chandra materializes semantic footnotes as Markdown while the local
+    # Paddle pass may only recover the visible numeric definition marker.
+    # Compare their visible content, not the backend-specific delimiters.
+    value = re.sub(r"\[\^([^\]]+)\]\s*:", r"\1 ", value)
+    value = re.sub(r"\[\^([^\]]+)\]", r"\1", value)
     lines = []
     for line in value.splitlines():
         line = re.sub(r"^\s{0,3}#{1,6}\s+", "", line)

@@ -64,6 +64,57 @@ def test_raw_html_math_is_converted_to_mathml() -> None:
     assert "\\Gamma_x^1" not in html
 
 
+def test_url_query_values_are_not_rewritten_as_html_attributes() -> None:
+    html = convert_markdown_to_html(
+        "<https://youtu.be/example?t=186>",
+        standalone=True,
+    )
+
+    assert 'href="https://youtu.be/example?t=186"' in html
+    assert '?t="186"' not in html
+
+
+def test_tables_are_wrapped_for_epub_readers() -> None:
+    ordinary = convert_markdown_to_html(
+        "| Name | 1 | 2 |\n| --- | --- | --- |\n| Animator | x | x |",
+        standalone=False,
+    )
+    wide = convert_markdown_to_html(
+        "| A | B | C | D | E | F | G | H |\n"
+        "| --- | --- | --- | --- | --- | --- | --- | --- |\n"
+        "| 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |",
+        standalone=False,
+    )
+
+    assert '<div class="table-scroll"><table>' in ordinary
+    assert "table-scroll--wide" not in ordinary
+    assert '<div class="table-scroll table-scroll--wide"><table>' in wide
+
+
+def test_math_and_code_are_not_misread_as_markdown_emphasis() -> None:
+    html = convert_markdown_to_html(
+        r"$R^*(t)$ and *ordinary emphasis*."
+        "\n\n```tex\n$$z^*$$\n<math>y^*</math>\n```",
+        standalone=False,
+    )
+
+    assert "<em>ordinary emphasis</em>" in html
+    assert "<em>" not in html.split("<code>", 1)[-1]
+    assert "math-display" not in html
+    assert "&lt;math&gt;y" in html
+    assert "&lt;/math&gt;" in html
+
+
+def test_currency_prefixed_math_keeps_the_currency_sign() -> None:
+    html = convert_markdown_to_html(
+        r"Cost was $\$1.1 \times 10^9$.",
+        standalone=False,
+    )
+
+    assert "PDF2EPUBESCAPEDDOLLARTOKEN" not in html
+    assert "$1.1" in html
+
+
 def test_generated_html_removes_active_content_and_escapes_title() -> None:
     html = convert_markdown_to_html(
         '<script>alert(1)</script>\n\n[bad](javascript:alert(1))\n\n<span onclick="alert(1)">safe</span>',

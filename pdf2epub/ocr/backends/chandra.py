@@ -48,9 +48,10 @@ Only use these tags {ALLOWED_TAGS}, and these attributes {ALLOWED_ATTRIBUTES}.
 
 Guidelines:
 * Inline math: Surround math with <math>...</math> tags. Math expressions should be rendered in KaTeX-compatible LaTeX. Use display for block math.
+* Footnotes: Mark each genuine inline footnote reference as <sup class="footnote-ref">key</sup>. At the start of every definition inside a Footnote block, mark its key as <sup class="footnote-def">key</sup>. Never use either class for exponents, ordinals, or other ordinary superscripts.
 * Tables: Use colspan and rowspan attributes to match table structure.
 * Formatting: Maintain consistent formatting with the image, including spacing, indentation, subscripts/superscripts, and special characters.
-* Images: Include a description of any images in the alt attribute of an <img> tag. Do not fill out the src property. Describe in detail inside the div tag. Also convert charts to high fidelity data, and convert diagrams to mermaid.
+* Images: Include a concise description in the alt attribute of an <img> tag and do not fill out the src property. Do not repeat or expand that description as visible text inside the image/figure div. Put only captions that are actually printed on the page in a separate Caption block. Also convert charts to high fidelity data, and convert diagrams to mermaid.
 * Forms: Mark checkboxes and radio buttons properly.
 * Text: join lines together properly into paragraphs using <p>...</p> tags. Use <br> tags for line breaks within paragraphs, but only when absolutely necessary to maintain meaning.
 * Chemistry: Use <chem>...</chem> tags for chemical formulas with reactive SMILES.
@@ -291,13 +292,118 @@ class _ChandraMarkdownConverter(MarkdownConverter):
         return text
 
 
+_MARKDOWN_FOOTNOTE_KEY_RE = re.compile(r"^\w+$")
+
+
+def _superscript_key(element: Tag) -> Optional[str]:
+    """Return a footnote key only for a simple, explicitly marked marker."""
+    key = "".join(element.stripped_strings)
+    return key if _MARKDOWN_FOOTNOTE_KEY_RE.fullmatch(key) else None
+
+
+def _leading_footnote_marker(block: Tag) -> Optional[Tuple[Tag, str]]:
+    """Find a leading superscript inside an explicitly labelled Footnote block."""
+    for descendant in block.descendants:
+        if isinstance(descendant, Tag):
+            if descendant.name == "sup":
+                key = _superscript_key(descendant)
+                return (descendant, key) if key is not None else None
+            continue
+        if str(descendant).strip():
+            return None
+    return None
+
+
+def _is_leading_marker(block: Tag, marker: Tag) -> bool:
+    """Return whether a marker precedes all visible text in its block."""
+    for descendant in block.descendants:
+        if descendant is marker:
+            return True
+        if not isinstance(descendant, Tag) and str(descendant).strip():
+            return False
+    return False
+
+
+def _has_footnote_class(marker: Tag, class_name: str) -> bool:
+    return class_name in (marker.get("class") or [])
+
+
+def _materialize_markdown_footnotes(soup: BeautifulSoup) -> Dict[str, str]:
+    """Convert Chandra's semantic footnote markers to the project syntax."""
+    footnote_blocks = soup.find_all("div", attrs={"data-label": "Footnote"})
+    definition_markers: List[Tuple[Tag, str, bool]] = []
+
+    for block in footnote_blocks:
+        marked_definitions: List[Tuple[Tag, str]] = []
+        for marker in block.find_all("sup"):
+            if not _has_footnote_class(marker, "footnote-def"):
+                continue
+            key = _superscript_key(marker)
+            if key is not None:
+                marked_definitions.append((marker, key))
+
+        # Accept older Chandra output where the first superscript in an
+        # explicitly labelled Footnote block was the definition marker.
+        leading = _leading_footnote_marker(block)
+        marked_ids = {id(marker) for marker, _key in marked_definitions}
+        if leading is not None and id(leading[0]) not in marked_ids:
+            definition_markers.append((leading[0], leading[1], True))
+        definition_markers.extend(
+            (marker, key, _is_leading_marker(block, marker))
+            for marker, key in marked_definitions
+        )
+
+    replacements: Dict[str, str] = {}
+    for index, (marker, key, is_leading) in enumerate(definition_markers, 1):
+        placeholder = f"PDF2EPUBFOOTNOTEDEF{index:06d}TOKEN"
+        prefix = "" if is_leading else "\n\n"
+        replacements[placeholder] = f"{prefix}[^{key}]:"
+        marker.replace_with(placeholder)
+
+    # Keep continuation paragraphs on the same logical definition line for
+    # the existing Markdown footnote scanner.
+    for block in footnote_blocks:
+        for line_break in block.find_all("br"):
+            line_break.replace_with(" ")
+        for index, paragraph in enumerate(list(block.find_all("p"))):
+            if index:
+                paragraph.insert_before(" ")
+            paragraph.unwrap()
+
+    reference_index = 0
+    for marker in list(soup.find_all("sup")):
+        if marker.find_parent("div", attrs={"data-label": "Footnote"}) is not None:
+            continue
+        if not _has_footnote_class(marker, "footnote-ref"):
+            continue
+        key = _superscript_key(marker)
+        if key is not None:
+            reference_index += 1
+            placeholder = f"PDF2EPUBFOOTNOTEREF{reference_index:06d}TOKEN"
+            replacements[placeholder] = f"[^{key}]"
+            marker.replace_with(placeholder)
+    return replacements
+
+
 def layout_to_markdown(html: str, *, include_headers_footers: bool) -> str:
     """Create the compatibility Markdown view without altering stored HTML."""
     soup = BeautifulSoup(html, "html.parser")
+    footnote_replacements = _materialize_markdown_footnotes(soup)
+
+    # Chandra's alt text is evidence metadata, not source prose. Keep the
+    # image reference but prevent generated descriptions from entering the
+    # polished/translated Markdown. Printed captions remain separate blocks.
+    for image in soup.find_all("img"):
+        image["alt"] = ""
+
     if not include_headers_footers:
         for div in soup.find_all("div", recursive=False):
-            if div.get("data-label") in {"Page-Header", "Page-Footer"}:
+            label = div.get("data-label")
+            if label in {"Page-Header", "Page-Footer"}:
                 div.decompose()
+            elif label in {"Image", "Figure"}:
+                for text_node in div.find_all(string=True):
+                    text_node.extract()
     converter = _ChandraMarkdownConverter(
         heading_style="ATX",
         bullets="-",
@@ -308,7 +414,10 @@ def layout_to_markdown(html: str, *, include_headers_footers: bool) -> str:
         sub_symbol="<sub>",
         sup_symbol="<sup>",
     )
-    return converter.convert(str(soup)).strip()
+    markdown = converter.convert(str(soup)).strip()
+    for placeholder, replacement in footnote_replacements.items():
+        markdown = markdown.replace(placeholder, replacement)
+    return re.sub(r"^(\[\^\w+\]:)[ \t]*", r"\1 ", markdown, flags=re.MULTILINE)
 
 
 class ChandraClient:

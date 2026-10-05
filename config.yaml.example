@@ -59,6 +59,16 @@ subagent:
 ocr:
   backend: chandra
   furigana_mode: attach # 日语振假名: attach / remove / ruby
+  # 可选的第二套 OCR。开启后，ocr-pages 会逐页生成 Paddle 结果和共识报告，
+  # 只有差异页、共同漏检风险页和固定抽样页进入视觉 Subagent 复核。
+  secondary:
+    enabled: false
+    backend: paddle
+  consensus:
+    common_miss:
+      sample_every: 20
+      density_ratio: 0.30
+      min_neighbor_chars: 800
   backends:
     chandra:
       base_url: https://chandra.shenshei.fans/v1
@@ -71,6 +81,16 @@ ocr:
       access_client_secret_env: CHANDRA_CF_ACCESS_CLIENT_SECRET
       request_timeout: 300
       max_retries: 6
+    paddle:
+      lang: en
+      device: cpu
+      # Windows CPU 默认关闭 OneDNN；确认本机运行时后再显式开启。
+      enable_mkldnn: false
+      cpu_threads: 4
+      use_doc_orientation_classify: false
+      use_doc_unwarping: false
+      use_textline_orientation: false
+      max_workers: 1
 
 # 整页彩页/插页复核（只影响疑似候选页，不会自动把普通插图移位）
 illustration:

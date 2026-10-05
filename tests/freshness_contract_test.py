@@ -14,6 +14,7 @@ from pdf2epub.tex_translation.arxiv import normalize_arxiv_id
 from pdf2epub.tex_translation.document import (
     TexProjectDocument,
     TranslationUnit,
+    inject_cjk_support,
     tex_structure_tokens,
 )
 
@@ -103,6 +104,21 @@ def test_tex_structure_tokens_preserve_references_environments_and_math():
 
     assert tex_structure_tokens(source) == tex_structure_tokens(target)
     assert tex_structure_tokens(source) != tex_structure_tokens(changed)
+
+
+def test_tex_xelatex_normalization_disables_microtype_setup_commands():
+    source = (
+        "\\documentclass{article}\n"
+        "\\usepackage{microtype}\n"
+        "\\UseMicrotypeSet[protrusion]{basicmath}\n"
+        "\\begin{document}Body\\end{document}\n"
+    )
+
+    prepared = inject_cjk_support(source)
+
+    assert "\\usepackage{microtype}" not in prepared
+    assert "\\UseMicrotypeSet" not in prepared
+    assert "together with the microtype package" in prepared
 
 
 def test_enabled_secondary_ocr_requires_a_backend():

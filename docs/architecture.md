@@ -4,6 +4,18 @@
 它不替代执行规范；翻译任务仍以 [`AGENTS.md`](../AGENTS.md) 为唯一执行规范源，
 具体操作流程见 [`antigravity-workflow.md`](antigravity-workflow.md)。
 
+## 文档分工
+
+- `AGENTS.md`：给主 Agent 和工作区 Subagent 的强制操作手册，规定权限边界、命令顺序、
+  交接方式、失败重试和打包门禁。
+- `README.md`：给使用者的项目介绍，说明能处理什么、如何选择流程、需要哪些依赖以及产物在哪里。
+- `docs/architecture.md`：本文，记录模块边界、数据契约、依赖方向和可扩展点。
+- `docs/antigravity-workflow.md`：记录各阶段的详细交接合同、恢复语义和维护示例。
+- `docs/html-translation-improvements.md`：EPUB HTML 路径的专门维护说明。
+
+修改命令、配置或产物格式时，先改实现和测试，再按上述层次同步文档；不要把维护细节全部
+塞进 README，也不要把执行规范只写在维护文档里。
+
 ## 1. 总体原则
 
 项目采用“本地确定性处理 + IDE 工作区 Subagent 判断/翻译”的架构：
@@ -29,7 +41,8 @@ cli.py
             ├── refine/              PDF 结构、分页、插图/脚注闸门和单元生成
             ├── html_translation/    EPUB HTML 解析、压缩、校验和重建
             ├── tex_translation/     TeX 项目扫描、编译和源文件解析
-            └── epub/                EPUB 通用构建能力
+            ├── epub/                EPUB 通用构建能力、Markdown→XHTML 和 MathML
+            └── ocr/                 页面 OCR 后端、sidecar 和双 OCR 共识
 
 Subagent 合同层
 ├── markdown_handoff.py              Markdown handoff 生成
@@ -60,6 +73,13 @@ Subagent 合同层
 - `runtime.py`：提供 `BookCommandContext`、配置加载和输出目录解析。
 - `sources.py`：选择原始 `ocr_markdown` 或已验证的 `polished_markdown`；所有 PDF 的翻译、实体提取和打包都必须使用后者。
 - `ocr.py`：执行唯一允许调用 OCR 服务的入口，并可在同一阶段运行本地 PaddleOCR 共识筛查；只把差异页交给工作区 Subagent 做视觉纠错。
+- `ocr_pages.py`：逐页调度主 OCR 和次 OCR，持久化页面 Markdown、HTML、原始 HTML、layout
+  sidecar 和共识记录；不把次 OCR 静默写回主 OCR。
+- `ocr/backends/chandra.py`：调用 Chandra 原生 layout OCR，保留 block、bbox、图片资产和
+  语义脚注；图片 alt 只作为证据元数据，不进入正文 Markdown。
+- `ocr/backends/paddle.py`：可选的本地次 OCR。它输出 Chandra-shaped layout sidecar，脚注
+  只按保守的页底几何和数字开头推导；明确的定义块使用相同 `footnote-def`/`[^N]:` 语义，
+  但不臆测普通上标、序数或行内引用。
 - `refine.py`：编排 TOC、整页插图和脚注的结构闸门，并调用本地分页/单元合并；页内章节
   边界通过 `boundary_info.start_line`/`end_line` 保留，避免把同页标题前的句子误归入新章节。
 - `markdown.py`：PDF Markdown 的 polish、translate、readiness 和 validation 编排。
@@ -189,6 +209,45 @@ OCR 的 `ocr_consensus.json`，双 OCR 运行也不会因为文件存在就跳�
 而不是顶层 TOC；相同数字在不同实际单元中可以重新开始。跨页顺序由页面和 block 顺序保留，
 所以“正文 → A 脚注 → B 正文 → A 脚注续文 → B 脚注”不会被错误重排。
 
+### 3.1.2 OCR sidecar 和共识比较
+
+每个视觉 OCR 页面至少有以下文件：
+
+```text
+pages/page_001.md          # 主 OCR 的工作流文本
+pages/page_001.html        # 有 layout 时的 HTML
+pages/page_001.raw.html    # 原始模型 HTML（如后端提供）
+pages/page_001.ocr.json    # OCRPageResult 的 sidecar
+```
+
+双 OCR 时，次 OCR 使用同样的文件名写入 `ocr_secondary/`，`ocr_consensus/` 保存逐页比较，
+顶层 `ocr_consensus.json` 保存当前配置、源 PDF、失败页和复核页索引。`OCRPageResult` 是
+后端之间的共同接口；后端可以只提供 Markdown，也可以提供 `html`、`raw_html`、`blocks`、
+`assets`、bbox 和模型信息等增强字段。
+
+共识分两层：
+
+1. 文本比较规范化换行、Markdown 外层格式、链接和脚注分隔符，但不吞掉数字、标点或缺行；
+2. layout 比较脚注标签、脚注编号序列和垂直范围。
+
+`agree` 只表示该页通过筛查；`review_required` 表示必须把页图、主 OCR 和次 OCR 一起交给
+`ocr-correct` 的 Subagent。任何后端都不能在共识阶段自动取代主 OCR。共同漏检由固定抽样和
+页面密度异常信号补充发现。
+
+### 3.1.3 公式输出契约
+
+PDF/EPUB 的 Markdown→XHTML 处理目前采用两级公式策略：
+
+- 可直接表达的行内公式优先使用 `unicodeitplus` 转成 Unicode；
+- 复杂行内公式、块公式和 OCR 后端输出的原始 `<math>` 片段使用 `latex2mathml` 转成 MathML；
+- 代码块、行内代码和已生成的公式片段在 Markdown 预处理期间使用占位保护，避免 `*`、表格
+  或属性处理器破坏公式；
+- 公式失败时保留可读的 LaTeX 退路，并记录日志；公式不是翻译 API 的调用点。
+
+当前没有 `dvisvgm`/XeLaTeX SVG 渲染器，因而普通 EPUB 构建不依赖 TeX Live。若未来增加
+SVG，必须作为显式可选能力设计：配置开关、工具链预检、缓存目录、SVG 安全清洗、失败策略、
+跨平台测试和 README/AGENTS/维护文档必须同时更新，不能让构建隐式要求安装系统 TeX。
+
 ### 3.2 高保真 EPUB 工作流
 
 ```text
@@ -272,6 +331,9 @@ sidecar 哈希和证据模式。`refine-local`、`footnote-apply` 和插图加�
 4. 为模块边界、旧导入兼容性、失败恢复和结构校验增加测试。
 5. 更新本文件中的模块地图；如果 pipeline 选择、Subagent 总闸、校验门禁或恢复规则
    发生变化，同时更新 `AGENTS.md`。
+6. 如果改变使用者可见的功能、配置示例、依赖或命令顺序，同时更新 `README.md`；如果改变
+   handoff、manifest、sidecar、validation report 或恢复语义，同时更新
+   `docs/antigravity-workflow.md` 或对应专项维护文档。
 
 测试入口为 `uv run pytest -q`。代码重构不应读取、改写或重新生成用户的书稿和译文输出；
 涉及实际翻译时必须重新遵守 [`AGENTS.md`](../AGENTS.md) 的 Subagent 总闸和开工检查。

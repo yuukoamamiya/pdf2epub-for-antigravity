@@ -34,6 +34,19 @@ def test_consensus_ignores_markdown_layout_only_differences():
     assert report["reasons"] == []
 
 
+def test_consensus_ignores_backend_specific_footnote_delimiters():
+    config = {"ocr": {"consensus": {}}}
+
+    report = compare_ocr_texts(
+        "Body\n\n[^1]: A note.",
+        "Body\n1 A note.",
+        config,
+    )
+
+    assert report["status"] == "agree"
+    assert report["reasons"] == []
+
+
 def test_consensus_flags_missing_lines_and_numeric_changes():
     config = {"ocr": {"consensus": {}}}
 
