@@ -100,6 +100,10 @@ RECOMMENDED WORKFLOW / 推荐工作流 (uses toc_tree.json):
   pdf2epub refine-prepare            # Prepare Subagent TOC analysis
   # Antigravity Subagent writes toc_tree.json
   pdf2epub refine-local              # Validate TOC and merge OCR pages locally
+  pdf2epub footnote-prepare          # Detect page-footnote candidates locally
+  # Antigravity Subagent writes footnote_decisions.json when review is needed
+  pdf2epub footnote-validate
+  pdf2epub footnote-apply            # Move confirmed footnotes to chapter ends
   pdf2epub polish                    # Prepare Subagent polishing task
   # Antigravity Subagent writes polished_markdown/*.md
   pdf2epub polish-validate
@@ -113,6 +117,10 @@ RECOMMENDED WORKFLOW / 推荐工作流 (uses toc_tree.json):
   pdf2epub refine-prepare
   # Antigravity Subagent writes toc_tree.json
   pdf2epub refine-local
+  pdf2epub footnote-prepare
+  # Antigravity Subagent writes footnote_decisions.json when review is needed
+  pdf2epub footnote-validate
+  pdf2epub footnote-apply
   pdf2epub polish --content-type japanese
   # Antigravity Subagent writes polished_markdown/*.md
   pdf2epub polish-validate

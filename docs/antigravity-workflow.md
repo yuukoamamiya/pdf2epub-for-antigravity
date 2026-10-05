@@ -109,8 +109,36 @@ html-validate --file <同名文件>.md
 ## PDF 结构精修
 
 ```text
-ocr-pages →（若启用第二套 OCR：ocr-correct → ocr-correct-validate）→ refine-prepare → Subagent → refine-local → polish → polish-validate
+ocr-pages
+→（two_ocr：ocr-correct → ocr-correct-validate）
+→ refine-prepare → Subagent 写 toc_tree.json
+→ illustration-prepare →（pending_review：Subagent 写 illustration_decisions.json）
+→ illustration-validate → illustration-apply
+→ refine-local
+→ footnote-prepare →（pending_review：Subagent 写 footnote_decisions.json）
+→ footnote-validate → footnote-apply
+→ polish → polish-validate
 ```
+
+结构阶段的本地命令通常是：
+
+```text
+uv run pdf2epub -c config.yaml refine-prepare
+# 工作区 Subagent 写 toc_tree.json
+uv run pdf2epub -c config.yaml illustration-prepare
+# 如果 manifest 为 pending_review：工作区 Subagent 写 illustration_decisions.json
+uv run pdf2epub -c config.yaml illustration-validate
+uv run pdf2epub -c config.yaml illustration-apply
+uv run pdf2epub -c config.yaml refine-local --resume
+uv run pdf2epub -c config.yaml footnote-prepare
+# 如果 manifest 为 pending_review：工作区 Subagent 写 footnote_decisions.json
+uv run pdf2epub -c config.yaml footnote-validate
+uv run pdf2epub -c config.yaml footnote-apply
+```
+
+`illustration-prepare` 必须先于 `refine-local`，因为已确认的整页插图会影响页面合并；
+`footnote-prepare` 必须后于 `refine-local`，因为脚注归并范围取自实际生成的
+`tree_progress.json` 单元，而不是抽象的顶层 TOC。
 
 OCR 完成不是“有几个 `page_*.md` 文件”就算通过。`ocr_progress.json` 会记录源 PDF
 哈希、真实物理页数、已处理页、失败页、缺失页和空结果页；失败、缺页或未确认的空结果
@@ -120,6 +148,20 @@ OCR 完成不是“有几个 `page_*.md` 文件”就算通过。`ocr_progress.j
 后，才可使用 `--allow-empty-pages` 显式放行，并保留该决定在 checkpoint 中。修复 OCR
 后运行 `refine-local --resume`，页面指纹变化会使下游 polish/翻译 checkpoint 重新进入
 待处理状态。
+
+在 `refine-local` 之前运行 `illustration-prepare`。本地程序只用 layout sidecar、图片引用和
+页面文字量筛选疑似整页彩页/插页，并只为候选页及其前后页生成审阅图；它不会自行断定普通图表
+是整页插页。工作区 Subagent 只写 `illustration_decisions.json`，把候选页区分为
+`full_page_insert`、`ordinary_illustration`、`blank_scan` 或 `body`。随后运行
+`illustration-validate` 和 `illustration-apply`，生成带源页哈希及候选报告哈希的
+`illustration_bindings.json`。`PageMerger` 只对其中的 `full_page_insert` 页面尝试把“前页未完句 →
+整页插页 → 后页续句”恢复成一个连续段落，并把图片保留在恢复后的段落之后；普通插图和证据不足的
+页面不会改变物理顺序。候选报告存在但未完成 apply 时，`refine-local` 会阻断，避免漏掉这道结构判断。
+
+插图候选报告会记录 `ocr_evidence_mode`。`single_ocr` 只依据主 OCR；`two_ocr` 必须有当前
+`ocr_consensus.json`，并比较主/次 OCR 是否都发现视觉候选。只有一套发现候选、候选标签或
+几何证据不一致时，候选页才会带上差异原因交给 Subagent；本地程序不会把次 OCR 直接覆盖到
+主 OCR Markdown。
 
 只有 `ocr.secondary.enabled: true` 时才执行 `ocr-correct`。本地程序会从原始 PDF 渲染一张
 与每个物理页对应的审阅图，并生成 `ocr-correct_worker_handoffs/`；工作区 Subagent 只能处理
@@ -131,8 +173,8 @@ OCR 完成不是“有几个 `page_*.md` 文件”就算通过。`ocr_progress.j
 第二套 OCR 关闭时直接使用主 OCR 的 `pages/`，不生成“已纠错”检查点；高置信度原生文字 PDF
 同样不适用该阶段。
 
-可选的双 OCR 配置可以在 `ocr-pages` 阶段启用本地 PaddleOCR；开关同时决定是否进入视觉
-Subagent 纠错阶段：
+可选的双 OCR 配置可以在 `ocr-pages` 阶段启用本地 PaddleOCR；同一个开关同时决定 OCR
+纠错、脚注候选和整页插图候选使用单 OCR 还是双 OCR 证据：
 
 ```yaml
 ocr:
@@ -143,15 +185,18 @@ ocr:
   backends:
     paddle:
       lang: en
+      device: cpu
+      enable_mkldnn: false
 
 ocr_correction:
   review_dpi: 150
 ```
 
-本地依赖可用 `uv sync --extra ocr-local` 安装；PaddleOCR 的语言模型必须与原书语言匹配。
-项目将 `albumentations` 固定在 1.4.x（`<2.0.0`），因为 Windows 下 2.x 会在导入阶段
-主动加载 PyTorch，可能触发与 PaddlePaddle 冲突的 DLL 加载错误。不要通过预加载 `torch`
-来绕过该问题；若本地依赖安装不完整，应重新运行上述同步命令。
+本地依赖可用 `uv sync --extra ocr-local` 安装。项目将第二套 OCR 固定为
+PaddleOCR 3.7.0 + PaddlePaddle 3.3.1，PaddleOCR 的语言模型必须与原书语言匹配；
+Windows CPU 默认关闭 `enable_mkldnn`，避免 PaddlePaddle 3.x 的 OneDNN 算子兼容问题。
+语义标题去重依赖被放在独立的 `semantic` extra 中；第二套 OCR 不应与该 extra 同时安装，
+也不要通过预加载 `torch` 来绕过 DLL 问题；若本地依赖安装不完整，应重新运行上述同步命令。
 
 安装本地引擎后，`ocr-pages` 会把主 OCR 和 PaddleOCR 的结果按页做规范化比较，忽略纯粹的
 Markdown 换行/标记差异，但保留字符、数字、标点和缺行差异。报告写入 `ocr_consensus.json`；
@@ -161,6 +206,16 @@ Markdown 换行/标记差异，但保留字符、数字、标点和缺行差异�
 标记为风险页。这些信号只扩大视觉复核范围，不自动修改文本；它们仍不能证明两个 OCR 没有
 共同犯错。`ocr.secondary.enabled: false` 时不运行第二套 OCR，也不运行
 视觉 OCR 纠错，主 OCR 结果直接进入后续结构整理。
+
+当主 OCR 使用 Chandra 时，PaddleOCR 还会把每个识别行物化为与 Chandra 相同的 layout
+sidecar：`blocks[].order`、`label`、归一化 `bbox`、像素 `bbox_px` 和 HTML block。
+Paddle 没有原生语义标签，因此 `Footnote` 只由它自己的底部位置和数字开头信号保守推导，
+不会复制 Chandra 的标签。`ocr_consensus.json` 除整页文本外，还记录两套 sidecar 的脚注
+存在性、脚注编号序列和脚注垂直范围；任一项不一致都会进入视觉复核。这使“一个 OCR 把
+底部正文误标成脚注”的情况被筛出，但两套 OCR 一致仍只是通过筛查，不是正确性证明。
+脚注和整页插图阶段还会检查证据模式与 sidecar 哈希：单 OCR 模式忽略遗留的
+`ocr_consensus.json`；双 OCR 模式若共识报告、主/次 sidecar 或配置已变化，会阻断旧的
+候选决定，必须重新准备。
 
 翻译模式在 polish 之后继续：
 
@@ -204,10 +259,33 @@ pipeline: epub_conversion
 结构结果。这样 `polish` 收到的源稿仍保持完整句子和正确章节归属，polish 只负责换行、
 段落和块级结构，不会通过删除半句来“修复”错误的章节切分。
 
-`refine-local` 完成物理切分后会运行边界注脚扫描器，将安全匹配的跨文件引用/定义记录
+`refine-local` 完成物理切分后会运行边界注脚扫描器，将安全匹配的跨文件 Markdown 脚注引用/定义记录
 到 `footnote_boundary_bindings.json`；EPUB 构建时由 `FootnoteManager` 消费。原始 PDF 书签
 草稿还会对明显的“大跨度目录/附录包装节点”执行保守的层级解构，Subagent 只需复核
 结果。
+
+对于扫描 PDF，在 `refine-local` 后、`polish` 前运行
+`footnote-prepare`。该命令只读取 `pages/page_*.ocr.json` 的版面 sidecar，在本地筛选
+带有脚注标签、底部坐标和编号起始的高置信度候选，并按页面内的实际顺序生成稀疏的
+`footnote_contexts/`。只有没有明确标签、跨页续文或正文/脚注交错的候选窗口才交给工作区
+Subagent；双 OCR 模式下，任何被 OCR 共识标为 `visual_review`、或主/次候选结果不同的页面
+都会禁用本地高置信度自动接受，并把主、次两套 sidecar 一起交给 Subagent。Subagent 只写
+`footnote_decisions.json`，随后用 `footnote-validate` 校验；单 OCR 模式不会读取遗留共识报告。
+这里必须区分脚注和引用：正文中的作者—年份/编号引用、引文来源以及
+`bibliography`/`reference` 条目使用 `citation` 或 `bibliography` 角色，脚本不会搬移它们。
+脚注候选必须保留“正文 → 上一脚注续文 → 新脚注”的页内顺序，不能把跨页续文默认移动到
+下一页开头。校验通过后运行 `footnote-apply`：本地脚本会把确认的脚注块从页面流中移除，
+合并跨页续文，并按实际生成的 TOC 单元（完整 `unit_id`；其 `.partM` 分片共享作用域）追加为 `[^N]: ...` 章末注，生成独立的
+`footnote_normalized/`；原始 `ocr_markdown/` 不会被覆盖。如果 `ocr-correct` 已经修正了块内字符，
+脚本会用原始页与已验证页的字符对齐生成匹配变体，但最终仍要求在章稿中唯一命中；无法唯一定位时保持阻断并要求复核。
+之后 `polish` 优先读取这个归一化源稿。
+验证通过的单元上下文会挂载到后续 `polish` handoff，避免每个 worker 读取整本脚注报告。
+
+脚注和整页插图共用 `ocr.secondary.enabled` 作为证据模式开关：关闭时只使用主 OCR，且会
+忽略旧的 `ocr_consensus.json`；开启时必须存在与当前主 OCR、Paddle 配置和次 OCR 文件匹配的
+最新共识检查点，主/次 OCR 对候选的差异会进入工作区 Subagent 复核。`footnote-validate`、
+`footnote-apply`、`illustration-validate`、`illustration-apply` 和 `refine-local` 都会再次
+检查这个模式及其哈希，因此切换开关后不能复用旧的脚注或插图绑定。
 
 `refine` 是 `refine-prepare` 的别名，不再存在 provider/API 实现。
 

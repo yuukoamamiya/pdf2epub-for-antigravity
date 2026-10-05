@@ -13,6 +13,7 @@ from pdf2epub.commands.runtime import load_book_context, load_command_config
 from pdf2epub.commands.sources import (
     _polished_stage_is_current,
     _resolve_pdf_markdown_source,
+    _resolve_pdf_polish_source,
 )
 from pdf2epub.pipeline_policy import PipelinePolicy
 from pdf2epub.utils.common import book_output_dir
@@ -139,7 +140,7 @@ def extract_entities_command(args):
     if list(epub_units.glob("*.md")) and is_epub:
         source_dir, source_stage = epub_units, "epub-compressed"
     elif source_stage != "polished" or not _polished_stage_is_current(
-        output_dir, source_dir, output_dir / "ocr_markdown"
+        output_dir, source_dir, _resolve_pdf_polish_source(output_dir)[0]
     ):
         logger.error(
             "PDF entity extraction requires a current validated polished source "

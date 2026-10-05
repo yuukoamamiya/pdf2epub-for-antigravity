@@ -6,7 +6,8 @@ to precisely cut content at section boundaries.
 """
 
 from pathlib import Path
-from typing import List
+import re
+from typing import Iterable, List, Optional, Set, Tuple
 from loguru import logger
 
 from .toc_tree import TOCNode
@@ -28,7 +29,8 @@ class PageMerger:
         self,
         node: TOCNode,
         pages_dir: Path,
-        next_node: TOCNode = None
+        next_node: TOCNode = None,
+        illustration_pages: Optional[Set[int]] = None,
     ) -> str:
         """
         Merge page content for a node.
@@ -44,7 +46,8 @@ class PageMerger:
         Returns:
             Merged content string
         """
-        content_parts = []
+        content_parts: list[tuple[int, str]] = []
+        illustration_pages = set(illustration_pages or set())
         boundary = node.boundary_info or {}
         previous_header = None
 
@@ -96,15 +99,16 @@ class PageMerger:
             previous_header = current_header
             page_content = '\n'.join(lines)
             if page_content.strip():
-                content_parts.append(page_content)
+                content_parts.append((page_num, page_content))
 
-        return '\n\n'.join(content_parts)
+        return _merge_full_page_insertions(content_parts, illustration_pages)
 
     def merge_nodes_content(
         self,
         nodes: List[TOCNode],
         pages_dir: Path,
-        next_node: TOCNode = None
+        next_node: TOCNode = None,
+        illustration_pages: Optional[Set[int]] = None,
     ) -> str:
         """
         Merge content for multiple consecutive nodes.
@@ -128,7 +132,8 @@ class PageMerger:
         first_boundary = nodes[0].boundary_info or {}
         previous_header = None
 
-        content_parts = []
+        content_parts: list[tuple[int, str]] = []
+        illustration_pages = set(illustration_pages or set())
 
         for page_num in range(start_page, end_page + 1):
             page_file = pages_dir / f"page_{page_num:03d}.md"
@@ -170,6 +175,97 @@ class PageMerger:
             previous_header = current_header
             page_content = '\n'.join(lines)
             if page_content.strip():
-                content_parts.append(page_content)
+                content_parts.append((page_num, page_content))
 
-        return '\n\n'.join(content_parts)
+        return _merge_full_page_insertions(content_parts, illustration_pages)
+
+
+_SENTENCE_END = frozenset("。！？!?；;：:….!?")
+_CLOSING_MARKS = frozenset("\"'”’》）)]】〉〕」』»\u3009\u300b\u300d\u300f\u3011")
+_NEXT_BLOCK_RE = re.compile(
+    r"^(?:#{1,6}\s|[-*+]\s+|\d+[.)]\s+|>\s+|!\[|<img\b|\|)",
+    re.IGNORECASE,
+)
+
+
+def _last_significant_character(value: str) -> str:
+    """Return the last prose character, ignoring closing quote/bracket marks."""
+    value = str(value or "").rstrip()
+    while value and value[-1] in _CLOSING_MARKS:
+        value = value[:-1].rstrip()
+    return value[-1:] if value else ""
+
+
+def _looks_like_new_block(value: str) -> bool:
+    stripped = str(value or "").lstrip()
+    return not stripped or bool(_NEXT_BLOCK_RE.match(stripped)) or stripped.startswith("[^")
+
+
+def _can_join_across_full_page(previous: str, following: str) -> bool:
+    """Conservatively recognize a sentence interrupted by a visual page."""
+    previous = str(previous or "").strip()
+    following = str(following or "").strip()
+    if not previous or not following or _looks_like_new_block(following):
+        return False
+    previous_last_line = next(
+        (line.strip() for line in reversed(previous.splitlines()) if line.strip()),
+        "",
+    )
+    if _looks_like_new_block(previous_last_line):
+        return False
+    last = _last_significant_character(previous_last_line)
+    return bool(last) and last not in _SENTENCE_END
+
+
+def _join_page_fragments(previous: str, following: str) -> str:
+    """Join OCR fragments without inserting a space into CJK or hyphenation."""
+    previous = str(previous or "").rstrip()
+    following = str(following or "").lstrip()
+    if not previous:
+        return following
+    if not following:
+        return previous
+    if previous.endswith("-") or following[0] in ",.;:!?\uff0c\u3002\uff1b\uff1a\uff01\uff1f\u3001)]}\u3011\u300b\u300d\u300f\u201d\u2019\"":
+        separator = ""
+    elif re.search(r"[\u3400-\u9fff\u3040-\u30ff]$", previous) or re.match(
+        r"^[\u3400-\u9fff\u3040-\u30ff]", following
+    ):
+        separator = ""
+    else:
+        separator = " "
+    return previous + separator + following
+
+
+def _merge_full_page_insertions(
+    entries: Iterable[Tuple[int, str]],
+    illustration_pages: Set[int],
+) -> str:
+    """Keep full-page images, but move them after a repaired interrupted sentence.
+
+    Only pages explicitly classified by the reviewed illustration binding are
+    eligible.  Ordinary figures, captions, and all unreviewed pages retain the
+    physical page order.
+    """
+    ordered = [(int(page), str(content)) for page, content in entries]
+    merged: list[str] = []
+    index = 0
+    while index < len(ordered):
+        page, content = ordered[index]
+        is_full_page = page in illustration_pages
+        if (
+            is_full_page
+            and index > 0
+            and index + 1 < len(ordered)
+            and ordered[index - 1][0] not in illustration_pages
+            and ordered[index + 1][0] not in illustration_pages
+            and _can_join_across_full_page(merged[-1] if merged else "", ordered[index + 1][1])
+        ):
+            merged[-1] = _join_page_fragments(merged[-1], ordered[index + 1][1])
+            if content.strip():
+                merged.append(content)
+            index += 2
+            continue
+        if content.strip():
+            merged.append(content)
+        index += 1
+    return "\n\n".join(merged)

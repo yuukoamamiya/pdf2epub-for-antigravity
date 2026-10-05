@@ -1186,10 +1186,15 @@ def test_extract_entities_uses_configured_language_and_selected_source_stage(
     (tmp_path / "output" / "Book" / "polish_validation.json").write_text(
         json.dumps(
             {
-                    "schema_version": 2,
+                "schema_version": 2,
+                "task": "polish",
+                "scope": "full",
                 "all_passed": True,
                 "source_sha256": {"chapter_001.md": hashlib.sha256(
                     (source_dir / "chapter_001.md").read_bytes()
+                ).hexdigest()},
+                "target_sha256": {"chapter_001.md": hashlib.sha256(
+                    (polished_dir / "chapter_001.md").read_bytes()
                 ).hexdigest()},
             }
         ),
@@ -1308,10 +1313,15 @@ def test_translate_skip_entities_is_recorded_in_prompt_and_manifest(
     (output_dir / "polish_validation.json").write_text(
         json.dumps(
             {
-                    "schema_version": 2,
+                "schema_version": 2,
+                "task": "polish",
+                "scope": "full",
                 "all_passed": True,
                 "source_sha256": {"chapter.md": hashlib.sha256(
                     (source_dir / "chapter.md").read_bytes()
+                ).hexdigest()},
+                "target_sha256": {"chapter.md": hashlib.sha256(
+                    (polished_dir / "chapter.md").read_bytes()
                 ).hexdigest()},
             }
         ),

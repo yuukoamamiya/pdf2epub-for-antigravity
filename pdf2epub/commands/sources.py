@@ -5,7 +5,22 @@ import json
 from pathlib import Path
 
 from pdf2epub.ocr_progress import assess_progress
-from pdf2epub.workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION
+from pdf2epub.refine.footnote_apply import footnote_normalization_is_current
+from pdf2epub.validation_receipts import validation_receipt_is_current
+
+
+def _resolve_pdf_polish_source(output_dir: Path, config: dict | None = None):
+    """Choose the source that the PDF polish gate must inspect.
+
+    A validated footnote-normalized stage is preferred when present.  The
+    fallback keeps older runs usable, while the recommended workflow can run
+    ``footnote-apply`` before ``polish`` to remove page-level note disruption.
+    """
+    output_dir = Path(output_dir)
+    normalized_dir = output_dir / "footnote_normalized"
+    if footnote_normalization_is_current(output_dir, config=config):
+        return normalized_dir, "footnote_normalized"
+    return output_dir / "ocr_markdown", "ocr"
 
 
 def _resolve_pdf_markdown_source(output_dir: Path, config: dict):
@@ -24,8 +39,11 @@ def _resolve_pdf_markdown_source(output_dir: Path, config: dict):
         )
 
     polished_dir = output_dir / "polished_markdown" / "validated"
+    polish_input_dir, _polish_input_stage = _resolve_pdf_polish_source(output_dir, config)
     ocr_dir = output_dir / "ocr_markdown"
-    polished_available = _polished_stage_is_current(output_dir, polished_dir, ocr_dir)
+    polished_available = _polished_stage_is_current(
+        output_dir, polished_dir, polish_input_dir
+    )
 
     if requested_stage == "polished":
         return polished_dir, "polished"
@@ -85,29 +103,17 @@ def _polished_stage_is_current(
     report_path = output_dir / "polish_validation.json"
     if not report_path.is_file():
         return False
-    try:
-        report = json.loads(report_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return False
-    if (
-        not isinstance(report, dict)
-        or report.get("schema_version") != MARKDOWN_VALIDATION_SCHEMA_VERSION
-        or not report.get("all_passed")
-    ):
-        return False
-    recorded_hashes = report.get("source_sha256")
-    if not isinstance(recorded_hashes, dict):
-        return False
-    current_hashes = {
-        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
-        for path in sorted(ocr_dir.glob("*.md"))
-        if path.is_file()
-    }
-    return bool(current_hashes) and current_hashes == recorded_hashes
+    return validation_receipt_is_current(
+        report_path,
+        ocr_dir,
+        polished_dir,
+        task="polish",
+    )
 
 
 __all__ = [
     "_native_text_stage_is_current",
+    "_resolve_pdf_polish_source",
     "_polished_stage_is_current",
     "_resolve_pdf_markdown_source",
 ]

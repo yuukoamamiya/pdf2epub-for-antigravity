@@ -190,7 +190,7 @@ def validate_markdown_subagent(
                     {"file": source.name, **fix} for fix in fixes
                 )
         diff_summary[source.name] = translation_diff_summary(source_text, target_text)
-        if not target_text.strip():
+        if not target_text.strip() and bool(source_text.strip()):
             invalid.append({"file": source.name, "reason": "target is empty"})
             continue
         role = normalized_roles.get(source.name)
@@ -322,7 +322,7 @@ def validate_markdown_subagent(
                 )
                 if source.name in valid_files:
                     valid_files.remove(source.name)
-            for finding in detect_polish_page_furniture(target_text):
+            for finding in detect_polish_page_furniture(target_text, role=role):
                 item = {"file": source.name, **finding}
                 polish_page_furniture_warnings.append(item)
                 review_required.append(
@@ -353,6 +353,11 @@ def validate_markdown_subagent(
             )
             if source.name in valid_files:
                 valid_files.remove(source.name)
+
+        # Normalization and high-confidence heading repair may have rewritten
+        # the target after its initial read.  Receipts must attest to the
+        # bytes that will actually be copied into validated/ and packaged.
+        target_sha256[source.name] = hashlib.sha256(target.read_bytes()).hexdigest()
 
     extras = [] if partial else sorted(
         path.name for path in _markdown_files(target_dir)

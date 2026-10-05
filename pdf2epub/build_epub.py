@@ -179,7 +179,10 @@ def find_chapter_file(unit_id: str, markdown_dir: Path) -> Optional[Path]:
     return None
 
 
-def find_part_files(base_file: Path) -> List[Path]:
+def find_part_files(
+    base_file: Path,
+    part_order: Optional[Dict[str, List[str]]] = None,
+) -> List[Path]:
     """
     Find all part files for a chapter.
 
@@ -194,6 +197,17 @@ def find_part_files(base_file: Path) -> List[Path]:
     """
     if base_file is None:
         return []
+
+    if part_order and base_file.name in part_order:
+        names = [str(name) for name in part_order[base_file.name]]
+        if any(
+            Path(name).name != name or Path(name).suffix.lower() != ".md"
+            for name in names
+        ):
+            names = []
+        ordered = [base_file.parent / name for name in names]
+        if ordered and all(path.is_file() for path in ordered):
+            return ordered
 
     # Get the base name without ALL .partN suffixes
     name = base_file.name
@@ -588,7 +602,8 @@ def flatten_toc_tree(
 
 def build_epub_structure(
     toc_structure: List[Dict],
-    markdown_dir: Path
+    markdown_dir: Path,
+    part_order: Optional[Dict[str, List[str]]] = None,
 ) -> Dict:
     """
     Build the final EPUB structure with file paths.
@@ -622,7 +637,7 @@ def build_epub_structure(
 
             if file_path:
                 result['file_path'] = file_path
-                result['part_files'] = find_part_files(file_path)
+                result['part_files'] = find_part_files(file_path, part_order)
             elif 'children' not in entry and inherited_file is None:
                 # Only warn if this is a leaf node (no children)
                 # Container nodes (with children) don't need their own markdown
@@ -638,6 +653,26 @@ def build_epub_structure(
         return result
 
     return [process_entry(ch) for ch in toc_structure]
+
+
+def load_refinement_part_order(output_dir: Path) -> Dict[str, List[str]]:
+    """Load authoritative continuation order from the refinement checkpoint."""
+    progress_path = Path(output_dir) / "ocr_markdown" / "tree_progress.json"
+    try:
+        progress = json.loads(progress_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return {}
+    result: Dict[str, List[str]] = {}
+    for unit in progress.get("units", []) or []:
+        if not isinstance(unit, dict):
+            continue
+        names = [str(name) for name in (unit.get("part_files") or []) if name]
+        if len(names) > 1 and all(
+            Path(name).name == name and Path(name).suffix.lower() == ".md"
+            for name in names
+        ):
+            result[names[0]] = names
+    return result
 
 
 def write_combined_markdown(
@@ -1013,7 +1048,11 @@ def build_epub(config: BuildEpubConfig) -> Path:
     )
 
     # Build structure with file paths
-    epub_structure = build_epub_structure(toc_structure, config.markdown_dir)
+    epub_structure = build_epub_structure(
+        toc_structure,
+        config.markdown_dir,
+        part_order=load_refinement_part_order(config.output_dir),
+    )
 
     # Count chapters with files
     def count_with_files(entries):

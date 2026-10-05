@@ -15,6 +15,7 @@ from .page_merger import PageMerger
 from .subagent_workflow import page_numbers, validate_toc_tree_data
 from .unit_splitter import split_markdown_unit
 from .footnote_stitcher import scan_boundary_footnotes
+from .illustration_prepare import load_current_illustration_pages
 
 # Initialize tokenizer
 tokenizer = tiktoken.get_encoding("cl100k_base")
@@ -164,12 +165,23 @@ class RefinedBreakdown:
         if errors:
             raise ValueError("Invalid subagent TOC: " + "; ".join(errors[:10]))
 
+        illustration_pages = load_current_illustration_pages(
+            output_dir,
+            config=self.config,
+        )
+        illustration_bindings_path = output_dir / "illustration_bindings.json"
+
         toc_tree = dict_list_to_toc_tree(toc_data["chapters"])
         book_metadata = {key: value for key, value in toc_data.items() if key != "chapters"}
         source_fingerprint = {
             "schema": REFINE_CHECKPOINT_SCHEMA,
             "toc_sha256": hashlib.sha256(toc_tree_file.read_bytes()).hexdigest(),
             "pages_sha256": _pages_fingerprint(pages_dir),
+            "illustration_bindings_sha256": (
+                hashlib.sha256(illustration_bindings_path.read_bytes()).hexdigest()
+                if illustration_bindings_path.is_file()
+                else None
+            ),
             "split_policy": self.split_policy,
         }
         return self._generate_units_from_tree(
@@ -179,6 +191,7 @@ class RefinedBreakdown:
             output_dir,
             resume=resume,
             source_fingerprint=source_fingerprint,
+            illustration_pages=illustration_pages,
         )
 
     def _generate_units_from_tree(
@@ -189,6 +202,7 @@ class RefinedBreakdown:
         output_dir: Path,
         resume: bool = False,
         source_fingerprint: Dict[str, str] = None,
+        illustration_pages: set[int] | None = None,
     ) -> List[Dict]:
         """Shared deterministic token estimation, splitting, and page merge."""
         ocr_markdown_dir = output_dir / "ocr_markdown"
@@ -219,7 +233,12 @@ class RefinedBreakdown:
 
         self._apply_inter_unit_page_boundaries(work_units)
         logger.info(f"Saving {len(work_units)} work units...")
-        unit_metadata = self._save_units(work_units, pages_dir, ocr_markdown_dir)
+        unit_metadata = self._save_units(
+            work_units,
+            pages_dir,
+            ocr_markdown_dir,
+            illustration_pages=illustration_pages,
+        )
         tree_progress_file.write_text(
             json.dumps(
                 {
@@ -453,7 +472,8 @@ class RefinedBreakdown:
         self,
         work_units: List[Dict],
         pages_dir: Path,
-        output_dir: Path
+        output_dir: Path,
+        illustration_pages: set[int] | None = None,
     ) -> List[Dict]:
         """Save all work units to files."""
         unit_metadata = []
@@ -470,9 +490,19 @@ class RefinedBreakdown:
             if unit.get('include_children'):
                 # Get all nodes to merge
                 all_nodes = [node] + node.get_all_leaves()
-                content = self.page_merger.merge_nodes_content(all_nodes, pages_dir, next_node)
+                content = self.page_merger.merge_nodes_content(
+                    all_nodes,
+                    pages_dir,
+                    next_node,
+                    illustration_pages=illustration_pages,
+                )
             else:
-                content = self.page_merger.merge_node_content(node, pages_dir, next_node)
+                content = self.page_merger.merge_node_content(
+                    node,
+                    pages_dir,
+                    next_node,
+                    illustration_pages=illustration_pages,
+                )
 
             role = str(getattr(node, "chapter_type", "") or "").strip().lower() or "body"
             actual_tokens = len(tokenizer.encode(content)) if content else 0

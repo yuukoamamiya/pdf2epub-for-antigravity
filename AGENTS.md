@@ -102,6 +102,40 @@ Subagent 直接写文件 → 单文件校验 → 收集完成结果 → 下一�
 全量校验 → 打包
 ```
 
+### 1.1 主 Agent 的快速执行表
+
+开始 PDF 任务时先读取配置中的 `ocr.secondary.enabled`，并把它作为整条结构流水线的
+唯一 OCR 证据模式：
+
+| 配置 | 证据模式 | 处理方式 |
+|---|---|---|
+| `false` | `single_ocr` | 只使用 `pages/` 的主 OCR；忽略旧的 `ocr_consensus.json`，不运行 OCR 纠错。 |
+| `true` | `two_ocr` | 必须配置 `ocr.secondary.backend`；`ocr-pages` 生成 Paddle 结果和共识报告，差异页进入 Subagent 复核。 |
+
+脚注和整页插图也读取同一个开关。双 OCR 模式下，`footnote-prepare` 和
+`illustration-prepare` 必须看到当前共识检查点；主/次 OCR 的候选差异不能由本地脚本自动
+选择，必须进入工作区 Subagent。切换模式后，旧的脚注决定、插图绑定和 `refine-local`
+检查点不能复用。
+
+PDF 结构阶段按以下顺序执行：
+
+```text
+ocr-pages
+→ [two_ocr: ocr-correct → ocr-correct-validate]
+→ refine-prepare → 工作区 Subagent 写 toc_tree.json
+→ illustration-prepare
+→ [有候选: 工作区 Subagent 写 illustration_decisions.json → illustration-validate → illustration-apply]
+→ refine-local
+→ footnote-prepare
+→ [有待复核: 工作区 Subagent 写 footnote_decisions.json → footnote-validate]
+→ footnote-apply
+→ polish → polish-validate
+```
+
+`illustration-prepare` 必须在 `refine-local` 前完成，因为它影响页面合并；
+`footnote-prepare` 必须在 `refine-local` 后完成，因为它按实际生成的 TOC 单元归并章末脚注。
+没有候选时仍保留本地生成的报告和 manifest，并继续执行下一个阶段。
+
 对所有 PDF，`polish` 都是翻译前的必经质量闸门，不是可选的版式优化；只有
 `polish-validate` 通过后，才能提取实体表或准备正文翻译。高置信度原生矢量文本 PDF
 只跳过视觉 OCR，仍必须用 `polish` 判断视觉换行与真实段落边界。原生文字稿的 polish
@@ -112,14 +146,14 @@ Subagent 直接写文件 → 单文件校验 → 收集完成结果 → 下一�
 `--allow-review-warnings`。
 EPUB、轻小说和 TeX 流程不使用这一 PDF 润色阶段。
 
-PDF 的具体循环为：`ocr-pages →（若启用第二套 OCR：ocr-correct → ocr-correct-validate）→ refine-prepare → refine-local → polish → polish-validate`。
+PDF 的具体循环为：`ocr-pages →（若启用第二套 OCR：ocr-correct → ocr-correct-validate）→ refine-prepare → illustration-prepare →（必要时 illustration-validate → illustration-apply）→ refine-local → footnote-prepare →（必要时 footnote-validate）→ footnote-apply → polish → polish-validate`。
 随后执行 `extract-entities → translate-toc → translate-toc-validate → translate →
 translate-validate → build-epub`。可搜索但由扫描图像叠加 OCR 文字层的 PDF 仍必须重新
 视觉 OCR。
 
 PDF 纯转换模式使用 `pipeline: epub_conversion`（兼容别名
 `mode: ocr_to_epub`），循环为：
-`ocr-pages →（若启用第二套 OCR：ocr-correct → ocr-correct-validate）→ refine-prepare → refine-local → polish → polish-validate → build-epub`。
+`ocr-pages →（若启用第二套 OCR：ocr-correct → ocr-correct-validate）→ refine-prepare → illustration-prepare →（必要时 illustration-validate → illustration-apply）→ refine-local → footnote-prepare →（必要时 footnote-validate）→ footnote-apply → polish → polish-validate → build-epub`。
 该模式不读取语言设置，不执行实体提取、翻译 TOC 或正文翻译；但 polish 仍是所有 PDF
 必须通过的结构质量门禁。构建时不得使用 `build-epub --translated`。
 
@@ -173,7 +207,26 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
    `ocr_corrected_pages/validated/`，原生文字 PDF 使用 `pages/`，写入 `toc_tree.json`。
    Subagent 应从书名页/版权页提取作者和出版社，并按内容标注 `notes`、`bibliography`、
    `index`；普通正文节点不写 `type`。
-6. 执行：
+6. 在 `refine-local` 前处理整页插图候选：
+
+   ```text
+   uv run pdf2epub -c config.yaml illustration-prepare
+   ```
+
+   若 manifest 状态为 `pending_review`，打开工作区 Subagent，读取
+   `illustration_subagent_prompt.md`，只复核列出的候选页及其前后页，并写入
+   `illustration_decisions.json`。然后执行：
+
+   ```text
+   uv run pdf2epub -c config.yaml illustration-validate
+   uv run pdf2epub -c config.yaml illustration-apply
+   ```
+
+   `full_page_insert` 才允许改变页面物理顺序；`ordinary_illustration`、`blank_scan` 和
+   `body` 不改变顺序。若没有候选，`illustration-validate`/`illustration-apply` 会生成空绑定，
+   仍可继续。双 OCR 模式下，主/次 OCR 的候选存在性或 layout 证据不一致会进入复核；单 OCR
+   模式只看主 OCR，且忽略旧共识报告。
+7. 执行：
 
    ```text
    uv run pdf2epub -c config.yaml refine-local --resume
@@ -185,7 +238,28 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
    新章节从页面中部开始时，上一单元保留同页标题前的前缀；父标题和首个子标题同页时，
    两者都必须提供 `start_line`，本地步骤把父标题/导语放入首个子章节单元。
    `tree_progress.json` 会锁定 TOC/OCR 指纹；输入变化后必须重新生成受影响单元。
-7. 所有 PDF 都必须执行 `polish`，打开工作区 Subagent 读取
+8. `refine-local` 完成后处理脚注：
+
+   ```text
+   uv run pdf2epub -c config.yaml footnote-prepare
+   ```
+
+   若 manifest 状态为 `pending_review`，打开工作区 Subagent，读取
+   `footnote_subagent_prompt.md`，只处理 manifest 中的候选窗口，并写入
+   `footnote_decisions.json`。随后执行：
+
+   ```text
+   uv run pdf2epub -c config.yaml footnote-validate
+   uv run pdf2epub -c config.yaml footnote-apply
+   ```
+
+   `footnote-apply` 只移动已确认的 `footnote_start`、`footnote_continuation` 和
+   `footnote_definition`；`citation`、`bibliography` 和 `body` 保持原位。脚注按实际
+   `tree_progress.json` 单元的完整 `unit_id` 归并到单元末尾，不使用顶层 TOC 作为唯一范围，
+   因而能处理同一章内脚注编号重启。跨页脚注按页面实际顺序拼接，允许出现“正文 → 上一脚注续文
+   → 新脚注”，不会默认把续文放到下一页开头。双 OCR 模式会再次检查当前共识报告和次 OCR
+   sidecar；切换到单 OCR 后旧双 OCR 报告不会被使用。
+9. 所有 PDF 都必须执行 `polish`，打开工作区 Subagent 读取
    `polish_subagent_prompt.md`，并按 `polish_worker_handoffs/` 中各 manifest 的
    `assigned_files` 写入 `polished_markdown/`，然后运行 `polish-validate`。
    若启用第二套 OCR，对 OCR/混合型 PDF，前置 `ocr-correct` 通过校验后的字符、词语和符号视为权威；
@@ -242,7 +316,7 @@ uv run pdf2epub -c config.yaml check-ready --stage translate --skip-entities
    Subagent；首次 `review_required` 也重新派发。若报告出现 `human_review_required`，必须暂停
    并询问人工，不能继续自动重试。只有完成复核后才可显式使用
    `translate-validate --allow-review-warnings` 放行。
-8. 执行打包：
+10. 执行打包：
 
    ```text
    uv run pdf2epub -c config.yaml build-epub --translated

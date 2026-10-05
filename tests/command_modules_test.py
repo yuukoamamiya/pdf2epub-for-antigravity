@@ -12,6 +12,7 @@ from pdf2epub.commands.markdown import (
     _load_pdf_file_roles,
 )
 from pdf2epub.commands.pdf import _resolve_pdf_markdown_source
+from pdf2epub.commands.sources import _resolve_pdf_polish_source
 from pdf2epub.commands.registry import register_command_parsers
 from pdf2epub.commands.runtime import load_book_context
 from pdf2epub.workflow_contracts import sha256_file
@@ -48,6 +49,12 @@ def test_command_registry_registers_every_workflow_command():
         "check-ready",
         "extract-entities",
         "extract-entities-validate",
+        "footnote-apply",
+        "footnote-prepare",
+        "footnote-validate",
+        "illustration-apply",
+        "illustration-prepare",
+        "illustration-validate",
         "glossary-candidates",
             "html-prepare",
             "html-skeleton-retry",
@@ -96,8 +103,11 @@ def test_pdf_source_stage_selects_only_current_polished_output(tmp_path: Path):
         json.dumps(
             {
                 "schema_version": 2,
+                "task": "polish",
+                "scope": "full",
                 "all_passed": True,
                 "source_sha256": {source.name: sha256_file(source)},
+                "target_sha256": {polished.name: sha256_file(polished)},
             }
         ),
         encoding="utf-8",
@@ -105,6 +115,43 @@ def test_pdf_source_stage_selects_only_current_polished_output(tmp_path: Path):
     assert _resolve_pdf_markdown_source(
         tmp_path, {"translation": {"source_stage": "auto"}}
     ) == (polished_dir, "polished")
+
+
+def test_polish_prefers_current_footnote_normalized_source(tmp_path: Path):
+    source_dir = tmp_path / "ocr_markdown"
+    normalized_dir = tmp_path / "footnote_normalized"
+    source_dir.mkdir()
+    normalized_dir.mkdir()
+    (source_dir / "chapter_1.md").write_text("source", encoding="utf-8")
+    (normalized_dir / "chapter_1.md").write_text("normalized", encoding="utf-8")
+    (tmp_path / "footnote_candidates.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "footnote_decision_validation.json").write_text(
+        json.dumps({"valid": True, "status": "validated"}), encoding="utf-8"
+    )
+    from pdf2epub.workflow_contracts import atomic_write_text
+
+    atomic_write_text(
+        tmp_path / "footnote_normalization.json",
+        json.dumps(
+            {
+                "schema_version": 1,
+                "valid": True,
+                "status": "validated",
+                "source_sha256": {"chapter_1.md": sha256_file(source_dir / "chapter_1.md")},
+                "target_sha256": {
+                    "chapter_1.md": sha256_file(normalized_dir / "chapter_1.md")
+                },
+                "candidate_report_sha256": sha256_file(
+                    tmp_path / "footnote_candidates.json"
+                ),
+                "decision_validation_sha256": sha256_file(
+                    tmp_path / "footnote_decision_validation.json"
+                ),
+            }
+        ),
+    )
+
+    assert _resolve_pdf_polish_source(tmp_path) == (normalized_dir, "footnote_normalized")
 
 def test_pdf_source_stage_auto_falls_back_to_ocr_without_native_probe(tmp_path: Path):
     polished_dir = tmp_path / "polished_markdown" / "validated"

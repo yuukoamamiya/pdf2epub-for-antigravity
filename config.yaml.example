@@ -72,6 +72,12 @@ ocr:
       request_timeout: 300
       max_retries: 6
 
+# 整页彩页/插页复核（只影响疑似候选页，不会自动把普通插图移位）
+illustration:
+  review_dpi: 150
+  large_block_area: 0.55
+  max_text_chars: 180
+
 # Refine 与结构自愈设置
 refine:
   # TOC analysis is done by an Antigravity workspace subagent.

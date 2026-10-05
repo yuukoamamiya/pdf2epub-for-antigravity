@@ -1,139 +1,141 @@
-# 用 Antigravity 把图书翻译成 EPUB
+# pdf2epub
 
-这是一个给 [Antigravity](https://antigravity.google/) 使用的图书翻译工具。
-它可以把扫描版 PDF、EPUB、MOBI 或 AZW3 图书整理并翻译成可以用阅读器打开的 EPUB 文件。
+一个面向 Antigravity 的图书整理与翻译工作流。它把扫描 PDF、原生文字 PDF、EPUB、MOBI
+和 AZW3 处理成结构可靠、可校验、可继续执行的 EPUB；需要翻译或判断版面结构的部分由
+Antigravity 工作区 Subagent 完成，本地程序负责文件整理、校验和打包。
 
-你不需要懂编程。按照下面的步骤准备好文件，之后直接用 Antigravity 里的 AI 操作即可。
+## 能做什么
 
-## 你需要准备什么
+- 扫描 PDF OCR：支持主 OCR，并可选用 PaddleOCR 做第二套 OCR 交叉筛查。
+- PDF 结构整理：识别目录和章节边界，合并跨页正文，保留图片、表格和公式。
+- 脚注处理：区分脚注、正文引用、参考文献和索引；把确认的脚注归并到实际章节单元末尾，
+  处理“正文 → 脚注续文 → 新脚注”的跨页顺序。
+- 彩页和整页插图：识别疑似整页插页，恢复被插图打断的句子；普通插图不会自动移位，
+  插图说明文字也会保留。
+- PDF 翻译：术语表、目录翻译、章节级翻译任务、断点续传和逐层校验。
+- EPUB 高保真翻译：尽量保持原有 XHTML、图片、目录、元数据和导航结构。
+- 轻小说 EPUB 和 arXiv/TeX：提供独立的文本交接、校验和构建流程。
+- 安全恢复：源文件不覆盖，任务通过 manifest、哈希和 validation report 恢复；失败时只重试
+  未完成或未通过的部分。
 
-- 一台 Windows 电脑；
-- 已安装的 Antigravity；
-- 本仓库文件；
-- 你有权使用和翻译的图书文件。
+## OCR 有两种工作模式
 
-## 第一步：下载这个仓库
+同一个配置开关控制 OCR、脚注和整页插图的证据来源：
 
-1. 打开仓库主页：
-   [github.com/yuukoamamiya/pdf2epub-for-antigravity](https://github.com/yuukoamamiya/pdf2epub-for-antigravity)
-2. 点击绿色的 **Code** 按钮，再点击 **Download ZIP**。
-3. 下载完成后，右键 ZIP 文件，选择“解压缩”。
-4. 记住解压出来的文件夹位置。这个文件夹就是本项目文件夹。
+| 配置 | 行为 |
+|---|---|
+| `ocr.secondary.enabled: false` | 单 OCR。直接使用主 OCR，忽略旧的双 OCR 共识文件。 |
+| `ocr.secondary.enabled: true` | 双 OCR。主 OCR 与 PaddleOCR 交叉比较，差异交给 Subagent 复核。 |
 
-解压后的文件夹里应该能看到 `AGENTS.md`、`README.md`、`pyproject.toml` 等文件。
-如果暂时看不到 `input` 文件夹，后面自己新建即可；`output` 文件夹会在运行时自动生成。
+双 OCR 模式需要安装本地依赖：
 
-## 第二步：把项目导入 Antigravity
+```text
+uv sync --extra ocr-local
+```
 
-1. 打开 Antigravity。
-2. 选择 **Open Folder（打开文件夹）** 或 **Import Project（导入项目）**。
-3. 选择刚才解压出来的项目文件夹，不要只选择里面的某一个文件。
-4. 打开 Antigravity 的 AI 对话窗口。
-
-第一次使用时，把下面这段话复制给 AI：
-
-> 请先阅读项目里的 AGENTS.md 和 README.md。请检查这个项目是否已经具备运行条件，并帮我完成首次配置。我要用它翻译图书：如果项目里已经有可用的远端 OCR 配置，请保留并继续使用，不要擅自改成本地 OCR；如果没有远端 OCR，请根据配置模板询问我选择当前版本支持的 OCR 后端。使用某个后端前先确认当前项目版本是否真正支持，不要写入一个程序无法识别的配置。若后端需要 API 密钥，请先告诉我；不要把密钥写进项目文件或提交到 GitHub。除非我明确要求，不要修改或删除原始图书。
-
-AI 会检查环境并保留或创建需要的配置。已经有远端 OCR 的用户继续使用原来的服务；没有远端服务的用户，应根据配置模板选择当前版本支持的 OCR 后端，不要写入模板中没有的后端名称。你不需要自己填写复杂配置。
-
-配置翻译任务时，AI 还会检查 `glossaries/` 中的 YAML/JSON 外部术语表，并根据书籍领域、源语言和目标语言判断是否适用。只有唯一明确匹配时才会建议加入配置；没有匹配时不加载，有多个候选或领域不明确时会先询问。已有的术语表选择或“不使用外部术语表”的明确选择不会被覆盖。
-
-需要时可以运行候选扫描，把候选术语表和语言/格式检查结果写入报告；最终选择仍必须
-明确记录在配置的 `translation.glossaries` 中，程序不会仅凭文件名自动加载术语表。
-跨语言但相关的学派术语表可以由用户明确写入
-`translation.reference_glossaries`；它们只读、仅供概念参考，不会覆盖正式术语表。
-
-## 第三步：把图书放进 input 文件夹
-
-在项目文件夹里找到 `input` 文件夹，把要翻译的图书复制进去。如果没有这个文件夹，
-请新建一个名为 `input` 的文件夹。
-
-建议一次只放一本书，避免 AI 选错文件。
-
-- 扫描版 PDF：需要 OCR，适合使用下面的完整流程；
-- 普通 EPUB：不需要 OCR，通常能最大限度保留原来的排版；
-- MOBI/AZW3：可以直接交给 AI，由 AI 判断如何处理。
-
-扫描版 PDF 可以在主 OCR 外配置本地 PaddleOCR 做交叉筛查。打开第二套 OCR 后，两个 OCR
-结果一致的页面自动接受，只有存在实质差异的页面才会进入视觉纠错 Subagent；这需要安装
-可选的本地 OCR 依赖，并在配置中设置：
+示例配置：
 
 ```yaml
 ocr:
+  backend: chandra
   secondary:
     enabled: true
     backend: paddle
+  backends:
+    paddle:
+      lang: en
+      device: cpu
+      enable_mkldnn: false
 ```
 
-关闭 `ocr.secondary.enabled` 时只使用主 OCR，不运行视觉 OCR 纠错；这是一种明确的单 OCR
-运行模式。`ocr-correct` 不需要另设开关，它会随第二套 OCR 自动启用。
+打开双 OCR 后，脚注和整页插图阶段也要求当前的共识检查点；切换开关后必须重新生成相关
+检查点，旧的脚注决定和插图绑定不会被静默复用。两套 OCR 一致只代表通过筛查，不代表一定
+正确；整页插图、脚注归属和引用/参考文献区分仍由 Subagent 复核。
 
-双 OCR 模式还会默认每 20 页抽查一页，并标记内部文本量明显低于相邻页面的风险页，用来
-补充拦截两个 OCR 同时漏掉内容的情况；这些页面会增加视觉复核，但不会被脚本自动改写。
+## 快速开始
 
-Windows 用户安装本地 OCR 依赖时请使用 `uv sync --extra ocr-local`。项目固定了
-`albumentations<2.0.0`，避免其 2.x 版本在导入时加载 PyTorch 并与 PaddlePaddle 发生 DLL
-冲突；不需要额外预加载 `torch`。
+### 1. 准备项目
 
-不要把原书放在 `output` 文件夹，也不要删除或改动原书。
+需要 Windows、Python/`uv`、Antigravity，以及一本你有权处理的图书。把原书放进项目的
+`input/`，建议一次只放一本。不要把原书放进 `output/`，不要把密钥写入配置或提交到 Git。
 
-## 第四步：告诉 AI 翻译
-
-在 Antigravity 的 AI 对话框中，复制下面的话，并把文件名改成你的书名：
-
-> 请按照项目里的 AGENTS.md 执行完整图书翻译流程，翻译 `input/我的书.pdf`。请依次完成配置检查、OCR、目录识别、章节整理、OCR 文字润色、术语统一、翻译、本地校验和 EPUB 打包；如果配置启用了第二套 OCR，再完成差异页视觉 OCR 纠错及校验。OCR 相关质量门禁、润色及其校验完成前不要提取术语或翻译。所有结果都要写入项目文件，不要只把译文发在聊天窗口里。遇到必须由我决定的事情再询问我；完成并通过校验后告诉我最终 EPUB 文件在哪里。
-
-如果你的书是 EPUB，就把最后的文件名改成 `.epub`，并告诉 AI：
-
-> 请按照项目里的 AGENTS.md 执行 EPUB 高保真翻译流程，翻译 `input/我的书.epub`，尽量保留原书的排版、图片和目录，并在校验通过后生成最终 EPUB。
-
-### 一个重要提醒
-
-翻译、目录识别、术语提取和润色应由 Antigravity 的**工作区 Subagent**完成，
-不是由当前聊天里的主 AI 直接把正文翻译出来。正常流程中，AI 会先生成任务提示词和
-任务清单，然后明确打开 Subagent，再由 Subagent 把结果写入项目文件。
-
-如果 AI 在聊天中直接开始贴出大段译文，或说当前无法打开 Subagent，请让它暂停，
-不要让它先在主聊天里翻译“之后再校验”。可以直接回复：
-
-> 请停止正文翻译。先按照 AGENTS.md 生成任务 Prompt 和 manifest，并打开工作区 Subagent；如果当前无法打开，请告诉我，不要降级到主 Agent。
-
-EPUB 流程默认会先从整本书提取实体术语，保证人名、专名和重复术语的译法统一。
-外部领域术语表会由 AI 根据本书领域和语言检查候选本地表；只有唯一明确匹配时才建议选择，没有匹配时不加载，
-多个候选时会先询问。也可以在配置的 `translation.glossaries` 中手动选择；跨语言参考表则
-配置在 `translation.reference_glossaries` 中。不配置就不会加载任何外部领域术语表。
-确实不需要书内实体术语表时，可以使用
-`html-prepare --skip-entities`。
-
-之后让 AI 自己继续工作即可。书比较厚时可能需要较长时间，请不要中途删除 `output` 文件夹。
-
-## 第五步：找到翻译好的书
-
-完成后，翻译好的 EPUB 会在项目文件夹的 `output` 文件夹中，通常位于：
+首次打开项目后，让 Antigravity 先执行：
 
 ```text
-output/书名/书名.epub
+请先阅读 AGENTS.md 和 README.md，检查运行条件，保留现有可用 OCR 配置，帮我完成配置。
+不要删除或覆盖原始图书，也不要在聊天中直接翻译正文。
 ```
 
-AI 会在对话中告诉你准确位置。双击 EPUB 文件，就可以用电脑或电子书阅读器打开。
+### 2. 处理 PDF
 
-## 如果中途停止了
+把书名、输入文件、OCR 后端和语言写入 `config.yaml`。翻译 PDF 的主流程是：
 
-不用删除已有结果。重新打开同一个项目，然后告诉 AI：
+```text
+OCR → OCR 纠错（双 OCR 时）→ 目录/章节识别
+→ 整页插图复核 → 页面合并
+→ 脚注复核与章末归并 → Markdown 润色
+→ 术语/目录/正文翻译 → 校验 → EPUB
+```
 
-> 请检查上一次图书翻译流程的进度，保留已经完成并通过校验的内容，从中断的位置继续，最后完成 EPUB 打包。
+直接告诉 Antigravity：
 
-## 如果 AI 报错
+```text
+请按照 AGENTS.md 翻译 input/我的书.pdf。
+完成 OCR、目录和章节整理、整页插图与脚注处理、润色、术语统一、翻译、校验和 EPUB 打包。
+所有结果写入项目文件；只有通过本地校验后才算完成。
+```
 
-直接把错误信息复制给 AI，并告诉它：
+### 3. 处理 EPUB
 
-> 请根据这个错误按照 AGENTS.md 检查项目文件，使用工作区 Subagent 或本地校验修复问题后从断点继续。不要删除原始图书，也不要覆盖已经通过校验的结果。
+在 `config_epub.yaml` 中填写输入文件、源语言和目标语言，然后告诉 Antigravity：
 
-## 重要提醒
+```text
+请按照 AGENTS.md 翻译 input/我的书.epub，尽量保留原书的 HTML、图片、目录和元数据，
+完成校验后生成 EPUB。
+```
 
-- OCR 是把图片里的文字识别出来，识别质量会影响最终译文；
-- 翻译完成前不要删除 `output` 文件夹；
-- 不要把账号、密码或密钥发到公开仓库；
-- 请只翻译你有权使用的图书。
+EPUB 流程不使用 PDF OCR，也不经过 PDF 的 polish 阶段。
 
-本项目基于 MIT License 发布。
+## 支持的工作流
+
+| 输入 | 主要命令 | 产物 |
+|---|---|---|
+| 扫描/原生 PDF | `ocr-pages`、`refine-*`、`polish`、`translate`、`build-epub` | 翻译 EPUB 或原语言 EPUB |
+| EPUB/MOBI/AZW3 | `html-prepare`、`html-validate`、`build-html-epub` | 保留结构的 EPUB |
+| 轻小说 EPUB | `translate-novel`、`translate-novel-validate`、`build-novel-epub` | 轻小说 EPUB |
+| arXiv/TeX | `translate-arxiv`、`translate-arxiv-validate` | 通过编译校验的 TeX 产物 |
+
+PDF 只转换、不翻译时，在配置中写：
+
+```yaml
+title: "Your Book Title"
+input_pdf: "input/your_book.pdf"
+pipeline: epub_conversion
+```
+
+## 结果在哪里
+
+最终文件通常位于：
+
+```text
+output/<书名>/<书名>.epub
+```
+
+中间目录会保存 OCR 页面、Subagent prompt、manifest、校验报告和断点信息。不要为了“重新开始”
+删除整个 `output/`；先让 Antigravity 检查进度并使用 `--resume`。只有“目标文件存在”不代表
+任务完成，必须以对应的 validation report 为准。
+
+## 重要边界
+
+- 正文翻译、润色、目录判断、术语提取，以及脚注/整页插图的语义和疑难结构判断必须交给工作区 Subagent；
+  本地程序只做明确规则筛选和校验。
+- 主 Agent 只负责准备任务、运行本地处理、调度 Subagent、读取校验结果和打包。
+- Subagent 不可用时应暂停，不能把正文译文直接贴在聊天里代替写文件。
+- 不要把外部术语表仅凭文件名自动加载；使用前先生成候选报告并明确选择。
+- 发现 `human_review_required`、拒答、免责声明或校验失败时，不能继续打包。
+
+更详细的执行规则见 [AGENTS.md](AGENTS.md)；实现和产物契约见
+[`docs/architecture.md`](docs/architecture.md)，流程示例和维护说明见
+[`docs/antigravity-workflow.md`](docs/antigravity-workflow.md)。
+
+本项目基于 MIT License 发布。请只处理你有权使用和翻译的内容。

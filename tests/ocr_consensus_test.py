@@ -2,10 +2,12 @@ import json
 from pathlib import Path
 
 import fitz
+import pytest
 
 from pdf2epub.ocr.artifacts import OCRPageResult
 from pdf2epub.ocr_consensus import (
     compare_ocr_texts,
+    compare_ocr_layouts,
     common_ocr_risk_reasons,
     consensus_is_current,
     load_consensus_manifest,
@@ -55,6 +57,44 @@ def test_consensus_flags_one_missing_line_even_when_text_is_long():
 
     assert report["status"] == "review_required"
     assert "non-empty line counts differ" in report["reasons"]
+
+
+def test_layout_consensus_flags_single_engine_footnote_label():
+    primary = {
+        "blocks": [
+            {"label": "Text", "html": "<p>body</p>"},
+            {"label": "Footnote", "html": "<p>1 note</p>"},
+        ]
+    }
+    secondary = {
+        "blocks": [
+            {"label": "Text", "text": "body"},
+            {"label": "Text", "text": "body at bottom"},
+        ]
+    }
+
+    report = compare_ocr_layouts(primary, secondary)
+
+    assert report["status"] == "review_required"
+    assert "footnote label presence differs" in report["reasons"]
+
+
+def test_layout_consensus_flags_different_footnote_vertical_coverage():
+    primary = {
+        "blocks": [
+            {"label": "Footnote", "bbox": [100, 650, 900, 750], "text": "1 note"},
+        ]
+    }
+    secondary = {
+        "blocks": [
+            {"label": "Footnote", "bbox": [100, 800, 900, 900], "text": "1 note"},
+        ]
+    }
+
+    report = compare_ocr_layouts(primary, secondary)
+
+    assert report["status"] == "review_required"
+    assert "footnote vertical coverage differs" in report["reasons"]
 
 
 def test_common_ocr_risk_flags_anomalously_sparse_internal_page():
@@ -140,3 +180,49 @@ def test_pagewise_secondary_consensus_scopes_visual_review(monkeypatch, tmp_path
         (output_dir / "ocr_consensus" / "page_002.json").read_text(encoding="utf-8")
     )
     assert record["action"] == "visual_review"
+
+
+def test_paddle_preflight_writes_diagnostics_before_workers(monkeypatch, tmp_path: Path):
+    pdf_path = tmp_path / "input.pdf"
+    _make_pdf(pdf_path, page_count=1)
+    pages_dir = tmp_path / "pages"
+    pages_dir.mkdir()
+    (pages_dir / "page_001.md").write_text("text", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "pdf2epub.ocr.backends.paddle.preflight",
+        lambda _config: (
+            {
+                "status": "failed",
+                "error_type": "RuntimeError",
+                "error": "OneDNN operator is unavailable",
+                "paddlepaddle_distribution": "3.0.0",
+                "paddleocr_distribution": "3.0.0",
+                "protobuf_distribution": "7.0.0",
+            },
+            None,
+        ),
+    )
+
+    config = {
+        "ocr": {
+            "backend": "chandra",
+            "secondary": {"enabled": True, "backend": "paddle"},
+        }
+    }
+    with pytest.raises(RuntimeError, match="preflight failed"):
+        run_secondary_ocr_consensus(
+            ocr_pdf=pdf_path,
+            output_dir=tmp_path,
+            total_pages=1,
+            primary_backend="chandra",
+            config=config,
+            max_workers=1,
+            resume=False,
+        )
+
+    diagnostics = json.loads(
+        (tmp_path / "ocr_secondary_preflight.json").read_text(encoding="utf-8")
+    )
+    assert diagnostics["error_type"] == "RuntimeError"
+    assert diagnostics["protobuf_distribution"] == "7.0.0"

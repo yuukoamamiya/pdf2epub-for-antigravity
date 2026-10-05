@@ -26,7 +26,7 @@ cli.py
         ├── commands/sources.py      PDF 源稿阶段选择
         ├── pipeline_policy.py       PDF pipeline 能力和门禁策略
         └── 领域工作流模块
-            ├── refine/              PDF 结构、分页和单元生成
+            ├── refine/              PDF 结构、分页、插图/脚注闸门和单元生成
             ├── html_translation/    EPUB HTML 解析、压缩、校验和重建
             ├── tex_translation/     TeX 项目扫描、编译和源文件解析
             └── epub/                EPUB 通用构建能力
@@ -60,8 +60,8 @@ Subagent 合同层
 - `runtime.py`：提供 `BookCommandContext`、配置加载和输出目录解析。
 - `sources.py`：选择原始 `ocr_markdown` 或已验证的 `polished_markdown`；所有 PDF 的翻译、实体提取和打包都必须使用后者。
 - `ocr.py`：执行唯一允许调用 OCR 服务的入口，并可在同一阶段运行本地 PaddleOCR 共识筛查；只把差异页交给工作区 Subagent 做视觉纠错。
-- `refine.py`：准备结构判断 handoff，或调用本地分页/单元合并；页内章节边界通过
-  `boundary_info.start_line`/`end_line` 保留，避免把同页标题前的句子误归入新章节。
+- `refine.py`：编排 TOC、整页插图和脚注的结构闸门，并调用本地分页/单元合并；页内章节
+  边界通过 `boundary_info.start_line`/`end_line` 保留，避免把同页标题前的句子误归入新章节。
 - `markdown.py`：PDF Markdown 的 polish、translate、readiness 和 validation 编排。
 - `page_furniture.py`：已有 PDF 译文的页眉页脚修复交接和校验编排。
 - `entities.py`：生成和校验书内实体表 handoff。
@@ -71,6 +71,19 @@ Subagent 合同层
 - `novel.py`：编排轻小说文本提取、校验和重建。
 - `tex.py`：编排 arXiv/本地 TeX 项目准备、校验和编译。
 - `glossary.py`：扫描外部术语表候选，并区分严格匹配的权威表与显式选择的跨语言只读参考表；不自动选择模糊候选。
+
+PDF 精修的核心领域模块如下：
+
+- `ocr_consensus.py`：解释 `ocr.secondary.enabled`，生成 `single_ocr`/`two_ocr` 证据模式，
+  校验次 OCR 配置、文件哈希和 `ocr_consensus.json` 是否仍对应当前页面集。
+- `refine/illustration_prepare.py`：只做整页插图候选筛选、局部审阅交接、决定校验和哈希绑定；
+  不自行判断普通插图是否应该移动。
+- `refine/page_merger.py`：消费已验证的整页插图绑定，恢复“前页半句 → 插图页 → 后页续句”，
+  并把图片及说明放回连续正文之后。
+- `refine/footnote_prepare.py`：按 OCR sidecar 的底部位置、标签和编号生成脚注候选；双 OCR
+  模式还比较主/次候选差异。它不直接改写 Markdown，也不把引用推断成脚注。
+- `refine/footnote_apply.py`：只消费已验证的脚注决定，按完整 TOC `unit_id` 合并脚注到单元末尾，
+  保留 `citation`、`bibliography` 和普通正文原位。
 
 `pipeline_policy.py` 是 PDF pipeline 的策略边界。`PipelinePolicy.from_config()` 将缺省
 配置视为传统翻译流程，将 `pipeline: epub_conversion` 和兼容别名
@@ -109,15 +122,21 @@ ocr-pages
   → pdf_text_probe.json
   → pages/ (native text extraction only for high-confidence vector PDFs;
             searchable OCR and scanned PDFs still use visual OCR)
-ocr-pages 可选：主 OCR + PaddleOCR → ocr_consensus.json
+ocr-pages 可选：主 OCR + PaddleOCR（兼容 layout sidecar + 文本共识）→ ocr_consensus.json
 （仅当 ocr.secondary.enabled=true）ocr-correct + 工作区 Subagent + ocr-correct-validate
 （只复核差异页、共同漏检风险页和确定性抽样页；一致页其余页面自动接受；原生文字跳过）
   → ocr_corrected_pages/validated/
 （ocr.secondary.enabled=false 时直接使用 pages/，不运行 OCR 纠错）
 refine-prepare + 工作区 Subagent
   → toc_tree.json
+illustration-prepare + 工作区 Subagent（只复核疑似整页插图页）
+  → illustration_candidate_report.json → illustration-validate → illustration-apply
+  → illustration_bindings.json
 refine-local
   → ocr_markdown/ + tree_progress.json
+footnote-prepare +（必要时）工作区 Subagent
+  → footnote_candidates.json → footnote-validate → footnote-apply
+  → footnote_normalized/
 polish + 工作区 Subagent + polish-validate（所有 PDF 必需；review_required 默认阻断，持续则人工；另做内容保真检查）
   → polished_markdown/validated/
 
@@ -150,6 +169,25 @@ manifest 指定的文件；大单元单独成批。polish 使用 `polish_worker_
 但当前章节的精确 TOC heading contract 始终优先；标题绑定只容忍安全的展示格式差异，
 不容忍语义改写。普通中文正文还必须通过目标语言内容审计。纯转换分支不生成实体表或
 翻译 TOC，但仍必须通过 polish。
+
+### 3.1.1 OCR 证据模式和结构闸门
+
+`ocr.secondary.enabled` 是结构判断的单一开关，不应在脚注或插图模块中再添加平行开关：
+
+| 模式 | 主 OCR | 次 OCR/共识 | 结构阶段行为 |
+|---|---|---|---|
+| `single_ocr` | 使用 `pages/` | 忽略旧共识产物 | 候选只来自主 OCR；高置信度脚注可以本地接受，疑难候选交给 Subagent。 |
+| `two_ocr` | 使用 `pages/` | 必须由当前配置生成 `ocr_secondary/` 和 `ocr_consensus.json` | 共识报告和次 OCR sidecar 参与脚注/插图候选比较；差异页必须复核。 |
+
+准备阶段把模式写入候选报告和 manifest。校验/应用阶段比较当前配置、候选报告、主/次
+sidecar 哈希和共识检查点；任何一项变化都阻断旧结果。这样单 OCR 运行不会误读上一次双
+OCR 的 `ocr_consensus.json`，双 OCR 运行也不会因为文件存在就跳过当前共识。
+
+整页插图只在 `illustration_bindings.json` 中出现 `full_page_insert` 时影响 `PageMerger`；
+脚注只在 Subagent 将候选标记为 `footnote_start`、`footnote_continuation` 或
+`footnote_definition` 时移动。脚注的作用域来自 `tree_progress.json` 的完整 `unit_id`，
+而不是顶层 TOC；相同数字在不同实际单元中可以重新开始。跨页顺序由页面和 block 顺序保留，
+所以“正文 → A 脚注 → B 正文 → A 脚注续文 → B 脚注”不会被错误重排。
 
 ### 3.2 高保真 EPUB 工作流
 
@@ -213,6 +251,11 @@ Format workflow services  → shared utilities/domain services
 实体表的恢复条件还包括源文件集合与 manifest 完全一致；只要集合新增或删除，即使剩余文件
 哈希未变，也必须重新生成实体 handoff。OCR 的第二套后端则在配置加载阶段完成一致性校验，
 避免策略层、命令层和实际 OCR 执行层对同一开关产生不同解释。
+
+脚注候选报告至少绑定主 OCR sidecar 哈希、证据模式和（双 OCR 时）次 OCR sidecar 哈希；
+脚注决定只能引用当前候选报告中的 page/block 地址。插图绑定还绑定候选报告哈希、源页哈希、
+sidecar 哈希和证据模式。`refine-local`、`footnote-apply` 和插图加载阶段都会重新检查这些
+绑定；配置从单 OCR 切换到双 OCR，或反向切换时，必须重新准备对应阶段。
 
 单文件校验只提供 checkpoint，不能替代全量校验。源稿、实体表、TOC 或术语上下文变化
 只应使受影响的 checkpoint 重新进入 `pending`；旧 manifest 没有单元级上下文哈希时，

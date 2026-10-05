@@ -158,7 +158,22 @@ def _process_image_page_backend(
     page_number: int,
     image_counter: int,
 ) -> Tuple[str, List, int]:
-    """Run an image-oriented registered backend with the shared adapter."""
+    """Run an image-oriented backend through the legacy tuple adapter."""
+    result = _process_image_page_result(
+        spec, pdf_bytes, config, images_dir, page_number, image_counter
+    )
+    return result.markdown, result.images, result.image_counter
+
+
+def _process_image_page_result(
+    spec,
+    pdf_bytes: bytes,
+    config: Dict,
+    images_dir: Optional[Path],
+    page_number: int,
+    image_counter: int,
+) -> OCRPageResult:
+    """Run an image backend while retaining its optional layout artifacts."""
     global _backend_clients
     zoom_factor = config.get("vision_ocr_settings", {}).get("zoom_factor", 1.0)
     if spec.name == "paddle":
@@ -186,7 +201,21 @@ def _process_image_page_backend(
     if illustrations:
         from .ocr import inject_illustrations_into_text
         markdown = inject_illustrations_into_text(markdown, illustrations)
-    return markdown, illustrations, image_counter + len(illustrations)
+    return OCRPageResult(
+        markdown=markdown,
+        images=illustrations,
+        image_counter=image_counter + len(illustrations),
+        html=result.get("html"),
+        raw_html=result.get("raw_html"),
+        blocks=result.get("blocks", []),
+        page_box=result.get("page_box"),
+        model_input_size=result.get("model_input_size"),
+        token_count=result.get("token_count"),
+        backend=spec.name,
+        model=result.get("model"),
+        model_revision=result.get("model_revision"),
+        assets=result.get("assets", []),
+    )
 
 
 def ocr_pdf_page(
@@ -222,10 +251,9 @@ def ocr_pdf_page(
     if spec.image_page_processor is not None:
         if config is None:
             raise ValueError(f"config is required for {backend} backend")
-        tuple_result = _process_image_page_backend(
+        return _process_image_page_result(
             spec, pdf_bytes, config, images_dir, page_number, image_counter
         )
-        return OCRPageResult.from_tuple(tuple_result, backend=backend)
 
     tuple_result = ocr_pdf_chunk(
         pdf_bytes=pdf_bytes,
@@ -275,6 +303,15 @@ def _file_sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _load_page_sidecar(path: Path) -> Optional[Dict[str, Any]]:
+    """Load a layout sidecar when the primary backend provides one."""
+    try:
+        value = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) else None
 
 
 def _page_artifacts_are_complete(pages_dir: Path, page_number: int) -> bool:
@@ -385,6 +422,30 @@ def _secondary_ocr_config(config: Dict[str, Any], backend: str) -> Dict[str, Any
     return settings if isinstance(settings, dict) else {}
 
 
+def _preflight_secondary_backend(
+    output_dir: Path,
+    backend: str,
+    config: Dict[str, Any],
+) -> None:
+    """Fail before page workers when an optional local backend cannot start."""
+    if backend != "paddle":
+        return
+    from .ocr.backends.paddle import preflight
+
+    diagnostics, client = preflight(config)
+    _atomic_write_json(output_dir / "ocr_secondary_preflight.json", diagnostics)
+    if diagnostics.get("status") != "ready" or client is None:
+        detail = diagnostics.get("error") or "backend initialization failed"
+        raise RuntimeError(
+            "PaddleOCR secondary backend preflight failed: "
+            f"{detail}. See ocr_secondary_preflight.json for runtime versions; "
+            "use an isolated OCR environment or disable the secondary backend."
+        )
+    # Reuse the initialized client so preflight does not download models or
+    # trigger the same platform-specific initialization twice.
+    _backend_clients[backend] = client
+
+
 def run_secondary_ocr_consensus(
     *,
     ocr_pdf: Path,
@@ -443,6 +504,8 @@ def run_secondary_ocr_consensus(
     except (TypeError, ValueError):
         secondary_workers = 1
 
+    _preflight_secondary_backend(output_dir, secondary_backend, config)
+
     def process_page(page_number: int) -> Dict[str, Any]:
         name = f"page_{page_number:03d}.md"
         primary_path = output_dir / "pages" / name
@@ -456,6 +519,10 @@ def run_secondary_ocr_consensus(
                 backend=secondary_backend,
                 config=config,
             )
+            # Keep a Chandra-shaped secondary sidecar.  The consensus record
+            # still compares Markdown, but footnote review can now compare
+            # page zones, labels, and numeric note keys as well.
+            save_page_artifacts(secondary_result, secondary_dir, page_number)
             record = write_page_consensus(
                 output_dir,
                 source_name=name,
@@ -464,8 +531,19 @@ def run_secondary_ocr_consensus(
                 primary_backend=primary_backend,
                 secondary_backend=secondary_backend,
                 config=config,
+                primary_layout=_load_page_sidecar(
+                    output_dir / "pages" / f"page_{page_number:03d}.ocr.json"
+                ),
+                secondary_layout=_load_page_sidecar(
+                    secondary_dir / f"page_{page_number:03d}.ocr.json"
+                ),
             )
             record["primary_source_sha256"] = sha256_file(primary_path)
+            primary_sidecar = output_dir / "pages" / f"page_{page_number:03d}.ocr.json"
+            secondary_sidecar = secondary_dir / f"page_{page_number:03d}.ocr.json"
+            if primary_sidecar.is_file():
+                record["primary_layout_sha256"] = sha256_file(primary_sidecar)
+            record["secondary_layout_sha256"] = sha256_file(secondary_sidecar)
             record_path = record_dir / f"{Path(name).stem}.json"
             atomic_write_text(
                 record_path,

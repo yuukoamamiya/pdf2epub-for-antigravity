@@ -8,6 +8,7 @@ it never silently replaces the primary text.
 from __future__ import annotations
 
 import hashlib
+import html
 import json
 import re
 import unicodedata
@@ -19,7 +20,7 @@ from typing import Any, Dict, Mapping, Optional
 from pdf2epub.workflow_contracts import atomic_write_text, sha256_file
 
 
-OCR_CONSENSUS_SCHEMA_VERSION = 2
+OCR_CONSENSUS_SCHEMA_VERSION = 3
 DEFAULT_MAX_EDIT_RATIO = 0.08
 DEFAULT_MIN_CHANGED_CHARS = 2
 # A one-line omission is exactly the failure mode this consensus gate is
@@ -92,6 +93,16 @@ def secondary_backend_name(config: Mapping[str, Any]) -> Optional[str]:
         return None
     value = str(value or "").strip().lower()
     return value or None
+
+
+def ocr_evidence_mode(config: Mapping[str, Any] | None) -> str:
+    """Return the configured evidence mode used by layout decisions.
+
+    The existing ``ocr.secondary.enabled`` switch is the single source of
+    truth: disabled means one OCR result is used, enabled means every layout
+    gate must have a current two-OCR consensus checkpoint.
+    """
+    return "two_ocr" if config is not None and secondary_ocr_enabled(config) else "single_ocr"
 
 
 def validate_ocr_config(config: Mapping[str, Any]) -> None:
@@ -210,6 +221,100 @@ def compare_ocr_texts(
     }
 
 
+def _layout_block_text(block: Mapping[str, Any]) -> str:
+    value = block.get("text")
+    if value is None:
+        value = block.get("html", "")
+    value = html.unescape(str(value or ""))
+    value = re.sub(r"<[^>]+>", " ", value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def _layout_summary(sidecar: Mapping[str, Any]) -> Dict[str, Any]:
+    blocks = sidecar.get("blocks", []) if isinstance(sidecar, Mapping) else []
+    if not isinstance(blocks, list):
+        blocks = []
+    footnote_blocks = []
+    footnote_keys = []
+    footnote_y_values = []
+    footnote_y_bins: set[int] = set()
+    labels: Dict[str, int] = {}
+    for block in blocks:
+        if not isinstance(block, Mapping):
+            continue
+        label = str(block.get("label") or "").strip().casefold()
+        labels[label] = labels.get(label, 0) + 1
+        if label != "footnote":
+            continue
+        text = _layout_block_text(block)
+        footnote_blocks.append(block)
+        bbox = block.get("bbox")
+        if isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+            try:
+                y0, y1 = float(bbox[1]), float(bbox[3])
+                footnote_y_values.extend([y0, y1])
+                first_bin = max(0, min(19, int(y0 // 50)))
+                last_bin = max(0, min(19, int(max(y0, y1 - 1) // 50)))
+                footnote_y_bins.update(range(first_bin, last_bin + 1))
+            except (TypeError, ValueError):
+                pass
+        match = re.match(r"^\s*(?:\[\^)?(\d{1,4})", text)
+        if match:
+            footnote_keys.append(match.group(1))
+    return {
+        "block_count": len(blocks),
+        "labels": labels,
+        "footnote_block_count": len(footnote_blocks),
+        "footnote_keys": footnote_keys,
+        "has_footnote": bool(footnote_blocks),
+        "footnote_y_range": (
+            [min(footnote_y_values), max(footnote_y_values)]
+            if footnote_y_values
+            else None
+        ),
+        "footnote_y_bins": sorted(footnote_y_bins),
+    }
+
+
+def compare_ocr_layouts(
+    primary_sidecar: Optional[Mapping[str, Any]],
+    secondary_sidecar: Optional[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """Compare the small layout contract relevant to footnote triage.
+
+    Paddle's labels are conservative geometry-derived labels, not semantic
+    model output.  A label or note-key disagreement is therefore evidence for
+    visual review, while agreement does not claim that either OCR is correct.
+    """
+    if not isinstance(primary_sidecar, Mapping) or not isinstance(secondary_sidecar, Mapping):
+        return {
+            "status": "not_available",
+            "reasons": ["layout sidecar missing"],
+        }
+    primary = _layout_summary(primary_sidecar)
+    secondary = _layout_summary(secondary_sidecar)
+    reasons: list[str] = []
+    if primary["has_footnote"] != secondary["has_footnote"]:
+        reasons.append("footnote label presence differs")
+    if primary["footnote_keys"] != secondary["footnote_keys"]:
+        reasons.append("footnote numeric keys differ")
+    if primary["footnote_y_bins"] != secondary["footnote_y_bins"]:
+        reasons.append("footnote vertical coverage differs")
+    primary_range = primary.get("footnote_y_range")
+    secondary_range = secondary.get("footnote_y_range")
+    if primary_range and secondary_range and max(
+        abs(primary_range[0] - secondary_range[0]),
+        abs(primary_range[1] - secondary_range[1]),
+    ) > 100:
+        reasons.append("footnote vertical range differs")
+    return {
+        "status": "review_required" if reasons else "agree",
+        "reasons": reasons,
+        "primary": primary,
+        "secondary": secondary,
+    }
+
+
 def common_ocr_risk_reasons(
     page_texts: Mapping[str, Mapping[str, str]],
     config: Mapping[str, Any],
@@ -312,6 +417,8 @@ def write_page_consensus(
     primary_backend: str,
     secondary_backend: str,
     config: Mapping[str, Any],
+    primary_layout: Optional[Mapping[str, Any]] = None,
+    secondary_layout: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Persist one secondary OCR output and its comparison record."""
     output_dir = Path(output_dir)
@@ -322,6 +429,12 @@ def write_page_consensus(
     secondary_path = secondary_dir / source_name
     atomic_write_text(secondary_path, str(secondary_text or ""))
     comparison = compare_ocr_texts(primary_text, secondary_text, config)
+    layout_comparison = compare_ocr_layouts(primary_layout, secondary_layout)
+    if layout_comparison.get("status") == "review_required":
+        comparison["reasons"].extend(
+            f"layout: {reason}" for reason in layout_comparison.get("reasons", [])
+        )
+        comparison["status"] = "review_required"
     record = {
         "schema_version": OCR_CONSENSUS_SCHEMA_VERSION,
         "source_file": source_name,
@@ -330,7 +443,9 @@ def write_page_consensus(
         "primary_sha256": hashlib.sha256(str(primary_text).encode("utf-8")).hexdigest(),
         "secondary_sha256": hashlib.sha256(str(secondary_text).encode("utf-8")).hexdigest(),
         "secondary_file": f"ocr_secondary/{source_name}",
+        "secondary_layout_file": f"ocr_secondary/{Path(source_name).stem}.ocr.json",
         "comparison": comparison,
+        "layout_comparison": layout_comparison,
         "action": "visual_review" if comparison["status"] == "review_required" else "auto_accept",
     }
     atomic_write_text(
@@ -399,11 +514,17 @@ def consensus_is_current(
         source = pages_dir / name
         record = records.get(name)
         secondary = secondary_page_dir(output_dir) / name
-        if not isinstance(record, Mapping) or not secondary.is_file():
+        secondary_sidecar = secondary.with_suffix(".ocr.json")
+        primary_sidecar = pages_dir / f"{Path(name).stem}.ocr.json"
+        if not isinstance(record, Mapping) or not secondary.is_file() or not secondary_sidecar.is_file():
             return False
         if record.get("primary_source_sha256") != sha256_file(source):
             return False
         if record.get("secondary_sha256") != sha256_file(secondary):
+            return False
+        if record.get("secondary_layout_sha256") != sha256_file(secondary_sidecar):
+            return False
+        if primary_sidecar.is_file() and record.get("primary_layout_sha256") != sha256_file(primary_sidecar):
             return False
     return True
 
@@ -433,6 +554,7 @@ def auto_accepted_files(output_dir: Path) -> list[str]:
 __all__ = [
     "OCR_CONSENSUS_SCHEMA_VERSION",
     "auto_accepted_files",
+    "compare_ocr_layouts",
     "compare_ocr_texts",
     "common_miss_settings",
     "common_ocr_risk_reasons",
@@ -440,6 +562,7 @@ __all__ = [
     "consensus_is_current",
     "consensus_manifest_path",
     "review_required_files",
+    "ocr_evidence_mode",
     "secondary_ocr_enabled",
     "secondary_backend_name",
     "validate_ocr_config",

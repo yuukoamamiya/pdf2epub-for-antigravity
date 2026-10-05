@@ -335,7 +335,9 @@ def target_language_ratio_check(
     return result
 
 
-def detect_polish_page_furniture(text: str) -> list[Dict[str, Any]]:
+def detect_polish_page_furniture(
+    text: str, role: Optional[str] = None
+) -> list[Dict[str, Any]]:
     """Report high-confidence page-furniture candidates left after polishing.
 
     The candidates are review signals.  Layout judgment belongs to the
@@ -348,6 +350,10 @@ def detect_polish_page_furniture(text: str) -> list[Dict[str, Any]]:
     for line_number, line in enumerate(text.splitlines(), 1):
         candidate = _candidate_for_line(line)
         if not candidate or candidate.get("confidence") != "high":
+            continue
+        if role in {"bibliography", "index"} and candidate.get("kind") == "running_title_plus_page_label":
+            continue
+        if candidate.get("kind") == "running_header" and line_number <= 5:
             continue
         findings.append({"line": line_number, **candidate})
     return findings
@@ -370,12 +376,16 @@ def polish_content_integrity_check(
         from .page_furniture_repair import _candidate_for_line
 
         visible_lines: list[str] = []
-        for line in clean_lines(text):
+        for line_number, line in enumerate(clean_lines(text), 1):
             candidate = _candidate_for_line(line)
             if candidate and candidate.get("confidence") == "high":
-                continue
+                if candidate.get("kind") == "running_header" and line_number <= 5:
+                    pass
+                else:
+                    continue
             visible_lines.append(line)
         value = "\n".join(visible_lines)
+        value = re.sub(r"([A-Za-zÄÖÜäöüß]+)[-‐‑‒–—][ \t]*\n[ \t]*([A-Za-zÄÖÜäöüß]+)", r"\1\2", value)
         value = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", value)
         value = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", value)
         value = re.sub(r"<sup>\s*(\d+)\s*</sup>", r"[^\1]", value, flags=re.IGNORECASE)
@@ -406,6 +416,7 @@ def polish_content_integrity_check(
             if not current:
                 return
             value = "\n".join(current)
+            value = re.sub(r"([A-Za-zÄÖÜäöüß]+)[-‐‑‒–—][ \t]*\n[ \t]*([A-Za-zÄÖÜäöüß]+)", r"\1\2", value)
             value = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", value)
             value = re.sub(r"<sup>\s*\d+\s*</sup>", " ", value, flags=re.IGNORECASE)
             value = re.sub(r"\[\^\s*\d+\s*\]", " ", value)

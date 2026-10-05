@@ -2,6 +2,7 @@
 """Module for extracting illustrations from pages by detecting non-text regions."""
 
 import numpy as np
+import re
 from PIL import Image, ImageDraw
 from pathlib import Path
 from loguru import logger
@@ -18,10 +19,16 @@ def inject_illustrations_into_text(text: str, illustrations: List[Dict]) -> str:
     if not valid_illustrations:
         return text
 
-    lines = text.split("\n")
+    cleaned_text = re.sub(r"\[illustration\]", "", text, flags=re.IGNORECASE)
+    lines = cleaned_text.split("\n")
     result_lines = []
 
-    # Group illustrations by placement
+    # Group illustrations by placement.  ``full_page`` is emitted by the
+    # VLLM path for an inserted colour plate and must be materialized too;
+    # previously that placement silently disappeared from the Markdown view.
+    full_page_illustrations = [
+        ill for ill in valid_illustrations if ill.get("placement") == "full_page"
+    ]
     above_illustrations = [ill for ill in valid_illustrations if ill["placement"] == "above"]
     below_illustrations = [ill for ill in valid_illustrations if ill["placement"] == "below"]
     between_illustrations = [
@@ -57,6 +64,13 @@ def inject_illustrations_into_text(text: str, illustrations: List[Dict]) -> str:
     for ill in end_illustrations:
         result_lines.append("")
         # Use the 'path' key
+        result_lines.append(f"![Image]({ill['path']})")
+
+    # Keep a full-page visual payload in the page stream.  PageMerger may move
+    # this line after a repaired sentence only when a separate reviewed
+    # illustration binding classifies the page as a true page insert.
+    for ill in full_page_illustrations:
+        result_lines.append("")
         result_lines.append(f"![Image]({ill['path']})")
 
     return "\n".join(result_lines)

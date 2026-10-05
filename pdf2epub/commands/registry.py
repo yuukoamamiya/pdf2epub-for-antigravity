@@ -35,6 +35,12 @@ from pdf2epub.commands.ocr import (
 )
 from pdf2epub.commands.pdf import build_epub_command
 from pdf2epub.commands.refine import (
+    footnote_apply_command,
+    footnote_prepare_command,
+    footnote_validate_command,
+    illustration_apply_command,
+    illustration_prepare_command,
+    illustration_validate_command,
     refine_command,
     refine_local_command,
     refine_prepare_command,
@@ -222,6 +228,92 @@ def register_command_parsers(subparsers) -> None:
         help="Maximum tokens per unit (default: from config or 8000)",
     )
     refine_local_parser.set_defaults(func=refine_local_command)
+
+    illustration_prepare_parser = subparsers.add_parser(
+        "illustration-prepare",
+        help="Prepare a compact full-page illustration review hand-off",
+        description=(
+            "Find likely inserted image pages locally and ask a workspace "
+            "Subagent to classify only those pages."
+        ),
+    )
+    illustration_prepare_parser.add_argument(
+        "--review-dpi",
+        type=int,
+        default=None,
+        help="Review-image resolution (default: illustration.review_dpi or 150)",
+    )
+    illustration_prepare_parser.add_argument(
+        "--large-block-area",
+        type=float,
+        default=None,
+        help="Candidate visual-block area threshold (default: 0.55)",
+    )
+    illustration_prepare_parser.add_argument(
+        "--max-text-chars",
+        type=int,
+        default=None,
+        help="Maximum visible text for sparse-image candidates (default: 180)",
+    )
+    illustration_prepare_parser.set_defaults(func=illustration_prepare_command)
+
+    illustration_validate_parser = subparsers.add_parser(
+        "illustration-validate",
+        help="Validate full-page illustration decisions from the Subagent",
+    )
+    illustration_validate_parser.set_defaults(func=illustration_validate_command)
+
+    illustration_apply_parser = subparsers.add_parser(
+        "illustration-apply",
+        help="Apply validated full-page illustration bindings to page merging",
+        description=(
+            "Write a hash-bound page binding file.  Only reviewed "
+            "full_page_insert pages can affect sentence joining."
+        ),
+    )
+    illustration_apply_parser.set_defaults(func=illustration_apply_command)
+
+    footnote_prepare_parser = subparsers.add_parser(
+        "footnote-prepare",
+        help="Prepare a compact layout-aware footnote review hand-off",
+        description=(
+            "Read OCR layout sidecars, identify high-confidence footnote candidates, "
+            "and send only ambiguous local windows to a workspace Subagent."
+        ),
+    )
+    footnote_prepare_parser.add_argument(
+        "--bottom-ratio",
+        type=float,
+        default=None,
+        help="Minimum normalized top position for a bottom-page candidate (default: 0.64)",
+    )
+    footnote_prepare_parser.add_argument(
+        "--context-blocks",
+        type=int,
+        default=None,
+        help="Neighboring OCR blocks included around each candidate (default: 2)",
+    )
+    footnote_prepare_parser.set_defaults(func=footnote_prepare_command)
+
+    footnote_validate_parser = subparsers.add_parser(
+        "footnote-validate",
+        help="Validate compact footnote layout decisions from the Subagent",
+        description=(
+            "Validate footnote_decisions.json and stage its sparse per-unit "
+            "context for the following polish hand-off."
+        ),
+    )
+    footnote_validate_parser.set_defaults(func=footnote_validate_command)
+
+    footnote_apply_parser = subparsers.add_parser(
+        "footnote-apply",
+        help="Move validated page footnotes to the end of their logical chapter",
+        description=(
+            "Materialize footnote_normalized/ locally. Only reviewed footnote roles "
+            "are moved; citations and bibliography entries remain in place."
+        ),
+    )
+    footnote_apply_parser.set_defaults(func=footnote_apply_command)
 
     # Polish subcommand
     polish_parser = subparsers.add_parser(

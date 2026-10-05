@@ -8,6 +8,7 @@ from pdf2epub.cli import _resolve_pdf_markdown_source
 from pdf2epub.build_epub import (
     flatten_toc_tree,
     build_epub_structure,
+    load_refinement_part_order,
     generate_hierarchical_toc_html,
     process_chapter_content,
     generate_hierarchical_toc_ncx,
@@ -16,6 +17,48 @@ from pdf2epub.build_epub import (
 )
 from pdf2epub.epub.builder import EpubBuilder
 from pdf2epub.epub.converter import ContentConverter
+
+
+def test_refinement_checkpoint_controls_continuation_order(tmp_path: Path) -> None:
+    markdown_dir = tmp_path / "translated"
+    markdown_dir.mkdir()
+    for name in ("chapter_1.part1.md", "chapter_1.part2.md", "chapter_1.part3.md"):
+        (markdown_dir / name).write_text(name, encoding="utf-8")
+    progress_dir = tmp_path / "ocr_markdown"
+    progress_dir.mkdir()
+    (progress_dir / "tree_progress.json").write_text(
+        json.dumps(
+            {
+                "units": [
+                    {
+                        "part_files": [
+                            "chapter_1.part1.md",
+                            "chapter_1.part3.md",
+                            "chapter_1.part2.md",
+                        ]
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    order = load_refinement_part_order(tmp_path)
+    assert order["chapter_1.part1.md"] == [
+        "chapter_1.part1.md",
+        "chapter_1.part3.md",
+        "chapter_1.part2.md",
+    ]
+    structure = build_epub_structure(
+        [{"title": "Chapter", "level": 1, "index_path": [1]}],
+        markdown_dir,
+        part_order=order,
+    )
+    assert [path.name for path in structure[0]["part_files"]] == [
+        "chapter_1.part1.md",
+        "chapter_1.part3.md",
+        "chapter_1.part2.md",
+    ]
 
 
 def test_ncx_and_opf_share_publication_identifier(tmp_path: Path) -> None:
@@ -277,8 +320,15 @@ def test_pdf_source_stage_can_be_auto_selected_or_explicit(tmp_path: Path) -> No
         json.dumps(
                 {
                     "schema_version": 2,
+                    "task": "polish",
+                    "scope": "full",
                     "all_passed": True,
                     "source_sha256": {"chapter_1.md": source_hash},
+                    "target_sha256": {
+                        "chapter_1.md": hashlib.sha256(
+                            (polished_dir / "chapter_1.md").read_bytes()
+                        ).hexdigest()
+                    },
                 }
         ),
         encoding="utf-8",

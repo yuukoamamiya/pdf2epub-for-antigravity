@@ -1,7 +1,11 @@
-# EPUB 翻译流程说明
+# EPUB 翻译流程与维护说明
 
 EPUB 翻译已经改为 Antigravity 工作区 Subagent 文件交接，Python 不再提供
 进程内翻译、自动修复或 provider fallback。
+
+本文是 EPUB 路径的维护文档：`AGENTS.md` 规定必须怎么执行，`README.md` 面向项目使用者，
+[`architecture.md`](architecture.md) 记录模块边界；这里记录 HTML 交接合同、freshness、
+导航构建和回归测试。修改 EPUB 流程时，必须同时检查这四处文档是否仍然一致。
 
 ```text
 html-prepare
@@ -69,3 +73,35 @@ OCR 配置在进入流程前统一校验。`ocr.secondary.enabled: true` 必须�
 文本、文本版心位置、非空像素和与预期渲染的像素签名；同一个成品重复渲染也必须保持一致。
 它覆盖本地“最终压缩包能否被阅读器引擎打开”的回归，但不声称替代 Kindle、Apple Books
 等具体阅读器和设备的兼容性测试。
+
+## 维护检查清单
+
+### 修改准备或交接合同
+
+- 同时更新 `pdf2epub/commands/html.py`、对应的 handoff/validation 模块和本文件中的数据流。
+- 新增或修改 JSON 字段时，更新 manifest、校验器、freshness 哈希和失败报告；不能只让
+  Subagent “大致输出正确格式”。
+- 任何源文件集合、单元顺序、HTML 标签数量或元数据保护字段的变化，都应增加一个“旧检查点
+  被拒绝、新准备可恢复”的测试。
+
+### 修改 HTML 校验或构建
+
+- 保持 `compressed_units/` 与 `translated_compressed/` 的非空单元 1:1 对齐。
+- 维持标签、属性、实体、容器和嵌套关系不变；不要用构建阶段脚本替代 Subagent 翻译。
+- 导航更新 warning 必须进入 `translation_report.json` 并默认阻断；只有人工检查后才能使用
+  `--allow-navigation-warnings`。
+- 构建前后的 `final_xhtml/`、输入快照和源哈希必须保持 freshness 关系，不能依赖旧目录残留。
+
+### 测试与交付
+
+```text
+uv run pytest -q
+git diff --check
+```
+
+涉及安全边界、外部输入、路径或依赖时，再运行项目约定的 DeepSec 扫描。测试必须覆盖：
+
+- 首次 `html-prepare`、实体表完成后的第二次 `html-prepare` 和 `--skip-entities`；
+- 单文件校验、全量校验、源集合变化和断点恢复；
+- 作者/出版社保护、目录 href/anchor 保留、NCX/nav 更新报告；
+- 最终 EPUB 可被 PyMuPDF 打开、渲染非空且重复渲染稳定。

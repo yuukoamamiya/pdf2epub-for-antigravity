@@ -19,6 +19,7 @@ from pdf2epub.toc_translation_workflow import (
     validate_toc_heading_bindings,
 )
 from pdf2epub.utils.common import is_epub_conversion_pipeline
+from pdf2epub.validation_receipts import validation_receipt_is_current
 
 
 def _make_native_pdf(path: Path, *, full_page_image: bool = False) -> None:
@@ -196,6 +197,81 @@ def test_worker_handoffs_balance_pending_batches_and_keep_files_disjoint(tmp_pat
     assert all(item["manifest"].startswith("worker_handoffs/") for item in handoffs)
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
     assert len(manifest["worker_queue"]) == 3
+
+
+def test_validation_receipt_rejects_changed_staged_target(tmp_path: Path) -> None:
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    source = source_dir / "unit.md"
+    target = target_dir / "unit.md"
+    source.write_text("source", encoding="utf-8")
+    target.write_text("translated", encoding="utf-8")
+    report = tmp_path / "translate_validation.json"
+    report.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "task": "translate",
+                "scope": "full",
+                "all_passed": True,
+                "source_sha256": {
+                    source.name: hashlib.sha256(source.read_bytes()).hexdigest()
+                },
+                "target_sha256": {
+                    target.name: hashlib.sha256(target.read_bytes()).hexdigest()
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert validation_receipt_is_current(
+        report, source_dir, target_dir, task="translate"
+    )
+    target.write_text("changed after validation", encoding="utf-8")
+    assert not validation_receipt_is_current(
+        report, source_dir, target_dir, task="translate"
+    )
+
+
+def test_continuation_worker_manifest_forbids_synthetic_opening_heading(
+    tmp_path: Path,
+) -> None:
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    (source_dir / "chapter_3.part1.md").write_text(
+        "# References\n\nPart one", encoding="utf-8"
+    )
+    (source_dir / "chapter_3.part2.md").write_text(
+        "Entry continued", encoding="utf-8"
+    )
+    paths = prepare_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        tmp_path / "target",
+        "German",
+        "Chinese",
+        config={"subagent": {"batching": {"max_files": 1}}},
+        chapter_groups={
+            "chapter_3": ["chapter_3.part1.md", "chapter_3.part2.md"]
+        },
+    )
+    handoffs = write_worker_handoffs(tmp_path, paths["manifest"], paths["prompt"])
+    continuation = next(
+        item for item in handoffs if item["files"] == ["chapter_3.part2.md"]
+    )
+    scoped = json.loads((tmp_path / continuation["manifest"]).read_text(encoding="utf-8"))
+    prompt = (tmp_path / continuation["prompt"]).read_text(encoding="utf-8")
+
+    assert scoped["is_continuation"] is True
+    assert scoped["continuation_files"] == {
+        "chapter_3.part2.md": {"is_continuation": True, "part_number": 2}
+    }
+    assert "do not add any Markdown heading at the file start" in prompt
+    assert "'(continued)'" in prompt
 
 
 def test_chapter_handoffs_keep_chapters_separate_and_aggregate_context_once(

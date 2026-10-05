@@ -9,17 +9,44 @@ from pathlib import Path
 from loguru import logger
 
 from pdf2epub.commands.runtime import load_book_context
-from pdf2epub.commands.sources import _resolve_pdf_markdown_source
+from pdf2epub.commands.sources import (
+    _resolve_pdf_markdown_source,
+    _resolve_pdf_polish_source,
+)
 from pdf2epub.pipeline_policy import PipelinePolicy
 from pdf2epub.utils.common import sanitize_filename
+from pdf2epub.validation_receipts import validation_receipt_is_current
 
 
-def _validate_pdf_source_stage(args, source_stage: str) -> int:
-    """Validate a Subagent-produced source stage when one is selected."""
+def _validate_pdf_source_stage(
+    args,
+    source_stage: str,
+    output_dir: Path | None = None,
+    ocr_dir: Path | None = None,
+    config_path: Path | None = None,
+) -> int:
+    """Check the immutable polish receipt without rerunning upstream gates."""
     if source_stage == "polished":
-        from pdf2epub.commands.markdown import polish_validate_command
+        if output_dir is not None and ocr_dir is not None:
+            from pdf2epub.commands.sources import _polished_stage_is_current
 
-        return polish_validate_command(args)
+            polished_dir = output_dir / "polished_markdown" / "validated"
+            if _polished_stage_is_current(output_dir, polished_dir, ocr_dir):
+                if config_path is not None and validation_receipt_is_current(
+                    output_dir / "polish_validation.json",
+                    ocr_dir,
+                    polished_dir,
+                    task="polish",
+                    output_dir=output_dir,
+                    config_path=config_path,
+                    require_build_inputs=True,
+                ):
+                    return 0
+        logger.error(
+            "Refusing to build: polish receipt is missing or stale. "
+            "Run polish-validate explicitly, then retry packaging."
+        )
+        return 1
     logger.error(
         "PDF packaging requires the current validated polished source. "
         "Run polish and polish-validate before building."
@@ -27,11 +54,31 @@ def _validate_pdf_source_stage(args, source_stage: str) -> int:
     return 1
 
 
-def _validate_translated_pdf(args) -> int:
-    """Run the existing PDF translation validator before packaging."""
-    from pdf2epub.commands.markdown import translate_validate_command
-
-    return translate_validate_command(args)
+def _validate_translated_pdf(
+    args,
+    output_dir: Path | None = None,
+    source_dir: Path | None = None,
+    target_dir: Path | None = None,
+    config_path: Path | None = None,
+) -> int:
+    """Check the immutable translation receipt without rerunning validation."""
+    if output_dir is not None and source_dir is not None and target_dir is not None:
+        report_path = output_dir / "translate_validation.json"
+        if validation_receipt_is_current(
+            report_path,
+            source_dir,
+            target_dir,
+            task="translate",
+            output_dir=output_dir,
+            config_path=config_path,
+            require_build_inputs=config_path is not None,
+        ):
+            return 0
+    logger.error(
+        "Refusing to build: translation receipt is missing or stale. "
+        "Run translate-validate explicitly, then retry packaging."
+    )
+    return 1
 
 
 def build_epub_command(args):
@@ -62,6 +109,7 @@ def build_epub_command(args):
 
     # V2 architecture stores Subagent results in validated/ subdirectories.
     source_dir, source_stage = _resolve_pdf_markdown_source(output_dir, config)
+    polish_input_dir, _ = _resolve_pdf_polish_source(output_dir)
     if args.translated:
         markdown_dir = output_dir / "translated" / "validated"
         logger.info("Building EPUB from translated markdown...")
@@ -72,12 +120,18 @@ def build_epub_command(args):
                 "PDFs. Run polish and polish-validate first."
             )
             return 1
-        source_validation = _validate_pdf_source_stage(args, source_stage)
+        source_validation = _validate_pdf_source_stage(
+            args,
+            source_stage,
+            output_dir=output_dir,
+            ocr_dir=polish_input_dir,
+            config_path=context.config_path,
+        )
         if source_validation != 0:
-            logger.error("Refusing to build: the English source stage is not validated")
+            logger.error("Refusing to build: the source stage is not validated")
             return 1
         if not source_dir.is_dir() or not any(source_dir.glob("*.md")):
-            logger.error(f"English source Markdown not found: {source_dir}")
+            logger.error(f"Source Markdown not found: {source_dir}")
             return 1
     else:
         markdown_dir = source_dir
@@ -88,9 +142,25 @@ def build_epub_command(args):
         logger.info("Run the corresponding Subagent task and its -validate command first")
         return 1
 
-    validation_result = _validate_translated_pdf(args) if args.translated else 0
+    validation_result = (
+        _validate_translated_pdf(
+            args,
+            output_dir=output_dir,
+            source_dir=source_dir,
+            target_dir=markdown_dir,
+            config_path=context.config_path,
+        )
+        if args.translated
+        else 0
+    )
     if not args.translated:
-        validation_result = _validate_pdf_source_stage(args, source_stage)
+        validation_result = _validate_pdf_source_stage(
+            args,
+            source_stage,
+            output_dir=output_dir,
+            ocr_dir=polish_input_dir,
+            config_path=context.config_path,
+        )
     if validation_result != 0:
         logger.error("Refusing to build from unvalidated Subagent output")
         return 1
