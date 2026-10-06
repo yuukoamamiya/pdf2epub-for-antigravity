@@ -9,7 +9,10 @@ from pdf2epub.refine.footnote_prepare import (
     prepare_footnote_subagent,
     validate_footnote_decisions,
 )
-from pdf2epub.refine.footnote_apply import apply_footnote_normalization
+from pdf2epub.refine.footnote_apply import (
+    apply_footnote_normalization,
+    footnote_normalization_status,
+)
 
 
 def _write_sidecar(
@@ -32,6 +35,54 @@ def _write_sidecar(
         json.dumps(payload, ensure_ascii=False),
         encoding="utf-8",
     )
+
+
+def test_footnote_status_reports_candidate_hash_as_root_cause(tmp_path: Path):
+    source_dir = tmp_path / "ocr_markdown"
+    target_dir = tmp_path / "footnote_normalized"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    source = source_dir / "unit.md"
+    target = target_dir / "unit.md"
+    source.write_text("body\n", encoding="utf-8")
+    target.write_text("body\n", encoding="utf-8")
+    candidates = tmp_path / "footnote_candidates.json"
+    decisions = tmp_path / "footnote_decision_validation.json"
+    candidates.write_text("{}", encoding="utf-8")
+    decisions.write_text(
+        json.dumps({"valid": True, "ocr_evidence_mode": "single_ocr"}),
+        encoding="utf-8",
+    )
+    normalization = tmp_path / "footnote_normalization.json"
+    normalization.write_text(
+        json.dumps(
+            {
+                "valid": True,
+                "status": "validated",
+                "ocr_evidence_mode": "single_ocr",
+                "source_sha256": {
+                    "unit.md": hashlib.sha256(source.read_bytes()).hexdigest()
+                },
+                "target_sha256": {
+                    "unit.md": hashlib.sha256(target.read_bytes()).hexdigest()
+                },
+                "candidate_report_sha256": hashlib.sha256(
+                    candidates.read_bytes()
+                ).hexdigest(),
+                "decision_validation_sha256": hashlib.sha256(
+                    decisions.read_bytes()
+                ).hexdigest(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    candidates.write_text('{"changed": true}', encoding="utf-8")
+
+    status = footnote_normalization_status(tmp_path)
+
+    assert status["current"] is False
+    assert status["failures"][0]["code"] == "candidate_report_stale"
+    assert "footnote-prepare" in status["detail"]
 
 
 def _write_native_sidecar(

@@ -87,6 +87,8 @@ Subagent 合同层
 - `refine.py`：编排 TOC、整页插图和脚注的结构闸门，并调用本地分页/单元合并；页内章节
   边界通过 `boundary_info.start_line`/`end_line` 保留，避免把同页标题前的句子误归入新章节。
 - `markdown.py`：PDF Markdown 的 polish、translate、readiness 和 validation 编排。
+- readiness 对派生源稿使用显式依赖诊断：脚注归一化过期时只报告其哈希/证据根因，
+  polish 与实体检查标记为 `blocked_by`，不把级联症状伪装成独立损坏。
 - `page_furniture.py`：已有 PDF 译文的页眉页脚修复交接和校验编排。
 - `entities.py`：生成和校验书内实体表 handoff。
 - `toc.py`：生成和校验独立的 PDF TOC 翻译 handoff。
@@ -135,6 +137,8 @@ polish。`commands/markdown.py`、`entities.py`、`toc.py` 和 `pdf.py` 均应�
 - `subagent_safety.py`：集中处理拒答、免责声明和翻译占位套话检测，避免各工作流使用不同规则。
 - `toc_translation_workflow.py`：维护 TOC 的原始结构、节点数量、非标题字段和翻译结果校验，
   并从已验证的译文 TOC 生成按 token 预算自适应的全书方向性轮廓。
+- TOC 标题绑定区分 `visible` 与 `container_only`：无可见源标签的纯图片/边界单元不要求
+  worker 伪造 Markdown 标题，章节容器标题由 EPUB 构建器生成；可见子标题仍使用严格绑定。
 
 旧代码可能仍从 [`subagent_workflow.py`](../pdf2epub/subagent_workflow.py) 导入这些函数。
 该文件现在是兼容门面。新代码应直接导入具体模块；如果移动公共函数，必须保留门面转出
@@ -163,7 +167,9 @@ Subagent 实际读写哪些文件。两者不能互相替代。
 章节，对每个章节单独运行 `_recommended_batches()`；若章节需要多个批次，或任一文件超过
 字节/token 上限，就先冲刷当前短章节队列，再只在该章节内部生成 part worker。普通短章节
 才会进入连续装箱，装箱同时受 `max_chapters_per_worker`、`max_files` 和
-`max_source_tokens` 约束。已完成而被 `--resume` 跳过的章节会冲刷当前队列，作为相邻性
+`max_source_tokens` 约束；连续且每章不超过 `tiny_chapter_max_tokens` 的极短章节可在同一
+批次中使用 `max_tiny_chapters_per_worker` 的更高章节上限，但不会放宽文件/token 预算。
+已完成而被 `--resume` 跳过的章节会冲刷当前队列，作为相邻性
 屏障；这保证恢复时不会把两个原本不相邻的章节拼到一起。这个过程只合并 worker 的文件
 清单和上下文，不把源 Markdown/HTML 物理拼接。
 

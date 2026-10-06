@@ -25,6 +25,8 @@ REFINE_CHECKPOINT_SCHEMA = 5
 DEFAULT_OVERSIZED_SPLIT_THRESHOLD = 15_000
 DEFAULT_OVERSIZED_SPLIT_TARGET = 12_000
 DEFAULT_OVERSIZED_SPLIT_TYPES = ("all",)
+DEFAULT_OVERSIZED_SPLIT_THRESHOLDS_BY_TYPE = {"index": 6_000}
+DEFAULT_OVERSIZED_SPLIT_TARGETS_BY_TYPE = {"index": 4_500}
 
 
 def _pages_fingerprint(pages_dir: Path) -> str:
@@ -111,6 +113,42 @@ class RefinedBreakdown:
         self.oversized_split_types = tuple(
             sorted({str(value).strip().lower() for value in configured_types if str(value).strip()})
         ) or DEFAULT_OVERSIZED_SPLIT_TYPES
+        configured_thresholds = split_config.get("threshold_tokens_by_type", {})
+        if not isinstance(configured_thresholds, dict):
+            configured_thresholds = {}
+        configured_targets = split_config.get("target_tokens_by_type", {})
+        if not isinstance(configured_targets, dict):
+            configured_targets = {}
+        self.oversized_split_thresholds_by_type = {
+            str(role).strip().lower(): self._positive_int(value, default)
+            for role, default in DEFAULT_OVERSIZED_SPLIT_THRESHOLDS_BY_TYPE.items()
+            for value in [configured_thresholds.get(role, default)]
+            if str(role).strip()
+        }
+        self.oversized_split_targets_by_type = {
+            str(role).strip().lower(): self._positive_int(value, default)
+            for role, default in DEFAULT_OVERSIZED_SPLIT_TARGETS_BY_TYPE.items()
+            for value in [configured_targets.get(role, default)]
+            if str(role).strip()
+        }
+        for role, value in configured_thresholds.items():
+            normalized_role = str(role).strip().lower()
+            if normalized_role:
+                self.oversized_split_thresholds_by_type[normalized_role] = self._positive_int(
+                    value, self.oversized_split_threshold
+                )
+        for role, value in configured_targets.items():
+            normalized_role = str(role).strip().lower()
+            if normalized_role:
+                self.oversized_split_targets_by_type[normalized_role] = self._positive_int(
+                    value, self.oversized_split_target
+                )
+        for role, target in list(self.oversized_split_targets_by_type.items()):
+            threshold = self.oversized_split_thresholds_by_type.get(
+                role, self.oversized_split_threshold
+            )
+            if target >= threshold:
+                self.oversized_split_targets_by_type[role] = max(1, threshold - 1)
 
     @staticmethod
     def _positive_int(value: Any, default: int) -> int:
@@ -128,6 +166,8 @@ class RefinedBreakdown:
             "threshold_tokens": self.oversized_split_threshold,
             "target_tokens": self.oversized_split_target,
             "types": list(self.oversized_split_types),
+            "threshold_tokens_by_type": self.oversized_split_thresholds_by_type,
+            "target_tokens_by_type": self.oversized_split_targets_by_type,
         }
 
     def process_from_toc(
@@ -507,15 +547,21 @@ class RefinedBreakdown:
             role = str(getattr(node, "chapter_type", "") or "").strip().lower() or "body"
             actual_tokens = len(tokenizer.encode(content)) if content else 0
             split_all_types = "all" in self.oversized_split_types or "*" in self.oversized_split_types
+            split_threshold = self.oversized_split_thresholds_by_type.get(
+                role, self.oversized_split_threshold
+            )
+            split_target = self.oversized_split_targets_by_type.get(
+                role, self.oversized_split_target
+            )
             should_split = (
                 self.oversized_split_enabled
                 and (split_all_types or role in self.oversized_split_types)
-                and actual_tokens > self.oversized_split_threshold
+                and actual_tokens > split_threshold
             )
             split_result = (
                 split_markdown_unit(
                     content,
-                    self.oversized_split_target,
+                    split_target,
                     role,
                     lambda value: len(tokenizer.encode(value)),
                 )
@@ -549,7 +595,7 @@ class RefinedBreakdown:
                             len(tokenizer.encode(part_content)) for part_content in part_contents
                         ],
                         "split_strategy": split_result.strategy,
-                        "split_target_tokens": self.oversized_split_target,
+                        "split_target_tokens": split_target,
                     }
                 )
             if node.chapter_type:

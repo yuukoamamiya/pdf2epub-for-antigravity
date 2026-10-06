@@ -115,10 +115,40 @@ def _matchable_source_text(text: str) -> str:
     return value
 
 
-def _term_forms(entry: Mapping[str, Any]) -> List[str]:
+def _language_alias_forms(
+    value: Any,
+    source_language: Optional[str],
+) -> List[str]:
+    """Return explicitly declared cross-language aliases for one language."""
+    if not source_language or not isinstance(value, Mapping):
+        return []
+    target_key = _language_key(source_language)
+    forms: List[str] = []
+    for language, aliases in value.items():
+        if _language_key(language) == target_key:
+            forms.extend(_optional_match_forms(aliases))
+    return forms
+
+
+def _term_forms(
+    entry: Mapping[str, Any],
+    *,
+    source_language: Optional[str] = None,
+    include_cross_language: bool = False,
+) -> List[str]:
     """Return all source forms that can identify one context entry."""
     original = entry.get("source") or entry.get("original") or ""
-    forms = [original, *_optional_match_forms(entry.get("variants")), *_optional_match_forms(entry.get("aliases"))]
+    forms = [
+        original,
+        *_optional_match_forms(entry.get("variants")),
+        *_optional_match_forms(entry.get("aliases")),
+    ]
+    if include_cross_language:
+        forms.extend(
+            _language_alias_forms(
+                entry.get("aliases_by_language"), source_language
+            )
+        )
     result = []
     seen = set()
     for form in forms:
@@ -139,6 +169,8 @@ def _optional_match_forms(value: Any) -> List[str]:
 
 
 def _entry_priority(entry: Mapping[str, Any]) -> int:
+    if entry.get("kind") == "reference":
+        return 0
     if entry.get("kind") == "domain":
         return 3 if entry.get("policy") == "fixed" else 2
     return 1
@@ -215,6 +247,25 @@ def normalize_glossary(data: Any, source_path: Optional[Path] = None) -> Dict[st
             )
         variants = _as_string_list(raw.get("variants"), "variants", index)
         aliases = _as_string_list(raw.get("aliases"), "aliases", index)
+        aliases_by_language_raw = raw.get("aliases_by_language")
+        if aliases_by_language_raw is None:
+            # Accept the earlier experimental name but emit one stable field.
+            aliases_by_language_raw = raw.get("cross_language_aliases")
+        aliases_by_language: Dict[str, List[str]] = {}
+        if aliases_by_language_raw is not None:
+            if not isinstance(aliases_by_language_raw, Mapping):
+                raise GlossaryError(
+                    f"entries[{index}].aliases_by_language must be an object"
+                )
+            for language, values in aliases_by_language_raw.items():
+                language_name = _clean(language)
+                if not language_name:
+                    raise GlossaryError(
+                        f"entries[{index}].aliases_by_language has an empty language key"
+                    )
+                aliases_by_language[language_name] = _as_string_list(
+                    values, f"aliases_by_language[{language_name!r}]", index
+                )
         forms = [source, *variants, *aliases]
         for form in forms:
             key = _normal_form(form)
@@ -225,6 +276,18 @@ def normalize_glossary(data: Any, source_path: Optional[Path] = None) -> Dict[st
                     f"{previous!r} vs {target!r}"
                 )
             seen[key] = target
+        language_seen: Dict[tuple[str, str], str] = {}
+        for language, language_forms in aliases_by_language.items():
+            language_key = _language_key(language)
+            for form in language_forms:
+                key = (language_key, _normal_form(form))
+                previous = language_seen.get(key)
+                if previous is not None and previous != target:
+                    raise GlossaryError(
+                        f"conflicting translations for cross-language source form {form!r}: "
+                        f"{previous!r} vs {target!r}"
+                    )
+                language_seen[key] = target
 
         item: Dict[str, Any] = {
             "source": source,
@@ -242,6 +305,8 @@ def normalize_glossary(data: Any, source_path: Optional[Path] = None) -> Dict[st
             item["variants"] = variants
         if aliases:
             item["aliases"] = aliases
+        if aliases_by_language:
+            item["aliases_by_language"] = aliases_by_language
         for field in ("id", "category", "note", "scope"):
             value = _clean(raw.get(field))
             if value:
@@ -465,18 +530,31 @@ def _entry_match_kind(entry: Mapping[str, Any], form: str) -> str:
         for value in _optional_match_forms(entry.get("variants"))
     }:
         return "variant"
+    for aliases in (entry.get("aliases_by_language") or {}).values():
+        if normalized in {
+            _normalize_match_text(value)
+            for value in _optional_match_forms(aliases)
+        }:
+            return "cross_language_alias"
     return "alias"
 
 
 def _select_matching_entries(
     text: str,
     entries: List[Dict[str, Any]],
+    *,
+    source_language: Optional[str] = None,
+    include_cross_language: bool = False,
 ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Select entries and return selected plus suppressed hit audit trails."""
     normalized_text = _normalize_match_text(_matchable_source_text(text))
     candidates = []
     for index, entry in enumerate(entries):
-        for form in _term_forms(entry):
+        for form in _term_forms(
+            entry,
+            source_language=source_language,
+            include_cross_language=include_cross_language,
+        ):
             normalized_form = _normalize_match_text(form)
             for match in _find_term_matches(
                 normalized_text,
@@ -593,6 +671,7 @@ def build_unit_glossary_contexts(
     source_dir: Path,
     glossary_context_files: Mapping[str, Path],
     entity_path: Optional[Path] = None,
+    source_language: Optional[str] = None,
 ) -> Dict[str, Path]:
     """Write compact, per-unit terminology contexts.
 
@@ -606,14 +685,18 @@ def build_unit_glossary_contexts(
     context_dir.mkdir(parents=True, exist_ok=True)
     domain_entries: List[Dict[str, Any]] = []
     for name, path in glossary_context_files.items():
-        if not str(name).startswith("domain_glossary_") or not Path(path).is_file():
+        if not (
+            str(name).startswith("domain_glossary_")
+            or str(name).startswith("reference_glossary_")
+        ) or not Path(path).is_file():
             continue
         try:
             glossary = load_glossary(path)
         except GlossaryError:
             continue
         for entry in glossary["entries"]:
-            domain_entries.append({"kind": "domain", **entry})
+            kind = "reference" if str(name).startswith("reference_") else "domain"
+            domain_entries.append({"kind": kind, **entry})
 
     entity_entries: List[Dict[str, Any]] = []
     if entity_path and Path(entity_path).is_file():
@@ -667,12 +750,17 @@ def build_unit_glossary_contexts(
             candidates.append(entry)
         for entry in entity_entries:
             candidates.append(entry)
-        selected, hits, suppressed_hits = _select_matching_entries(text, candidates)
+        selected, hits, suppressed_hits = _select_matching_entries(
+            text,
+            candidates,
+            source_language=source_language,
+            include_cross_language=True,
+        )
         context = {
             "schema_version": 1,
             "source_file": source.name,
             "entries": selected,
-            "selection": "normalized_exact_source_form_match",
+            "selection": "normalized_exact_source_form_match_with_reference_aliases",
         }
         context_path = context_dir / f"{source.stem}.json"
         context_path.write_text(
@@ -686,7 +774,7 @@ def build_unit_glossary_contexts(
                 {
                     "schema_version": 1,
                     "source_file": source.name,
-                    "selection": "normalized_exact_source_form_match",
+                    "selection": "normalized_exact_source_form_match_with_reference_aliases",
                     "hits": hits,
                     "suppressed_hits": suppressed_hits,
                 },
@@ -852,6 +940,7 @@ def load_selected_glossaries(
     names: List[str] = []
     total_entries = 0
     seen_sources: Dict[str, str] = {}
+    seen_reference_aliases: Dict[tuple[str, str], str] = {}
     source_files: Dict[str, Path] = {}
     source_sha256: Dict[str, str] = {}
     metadata_by_context: Dict[str, Dict[str, Any]] = {}
@@ -937,6 +1026,22 @@ def load_selected_glossaries(
                                 f"{previous!r} vs {entry['target']!r}"
                             )
                         seen_sources[key] = entry["target"]
+            else:
+                for entry in glossary["entries"]:
+                    for language, aliases in (
+                        entry.get("aliases_by_language", {}) or {}
+                    ).items():
+                        language_key = _language_key(language)
+                        for form in aliases:
+                            key = (language_key, _normal_form(form))
+                            previous = seen_reference_aliases.get(key)
+                            if previous is not None and previous != entry["target"]:
+                                raise GlossaryError(
+                                    "conflicting reference translations for "
+                                    f"{language} source form {form!r}: "
+                                    f"{previous!r} vs {entry['target']!r}"
+                                )
+                            seen_reference_aliases[key] = entry["target"]
 
     rules = [
         "Selected domain glossaries are read-only authoritative terminology context; never modify them.",
@@ -953,6 +1058,7 @@ def load_selected_glossaries(
                 "Reference-only glossaries are read-only background material; never modify the original files or their snapshots.",
                 "Reference-only glossaries do not establish terminology precedence and must never override an authoritative glossary or book-specific entity.",
                 "Consult reference-only glossaries for conceptual correspondences and established target-language names when relevant, especially across source languages; do not mechanically apply a reference entry when the source text does not support the correspondence.",
+                "In a unit terminology context, entries with kind=reference are sparse conceptual hints matched through an explicitly declared aliases_by_language mapping. They are not fixed translations and never override domain or book-specific entries.",
                 "Do not add inferred variants, translations, or corrections back into any glossary file. If a reference is ambiguous, use normal translation judgment and keep the glossary unchanged.",
             ]
         )

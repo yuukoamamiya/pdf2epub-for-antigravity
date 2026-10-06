@@ -9,7 +9,7 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Mapping
 
 from loguru import logger
 
@@ -123,6 +123,32 @@ def _load_pdf_file_contexts(output_dir: Path) -> dict:
         except (OSError, json.JSONDecodeError, AttributeError, TypeError):
             pass
     return contexts
+
+
+def _load_pdf_toc_titles(output_dir: Path) -> list[str]:
+    """Return source-language TOC labels used to protect polish headings."""
+    toc_path = Path(output_dir) / "toc_tree.json"
+    if not toc_path.is_file():
+        return []
+    try:
+        toc = json.loads(toc_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return []
+    titles: list[str] = []
+
+    def visit(nodes: Any) -> None:
+        if not isinstance(nodes, list):
+            return
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            title = str(node.get("title") or "").strip()
+            if title and title not in titles:
+                titles.append(title)
+            visit(node.get("children", []))
+
+    visit(toc.get("chapters", []))
+    return titles
 
 
 def _load_pdf_continuation_files(output_dir: Path, source_dir: Path) -> dict:
@@ -300,7 +326,10 @@ def _prepare_pdf_markdown_task(args, task: str):
                 "translation: " + "; ".join(toc_report["errors"][:5])
             )
             return 1
-        heading_contexts = build_toc_heading_contexts(output_dir)
+        heading_contexts = build_toc_heading_contexts(
+            output_dir,
+            source_dir=source_dir,
+        )
         global_toc_outline = build_global_toc_outline(
             output_dir,
             token_budget=_batching_config(config)["global_toc_tokens"],
@@ -365,6 +394,7 @@ def _prepare_pdf_markdown_task(args, task: str):
             source_dir,
             glossary_bundle.context_files if glossary_bundle else {},
             None if skip_entities else entity_path,
+            source_language=source_language,
         )
         prompt_context_files = {
             name: path
@@ -401,6 +431,9 @@ def _prepare_pdf_markdown_task(args, task: str):
                 else None
             ),
             continuation_files=_load_pdf_continuation_files(output_dir, source_dir),
+            protected_toc_titles=(
+                _load_pdf_toc_titles(output_dir) if task == "polish" else None
+            ),
         )
         from pdf2epub.subagent_runtime import write_worker_handoffs
 
@@ -569,6 +602,9 @@ def _validate_pdf_markdown_task(args, task: str):
         ),
         selected_files=[selected_file] if selected_file else None,
         target_language=target_language if task == "translate" else None,
+        protected_toc_titles=(
+            _load_pdf_toc_titles(output_dir) if task == "polish" else None
+        ),
         allow_review_warnings=bool(
             getattr(args, "allow_review_warnings", False)
         ),
@@ -669,7 +705,11 @@ def _validate_pdf_markdown_task(args, task: str):
     first_pass_review_retries = [
         item
         for item in report.get("retry_required", [])
-        if item.get("kind") in {"bilingual_output", "polish_page_furniture"}
+        if item.get("kind") in {
+            "bilingual_output",
+            "polish_page_furniture",
+            "polish_unique_toc_label_removed",
+        }
     ]
     if first_pass_review_retries and not report.get(
         "review_warnings_acknowledged"
@@ -725,6 +765,47 @@ def _persist_full_validation_report(
     atomic_write_text(
         Path(output_dir) / f"{task}_validation.json",
         json.dumps(report, ensure_ascii=False, indent=2),
+    )
+    _sync_subagent_manifest_progress(output_dir, task, report)
+
+
+def _sync_subagent_manifest_progress(
+    output_dir: Path,
+    task: str,
+    report: Mapping[str, Any],
+) -> None:
+    """Reconcile parent hand-off progress after a full validation run."""
+    manifest_path = Path(output_dir) / f"{task}_subagent_manifest.json"
+    if not manifest_path.is_file() or report.get("scope") != "full":
+        return
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return
+    if not isinstance(manifest, dict):
+        return
+    files = [str(name) for name in manifest.get("files", [])]
+    valid = {str(name) for name in report.get("valid_files", [])}
+    manifest["completed_files"] = [name for name in files if name in valid]
+    manifest["pending_files"] = [name for name in files if name not in valid]
+    pending = set(manifest["pending_files"])
+    for key in ("batch_queue", "worker_queue", "worker_handoffs", "batch_handoffs"):
+        items = manifest.get(key)
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            assigned = {str(name) for name in item.get("files", [])}
+            if not assigned:
+                continue
+            if assigned <= valid:
+                item["status"] = "completed"
+            elif assigned & pending:
+                item["status"] = "pending"
+    atomic_write_text(
+        manifest_path,
+        json.dumps(manifest, ensure_ascii=False, indent=2),
     )
 
 
@@ -816,9 +897,21 @@ def _run_readiness_check(
     checks: Dict[str, dict] = {}
     errors: list[str] = []
 
-    def record(name: str, ready: bool, detail: str) -> None:
+    def record(
+        name: str,
+        ready: bool,
+        detail: str,
+        *,
+        code: str | None = None,
+        blocked_by: list[str] | None = None,
+        emit_error: bool = True,
+    ) -> None:
         checks[name] = {"ready": bool(ready), "detail": detail}
-        if not ready:
+        if code:
+            checks[name]["code"] = code
+        if blocked_by:
+            checks[name]["blocked_by"] = list(blocked_by)
+        if not ready and emit_error:
             errors.append(f"{name}: {detail}")
 
     if not book_title:
@@ -921,6 +1014,26 @@ def _run_readiness_check(
         else "ocr_markdown/tree_progress.json is missing or stale",
     )
 
+    footnote_status = {"current": True, "detail": "not required at this stage"}
+    if stage in {"translate", "package"} and policy.requires_polish:
+        from pdf2epub.refine.footnote_apply import footnote_normalization_status
+
+        footnote_status = footnote_normalization_status(output_dir, config=config)
+        record(
+            "footnote_normalization",
+            bool(footnote_status.get("current")),
+            str(footnote_status.get("detail") or "footnote checkpoint is stale"),
+            code=(
+                None
+                if footnote_status.get("current")
+                else str(
+                    (footnote_status.get("failures") or [{"code": "stale"}])[0].get(
+                        "code", "stale"
+                    )
+                )
+            ),
+        )
+
     source_dir, source_stage = _resolve_pdf_markdown_source(output_dir, config)
     source_files = list(source_dir.glob("*.md")) if source_dir.is_dir() else []
     source_ready = bool(source_files)
@@ -948,6 +1061,12 @@ def _run_readiness_check(
             )
             if source_stage != "polished" or not source_ready
             else f"current validated {source_stage} source is selected",
+            blocked_by=(
+                ["footnote_normalization"]
+                if not footnote_status.get("current")
+                else None
+            ),
+            emit_error=bool(footnote_status.get("current")),
         )
 
     translation = config.get("translation", {}) or {}
@@ -958,11 +1077,15 @@ def _run_readiness_check(
             "not applicable for pipeline: epub_conversion",
         )
     elif policy.requires_entities and not skip_entities:
-        entity_ready = _entity_context_is_current(
-            output_dir,
-            source_dir,
-            policy.source_language,
-            policy.target_language,
+        entity_ready = (
+            False
+            if not footnote_status.get("current")
+            else _entity_context_is_current(
+                output_dir,
+                source_dir,
+                policy.source_language,
+                policy.target_language,
+            )
         )
         entity_validation_path = output_dir / "translation_entities_validation.json"
         if entity_validation_path.is_file():
@@ -978,18 +1101,31 @@ def _run_readiness_check(
         record(
             "translation_entities",
             entity_ready,
-            "entity glossary matches the selected source stage"
-            if entity_ready
-            else "entity glossary is missing, unvalidated, or stale",
+            (
+                "entity glossary matches the selected source stage"
+                if entity_ready
+                else (
+                    "not evaluated because footnote normalization is stale"
+                    if not footnote_status.get("current")
+                    else "entity glossary is missing, unvalidated, or stale"
+                )
+            ),
+            blocked_by=(
+                ["footnote_normalization"]
+                if not footnote_status.get("current")
+                else None
+            ),
+            emit_error=bool(footnote_status.get("current")),
         )
     else:
         record("translation_entities", True, "explicitly skipped for this task")
 
     glossary_ready = True
     configured_glossaries = translation.get("glossaries", []) or []
+    configured_reference_glossaries = translation.get("reference_glossaries", []) or []
     if not policy.requires_translation:
         glossary_detail = "not applicable for pipeline: epub_conversion"
-    elif configured_glossaries:
+    elif configured_glossaries or configured_reference_glossaries:
         try:
             from pdf2epub.glossary import load_selected_glossaries
 
@@ -1001,7 +1137,10 @@ def _run_readiness_check(
                 Path(config_path),
             )
             glossary_ready = all(path.is_file() for path in bundle.context_files.values())
-            glossary_detail = f"{bundle.entries} entries in {len(bundle.context_files)} snapshot(s)"
+            glossary_detail = (
+                f"{bundle.entries} authoritative entries and "
+                f"{len(configured_reference_glossaries)} reference glossary(s)"
+            )
         except Exception as exc:
             glossary_ready = False
             glossary_detail = str(exc)

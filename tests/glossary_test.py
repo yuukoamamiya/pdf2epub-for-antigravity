@@ -206,6 +206,57 @@ def test_reference_glossary_context_validates_without_authoritative_language_mat
     assert report["reference_glossary_entries"] == 1
 
 
+def test_reference_glossary_cross_language_aliases_are_sparse_context(tmp_path: Path):
+    source = tmp_path / "german.yaml"
+    source.write_text(
+        "schema_version: 1\n"
+        "metadata:\n"
+        "  name: german\n"
+        "  domain: German classical philosophy\n"
+        "  source_language: German\n"
+        "  target_language: Chinese\n"
+        "entries:\n"
+        "  - source: Aufhebung\n"
+        "    target: 扬弃\n"
+        "    policy: fixed\n"
+        "    aliases_by_language:\n"
+        "      English: [sublation, sublate]\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "output"
+    bundle = load_selected_glossaries(
+        {"translation": {"reference_glossaries": [str(source)]}},
+        output,
+        "English",
+        "Chinese",
+    )
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    (source_dir / "unit.md").write_text(
+        "The sublation of the opposition is decisive.\n", encoding="utf-8"
+    )
+
+    contexts = build_unit_glossary_contexts(
+        output,
+        source_dir,
+        bundle.context_files,
+        source_language="English",
+    )
+    context = json.loads(contexts["unit.md"].read_text(encoding="utf-8"))
+    assert context["entries"][0]["kind"] == "reference"
+    assert context["entries"][0]["source"] == "Aufhebung"
+    assert context["entries"][0]["aliases_by_language"]["English"] == [
+        "sublation",
+        "sublate",
+    ]
+    hits = json.loads(
+        (output / "translation_glossaries" / "keyword_hits" / "unit.json").read_text(
+            encoding="utf-8"
+        )
+    )["hits"]
+    assert hits[0]["match_types"] == ["cross_language_alias"]
+
+
 def test_unit_glossary_context_contains_only_matching_entries(tmp_path: Path):
     source = tmp_path / "terms.yaml"
     output = tmp_path / "output"

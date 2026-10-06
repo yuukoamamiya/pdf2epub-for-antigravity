@@ -267,6 +267,7 @@ def _prepare_html_command(args):
                 output_dir / "compressed_units",
                 glossary_bundle.context_files,
                 None if skip_entities else entity_path,
+                source_language=source_language,
             ),
             declared_files=declared_files,
             chapter_groups=_load_html_chapter_groups(pipeline, declared_files),

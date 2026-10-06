@@ -746,13 +746,18 @@ def apply_footnote_normalization(
     return result
 
 
-def footnote_normalization_is_current(
+def footnote_normalization_status(
     output_dir: Path,
     config: Optional[Mapping[str, Any]] = None,
-) -> bool:
-    """Return whether the derived chapter-end source still matches inputs."""
+) -> dict[str, Any]:
+    """Explain whether the derived chapter-end source still matches inputs."""
 
     output_dir = Path(output_dir)
+    failures: list[dict[str, str]] = []
+
+    def fail(code: str, detail: str) -> None:
+        failures.append({"code": code, "detail": detail})
+
     try:
         report = _load_json(
             output_dir / "footnote_normalization.json",
@@ -762,42 +767,101 @@ def footnote_normalization_is_current(
             output_dir / "footnote_decision_validation.json",
             "footnote_decision_validation.json",
         )
-        if report.get("valid") is not True or report.get("status") != "validated":
-            return False
-        if validation.get("valid") is not True:
-            return False
-        report_mode = str(report.get("ocr_evidence_mode") or "single_ocr")
-        validation_mode = str(validation.get("ocr_evidence_mode") or report_mode)
-        if report_mode != validation_mode:
-            return False
-        if config is not None:
-            configured_mode = pdf_evidence_mode(output_dir, config)
-            if report_mode != configured_mode:
-                return False
-            if configured_mode == "two_ocr":
-                try:
-                    require_current_consensus(output_dir, config, stage="footnote")
-                except ValueError:
-                    return False
-        source_dir = output_dir / "ocr_markdown"
-        target_dir = output_dir / "footnote_normalized"
-        if report.get("source_sha256") != _markdown_inventory(source_dir):
-            return False
-        if report.get("target_sha256") != _markdown_inventory(target_dir):
-            return False
-        if report.get("candidate_report_sha256") != sha256_file(
-            output_dir / "footnote_candidates.json"
-        ):
-            return False
-        return report.get("decision_validation_sha256") == sha256_file(
-            output_dir / "footnote_decision_validation.json"
+    except (OSError, UnicodeError, ValueError, TypeError) as exc:
+        fail("checkpoint_missing_or_invalid", str(exc))
+        return {
+            "current": False,
+            "status": "stale",
+            "failures": failures,
+            "detail": "footnote normalization checkpoint is missing or invalid; "
+            "run footnote-prepare, footnote-validate, and footnote-apply",
+        }
+
+    if report.get("valid") is not True or report.get("status") != "validated":
+        fail(
+            "normalization_not_validated",
+            "footnote_normalization.json is not a validated checkpoint",
         )
-    except (OSError, UnicodeError, ValueError, TypeError):
-        return False
+    if validation.get("valid") is not True:
+        fail(
+            "decision_validation_failed",
+            "footnote_decision_validation.json is missing or invalid",
+        )
+    report_mode = str(report.get("ocr_evidence_mode") or "single_ocr")
+    validation_mode = str(validation.get("ocr_evidence_mode") or report_mode)
+    if report_mode != validation_mode:
+        fail(
+            "evidence_mode_mismatch",
+            "footnote normalization and decision validation use different OCR evidence modes",
+        )
+    if config is not None:
+        configured_mode = pdf_evidence_mode(output_dir, config)
+        if report_mode != configured_mode:
+            fail(
+                "configured_evidence_mode_mismatch",
+                f"checkpoint uses {report_mode}, current configuration requires {configured_mode}",
+            )
+        if configured_mode == "two_ocr":
+            try:
+                require_current_consensus(output_dir, config, stage="footnote")
+            except ValueError as exc:
+                fail("ocr_consensus_stale", str(exc))
+    source_dir = output_dir / "ocr_markdown"
+    target_dir = output_dir / "footnote_normalized"
+    if report.get("source_sha256") != _markdown_inventory(source_dir):
+        fail(
+            "source_markdown_changed",
+            "ocr_markdown changed after footnote normalization",
+        )
+    if report.get("target_sha256") != _markdown_inventory(target_dir):
+        fail(
+            "normalized_output_changed",
+            "footnote_normalized changed after footnote normalization",
+        )
+    if report.get("candidate_report_sha256") != sha256_file(
+        output_dir / "footnote_candidates.json"
+    ):
+        fail(
+            "candidate_report_stale",
+            "footnote_candidates.json changed after footnote-apply",
+        )
+    if report.get("decision_validation_sha256") != sha256_file(
+        output_dir / "footnote_decision_validation.json"
+    ):
+        fail(
+            "decision_validation_stale",
+            "footnote_decision_validation.json changed after footnote-apply",
+        )
+
+    current = not failures
+    if current:
+        detail = "current validated footnote normalization matches all inputs"
+    else:
+        detail = failures[0]["detail"]
+        if any(item["code"] == "candidate_report_stale" for item in failures):
+            detail += "; rerun footnote-prepare, footnote-validate, and footnote-apply"
+        elif any(item["code"] == "decision_validation_stale" for item in failures):
+            detail += "; rerun footnote-validate and footnote-apply"
+    return {
+        "current": current,
+        "status": "validated" if current else "stale",
+        "failures": failures,
+        "detail": detail,
+    }
+
+
+def footnote_normalization_is_current(
+    output_dir: Path,
+    config: Optional[Mapping[str, Any]] = None,
+) -> bool:
+    """Return whether the derived chapter-end source still matches inputs."""
+
+    return bool(footnote_normalization_status(output_dir, config=config)["current"])
 
 
 __all__ = [
     "FOOTNOTE_NORMALIZATION_SCHEMA_VERSION",
     "apply_footnote_normalization",
+    "footnote_normalization_status",
     "footnote_normalization_is_current",
 ]

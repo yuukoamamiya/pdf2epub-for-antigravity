@@ -34,3 +34,14 @@ entries:
 `policy` 可以是 `fixed` 或 `preferred`。同一个源词及其变体不能在所选术语表
 中对应不同的译法。术语表原文件只读，程序会在书籍输出目录保存规范化快照并锁定
 SHA-256。
+
+跨语言参考表可以额外声明按源语言命中的别名；它们只适用于明确配置在
+`translation.reference_glossaries` 的只读参考表，不参与正式术语优先级：
+
+```yaml
+    aliases_by_language:
+      English: [sublation, sublate]
+```
+
+命中后会以 `kind: reference` 写入单元稀疏上下文，供 Subagent 进行概念核对；不会
+自动覆盖领域表或书内实体表。

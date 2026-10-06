@@ -423,6 +423,76 @@ def test_adjacent_short_chapters_pack_with_file_scoped_contexts(tmp_path: Path):
     assert "do not let terms leak across files" in prompt
 
 
+def test_explicit_max_chapters_remains_strict_without_tiny_override(tmp_path: Path):
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    chapter_names = [f"chapter_{index}.md" for index in range(1, 4)]
+    for name in chapter_names:
+        (source_dir / name).write_text("short", encoding="utf-8")
+
+    paths = prepare_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        tmp_path / "target",
+        "English",
+        "Chinese",
+        config={
+            "subagent": {
+                "batching": {
+                    "max_files": 8,
+                    "max_source_tokens": 100,
+                    "max_chapters_per_worker": 2,
+                }
+            }
+        },
+        chapter_groups={Path(name).stem: [name] for name in chapter_names},
+    )
+
+    handoffs = write_worker_handoffs(tmp_path, paths["manifest"], paths["prompt"])
+
+    assert [item["files"] for item in handoffs] == [
+        ["chapter_1.md", "chapter_2.md"],
+        ["chapter_3.md"],
+    ]
+
+
+def test_tiny_chapters_can_use_expanded_adjacent_pack_limit(tmp_path: Path):
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    chapter_names = [f"chapter_{index}.md" for index in range(1, 7)]
+    for name in chapter_names:
+        (source_dir / name).write_text("tiny", encoding="utf-8")
+
+    paths = prepare_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        tmp_path / "target",
+        "English",
+        "Chinese",
+        config={
+            "subagent": {
+                "batching": {
+                    "max_files": 8,
+                    "max_source_tokens": 100,
+                    "max_chapters_per_worker": 3,
+                    "max_tiny_chapters_per_worker": 6,
+                    "tiny_chapter_max_tokens": 10,
+                }
+            }
+        },
+        chapter_groups={Path(name).stem: [name] for name in chapter_names},
+    )
+
+    handoffs = write_worker_handoffs(tmp_path, paths["manifest"], paths["prompt"])
+
+    assert len(handoffs) == 1
+    assert handoffs[0]["files"] == chapter_names
+    prompt = (tmp_path / handoffs[0]["prompt"]).read_text(encoding="utf-8")
+    assert "up to 6 chapters" in prompt
+
+
 def test_large_chapter_splits_without_mixing_chapter_contexts(tmp_path: Path):
     source_dir = tmp_path / "source"
     source_dir.mkdir()
@@ -707,6 +777,57 @@ def test_toc_heading_contexts_and_validation_use_first_unit_part(tmp_path: Path)
     assert validate_toc_heading_bindings(output)["valid"] is True
 
 
+def test_image_only_unit_uses_package_only_toc_container(tmp_path: Path):
+    output = tmp_path / "output"
+    source = tmp_path / "source"
+    output.mkdir()
+    source.mkdir()
+    (source / "chapter_1.md").write_text(
+        "![cover](../images/cover.png)\n", encoding="utf-8"
+    )
+    toc = {
+        "chapters": [{"title": "Cover", "children": []}],
+    }
+    (output / "toc_tree.json").write_text(
+        json.dumps(toc, ensure_ascii=False), encoding="utf-8"
+    )
+    (output / "toc_tree_translated.json").write_text(
+        json.dumps({"chapters": [{"title": "封面", "children": []}]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    progress_dir = output / "ocr_markdown"
+    progress_dir.mkdir()
+    (progress_dir / "tree_progress.json").write_text(
+        json.dumps(
+            {
+                "units": [
+                    {
+                        "index_path": [1],
+                        "file": "chapter_1.md",
+                        "part_files": ["chapter_1.md"],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    contexts = build_toc_heading_contexts(output, source_dir=source)
+    assert contexts["chapter_1.md"]["binding_mode"] == "container_only"
+    manifest = output / "translate_subagent_manifest.json"
+    manifest.write_text(
+        json.dumps({"toc_heading_contexts": contexts}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    validated = output / "translated" / "validated"
+    validated.mkdir(parents=True)
+    (validated / "chapter_1.md").write_text(
+        "![cover](../images/cover.png)\n", encoding="utf-8"
+    )
+    report = validate_toc_heading_bindings(output)
+    assert report["valid"] is True
+    assert report["skipped"][0]["reason"].startswith("package-level")
+
+
 def test_toc_heading_binding_allows_whitespace_and_outer_quote_variants(tmp_path: Path):
     output = tmp_path / "output"
     output.mkdir()
@@ -747,6 +868,24 @@ def test_batching_caps_configured_worker_file_count():
     assert batching["max_files"] == MAX_BATCH_FILES == 8
     assert batching["pack_adjacent_chapters"] is True
     assert batching["max_chapters_per_worker"] == 3
+    assert batching["max_tiny_chapters_per_worker"] == 6
+    assert batching["tiny_chapter_max_tokens"] == 2000
+
+
+def test_tiny_batching_settings_fall_back_to_refine_section():
+    batching = _batching_config(
+        {
+            "refine": {
+                "batching": {
+                    "max_tiny_chapters_per_worker": 4,
+                    "tiny_chapter_max_tokens": 321,
+                }
+            }
+        }
+    )
+
+    assert batching["max_tiny_chapters_per_worker"] == 4
+    assert batching["tiny_chapter_max_tokens"] == 321
 
 
 def test_global_toc_outline_keeps_complete_small_tree(tmp_path: Path):

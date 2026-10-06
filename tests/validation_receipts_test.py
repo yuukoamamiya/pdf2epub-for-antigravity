@@ -6,7 +6,10 @@ from pdf2epub.validation_receipts import (
     build_input_snapshot,
     validation_receipt_is_current,
 )
-from pdf2epub.commands.markdown import _load_pdf_continuation_files
+from pdf2epub.commands.markdown import (
+    _load_pdf_continuation_files,
+    _sync_subagent_manifest_progress,
+)
 from pdf2epub.markdown_handoff import prepare_markdown_subagent
 from pdf2epub.workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION
 
@@ -176,3 +179,32 @@ def test_continuation_metadata_uses_refinement_part_order(tmp_path: Path):
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
     assert manifest["continuation_files"] == metadata
     assert "never add a Markdown heading" in paths["prompt"].read_text(encoding="utf-8")
+
+
+def test_full_validation_reconciles_parent_manifest_progress(tmp_path: Path):
+    manifest = tmp_path / "translate_subagent_manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "files": ["a.md", "b.md"],
+                "completed_files": ["a.md"],
+                "pending_files": ["b.md"],
+                "worker_handoffs": [
+                    {"files": ["a.md"], "status": "pending"},
+                    {"files": ["b.md"], "status": "pending"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    _sync_subagent_manifest_progress(
+        tmp_path,
+        "translate",
+        {"scope": "full", "valid_files": ["a.md", "b.md"]},
+    )
+
+    updated = json.loads(manifest.read_text(encoding="utf-8"))
+    assert updated["completed_files"] == ["a.md", "b.md"]
+    assert updated["pending_files"] == []
+    assert all(item["status"] == "completed" for item in updated["worker_handoffs"])

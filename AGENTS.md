@@ -95,6 +95,9 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
   完整快照只用于审计和冲突复核，不能修改。没有外部表时也要尊重记录的
   `explicit_none`/`unconfigured` 状态，不得自行加载目录中的术语表。参考术语表快照
   使用 `reference_glossary_*` 名称，不能覆盖权威术语表，也不得反向写回原文件。
+  参考表若要为英文正文提供德文概念提示，必须在条目中使用带语言标记的
+  `aliases_by_language`（例如 `English: [sublation]`）；命中的条目只作为
+  `kind: reference` 的稀疏背景提示，不改变正式术语优先级。
 - `translate`、`polish`、`refine`、`extract-entities`、`translate-toc` 只准备交接或
   执行本地处理；命令成功不代表正文已经完成。
 - `polish` 会按 `subagent.batching.max_concurrency` 生成
@@ -104,10 +107,16 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
   限制；超出限制的章节在章节内部拆分，并且不能与其他章节合并。
   `max_files` 默认值为 5，配置值的有效上限为 8；文件数、字节数和 token 数任一达到
   限制都必须拆批。
+  `index` 单元还受 `refine.oversized_unit_split.threshold_tokens_by_type` 与
+  `target_tokens_by_type` 的条目级拆分阈值约束；不得用固定字母范围或词典回填替代
+  页码、层级和交叉引用校验。
 - `chapter_groups` 是语义分组，不等于 worker 数量。`pack_adjacent_chapters: true`
   时，运行时按 `chapter_groups` 的 TOC 顺序连续装箱；`max_chapters_per_worker` 默认
   为 3。单个章节只要需要内部拆分，或包含超过单文件字节/token 限制的文件，就必须
   独立成批；不能为了凑满 worker 跨过它。
+  连续且每章不超过 `tiny_chapter_max_tokens` 的极短章节可使用
+  `max_tiny_chapters_per_worker` 的更高上限（默认 6），但仍受文件/token 预算约束，且
+  一旦混入普通章节就回到 `max_chapters_per_worker`。
 - 章节 worker 的术语上下文按 handoff 类型读取：单章节使用 `entries`，单个大章节
   的分片使用 `shared_entries` + `local_entries`，相邻多章节 worker 使用 `files` 映射，
   只能应用匹配文件的条目。相邻章节可以共享同一个 Subagent 的风格上下文，但不得把
@@ -238,6 +247,9 @@ PDF 正文 Prompt 还会从已验证的 `toc_tree_translated.json` 生成一个�
 TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引号做规范化容差；近义词或
 独立改译仍必须失败。worker Prompt 必须把当前文件的标题锚定清单置于 assigned 任务附近，
 要求对应的第一个匹配标题逐字使用 TOC 文本，但不强制其成为物理首行。
+  `toc_heading_contexts.binding_mode: container_only` 表示源单元没有可见 TOC 标签（例如
+  纯图片封面或边界片段）；此时 EPUB 构建器负责章节容器标题，Subagent 不得在 Markdown
+  中凭空新增标题或纯段落标签。续文分片仍保持原样，不生成“续”标题。
 
 ## 2. PDF 翻译流程（扫描/混合稿与原生文字稿）
 
@@ -373,6 +385,8 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
    正文数字、标题编号、日期、引用、脚注、参考文献和索引中的页码不得删除。
    润色不得把普通粗体、罗马数字、编号或序数上标升级成 Markdown 标题；已确认的
    `<sup>N</sup>` 注脚才可规范化为 `[^N]`。
+  当前 TOC 标签会作为 polish 的保护证据；唯一出现且与 TOC 标签相同的源行被删除时，
+  必须进入 `review_required`，不能仅因该行位于页首就自动视为页眉。
 
 ### 2.2 术语提取和翻译
 

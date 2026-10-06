@@ -79,6 +79,7 @@ def validate_markdown_subagent(
     selected_files: Optional[Iterable[str]] = None,
     target_language: Optional[str] = None,
     allow_review_warnings: bool = False,
+    protected_toc_titles: Optional[Iterable[str]] = None,
 ) -> Dict:
     """Validate a Subagent markdown hand-off and optionally stage it."""
     source_dir = Path(source_dir)
@@ -139,6 +140,13 @@ def validate_markdown_subagent(
         for name, role in (file_roles or {}).items()
         if str(role).strip().lower() in {"bibliography", "index"}
     }
+    normalized_protected_toc_titles = list(
+        dict.fromkeys(
+            str(title).strip()
+            for title in (protected_toc_titles or ())
+            if str(title).strip()
+        )
+    )
     bilingual_warnings: List[Dict[str, Any]] = []
     validated_dir = target_dir / "validated"
     # Never leave a previous successful hand-off usable after a later failed
@@ -181,6 +189,39 @@ def validate_markdown_subagent(
         if stripped_fence:
             atomic_write_text(target, target_text)
             normalized_files.append(source.name)
+        if task == "polish" and normalized_protected_toc_titles:
+            def normalize_label(value: str) -> str:
+                value = re.sub(r"^\s*#{1,6}\s+", "", value.strip())
+                value = re.sub(r"[*_`]+", "", value).strip()
+                return re.sub(r"\s+", " ", value).casefold()
+
+            source_labels = [
+                normalize_label(line)
+                for line in source_text.splitlines()
+                if normalize_label(line)
+            ]
+            target_labels = [
+                normalize_label(line)
+                for line in target_text.splitlines()
+                if normalize_label(line)
+            ]
+            for title in normalized_protected_toc_titles:
+                normalized_title = normalize_label(title)
+                if (
+                    source_labels.count(normalized_title) == 1
+                    and target_labels.count(normalized_title) == 0
+                ):
+                    review_required.append(
+                        {
+                            "file": source.name,
+                            "kind": "polish_unique_toc_label_removed",
+                            "reason": (
+                                "a unique source TOC label disappeared during polish; "
+                                "confirm that it was not a running header"
+                            ),
+                            "title": title,
+                        }
+                    )
         if task == "translate" and fix_reference_headings:
             target_text, fixes = fix_reference_heading_mismatch(source_text, target_text)
             if fixes:
@@ -480,6 +521,7 @@ def validate_markdown_subagent(
         "structural_warnings": structural_warnings,
         "diff_summary": diff_summary,
         "file_roles": normalized_roles,
+        "protected_toc_titles": normalized_protected_toc_titles,
         "extra": extras,
         "valid_files": valid_files,
         "source_sha256": source_sha256,

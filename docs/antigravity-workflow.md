@@ -74,6 +74,8 @@ PDF 和 EPUB 的正文翻译有两个不能混淆的范围：`chapter_groups` �
 | --- | --- |
 | `pack_adjacent_chapters` | 是否允许相邻顶层章节组进入同一 worker，默认 `true` |
 | `max_chapters_per_worker` | 一个 worker 最多容纳的章节组数量，默认 `3` |
+| `max_tiny_chapters_per_worker` | 连续 tiny 章节的更高上限，默认 `6`；只在批次全由 tiny 章节组成时生效 |
+| `tiny_chapter_max_tokens` | 判定 tiny 章节的单章 token 上限，默认 `2000` |
 | `max_files` | 一个 worker 的源文件数量上限，硬上限为 `8` |
 | `max_source_tokens` | 一个 worker 的源 token 预算 |
 | `single_file_max_bytes` | 单个文件超过该值时必须独立成批，默认 `30000` |
@@ -88,6 +90,8 @@ PDF 和 EPUB 的正文翻译有两个不能混淆的范围：`chapter_groups` �
    新 worker。装箱只允许连续相邻章节，不做跨章节重排或负载均衡重排。
 4. `--resume` 时，已经完成而被跳过的章节组是相邻性屏障；不能把它前后的两个待处理章节
    重新拼成一个 worker。
+5. 若当前批次和新增章节都属于 tiny，章节数可放宽到 `max_tiny_chapters_per_worker`；
+   新增普通章节、超大章节或拆分章节时不适用该放宽。
 
 父级 `translate_subagent_manifest.json` 保留完整的 `chapter_groups`、`pending_files`、
 `batch_queue` 和审计信息。真正交给 Subagent 的 scoped manifest 只保留当前 worker 的
@@ -495,6 +499,11 @@ MathML 是当前默认策略，因为它不增加系统级 TeX 依赖，已满�
 
 `refine` 是 `refine-prepare` 的别名，不再存在 provider/API 实现。
 
+超大单元拆分支持按内容类型覆盖阈值。默认 `index` 使用 6,000 token 的拆分阈值和
+4,500 token 的目标大小，仍按完整索引条目/子条目边界切分；可在
+`refine.oversized_unit_split.threshold_tokens_by_type` 和
+`target_tokens_by_type` 中调整。不要用固定字母范围或词典回填替代条目级校验。
+
 ## PDF 翻译的术语、注脚和目录
 
 润色前后的 Markdown 标题标记是结构合同：Subagent 不得把普通粗体、罗马数字
@@ -523,6 +532,12 @@ PDF 翻译、实体提取和打包都必须以当前且通过 `polish-validate` 
 `polished_markdown/validated/` 为源稿；如果润色稿缺失、校验失败或与当前源稿不匹配，
 本地门禁会拒绝继续。
 
+polish handoff 会附带源语言 TOC 标签保护清单。唯一出现且匹配 TOC 的源行被删除时，
+校验会生成 `polish_unique_toc_label_removed` 的 `review_required`；重复页眉只有在
+版面和重复性证据充分时才可移除。纯图片或无可见标题的单元使用
+`binding_mode: container_only`，由 EPUB 构建阶段生成包装器标题，Markdown worker 不得
+自行补写标题。
+
 `extract-entities` 读取 `translation.source_stage` 实际选中的源稿，并生成
 `translation_entities.template.json` 和 `translation_entities.json` 的交接契约。
 默认情况下 `translate` 要求后者存在且合法，
@@ -547,6 +562,9 @@ PDF 正文 Prompt 还会读取已验证的
 `reference_eligible`，但不会自动选择；用户明确选择后，Subagent 只能读取其
 `reference_glossary_*` 快照，用于概念对照和既有目标语定名参考，不能覆盖正式术语表，
 也不能修改原始 YAML、快照或生成自动修订版。
+需要从英文正文命中德文概念时，在条目中声明
+`aliases_by_language: {English: [sublation]}`。这些命中只进入当前单元的
+`kind: reference` 稀疏上下文，不参与 fixed/preferred/entity 优先级。
 
 目录翻译保持独立的 JSON 合同，可使用：
 

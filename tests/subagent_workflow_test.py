@@ -33,6 +33,7 @@ from pdf2epub.markdown_validation import (
     polish_content_integrity_check,
     target_language_ratio_check,
 )
+from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 from pdf2epub.footnote_normalization import validate_polish_footnote_normalization
 from pdf2epub.cli import (
     _prepare_pdf_markdown_task,
@@ -1948,6 +1949,45 @@ def test_markdown_unit_split_keeps_index_continuation_with_entry():
 
     assert "Algeria: first half,\n\nAlgeria: *(continued)*" in "".join(result.parts)
     assert "".join(result.parts) == text
+
+
+def test_index_units_use_a_role_specific_split_budget():
+    breakdown = RefinedBreakdown({"refine": {}})
+    policy = breakdown.split_policy
+    assert policy["threshold_tokens_by_type"]["index"] == 6000
+    assert policy["target_tokens_by_type"]["index"] == 4500
+
+    text = "\n\n".join(f"Term {index}  {index}" for index in range(7000))
+    result = split_markdown_unit(text, 4500, "index", lambda value: len(value.split()))
+    assert len(result.parts) > 1
+    assert "Term 0" in result.parts[0]
+    assert "Term 6999" in result.parts[-1]
+
+
+def test_polish_flags_unique_toc_label_removed(tmp_path: Path):
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "polished"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "chapter.md").write_text(
+        "Absolute knowledge\n\nand comprehensible order comprises the whole.\n",
+        encoding="utf-8",
+    )
+    (target_dir / "chapter.md").write_text(
+        "and comprehensible order comprises the whole.\n", encoding="utf-8"
+    )
+    report = validate_markdown_subagent(
+        tmp_path,
+        "polish",
+        source_dir,
+        target_dir,
+        protected_toc_titles=["Absolute knowledge"],
+    )
+    assert report["all_passed"] is False
+    assert any(
+        item["kind"] == "polish_unique_toc_label_removed"
+        for item in report["review_required"]
+    )
 
 
 def test_entity_validation_requires_completed_entries():

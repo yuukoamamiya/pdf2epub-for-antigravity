@@ -249,7 +249,26 @@ def validate_toc_translation_subagent(output_dir: Path) -> Dict:
     }
 
 
-def build_toc_heading_contexts(output_dir: Path) -> Dict[str, Dict[str, Any]]:
+def _source_contains_label(text: str, label: str) -> bool:
+    """Return whether a source unit visibly contains a TOC label."""
+    expected = _normalize_toc_heading_for_binding(label)
+    if not expected:
+        return False
+    for line in str(text or "").splitlines():
+        value = line.strip()
+        if not value or value.startswith("```"):
+            continue
+        value = re.sub(r"^#{1,6}\s+", "", value)
+        value = re.sub(r"[*_`]+", "", value).strip()
+        if _normalize_toc_heading_for_binding(value) == expected:
+            return True
+    return False
+
+
+def build_toc_heading_contexts(
+    output_dir: Path,
+    source_dir: Optional[Path] = None,
+) -> Dict[str, Dict[str, Any]]:
     """Map generated Markdown units to exact translated TOC labels.
 
     The context is metadata only. It gives a translation worker the exact
@@ -257,16 +276,23 @@ def build_toc_heading_contexts(output_dir: Path) -> Dict[str, Dict[str, Any]]:
     """
     output_dir = Path(output_dir)
     toc_path = output_dir / "toc_tree_translated.json"
+    source_toc_path = output_dir / "toc_tree.json"
     progress_path = output_dir / "ocr_markdown" / "tree_progress.json"
     if not toc_path.is_file() or not progress_path.is_file():
         return {}
     try:
         toc = json.loads(toc_path.read_text(encoding="utf-8"))
+        source_toc = (
+            json.loads(source_toc_path.read_text(encoding="utf-8"))
+            if source_toc_path.is_file()
+            else {}
+        )
         progress = json.loads(progress_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
 
     nodes: Dict[tuple[int, ...], Dict[str, Any]] = {}
+    source_nodes: Dict[tuple[int, ...], Dict[str, Any]] = {}
 
     def visit(items: Any, prefix: tuple[int, ...] = ()) -> None:
         if not isinstance(items, list):
@@ -279,6 +305,18 @@ def build_toc_heading_contexts(output_dir: Path) -> Dict[str, Dict[str, Any]]:
             visit(node.get("children", []), path)
 
     visit(toc.get("chapters", []))
+
+    def visit_source(items: Any, prefix: tuple[int, ...] = ()) -> None:
+        if not isinstance(items, list):
+            return
+        for index, node in enumerate(items, 1):
+            if not isinstance(node, dict):
+                continue
+            path = prefix + (index,)
+            source_nodes[path] = node
+            visit_source(node.get("children", []), path)
+
+    visit_source(source_toc.get("chapters", []))
     contexts: Dict[str, Dict[str, Any]] = {}
     for unit in progress.get("units", []):
         if not isinstance(unit, dict):
@@ -302,6 +340,28 @@ def build_toc_heading_contexts(output_dir: Path) -> Dict[str, Dict[str, Any]]:
             "children": [child for child in children if child["title"]],
         }
         names = unit.get("part_files") or [unit.get("file")]
+        # The EPUB builder supplies the parent TOC title as a package-level
+        # container when the source unit has no visible title (cover/image-only
+        # units and boundary fragments are common examples).  Requiring the
+        # Subagent to invent that title would violate the immutable Markdown
+        # heading contract.  Older callers without a source directory retain
+        # the conservative visible-title contract.
+        source_text = ""
+        if source_dir is not None and names and names[0]:
+            source_file = Path(source_dir) / str(names[0])
+            try:
+                source_text = source_file.read_text(encoding="utf-8")
+            except (OSError, UnicodeError):
+                source_text = ""
+        source_node = source_nodes.get(index_path, {})
+        source_title = str(source_node.get("title") or "").strip()
+        context["binding_mode"] = (
+            "visible"
+            if source_dir is None
+            or not source_node
+            or _source_contains_label(source_text, source_title)
+            else "container_only"
+        )
         # Stable child anchors are added to the first physical part only.
         # Mapping the contract to that same file avoids requiring a repeated
         # chapter title in later continuation parts.
@@ -458,6 +518,7 @@ def validate_toc_heading_bindings(output_dir: Path) -> Dict[str, Any]:
     target_dir = output_dir / "translated" / "validated"
     errors = []
     checked = []
+    skipped = []
     normalized_matches: List[Dict[str, str]] = []
     for name, context in contexts.items():
         target = target_dir / str(name)
@@ -482,8 +543,18 @@ def validate_toc_heading_bindings(output_dir: Path) -> Dict[str, Any]:
             normalized_candidates.add(_normalize_toc_heading_for_binding(value))
         expected = []
         title = str(context.get("toc_title") or "").strip()
-        if title:
+        binding_mode = str(context.get("binding_mode") or "visible").strip()
+        if title and binding_mode != "container_only":
             expected.append(("TOC title", title))
+        elif title and binding_mode == "container_only":
+            skipped.append(
+                {
+                    "file": name,
+                    "label": "TOC title",
+                    "title": title,
+                    "reason": "package-level container title; source has no visible label",
+                }
+            )
         for child in context.get("children", []):
             if isinstance(child, dict) and str(child.get("title") or "").strip():
                 expected.append((f"TOC child {child.get('anchor', '')}".strip(), str(child["title"]).strip()))
@@ -510,6 +581,7 @@ def validate_toc_heading_bindings(output_dir: Path) -> Dict[str, Any]:
         "valid": not errors,
         "errors": errors,
         "checked": checked,
+        "skipped": skipped,
         "normalized_matches": normalized_matches,
     }
 

@@ -50,6 +50,7 @@ def prepare_markdown_subagent(
     visual_review_dir: Optional[Path] = None,
     review_output_dir: Optional[Path] = None,
     continuation_files: Optional[Mapping[str, Mapping[str, Any]]] = None,
+    protected_toc_titles: Optional[Iterable[str]] = None,
 ) -> Dict[str, Path]:
     """Write a manifest and prompt for a markdown Subagent task."""
     source_dir = Path(source_dir)
@@ -420,6 +421,15 @@ def prepare_markdown_subagent(
         manifest["file_contexts"] = normalized_file_contexts
     if normalized_heading_contexts:
         manifest["toc_heading_contexts"] = normalized_heading_contexts
+    normalized_protected_toc_titles = list(
+        dict.fromkeys(
+            str(title).strip()
+            for title in (protected_toc_titles or ())
+            if str(title).strip()
+        )
+    )
+    if normalized_protected_toc_titles:
+        manifest["protected_toc_titles"] = normalized_protected_toc_titles
     normalized_global_toc_outline = str(global_toc_outline or "").strip()
     if normalized_global_toc_outline:
         manifest["global_toc_outline_sha256"] = hashlib.sha256(
@@ -572,11 +582,15 @@ Batching guidance:
   {manifest['concurrency_reason']}).
 - When `chapter_groups` is present, adjacent top-level chapter groups may be
   packed into one Subagent task when `pack_adjacent_chapters` is enabled. A
-  packed task contains at most {batching['max_chapters_per_worker']} chapters
-  and still obeys the file/token limits. Its terminology context is scoped per
-  source file so terms cannot leak between chapters. A chapter larger than the
-  batching limits is always split only within itself and must not be packed with
-  another chapter.
+  packed task contains at most {batching['max_chapters_per_worker']} ordinary
+  chapters and still obeys the file/token limits. A run of only tiny chapters
+  (each at most {batching['tiny_chapter_max_tokens']} source tokens) may contain
+  up to {batching['max_tiny_chapters_per_worker']} chapters, subject to the same
+  file/token limits. The tiny allowance does not raise the chapter limit for a
+  batch that contains an ordinary or oversized chapter. Its terminology context
+  is scoped per source file so terms cannot leak between chapters. A chapter
+  larger than the batching limits is always split only within itself and must
+  not be packed with another chapter.
 - Files with no prior validation report are pending, even when a non-empty
   target file already exists.
 - Do not create extra Markdown files in the source or target directory. Put any
@@ -675,6 +689,15 @@ Global book outline (orientation only; never copy headings from another branch):
 Use this adaptive outline only to understand the book's overall structure and
 topic progression. The current chapter's exact TOC contract above is
 authoritative for visible headings and output wording.
+
+Protected source TOC labels for polish (read-only metadata):
+
+{chr(10).join(f"- {json.dumps(title, ensure_ascii=False)}" for title in normalized_protected_toc_titles) or "- none"}
+
+When polishing, a unique source line matching one of these labels is presumed
+to be a real section label and must be preserved. Remove it only when the page
+layout and repetition clearly prove that it is a running header; ambiguous
+deletions must be left for review.
 
 Previous local validation review signals:
 
