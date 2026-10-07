@@ -11,6 +11,9 @@ entries:
 - id: absence
   source: absence
   target: 缺位
+  aliases_by_language:
+    French:
+      - absence
   policy: fixed
 - id: anxiety
   source: anxiety
@@ -18,6 +21,9 @@ entries:
   variants:
   - angoisse
   - Angst
+  aliases_by_language:
+    French:
+      - angoisse
   policy: fixed
 - id: aphanisis
   source: aphanisis
@@ -26,6 +32,9 @@ entries:
 - id: art
   source: art
   target: 艺术
+  aliases_by_language:
+    French:
+      - art
   policy: fixed
 - id: autonomous-ego
   source: autonomous ego
@@ -36,6 +45,9 @@ entries:
   target: 行动
   variants:
   - acte
+  aliases_by_language:
+    French:
+      - acte
   policy: fixed
 - id: acting-out
   source: acting out
@@ -48,18 +60,27 @@ entries:
   target: 情感
   variants:
   - Affekt
+  aliases_by_language:
+    French:
+      - affect
   policy: fixed
 - id: aggressivity
   source: aggressivity
   target: 侵凌性
   variants:
   - agressivité
+  aliases_by_language:
+    French:
+      - agressivité
   policy: fixed
 - id: algebra
   source: algebra
   target: 代数学
   variants:
   - algèbre
+  aliases_by_language:
+    French:
+      - algèbre
   policy: fixed
 - id: alienation
   source: alienation
@@ -67,12 +88,18 @@ entries:
   variants:
   - aliénation
   - Entfremdung
+  aliases_by_language:
+    French:
+      - aliénation
   policy: fixed
 - id: bar
   source: bar
   target: 杠
   variants:
   - barre
+  aliases_by_language:
+    French:
+      - barre
   policy: fixed
 - id: beautiful-soul
   source: beautiful soul
@@ -80,6 +107,9 @@ entries:
   variants:
   - belle âme
   - schöne Seele
+  aliases_by_language:
+    French:
+      - belle âme
   policy: fixed
 - id: being
   source: being
@@ -87,6 +117,9 @@ entries:
   variants:
   - être
   - Sein
+  aliases_by_language:
+    French:
+      - être
   policy: fixed
 - id: bejahung
   source: Bejahung
@@ -97,50 +130,80 @@ entries:
   target: 生物学
   variants:
   - biologie
+  aliases_by_language:
+    French:
+      - biologie
   policy: fixed
 - id: borromean-knot
   source: Borromean knot
   target: 博洛米结
   variants:
   - nœud borroméen
+  aliases_by_language:
+    French:
+      - nœud borroméen
   policy: fixed
 - id: captation
   source: captation
   target: 捕获
+  aliases_by_language:
+    French:
+      - captation
   policy: fixed
 - id: counterpart
   source: counterpart
   target: 相似者
   variants:
   - semblable
+  aliases_by_language:
+    French:
+      - semblable
   policy: fixed
 - id: contertransference
   source: contertransference
   target: 反转移
   variants:
   - contre-transfert
+  aliases_by_language:
+    French:
+      - contre-transfert
   policy: fixed
 - id: cartel
   source: cartel
   target: 卡特尔
+  aliases_by_language:
+    French:
+      - cartel
   policy: fixed
 - id: castration-complex
   source: castration complex
   target: 阉割情结
   variants:
   - complexe de castration
+  aliases_by_language:
+    French:
+      - complexe de castration
   policy: fixed
 - id: cause
   source: cause
   target: 原因/事业
+  aliases_by_language:
+    French:
+      - cause
   policy: fixed
 - id: chance
   source: chance
   target: 偶然
+  aliases_by_language:
+    French:
+      - chance
   policy: fixed
 - id: code
   source: code
   target: 编码
+  aliases_by_language:
+    French:
+      - code
   policy: fixed
 - id: cogito
   source: cogito
@@ -149,6 +212,9 @@ entries:
 - id: communication
   source: communication
   target: 交流
+  aliases_by_language:
+    French:
+      - communication
   policy: fixed
 - id: complex
   source: complex
@@ -156,6 +222,9 @@ entries:
   variants:
   - complexe
   - Komplex
+  aliases_by_language:
+    French:
+      - complexe
   policy: fixed
 - id: disavowal
   source: disavowal
@@ -163,12 +232,18 @@ entries:
   variants:
   - déni
   - Verleugnung
+  aliases_by_language:
+    French:
+      - déni
   policy: fixed
 - id: discourse
   source: discourse
   target: 话语
   variants:
   - discours
+  aliases_by_language:
+    French:
+      - discours
   policy: fixed
 - id: drive
   source: drive
@@ -176,12 +251,18 @@ entries:
   variants:
   - pulsion
   - Trieb
+  aliases_by_language:
+    French:
+      - pulsion
   policy: fixed
 - id: dual-relation
   source: dual relation
   target: 二元关系
   variants:
   - relation duelle
+  aliases_by_language:
+    French:
+      - relation duelle
   policy: fixed
 - id: death-drive
   source: death drive
@@ -189,6 +270,9 @@ entries:
   variants:
   - pulsion de mort
   - Todestriebe
+  aliases_by_language:
+    French:
+      - pulsion de mort
   policy: fixed
 - id: defence
   source: defence
@@ -196,18 +280,27 @@ entries:
   variants:
   - défense
   - Abwehr
+  aliases_by_language:
+    French:
+      - défense
   policy: fixed
 - id: delusion
   source: delusion
   target: 妄想
   variants:
   - délire
+  aliases_by_language:
+    French:
+      - délire
   policy: fixed
 - id: demand
   source: demand
   target: 要求/请求
   variants:
   - demande
+  aliases_by_language:
+    French:
+      - demande
   policy: fixed
 - id: desire
   source: desire
@@ -216,24 +309,36 @@ entries:
   - désir
   - Wunsch
   - Begierde
+  aliases_by_language:
+    French:
+      - désir
   policy: fixed
 - id: desire-of-the-analyst
   source: desire of the analyst
   target: 分析家的欲望
   variants:
   - désir de l’analyste
+  aliases_by_language:
+    French:
+      - désir de l’analyste
   policy: fixed
 - id: development
   source: development
   target: 发展
   variants:
   - développement
+  aliases_by_language:
+    French:
+      - développement
   policy: fixed
 - id: dialectic
   source: dialectic
   target: 辩证法
   variants:
   - dialectique
+  aliases_by_language:
+    French:
+      - dialectique
   policy: fixed
 - id: ego
   source: ego
@@ -241,6 +346,9 @@ entries:
   variants:
   - moi
   - Ich
+  aliases_by_language:
+    French:
+      - moi
   policy: fixed
 - id: ego-ideal
   source: ego-ideal
@@ -248,66 +356,99 @@ entries:
   variants:
   - idéal du moi
   - Ich-ideal
+  aliases_by_language:
+    French:
+      - idéal du moi
   policy: fixed
 - id: ego-psychology
   source: ego-psychology
   target: 自我心理学
   variants:
   - psychologie du moi
+  aliases_by_language:
+    French:
+      - psychologie du moi
   policy: fixed
 - id: end-of-analysis
   source: end of analysis
   target: 分析的结束
   variants:
   - fin d’analyse
+  aliases_by_language:
+    French:
+      - fin d’analyse
   policy: fixed
 - id: enunciation
   source: enunciation
   target: 能述
   variants:
   - énonciation
+  aliases_by_language:
+    French:
+      - énonciation
   policy: fixed
 - id: ethics
   source: ethics
   target: 伦理学
   variants:
   - éthique
+  aliases_by_language:
+    French:
+      - éthique
   policy: fixed
 - id: existence
   source: existence
   target: 存在/实存
   variants:
   - Existenz
+  aliases_by_language:
+    French:
+      - existence
   policy: fixed
 - id: extimacy
   source: extimacy
   target: 外心性/外密性
   variants:
   - extimité
+  aliases_by_language:
+    French:
+      - extimité
   policy: fixed
 - id: factor-c
   source: factor c
   target: c 因素
   variants:
   - facteur c
+  aliases_by_language:
+    French:
+      - facteur c
   policy: fixed
 - id: frustration
   source: frustration
   target: 挫折
   variants:
   - Versagung
+  aliases_by_language:
+    French:
+      - frustration
   policy: fixed
 - id: fantasy
   source: fantasy
   target: 幻想
   variants:
   - fantasmé
+  aliases_by_language:
+    French:
+      - fantasmé
   policy: fixed
 - id: father
   source: father
   target: 父亲
   variants:
   - père
+  aliases_by_language:
+    French:
+      - père
   policy: fixed
 - id: fetishism
   source: fetishism
@@ -315,6 +456,9 @@ entries:
   variants:
   - fétichisme
   - Fetischismus
+  aliases_by_language:
+    French:
+      - fétichisme
   policy: fixed
 - id: foreclosure
   source: foreclosure
@@ -322,42 +466,63 @@ entries:
   variants:
   - forclusion
   - Verwerfung
+  aliases_by_language:
+    French:
+      - forclusion
   policy: fixed
 - id: founding-speech
   source: founding speech
   target: 基底言语
   variants:
   - parole fondant
+  aliases_by_language:
+    French:
+      - parole fondant
   policy: fixed
 - id: fragmented-body
   source: fragmented body
   target: 碎裂的身体
   variants:
   - corps morcelé
+  aliases_by_language:
+    French:
+      - corps morcelé
   policy: fixed
 - id: freud-return-to
   source: Freud, return to
   target: 回到弗洛伊德
   variants:
   - Freud, retour à
+  aliases_by_language:
+    French:
+      - Freud, retour à
   policy: fixed
 - id: gap
   source: gap
   target: 缺口
   variants:
   - béance
+  aliases_by_language:
+    French:
+      - béance
   policy: fixed
 - id: gaze
   source: gaze
   target: 目光
   variants:
   - regard
+  aliases_by_language:
+    French:
+      - regard
   policy: fixed
 - id: genital
   source: genital
   target: 生殖
   variants:
   - génital
+  aliases_by_language:
+    French:
+      - génital
   policy: fixed
 - id: gestalt
   source: Gestalt
@@ -368,10 +533,16 @@ entries:
   target: 欲望图解
   variants:
   - graphe du désir
+  aliases_by_language:
+    French:
+      - graphe du désir
   policy: fixed
 - id: hallucination
   source: hallucination
   target: 幻觉
+  aliases_by_language:
+    French:
+      - hallucination
   policy: fixed
 - id: helplessness
   source: helplessness
@@ -379,6 +550,9 @@ entries:
   variants:
   - détresse
   - Hilflosigkeit
+  aliases_by_language:
+    French:
+      - détresse
   policy: fixed
 - id: hysteria
   source: hysteria
@@ -386,6 +560,9 @@ entries:
   variants:
   - hystérie
   - Hysterie
+  aliases_by_language:
+    French:
+      - hystérie
   policy: fixed
 - id: id
   source: id
@@ -393,28 +570,43 @@ entries:
   variants:
   - ça
   - das Es
+  aliases_by_language:
+    French:
+      - ça
   policy: fixed
 - id: introjection
   source: introjection
   target: 内摄
   variants:
   - Introjektion
+  aliases_by_language:
+    French:
+      - introjection
   policy: fixed
 - id: inversion
   source: inversion
   target: 颠倒
+  aliases_by_language:
+    French:
+      - inversion
   policy: fixed
 - id: identification
   source: identification
   target: 认同
   variants:
   - Identifizierung
+  aliases_by_language:
+    French:
+      - identification
   policy: fixed
 - id: imaginary
   source: imaginary
   target: 想象界
   variants:
   - imaginaire
+  aliases_by_language:
+    French:
+      - imaginaire
   policy: fixed
 - id: imago
   source: imago
@@ -423,12 +615,18 @@ entries:
 - id: index
   source: index
   target: 指示符
+  aliases_by_language:
+    French:
+      - index
   policy: fixed
 - id: instinct
   source: instinct
   target: 本能
   variants:
   - Instinkt
+  aliases_by_language:
+    French:
+      - instinct
   policy: fixed
 - id: international-psycho-analytical-association
   source: International Psycho-Analytical Association
@@ -439,16 +637,25 @@ entries:
   target: 解释
   variants:
   - interprétation
+  aliases_by_language:
+    French:
+      - interprétation
   policy: fixed
 - id: intersubjectivity
   source: intersubjectivity
   target: 主体间性
   variants:
   - intersubjectivité
+  aliases_by_language:
+    French:
+      - intersubjectivité
   policy: fixed
 - id: jouissance
   source: jouissance
   target: 享乐
+  aliases_by_language:
+    French:
+      - jouissance
   policy: fixed
 - id: kleinian-psychoanalysis
   source: Kleinian psychoanalysis
@@ -460,12 +667,19 @@ entries:
   variants:
   - connaissance
   - savoir
+  aliases_by_language:
+    French:
+      - connaissance
+      - savoir
   policy: fixed
 - id: lack
   source: lack
   target: 缺失
   variants:
   - manque
+  aliases_by_language:
+    French:
+      - manque
   policy: fixed
 - id: language
   source: language
@@ -473,122 +687,186 @@ entries:
   variants:
   - langue
   - langage
+  aliases_by_language:
+    French:
+      - langue
+      - langage
   policy: fixed
 - id: law
   source: law
   target: 法则
   variants:
   - loi
+  aliases_by_language:
+    French:
+      - loi
   policy: fixed
 - id: letter
   source: letter
   target: 字符
   variants:
   - lettre
+  aliases_by_language:
+    French:
+      - lettre
   policy: fixed
 - id: libido
   source: libido
   target: 力比多
+  aliases_by_language:
+    French:
+      - libido
   policy: fixed
 - id: linguistics
   source: linguistics
   target: 语言学
   variants:
   - linguistique
+  aliases_by_language:
+    French:
+      - linguistique
   policy: fixed
 - id: love
   source: love
   target: 爱
   variants:
   - amour
+  aliases_by_language:
+    French:
+      - amour
   policy: fixed
 - id: lure
   source: lure
   target: 引诱
   variants:
   - leurre
+  aliases_by_language:
+    French:
+      - leurre
   policy: fixed
 - id: madness
   source: madness
   target: 疯癫
   variants:
   - folie
+  aliases_by_language:
+    French:
+      - folie
   policy: fixed
 - id: metonymy
   source: metonymy
   target: 换喻
   variants:
   - métonymie
+  aliases_by_language:
+    French:
+      - métonymie
   policy: fixed
 - id: mirror-stage
   source: mirror stage
   target: 镜子阶段
   variants:
   - stade du miroir
+  aliases_by_language:
+    French:
+      - stade du miroir
   policy: fixed
 - id: moebius-strip
   source: moebius strip
   target: 莫比乌斯带
   variants:
   - bande de moebius
+  aliases_by_language:
+    French:
+      - bande de moebius
   policy: fixed
 - id: mother
   source: mother
   target: 母亲
   variants:
   - mère
+  aliases_by_language:
+    French:
+      - mère
   policy: fixed
 - id: master
   source: master
   target: 主人
   variants:
   - maître
+  aliases_by_language:
+    French:
+      - maître
   policy: fixed
 - id: materialism
   source: materialism
   target: 唯物主义
   variants:
   - matérialisme
+  aliases_by_language:
+    French:
+      - matérialisme
   policy: fixed
 - id: mathematics
   source: mathematics
   target: 数学
   variants:
   - mathématiques
+  aliases_by_language:
+    French:
+      - mathématiques
   policy: fixed
 - id: matheme
   source: matheme
   target: 数元/数学型
   variants:
   - mathème
+  aliases_by_language:
+    French:
+      - mathème
   policy: fixed
 - id: meconnaissance
   source: méconnaissance
   target: 误认
+  aliases_by_language:
+    French:
+      - méconnaissance
   policy: fixed
 - id: memory
   source: memory
   target: 记忆
   variants:
   - mémoire
+  aliases_by_language:
+    French:
+      - mémoire
   policy: fixed
 - id: metalanguage
   source: metalanguage
   target: 元语言
   variants:
   - métalangage
+  aliases_by_language:
+    French:
+      - métalangage
   policy: fixed
 - id: metaphor
   source: metaphor
   target: 隐喻
   variants:
   - métaphore
+  aliases_by_language:
+    French:
+      - métaphore
   policy: fixed
 - id: name-of-the-father
   source: Name-of-the-Father
   target: 父亲的名义
   variants:
   - Nom-du-père ①
+  aliases_by_language:
+    French:
+      - Nom-du-père ①
   policy: fixed
 - id: narcissism
   source: narcissism
@@ -596,16 +874,25 @@ entries:
   variants:
   - narcissisme
   - Narzissmus
+  aliases_by_language:
+    French:
+      - narcissisme
   policy: fixed
 - id: nature
   source: nature
   target: 自然
+  aliases_by_language:
+    French:
+      - nature
   policy: fixed
 - id: need
   source: need
   target: 需要
   variants:
   - besoin
+  aliases_by_language:
+    French:
+      - besoin
   policy: fixed
 - id: negation
   source: negation
@@ -613,6 +900,9 @@ entries:
   variants:
   - dénégation
   - Verneinung
+  aliases_by_language:
+    French:
+      - dénégation
   policy: fixed
 - id: neurosis
   source: neurosis
@@ -620,22 +910,34 @@ entries:
   variants:
   - névrose
   - Neurose
+  aliases_by_language:
+    French:
+      - névrose
   policy: fixed
 - id: object-relations-theory
   source: object-relations theory
   target: 对象关系理论
   variants:
   - théorie du relation d’objet
+  aliases_by_language:
+    French:
+      - théorie du relation d’objet
   policy: fixed
 - id: objet-petit-a
   source: objet petit a
   target: 对象小 a
+  aliases_by_language:
+    French:
+      - objet petit a
   policy: fixed
 - id: obsessional-neurosis
   source: obsessional neurosis
   target: 强迫型神经症
   variants:
   - névrose obsessionnelle
+  aliases_by_language:
+    French:
+      - névrose obsessionnelle
   policy: fixed
 - id: oedipus-complex
   source: Oedipus complex
@@ -643,18 +945,27 @@ entries:
   variants:
   - complexe d’Œdipe
   - Ödipuskomplex
+  aliases_by_language:
+    French:
+      - complexe d’Œdipe
   policy: fixed
 - id: optical-model
   source: optical model
   target: 光学模型
   variants:
   - modèle optique
+  aliases_by_language:
+    French:
+      - modèle optique
   policy: fixed
 - id: order
   source: order
   target: 秩序
   variants:
   - ordre
+  aliases_by_language:
+    French:
+      - ordre
   policy: fixed
 - id: other
   source: other
@@ -663,6 +974,10 @@ entries:
   - Other
   - autre
   - Autre
+  aliases_by_language:
+    French:
+      - autre
+      - Autre
   policy: fixed
 - id: pleasure-principle
   source: pleasure principle
@@ -670,32 +985,50 @@ entries:
   variants:
   - principe de plaisir
   - Lustprinzip
+  aliases_by_language:
+    French:
+      - principe de plaisir
   policy: fixed
 - id: point-de-capiton
   source: point de capiton
   target: 结扣点
+  aliases_by_language:
+    French:
+      - point de capiton
   policy: fixed
 - id: preoedipal-phase
   source: preoedipal phase
   target: 前俄狄浦斯期
   variants:
   - stade préœdipien
+  aliases_by_language:
+    French:
+      - stade préœdipien
   policy: fixed
 - id: privation
   source: privation
   target: 剥夺
+  aliases_by_language:
+    French:
+      - privation
   policy: fixed
 - id: progress
   source: progress
   target: 进展
   variants:
   - progrès
+  aliases_by_language:
+    French:
+      - progrès
   policy: fixed
 - id: projection
   source: projection
   target: 投射
   variants:
   - Projektion
+  aliases_by_language:
+    French:
+      - projection
   policy: fixed
 - id: psychoanalysis
   source: psychoanalysis
@@ -703,12 +1036,18 @@ entries:
   variants:
   - psychanalyser
   - Psychoanalyse
+  aliases_by_language:
+    French:
+      - psychanalyser
   policy: fixed
 - id: psychology
   source: psychology
   target: 心理学
   variants:
   - psychologie
+  aliases_by_language:
+    French:
+      - psychologie
   policy: fixed
 - id: psychosis
   source: psychosis
@@ -716,10 +1055,16 @@ entries:
   variants:
   - psychose
   - Psychose
+  aliases_by_language:
+    French:
+      - psychose
   policy: fixed
 - id: punctuation
   source: punctuation
   target: 标点
+  aliases_by_language:
+    French:
+      - punctuation
   policy: fixed
 - id: part-object
   source: part-object
@@ -727,54 +1072,81 @@ entries:
   variants:
   - objet partiel
   - Partialobjekt
+  aliases_by_language:
+    French:
+      - objet partiel
   policy: fixed
 - id: passage-to-the-act
   source: passage to the act
   target: 行动宣泄
   variants:
   - passage à l’act
+  aliases_by_language:
+    French:
+      - passage à l’act
   policy: fixed
 - id: paternal-metaphor
   source: paternal metaphor
   target: 父性隐喻
   variants:
   - métaphore paternelle
+  aliases_by_language:
+    French:
+      - métaphore paternelle
   policy: fixed
 - id: perversion
   source: perversion
   target: 性倒错
   variants:
   - Perversion
+  aliases_by_language:
+    French:
+      - perversion
   policy: fixed
 - id: phallus
   source: phallus
   target: 阳具
   variants:
   - Phallus
+  aliases_by_language:
+    French:
+      - phallus
   policy: fixed
 - id: philosophy
   source: philosophy
   target: 哲学
   variants:
   - philosophie
+  aliases_by_language:
+    French:
+      - philosophie
   policy: fixed
 - id: phobia
   source: phobia
   target: 恐怖症
   variants:
   - phobie
+  aliases_by_language:
+    French:
+      - phobie
   policy: fixed
 - id: quaternary
   source: quaternary
   target: 四元组
   variants:
   - quaternaire
+  aliases_by_language:
+    French:
+      - quaternaire
   policy: fixed
 - id: real
   source: real
   target: 实在界
   variants:
   - réal
+  aliases_by_language:
+    French:
+      - réal
   policy: fixed
 - id: reality-principle
   source: reality principle
@@ -782,12 +1154,18 @@ entries:
   variants:
   - principe de réalité
   - Realitätsprinzip
+  aliases_by_language:
+    French:
+      - principe de réalité
   policy: fixed
 - id: recollection
   source: recollection
   target: 回忆
   variants:
   - remémoration
+  aliases_by_language:
+    French:
+      - remémoration
   policy: fixed
 - id: regression
   source: regression
@@ -795,16 +1173,25 @@ entries:
   variants:
   - régression
   - Regression
+  aliases_by_language:
+    French:
+      - régression
   policy: fixed
 - id: religion
   source: religion
   target: 宗教
+  aliases_by_language:
+    French:
+      - religion
   policy: fixed
 - id: repetition
   source: repetition
   target: 重复
   variants:
   - répétition
+  aliases_by_language:
+    French:
+      - répétition
   policy: fixed
 - id: repression
   source: repression
@@ -812,6 +1199,9 @@ entries:
   variants:
   - refoulement
   - Verdrängung
+  aliases_by_language:
+    French:
+      - refoulement
   policy: fixed
 - id: resistance
   source: resistance
@@ -819,6 +1209,9 @@ entries:
   variants:
   - résistance
   - Widerstand
+  aliases_by_language:
+    French:
+      - résistance
   policy: fixed
 - id: sadism
   source: sadism
@@ -827,6 +1220,10 @@ entries:
   - masochism
   - sadisme
   - masochisme
+  aliases_by_language:
+    French:
+      - sadisme
+      - masochisme
   policy: fixed
 - id: shifter
   source: shifter
@@ -837,18 +1234,27 @@ entries:
   target: 符号
   variants:
   - signé
+  aliases_by_language:
+    French:
+      - signé
   policy: fixed
 - id: signified
   source: signified
   target: 所指
   variants:
   - signifié
+  aliases_by_language:
+    French:
+      - signifié
   policy: fixed
 - id: signifier
   source: signifier
   target: 能指
   variants:
   - signifiant
+  aliases_by_language:
+    French:
+      - signifiant
   policy: fixed
 - id: signifying-chain
   source: signifying chain
@@ -856,10 +1262,17 @@ entries:
   variants:
   - chaîne signifiante
   - chaîne du signifiant
+  aliases_by_language:
+    French:
+      - chaîne signifiante
+      - chaîne du signifiant
   policy: fixed
 - id: sinthome
   source: sinthome
   target: 圣状
+  aliases_by_language:
+    French:
+      - sinthome
   policy: fixed
 - id: slip
   source: slip
@@ -867,56 +1280,87 @@ entries:
   variants:
   - glisser[动词]
   - glissement[名词]
+  aliases_by_language:
+    French:
+      - glisser[动词]
+      - glissement[名词]
   policy: fixed
 - id: specular-image
   source: specular image
   target: 镜像
   variants:
   - image spéculaire
+  aliases_by_language:
+    French:
+      - image spéculaire
   policy: fixed
 - id: speech
   source: speech
   target: 言语
   variants:
   - parole
+  aliases_by_language:
+    French:
+      - parole
   policy: fixed
 - id: scene
   source: scene
   target: 场景
   variants:
   - scène
+  aliases_by_language:
+    French:
+      - scène
   policy: fixed
 - id: split
   source: split
   target: 分裂
   variants:
   - refente
+  aliases_by_language:
+    French:
+      - refente
   policy: fixed
 - id: structure
   source: structure
   target: 结构
+  aliases_by_language:
+    French:
+      - structure
   policy: fixed
 - id: subject
   source: subject
   target: 主体
   variants:
   - sujet
+  aliases_by_language:
+    French:
+      - sujet
   policy: fixed
 - id: subject-supposed-to-know
   source: subject supposed to know
   target: 假设知道的主体
   variants:
   - sujet supposé savoir
+  aliases_by_language:
+    French:
+      - sujet supposé savoir
   policy: fixed
 - id: sublimation
   source: sublimation
   target: 升华
   variants:
   - Sublimierung
+  aliases_by_language:
+    French:
+      - sublimation
   policy: fixed
 - id: suggestion
   source: suggestion
   target: 暗示
+  aliases_by_language:
+    French:
+      - suggestion
   policy: fixed
 - id: superego
   source: superego
@@ -924,54 +1368,81 @@ entries:
   variants:
   - surmoi
   - Über-Ich
+  aliases_by_language:
+    French:
+      - surmoi
   policy: fixed
 - id: symbolic
   source: symbolic
   target: 象征界
   variants:
   - symbolique
+  aliases_by_language:
+    French:
+      - symbolique
   policy: fixed
 - id: symptom
   source: symptom
   target: 症状
   variants:
   - symptôme
+  aliases_by_language:
+    French:
+      - symptôme
   policy: fixed
 - id: schema-l
   source: schema L
   target: L图式
   variants:
   - schéma L
+  aliases_by_language:
+    French:
+      - schéma L
   policy: fixed
 - id: school
   source: school
   target: 学派
   variants:
   - école
+  aliases_by_language:
+    French:
+      - école
   policy: fixed
 - id: science
   source: science
   target: 科学
   variants:
   - Wissenschaft
+  aliases_by_language:
+    French:
+      - science
   policy: fixed
 - id: semblance
   source: semblance
   target: 假相
   variants:
   - semblant
+  aliases_by_language:
+    French:
+      - semblant
   policy: fixed
 - id: seminar
   source: seminar
   target: 研讨班
   variants:
   - séminaire
+  aliases_by_language:
+    French:
+      - séminaire
   policy: fixed
 - id: sexual-relationship
   source: sexual relationship
   target: 性别关系
   variants:
   - rapport sexuel
+  aliases_by_language:
+    French:
+      - rapport sexuel
   policy: fixed
 - id: thing
   source: Thing
@@ -979,24 +1450,36 @@ entries:
   variants:
   - chose
   - das Ding
+  aliases_by_language:
+    French:
+      - chose
   policy: fixed
 - id: time
   source: time
   target: 时间
   variants:
   - temps
+  aliases_by_language:
+    French:
+      - temps
   policy: fixed
 - id: topology
   source: topology
   target: 拓扑学
   variants:
   - topologie
+  aliases_by_language:
+    French:
+      - topologie
   policy: fixed
 - id: torus
   source: torus
   target: 圆环面
   variants:
   - tore
+  aliases_by_language:
+    French:
+      - tore
   policy: fixed
 - id: transference
   source: transference
@@ -1004,24 +1487,36 @@ entries:
   variants:
   - transfert
   - Übertragung
+  aliases_by_language:
+    French:
+      - transfert
   policy: fixed
 - id: transitivism
   source: transitivism
   target: 互易感觉
   variants:
   - transitivisme
+  aliases_by_language:
+    French:
+      - transitivisme
   policy: fixed
 - id: treatment
   source: treatment
   target: 治疗
   variants:
   - cure
+  aliases_by_language:
+    French:
+      - cure
   policy: fixed
 - id: truth
   source: truth
   target: 真理
   variants:
   - vérité
+  aliases_by_language:
+    French:
+      - vérité
   policy: fixed
 - id: unconscious
   source: unconscious
@@ -1029,10 +1524,16 @@ entries:
   variants:
   - inconscient
   - das Unbewußte
+  aliases_by_language:
+    French:
+      - inconscient
   policy: fixed
 - id: woman
   source: woman
   target: 女人
   variants:
   - femme
+  aliases_by_language:
+    French:
+      - femme
   policy: fixed
