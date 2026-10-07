@@ -10,6 +10,11 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 from .workflow_contracts import atomic_write_text, relative_posix_path
+from .subagent_dispatch import (
+    build_assignment_sha256,
+    dispatch_lease_path,
+    inspect_dispatch_assignment,
+)
 
 DEFAULT_TRANSLATION_MODEL = "gemini-3.1-pro-preview"
 DEFAULT_SUBAGENT_MODEL = "gemini-3.6-flash"
@@ -848,12 +853,60 @@ def write_worker_handoffs(
         handoff_dir_name or ("worker_handoffs" if task == "translate" else f"{task}_worker_handoffs")
     )
     handoff_dir.mkdir(parents=True, exist_ok=True)
+    lease_path = dispatch_lease_path(output_dir, task)
+    manifest["dispatch_lease_file"] = relative_posix_path(lease_path, output_dir)
     unit_contexts = manifest.get("unit_context_files", {}) or {}
+    previous_handoffs = manifest.get("previous_worker_handoffs", [])
+    if not isinstance(previous_handoffs, list):
+        previous_handoffs = []
+    # A direct second call to this function (without a fresh prepare step)
+    # should also retain active state from the current manifest.  This is an
+    # advisory hand-off lease, not a claim that the IDE has confirmed a live
+    # conversation; the dispatching layer must still inspect the actual
+    # Subagent list before starting work.
+    previous_handoffs = previous_handoffs + [
+        item
+        for item in (manifest.get("worker_handoffs", []) or [])
+        if isinstance(item, Mapping)
+    ]
+    previous_by_assignment: dict[str, Mapping[str, Any]] = {}
+    for item in previous_handoffs:
+        assignment = str(item.get("assignment_sha256") or "").strip()
+        if assignment:
+            previous_by_assignment[assignment] = item
     handoffs: List[Dict[str, Any]] = []
     worker_queue = []
     for group in groups:
         worker_id = group["worker_id"]
         files = list(group["files"])
+        source_hashes = manifest.get("source_sha256", {})
+        if not isinstance(source_hashes, Mapping):
+            source_hashes = {}
+        unit_context_hashes = manifest.get("unit_context_sha256", {})
+        if not isinstance(unit_context_hashes, Mapping):
+            unit_context_hashes = {}
+        global_context_hashes = manifest.get("context_sha256", {})
+        if not isinstance(global_context_hashes, Mapping):
+            global_context_hashes = {}
+        assignment_sha256 = build_assignment_sha256(
+            task=task,
+            worker_id=worker_id,
+            assigned_files=files,
+            batch_ids=[batch.get("batch_id") for batch in group["batches"]],
+            source_sha256=source_hashes,
+            context_sha256={
+                **{
+                    f"unit:{name}": unit_context_hashes[name]
+                    for name in files
+                    if name in unit_context_hashes
+                },
+                **{
+                    f"global:{name}": value
+                    for name, value in global_context_hashes.items()
+                },
+            },
+        )
+        prior = previous_by_assignment.get(assignment_sha256)
         chapter_pack = chapter_mode and int(group.get("chapter_count", 1)) > 1
         scoped = _worker_manifest_projection(
             manifest,
@@ -863,6 +916,8 @@ def write_worker_handoffs(
             chapter_mode=chapter_mode,
             group=group,
         )
+        scoped["assignment_sha256"] = assignment_sha256
+        scoped["dispatch_lease_file"] = relative_posix_path(lease_path, output_dir)
         # Worker manifests must expose only their assigned unit contexts.  The
         # parent manifest may contain every unit, but that inventory is not a
         # permission for this worker to inspect other files.
@@ -1219,13 +1274,36 @@ def write_worker_handoffs(
             ),
             "batch_ids": [batch.get("batch_id") for batch in group["batches"]],
             "files": files,
+            "assigned_files": files,
             "estimated_tokens": group["estimated_tokens"],
+            "assignment_sha256": assignment_sha256,
+            "dispatch_status": (
+                inspect_dispatch_assignment(
+                    lease_path,
+                    assignment_sha256=assignment_sha256,
+                    assigned_files=files,
+                )["status"]
+                if lease_path.is_file()
+                else "available"
+            ),
             "manifest": relative_posix_path(scoped_path, output_dir),
             "prompt": relative_posix_path(scoped_prompt_path, output_dir),
             "status": "pending",
         }
+        if prior and str(prior.get("status") or "") in {"assigned", "running"}:
+            # Preserve only active state for an exact assignment.  Completed
+            # state is derived from the current validation checkpoint and must
+            # never make a newly pending file disappear on resume.
+            entry["status"] = str(prior["status"])
+            for key in (
+                "conversation_id",
+                "lease_timestamp",
+                "lease_expires_at",
+            ):
+                if prior.get(key) is not None:
+                    entry[key] = prior[key]
         handoffs.append(entry)
-        worker_queue.append(dict(entry, status="pending"))
+        worker_queue.append(dict(entry))
     manifest["worker_queue"] = worker_queue
     manifest["worker_handoffs"] = handoffs
     atomic_write_text(manifest_path, json.dumps(manifest, ensure_ascii=False, indent=2))

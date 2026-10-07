@@ -5,6 +5,7 @@ from pathlib import Path
 import pymupdf
 
 from pdf2epub.markdown_handoff import prepare_markdown_subagent
+from pdf2epub.commands.markdown import _load_pdf_continuation_toc_titles
 from pdf2epub.pipeline_policy import PipelinePolicy
 from pdf2epub.pdf_text_probe import extract_native_text_pages, probe_pdf_text_layer
 from pdf2epub.subagent_runtime import (
@@ -207,6 +208,150 @@ def test_worker_handoffs_balance_pending_batches_and_keep_files_disjoint(tmp_pat
     assert all(item["manifest"].startswith("worker_handoffs/") for item in handoffs)
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
     assert len(manifest["worker_queue"]) == 3
+    assert manifest["dispatch_lease_file"] == "translate_dispatch_leases.json"
+    scoped = json.loads((tmp_path / handoffs[0]["manifest"]).read_text(encoding="utf-8"))
+    assert scoped["assignment_sha256"] == handoffs[0]["assignment_sha256"]
+    assert scoped["dispatch_lease_file"] == "translate_dispatch_leases.json"
+
+
+def test_worker_handoff_regeneration_preserves_exact_active_assignment(tmp_path: Path):
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    for index in range(2):
+        (source_dir / f"unit_{index}.md").write_text(
+            "text " * (index + 1), encoding="utf-8"
+        )
+    paths = prepare_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        target_dir,
+        "English",
+        "Chinese",
+        config={"subagent": {"batching": {"max_concurrency": 1}}},
+    )
+    first = write_worker_handoffs(tmp_path, paths["manifest"], paths["prompt"])
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    manifest["worker_handoffs"][0].update(
+        {
+            "status": "running",
+            "conversation_id": "conversation-1",
+            "lease_timestamp": "2026-10-07T01:02:03Z",
+        }
+    )
+    paths["manifest"].write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+    second = write_worker_handoffs(tmp_path, paths["manifest"], paths["prompt"])
+
+    assert second[0]["assignment_sha256"] == first[0]["assignment_sha256"]
+    assert second[0]["assigned_files"] == second[0]["files"]
+    assert second[0]["status"] == "running"
+    assert second[0]["conversation_id"] == "conversation-1"
+    assert second[0]["lease_timestamp"] == "2026-10-07T01:02:03Z"
+
+
+def test_continuation_toc_exemption_is_limited_to_nested_part_ancestor(
+    tmp_path: Path,
+):
+    output_dir = tmp_path / "output"
+    progress_dir = output_dir / "ocr_markdown"
+    progress_dir.mkdir(parents=True)
+    (output_dir / "toc_tree.json").write_text(
+        json.dumps(
+            {
+                "chapters": [
+                    {
+                        "title": "IV Hegel in the philosophy history",
+                        "children": [{"title": "Current section"}],
+                    },
+                    {"title": "V Another part"},
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (progress_dir / "tree_progress.json").write_text(
+        json.dumps(
+            {
+                "units": [
+                    {
+                        "unit_id": "chapter_1.1",
+                        "index_path": [1, 1],
+                        "title": "Current section",
+                        "part_files": [
+                            "chapter_1.1.part1.md",
+                            "chapter_1.1.part2.md",
+                        ],
+                    },
+                    {
+                        "unit_id": "chapter_2",
+                        "index_path": [2],
+                        "title": "V Another part",
+                        "part_files": [
+                            "chapter_2.part1.md",
+                            "chapter_2.part2.md",
+                        ],
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = _load_pdf_continuation_toc_titles(output_dir)
+
+    assert result == {
+        "chapter_1.1.part2.md": ["IV Hegel in the philosophy history"]
+    }
+
+
+def test_resume_prepare_carries_active_handoff_to_new_manifest(tmp_path: Path):
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "unit.md").write_text("text", encoding="utf-8")
+    first_paths = prepare_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        target_dir,
+        "English",
+        "Chinese",
+    )
+    write_worker_handoffs(tmp_path, first_paths["manifest"], first_paths["prompt"])
+    manifest = json.loads(first_paths["manifest"].read_text(encoding="utf-8"))
+    manifest["worker_handoffs"][0].update(
+        {
+            "status": "assigned",
+            "conversation_id": "conversation-resume",
+        }
+    )
+    first_paths["manifest"].write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+    resumed_paths = prepare_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        target_dir,
+        "English",
+        "Chinese",
+        resume=True,
+    )
+    handoffs = write_worker_handoffs(
+        tmp_path, resumed_paths["manifest"], resumed_paths["prompt"]
+    )
+
+    assert handoffs[0]["status"] == "assigned"
+    assert handoffs[0]["conversation_id"] == "conversation-resume"
 
 
 def test_validation_receipt_rejects_changed_staged_target(tmp_path: Path) -> None:

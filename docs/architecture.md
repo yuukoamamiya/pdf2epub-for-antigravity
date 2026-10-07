@@ -50,6 +50,7 @@ Subagent 合同层
 ├── markdown_validation.py           结构、脚注、双语和特殊标记规则
 ├── toc_translation_workflow.py      PDF TOC handoff、合并和校验
 ├── subagent_runtime.py              模型选择、token 估算和批次 handoff
+├── subagent_dispatch.py             assignment digest、原子 lease 和冲突检测
 └── subagent_safety.py               拒答/免责声明检测
 ```
 
@@ -186,6 +187,10 @@ Subagent 实际读写哪些文件。两者不能互相替代。
 4. worker prompt 再次列出同一组 `assigned_files`，并明确不得读取或修改其他 worker 的
    文件。翻译输出仍是每个源文件一个同名目标文件，因此单文件校验和 `--resume` 可以继续
    精确到单元。
+5. 每个 handoff 记录 `assignment_sha256`，由任务、worker、批次、文件清单和当前源哈希
+   组成；重新生成完全相同的 assignment 时只继承 `assigned`/`running` 的 lease 元数据，
+   不继承 `completed` 状态。该字段帮助调度端去重，但不伪装成 IDE 进程锁；真正派发前仍
+   需要查询工作区 Subagent 的实际活动状态。
 
 这一设计的可维护不变量是：TOC 顺序不变、章节组不跨越大单元硬边界、worker 不拥有组外
 文件权限、术语上下文不跨文件广播、输出文件集合与源文件集合保持一一对应。任何改变装箱
@@ -519,6 +524,10 @@ ocr-pages --resume
 只应使受影响的 checkpoint 重新进入 `pending`；旧 manifest 没有单元级上下文哈希时，
 为安全起见按整批重新处理。父 manifest 是完整审计/恢复索引，worker handoff 则是只含
 当前 assignment 的最小运行投影。
+
+polish 校验对续片的 TOC 保护是上下文感知的：只有文件开头、且确认为当前分支顶层祖先
+的重复标签可记录为窄范围例外；书目和索引的页眉启发式则要求重复证据，不以单个短标题、
+页码或无句号的出处条目为阻断依据。
 
 ## 6. 扩展和维护约定
 

@@ -57,6 +57,15 @@ PDF/EPUB 的 `translate` manifest 会在 `worker_handoffs/` 按 TOC 顺序为相
 `translate-toc` 是正文 worker 启动前的
 独立任务，不由任何正文 worker 写入。
 
+每个 worker handoff 还记录由任务、worker、批次和当前源哈希计算的
+`assignment_sha256`，并把 `assigned_files` 作为显式授权字段。`--resume` 重建完全相同的
+assignment 时只保留旧的 `assigned`/`running` lease 元数据；它是文件合同中的恢复提示，
+不等于 IDE 已确认存在对应会话。实际派发前仍必须检查当前工作区 Subagent 列表，确认没有
+相同 `assigned_files` 的活动任务；不同源哈希或不同分配会生成新的 assignment，不能复用旧 lease。
+调度器可通过 `subagent_dispatch.py` 的 `claim_dispatch_lease()`、
+`renew_dispatch_lease()` 和 `release_dispatch_lease()` 完成原子认领、续租和释放；发现
+`already_active` 或 `conflict` 时必须停止派发，而不是覆盖旧 handoff。
+
 元数据是单个 `translated_metadata.json`，必须整体是合法 JSON；如果额度中断留下半个文件，校验会拒绝它，下一次 Subagent 会完整重写。
 
 ## 章节组与 worker 装箱合同
@@ -534,7 +543,10 @@ PDF 翻译、实体提取和打包都必须以当前且通过 `polish-validate` 
 
 polish handoff 会附带源语言 TOC 标签保护清单。唯一出现且匹配 TOC 的源行被删除时，
 校验会生成 `polish_unique_toc_label_removed` 的 `review_required`；重复页眉只有在
-版面和重复性证据充分时才可移除。纯图片或无可见标题的单元使用
+版面和重复性证据充分时才可移除。续片只在文件开头删除其 TOC 所属顶层祖先标签时
+使用窄范围例外，并把例外记录在校验报告；续片自己的标题以及其他分支的标题仍然阻断。
+`bibliography`/`index` 单元中的短标题、页码和无标点条目只有在同类页眉信号重复出现时
+才进入该页眉警告，避免把合法书目条目当作页边装饰。纯图片或无可见标题的单元使用
 `binding_mode: container_only`，由 EPUB 构建阶段生成包装器标题，Markdown worker 不得
 自行补写标题。
 
@@ -585,7 +597,9 @@ translate-validate --file chapter_5.3.2.md
 参考文献和索引单元会额外进行离线数字标记校验，覆盖年份、版次、DOI/ISBN 片段、页码、页码范围和索引交叉引用；数字标记发生丢失、改写或重排时，校验会拒绝该单元。
 
 Windows 下的批量替换、JSON 写入和正则处理应使用仓库已有的 UTF-8 脚本或可复用
-脚本，不要拼接复杂的 PowerShell `python -c` 内联命令。
+脚本，不要拼接复杂的 PowerShell `python -c` 内联命令。若确需运行独立 Python 检查，
+入口应设置 `PYTHONIOENCODING=utf-8`；仓库 CLI 会自动覆盖继承的 GBK 设置，并把该设置
+传给子进程。
 
 pipeline 的能力矩阵由 `pdf2epub/pipeline_policy.py` 维护。命令模块应使用该策略判断
 实体、翻译 TOC、正文翻译和 polish 门禁，不要各自解析 `pipeline`/`mode`。

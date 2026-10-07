@@ -24,3 +24,15 @@ def test_configure_utf8_stdio_sets_utf8_without_crashing(monkeypatch):
     assert os.environ["PYTHONIOENCODING"] == "utf-8"
     assert stdout.calls == [{"encoding": "utf-8", "errors": "replace"}]
     assert stderr.calls == [{"encoding": "utf-8", "errors": "replace"}]
+
+
+def test_configure_utf8_stdio_overrides_inherited_gbk(monkeypatch):
+    stdout = _Stream()
+    stderr = _Stream()
+    monkeypatch.setattr(sys, "stdout", stdout)
+    monkeypatch.setattr(sys, "stderr", stderr)
+    monkeypatch.setenv("PYTHONIOENCODING", "gbk")
+
+    configure_utf8_stdio()
+
+    assert os.environ["PYTHONIOENCODING"] == "utf-8"

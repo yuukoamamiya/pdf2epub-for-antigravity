@@ -15,7 +15,11 @@ def configure_utf8_stdio() -> None:
     # Child processes launched by the CLI inherit this setting.  It cannot
     # change the parent PowerShell process, but it prevents nested Python tools
     # from falling back to the Windows active code page.
-    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+    # An inherited GBK value is precisely the failure mode this helper is
+    # meant to prevent.  Override it for this CLI process and its children;
+    # the explicit stream reconfiguration below also covers already-created
+    # loguru/test streams.
+    os.environ["PYTHONIOENCODING"] = "utf-8"
 
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)

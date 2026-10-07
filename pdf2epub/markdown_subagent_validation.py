@@ -80,6 +80,9 @@ def validate_markdown_subagent(
     target_language: Optional[str] = None,
     allow_review_warnings: bool = False,
     protected_toc_titles: Optional[Iterable[str]] = None,
+    continuation_toc_titles: Optional[
+        Mapping[str, Iterable[str]]
+    ] = None,
 ) -> Dict:
     """Validate a Subagent markdown hand-off and optionally stage it."""
     source_dir = Path(source_dir)
@@ -133,6 +136,7 @@ def validate_markdown_subagent(
     target_language_audits: Dict[str, Dict[str, Any]] = {}
     target_language_blocked: List[str] = []
     polish_page_furniture_warnings: List[Dict[str, Any]] = []
+    polish_toc_label_exemptions: List[Dict[str, Any]] = []
     polish_content_integrity: Dict[str, Dict[str, Any]] = {}
     review_required: List[Dict[str, Any]] = []
     normalized_roles = {
@@ -147,6 +151,15 @@ def validate_markdown_subagent(
             if str(title).strip()
         )
     )
+    normalized_continuation_toc_titles = {
+        str(name): {
+            str(title).strip()
+            for title in titles
+            if str(title).strip()
+        }
+        for name, titles in (continuation_toc_titles or {}).items()
+        if str(name).strip() and titles is not None
+    }
     bilingual_warnings: List[Dict[str, Any]] = []
     validated_dir = target_dir / "validated"
     # Never leave a previous successful hand-off usable after a later failed
@@ -205,12 +218,38 @@ def validate_markdown_subagent(
                 for line in target_text.splitlines()
                 if normalize_label(line)
             ]
+            source_prefix_labels = {
+                normalize_label(line)
+                for line in source_text.splitlines()[:5]
+                if normalize_label(line)
+            }
             for title in normalized_protected_toc_titles:
                 normalized_title = normalize_label(title)
                 if (
                     source_labels.count(normalized_title) == 1
                     and target_labels.count(normalized_title) == 0
                 ):
+                    continuation_titles = normalized_continuation_toc_titles.get(
+                        source.name, set()
+                    )
+                    if (
+                        normalized_title in {
+                            normalize_label(value) for value in continuation_titles
+                        }
+                        and normalized_title in source_prefix_labels
+                    ):
+                        polish_toc_label_exemptions.append(
+                            {
+                                "file": source.name,
+                                "kind": "polish_continuation_toc_label_removed",
+                                "reason": (
+                                    "a top-level ancestor label was removed from the "
+                                    "opening of a continuation part"
+                                ),
+                                "title": title,
+                            }
+                        )
+                        continue
                     review_required.append(
                         {
                             "file": source.name,
@@ -504,6 +543,7 @@ def validate_markdown_subagent(
         "target_language_audits": target_language_audits,
         "bilingual_warnings": bilingual_warnings,
         "polish_page_furniture_warnings": polish_page_furniture_warnings,
+        "polish_toc_label_exemptions": polish_toc_label_exemptions,
         "polish_content_integrity": polish_content_integrity,
         "review_required": review_required,
         "review_required_files": review_required_files,
@@ -522,6 +562,10 @@ def validate_markdown_subagent(
         "diff_summary": diff_summary,
         "file_roles": normalized_roles,
         "protected_toc_titles": normalized_protected_toc_titles,
+        "continuation_toc_titles": {
+            name: sorted(titles)
+            for name, titles in normalized_continuation_toc_titles.items()
+        },
         "extra": extras,
         "valid_files": valid_files,
         "source_sha256": source_sha256,

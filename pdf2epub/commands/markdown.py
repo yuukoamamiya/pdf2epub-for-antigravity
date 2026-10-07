@@ -180,6 +180,68 @@ def _load_pdf_continuation_files(output_dir: Path, source_dir: Path) -> dict:
     return metadata
 
 
+def _load_pdf_continuation_toc_titles(output_dir: Path) -> dict[str, list[str]]:
+    """Map split parts to the top-level ancestor labels they may repeat.
+
+    A split Markdown unit can begin with a repeated top-level part label that
+    was present at the top of the source page.  That label is not the unit's
+    own heading, so polish validation may accept its removal when it is the
+    unique opening line of a continuation part.  Keep this exception narrow:
+    only the actual top-level ancestor from the TOC is eligible, never every
+    protected title in the book.
+    """
+    progress_path = Path(output_dir) / "ocr_markdown" / "tree_progress.json"
+    toc_path = Path(output_dir) / "toc_tree.json"
+    try:
+        progress = json.loads(progress_path.read_text(encoding="utf-8"))
+        toc = json.loads(toc_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return {}
+    if not isinstance(progress, Mapping) or not isinstance(toc, Mapping):
+        return {}
+
+    chapters = toc.get("chapters", [])
+
+    def top_level_title(index_path: Any) -> str:
+        if not isinstance(index_path, list) or not index_path:
+            return ""
+        nodes = chapters
+        first_title = ""
+        try:
+            for depth, raw_index in enumerate(index_path):
+                if not isinstance(nodes, list):
+                    return ""
+                index = int(raw_index) - 1
+                node = nodes[index]
+                if not isinstance(node, Mapping):
+                    return ""
+                if depth == 0:
+                    first_title = str(node.get("title") or "").strip()
+                nodes = node.get("children", [])
+        except (IndexError, TypeError, ValueError):
+            return ""
+        return first_title
+
+    result: dict[str, list[str]] = {}
+    for unit in progress.get("units", []) or []:
+        if not isinstance(unit, Mapping):
+            continue
+        names = [
+            str(name)
+            for name in (unit.get("part_files") or [])
+            if str(name).strip()
+        ]
+        if len(names) < 2:
+            continue
+        ancestor = top_level_title(unit.get("index_path"))
+        own_title = str(unit.get("title") or "").strip()
+        if not ancestor or ancestor.casefold() == own_title.casefold():
+            continue
+        for name in names[1:]:
+            result[name] = [ancestor]
+    return result
+
+
 def _load_pdf_chapter_groups(output_dir: Path, source_dir: Path) -> dict:
     """Group PDF units by top-level chapter, including split part files."""
     from pdf2epub.chapter_identity import ChapterIdentity
@@ -604,6 +666,11 @@ def _validate_pdf_markdown_task(args, task: str):
         target_language=target_language if task == "translate" else None,
         protected_toc_titles=(
             _load_pdf_toc_titles(output_dir) if task == "polish" else None
+        ),
+        continuation_toc_titles=(
+            _load_pdf_continuation_toc_titles(output_dir)
+            if task == "polish"
+            else None
         ),
         allow_review_warnings=bool(
             getattr(args, "allow_review_warnings", False)

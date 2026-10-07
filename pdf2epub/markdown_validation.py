@@ -346,14 +346,60 @@ def detect_polish_page_furniture(
     """
     from .page_furniture_repair import _candidate_for_line
 
+    def repeat_key(candidate: Dict[str, Any]) -> str:
+        """Normalize a candidate for repeated-header detection.
+
+        Bibliography and index units contain legitimate short, punctuation-free
+        titles and page labels.  For those roles, a page-furniture signal is
+        useful only when it repeats.  A changing printed page number must not
+        prevent two copies of the same running title from being recognized as
+        a repeat.
+        """
+        value = str(candidate.get("text") or "")
+        if candidate.get("kind") == "running_title_plus_page_label":
+            value = re.sub(
+                r"\s+(?:\d{1,4}|[ivxlcdm]{1,12})$",
+                "",
+                value,
+                flags=re.IGNORECASE,
+            )
+        return re.sub(r"\s+", " ", value).strip().casefold()
+
+    lines = text.splitlines()
+    candidate_records = [
+        _candidate_for_line(line)
+        for line in lines
+    ]
+    repeated_candidate_keys = Counter(
+        repeat_key(candidate)
+        for candidate in candidate_records
+        if candidate
+        and candidate.get("kind")
+        in {"running_header", "running_title_plus_page_label"}
+    )
+
     findings: list[Dict[str, Any]] = []
-    for line_number, line in enumerate(text.splitlines(), 1):
-        candidate = _candidate_for_line(line)
+    special_role = role in {"bibliography", "index"}
+    for line_number, (line, candidate) in enumerate(
+        zip(lines, candidate_records), 1
+    ):
         if not candidate or candidate.get("confidence") != "high":
             continue
-        if role in {"bibliography", "index"} and candidate.get("kind") == "running_title_plus_page_label":
-            continue
-        if candidate.get("kind") == "running_header" and line_number <= 5:
+        if special_role:
+            kind = candidate.get("kind")
+            # A standalone number, publisher imprint, or one-off title-like
+            # line is ordinary bibliography/index content until repetition
+            # supplies independent page-layout evidence.  This deliberately
+            # keeps page numbers and source titles out of the furniture gate.
+            if kind not in {"running_header", "running_title_plus_page_label"}:
+                continue
+            if repeated_candidate_keys.get(repeat_key(candidate), 0) < 2:
+                continue
+        if (
+            candidate.get("kind") == "running_header"
+            and line_number <= 5
+            and not special_role
+        ):
             continue
         findings.append({"line": line_number, **candidate})
     return findings

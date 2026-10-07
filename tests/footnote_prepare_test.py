@@ -10,9 +10,73 @@ from pdf2epub.refine.footnote_prepare import (
     validate_footnote_decisions,
 )
 from pdf2epub.refine.footnote_apply import (
+    _find_exact_signature_spans,
+    _locate_block,
     apply_footnote_normalization,
     footnote_normalization_status,
 )
+
+
+def test_footnote_signature_does_not_match_number_inside_larger_number():
+    source = "15 Auflage der Ausgabe\n\n5 Auflage der Ausgabe"
+
+    spans = _find_exact_signature_spans(source, "5 Auflage der Ausgabe")
+
+    assert len(spans) == 1
+    start, end = spans[0]
+    assert source[start:end] == "5 Auflage der Ausgabe"
+
+
+def test_footnote_signature_preserves_ambiguity_for_true_duplicate_blocks():
+    source = "5 Auflage der Ausgabe\n\nZwischentext\n\n5 Auflage der Ausgabe"
+
+    with pytest.raises(ValueError, match="matched multiple source spans"):
+        _locate_block(
+            {"unit.md": source},
+            [
+                {
+                    "name": "unit.md",
+                    "start_page": 1,
+                    "end_page": 1,
+                }
+            ],
+            1,
+            ["5 Auflage der Ausgabe"],
+        )
+
+
+def test_footnote_locator_does_not_fallback_to_another_refinement_unit():
+    with pytest.raises(ValueError, match="could not locate OCR block text"):
+        _locate_block(
+            {
+                "chapter_1.md": "Body in the expected chapter",
+                "chapter_2.md": "36 Shared footnote text",
+            },
+            [
+                {
+                    "name": "chapter_1.md",
+                    "start_page": 1,
+                    "end_page": 1,
+                },
+                {
+                    "name": "chapter_2.md",
+                    "start_page": 2,
+                    "end_page": 2,
+                },
+            ],
+            1,
+            ["36 Shared footnote text"],
+        )
+
+
+def test_footnote_signature_maps_markup_without_relaxing_boundaries():
+    source = "15 Auflage\n5 <sup>Auflage</sup>"
+
+    spans = _find_exact_signature_spans(source, "5 Auflage")
+
+    assert len(spans) == 1
+    start, end = spans[0]
+    assert source[start:end] == "5 <sup>Auflage</sup>"
 
 
 def _write_sidecar(

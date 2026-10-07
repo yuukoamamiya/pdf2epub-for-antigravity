@@ -187,8 +187,9 @@ output/<书名>/<书名>.epub
 ```
 
 中间目录会保存 OCR 页面、Subagent prompt、manifest、校验报告和断点信息。不要为了“重新开始”
-删除整个 `output/`；先让 Antigravity 检查进度并使用 `--resume`。只有“目标文件存在”不代表
-任务完成，必须以对应的 validation report 为准。
+删除整个 `output/`；先让 Antigravity 检查进度并使用 `--resume`，并确认当前没有相同文件分配的
+活动 Subagent。manifest 中的 assignment 哈希只用于恢复和去重提示，不代表 IDE 进程锁。只有
+“目标文件存在”不代表任务完成，必须以对应的 validation report 为准。
 
 ## 重要边界
 

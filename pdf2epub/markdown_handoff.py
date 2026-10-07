@@ -353,6 +353,15 @@ def prepare_markdown_subagent(
         "effective_max_concurrency": effective_concurrency,
         "concurrency_reason": concurrency_reason,
     }
+    previous_worker_handoffs = previous_manifest.get("worker_handoffs", [])
+    if resume and isinstance(previous_worker_handoffs, list) and previous_worker_handoffs:
+        # ``write_worker_handoffs`` uses this audit-only carry-over to preserve
+        # an active lease when a resume rebuilds the parent manifest.  It is
+        # intentionally not exposed as a worker permission or completion
+        # checkpoint; source/context hashes are recomputed above.
+        manifest["previous_worker_handoffs"] = [
+            dict(item) for item in previous_worker_handoffs if isinstance(item, Mapping)
+        ]
     if continuation_metadata:
         manifest["continuation_files"] = {
             name: value

@@ -96,6 +96,63 @@ def _signature_with_map(value: str) -> tuple[str, list[int]]:
     return "".join(chars[start:end]), positions[start:end]
 
 
+def _is_signature_boundary(text: str, start: int, end: int) -> bool:
+    left_ok = (start == 0) or (not text[start - 1].isalnum())
+    right_ok = (end >= len(text)) or (not text[end].isalnum())
+    return left_ok and right_ok
+
+
+def _expand_mapped_span(source: str, start: int, end: int) -> tuple[int, int]:
+    """Include formatting wrappers removed from the normalized signature.
+
+    The signature matcher deliberately ignores HTML/Markdown wrappers, but
+    the edit must not leave a dangling ``</sup>`` or emphasis marker behind.
+    Only wrappers adjacent to the matched text are included, and a trailing
+    HTML close tag is accepted only when its tag name has an opening tag in
+    the matched span.
+    """
+    opening_tags = {
+        match.group(1).casefold()
+        for match in re.finditer(
+            r"<\s*([A-Za-z][\w:-]*)\b[^>]*>",
+            source[start:end],
+        )
+    }
+    while start > 0:
+        if source[start - 1] in "*_~`":
+            start -= 1
+            continue
+        if source[start - 1] == ">":
+            tag_start = source.rfind("<", 0, start)
+            if tag_start >= 0:
+                match = re.fullmatch(
+                    r"<\s*([A-Za-z][\w:-]*)\b[^>]*>",
+                    source[tag_start:start],
+                )
+                if match:
+                    opening_tags.add(match.group(1).casefold())
+                    start = tag_start
+                    continue
+        break
+
+    while end < len(source):
+        if source[end] in "*_~`":
+            end += 1
+            continue
+        if source[end] == "<":
+            tag_end = source.find(">", end + 1)
+            if tag_end >= 0:
+                match = re.fullmatch(
+                    r"<\s*/\s*([A-Za-z][\w:-]*)\s*>",
+                    source[end : tag_end + 1],
+                )
+                if match and match.group(1).casefold() in opening_tags:
+                    end = tag_end + 1
+                    continue
+        break
+    return start, end
+
+
 def _find_exact_signature_spans(source: str, needle: str) -> list[tuple[int, int]]:
     source_signature, positions = _signature_with_map(source)
     needle_signature, _ = _signature_with_map(needle)
@@ -107,9 +164,17 @@ def _find_exact_signature_spans(source: str, needle: str) -> list[tuple[int, int
         found = source_signature.find(needle_signature, cursor)
         if found < 0:
             break
-        last = found + len(needle_signature) - 1
-        if last < len(positions):
-            spans.append((positions[found], positions[last] + 1))
+        end = found + len(needle_signature)
+        if _is_signature_boundary(source_signature, found, end):
+            last = end - 1
+            if last < len(positions):
+                spans.append(
+                    _expand_mapped_span(
+                        source,
+                        positions[found],
+                        positions[last] + 1,
+                    )
+                )
         cursor = found + 1
     return spans
 
@@ -126,9 +191,12 @@ def _signature_matches(source: str, needle: str) -> list[tuple[int, int]]:
         found = source_signature.find(needle_signature, cursor)
         if found < 0:
             break
-        matches.append((found, found + len(needle_signature)))
+        end = found + len(needle_signature)
+        if _is_signature_boundary(source_signature, found, end):
+            matches.append((found, end))
         cursor = found + 1
     return matches
+
 
 
 def _map_signature_boundary(
@@ -386,6 +454,8 @@ def _locate_block(
     block_texts: list[str],
 ) -> tuple[dict[str, Any], tuple[int, int]]:
     expected = _records_for_page(records, page)
+    if not expected:
+        raise ValueError(f"no refinement unit covers OCR page {page}")
     matches: list[tuple[dict[str, Any], tuple[int, int]]] = []
     seen: set[tuple[str, int, int]] = set()
     for block_text in block_texts:
@@ -395,13 +465,6 @@ def _locate_block(
                 if identity not in seen:
                     seen.add(identity)
                     matches.append((record, span))
-        if not matches:
-            for record in records:
-                for span in _find_exact_signature_spans(source_texts[record["name"]], block_text):
-                    identity = (record["name"], span[0], span[1])
-                    if identity not in seen:
-                        seen.add(identity)
-                        matches.append((record, span))
         if matches:
             break
     if len(matches) != 1:

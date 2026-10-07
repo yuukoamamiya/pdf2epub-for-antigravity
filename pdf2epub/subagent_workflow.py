@@ -32,6 +32,14 @@ from .subagent_runtime import (
     resolve_subagent_model,
     write_batch_handoffs,
 )
+from .subagent_dispatch import (
+    build_assignment_sha256,
+    claim_dispatch_lease,
+    dispatch_lease_path,
+    inspect_dispatch_assignment,
+    release_dispatch_lease,
+    renew_dispatch_lease,
+)
 from .subagent_safety import (
     _REFUSAL_PATTERNS,
     _normalize_detection_text,
@@ -47,6 +55,9 @@ __all__ = [
     "detect_bilingual_output",
     "detect_refusal",
     "detect_polish_page_furniture",
+    "build_assignment_sha256",
+    "claim_dispatch_lease",
+    "dispatch_lease_path",
     "estimate_tokens",
     "fix_reference_heading_mismatch",
     "polish_content_integrity_check",
@@ -54,6 +65,9 @@ __all__ = [
     "prepare_markdown_subagent",
     "prepare_toc_translation_subagent",
     "resolve_subagent_model",
+    "inspect_dispatch_assignment",
+    "release_dispatch_lease",
+    "renew_dispatch_lease",
     "strip_outer_markdown_fences",
     "target_language_ratio_check",
     "translation_diff_summary",

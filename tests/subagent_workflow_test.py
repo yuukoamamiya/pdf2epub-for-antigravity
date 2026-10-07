@@ -381,6 +381,122 @@ def test_polish_requires_review_for_page_furniture(tmp_path: Path):
     assert (target_dir / "validated" / "unit.md").exists()
 
 
+def test_polish_does_not_flag_unique_bibliography_title_like_lines(tmp_path: Path):
+    from pdf2epub.subagent_workflow import validate_markdown_subagent
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    text = "12 Hegel and the history of philosophy\n\nA source note.\n"
+    (source_dir / "refs.md").write_text(text, encoding="utf-8")
+    (target_dir / "refs.md").write_text(text, encoding="utf-8")
+
+    report = validate_markdown_subagent(
+        tmp_path,
+        "polish",
+        source_dir,
+        target_dir,
+        file_roles={"refs.md": "bibliography"},
+    )
+
+    assert report["all_passed"] is True
+    assert report["polish_page_furniture_warnings"] == []
+
+
+def test_polish_still_flags_repeated_bibliography_running_headers(tmp_path: Path):
+    from pdf2epub.subagent_workflow import validate_markdown_subagent
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    text = (
+        "IV Hegel in the philosophy history\n\n"
+        "A source note.\n\n"
+        "IV Hegel in the philosophy history\n"
+    )
+    (source_dir / "refs.md").write_text(text, encoding="utf-8")
+    (target_dir / "refs.md").write_text(text, encoding="utf-8")
+
+    report = validate_markdown_subagent(
+        tmp_path,
+        "polish",
+        source_dir,
+        target_dir,
+        file_roles={"refs.md": "bibliography"},
+    )
+
+    assert report["all_passed"] is False
+    assert report["polish_page_furniture_warnings"][0]["kind"] == "running_header"
+
+
+def test_polish_allows_removed_top_level_label_at_continuation_prefix(tmp_path: Path):
+    from pdf2epub.subagent_workflow import validate_markdown_subagent
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "chapter_7.3.part2.md").write_text(
+        "IV Hegel in the philosophy history\n\nThe sentence continues here.\n",
+        encoding="utf-8",
+    )
+    (target_dir / "chapter_7.3.part2.md").write_text(
+        "The sentence continues here.\n",
+        encoding="utf-8",
+    )
+
+    report = validate_markdown_subagent(
+        tmp_path,
+        "polish",
+        source_dir,
+        target_dir,
+        protected_toc_titles=["IV Hegel in the philosophy history"],
+        continuation_toc_titles={
+            "chapter_7.3.part2.md": ["IV Hegel in the philosophy history"]
+        },
+    )
+
+    assert report["all_passed"] is True
+    assert report["review_required"] == []
+    assert report["polish_toc_label_exemptions"][0]["kind"] == (
+        "polish_continuation_toc_label_removed"
+    )
+
+
+def test_polish_does_not_exempt_a_continuation_parts_own_toc_label(tmp_path: Path):
+    from pdf2epub.subagent_workflow import validate_markdown_subagent
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "chapter_7.3.part2.md").write_text(
+        "Current section\n\nThe sentence continues here.\n",
+        encoding="utf-8",
+    )
+    (target_dir / "chapter_7.3.part2.md").write_text(
+        "The sentence continues here.\n",
+        encoding="utf-8",
+    )
+
+    report = validate_markdown_subagent(
+        tmp_path,
+        "polish",
+        source_dir,
+        target_dir,
+        protected_toc_titles=["Current section"],
+        continuation_toc_titles={"chapter_7.3.part2.md": ["Parent section"]},
+    )
+
+    assert report["all_passed"] is False
+    assert any(
+        item["kind"] == "polish_unique_toc_label_removed"
+        for item in report["review_required"]
+    )
+
+
 def test_markdown_validation_rejects_bibliography_marker_loss(tmp_path: Path):
     from pdf2epub.subagent_workflow import validate_markdown_subagent
 
