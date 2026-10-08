@@ -147,8 +147,8 @@ def _comparable_text(text: str) -> str:
     value = unicodedata.normalize("NFKC", str(text or ""))
     value = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", value)
     value = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", value)
-    # Chandra materializes semantic footnotes as Markdown while the local
-    # Paddle pass may only recover the visible numeric definition marker.
+    # Chandra materializes semantic footnotes as Markdown while a secondary
+    # OCR pass may only recover the visible numeric definition marker.
     # Compare their visible content, not the backend-specific delimiters.
     value = re.sub(r"\[\^([^\]]+)\]\s*:", r"\1 ", value)
     value = re.sub(r"\[\^([^\]]+)\]", r"\1", value)
@@ -287,9 +287,9 @@ def compare_ocr_layouts(
 ) -> Dict[str, Any]:
     """Compare the small layout contract relevant to footnote triage.
 
-    Paddle's labels are conservative geometry-derived labels, not semantic
-    model output.  A label or note-key disagreement is therefore evidence for
-    visual review, while agreement does not claim that either OCR is correct.
+    Backend layout labels are evidence rather than semantic truth. A label or
+    note-key disagreement is therefore evidence for visual review, while
+    agreement does not claim that either OCR is correct.
     """
     if not isinstance(primary_sidecar, Mapping) or not isinstance(secondary_sidecar, Mapping):
         return {

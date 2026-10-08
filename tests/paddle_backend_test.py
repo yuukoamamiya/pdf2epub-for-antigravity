@@ -1,45 +1,47 @@
 import io
-import sys
-import types
 
 from PIL import Image
 
 from pdf2epub.ocr.backends import paddle
 
 
-def test_init_client_uses_pinned_cpu_safe_defaults(monkeypatch):
+def test_init_client_uses_isolated_gpu_worker(monkeypatch):
     captured = {}
 
-    class FakePaddleOCR:
-        def __init__(self, **kwargs):
-            captured.update(kwargs)
+    class FakeWorker:
+        diagnostics = {
+            "status": "ready",
+            "worker_mode": "subprocess",
+            "device_actual": "gpu:0",
+        }
 
-    fake_module = types.ModuleType("paddleocr")
-    fake_module.PaddleOCR = FakePaddleOCR
-    monkeypatch.setitem(sys.modules, "paddleocr", fake_module)
+        def __init__(self, config):
+            captured.update(config["ocr"]["backends"]["paddle"])
+
+    monkeypatch.setattr(paddle, "PaddleWorkerClient", FakeWorker)
 
     client = paddle.init_client(
-        {"ocr": {"backends": {"paddle": {"lang": "german"}}}}
+        {
+            "ocr": {
+                "backends": {
+                    "paddle": {"lang": "german", "device": "gpu:0"}
+                }
+            }
+        }
     )
 
-    assert isinstance(client, FakePaddleOCR)
-    assert captured == {
-        "lang": "german",
-        "device": "cpu",
-        "enable_mkldnn": False,
-    }
+    assert isinstance(client, FakeWorker)
+    assert captured == {"lang": "german", "device": "gpu:0"}
 
 
-def test_init_client_preserves_explicit_cpu_runtime_settings(monkeypatch):
+def test_init_client_passes_gpu_runtime_settings_to_worker(monkeypatch):
     captured = {}
 
-    class FakePaddleOCR:
-        def __init__(self, **kwargs):
-            captured.update(kwargs)
+    class FakeWorker:
+        def __init__(self, config):
+            captured.update(config["ocr"]["backends"]["paddle"])
 
-    fake_module = types.ModuleType("paddleocr")
-    fake_module.PaddleOCR = FakePaddleOCR
-    monkeypatch.setitem(sys.modules, "paddleocr", fake_module)
+    monkeypatch.setattr(paddle, "PaddleWorkerClient", FakeWorker)
 
     paddle.init_client(
         {
@@ -47,17 +49,18 @@ def test_init_client_preserves_explicit_cpu_runtime_settings(monkeypatch):
                 "backends": {
                     "paddle": {
                         "lang": "en",
-                        "device": "cpu",
-                        "enable_mkldnn": True,
-                        "cpu_threads": 2,
+                        "device": "gpu:0",
+                        "use_doc_unwarping": True,
+                        "use_textline_orientation": True,
                     }
                 }
             }
         }
     )
 
-    assert captured["enable_mkldnn"] is True
-    assert captured["cpu_threads"] == 2
+    assert captured["device"] == "gpu:0"
+    assert captured["use_doc_unwarping"] is True
+    assert captured["use_textline_orientation"] is True
 
 
 def test_process_page_reads_paddleocr_3_result_and_sorts_boxes():

@@ -49,7 +49,10 @@ def ocr_pdf_chunk_mistral(
     image_counter: int = 0,
     max_retries: int = 5,
     initial_backoff: float = 4.0,
-    base_url: str = "https://api.mistral.ai/v1"
+    base_url: str = "https://api.mistral.ai/v1",
+    model: str = "mistral-ocr-latest",
+    include_image_base64: bool = True,
+    request_timeout: float = 300,
 ) -> Tuple[str, List[Dict], int]:
     """
     OCR a PDF chunk using Mistral's official API.
@@ -64,6 +67,9 @@ def ocr_pdf_chunk_mistral(
         max_retries: Maximum retry attempts for 429 errors
         initial_backoff: Initial backoff time in seconds
         base_url: Base URL for Mistral API (default: https://api.mistral.ai/v1)
+        model: Mistral OCR model identifier
+        include_image_base64: Whether to return embedded image assets
+        request_timeout: HTTP request timeout in seconds
 
     Returns:
         Tuple of (markdown_content, images_info, updated_image_counter)
@@ -84,12 +90,12 @@ def ocr_pdf_chunk_mistral(
 
     # Request payload
     payload = {
-        "model": "mistral-ocr-latest",
+        "model": model,
         "document": {
             "type": "document_url",
             "document_url": data_url,
         },
-        "include_image_base64": True,  # Include images in base64 format
+        "include_image_base64": include_image_base64,
     }
 
     logger.info(f"Sending OCR request to Mistral API for {chunk_info}...")
@@ -109,7 +115,12 @@ def ocr_pdf_chunk_mistral(
     )
     def _make_ocr_request():
         """Make OCR request with automatic retry on failures."""
-        resp = requests.post(url, headers=headers, json=payload, timeout=300)
+        resp = requests.post(
+            url,
+            headers=headers,
+            json=payload,
+            timeout=request_timeout,
+        )
 
         # Check for errors
         if resp.status_code != 200:
@@ -184,7 +195,7 @@ def ocr_pdf_chunk_mistral(
                 f.write(img_bytes)
 
             # Replace image reference in markdown
-            # PaddleOCR can return references in different formats:
+            # OCR services can return references in different formats:
             # - Markdown: ![img-0.jpeg](img-0.jpeg), ![Image](img-0.jpeg), ![](img-0.jpeg)
             # - HTML: <img src="imgs/img_in_image_box_XXX.jpg" ... />
             img_id = img_info['id']
@@ -392,7 +403,7 @@ def ocr_pdf_chunk_vertex(
                 f.write(img_bytes)
 
             # Replace image reference in markdown
-            # PaddleOCR can return references in different formats:
+            # OCR services can return references in different formats:
             # - Markdown: ![img-0.jpeg](img-0.jpeg), ![Image](img-0.jpeg), ![](img-0.jpeg)
             # - HTML: <img src="imgs/img_in_image_box_XXX.jpg" ... />
             img_id = img_info['id']

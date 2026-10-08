@@ -14,7 +14,7 @@ from pdf2epub.ocr_consensus import (
     secondary_backend_name,
     secondary_ocr_enabled,
 )
-from pdf2epub.ocr_pages import run_secondary_ocr_consensus
+from pdf2epub.ocr_pages import preflight_secondary_ocr, run_secondary_ocr_consensus
 
 
 def _make_pdf(path: Path, page_count: int = 2) -> None:
@@ -146,6 +146,49 @@ def test_secondary_ocr_switch_controls_consensus_and_keeps_legacy_alias():
     assert secondary_backend_name(legacy) == "paddle"
 
 
+def test_secondary_preflight_blocks_paddle_cpu_before_primary_pages(tmp_path: Path):
+    config = {
+        "ocr": {
+            "secondary": {"enabled": True, "backend": "paddle"},
+            "backends": {"paddle": {"device": "cpu"}},
+        }
+    }
+
+    with pytest.raises(RuntimeError, match="GPU-only"):
+        preflight_secondary_ocr(tmp_path, 674, config)
+
+    report = json.loads(
+        (tmp_path / "ocr_secondary_preflight.json").read_text(encoding="utf-8")
+    )
+    assert report["status"] == "blocked"
+    assert report["reason"] == "cpu_device_not_allowed"
+
+
+def test_secondary_preflight_requires_explicit_slow_run_confirmation(tmp_path: Path):
+    config = {
+        "ocr": {
+            "secondary": {
+                "enabled": True,
+                "backend": "paddle",
+                "performance": {
+                    "estimated_seconds_per_page": 20,
+                    "max_estimated_seconds": 100,
+                },
+            },
+            "backends": {"paddle": {"device": "gpu:0"}},
+        }
+    }
+
+    with pytest.raises(RuntimeError, match="requires confirmation"):
+        preflight_secondary_ocr(tmp_path, 10, config)
+
+    report = preflight_secondary_ocr(tmp_path, 10, config, allow_slow=True)
+
+    assert report["status"] == "allowed_with_confirmation"
+    assert report["estimated_seconds"] == 200.0
+    assert report["estimated_hours"] == round(200 / 3600, 3)
+
+
 def test_pagewise_secondary_consensus_scopes_visual_review(monkeypatch, tmp_path: Path):
     pdf_path = tmp_path / "input.pdf"
     _make_pdf(pdf_path)
@@ -239,3 +282,57 @@ def test_paddle_preflight_writes_diagnostics_before_workers(monkeypatch, tmp_pat
     )
     assert diagnostics["error_type"] == "RuntimeError"
     assert diagnostics["protobuf_distribution"] == "7.0.0"
+
+
+def test_paddle_worker_is_closed_after_secondary_batch(monkeypatch, tmp_path: Path):
+    pdf_path = tmp_path / "input.pdf"
+    _make_pdf(pdf_path, page_count=1)
+    output_dir = tmp_path / "output"
+    pages_dir = output_dir / "pages"
+    pages_dir.mkdir(parents=True)
+    (pages_dir / "page_001.md").write_text("primary text\n", encoding="utf-8")
+
+    class FakeWorker:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    worker = FakeWorker()
+    monkeypatch.setattr(
+        "pdf2epub.ocr.backends.paddle.preflight",
+        lambda _config: (
+            {
+                "status": "ready",
+                "worker_mode": "subprocess",
+                "device_actual": "gpu:0",
+            },
+            worker,
+        ),
+    )
+    monkeypatch.setattr(
+        "pdf2epub.ocr_pages.ocr_pdf_page",
+        lambda *args, **kwargs: OCRPageResult(
+            markdown="secondary text\n", backend="paddle"
+        ),
+    )
+
+    summary = run_secondary_ocr_consensus(
+        ocr_pdf=pdf_path,
+        output_dir=output_dir,
+        total_pages=1,
+        primary_backend="chandra",
+        config={
+            "ocr": {
+                "secondary": {"enabled": True, "backend": "paddle"},
+                "backends": {"paddle": {"max_workers": 4}},
+                "consensus": {},
+            }
+        },
+        max_workers=1,
+        resume=False,
+    )
+
+    assert summary["failed_pages"] == []
+    assert worker.closed is True

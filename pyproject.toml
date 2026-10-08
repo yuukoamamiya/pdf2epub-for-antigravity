@@ -17,6 +17,7 @@ dependencies = [
     "google-genai>=1.70.0,<2.0.0",
     "pymupdf>=1.25.4",
     "pillow>=11.1.0",
+    "numpy>=2.0.0",
     "boto3>=1.38.2",
     "loguru>=0.7.3",
     "markdown>=3.8.2",
@@ -42,6 +43,8 @@ dependencies = [
     "rapidfuzz>=3.14.3",
     "google-cloud-storage>=3.4.1",
     "json-repair>=0.39.0",
+    "requests>=2.32.0",
+    "tqdm>=4.66.0",
 ]
 
 [project.urls]
@@ -52,12 +55,6 @@ Repository = "https://github.com/yuukoamamiya/pdf2epub-for-antigravity.git"
 [project.optional-dependencies]
 semantic = [
     "sentence-transformers>=2.2.0",
-]
-ocr-local = [
-    # Keep the optional secondary OCR on one tested API/runtime generation.
-    # PaddleOCR 3.7's API is paired with the matching PaddlePaddle 3.3 line.
-    "paddleocr==3.7.0",
-    "paddlepaddle==3.3.1",
 ]
 
 [project.scripts]

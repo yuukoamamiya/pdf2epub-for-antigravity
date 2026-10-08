@@ -9,8 +9,17 @@
 
 # UV
 .venv/
+.venv-paddle/
+
+# Paddle/PaddleX model caches. They normally live in the user profile, but
+# may be redirected into the repository by local tooling.
+.paddlex/
+.paddleocr/
+paddle_models/
 
 # Security - API keys and credentials
+.secrets/
+mistral_usage.json
 sa-keys.json
 vertex_adc.json
 chandra-access.json

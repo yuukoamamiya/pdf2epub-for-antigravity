@@ -30,6 +30,7 @@ from openai import OpenAI
 from PIL import Image
 
 from ..artifacts import OCRPageResult
+from ...local_credentials import local_credential_path
 
 
 ALLOWED_TAGS = [
@@ -443,10 +444,14 @@ class ChandraClient:
         access_client_id = backend_config.get("access_client_id") or os.environ.get(access_client_id_env)
         access_client_secret = backend_config.get("access_client_secret") or os.environ.get(access_client_secret_env)
 
-        # Fallback to credentials JSON file if neither in config nor env
+        # Fallback to credentials JSON file if neither in config nor env.
         if not access_client_id and not access_client_secret:
+            credentials_file = backend_config.get(
+                "credentials_file", "chandra-access.json"
+            )
             for cred_path in [
                 Path(os.environ.get("CHANDRA_ACCESS_CREDENTIALS", "")),
+                local_credential_path(config, str(credentials_file)),
                 Path.home() / ".config" / "pdf2epub" / "chandra-access.json",
                 Path("chandra-access.json"),
             ]:
