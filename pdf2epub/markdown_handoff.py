@@ -405,7 +405,16 @@ def prepare_markdown_subagent(
     normalized_roles = {
         str(name): str(role).strip().lower()
         for name, role in (file_roles or {}).items()
-        if str(role).strip().lower() in {"bibliography", "index"}
+        if str(role).strip().lower()
+        in {
+            "bibliography",
+            "index",
+            "metadata",
+            "frontmatter",
+            "copyright",
+            "cover",
+            "notes",
+        }
     }
     if normalized_roles:
         manifest["file_roles"] = normalized_roles
@@ -551,6 +560,9 @@ def prepare_markdown_subagent(
             "For bibliography units: preserve author names, publication titles, years, editions, DOI/URL/ISBN, page numbers, and citation punctuation. Translate only prose labels, headings, and explanatory text when present.",
             "For index units: translate index terms naturally, but preserve indentation/entry hierarchy, page numbers, ranges, cross-reference targets, and alphabetic grouping as far as the target language permits.",
             "Do not omit, summarize, or silently skip bibliography or index entries.",
+            "For CIP, copyright, cover, metadata, and other front-matter units: translate all prose labels and explanatory sentences into the target language. Preserve author names, publishers, ISBNs, catalog numbers, dates, URLs, and other identifiers exactly when they are identifiers rather than prose.",
+            "For index units: each non-indented source entry must produce exactly one corresponding target entry. A target entry may wrap onto additional indented lines, but entries may not be merged, split, reordered, or omitted.",
+            "For every footnote unit in a translation: preserve each source marker byte-for-byte in Markdown form such as `[^53]` or `[^53]:`; never replace it with `<sup>53</sup>`, `[注53]`, or another notation, and never drop a marker.",
         ]
     heading_guard = ""
     if task == "translate":
@@ -561,6 +573,7 @@ def prepare_markdown_subagent(
 1. If a source line does not begin with `#`, the translation must not add any `#`, even when the line looks like a title, author name, italic label, or numbered entry.
 2. If a source heading begins with a specific number of `#` characters, the translated heading must begin with exactly the same number; never upgrade or downgrade its level.
 3. Output one translated heading line only. Never keep the original-language heading on a separate line or produce bilingual/parallel headings.
+4. The number and level of Markdown headings must remain one-to-one with the source. Do not output both the original heading and its translation.
 """
     prompt_path = output_dir / f"{task}_subagent_prompt.md"
     prompt_path_content = f"""# {task} Subagent task

@@ -7,9 +7,15 @@ Antigravity 工作区 Subagent 完成，本地程序负责文件整理、校验�
 这是一个“文件交接 + 本地门禁”的工具，不是聊天窗口里的即时翻译器：Subagent 直接写入
 工作区文件，Python 只负责确定性处理和验证。完整操作规程见 [AGENTS.md](AGENTS.md)。
 
+文档按读者分工：
+
+- `README.md`：给使用者看的能力介绍、安装和快速开始；
+- `AGENTS.md`：给 Agent 看的可执行操作手册；
+- `docs/`：给维护者看的架构、交接合同、产物格式和恢复细节。
+
 ## 能做什么
 
-- 扫描 PDF OCR：支持主 OCR，并可选用 PaddleOCR 做第二套 OCR 交叉筛查。
+- 扫描 PDF OCR：支持主 OCR，并可选用独立 GPU PaddleOCR 做第二套 OCR 交叉筛查。
 - PDF 结构整理：识别目录和章节边界，合并跨页正文，保留图片、表格和公式。
 - 脚注处理：区分脚注、正文引用、参考文献和索引；把确认的脚注归并到实际章节单元末尾，
   处理“正文 → 脚注续文 → 新脚注”的跨页顺序。
@@ -30,11 +36,10 @@ Antigravity 工作区 Subagent 完成，本地程序负责文件整理、校验�
 | `ocr.secondary.enabled: false` | 单 OCR。直接使用主 OCR，忽略旧的双 OCR 共识文件。 |
 | `ocr.secondary.enabled: true` | 双 OCR。主 OCR 与 PaddleOCR 交叉比较，差异交给 Subagent 复核。 |
 
-双 OCR 模式需要安装本地依赖：
-
-```text
-uv sync --extra ocr-local
-```
+双 OCR 默认使用独立的 PaddleOCR GPU 环境，不把 Paddle/PaddleX 加载进主项目解释器。
+`.venv-paddle/` 被 `.gitignore` 忽略；worker 在一次 OCR 任务开始时按需启动，完成后立即关闭。
+Chandra 的 Cloudflare Access 凭据放在 `.secrets/chandra-access.json`。YAML 中只配置本地凭据
+目录，不写入密钥本身。
 
 示例配置：
 
@@ -44,19 +49,46 @@ ocr:
   secondary:
     enabled: true
     backend: paddle
+    performance:
+      max_estimated_seconds: 3600
+      estimated_seconds_per_page: 5.0
   backends:
     paddle:
-      lang: en
-      device: cpu
-      enable_mkldnn: false
+      python_executable: .venv-paddle/Scripts/python.exe
+      device: gpu:0
+      dpi: 192
+      use_doc_orientation_classify: true
+      use_doc_unwarping: true
+      use_textline_orientation: true
+      max_workers: 1
+      request_timeout: 300
+```
+
+GPU 预检会验证 Paddle 是否编译了 CUDA、是否检测到显卡以及实际设备是否为 `gpu:0`；任何
+失败都会停止 OCR，不会静默退回 CPU。需要改用远程 Mistral 时仍可显式填写
+`secondary.backend: mistral`，但它不属于本地 Paddle 路径。
+
+启用双 OCR 后，`ocr-pages` 会在主 OCR 开始前写入 `ocr_secondary_preflight.json`，按页数和配置的
+保守页速估算次 OCR 时长。超过 `max_estimated_seconds` 时命令会暂停；确认确实接受耗时后，使用
+`ocr-pages --allow-slow-secondary` 继续。若要退回单 OCR，应明确将
+`ocr.secondary.enabled` 改为 `false` 后重新运行；旧的双 OCR 共识不会被复用，也不会自动降级。
+
+首次安装使用 Python 3.12 的独立环境：
+
+```text
+uv venv --python 3.12 .venv-paddle
+uv pip install --python .venv-paddle/Scripts/python.exe \
+  https://paddle-whl.cdn.bcebos.com/stable/cu126/paddlepaddle-gpu/paddlepaddle_gpu-3.3.1-cp312-cp312-win_amd64.whl \
+  paddleocr==3.7.0
 ```
 
 打开双 OCR 后，脚注和整页插图阶段也要求当前的共识检查点；切换开关后必须重新生成相关
 检查点，旧的脚注决定和插图绑定不会被静默复用。两套 OCR 一致只代表通过筛查，不代表一定
 正确；整页插图、脚注归属和引用/参考文献区分仍由 Subagent 复核。
 
-Chandra 是当前主 OCR，Paddle 是可选的本地次 OCR。Paddle 会输出与 Chandra 对齐的页面
-sidecar，并对明确的页底脚注定义使用相同的 `footnote-def`/`[^N]: ...` 语义；高置信度原生
+Chandra 是当前主 OCR，PaddleOCR 是可选的本地 GPU 次 OCR。Paddle worker 使用与主 OCR 相同的
+逐页 PDF 输入，独立生成文本和 layout sidecar，不把次 OCR 静默写回主 OCR；它的模型只在本次
+OCR 任务期间驻留子进程。高置信度原生
 文字 PDF 则由原生提取器输出带坐标和字体元数据的 layout sidecar。两种来源都不会把普通
 上标、序数或行内数字引用自动判成脚注。双 OCR 的作用是缩小视觉复核范围，不是让一个引擎
 静默覆盖另一个引擎。
@@ -96,12 +128,6 @@ PDF 纯转换模式仍必须经过 OCR、结构整理和 polish；它只跳过�
 
 ```text
 uv sync
-```
-
-如果配置启用了 `ocr.secondary.enabled: true`，额外安装锁定版本的本地 PaddleOCR：
-
-```text
-uv sync --extra ocr-local
 ```
 
 首次打开项目后，让 Antigravity 先执行：
@@ -191,12 +217,12 @@ output/<书名>/<书名>.epub
 活动 Subagent。manifest 中的 assignment 哈希只用于恢复和去重提示，不代表 IDE 进程锁。只有
 “目标文件存在”不代表任务完成，必须以对应的 validation report 为准。
 
-## 重要边界
+## 使用时注意
 
-- 正文翻译、润色、目录判断、术语提取，以及脚注/整页插图的语义和疑难结构判断必须交给工作区 Subagent；
-  本地程序只做明确规则筛选和校验。
-- 主 Agent 只负责准备任务、运行本地处理、调度 Subagent、读取校验结果和打包。
-- Subagent 不可用时应暂停，不能把正文译文直接贴在聊天里代替写文件。
+- 需要翻译、润色、目录判断、术语提取，以及脚注/整页插图的疑难结构判断时，按照
+  `AGENTS.md` 使用工作区 Subagent；本地程序只做确定性处理和校验。
+- 双 OCR 使用 Paddle 时，项目只发布接口源码；Paddle GPU 环境、模型缓存和本地凭据由每位
+  使用者自行配置，不会随 GitHub 项目下载。
 - 不要把外部术语表仅凭文件名自动加载；使用前先生成候选报告并明确选择。
 - 发现 `human_review_required`、拒答、免责声明或校验失败时，不能继续打包。
 

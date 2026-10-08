@@ -79,6 +79,19 @@ def test_footnote_signature_maps_markup_without_relaxing_boundaries():
     assert source[start:end] == "5 <sup>Auflage</sup>"
 
 
+def test_footnote_signature_does_not_insert_space_before_punctuation_after_html():
+    source = "The title is In the Spirit of Hegel, followed by prose."
+
+    spans = _find_exact_signature_spans(
+        source,
+        "<i>In the Spirit of Hegel</i>,",
+    )
+
+    assert len(spans) == 1
+    start, end = spans[0]
+    assert source[start:end] == "In the Spirit of Hegel,"
+
+
 def _write_sidecar(
     output_dir: Path,
     page: int,
@@ -975,3 +988,61 @@ def test_apply_uses_validated_correction_when_sidecar_text_changed(tmp_path: Pat
     )
     assert "A body [^36]" in normalized
     assert "[^36]: Footnote starts on Å" in normalized
+
+
+def test_apply_links_a_footnote_marker_from_the_previous_oversized_part(
+    tmp_path: Path,
+):
+    _write_sidecar(tmp_path, 1, [_block("Body 45", 0)])
+    _write_sidecar(
+        tmp_path,
+        2,
+        [_block("45 Footnote text", 0, label="Footnote", y0=820)],
+    )
+    pages = tmp_path / "pages"
+    (pages / "page_001.md").write_text("Body <sup>45</sup>\n", encoding="utf-8")
+    (pages / "page_002.md").write_text("45 Footnote text\n", encoding="utf-8")
+
+    source = tmp_path / "ocr_markdown"
+    source.mkdir()
+    (source / "chapter_5.2.part1.md").write_text(
+        "Body <sup>45</sup>\n", encoding="utf-8"
+    )
+    (source / "chapter_5.2.part2.md").write_text(
+        "45 Footnote text\n", encoding="utf-8"
+    )
+    (source / "tree_progress.json").write_text(
+        json.dumps(
+            {
+                "units": [
+                    {
+                        "unit_id": "chapter_5.2",
+                        "index_path": [5, 2],
+                        "part_files": [
+                            "chapter_5.2.part1.md",
+                            "chapter_5.2.part2.md",
+                        ],
+                        "file": "chapter_5.2.part1.md",
+                        "page_range": [1, 2],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    prepare_footnote_subagent(tmp_path, book_title="Split chapter")
+    assert validate_footnote_decisions(tmp_path)["valid"] is True
+
+    result = apply_footnote_normalization(tmp_path)
+
+    assert result["valid"] is True
+    part1 = (tmp_path / "footnote_normalized" / "chapter_5.2.part1.md").read_text(
+        encoding="utf-8"
+    )
+    part2 = (tmp_path / "footnote_normalized" / "chapter_5.2.part2.md").read_text(
+        encoding="utf-8"
+    )
+    assert "Body [^45]" in part1
+    assert "45 Footnote text" not in part2
+    assert "[^45]: Footnote text" in part2

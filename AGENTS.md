@@ -1,10 +1,12 @@
-# pdf2epub Agent 工作规范
+# pdf2epub Agent 操作手册
 
-本文件是本仓库翻译工作的唯一执行规范源。`docs/antigravity-workflow.md` 仅作补充说明；
-执行任务时以本文件为准。
+本文件面向实际操作仓库的主 Agent 和工作区 Subagent，是执行任务时的唯一规范源。Agent
+应先读本文件，再根据任务类型执行对应流程；不要把 README 或维护文档中的示例当成更高
+优先级的操作规则。
 
-仓库模块职责和依赖方向见 `docs/architecture.md`；该文件仅作架构说明，不改变本文件的
-执行规范和优先级。
+`README.md` 面向使用者，只介绍能力、安装和快速开始；`docs/architecture.md` 与
+`docs/antigravity-workflow.md` 面向维护者，记录模块边界、产物合同和实现细节。修改流程、
+配置、产物或后端时，三层文档都要同步检查，但本文件的执行规则优先。
 
 ## 0.1 Agent 快速上手
 
@@ -32,6 +34,55 @@
 uv run pytest -q
 git diff --check
 ```
+
+## 0.2 依赖和 OCR 后端快速配置
+
+主项目环境只安装 `pyproject.toml` 中的依赖：
+
+```text
+uv sync
+```
+
+当前推荐的 PDF OCR 组合是 Chandra + 可选 Paddle。Chandra 运行在主项目环境；Paddle 不得
+安装进主项目环境，而是由一次 OCR 任务按需启动独立子进程。Windows 首次安装 Paddle 使用
+Python 3.12 的独立环境：
+
+```text
+uv venv --python 3.12 .venv-paddle
+uv pip install --python .venv-paddle/Scripts/python.exe \
+  https://paddle-whl.cdn.bcebos.com/stable/cu126/paddlepaddle-gpu/paddlepaddle_gpu-3.3.1-cp312-cp312-win_amd64.whl \
+  paddleocr==3.7.0
+```
+
+配置至少应包含：
+
+```yaml
+ocr:
+  backend: chandra
+  secondary:
+    enabled: false
+    backend: paddle
+  backends:
+    paddle:
+      python_executable: .venv-paddle/Scripts/python.exe
+      device: gpu:0
+      max_workers: 1
+```
+
+需要双 OCR 时才把 `ocr.secondary.enabled` 改为 `true`。Paddle 预检会检查 CUDA 编译支持、
+GPU 数量和实际设备；不满足时直接失败，禁止 CPU 回退。worker 只在当前 OCR 批次期间存活，
+批次结束或失败后必须被关闭。模型缓存可以位于用户目录，但 `.venv-paddle/`、`.paddlex/`
+和 `.paddleocr/` 不得加入 Git。
+
+启用双 OCR 后，`ocr-pages` 必须在主 OCR 页面 worker 启动前生成
+`ocr_secondary_preflight.json`，按页数和配置的 `ocr.secondary.performance` 页速估算次 OCR
+耗时。超过 `max_estimated_seconds` 时必须先暂停；只有用户明确使用
+`ocr-pages --allow-slow-secondary` 才能继续。CPU 次 OCR 始终前置阻断，不得自动降级；退回
+单 OCR 必须明确关闭 `ocr.secondary.enabled` 后重新运行，旧的双 OCR 共识不得复用。
+
+Mistral 是保留的可选远程兼容后端，不是本地 Paddle 的依赖。它使用主项目已有的 HTTP 依赖，
+密钥从 `.secrets/mistral_api_key` 或用户明确配置的凭据文件读取；不要把密钥写入 YAML、
+manifest、日志或提交记录。Mistral 的本地额度账本只保护本项目，不能代表账户全局余额。
 
 这三层文档的职责不同：本文件规定 Agent 必须怎么做；`README.md` 供使用者了解能力和快速
 开始；`docs/` 记录模块边界、产物合同和维护细节。修改流程、命令、配置或产物时，三层文档
@@ -278,7 +329,8 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
    只有两个 OCR 有实质差异，或被共同漏检哨兵选中的页面才进入下一步视觉 Subagent。
    哨兵默认每 20 页抽查一页，并把内部文本密度显著低于相邻页的页面列为风险页；这些规则
    只增加复核，不会自动改写页面。`enabled: false` 时只运行主 OCR，不进行 OCR 纠错。
-   本地 PaddleOCR 依赖使用 `uv sync --extra ocr-local` 安装。
+   本地 PaddleOCR 依赖使用本节的独立 `.venv-paddle` 环境安装；不要把 Paddle/PaddleX 加入
+   主项目 `pyproject.toml` 或 `uv.lock`。worker 通过 JSON Lines 接收页面，完成本批次后关闭。
 4. 仅对视觉 OCR PDF 且 `ocr.secondary.enabled: true` 时执行 `ocr-correct`。然后打开工作区 Subagent，读取
    生成的 Prompt，按 `ocr-correct_worker_handoffs/` 中 manifest 的 `assigned_files` 对照同名页图；
    该 handoff 自动只包含 `ocr_consensus.json` 标记的差异页。将纠错后的同名文件写入
@@ -571,6 +623,15 @@ uv run pdf2epub -c config.yaml build-epub
   消耗官方 IDE 会话配额。
 - 工作区内的编辑和测试可自动执行；仓库外路径或不可逆操作先确认。
 - 本仓库直接维护当前主分支，不创建临时分支；用户明确要求上传 GitHub 时才提交并推送 fork。
+- GitHub 发布只上传源码、测试、配置模板和维护文档。不要使用无选择的 `git add .`：
+  明确排除 `.venv-paddle/`、`.paddlex/`、`.paddleocr/`、`paddle_models/`、`.secrets/`、
+  `config.yaml`、`input/`、`output/`、Mistral 使用账本以及根目录的一次性翻译脚本和报告。
+  Paddle 接口源码是 `pdf2epub/ocr/backends/paddle.py` 与
+  `pdf2epub/ocr/backends/paddle_worker.py`；Mistral 相关接口包括
+  `pdf2epub/ocr_backends.py`、`pdf2epub/mistral_budget.py` 和
+  `pdf2epub/local_credentials.py`，这些源码可以上传，但密钥和本地运行时不能上传。
+- 上传前至少执行 `git status --short`、`git diff --check`、`uv run pytest -q`，并确认
+  `git check-ignore -v .venv-paddle .secrets config.yaml mistral_usage.json` 均命中忽略规则。
 - Windows 普通命令优先使用 Git Bash；复杂文本/JSON 处理优先使用 UTF-8 Python；不要把
   复杂 Bash 语法传给 PowerShell，也不要为一次性翻译交接制造临时脚本。
 

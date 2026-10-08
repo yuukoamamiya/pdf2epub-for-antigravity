@@ -207,9 +207,9 @@ def ocr_pages_command(args):
     base_url = None
 
     if backend == 'mistral':
-        mistral_config = credentials.get('mistral', {})
-        api_key = mistral_config.get('api_key')
-        base_url = mistral_config.get('base_url')
+        from pdf2epub.ocr_pages import _resolve_mistral_credentials
+
+        api_key, base_url = _resolve_mistral_credentials(config)
     elif backend == 'azure':
         azure_config = credentials.get('azure', {})
         api_key = azure_config.get('api_key')
@@ -239,6 +239,9 @@ def ocr_pages_command(args):
             max_workers=max_workers,
             allow_empty_pages=bool(getattr(args, "allow_empty_pages", False)),
             retry_pages=retry_pages,
+            allow_slow_secondary=bool(
+                getattr(args, "allow_slow_secondary", False)
+            ),
         )
 
         if (

@@ -17,10 +17,12 @@ from .markdown_validation import (
     detect_bilingual_output,
     detect_polish_page_furniture,
     fix_reference_heading_mismatch,
+    is_front_matter_text,
     polish_content_integrity_check,
     strip_outer_markdown_fences,
     target_language_ratio_check,
     translation_diff_summary,
+    _validate_footnote_markers,
 )
 from .subagent_runtime import _markdown_files
 from .subagent_safety import detect_refusal
@@ -35,6 +37,16 @@ from .workflow_contracts import (
 # were allowed to stage files while carrying advisory warnings, so callers
 # must not treat a pre-v2 report as proof that the new gate was evaluated.
 VALIDATION_SCHEMA_VERSION = MARKDOWN_VALIDATION_SCHEMA_VERSION
+_TRANSLATION_SPECIAL_ROLES = {
+    "bibliography",
+    "index",
+    "metadata",
+    "frontmatter",
+    "copyright",
+    "cover",
+    "notes",
+}
+_DENSITY_EXEMPT_ROLES = {"bibliography", "index"}
 
 
 def _structural_mismatch_reason(
@@ -142,7 +154,7 @@ def validate_markdown_subagent(
     normalized_roles = {
         str(name): str(role).strip().lower()
         for name, role in (file_roles or {}).items()
-        if str(role).strip().lower() in {"bibliography", "index"}
+        if str(role).strip().lower() in _TRANSLATION_SPECIAL_ROLES
     }
     normalized_protected_toc_titles = list(
         dict.fromkeys(
@@ -274,9 +286,15 @@ def validate_markdown_subagent(
             invalid.append({"file": source.name, "reason": "target is empty"})
             continue
         role = normalized_roles.get(source.name)
-        if task == "translate" and role not in {"bibliography", "index"}:
+        if task == "translate" and role not in _DENSITY_EXEMPT_ROLES:
+            language_kwargs = {}
+            if role in {"metadata", "frontmatter", "copyright", "cover"} or is_front_matter_text(source_text):
+                language_kwargs = {
+                    "min_source_letters": 50,
+                    "min_target_letters": 20,
+                }
             language_audit = target_language_ratio_check(
-                source_text, target_text, target_language
+                source_text, target_text, target_language, **language_kwargs
             )
             target_language_audits[source.name] = language_audit
             if language_audit.get("blocked"):
@@ -390,6 +408,17 @@ def validate_markdown_subagent(
             for role_error in role_errors:
                 invalid.append({"file": source.name, "reason": role_error})
             if role_errors and source.name in valid_files:
+                valid_files.remove(source.name)
+
+        if task == "translate":
+            footnote_marker_errors = _validate_footnote_markers(
+                source_text, target_text
+            )
+            invalid.extend(
+                {"file": source.name, "reason": error}
+                for error in footnote_marker_errors
+            )
+            if footnote_marker_errors and source.name in valid_files:
                 valid_files.remove(source.name)
 
         if task == "polish":

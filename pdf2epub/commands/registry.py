@@ -141,6 +141,14 @@ def register_command_parsers(subparsers) -> None:
             "their checkpoint is complete"
         ),
     )
+    ocr_pages_parser.add_argument(
+        "--allow-slow-secondary",
+        action="store_true",
+        help=(
+            "Explicitly accept a secondary OCR runtime estimate above the "
+            "configured preflight limit"
+        ),
+    )
     ocr_pages_parser.set_defaults(func=ocr_pages_command)
 
     ocr_correct_parser = subparsers.add_parser(

@@ -312,6 +312,13 @@ def _block_text_variants(
     """Return raw text plus an optional validated-correction text variant."""
     raw_text = _plain_block_text(block)
     variants = [raw_text] if raw_text else []
+    raw_html = block.get("html")
+    if raw_html:
+        stripped = html.unescape(str(raw_html))
+        stripped = re.sub(r"<[^>]+>", "", stripped)
+        compact = re.sub(r"\s+", " ", stripped).strip()
+        if compact and compact not in variants:
+            variants.append(compact)
     corrected = _corrected_block_text(output_dir, page, raw_text)
     if corrected and corrected not in variants:
         variants.append(corrected)
@@ -706,13 +713,49 @@ def apply_footnote_normalization(
     # A continuation may be physically on a later page after ordinary body
     # text.  The sorted decision stream above follows page/block order, so it
     # naturally joins it to the preceding note without moving the body block.
+    record_by_name = {record["name"]: record for record in records}
+    records_by_chapter: dict[str, list[dict[str, Any]]] = {}
+    for record in records:
+        records_by_chapter.setdefault(record["chapter_id"], []).append(record)
+    for chapter_records in records_by_chapter.values():
+        chapter_records.sort(key=lambda item: (item["unit_order"], item["part_index"]))
+
     for note in (note for notes in notes_by_chapter.values() for note in notes):
+        note_record = record_by_name[note["source_file"]]
         source = source_texts[note["source_file"]]
         start = note["start_span"][0]
         marker_candidates = [
             item for item in _marker_spans(source, note["key"])
             if item[1] <= start
         ]
+        target_file = note["source_file"]
+
+        if not marker_candidates:
+            # If the note appears at the beginning of a split part, its body marker
+            # may reside in an earlier part of the same logical chapter unit.
+            sibling_records = [
+                rec for rec in records_by_chapter.get(note["chapter_id"], [])
+                if (rec["unit_order"], rec["part_index"]) < (note_record["unit_order"], note_record["part_index"])
+            ]
+            cross_part_candidates: list[tuple[str, tuple[int, int, str]]] = []
+            for earlier_record in reversed(sibling_records):
+                earlier_source = source_texts[earlier_record["name"]]
+                earlier_spans = _marker_spans(earlier_source, note["key"])
+                if earlier_spans:
+                    cross_part_candidates.extend(
+                        (earlier_record["name"], span) for span in earlier_spans
+                    )
+            if len(cross_part_candidates) == 1:
+                target_file, selected = cross_part_candidates[0]
+                marker_candidates = [selected]
+                source = source_texts[target_file]
+            elif len(cross_part_candidates) > 1:
+                errors.append(
+                    f"{note['source_page']}:{note['source_file']}: ambiguous body "
+                    f"footnote marker for key {note['key']} across logical chapter parts"
+                )
+                continue
+
         if not marker_candidates:
             errors.append(
                 f"{note['source_page']}:{note['source_file']}: no body footnote marker "
@@ -723,7 +766,7 @@ def apply_footnote_normalization(
         replacement = f"[^{note['output_key']}]"
         if marker_kind == "markdown" and source[marker_start:marker_end] == replacement:
             continue
-        edits_by_file[note["source_file"]].append(
+        edits_by_file[target_file].append(
             (marker_start, marker_end, replacement)
         )
 

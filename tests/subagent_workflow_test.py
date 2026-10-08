@@ -348,6 +348,104 @@ def test_markdown_validation_excludes_bibliography_from_target_language_gate(
     assert report["target_language_audits"] == {}
 
 
+def test_markdown_validation_blocks_unchanged_short_cip_front_matter(
+    tmp_path: Path,
+):
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    text = (
+        "Cataloging-in-Publication Data. Library of Congress. "
+        "Copyright 2024 by Example Press. ISBN 978-1-2345-6789-0."
+    )
+    (source_dir / "frontmatter.md").write_text(text, encoding="utf-8")
+    (target_dir / "frontmatter.md").write_text(text, encoding="utf-8")
+
+    report = validate_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        target_dir,
+        target_language="Chinese",
+    )
+
+    assert report["all_passed"] is False
+    assert report["target_language_blocked"] == ["frontmatter.md"]
+
+
+def test_markdown_validation_requires_one_to_one_index_entries(
+    tmp_path: Path,
+):
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "index.md").write_text(
+        "and behavior, 95-99, 100n206\n\n61-78\n",
+        encoding="utf-8",
+    )
+    (target_dir / "index.md").write_text(
+        "and behavior，95-99，100n206\n",
+        encoding="utf-8",
+    )
+
+    report = validate_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        target_dir,
+        file_roles={"index.md": "index"},
+    )
+
+    assert report["all_passed"] is False
+    assert "index entry count mismatch" in report["invalid"][0]["reason"]
+
+
+def test_markdown_validation_preserves_exact_footnote_marker_syntax(
+    tmp_path: Path,
+):
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "unit.md").write_text(
+        "Body [^53].\n\n[^53]: A note.\n", encoding="utf-8"
+    )
+    (target_dir / "unit.md").write_text(
+        "正文 <sup>53</sup>。\n\n[注53]：注释。\n", encoding="utf-8"
+    )
+
+    report = validate_markdown_subagent(tmp_path, "translate", source_dir, target_dir)
+
+    assert report["all_passed"] is False
+    assert any("translate footnote marker mismatch" in item["reason"] for item in report["invalid"])
+
+
+def test_markdown_validation_rejects_parallel_original_and_translated_headings(
+    tmp_path: Path,
+):
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "unit.md").write_text("# Original heading\n\nBody\n", encoding="utf-8")
+    (target_dir / "unit.md").write_text(
+        "# 翻译标题\n# Original heading\n\n正文\n", encoding="utf-8"
+    )
+
+    report = validate_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        target_dir,
+        structural_patterns=(r"^#{1,6}\s",),
+    )
+
+    assert report["all_passed"] is False
+    assert "Markdown heading structure mismatch" in report["invalid"][0]["reason"]
+
+
 def test_polish_requires_review_for_page_furniture(tmp_path: Path):
     from pdf2epub.subagent_workflow import validate_markdown_subagent
 

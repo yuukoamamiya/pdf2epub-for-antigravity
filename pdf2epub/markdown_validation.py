@@ -99,6 +99,26 @@ def _validate_special_role_markers(
     """
     source_markers = _special_role_numeric_markers(source_text)
     target_markers = _special_role_numeric_markers(target_text)
+
+    if role == "index":
+        source_entries = _index_entry_groups(source_text)
+        target_entries = _index_entry_groups(target_text)
+        if len(source_entries) != len(target_entries):
+            return [
+                "index entry count mismatch: "
+                f"source={len(source_entries)}, target={len(target_entries)}"
+            ]
+        for index, (source_entry, target_entry) in enumerate(
+            zip(source_entries, target_entries), 1
+        ):
+            source_entry_markers = _special_role_numeric_markers(source_entry)
+            target_entry_markers = _special_role_numeric_markers(target_entry)
+            if source_entry_markers != target_entry_markers:
+                return [
+                    f"index numeric marker mismatch (entry {index}): "
+                    f"source={source_entry_markers!r}, "
+                    f"target={target_entry_markers!r}"
+                ]
     if source_markers == target_markers:
         return []
 
@@ -137,6 +157,74 @@ def _validate_special_role_markers(
         f"{role} numeric marker mismatch: "
         f"source={source_preview!r}, target={target_preview!r}{suffix}"
     ]
+
+
+def _index_entry_groups(text: str) -> list[str]:
+    """Group an index into stable entries while allowing indented wrapping.
+
+    The translation contract requires a new top-level entry to start at the
+    same indentation boundary as the source. A wrapped target entry may use
+    additional indented lines, which are folded into the preceding entry for
+    marker comparison. This catches omitted prose-only entries as well as
+    entries whose page markers were dropped.
+    """
+    entries: list[str] = []
+    current: list[str] = []
+    for line in str(text or "").splitlines():
+        if not line.strip() or re.match(r"^\s*#{1,6}\s+", line):
+            continue
+        stripped = line.strip()
+        if current and line[:1].isspace():
+            current.append(stripped)
+            continue
+        if current:
+            entries.append(" ".join(current))
+        current = [stripped]
+    if current:
+        entries.append(" ".join(current))
+    return entries
+
+
+def _validate_footnote_markers(source_text: str, target_text: str) -> list[str]:
+    """Require translated Markdown to preserve exact footnote marker syntax."""
+    marker_re = re.compile(r"\[\^([A-Za-z0-9_-]+)\]")
+    source_markers = [match.group(1) for match in marker_re.finditer(source_text)]
+    target_markers = [match.group(1) for match in marker_re.finditer(target_text)]
+    if source_markers != target_markers:
+        return [
+            "translate footnote marker mismatch: "
+            f"source={source_markers!r}, target={target_markers!r}"
+        ]
+    if source_markers:
+        for key in dict.fromkeys(source_markers):
+            escaped = re.escape(key)
+            if re.search(
+                rf"<sup\b[^>]*>\s*{escaped}\s*</sup>",
+                target_text,
+                flags=re.IGNORECASE,
+            ) or re.search(
+                rf"\[(?:注|note)\s*{escaped}\]",
+                target_text,
+                flags=re.IGNORECASE,
+            ):
+                return [
+                    f"translate footnote marker {key} changed from Markdown "
+                    "[^N] syntax to an alternate notation"
+                ]
+    return []
+
+
+def is_front_matter_text(text: str) -> bool:
+    """Recognize common copyright/CIP front-matter labels for stricter audits."""
+    head = "\n".join(str(text or "").splitlines()[:24])
+    return bool(
+        re.search(
+            r"\b(?:cataloging[- ]in[- ]publication|library of congress|"
+            r"copyright|all rights reserved|isbn|cip data)\b",
+            head,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _plain_markdown_label(line: str) -> str:

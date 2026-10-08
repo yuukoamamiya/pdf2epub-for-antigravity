@@ -73,14 +73,16 @@ Subagent 合同层
 
 - `runtime.py`：提供 `BookCommandContext`、配置加载和输出目录解析。
 - `sources.py`：选择原始 `ocr_markdown` 或已验证的 `polished_markdown`；所有 PDF 的翻译、实体提取和打包都必须使用后者。
-- `ocr.py`：执行唯一允许调用 OCR 服务的入口，并可在同一阶段运行本地 PaddleOCR 共识筛查；只把差异页交给工作区 Subagent 做视觉纠错。
+- `ocr.py`：执行唯一允许调用 OCR 服务的入口，并可在同一阶段运行独立 GPU PaddleOCR 共识筛查；只把差异页交给工作区 Subagent 做视觉纠错。
 - `ocr_pages.py`：逐页调度主 OCR 和次 OCR，持久化页面 Markdown、HTML、原始 HTML、layout
   sidecar 和共识记录；不把次 OCR 静默写回主 OCR。
 - `ocr/backends/chandra.py`：调用 Chandra 原生 layout OCR，保留 block、bbox、图片资产和
   语义脚注；图片 alt 只作为证据元数据，不进入正文 Markdown。
-- `ocr/backends/paddle.py`：可选的本地次 OCR。它输出 Chandra-shaped layout sidecar，脚注
-  只按保守的页底几何和数字开头推导；明确的定义块使用相同 `footnote-def`/`[^N]:` 语义，
-  但不臆测普通上标、序数或行内引用。
+- `ocr/backends/paddle.py`：启动一次 OCR 批次专用的独立 GPU Paddle worker，主进程不导入
+  Paddle/PaddleOCR；worker 退出后由调度器显式回收。它写入与 Chandra 形状兼容的 layout sidecar，
+  但不静默覆盖主 OCR。
+- `ocr_backends.py` 中的 Mistral 适配器：保留的可选远程兼容后端；它按物理页提交 PDF，只把
+  Markdown 文本写入 `ocr_secondary/` 供共识比较，不静默覆盖主 OCR。
 - `refine/pdf_evidence.py`：统一决定当前页面集合使用 `native_text` 版面证据、`single_ocr`
   还是 `two_ocr` 共识，并集中校验共识检查点；脚注和插图阶段不得各自重新解释这个选择。
 - `refine/layout_evidence.py`：统一加载 layout sidecar、清理 block 文本和归一化 bbox；它只
@@ -123,6 +125,47 @@ polish。`commands/markdown.py`、`entities.py`、`toc.py` 和 `pdf.py` 均应�
 
 新命令应优先使用 `runtime.py` 的公共上下文；不要从 `cli.py` 导入业务函数，也不要把
 配置解析和输出目录推断复制到每个 handler 中。
+
+#### 2.2.1 OCR 后端边界和运行时隔离
+
+OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。注册层只描述后端
+能力，不在导入阶段初始化网络客户端、GPU runtime 或模型：
+
+| 能力字段 | 用途 |
+|---|---|
+| `chunk_processor` | 兼容旧的 PDF chunk 调用，当前由 Mistral/Vertex/VLLM 使用 |
+| `image_page_processor` | 输入单页图像并返回 `OCRPageResult`，当前由 Paddle/Azure/Vision 使用 |
+| `native_page_processor` | 返回原生 layout 证据，当前由 Chandra 使用 |
+| `init_client` | 在第一次实际使用前创建后端客户端或进程代理 |
+
+Paddle 的 `init_client` 返回的是主进程代理，不是 `PaddleOCR` 对象。代理负责：
+
+1. 解析 `ocr.backends.paddle.python_executable`，默认指向 `.venv-paddle/Scripts/python.exe`；
+2. 通过 `subprocess.Popen` 启动 `paddle_worker.py`，用 JSON Lines 传输初始化、页面图片和关闭请求；
+3. 等待 worker 返回 CUDA 诊断，强制要求 `compiled_with_cuda: true`、GPU 数量大于 0 且设备为 `gpu:0`；
+4. 将 worker 返回的 JSON-safe `rec_texts`、`rec_boxes`/`dt_polys` 转为统一的 block/layout sidecar；
+5. 在 OCR 批次结束、失败或超时后显式发送 shutdown 并回收子进程。
+
+启用次 OCR 时，`ocr_pages.py` 会在任何主 OCR 页面 worker 启动前生成
+`ocr_secondary_preflight.json`。它检查 Paddle 是否请求 GPU，并按页数、次 OCR worker 数和
+`ocr.secondary.performance.estimated_seconds_per_page` 计算保守耗时；超过
+`max_estimated_seconds` 会阻断本次运行，只有用户显式传入 `--allow-slow-secondary` 才继续。
+CPU 配置始终阻断，不能静默回退。若用户要切换到单 OCR，必须明确关闭
+`ocr.secondary.enabled` 后重新运行，旧的双 OCR 共识不会参与后续结构阶段。
+
+`paddle_worker.py` 不依赖主项目包，且只在子进程中 import `paddle`/`paddleocr`，避免 PaddleX、
+CUDA DLL 和大型模型依赖污染主项目环境。Paddle GPU wheel、PaddleOCR 包和模型缓存都属于
+本地部署内容，不写入 `pyproject.toml`、`uv.lock` 或 GitHub 源码发布包。添加新的本地模型
+后端时，应复用该隔离边界，不要把模型 runtime 直接放进主进程。
+
+Mistral 仍通过 `ocr_backends.py` 提供远程 chunk adapter；`local_credentials.py` 负责读取
+被 Git 忽略的本地凭据，`mistral_budget.py` 负责项目级页数预留。Mistral 适配器不应读取或
+写入 Paddle worker 状态，Paddle 也不应依赖 Mistral 的 key、额度账本或 HTTP 客户端。
+
+发布边界是“发布接口，不发布运行时”：应包含后端源码、注册表、测试、配置模板和维护文档；
+应排除 `.venv-paddle/`、`.paddlex/`、`.paddleocr/`、`paddle_models/`、`.secrets/`、真实
+`config.yaml`、`input/`、`output/`、Mistral 使用账本和一次性工作脚本。维护者在发布前用
+`git status --short` 与 `git check-ignore` 审核，而不是无选择地执行 `git add .`。
 
 ### 2.3 Subagent 合同层
 
@@ -206,7 +249,7 @@ ocr-pages
   → pdf_text_probe.json
   → pages/ (native text extraction only for high-confidence vector PDFs;
             searchable OCR and scanned PDFs still use visual OCR)
-ocr-pages 可选：主 OCR + PaddleOCR（兼容 layout sidecar + 文本共识）→ ocr_consensus.json
+ocr-pages 可选：主 OCR + 独立 GPU PaddleOCR worker（文本/版面共识）→ ocr_consensus.json
 （仅当 ocr.secondary.enabled=true）ocr-correct + 工作区 Subagent + ocr-correct-validate
 （只复核差异页、共同漏检风险页和确定性抽样页；一致页其余页面自动接受；原生文字跳过）
   → ocr_corrected_pages/validated/

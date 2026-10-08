@@ -12,16 +12,37 @@
 
 ## 当前实现基线
 
-- 默认 PDF 主 OCR 是 Chandra；可选第二套 OCR 是本地 PaddleOCR 3.7.0 + PaddlePaddle 3.3.1。
+- 默认 PDF 主 OCR 是 Chandra；可选第二套 OCR 是独立 GPU PaddleOCR worker。
 - `ocr.secondary.enabled` 是单 OCR/双 OCR 的唯一开关，同时约束 OCR 纠错、脚注候选和整页插图候选。
 - 高置信度矢量文字 PDF 使用 `native_text` 页面源和 PDF page-point layout sidecar；它跳过视觉
   OCR/共识，但仍必须经过 `refine-local`、脚注门禁和 polish。
-- Chandra 和 Paddle 都写入 Chandra-shaped layout sidecar；Paddle 只保守识别页底脚注定义，
-  不把普通序数、上标或行内数字引用升级成脚注。
+- Chandra 写入完整的 layout sidecar；Paddle 次 OCR 在独立子进程中运行并写入逐页文本和
+  layout sidecar，不静默覆盖主 OCR。worker 只在一次 OCR 任务期间运行，任务结束后关闭。
 - EPUB 公式使用 Unicode 优先、MathML 回退方案；当前没有 SVG 公式渲染器，也不要求
   `dvisvgm`、XeLaTeX 或 TeX Live 参与普通 EPUB 构建。
 - 任何“存在文件即可继续”的旧流程都不再成立：必须检查当前源哈希、manifest、validation
   report 和证据模式。
+
+### OCR 后端的维护边界
+
+当前 OCR 后端分成两条独立运行边界：
+
+| 后端 | 运行位置 | 进入主流程的接口 | 本地运行时是否随项目发布 |
+|---|---|---|---|
+| Chandra | 主项目 Python 进程 | `ocr/backends/chandra.py` 的 page result | 否；只发布接口和配置模板 |
+| Paddle | `.venv-paddle` 子进程 | `ocr/backends/paddle.py` + `paddle_worker.py` | 否；用户自行安装 GPU wheel 和模型 |
+| Mistral | 主项目 Python 进程，通过 HTTP | `ocr_backends.py` 的 chunk adapter | 否；只发布接口，用户自行提供密钥 |
+
+Paddle 的主进程代理只负责启动、JSON Lines 请求、超时和回收；Paddle/PaddleOCR 的 import、
+CUDA 检查、模型初始化和图片预测全部发生在 `paddle_worker.py`。因此维护者不能为了方便
+把 Paddle 加入主项目依赖，也不能让 worker 在 CUDA 不可用时改用 CPU。一次 OCR 批次只启动
+一个 worker，配置中的 `max_workers` 对 Paddle 会被限制为 1；批次完成、失败或预检异常都
+必须回收子进程。
+
+Mistral 的 API key 只能来自被 Git 忽略的本地凭据目录或用户明确允许的兼容环境变量。额度
+账本是项目级的保守预留，不是账户余额查询；它不得写入 key，也不能被当作 Mistral 账户的
+全局消费证明。发布源码时只包含 adapter、凭据读取和额度保护逻辑，不包含 `.secrets/`、
+`config.yaml`、`mistral_usage.json`、`.venv-paddle/` 或模型缓存。
 
 ## Subagent 模型配置
 
@@ -302,7 +323,7 @@ OCR 完成不是“有几个 `page_*.md` 文件”就算通过。`ocr_progress.j
 第二套 OCR 关闭时直接使用主 OCR 的 `pages/`，不生成“已纠错”检查点；高置信度原生文字 PDF
 同样不适用该阶段。
 
-可选的双 OCR 配置可以在 `ocr-pages` 阶段启用本地 PaddleOCR；同一个开关同时决定 OCR
+可选的双 OCR 配置可以在 `ocr-pages` 阶段启用独立 GPU PaddleOCR；同一个开关同时决定 OCR
 纠错、脚注候选和整页插图候选使用单 OCR 还是双 OCR 证据：
 
 ```yaml
@@ -311,23 +332,36 @@ ocr:
   secondary:
     enabled: true
     backend: paddle
+    performance:
+      max_estimated_seconds: 3600
+      estimated_seconds_per_page: 5.0
   backends:
     paddle:
-      lang: en
-      device: cpu
-      enable_mkldnn: false
+      python_executable: .venv-paddle/Scripts/python.exe
+      device: gpu:0
+      dpi: 192
+      use_doc_orientation_classify: true
+      use_doc_unwarping: true
+      use_textline_orientation: true
+      max_workers: 1
+      request_timeout: 300
 
 ocr_correction:
   review_dpi: 150
 ```
 
-本地依赖可用 `uv sync --extra ocr-local` 安装。项目将第二套 OCR 固定为
-PaddleOCR 3.7.0 + PaddlePaddle 3.3.1，PaddleOCR 的语言模型必须与原书语言匹配；
-Windows CPU 默认关闭 `enable_mkldnn`，避免 PaddlePaddle 3.x 的 OneDNN 算子兼容问题。
-语义标题去重依赖被放在独立的 `semantic` extra 中；第二套 OCR 不应与该 extra 同时安装，
-也不要通过预加载 `torch` 来绕过 DLL 问题；若本地依赖安装不完整，应重新运行上述同步命令。
+Paddle GPU worker 使用独立的 `.venv-paddle` 环境。预检会验证 CUDA 编译支持、GPU 数量和
+实际设备；任何一项不满足都会阻断流程，不会退回 CPU。worker 通过 JSON Lines 接收页面，
+模型只在当前 OCR 批次中驻留，批次结束后立即回收。Chandra 的 Cloudflare Access 凭据放在
+`.secrets/chandra-access.json`。远程 Mistral 仍可作为显式兼容后端配置，但不是本地 Paddle
+路径的一部分。
 
-安装本地引擎后，`ocr-pages` 会把主 OCR 和 PaddleOCR 的结果按页做规范化比较，忽略纯粹的
+此外，`ocr-pages` 会在主 OCR worker 启动前写入 `ocr_secondary_preflight.json`，按页数、worker
+数和配置的保守页速估算次 OCR 总耗时。超过 `max_estimated_seconds` 时先暂停，只有用户明确
+使用 `ocr-pages --allow-slow-secondary` 才继续。需要退回单 OCR 时，必须明确关闭
+`ocr.secondary.enabled` 后重新运行；旧的双 OCR 共识不得复用，也不会自动降级。
+
+启用 Paddle 后，`ocr-pages` 会把主 OCR 和 PaddleOCR 的结果按页做规范化比较，忽略纯粹的
 Markdown 换行/标记差异，但保留字符、数字、标点和缺行差异。报告写入 `ocr_consensus.json`；
 没有实质差异的页面直接自动接受，只有 `action: visual_review` 的页面才进入
 `ocr-correct_worker_handoffs/`。双 OCR 只是筛查，不把任一 OCR 结果当作绝对真值；两个引擎
@@ -336,14 +370,9 @@ Markdown 换行/标记差异，但保留字符、数字、标点和缺行差异�
 共同犯错。`ocr.secondary.enabled: false` 时不运行第二套 OCR，也不运行
 视觉 OCR 纠错，主 OCR 结果直接进入后续结构整理。
 
-当主 OCR 使用 Chandra 时，PaddleOCR 还会把每个识别行物化为与 Chandra 相同的 layout
-sidecar：`blocks[].order`、`label`、归一化 `bbox`、像素 `bbox_px` 和 HTML block。
-Paddle 没有原生语义标签，因此 `Footnote` 只由它自己的底部位置和数字开头信号保守推导；
-在这个明确的定义块场景下，它会使用与 Chandra 相同的 `footnote-def` HTML 标记和
-`[^N]: ...` Markdown 形式，但不会把普通上标或行内数字引用臆测为脚注，也不会复制
-Chandra 的图片描述。`ocr_consensus.json` 除整页文本外，还记录两套 sidecar 的脚注
-存在性、脚注编号序列和脚注垂直范围；任一项不一致都会进入视觉复核。这使“一个 OCR 把
-底部正文误标成脚注”的情况被筛出，但两套 OCR 一致仍只是通过筛查，不是正确性证明。
+Paddle 次 OCR 提供与 Chandra 形状兼容的 layout sidecar，但几何标签仍是保守启发式；文本、
+数字、缺行和版面差异仍会进入视觉复核，脚注和整页
+插图不能仅凭次 OCR 文本或启发式标签自动改变页面结构。两套 OCR 一致仍只是通过筛查，不是正确性证明。
 脚注和整页插图阶段还会检查证据模式与 sidecar 哈希：单 OCR 模式忽略遗留的
 `ocr_consensus.json`；双 OCR 模式若共识报告、主/次 sidecar 或配置已变化，会阻断旧的
 候选决定，必须重新准备。
@@ -424,7 +453,7 @@ Subagent；双 OCR 模式下，任何被 OCR 共识标为 `visual_review`、或�
 验证通过的单元上下文会挂载到后续 `polish` handoff，避免每个 worker 读取整本脚注报告。
 
 脚注和整页插图共用 `ocr.secondary.enabled` 作为证据模式开关：关闭时只使用主 OCR，且会
-忽略旧的 `ocr_consensus.json`；开启时必须存在与当前主 OCR、Paddle 配置和次 OCR 文件匹配的
+忽略旧的 `ocr_consensus.json`；开启时必须存在与当前主 OCR、次 OCR 配置和次 OCR 文件匹配的
 最新共识检查点，主/次 OCR 对候选的差异会进入工作区 Subagent 复核。`footnote-validate`、
 `footnote-apply`、`illustration-validate`、`illustration-apply` 和 `refine-local` 都会再次
 检查这个模式及其哈希，因此切换开关后不能复用旧的脚注或插图绑定。

@@ -59,15 +59,23 @@ subagent:
   # task_models:
   #   refine: gemini-3.6-flash
 
+# 本地凭据目录（整个目录已加入 .gitignore；不要把密钥写入 YAML）
+credentials:
+  local_dir: .secrets
+
 # OCR 设置 (默认 chandra，支持多模态 OCR)
 ocr:
   backend: chandra
   furigana_mode: attach # 日语振假名: attach / remove / ruby
-  # 可选的第二套 OCR。开启后，ocr-pages 会逐页生成 Paddle 结果和共识报告，
-  # 只有差异页、共同漏检风险页和固定抽样页进入视觉 Subagent 复核。
+  # 可选的第二套 OCR。开启后，ocr-pages 会按需启动独立 GPU Paddle worker，
+  # 逐页生成结果和共识报告；任务结束后 worker 会立即关闭。
   secondary:
     enabled: false
     backend: paddle
+    # 双 OCR 会在第 1 页前估算总耗时；超过此阈值时先暂停，不会静默退回单 OCR。
+    performance:
+      max_estimated_seconds: 3600
+      estimated_seconds_per_page: 5.0
   consensus:
     common_miss:
       sample_every: 20
@@ -81,20 +89,22 @@ ocr:
       dpi: 192
       min_dimension: 1024
       include_headers_footers: false
-      access_client_id_env: CHANDRA_CF_ACCESS_CLIENT_ID
-      access_client_secret_env: CHANDRA_CF_ACCESS_CLIENT_SECRET
+      credentials_file: chandra-access.json
       request_timeout: 300
       max_retries: 6
     paddle:
+      # Paddle/PaddleOCR 只安装在这个独立环境中，主项目解释器不会加载它们。
+      python_executable: .venv-paddle/Scripts/python.exe
+      # GPU-only：未检测到 CUDA 或无法使用 gpu:0 时，ocr-pages 直接失败。
+      device: gpu:0
       lang: en
-      device: cpu
-      # Windows CPU 默认关闭 OneDNN；确认本机运行时后再显式开启。
-      enable_mkldnn: false
-      cpu_threads: 4
-      use_doc_orientation_classify: false
-      use_doc_unwarping: false
-      use_textline_orientation: false
+      dpi: 192
+      use_doc_orientation_classify: true
+      use_doc_unwarping: true
+      use_textline_orientation: true
       max_workers: 1
+      request_timeout: 300
+      worker_startup_timeout: 300
 
 # 脚注候选的本地高置信度接受策略；false 时扫描/OCR 和原生文字 PDF 都交给 Subagent 复核。
 footnotes:
