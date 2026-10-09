@@ -237,6 +237,11 @@ PDF 的单 OCR/双 OCR；它不能把原生文字 PDF 变成双 OCR：
 文字就认定它是原生稿。只有高置信度矢量文字层才走 `native_text`；扫描图、图片上叠加的
 隐藏 OCR 层和混合稿仍走视觉 OCR。原生路径的关键检查是：
 
+稳定双栏或多栏的高置信度原生文字 PDF 仍走 `native_text`，由本地提取器按 PDF 文本 span
+的横向坐标拆分并以栏为单位输出阅读顺序；`pdf_text_probe.json` 会记录
+`layout_mode: multi_column` 和 `reading_order: column_major`。多栏本身不是强制 OCR 的理由，
+但图片型、隐藏 OCR 层和混合稿仍按上述保守判定进入视觉 OCR。
+
 - `pdf_text_probe.json` 的 `classification` 为 `native_text`；
 - `pages/ocr_progress.json` 的 `mode` 和 `backend` 为 `native_text`；
 - 每一页都有 `pages/page_NNN.ocr.json`，sidecar 的 `source_kind` 为 `native_text`、

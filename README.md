@@ -111,6 +111,10 @@ Chandra 是当前主 OCR，PaddleOCR 是可选的本地 GPU 次 OCR。原生文�
 扫描或混合 PDF 使用视觉 OCR。两种来源都不会把普通上标、序数或行内数字引用自动判成脚注，
 脚注归属仍由 Subagent 复核。
 
+原生文字 PDF 即使是稳定双栏，也不会仅因栏布局而强制 OCR；提取器会利用 PDF 文本 span 的
+坐标按栏重排，并在页面 sidecar 中记录 `layout_mode: multi_column`。只有扫描图、隐藏 OCR
+文字层或其他未通过原生文字置信度门禁的 PDF 才进入视觉 OCR。
+
 ## 当前输出和公式策略
 
 - PDF 页面结果保存在 `pages/`，双 OCR 结果保存在 `ocr_secondary/`，比较记录保存在

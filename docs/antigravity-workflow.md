@@ -242,14 +242,15 @@ ocr-pages
   → visual OCR: pages/*.md + OCR layout sidecars
 ```
 
-只有 `classification: native_text` 且没有多栏阻断信号才走原生分支。探测到稳定双栏或多栏
-阅读版面的 PDF 会写入 `classification: native_text_multicolumn`，并使用
-`recommendation: ocr_required` 转入视觉 OCR。可搜索但实际内容来自整页图像的 PDF、
-隐藏 OCR 层和混合稿仍必须走视觉 OCR；不能仅凭复制文字或目录中已有 Markdown 判断。
+高置信度原生 PDF 都走原生分支，包括稳定双栏或多栏版面。多栏页由提取器根据 PDF 文本
+span 的横向坐标拆分，并以栏为单位生成 `column_major` 阅读顺序；报告保留
+`classification: native_text`、`recommendation: use_text_layer`，并记录
+`layout_mode: multi_column`。可搜索但实际内容来自整页图像的 PDF、隐藏 OCR 层和混合稿仍必须
+走视觉 OCR；不能仅凭复制文字或目录中已有 Markdown 判断。
 
-原生分支的 sidecar 是版面证据，不是 OCR 结果。只有单栏原生 PDF 才生成这类 sidecar；每页 sidecar 应包含
+原生分支的 sidecar 是版面证据，不是 OCR 结果。单栏和多栏原生 PDF 都生成这类 sidecar；每页 sidecar 应包含
 `backend: native_text`、`source_kind: native_text`、`coordinate_system: page_points`、
-`page_box`、`body_font_size` 和有序 `blocks[]`。block 至少保留 `bbox`、`text`、
+`page_box`、`layout_mode`、`reading_order`、`body_font_size` 和有序 `blocks[]`。block 至少保留 `bbox`、`text`、
 `font_size`、`font_names` 和 `source_block`。这里的坐标是 PDF page points，不能使用视觉
 OCR 的 `0..1000` 坐标解释。
 

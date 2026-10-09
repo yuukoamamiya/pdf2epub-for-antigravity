@@ -307,8 +307,7 @@ heading contract 始终优先；标题绑定只容忍安全的展示格式差异
 
 | 页面来源 | 配置 | 主/次证据 | 结构阶段行为 |
 |---|---|---|---|
-| `native_text`（单栏） | 忽略 `ocr.secondary.enabled` | PDF 原生文本块/坐标/字体；报告兼容字段为 `single_ocr` | 不运行视觉 OCR、Paddle、`ocr-correct` 或 OCR 共识；同页上标+小字号的高置信度候选本地接受，其余候选交 Subagent。 |
-| `native_text_multicolumn` | 忽略 `ocr.secondary.enabled` | 原生文字层存在，但页面几何显示稳定多栏；报告推荐 `ocr_required` | 禁止直接文本提取，转入视觉 OCR；多栏文字层的字符可以正确但阅读顺序不可靠。 |
+| `native_text`（单栏或多栏） | 忽略 `ocr.secondary.enabled` | PDF 原生文本块/坐标/字体；报告兼容字段为 `single_ocr`；多栏页额外记录 `column_major` 阅读顺序 | 不运行视觉 OCR、Paddle、`ocr-correct` 或 OCR 共识；同页上标+小字号的高置信度候选本地接受，其余候选交 Subagent。 |
 | 视觉 OCR | `false` | 只有 `pages/` 主 OCR | 忽略旧共识产物；明确的高置信度 OCR 脚注可本地接受，疑难候选交给 Subagent。 |
 | 视觉 OCR | `true` | 当前 `ocr_secondary/` + `ocr_consensus.json` | 共识报告和次 OCR sidecar 参与脚注/插图候选比较；差异页必须复核。 |
 
@@ -368,13 +367,13 @@ PP-DocLayout 的预测不复用 `OCRPageResult` sidecar。每页预测至少包�
 
 #### 3.1.2.1 原生文字 PDF sidecar 合同
 
-高置信度、单栏原生 PDF 由 `pdf_text_probe` 选择直接文本提取。探测器同时检查文本行的横向
-分布；如果发现两个具有明显 gutter、足够行数和纵向重叠的稳定栏，报告使用
-`classification: native_text_multicolumn` 与 `recommendation: ocr_required`，整本 PDF 转入
-视觉 OCR。这样不会把看似可复制的双栏文字层误当成可靠的线性阅读顺序。
+高置信度原生 PDF 由 `pdf_text_probe` 选择直接文本提取。探测器同时检查文本行的横向
+分布；如果发现两个具有明显 gutter、足够行数和纵向重叠的稳定栏，原生提取器会依据文本
+span 的起始 x 坐标拆分左右栏，再按“左栏自上而下、右栏自上而下”输出，而不是把整本 PDF
+退回视觉 OCR。报告仍为 `classification: native_text` 与 `recommendation: use_text_layer`，
+并记录 `layout_mode: multi_column`、`reading_order: column_major`。
 
-对仍符合单栏条件的原生 PDF，`extract_native_text_pages()`
-仍生成与 OCR 页相同的 `pages/page_NNN.md`，但同时生成带源坐标的
+单栏和多栏原生 PDF 的 `extract_native_text_pages()` 都生成与 OCR 页相同的 `pages/page_NNN.md`，但同时生成带源坐标的
 `pages/page_NNN.ocr.json`。该 sidecar 是脚注和整页插图的版面证据，不是另一套 OCR 结果，
 也不是让本地脚本直接替代 Subagent 判断的标签。
 

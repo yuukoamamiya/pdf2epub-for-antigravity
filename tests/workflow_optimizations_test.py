@@ -87,16 +87,29 @@ def test_pdf_probe_only_accepts_clean_vector_text(tmp_path: Path):
     assert native_report["multi_column_page_ratio"] == 0.0
 
 
-def test_pdf_probe_routes_two_column_native_text_to_visual_ocr(tmp_path: Path):
+def test_pdf_probe_keeps_two_column_native_text_on_native_path(tmp_path: Path):
     two_column = tmp_path / "two-column.pdf"
     _make_two_column_pdf(two_column)
 
     report = probe_pdf_text_layer(two_column)
 
-    assert report["classification"] == "native_text_multicolumn"
-    assert report["recommendation"] == "ocr_required"
+    assert report["classification"] == "native_text"
+    assert report["recommendation"] == "use_text_layer"
+    assert report["layout_mode"] == "multi_column"
+    assert report["reading_order"] == "column_major"
     assert report["multi_column_pages"]
     assert report["multi_column_page_ratio"] == 1.0
+
+    output_dir = tmp_path / "book"
+    extract_native_text_pages(two_column, output_dir, report)
+    text = (output_dir / "pages" / "page_001.md").read_text(encoding="utf-8")
+    assert text.index("Left column line 29") < text.index("Right column line 0")
+    assert text.index("Right column line 0") < text.index("Right column line 29")
+    sidecar = json.loads(
+        (output_dir / "pages" / "page_001.ocr.json").read_text(encoding="utf-8")
+    )
+    assert sidecar["layout_mode"] == "multi_column"
+    assert sidecar["reading_order"] == "column_major"
 
 
 def test_epub_conversion_pipeline_is_language_neutral():

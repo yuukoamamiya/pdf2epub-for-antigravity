@@ -60,14 +60,12 @@ def _image_coverage(page: Any) -> float:
 def _detect_multi_column_layout(page: Any) -> Dict[str, Any] | None:
     """Detect a strong two-column text layout from PDF line geometry.
 
-    A clean vector text layer is not enough to use direct extraction: PyMuPDF's
-    geometric sort can still interleave the lines of two newspaper-style
-    columns.  This detector intentionally looks only at geometry and is
-    conservative.  It requires two sizeable x-origin bands, substantial
-    vertical overlap, and narrow enough line widths to leave a real column
-    gutter.  A positive signal makes the page unsafe for the current native
-    extraction path, so the caller can route the whole document through visual
-    OCR and preserve reading order.
+    A clean vector text layer is not enough to use PyMuPDF's default geometric
+    order: it can interleave the lines of two newspaper-style columns.  This
+    detector intentionally looks only at geometry and is conservative.  It
+    requires two sizeable x-origin bands, substantial vertical overlap, and
+    narrow enough line widths to leave a real column gutter.  The result is
+    used to repair native reading order; it is not a reason to invoke OCR.
     """
     try:
         page_width = float(page.rect.width)
@@ -135,6 +133,10 @@ def _detect_multi_column_layout(page: Any) -> Dict[str, Any] | None:
             "left_line_count": len(left),
             "right_line_count": len(right),
             "x0_gap_ratio": round(x_gap_ratio, 6),
+            "column_split_x": round(
+                (left[-1][0] + right[0][0]) / 2.0,
+                3,
+            ),
             "y_overlap_ratio": round(y_overlap_ratio, 6),
             "left_median_width_ratio": round(left_median_width, 6),
             "right_median_width_ratio": round(right_median_width, 6),
@@ -205,10 +207,7 @@ def probe_pdf_text_layer(pdf_path: Path) -> Dict[str, Any]:
     multi_column_page_ratio = (
         len(multi_column_pages) / page_count if page_count else 0.0
     )
-    if native_text_candidate and multi_column_pages:
-        classification = "native_text_multicolumn"
-        recommendation = "ocr_required"
-    elif native_text_candidate:
+    if native_text_candidate:
         classification = "native_text"
         recommendation = "use_text_layer"
     elif text_page_ratio >= 0.50:
@@ -235,6 +234,8 @@ def probe_pdf_text_layer(pdf_path: Path) -> Dict[str, Any]:
         "large_image_ratio": round(large_image_ratio, 6),
         "multi_column_pages": multi_column_pages,
         "multi_column_page_ratio": round(multi_column_page_ratio, 6),
+        "layout_mode": "multi_column" if multi_column_pages else "single_column",
+        "reading_order": "column_major" if multi_column_pages else "geometric",
         "classification": classification,
         "recommendation": recommendation,
     }
@@ -298,13 +299,172 @@ def _native_span_is_superscript(
     return span_bbox[1] <= line_bbox[1] + line_height * 0.45
 
 
+def _region_for_bbox(bbox: list[float] | None, split_x: float) -> int:
+    """Classify a box as left, right, or full-width relative to a gutter."""
+    if bbox is None:
+        return -1
+    if bbox[2] <= split_x:
+        return 0
+    if bbox[0] >= split_x:
+        return 1
+    return -1
+
+
+def _union_bboxes(bboxes: list[list[float]]) -> list[float] | None:
+    """Return the smallest rectangle containing the supplied boxes."""
+    if not bboxes:
+        return None
+    return [
+        min(bbox[0] for bbox in bboxes),
+        min(bbox[1] for bbox in bboxes),
+        max(bbox[2] for bbox in bboxes),
+        max(bbox[3] for bbox in bboxes),
+    ]
+
+
+def _split_line_for_columns(
+    line: Dict[str, Any],
+    split_x: float,
+    page_width: float,
+) -> list[tuple[int, Dict[str, Any]]]:
+    """Split a line containing spans from both columns into column lines.
+
+    PDF producers frequently emit one text block for a whole page, and some
+    even emit the left and right text at the same y coordinate as one PDF line.
+    Looking only at block or line boxes would therefore leave the original
+    interleaving intact.  Span boxes are the finest reliable geometry exposed
+    by PyMuPDF for this purpose.
+    """
+    spans = [span for span in line.get("spans", []) if isinstance(span, dict)]
+    if not spans:
+        return []
+
+    buckets: dict[int, list[Dict[str, Any]]] = {}
+    for span in spans:
+        span_bbox = _bbox_list(span.get("bbox"))
+        if span_bbox is None:
+            region = -1
+        elif span_bbox[2] - span_bbox[0] >= page_width * 0.65:
+            # A page-wide heading or rule is not body text from the left
+            # column merely because its x0 happens to be left of the gutter.
+            region = -1
+        else:
+            # Text spans can legitimately cross the mathematical gutter: the
+            # gutter is between column origins, not necessarily between every
+            # glyph box.  For text, the starting x coordinate is the stable
+            # column signal; the full-box test above handles true wide lines.
+            region = 0 if span_bbox[0] < split_x else 1
+        buckets.setdefault(region, []).append(span)
+
+    results: list[tuple[int, Dict[str, Any]]] = []
+    for region, region_spans in buckets.items():
+        clone = dict(line)
+        clone["spans"] = region_spans
+        span_bboxes = [
+            span_bbox
+            for span in region_spans
+            if (span_bbox := _bbox_list(span.get("bbox"))) is not None
+        ]
+        if span_bboxes:
+            clone["bbox"] = _union_bboxes(span_bboxes)
+        results.append((region, clone))
+    return results
+
+
+def _ordered_native_blocks(
+    page: Any,
+    raw_blocks: list[Dict[str, Any]],
+) -> tuple[list[Dict[str, Any]], str]:
+    """Return native blocks in a stable visual reading order.
+
+    Single-column pages retain PyMuPDF's normal geometric ordering.  On a
+    strong two-column page, text spans are split at the measured gutter and
+    emitted column-major.  Full-width headers and images remain between the
+    columns only when their geometry places them there; this avoids treating a
+    page-wide title as left-column body text.
+    """
+    layout = _detect_multi_column_layout(page)
+    if layout is None:
+        return page.get_text("dict", sort=True).get("blocks", []), "single_column"
+
+    split_x = float(layout["column_split_x"])
+    expanded: list[Dict[str, Any]] = []
+    for source_index, block in enumerate(raw_blocks):
+        if not isinstance(block, dict):
+            continue
+        block_type = block.get("type")
+        if block_type != 0:
+            item = dict(block)
+            item["_native_column"] = _region_for_bbox(
+                _bbox_list(block.get("bbox")), split_x
+            )
+            item["_native_source_block"] = source_index
+            expanded.append(item)
+            continue
+
+        buckets: dict[int, list[Dict[str, Any]]] = {}
+        for line in block.get("lines", []):
+            if not isinstance(line, dict):
+                continue
+            for region, split_line in _split_line_for_columns(
+                line, split_x, float(page.rect.width)
+            ):
+                buckets.setdefault(region, []).append(split_line)
+        for region, lines in buckets.items():
+            item = dict(block)
+            item["lines"] = sorted(
+                lines,
+                key=lambda value: (
+                    (_bbox_list(value.get("bbox")) or [0.0, 0.0])[1],
+                    (_bbox_list(value.get("bbox")) or [0.0, 0.0])[0],
+                ),
+            )
+            item["bbox"] = _union_bboxes(
+                [
+                    line_bbox
+                    for line in item["lines"]
+                    if (line_bbox := _bbox_list(line.get("bbox"))) is not None
+                ]
+            ) or _bbox_list(block.get("bbox"))
+            item["_native_column"] = region
+            item["_native_source_block"] = source_index
+            expanded.append(item)
+
+    body_boxes = [
+        _bbox_list(item.get("bbox"))
+        for item in expanded
+        if item.get("_native_column") in (0, 1)
+    ]
+    body_boxes = [bbox for bbox in body_boxes if bbox is not None]
+    body_top = min((bbox[1] for bbox in body_boxes), default=0.0)
+    body_bottom = max((bbox[3] for bbox in body_boxes), default=float(page.rect.height))
+
+    def sort_key(item: Dict[str, Any]) -> tuple[int, float, float, int]:
+        bbox = _bbox_list(item.get("bbox")) or [0.0, 0.0, 0.0, 0.0]
+        column = item.get("_native_column")
+        if column == 0:
+            rank = 1
+        elif column == 1:
+            rank = 2
+        elif bbox[3] <= body_top:
+            rank = 0
+        elif bbox[1] >= body_bottom:
+            rank = 3
+        else:
+            rank = 2
+        return rank, bbox[1], bbox[0], int(item.get("_native_source_block", 0))
+
+    return sorted(expanded, key=sort_key), "multi_column"
+
+
 def _native_page_artifacts(
     page: Any,
     images_dir: Path,
     page_number: int,
-) -> tuple[str, int, list[dict[str, Any]], list[float], float]:
+) -> tuple[str, int, list[dict[str, Any]], list[float], float, str]:
     """Extract Markdown plus compact, source-native layout evidence."""
-    raw_blocks = page.get_text("dict", sort=True).get("blocks", [])
+    unsorted_blocks = page.get_text("dict", sort=False).get("blocks", [])
+    raw_blocks, layout_mode = _ordered_native_blocks(page, unsorted_blocks)
     all_sizes = [
         size
         for block in raw_blocks
@@ -422,7 +582,10 @@ def _native_page_artifacts(
                         "markdown_text": "\n".join(markdown_lines),
                         "html": block_text,
                         "line_count": len(group),
-                        "source_block": block_index,
+                        "source_block": int(
+                            block.get("_native_source_block", block_index)
+                        ),
+                        "column": block.get("_native_column"),
                         "font_size": round(float(median(group_sizes)), 3)
                         if group_sizes
                         else None,
@@ -444,6 +607,7 @@ def _native_page_artifacts(
                     "label": "Image",
                     "bbox": bbox,
                     "text": "",
+                    "column": block.get("_native_column"),
                     "asset": f"images/{image_path.name}",
                 }
             )
@@ -461,12 +625,13 @@ def _native_page_artifacts(
         layout_blocks,
         page_box,
         page_font_size,
+        layout_mode,
     )
 
 
 def _native_page_markdown(page: Any, images_dir: Path, page_number: int) -> tuple[str, int]:
     """Convert a native PDF page into ordered Markdown blocks."""
-    markdown, image_count, _layout_blocks, _page_box, _page_font_size = _native_page_artifacts(
+    markdown, image_count, _layout_blocks, _page_box, _page_font_size, _layout_mode = _native_page_artifacts(
         page, images_dir, page_number
     )
     return markdown, image_count
@@ -488,7 +653,7 @@ def extract_native_text_pages(
     pages_processed = []
     with pymupdf.open(pdf_path) as document:
         for page_number, page in enumerate(document, 1):
-            markdown, image_count, layout_blocks, page_box, page_font_size = _native_page_artifacts(
+            markdown, image_count, layout_blocks, page_box, page_font_size, layout_mode = _native_page_artifacts(
                 page, images_dir, page_number
             )
             page_path = pages_dir / f"page_{page_number:03d}.md"
@@ -503,6 +668,12 @@ def extract_native_text_pages(
                         "source_kind": "native_text",
                         "coordinate_system": "page_points",
                         "page_box": page_box,
+                        "layout_mode": layout_mode,
+                        "reading_order": (
+                            "column_major"
+                            if layout_mode == "multi_column"
+                            else "geometric"
+                        ),
                         "body_font_size": round(page_font_size, 3)
                         if page_font_size > 0
                         else None,
