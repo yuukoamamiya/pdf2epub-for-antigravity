@@ -214,9 +214,12 @@ PDF 翻译或精修的完整顺序是：
 ```text
 ocr-pages --resume
 → [双 OCR] ocr-correct → ocr-correct-validate
-→ refine-prepare → Subagent 写 toc_tree.json → refine-local --resume
-→ illustration-prepare → [必要时 validate/apply]
-→ footnote-prepare → [必要时 Subagent + validate] → footnote-apply
+→ refine-prepare → Subagent 写 toc_tree.json
+→ illustration-prepare → [有候选时 Subagent 写 illustration_decisions.json]
+→ illustration-validate → illustration-apply
+→ refine-local --resume
+→ footnote-prepare → [有待复核时 Subagent 写 footnote_decisions.json]
+→ footnote-validate → footnote-apply
 → polish → Subagent 写 polished_markdown/ → polish-validate
 → extract-entities → extract-entities-validate
 → translate-toc → translate-toc-validate
@@ -224,8 +227,11 @@ ocr-pages --resume
 → build-epub --translated
 ```
 
-方括号中的阶段由配置和候选报告决定。任何 `*_subagent_prompt.md` 或 manifest 出现后，
-都要先交给工作区 Subagent，再运行后续校验；不要跳过中间门禁。
+方括号中的阶段只表示是否需要工作区 Subagent。`illustration-validate`、
+`illustration-apply`、`footnote-validate` 和 `footnote-apply` 是确定性检查点，即使没有候选或
+没有待复核项也必须运行；它们会生成空的、可供后续阶段消费的绑定/归一化产物。任何
+`*_subagent_prompt.md` 或 manifest 出现后，都要先交给工作区 Subagent，再运行后续校验；
+不要跳过中间门禁。
 
 ## 结果在哪里
 

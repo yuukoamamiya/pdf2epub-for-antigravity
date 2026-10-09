@@ -52,6 +52,7 @@ SECONDARY_PREFLIGHT_SCHEMA_VERSION = 1
 DEFAULT_SECONDARY_MAX_ESTIMATED_SECONDS = 60 * 60
 DEFAULT_PADDLE_ESTIMATED_SECONDS_PER_PAGE = 5.0
 DEFAULT_SECONDARY_ESTIMATED_SECONDS_PER_PAGE = 2.0
+DEFAULT_PRIMARY_OCR_BACKEND = "chandra"
 
 
 def pdf_to_image(pdf_bytes: bytes, zoom_factor: float = 1.0) -> bytes:
@@ -82,6 +83,8 @@ def ocr_pdf_chunk(
     image_counter: int = 0,
     max_retries: int = 5,
     initial_backoff: float = 4.0,
+    # This legacy chunk adapter is retained for the historical Vertex/Mistral
+    # callers. The user-facing pagewise workflow defaults to Chandra below.
     backend: str = "vertex",
     api_key: str = None,
     base_url: str = None,
@@ -245,7 +248,7 @@ def ocr_pdf_page(
     image_counter: int = 0,
     max_retries: int = 5,
     initial_backoff: float = 4.0,
-    backend: str = "vertex",
+    backend: str = DEFAULT_PRIMARY_OCR_BACKEND,
     api_key: str = None,
     base_url: str = None,
     config: Dict = None,
@@ -991,7 +994,7 @@ def ocr_full_book_pagewise(
     location: str = None,
     start_page: int = 1,
     end_page: int = None,
-    backend: str = "vertex",
+    backend: str = DEFAULT_PRIMARY_OCR_BACKEND,
     api_key: str = None,
     base_url: str = None,
     resume: bool = False,

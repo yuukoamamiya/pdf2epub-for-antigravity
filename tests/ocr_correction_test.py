@@ -140,6 +140,48 @@ def test_single_ocr_mode_uses_raw_pages_without_correction_checkpoint(tmp_path: 
     )
 
 
+def test_two_ocr_correction_checkpoint_requires_current_consensus(
+    tmp_path: Path, monkeypatch
+):
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    source = pages / "page_001.md"
+    source.write_text("raw OCR\n", encoding="utf-8")
+    validated = tmp_path / "ocr_corrected_pages" / "validated"
+    validated.mkdir(parents=True)
+    target = validated / source.name
+    target.write_text("corrected OCR\n", encoding="utf-8")
+
+    (tmp_path / "ocr-correct_validation.json").write_text(
+        json.dumps(
+            {
+                "schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION,
+                "task": "ocr-correct",
+                "all_passed": True,
+                "valid_files": [source.name],
+                "source_sha256": {source.name: sha256_file(source)},
+                "target_sha256": {target.name: sha256_file(target)},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    # Simulate a legacy correction checkpoint whose page-level review evidence
+    # still exists but whose required two-OCR consensus checkpoint is absent.
+    monkeypatch.setattr(
+        "pdf2epub.ocr_correction.review_images_are_current", lambda _output: True
+    )
+    monkeypatch.setattr(
+        "pdf2epub.ocr_correction.validate_ocr_correction_reviews",
+        lambda *args, **kwargs: {"valid": True},
+    )
+
+    assert not ocr_correction_is_current(
+        tmp_path,
+        {"ocr": {"secondary": {"enabled": True, "backend": "paddle"}}},
+    )
+
+
 def test_ocr_correction_review_rejects_dropped_lines(tmp_path: Path):
     pages = tmp_path / "pages"
     pages.mkdir()

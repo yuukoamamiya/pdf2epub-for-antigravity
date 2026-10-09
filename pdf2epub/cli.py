@@ -94,11 +94,16 @@ RECOMMENDED WORKFLOW / 推荐工作流 (uses toc_tree.json):
 
   # Complete pipeline for a PDF book:
   pdf2epub ocr-pages -i mybook.pdf   # Page-level OCR
-  pdf2epub ocr-correct                # Visual OCR correction (when secondary OCR is enabled)
+  # For visual OCR with ocr.secondary.enabled=true:
+  pdf2epub ocr-correct
   # Antigravity Subagent writes ocr_corrected_pages/*.md
-  pdf2epub ocr-correct-validate
+  pdf2epub ocr-correct-validate       # Otherwise skip both correction commands
   pdf2epub refine-prepare            # Prepare Subagent TOC analysis
   # Antigravity Subagent writes toc_tree.json
+  pdf2epub illustration-prepare      # Candidate report; no Subagent if there are no candidates
+  # Antigravity Subagent writes illustration_decisions.json when candidates exist
+  pdf2epub illustration-validate
+  pdf2epub illustration-apply
   pdf2epub refine-local              # Validate TOC and merge OCR pages locally
   pdf2epub footnote-prepare          # Detect page-footnote candidates locally
   # Antigravity Subagent writes footnote_decisions.json when review is needed
@@ -111,11 +116,16 @@ RECOMMENDED WORKFLOW / 推荐工作流 (uses toc_tree.json):
 
   # With translation:
   pdf2epub ocr-pages -i mybook.pdf
-  pdf2epub ocr-correct                # Only when ocr.secondary.enabled is true
+  # Only for visual OCR when ocr.secondary.enabled is true:
+  pdf2epub ocr-correct                # Otherwise skip both correction commands
   # Antigravity Subagent writes ocr_corrected_pages/*.md
   pdf2epub ocr-correct-validate
   pdf2epub refine-prepare
   # Antigravity Subagent writes toc_tree.json
+  pdf2epub illustration-prepare
+  # Antigravity Subagent writes illustration_decisions.json when candidates exist
+  pdf2epub illustration-validate
+  pdf2epub illustration-apply
   pdf2epub refine-local
   pdf2epub footnote-prepare
   # Antigravity Subagent writes footnote_decisions.json when review is needed
@@ -127,15 +137,13 @@ RECOMMENDED WORKFLOW / 推荐工作流 (uses toc_tree.json):
   pdf2epub extract-entities
   # Antigravity Subagent writes translation_entities.json
   pdf2epub extract-entities-validate
-  pdf2epub translate --target-language Chinese
-  # Antigravity Subagent writes translated/*.md and toc_tree_translated.json
-  pdf2epub translate-validate
-  pdf2epub build-epub --translated
-
-  # Translate only the PDF directory tree:
   pdf2epub translate-toc
   # Antigravity Subagent writes toc_tree_translated.json
   pdf2epub translate-toc-validate
+  pdf2epub translate --target-language Chinese
+  # Antigravity Subagent writes translated/*.md; it must not modify toc_tree_translated.json
+  pdf2epub translate-validate
+  pdf2epub build-epub --translated
 
   # EPUB Translation (preserves original formatting):
   pdf2epub html-prepare -i mybook.epub       # Extract locally

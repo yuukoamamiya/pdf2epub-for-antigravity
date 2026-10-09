@@ -424,13 +424,26 @@ def ocr_correction_is_current(
         if not target.is_file() or target_hashes.get(name) != sha256_file(target):
             return False
     consensus_manifest = load_consensus_manifest(output_dir)
-    if consensus_manifest:
+    if config is not None and secondary_ocr_enabled(config):
+        # A correction checkpoint is only meaningful when it is tied to the
+        # current two-OCR comparison. Do not let a pre-consensus or partially
+        # migrated checkpoint enter refinement merely because its page hashes
+        # and visual review records still happen to match.
+        if (
+            not consensus_manifest
+            or not consensus_manifest.get("complete")
+            or not consensus_is_current(output_dir, config)
+        ):
+            return False
+        review_files = review_required_files(output_dir)
+    elif consensus_manifest:
         if not consensus_manifest.get("complete"):
             return False
         if config is not None and not consensus_is_current(output_dir, config):
             return False
         review_files = review_required_files(output_dir)
     else:
+        # Compatibility path for callers that do not provide configuration.
         review_files = list(current)
     # When every page was accepted by the two local OCR results, no visual
     # review image or per-page visual record is needed. The auto-accepted

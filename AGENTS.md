@@ -270,11 +270,12 @@ ocr-pages
 → [two_ocr: ocr-correct → ocr-correct-validate]
 → refine-prepare → 工作区 Subagent 写 toc_tree.json
 → illustration-prepare
-→ [有候选: 工作区 Subagent 写 illustration_decisions.json → illustration-validate → illustration-apply]
+→ [有候选: 工作区 Subagent 写 illustration_decisions.json]
+→ illustration-validate → illustration-apply
 → refine-local
 → footnote-prepare
-→ [有待复核: 工作区 Subagent 写 footnote_decisions.json → footnote-validate]
-→ footnote-apply
+→ [有待复核: 工作区 Subagent 写 footnote_decisions.json]
+→ footnote-validate → footnote-apply
 → polish → polish-validate
 ```
 
@@ -292,14 +293,14 @@ ocr-pages
 `--allow-review-warnings`。
 EPUB、轻小说和 TeX 流程不使用这一 PDF 润色阶段。
 
-PDF 的具体循环为：`ocr-pages →（若启用第二套 OCR：ocr-correct → ocr-correct-validate）→ refine-prepare → illustration-prepare →（必要时 illustration-validate → illustration-apply）→ refine-local → footnote-prepare →（必要时 footnote-validate）→ footnote-apply → polish → polish-validate`。
+PDF 的具体循环为：`ocr-pages →（若启用第二套 OCR：ocr-correct → ocr-correct-validate）→ refine-prepare → illustration-prepare →（有候选时交给 Subagent）→ illustration-validate → illustration-apply → refine-local → footnote-prepare →（有待复核时交给 Subagent）→ footnote-validate → footnote-apply → polish → polish-validate`。
 随后执行 `extract-entities → translate-toc → translate-toc-validate → translate →
 translate-validate → build-epub`。可搜索但由扫描图像叠加 OCR 文字层的 PDF 仍必须重新
 视觉 OCR。
 
 PDF 纯转换模式使用 `pipeline: epub_conversion`（兼容别名
 `mode: ocr_to_epub`），循环为：
-`ocr-pages →（若启用第二套 OCR：ocr-correct → ocr-correct-validate）→ refine-prepare → illustration-prepare →（必要时 illustration-validate → illustration-apply）→ refine-local → footnote-prepare →（必要时 footnote-validate）→ footnote-apply → polish → polish-validate → build-epub`。
+`ocr-pages →（若启用第二套 OCR：ocr-correct → ocr-correct-validate）→ refine-prepare → illustration-prepare →（有候选时交给 Subagent）→ illustration-validate → illustration-apply → refine-local → footnote-prepare →（有待复核时交给 Subagent）→ footnote-validate → footnote-apply → polish → polish-validate → build-epub`。
 该模式不读取语言设置，不执行实体提取、翻译 TOC 或正文翻译；但 polish 仍是所有 PDF
 必须通过的结构质量门禁。构建时不得使用 `build-epub --translated`。
 

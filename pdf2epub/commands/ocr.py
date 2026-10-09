@@ -192,7 +192,10 @@ def ocr_pages_command(args):
 
     # Get OCR settings from config
     ocr_config = config.get('ocr', {})
-    backend = ocr_config.get('backend', 'mistral')
+    # Chandra is the documented primary OCR. Keep the command-line fallback
+    # aligned with the template and the pagewise API; remote Mistral remains an
+    # explicit opt-in through ocr.backend.
+    backend = ocr_config.get('backend', 'chandra')
     backend_config = ocr_config.get('backends', {}).get(backend, {})
     max_workers = args.max_workers or backend_config.get(
         'max_workers',
