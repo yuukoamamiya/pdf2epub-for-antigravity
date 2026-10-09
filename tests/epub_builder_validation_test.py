@@ -278,6 +278,20 @@ def test_process_chapter_content_keeps_related_subsection_heading() -> None:
     assert "## A. 简要文献目录" in processed
 
 
+def test_process_chapter_content_preserves_inherited_parent_heading() -> None:
+    processed = process_chapter_content(
+        "0 Stuttgart (1770–1788)",
+        2,
+        "# I Leben\n\n## 0 Stuttgart (1770–1788)\n\nChild body",
+        True,
+    )
+
+    assert processed.startswith(
+        "# I Leben\n\n## 0 Stuttgart (1770–1788)\n\nChild body"
+    )
+    assert processed.count("Child body") == 1
+
+
 def test_combined_markdown_follows_toc_and_split_part_order(tmp_path: Path) -> None:
     chapter_one = tmp_path / "chapter_1.md"
     chapter_one.write_text("# First\n\nFirst body", encoding="utf-8")

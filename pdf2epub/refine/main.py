@@ -2,6 +2,7 @@
 
 import json
 import hashlib
+import re
 import shutil
 from copy import copy
 from pathlib import Path
@@ -16,6 +17,10 @@ from .subagent_workflow import page_numbers, validate_toc_tree_data
 from .unit_splitter import split_markdown_unit
 from .footnote_stitcher import scan_boundary_footnotes
 from .illustration_prepare import load_current_illustration_pages
+from ..utils.ocr_artifacts import (
+    clean_ocr_page_artifacts,
+    remove_printed_page_number_lines,
+)
 
 # Initialize tokenizer
 tokenizer = tiktoken.get_encoding("cl100k_base")
@@ -358,20 +363,14 @@ class RefinedBreakdown:
                 )
                 return [self._create_unit(node, index_path)]
 
-        # Case 2: Has children. If the direct children cover the complete
-        # parent range, use leaf units so every TOC leaf has a real file and
-        # EPUB navigation does not point at a non-existent chapter_N.M file.
+        # Case 2: Has children. If the direct children cover the parent range
+        # (allowing heading-only/page-furniture gaps), use leaf units so every
+        # TOC leaf has a real file and EPUB navigation does not point at a
+        # non-existent chapter_N.M file.
         total_children_tokens = sum(child.estimated_tokens for child in node.children)
 
         if total_children_tokens <= self.max_tokens:
-            cursor = node.start_page
-            children_cover_parent = True
-            for child in sorted(node.children, key=lambda item: item.start_page):
-                if child.start_page > cursor:
-                    children_cover_parent = False
-                    break
-                cursor = max(cursor, child.end_page + 1)
-            children_cover_parent = children_cover_parent and cursor > node.end_page
+            children_cover_parent = self._children_cover_parent(node, pages_dir)
             if not children_cover_parent:
                 # Preserve parent-only introductory material in one file.
                 return [self._create_unit(node, index_path, include_children=True)]
@@ -402,6 +401,92 @@ class RefinedBreakdown:
                 )
                 units.extend(child_units)
             return units
+
+    @classmethod
+    def _children_cover_parent(cls, node: TOCNode, pages_dir: Path) -> bool:
+        """Return whether a parent has no standalone content outside children.
+
+        Page ranges are inclusive, so a simple range-gap check treats a
+        heading-only page before the first child as parent prose.  The old
+        fallback then merged the parent and every descendant into one file;
+        for a structural-only parent this made the first child's body appear
+        under the parent.  Blank pages, page labels, and the parent's own
+        heading are not standalone content, but any other visible line keeps
+        the conservative parent-unit fallback.
+        """
+        children = sorted(node.children, key=lambda item: (item.start_page, item.end_page))
+        if not children:
+            return False
+
+        cursor = node.start_page
+        for child in children:
+            if child.start_page > cursor and cls._range_has_standalone_content(
+                node,
+                pages_dir,
+                cursor,
+                child.start_page - 1,
+            ):
+                return False
+            cursor = max(cursor, child.end_page + 1)
+
+        if cursor <= node.end_page and cls._range_has_standalone_content(
+            node,
+            pages_dir,
+            cursor,
+            node.end_page,
+        ):
+            return False
+        return True
+
+    @classmethod
+    def _range_has_standalone_content(
+        cls,
+        node: TOCNode,
+        pages_dir: Path,
+        start_page: int,
+        end_page: int,
+    ) -> bool:
+        """Check an uncovered page range for content owned by the parent."""
+        boundary = node.boundary_info or {}
+        parent_title = cls._normalize_heading_text(node.title)
+
+        for page_num in range(start_page, end_page + 1):
+            page_file = pages_dir / f"page_{page_num:03d}.md"
+            if not page_file.is_file():
+                # Missing source pages are not evidence of an empty gap.
+                # Keep the old conservative fallback instead of dropping an
+                # unverified parent-owned range.
+                return True
+
+            lines = page_file.read_text(encoding="utf-8").split("\n")
+            if page_num == node.start_page:
+                start_line = boundary.get("start_line")
+                if isinstance(start_line, int) and start_line > 1:
+                    lines = lines[start_line - 1 :]
+            if page_num == node.end_page:
+                end_line = boundary.get("end_line")
+                if isinstance(end_line, int):
+                    lines = lines[: max(0, end_line - 1)]
+
+            cleaned = clean_ocr_page_artifacts("\n".join(lines))
+            cleaned_lines = remove_printed_page_number_lines(cleaned.split("\n"))
+            for line in cleaned_lines:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                if cls._normalize_heading_text(stripped) == parent_title:
+                    continue
+                # A Markdown heading whose title is not the parent is real
+                # structural content; keep the conservative fallback rather
+                # than silently dropping an unmodelled heading.
+                return True
+        return False
+
+    @staticmethod
+    def _normalize_heading_text(value: str) -> str:
+        """Normalize a heading enough to recognize its own OCR Markdown line."""
+        value = re.sub(r"^#{1,6}\s*", "", str(value or ""))
+        return re.sub(r"\s+", " ", value).strip().casefold()
 
     @staticmethod
     def _node_with_start_line(node: TOCNode, start_line: int) -> TOCNode:

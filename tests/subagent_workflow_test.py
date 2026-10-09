@@ -529,6 +529,33 @@ def test_polish_still_flags_repeated_bibliography_running_headers(tmp_path: Path
     assert report["polish_page_furniture_warnings"][0]["kind"] == "running_header"
 
 
+def test_polish_does_not_flag_index_entries_with_page_labels(tmp_path: Path):
+    from pdf2epub.subagent_workflow import validate_markdown_subagent
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    text = (
+        "Briefwechsel mit Fichte 114\n\n"
+        "vorstellendes 407\n\n"
+        "Briefwechsel mit Fichte 101\n"
+    )
+    (source_dir / "index.md").write_text(text, encoding="utf-8")
+    (target_dir / "index.md").write_text(text, encoding="utf-8")
+
+    report = validate_markdown_subagent(
+        tmp_path,
+        "polish",
+        source_dir,
+        target_dir,
+        file_roles={"index.md": "index"},
+    )
+
+    assert report["all_passed"] is True
+    assert report["polish_page_furniture_warnings"] == []
+
+
 def test_polish_allows_removed_top_level_label_at_continuation_prefix(tmp_path: Path):
     from pdf2epub.subagent_workflow import validate_markdown_subagent
 
@@ -1962,6 +1989,64 @@ def test_refine_local_splits_a_parent_when_children_cover_its_range(tmp_path: Pa
         tmp_path / "input.pdf", tmp_path, "Book"
     )
     assert [unit["unit_id"] for unit in units] == ["chapter_1.1", "chapter_1.2"]
+
+
+def test_refine_local_does_not_merge_children_into_heading_only_parent(tmp_path: Path):
+    pages_dir = tmp_path / "pages"
+    pages_dir.mkdir()
+    (pages_dir / "page_001.md").write_text("# 4 Chapter\n", encoding="utf-8")
+    (pages_dir / "page_002.md").write_text(
+        "## 4.1 First section\n\nFirst child body.\n", encoding="utf-8"
+    )
+    (pages_dir / "page_003.md").write_text(
+        "## 4.2 Second section\n\nSecond child body.\n", encoding="utf-8"
+    )
+    (tmp_path / "toc_tree.json").write_text(
+        json.dumps(
+            {
+                "chapters": [
+                    {
+                        "title": "4 Chapter",
+                        "level": 1,
+                        "start_page": 1,
+                        "end_page": 3,
+                        "boundary_info": {"start_line": 1},
+                        "children": [
+                            {
+                                "title": "4.1 First section",
+                                "level": 2,
+                                "start_page": 2,
+                                "end_page": 2,
+                                "boundary_info": {"start_line": 1},
+                            },
+                            {
+                                "title": "4.2 Second section",
+                                "level": 2,
+                                "start_page": 3,
+                                "end_page": 3,
+                                "boundary_info": {"start_line": 1},
+                            },
+                        ],
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    units = RefinedBreakdown(config={}, max_tokens=8000).process_from_toc(
+        tmp_path / "input.pdf", tmp_path, "Book"
+    )
+
+    assert [unit["unit_id"] for unit in units] == ["chapter_1.1", "chapter_1.2"]
+    first = (tmp_path / "ocr_markdown" / "chapter_1.1.md").read_text(encoding="utf-8")
+    second = (tmp_path / "ocr_markdown" / "chapter_1.2.md").read_text(encoding="utf-8")
+    assert "First child body." in first
+    assert "Second child body." not in first
+    assert "First child body." not in second
+    assert "Second child body." in second
+    assert not (tmp_path / "ocr_markdown" / "chapter_1.md").exists()
 
 
 def test_refine_local_preserves_midpage_parent_and_previous_prefix(tmp_path: Path):

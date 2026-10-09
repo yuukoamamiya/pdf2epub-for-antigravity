@@ -281,12 +281,28 @@ def process_chapter_content(
     heading_prefix = '#' * toc_level
     chapter_heading = f"{heading_prefix} {toc_title}"
 
-    # Check first 3 lines for existing heading
-    title_line_idx = None
-    for i in range(min(3, len(lines))):
-        if lines[i].strip().startswith('#'):
-            title_line_idx = i
-            break
+    # A leaf unit may carry structural ancestor headings in front of its own
+    # heading (for example ``# Part`` followed by ``## Section``).  Do not
+    # replace the ancestor with the leaf title: that makes the parent TOC
+    # entry point at the first child's body as if it were parent prose.
+    first_heading_idx = _find_first_heading(lines)
+    title_line_idx = _find_matching_heading(lines, toc_title)
+    if (
+        first_heading_idx is not None
+        and title_line_idx is not None
+        and title_line_idx != first_heading_idx
+    ):
+        original_level = len(re.match(r"^(#+)", lines[title_line_idx].lstrip()).group(1))
+        lines[title_line_idx] = chapter_heading
+        _remove_duplicate_heading(lines, title_line_idx, toc_title)
+        _shift_heading_levels(lines, title_line_idx, toc_level - original_level)
+        return '\n'.join(lines)
+
+    # Check for the current heading at the beginning of the unit.  If it is
+    # absent, the first heading is still the best authoritative replacement
+    # for ordinary units whose OCR/source heading uses another language.
+    if first_heading_idx is not None and title_line_idx is None:
+        title_line_idx = first_heading_idx
 
     if title_line_idx is not None:
         # Replace existing heading
@@ -304,6 +320,48 @@ def process_chapter_content(
     return relevel_content('\n'.join(lines), toc_level, skip_first=True)
 
 
+def _find_first_heading(lines: list[str]) -> Optional[int]:
+    """Return the first Markdown heading line in a unit."""
+    for index, line in enumerate(lines):
+        if re.match(r"^\s*#+\s+", line):
+            return index
+    return None
+
+
+def _normalize_heading_text(value: str) -> str:
+    """Normalize heading text for conservative TOC-title matching."""
+    value = re.sub(r"^#+\s*", "", str(value or ""))
+    return re.sub(r"[^\w\u3400-\u9fff]+", "", value, flags=re.UNICODE).casefold()
+
+
+def _find_matching_heading(lines: list[str], toc_title: str) -> Optional[int]:
+    """Find the first heading matching the current TOC title."""
+    normalized_title = _normalize_heading_text(toc_title)
+    if not normalized_title:
+        return None
+    for index, line in enumerate(lines):
+        if not re.match(r"^\s*#+\s+", line):
+            continue
+        normalized_heading = _normalize_heading_text(line)
+        if normalized_heading == normalized_title:
+            return index
+        if difflib.SequenceMatcher(None, normalized_title, normalized_heading).ratio() >= 0.9:
+            return index
+    return None
+
+
+def _shift_heading_levels(lines: list[str], start_index: int, delta: int) -> None:
+    """Shift headings after an inherited ancestor/current-heading pair."""
+    if not delta:
+        return
+    for index in range(start_index + 1, len(lines)):
+        match = re.match(r"^(\s*)(#+)(\s+.*)$", lines[index])
+        if not match:
+            continue
+        level = max(1, min(6, len(match.group(2)) + delta))
+        lines[index] = f"{match.group(1)}{'#' * level}{match.group(3)}"
+
+
 def _remove_duplicate_heading(lines: list, title_line_idx: int, toc_title: str):
     """Remove duplicate heading that follows the chapter title.
 
@@ -316,10 +374,7 @@ def _remove_duplicate_heading(lines: list, title_line_idx: int, toc_title: str):
     at this stage also makes its EPUB TOC anchor impossible to create.
     """
     def normalize_heading(value: str) -> str:
-        value = re.sub(r"^#+\s*", "", value)
-        # Ignore punctuation and spacing differences commonly introduced by OCR,
-        # while retaining letters and ideographs for a conservative comparison.
-        return re.sub(r"[^\w\u3400-\u9fff]+", "", value, flags=re.UNICODE).casefold()
+        return _normalize_heading_text(value)
 
     normalized_title = normalize_heading(toc_title)
     # Look in lines after the title (skip blank lines)

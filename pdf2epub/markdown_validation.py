@@ -475,6 +475,13 @@ def detect_polish_page_furniture(
             continue
         if special_role:
             kind = candidate.get("kind")
+            # Index entries commonly have the form "term page" and the same
+            # term may legitimately occur with several page references.  In
+            # that role, a title-plus-page candidate is content, not enough
+            # evidence of a running header/footer.  Repeated plain running
+            # headers are still checked below.
+            if role == "index" and kind == "running_title_plus_page_label":
+                continue
             # A standalone number, publisher imprint, or one-off title-like
             # line is ordinary bibliography/index content until repetition
             # supplies independent page-layout evidence.  This deliberately
