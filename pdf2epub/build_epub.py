@@ -282,9 +282,10 @@ def process_chapter_content(
     chapter_heading = f"{heading_prefix} {toc_title}"
 
     # A leaf unit may carry structural ancestor headings in front of its own
-    # heading (for example ``# Part`` followed by ``## Section``).  Do not
-    # replace the ancestor with the leaf title: that makes the parent TOC
-    # entry point at the first child's body as if it were parent prose.
+    # heading (for example ``# Part`` followed by ``## Section``).  Structural
+    # parents get their own heading-only HTML page during the build, so remove
+    # an ancestor-only prefix before converting the leaf.  This keeps a parent
+    # TOC entry from pointing at the first child's body.
     first_heading_idx = _find_first_heading(lines)
     title_line_idx = _find_matching_heading(lines, toc_title)
     if (
@@ -292,11 +293,10 @@ def process_chapter_content(
         and title_line_idx is not None
         and title_line_idx != first_heading_idx
     ):
-        original_level = len(re.match(r"^(#+)", lines[title_line_idx].lstrip()).group(1))
-        lines[title_line_idx] = chapter_heading
-        _remove_duplicate_heading(lines, title_line_idx, toc_title)
-        _shift_heading_levels(lines, title_line_idx, toc_level - original_level)
-        return '\n'.join(lines)
+        prefix = lines[:title_line_idx]
+        if _is_structural_heading_prefix(prefix):
+            lines = lines[title_line_idx:]
+            title_line_idx = 0
 
     # Check for the current heading at the beginning of the unit.  If it is
     # absent, the first heading is still the best authoritative replacement
@@ -334,6 +334,11 @@ def _normalize_heading_text(value: str) -> str:
     return re.sub(r"[^\w\u3400-\u9fff]+", "", value, flags=re.UNICODE).casefold()
 
 
+def _is_structural_heading_prefix(lines: list[str]) -> bool:
+    """Return whether a prefix contains only headings and whitespace."""
+    return all(not line.strip() or re.match(r"^\s*#+\s+", line) for line in lines)
+
+
 def _find_matching_heading(lines: list[str], toc_title: str) -> Optional[int]:
     """Find the first heading matching the current TOC title."""
     normalized_title = _normalize_heading_text(toc_title)
@@ -348,18 +353,6 @@ def _find_matching_heading(lines: list[str], toc_title: str) -> Optional[int]:
         if difflib.SequenceMatcher(None, normalized_title, normalized_heading).ratio() >= 0.9:
             return index
     return None
-
-
-def _shift_heading_levels(lines: list[str], start_index: int, delta: int) -> None:
-    """Shift headings after an inherited ancestor/current-heading pair."""
-    if not delta:
-        return
-    for index in range(start_index + 1, len(lines)):
-        match = re.match(r"^(\s*)(#+)(\s+.*)$", lines[index])
-        if not match:
-            continue
-        level = max(1, min(6, len(match.group(2)) + delta))
-        lines[index] = f"{match.group(1)}{'#' * level}{match.group(3)}"
 
 
 def _remove_duplicate_heading(lines: list, title_line_idx: int, toc_title: str):
@@ -693,6 +686,11 @@ def build_epub_structure(
             if file_path:
                 result['file_path'] = file_path
                 result['part_files'] = find_part_files(file_path, part_order)
+            elif entry.get('children'):
+                # A structural-only parent still needs a distinct navigation
+                # target. Otherwise the parent points at its first child and
+                # appears to contain that child's body.
+                result['virtual_file_name'] = f"{unit_id}.html"
             elif 'children' not in entry and inherited_file is None:
                 # Only warn if this is a leaf node (no children)
                 # Container nodes (with children) don't need their own markdown
@@ -825,7 +823,9 @@ def generate_hierarchical_toc_ncx(
         title = html.escape(entry['title'])
 
         # Determine the href
-        if 'file_path' in entry:
+        if entry.get('virtual_file_name'):
+            href = f"text/{entry['virtual_file_name']}"
+        elif 'file_path' in entry:
             # Has content file
             unit_id = entry.get('unit_id')
             if unit_id:
@@ -869,6 +869,8 @@ def generate_hierarchical_toc_ncx(
 
     def find_first_child_href(entry: Dict, parent_href: str = "text/toc.html") -> str:
         """Find href of first descendant with a file, or fall back to parent."""
+        if entry.get('virtual_file_name'):
+            return f"text/{entry['virtual_file_name']}"
         if 'file_path' in entry:
             unit_id = entry.get('unit_id')
             if unit_id:
@@ -948,7 +950,9 @@ def generate_hierarchical_toc_html(
         title = html.escape(entry['title'])
 
         # Determine the href
-        if 'file_path' in entry:
+        if entry.get('virtual_file_name'):
+            href = entry['virtual_file_name']
+        elif 'file_path' in entry:
             unit_id = entry.get('unit_id')
             if unit_id:
                 # Check if this chapter has multiple parts
@@ -982,6 +986,8 @@ def generate_hierarchical_toc_html(
 
     def find_first_child_href_html(entry: Dict, parent_href: str = "toc.html") -> str:
         """Find href of first descendant with a file, or fall back to parent."""
+        if entry.get('virtual_file_name'):
+            return entry['virtual_file_name']
         if 'file_path' in entry:
             unit_id = entry.get('unit_id')
             if unit_id:
@@ -1113,7 +1119,7 @@ def build_epub(config: BuildEpubConfig) -> Path:
     def count_with_files(entries):
         count = 0
         for e in entries:
-            if 'file_path' in e:
+            if 'file_path' in e or 'virtual_file_name' in e:
                 count += 1
             if 'children' in e:
                 count += count_with_files(e['children'])
@@ -1213,6 +1219,27 @@ def build_epub(config: BuildEpubConfig) -> Path:
     def process_chapters(entries: List[Dict]):
         """Recursively process all chapters with files."""
         for entry in entries:
+            if entry.get('virtual_file_name'):
+                # Structural-only parents get a small standalone page so the
+                # parent navigation target cannot land on the first child's
+                # prose.  The actual child Markdown remains immutable.
+                heading = f"{'#' * max(1, int(entry.get('level') or 1))} {entry['title']}"
+                html_content = markdown_to_html(
+                    heading,
+                    config.book_title,
+                    language,
+                    footnote_manager=footnote_manager,
+                    image_mapping=image_mapping,
+                    source_chapter=Path(entry['virtual_file_name']).stem,
+                )
+                html_filename = entry['virtual_file_name']
+                html_path = epub_dir / "text" / html_filename
+                with open(html_path, 'w', encoding='utf-8') as f:
+                    f.write(html_content)
+                all_html_files.append(html_filename)
+                generated_html[html_filename] = html_content
+                logger.debug(f"Created structural container {html_filename}")
+
             if 'file_path' in entry:
                 unit_id = entry.get('unit_id')
                 if unit_id:

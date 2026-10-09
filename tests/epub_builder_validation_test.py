@@ -278,7 +278,7 @@ def test_process_chapter_content_keeps_related_subsection_heading() -> None:
     assert "## A. 简要文献目录" in processed
 
 
-def test_process_chapter_content_preserves_inherited_parent_heading() -> None:
+def test_process_chapter_content_removes_structural_ancestor_heading() -> None:
     processed = process_chapter_content(
         "0 Stuttgart (1770–1788)",
         2,
@@ -286,10 +286,45 @@ def test_process_chapter_content_preserves_inherited_parent_heading() -> None:
         True,
     )
 
-    assert processed.startswith(
-        "# I Leben\n\n## 0 Stuttgart (1770–1788)\n\nChild body"
-    )
+    assert processed.startswith("## 0 Stuttgart (1770–1788)\n\nChild body")
+    assert "# I Leben" not in processed
     assert processed.count("Child body") == 1
+
+
+def test_build_epub_structure_gives_structural_parent_a_virtual_file(
+    tmp_path: Path,
+) -> None:
+    markdown_dir = tmp_path / "markdown"
+    markdown_dir.mkdir()
+    (markdown_dir / "chapter_1.1.md").write_text(
+        "## Parent\n\n### Child\n\nChild body", encoding="utf-8"
+    )
+
+    structure = build_epub_structure(
+        flatten_toc_tree(
+            [
+                {
+                    "title": "Parent",
+                    "level": 1,
+                    "children": [
+                        {
+                            "title": "Child",
+                            "level": 2,
+                        }
+                    ],
+                }
+            ]
+        ),
+        markdown_dir,
+    )
+
+    assert structure[0]["virtual_file_name"] == "chapter_1.html"
+    assert structure[0]["children"][0]["file_path"].name == "chapter_1.1.md"
+    toc_path = tmp_path / "toc.html"
+    assert generate_hierarchical_toc_html(structure, "Book", toc_path)
+    toc = toc_path.read_text(encoding="utf-8")
+    assert 'href="chapter_1.html">Parent</a>' in toc
+    assert 'href="chapter_1.1.html">Child</a>' in toc
 
 
 def test_combined_markdown_follows_toc_and_split_part_order(tmp_path: Path) -> None:
