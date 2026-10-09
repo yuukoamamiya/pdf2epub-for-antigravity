@@ -40,6 +40,17 @@ def _make_native_pdf(path: Path, *, full_page_image: bool = False) -> None:
     document.close()
 
 
+def _make_two_column_pdf(path: Path) -> None:
+    document = pymupdf.open()
+    page = document.new_page(width=612, height=792)
+    for line_index in range(30):
+        y = 72 + line_index * 20
+        page.insert_text((72, y), f"Left column line {line_index}: vector text.")
+        page.insert_text((324, y), f"Right column line {line_index}: vector text.")
+    document.save(path)
+    document.close()
+
+
 def test_effective_concurrency_throttles_large_pending_units():
     small, reason = effective_max_concurrency(
         {"small.md": {"estimated_tokens": 100}}, 3
@@ -73,6 +84,19 @@ def test_pdf_probe_only_accepts_clean_vector_text(tmp_path: Path):
     assert native_report["recommendation"] == "use_text_layer"
     assert searchable_report["classification"] == "searchable_ocr_or_mixed"
     assert searchable_report["recommendation"] == "ocr_required"
+    assert native_report["multi_column_page_ratio"] == 0.0
+
+
+def test_pdf_probe_routes_two_column_native_text_to_visual_ocr(tmp_path: Path):
+    two_column = tmp_path / "two-column.pdf"
+    _make_two_column_pdf(two_column)
+
+    report = probe_pdf_text_layer(two_column)
+
+    assert report["classification"] == "native_text_multicolumn"
+    assert report["recommendation"] == "ocr_required"
+    assert report["multi_column_pages"]
+    assert report["multi_column_page_ratio"] == 1.0
 
 
 def test_epub_conversion_pipeline_is_language_neutral():

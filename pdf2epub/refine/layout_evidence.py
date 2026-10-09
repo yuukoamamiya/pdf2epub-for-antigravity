@@ -112,6 +112,127 @@ def load_layout_sidecar(
     return value
 
 
+def layout_box_evidence(
+    prediction: Mapping[str, Any] | None,
+    block: Mapping[str, Any],
+    sidecar: Mapping[str, Any],
+    *,
+    labels: Optional[frozenset[str]] = frozenset({"footnote", "footnotes"}),
+    min_overlap: float = 0.25,
+) -> dict[str, Any]:
+    """Return the strongest selected layout box overlapping an OCR block.
+
+    PP-DocLayout boxes are evidence only.  This helper deliberately does not
+    classify the OCR block; callers still combine the result with page-zone,
+    numbering, and cross-page signals before moving content. ``labels=None``
+    selects every model region and is useful when a model has no dedicated
+    footnote class but still distinguishes text, headings, references, and
+    page furniture.
+    """
+    if not isinstance(prediction, Mapping):
+        return {
+            "matched": False,
+            "score": None,
+            "overlap": 0.0,
+            "label": None,
+            "bbox": None,
+        }
+    block_bbox = normalized_bbox(block, sidecar)
+    if block_bbox is None:
+        return {
+            "matched": False,
+            "score": None,
+            "overlap": 0.0,
+            "label": None,
+            "bbox": None,
+        }
+    page_box = bbox_from_value(prediction.get("page_box"))
+    coordinate_system = str(prediction.get("coordinate_system") or "pixels").strip().lower()
+    best: dict[str, Any] | None = None
+    for item in prediction.get("boxes", []):
+        if not isinstance(item, Mapping):
+            continue
+        label = str(item.get("label") or "").strip().casefold()
+        if labels is not None and label not in labels:
+            continue
+        raw_bbox = item.get("bbox")
+        if raw_bbox is None:
+            raw_bbox = item.get("coordinate")
+        raw = bbox_from_value(raw_bbox)
+        if raw is None:
+            continue
+        if coordinate_system in _PAGE_POINT_COORDINATE_SYSTEMS:
+            candidate_bbox = _scale_to_page(raw, page_box)
+        elif coordinate_system in _NORMALIZED_COORDINATE_SYSTEMS:
+            candidate_bbox = _scale_to_unit(raw, 1.0)
+        elif page_box is not None:
+            candidate_bbox = _scale_to_page(raw, page_box)
+        else:
+            candidate_bbox = _scale_to_unit(raw, 1000.0)
+        if candidate_bbox is None:
+            continue
+        overlap = _intersection_over_block(block_bbox, candidate_bbox)
+        if overlap < float(min_overlap):
+            continue
+        try:
+            score = float(item.get("score"))
+        except (TypeError, ValueError):
+            score = 0.0
+        candidate = {
+            "matched": True,
+            "score": round(score, 6),
+            "overlap": round(overlap, 6),
+            "label": label,
+            "bbox": candidate_bbox,
+        }
+        if best is None or (candidate["overlap"], candidate["score"]) > (
+            best["overlap"],
+            best["score"],
+        ):
+            best = candidate
+    return best or {
+        "matched": False,
+        "score": None,
+        "overlap": 0.0,
+        "label": None,
+        "bbox": None,
+    }
+
+
+def layout_region_evidence(
+    prediction: Mapping[str, Any] | None,
+    block: Mapping[str, Any],
+    sidecar: Mapping[str, Any],
+    *,
+    min_overlap: float = 0.25,
+) -> dict[str, Any]:
+    """Return the best PP-DocLayout region for an OCR block.
+
+    PP-DocLayout-L commonly emits generic ``text`` or ``paragraph_title``
+    regions for footnote-like material rather than a dedicated ``footnotes``
+    class. Keeping those labels in the evidence lets the reviewer see that a
+    numbered bottom block is actually inside a heading/reference/footer region
+    without granting the model authority to move it.
+    """
+    return layout_box_evidence(
+        prediction,
+        block,
+        sidecar,
+        labels=None,
+        min_overlap=min_overlap,
+    )
+
+
+def _intersection_over_block(left: list[float], right: list[float]) -> float:
+    x0 = max(left[0], right[0])
+    y0 = max(left[1], right[1])
+    x1 = min(left[2], right[2])
+    y1 = min(left[3], right[3])
+    intersection = max(0.0, x1 - x0) * max(0.0, y1 - y0)
+    area = max(0.0, left[2] - left[0]) * max(0.0, left[3] - left[1])
+    return intersection / area if area else 0.0
+
+
 def _scale_to_unit(bbox: list[float], scale: float) -> list[float]:
     return [max(0.0, min(1.0, value / scale)) for value in bbox]
 
@@ -136,6 +257,8 @@ def _scale_to_page(
 
 __all__ = [
     "bbox_from_value",
+    "layout_box_evidence",
+    "layout_region_evidence",
     "load_layout_sidecar",
     "normalized_bbox",
     "text_from_block",

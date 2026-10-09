@@ -18,6 +18,7 @@ from typing import Any, Iterable, Mapping, Optional
 
 from ..workflow_contracts import atomic_write_text, sha256_file
 from .layout_evidence import (
+    layout_region_evidence as _layout_region_evidence,
     load_layout_sidecar as _load_sidecar,
     normalized_bbox as _normalise_bbox,
     text_from_block as _text_from_block,
@@ -26,6 +27,11 @@ from .pdf_evidence import (
     is_native_text_source,
     pdf_evidence_mode,
     require_current_consensus,
+)
+from ..layout_detection import (
+    layout_config_sha256,
+    layout_enabled,
+    load_layout_prediction,
 )
 
 
@@ -143,6 +149,7 @@ def _candidate_for_block(
     *,
     bottom_ratio: float,
     force_review: bool = False,
+    layout_evidence: Optional[Mapping[str, Any]] = None,
 ) -> Optional[dict[str, Any]]:
     text = _text_from_block(block)
     if not text:
@@ -150,10 +157,25 @@ def _candidate_for_block(
     label = str(block.get("label") or "").strip()
     label_is_footnote = bool(_FOOTNOTE_LABEL_RE.search(label))
     label_is_citation = bool(_CITATION_LABEL_RE.search(label))
+    layout_region_label = str(
+        (layout_evidence or {}).get("label") or ""
+    ).casefold()
     bbox = _normalise_bbox(block, sidecar)
     is_bottom = bool(bbox and bbox[1] >= bottom_ratio)
     key_match = _FOOTNOTE_KEY_RE.match(text)
     key = key_match.group("key") if key_match else None
+    layout_matched = bool(layout_evidence and layout_evidence.get("matched"))
+    layout_bottom = bool(
+        is_bottom
+        or (
+            layout_evidence
+            and layout_evidence.get("bbox")
+            and float(layout_evidence["bbox"][1]) >= bottom_ratio
+        )
+    )
+    layout_footnote_region = bool(
+        layout_matched and layout_region_label in {"footnote", "footnotes"}
+    )
 
     # A candidate must have either an explicit OCR footnote label or a strong
     # bottom-of-page + numbered-start signal.  Ordinary low page text is not
@@ -161,10 +183,21 @@ def _candidate_for_block(
     # OCR can label bibliography/reference material as a bottom block too.
     # It is never a page footnote candidate: citations and bibliography are
     # semantic book content and must remain where the chapter puts them.
-    if label_is_citation or (not label_is_footnote and not (is_bottom and key)):
+    if label_is_citation or (
+        not label_is_footnote
+        and not (is_bottom and key)
+        and not (layout_footnote_region and layout_bottom)
+    ):
         return None
 
-    if label_is_footnote and is_bottom and key and not force_review:
+    if layout_evidence is not None:
+        # The detector is useful for discovering continuations and for
+        # rescuing OCR blocks whose semantic label was lost, but neither a
+        # positive nor a negative model result is trusted enough to
+        # auto-move a block on its own.
+        confidence = "review"
+        disposition = "review_required"
+    elif label_is_footnote and is_bottom and key and not force_review:
         confidence = "high"
         disposition = "local_candidate"
     else:
@@ -182,6 +215,18 @@ def _candidate_for_block(
         "disposition": disposition,
         "text": text[:240],
     }
+    if layout_evidence:
+        candidate["layout_evidence"] = dict(layout_evidence)
+        region_label = str(layout_evidence.get("label") or "").casefold()
+        candidate["review_reason"] = (
+            "pp_doclayout_footnotes_region"
+            if layout_matched and region_label in {"footnote", "footnotes"}
+            else (
+                f"pp_doclayout_{region_label or 'unmatched'}_region"
+                if layout_matched
+                else "ocr_candidate_without_layout_support"
+            )
+        )
     if force_review:
         candidate["review_reason"] = "ocr_consensus_visual_review"
     return candidate
@@ -327,6 +372,47 @@ def _candidate_signature(candidates: Iterable[Mapping[str, Any]]) -> list[tuple[
 
 def _secondary_sidecar_path(output_dir: Path, sidecar_path: Path) -> Path:
     return Path(output_dir) / "ocr_secondary" / sidecar_path.name
+
+
+def _layout_evidence_for_page(
+    output_dir: Path,
+    config: Optional[Mapping[str, Any]],
+    page_number: int,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Load current PP-DocLayout evidence, failing closed when enabled."""
+    if not layout_enabled(config):
+        return None, None
+    manifest_path = Path(output_dir) / "layout_detection_manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(
+            "PP-DocLayout is enabled but layout_detection_manifest.json is missing; "
+            "run ocr-pages --resume or layout-detect first"
+        ) from exc
+    if (
+        not isinstance(manifest, Mapping)
+        or manifest.get("status") != "complete"
+        or not manifest.get("complete", False)
+        or manifest.get("layout_config_sha256") != layout_config_sha256(config)
+    ):
+        raise ValueError(
+            "PP-DocLayout evidence is missing or stale; rerun ocr-pages --resume "
+            "or layout-detect before footnote-prepare"
+        )
+    prediction = load_layout_prediction(output_dir, page_number)
+    if (
+        not prediction
+        or prediction.get("layout_config_sha256") != layout_config_sha256(config)
+        or prediction.get("source_pdf_sha256") != manifest.get("source_pdf_sha256")
+    ):
+        raise ValueError(
+            f"PP-DocLayout prediction for page {page_number} is missing or stale; "
+            "rerun layout-detect"
+        )
+    return prediction, sha256_file(
+        Path(output_dir) / "layout_detection" / f"page_{page_number:03d}.json"
+    )
 
 
 def _candidate_for_native_block(
@@ -550,6 +636,7 @@ def prepare_footnote_candidates(
     page_reports: list[dict[str, Any]] = []
     sidecar_hashes: dict[str, str] = {}
     secondary_sidecar_hashes: dict[str, str] = {}
+    layout_prediction_hashes: dict[str, str] = {}
     consensus_review_pages = (
         _load_consensus_review_pages(output_dir)
         if not native_text_source and (legacy_consensus or evidence_mode == "two_ocr")
@@ -566,6 +653,17 @@ def prepare_footnote_candidates(
         except (TypeError, ValueError) as exc:
             raise ValueError(f"OCR sidecar has invalid page_number: {sidecar_path}") from exc
         sidecar_hashes[sidecar_path.relative_to(output_dir).as_posix()] = sha256_file(sidecar_path)
+        layout_prediction = None
+        if not native_text_source:
+            layout_prediction, layout_hash = _layout_evidence_for_page(
+                output_dir,
+                config,
+                page_number,
+            )
+            if layout_hash:
+                layout_prediction_hashes[
+                    f"layout_detection/page_{page_number:03d}.json"
+                ] = layout_hash
         page_markdown_path = pages_dir / f"page_{page_number:03d}.md"
         try:
             page_markdown = page_markdown_path.read_text(encoding="utf-8")
@@ -602,8 +700,30 @@ def prepare_footnote_candidates(
                     force_review=(
                         local_acceptance_disabled or consensus_review
                     ),
+                    layout_evidence=_layout_region_evidence(
+                        layout_prediction,
+                        block,
+                        sidecar,
+                    )
+                    if layout_prediction is not None
+                    else None,
                 )
                 if candidate is not None and local_acceptance_disabled:
+                    layout_evidence = candidate.get("layout_evidence")
+                    if isinstance(layout_evidence, Mapping):
+                        region_label = str(
+                            layout_evidence.get("label") or ""
+                        ).casefold()
+                        candidate["layout_review_reason"] = (
+                            "pp_doclayout_footnotes_region"
+                            if layout_evidence.get("matched")
+                            and region_label in {"footnote", "footnotes"}
+                            else (
+                                f"pp_doclayout_{region_label or 'unmatched'}_region"
+                                if layout_evidence.get("matched")
+                                else "ocr_candidate_without_layout_support"
+                            )
+                        )
                     candidate["review_reason"] = "local_auto_accept_disabled"
             if candidate is None:
                 continue
@@ -632,6 +752,13 @@ def prepare_footnote_candidates(
                     block,
                     secondary,
                     bottom_ratio=options.bottom_ratio,
+                    layout_evidence=_layout_region_evidence(
+                        layout_prediction,
+                        block,
+                        secondary,
+                    )
+                    if layout_prediction is not None
+                    else None,
                 )
                 if candidate is not None:
                     secondary_candidates.append(candidate)
@@ -715,6 +842,8 @@ def prepare_footnote_candidates(
         "consensus_visual_review_pages": sorted(consensus_review_pages),
         "sidecar_sha256": sidecar_hashes,
         "secondary_sidecar_sha256": secondary_sidecar_hashes,
+        "layout_detection_enabled": bool(layout_prediction_hashes),
+        "layout_prediction_sha256": layout_prediction_hashes,
         "pages": page_reports,
         "cross_page_windows": cross_page_windows,
         "review_pages": sorted(review_pages),
@@ -798,6 +927,14 @@ def prepare_footnote_subagent(
         if report["source_kind"] == "native_text"
         else "If a page is marked as an OCR-consensus visual review, treat the local label as untrusted even when it says `Footnote`; compare the primary and secondary sidecars and the page image before deciding."
     )
+    if report.get("layout_detection_enabled"):
+        source_guidance += (
+            " PP-DocLayout-L evidence is included in candidate records as layout_evidence. "
+            "The model may label footnote-like material as generic text, paragraph_title, "
+            "or reference rather than footnotes; treat every region label and score as geometric "
+            "evidence, not a semantic decision. Candidates without matching layout support are "
+            "also deliberately sent to review; do not auto-move either kind based on a numeric key alone."
+        )
     prompt = f"""# Footnote layout review\n\nBook: {book_title}\n\nRead `footnote_subagent_manifest.json` and `footnote_candidates.json`. The local script has selected compact bottom-of-page candidate windows. Review only blocks marked `confidence: review`; blocks marked `confidence: high` are already accepted by the deterministic local rule and do not need a decision. Do not reread or rewrite the whole book. {source_guidance}\n\nCandidate page layout sidecars:\n{page_text}\n\nUse these meanings strictly:\n- `footnote_start`: the beginning of a real page footnote; it will be moved to the end of its logical chapter.\n- `footnote_continuation`: text continuing a real footnote from an earlier page; it will be joined to that footnote.\n- `footnote_definition`: a complete footnote definition already presented as a note block.\n- `citation`: an in-text citation, quoted source, parenthetical/numeric reference, or other scholarly reference; it must stay in the body and must never be moved.\n- `bibliography`: a reference-list/bibliography entry; it must stay in place and must never be moved.\n- `body`: ordinary prose or an uncertain block that is not a footnote.\n\nFor each candidate block marked `confidence: review`, assign exactly one role. Keep the block's page and block number. For `footnote_start` and `footnote_definition`, copy the visible numeric key when present. For `footnote_continuation`, provide the key of the footnote it continues. A continuation may appear after ordinary body blocks on the next page; preserve visual order and attach it only when the page image/layout supports that decision. Do not assume that a next-page footnote continuation is at the top of the page. A numeric marker alone is not enough to call something a footnote: if it is a citation or reference, use `citation` or `bibliography`.\n\nWrite only valid JSON to `footnote_decisions.json` with this shape:\n\n```json\n{{\n  "schema_version": {FOOTNOTE_PREPARE_SCHEMA_VERSION},\n  "decisions": [\n    {{\n      "page": 125,\n      "block": 8,\n      "role": "footnote_continuation",\n      "key": "36",\n      "confidence": "high"\n    }}\n  ]\n}}\n```\n\nIf a candidate is genuinely ambiguous, use `role: "review_required"` and explain it in `reason`; do not guess.\n"""
     prompt += "\n\nDo not reread or rewrite the whole book.\n"
     prompt_path = output_dir / "footnote_subagent_prompt.md"
@@ -896,6 +1033,13 @@ def validate_footnote_decisions(
         _hashes_current("secondary_sidecar_sha256")
     elif secondary_hashes:
         errors.append("single-OCR candidate report unexpectedly contains secondary OCR files")
+    layout_hashes = report.get("layout_prediction_sha256", {})
+    if layout_hashes:
+        _hashes_current("layout_prediction_sha256")
+    elif config is not None and layout_enabled(config) and source_kind == "ocr":
+        errors.append(
+            "PP-DocLayout is enabled but the candidate report contains no layout predictions"
+        )
 
     if errors:
         result = {

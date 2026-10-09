@@ -56,6 +56,7 @@ def test_command_registry_registers_every_workflow_command():
         "illustration-prepare",
         "illustration-validate",
         "glossary-candidates",
+        "layout-detect",
             "html-prepare",
             "html-skeleton-retry",
             "html-skeleton-restore",

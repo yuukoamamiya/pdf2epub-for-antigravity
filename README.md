@@ -36,6 +36,9 @@ Antigravity 工作区 Subagent 完成，本地程序负责文件整理、校验�
 | `ocr.secondary.enabled: false` | 单 OCR。直接使用主 OCR，忽略旧的双 OCR 共识文件。 |
 | `ocr.secondary.enabled: true` | 双 OCR。主 OCR 与 PaddleOCR 交叉比较，差异交给 Subagent 复核。 |
 
+此外可以独立启用 PP-DocLayout-L 版面检测，为脚注候选提供版面辅助信息。它不是第二套 OCR，
+也不会直接移动正文；疑难候选仍交给脚注 Subagent 复核。
+
 双 OCR 默认使用独立的 PaddleOCR GPU 环境，不把 Paddle/PaddleX 加载进主项目解释器。
 `.venv-paddle/` 被 `.gitignore` 忽略；worker 在一次 OCR 任务开始时按需启动，完成后立即关闭。
 Chandra 的 Cloudflare Access 凭据放在 `.secrets/chandra-access.json`。YAML 中只配置本地凭据
@@ -46,6 +49,15 @@ Chandra 的 Cloudflare Access 凭据放在 `.secrets/chandra-access.json`。YAML
 ```yaml
 ocr:
   backend: chandra
+  layout:
+    enabled: true
+    backend: pp_doclayout
+    model_name: PP-DocLayout-L
+    model_source: BOS
+    python_executable: .venv-paddle/Scripts/python.exe
+    device: gpu:0
+    dpi: 192
+    layout_nms: true
   secondary:
     enabled: true
     backend: paddle
@@ -64,9 +76,18 @@ ocr:
       request_timeout: 300
 ```
 
-GPU 预检会验证 Paddle 是否编译了 CUDA、是否检测到显卡以及实际设备是否为 `gpu:0`；任何
-失败都会停止 OCR，不会静默退回 CPU。需要改用远程 Mistral 时仍可显式填写
-`secondary.backend: mistral`，但它不属于本地 Paddle 路径。
+首次建议先只检测代表页，确认框位置后再跑全书：
+
+```text
+uv run pdf2epub -c config.yaml layout-detect --start-page 120 --end-page 130 --resume
+```
+
+视觉 OCR 全部完成后，启用 `ocr.layout.enabled: true` 再运行
+`uv run pdf2epub -c config.yaml ocr-pages --resume`，版面证据会自动补齐；随后照常运行
+`refine-local`、`footnote-prepare`。高置信度原生文字 PDF 不运行这个视觉模型。
+
+本地版面检测需要支持 CUDA 的 NVIDIA GPU；不可用时会停止，不会自动退回 CPU。需要改用远程
+Mistral 时仍可显式填写 `secondary.backend: mistral`，但它不属于本地版面检测路径。
 
 启用双 OCR 后，`ocr-pages` 会在主 OCR 开始前写入 `ocr_secondary_preflight.json`，按页数和配置的
 保守页速估算次 OCR 时长。超过 `max_estimated_seconds` 时命令会暂停；确认确实接受耗时后，使用
@@ -86,17 +107,15 @@ uv pip install --python .venv-paddle/Scripts/python.exe \
 检查点，旧的脚注决定和插图绑定不会被静默复用。两套 OCR 一致只代表通过筛查，不代表一定
 正确；整页插图、脚注归属和引用/参考文献区分仍由 Subagent 复核。
 
-Chandra 是当前主 OCR，PaddleOCR 是可选的本地 GPU 次 OCR。Paddle worker 使用与主 OCR 相同的
-逐页 PDF 输入，独立生成文本和 layout sidecar，不把次 OCR 静默写回主 OCR；它的模型只在本次
-OCR 任务期间驻留子进程。高置信度原生
-文字 PDF 则由原生提取器输出带坐标和字体元数据的 layout sidecar。两种来源都不会把普通
-上标、序数或行内数字引用自动判成脚注。双 OCR 的作用是缩小视觉复核范围，不是让一个引擎
-静默覆盖另一个引擎。
+Chandra 是当前主 OCR，PaddleOCR 是可选的本地 GPU 次 OCR。原生文字 PDF 会保留版面信息；
+扫描或混合 PDF 使用视觉 OCR。两种来源都不会把普通上标、序数或行内数字引用自动判成脚注，
+脚注归属仍由 Subagent 复核。
 
 ## 当前输出和公式策略
 
 - PDF 页面结果保存在 `pages/`，双 OCR 结果保存在 `ocr_secondary/`，比较记录保存在
   `ocr_consensus.json`。
+- 启用 PP-DocLayout 后，版面预测保存在输出目录的 `layout_detection/` 中，供后续脚注复核使用。
 - 目录、页面合并、脚注和插图决定分别有 manifest、prompt、decision 和 validation report，
   可以中断后从 pending 项恢复。
 - EPUB 公式采用 Unicode 优先、复杂公式使用 MathML 的方案；目前不要求安装 XeLaTeX、

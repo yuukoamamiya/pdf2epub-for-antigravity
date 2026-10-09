@@ -80,6 +80,19 @@ GPU 数量和实际设备；不满足时直接失败，禁止 CPU 回退。worke
 `ocr-pages --allow-slow-secondary` 才能继续。CPU 次 OCR 始终前置阻断，不得自动降级；退回
 单 OCR 必须明确关闭 `ocr.secondary.enabled` 后重新运行，旧的双 OCR 共识不得复用。
 
+PP-DocLayout-L 是可选的独立版面证据通道，不是第二套 OCR。启用后按以下顺序操作：
+
+1. 视觉 OCR PDF 先用 `layout-detect --start-page ... --end-page ... --resume` 检查代表页，
+   确认后再用 `layout-detect --resume` 完成全书；原生文字 PDF 不运行该通道。
+2. `footnote-prepare` 前确认 `layout_detection_manifest.json` 的 `scope` 为 `full_book`，
+   `scope_complete` 和 `complete` 均为 `true`，且源 PDF/配置哈希当前。
+3. 模型区域只能作为候选证据，不能直接移动内容；启用后候选必须交给工作区 Subagent，
+   再运行脚注校验和应用命令。
+
+配置、GPU 预检、worker 生命周期、区域框格式和当前性合同见
+`docs/antigravity-workflow.md` 与 `docs/architecture.md`。本地 Paddle 环境使用仓库根目录的
+`.venv-paddle/`；它以及 `.paddlex/`、`.paddleocr/` 和模型缓存不得加入 Git。
+
 Mistral 是保留的可选远程兼容后端，不是本地 Paddle 的依赖。它使用主项目已有的 HTTP 依赖，
 密钥从 `.secrets/mistral_api_key` 或用户明确配置的凭据文件读取；不要把密钥写入 YAML、
 manifest、日志或提交记录。Mistral 的本地额度账本只保护本项目，不能代表账户全局余额。

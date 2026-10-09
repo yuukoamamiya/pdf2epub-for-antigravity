@@ -15,6 +15,7 @@ from pdf2epub.refine.footnote_apply import (
     apply_footnote_normalization,
     footnote_normalization_status,
 )
+from pdf2epub.layout_detection import layout_config_sha256
 
 
 def test_footnote_signature_does_not_match_number_inside_larger_number():
@@ -112,6 +113,169 @@ def _write_sidecar(
         json.dumps(payload, ensure_ascii=False),
         encoding="utf-8",
     )
+
+
+def _write_layout_prediction(
+    output_dir: Path,
+    page: int,
+    config: dict,
+    *,
+    source_sha256: str = "source-sha",
+    boxes: list[dict] | None = None,
+) -> None:
+    layout_dir = output_dir / "layout_detection"
+    layout_dir.mkdir(parents=True, exist_ok=True)
+    prediction = {
+        "schema_version": 1,
+        "page_number": page,
+        "backend": "pp_doclayout",
+        "model_name": "PP-DocLayout-L",
+        "source_pdf_sha256": source_sha256,
+        "layout_config_sha256": layout_config_sha256(config),
+        "coordinate_system": "pixels",
+        "page_box": [0, 0, 1000, 1000],
+        "boxes": boxes or [],
+    }
+    (layout_dir / f"page_{page:03d}.json").write_text(
+        json.dumps(prediction), encoding="utf-8"
+    )
+    (output_dir / "layout_detection_manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "status": "complete",
+                "complete": True,
+                "source_pdf_sha256": source_sha256,
+                "layout_config_sha256": layout_config_sha256(config),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_pp_doclayout_footnotes_box_discovers_unlabelled_continuation(
+    tmp_path: Path,
+):
+    config = {
+        "ocr": {
+            "layout": {
+                "enabled": True,
+                "model_name": "PP-DocLayout-L",
+                "device": "gpu:0",
+            }
+        }
+    }
+    _write_sidecar(
+        tmp_path,
+        1,
+        [_block("continuation without a repeated number", 0, y0=820)],
+    )
+    _write_layout_prediction(
+        tmp_path,
+        1,
+        config,
+        boxes=[
+            {
+                "label": "footnotes",
+                "score": 0.93,
+                "bbox": [20, 780, 980, 960],
+            }
+        ],
+    )
+
+    report = prepare_footnote_candidates(tmp_path, config=config)
+
+    candidate = report["pages"][0]["candidates"][0]
+    assert candidate["confidence"] == "review"
+    assert candidate["review_reason"] == "pp_doclayout_footnotes_region"
+    assert candidate["layout_evidence"]["overlap"] > 0.5
+    assert report["layout_detection_enabled"] is True
+
+
+def test_pp_doclayout_stale_prediction_blocks_footnote_prepare(tmp_path: Path):
+    config = {
+        "ocr": {
+            "layout": {
+                "enabled": True,
+                "model_name": "PP-DocLayout-L",
+                "device": "gpu:0",
+            }
+        }
+    }
+    _write_sidecar(
+        tmp_path,
+        1,
+        [_block("36 footnote", 0, label="Footnote", y0=820)],
+    )
+    _write_layout_prediction(tmp_path, 1, config, source_sha256="old-source")
+    prediction_path = tmp_path / "layout_detection" / "page_001.json"
+    prediction = json.loads(prediction_path.read_text(encoding="utf-8"))
+    prediction["source_pdf_sha256"] = "new-source"
+    prediction_path.write_text(json.dumps(prediction), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="missing or stale"):
+        prepare_footnote_candidates(tmp_path, config=config)
+
+
+def test_pp_doclayout_disables_auto_accept_without_region_support(tmp_path: Path):
+    config = {
+        "ocr": {
+            "layout": {
+                "enabled": True,
+                "model_name": "PP-DocLayout-L",
+                "device": "gpu:0",
+            }
+        }
+    }
+    _write_sidecar(
+        tmp_path,
+        1,
+        [_block("36 OCR footnote", 0, label="Footnote", y0=820)],
+    )
+    _write_layout_prediction(tmp_path, 1, config, boxes=[])
+
+    report = prepare_footnote_candidates(tmp_path, config=config)
+
+    candidate = report["pages"][0]["candidates"][0]
+    assert candidate["confidence"] == "review"
+    assert candidate["review_reason"] == "ocr_candidate_without_layout_support"
+
+
+def test_pp_doclayout_generic_region_is_preserved_as_review_evidence(tmp_path: Path):
+    config = {
+        "ocr": {
+            "layout": {
+                "enabled": True,
+                "model_name": "PP-DocLayout-L",
+                "device": "gpu:0",
+            }
+        },
+        "footnotes": {"auto_accept": False},
+    }
+    _write_sidecar(
+        tmp_path,
+        1,
+        [_block("1. Numbered section heading", 0, label="Section-Header", y0=820)],
+    )
+    _write_layout_prediction(
+        tmp_path,
+        1,
+        config,
+        boxes=[
+            {
+                "label": "paragraph_title",
+                "score": 0.91,
+                "bbox": [20, 780, 980, 960],
+            }
+        ],
+    )
+
+    report = prepare_footnote_candidates(tmp_path, config=config)
+
+    candidate = report["pages"][0]["candidates"][0]
+    assert candidate["layout_evidence"]["label"] == "paragraph_title"
+    assert candidate["layout_evidence"]["matched"] is True
+    assert candidate["layout_review_reason"] == "pp_doclayout_paragraph_title_region"
 
 
 def test_footnote_status_reports_candidate_hash_as_root_cause(tmp_path: Path):

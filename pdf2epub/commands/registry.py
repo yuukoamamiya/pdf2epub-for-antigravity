@@ -31,6 +31,7 @@ from pdf2epub.commands.page_furniture import (
 from pdf2epub.commands.ocr import (
     ocr_correct_command,
     ocr_correct_validate_command,
+    layout_detect_command,
     ocr_pages_command,
 )
 from pdf2epub.commands.pdf import build_epub_command
@@ -150,6 +151,35 @@ def register_command_parsers(subparsers) -> None:
         ),
     )
     ocr_pages_parser.set_defaults(func=ocr_pages_command)
+
+    layout_detect_parser = subparsers.add_parser(
+        "layout-detect",
+        help="Run independent PP-DocLayout page-region detection",
+        description=(
+            "Generate PP-DocLayout-L region boxes as layout evidence. "
+            "This is separate from secondary OCR and does not produce text."
+        ),
+    )
+    layout_detect_parser.add_argument(
+        "-i", "--input",
+        help="Path to PDF file (default: config/input PDF or output/input_original.pdf)",
+    )
+    layout_detect_parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Reuse current per-page layout predictions",
+    )
+    layout_detect_parser.add_argument(
+        "--start-page",
+        type=int,
+        help="First page to detect (default: 1)",
+    )
+    layout_detect_parser.add_argument(
+        "--end-page",
+        type=int,
+        help="Last page to detect (default: all pages)",
+    )
+    layout_detect_parser.set_defaults(func=layout_detect_command)
 
     ocr_correct_parser = subparsers.add_parser(
         "ocr-correct",

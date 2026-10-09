@@ -126,6 +126,46 @@ def test_enabled_secondary_ocr_requires_a_backend():
         validate_ocr_config({"ocr": {"secondary": {"enabled": True}}})
 
 
+def test_enabled_pp_doclayout_requires_gpu_and_known_backend():
+    with pytest.raises(ValueError, match="must be a GPU device"):
+        validate_ocr_config(
+            {
+                "ocr": {
+                    "layout": {
+                        "enabled": True,
+                        "backend": "pp_doclayout",
+                        "device": "cpu",
+                    }
+                }
+            }
+        )
+
+    with pytest.raises(ValueError, match="must be 'pp_doclayout'"):
+        validate_ocr_config(
+            {
+                "ocr": {
+                    "layout": {
+                        "enabled": True,
+                        "backend": "other",
+                        "device": "gpu:0",
+                    }
+                }
+            }
+        )
+
+    validate_ocr_config(
+        {
+            "ocr": {
+                "layout": {
+                    "enabled": True,
+                    "backend": "pp_doclayout",
+                    "device": "gpu:0",
+                }
+            }
+        }
+    )
+
+
 def test_arxiv_url_normalization_allows_only_https_arxiv_hosts():
     assert normalize_arxiv_id("https://arxiv.org/abs/2301.12345v2") == "2301.12345v2"
     with pytest.raises(ValueError, match="HTTPS URLs hosted by arxiv.org"):

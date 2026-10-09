@@ -307,9 +307,20 @@ heading contract 始终优先；标题绑定只容忍安全的展示格式差异
 
 | 页面来源 | 配置 | 主/次证据 | 结构阶段行为 |
 |---|---|---|---|
-| `native_text` | 忽略 `ocr.secondary.enabled` | PDF 原生文本块/坐标/字体；报告兼容字段为 `single_ocr` | 不运行视觉 OCR、Paddle、`ocr-correct` 或 OCR 共识；同页上标+小字号的高置信度候选本地接受，其余候选交 Subagent。 |
+| `native_text`（单栏） | 忽略 `ocr.secondary.enabled` | PDF 原生文本块/坐标/字体；报告兼容字段为 `single_ocr` | 不运行视觉 OCR、Paddle、`ocr-correct` 或 OCR 共识；同页上标+小字号的高置信度候选本地接受，其余候选交 Subagent。 |
+| `native_text_multicolumn` | 忽略 `ocr.secondary.enabled` | 原生文字层存在，但页面几何显示稳定多栏；报告推荐 `ocr_required` | 禁止直接文本提取，转入视觉 OCR；多栏文字层的字符可以正确但阅读顺序不可靠。 |
 | 视觉 OCR | `false` | 只有 `pages/` 主 OCR | 忽略旧共识产物；明确的高置信度 OCR 脚注可本地接受，疑难候选交给 Subagent。 |
 | 视觉 OCR | `true` | 当前 `ocr_secondary/` + `ocr_consensus.json` | 共识报告和次 OCR sidecar 参与脚注/插图候选比较；差异页必须复核。 |
+
+视觉 OCR 还可以独立启用 `ocr.layout`。该阶段使用隔离的 Paddle GPU worker 加载
+`PP-DocLayout-L`，只生成 `layout_detection/page_NNN.json` 区域框和
+`layout_detection_manifest.json` 当前性检查点；它不写入 `pages/`、不生成文字、也不加入
+`ocr.secondary` 双 OCR 共识。脚注候选器记录与 OCR block 重叠的完整区域类别；模型可能把
+脚注样式内容标成通用 `text`，也可能输出 `paragraph_title`、`reference` 或页眉页脚，因而
+不能只等待专门的 `footnotes` 类。区域类别和置信度是几何证据，模型候选默认进入
+Subagent 复核；启用模型时，OCR 标签与模型区域不一致的候选也降为复核项，不能单独触发
+`footnote-apply`。页段试跑的 manifest 只允许 `scope_complete: true`，全书脚注门禁还要求
+`complete: true`。
 
 准备阶段把 `source_kind` 和 `ocr_evidence_mode` 写入候选报告和 manifest。脚注和插图都从
 同一个 `pdf_evidence_mode()` 获取该值，并通过 `require_current_consensus()` 检查双 OCR
@@ -342,6 +353,10 @@ pages/page_001.ocr.json    # OCR 或 native-text layout sidecar
 后端之间的共同接口；后端可以只提供 Markdown，也可以提供 `html`、`raw_html`、`blocks`、
 `assets`、bbox 和模型信息等增强字段。
 
+PP-DocLayout 的预测不复用 `OCRPageResult` sidecar。每页预测至少包含
+`source_pdf_sha256`、`layout_config_sha256`、`coordinate_system: pixels`、`page_box` 和
+`boxes[]`（每个框包含 `label`、`score`、`bbox`）。改变 PDF、模型或 layout 配置会使旧预测失效。
+
 共识分两层：
 
 1. 文本比较规范化换行、Markdown 外层格式、链接和脚注分隔符，但不吞掉数字、标点或缺行；
@@ -353,7 +368,12 @@ pages/page_001.ocr.json    # OCR 或 native-text layout sidecar
 
 #### 3.1.2.1 原生文字 PDF sidecar 合同
 
-高置信度原生 PDF 由 `pdf_text_probe` 选择直接文本提取。`extract_native_text_pages()`
+高置信度、单栏原生 PDF 由 `pdf_text_probe` 选择直接文本提取。探测器同时检查文本行的横向
+分布；如果发现两个具有明显 gutter、足够行数和纵向重叠的稳定栏，报告使用
+`classification: native_text_multicolumn` 与 `recommendation: ocr_required`，整本 PDF 转入
+视觉 OCR。这样不会把看似可复制的双栏文字层误当成可靠的线性阅读顺序。
+
+对仍符合单栏条件的原生 PDF，`extract_native_text_pages()`
 仍生成与 OCR 页相同的 `pages/page_NNN.md`，但同时生成带源坐标的
 `pages/page_NNN.ocr.json`。该 sidecar 是脚注和整页插图的版面证据，不是另一套 OCR 结果，
 也不是让本地脚本直接替代 Subagent 判断的标签。

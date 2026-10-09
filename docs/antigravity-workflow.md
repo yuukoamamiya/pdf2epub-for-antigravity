@@ -242,10 +242,12 @@ ocr-pages
   → visual OCR: pages/*.md + OCR layout sidecars
 ```
 
-只有 `classification: native_text` 才走原生分支。可搜索但实际内容来自整页图像的 PDF、
+只有 `classification: native_text` 且没有多栏阻断信号才走原生分支。探测到稳定双栏或多栏
+阅读版面的 PDF 会写入 `classification: native_text_multicolumn`，并使用
+`recommendation: ocr_required` 转入视觉 OCR。可搜索但实际内容来自整页图像的 PDF、
 隐藏 OCR 层和混合稿仍必须走视觉 OCR；不能仅凭复制文字或目录中已有 Markdown 判断。
 
-原生分支的 sidecar 是版面证据，不是 OCR 结果。每页 sidecar 应包含
+原生分支的 sidecar 是版面证据，不是 OCR 结果。只有单栏原生 PDF 才生成这类 sidecar；每页 sidecar 应包含
 `backend: native_text`、`source_kind: native_text`、`coordinate_system: page_points`、
 `page_box`、`body_font_size` 和有序 `blocks[]`。block 至少保留 `bbox`、`text`、
 `font_size`、`font_names` 和 `source_block`。这里的坐标是 PDF page points，不能使用视觉
@@ -349,6 +351,36 @@ ocr:
 ocr_correction:
   review_dpi: 150
 ```
+
+PP-DocLayout-L 是另一条独立的版面证据通道，不要把它配置成
+`ocr.secondary.backend`：
+
+```yaml
+ocr:
+  layout:
+    enabled: true
+    backend: pp_doclayout
+    model_name: PP-DocLayout-L
+    model_source: BOS
+    python_executable: .venv-paddle/Scripts/python.exe
+    device: gpu:0
+    dpi: 192
+    layout_nms: true
+```
+
+首次可只跑代表页：
+
+```text
+uv run pdf2epub -c config.yaml layout-detect --start-page 120 --end-page 130 --resume
+```
+
+确认输出后，视觉 OCR 全部完成时运行 `ocr-pages --resume` 会自动补齐全书版面预测；也可直接
+运行 `layout-detect --resume`。产物位于 `layout_detection/`，由
+`layout_detection_manifest.json`、源 PDF 哈希和 layout 配置哈希约束。`footnote-prepare` 会
+把与 PP-DocLayout 区域框重叠的 OCR block 纳入候选证据；模型可能只输出通用 `text`、
+`paragraph_title` 或 `reference`，不应假定一定有 `footnotes` 类。它不会因为模型框本身自动搬移内容；这些候选
+仍须在脚注、引用、参考文献、正文和不确定项之间作出决定。原生文字 PDF 路径不启动该视觉
+worker。
 
 Paddle GPU worker 使用独立的 `.venv-paddle` 环境。预检会验证 CUDA 编译支持、GPU 数量和
 实际设备；任何一项不满足都会阻断流程，不会退回 CPU。worker 通过 JSON Lines 接收页面，

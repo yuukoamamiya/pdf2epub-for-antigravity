@@ -1367,6 +1367,31 @@ def ocr_full_book_pagewise(
             resume=resume,
         )
 
+    layout_summary: Dict[str, Any] = {
+        "enabled": False,
+        "status": "disabled",
+        "failed_pages": [],
+    }
+    # PP-DocLayout is an independent evidence pass.  It runs only after the
+    # visual OCR page set is complete and never participates in OCR consensus.
+    from .layout_detection import layout_enabled, run_layout_detection
+
+    if layout_enabled(config) and not failed_pages and not missing_pages and not unacknowledged_empty:
+        layout_manifest = run_layout_detection(
+            ocr_pdf,
+            output_dir,
+            config=config,
+            start_page=1,
+            end_page=total_pages,
+            resume=resume,
+        )
+        layout_summary = {
+            "enabled": True,
+            "status": layout_manifest.get("status"),
+            "failed_pages": layout_manifest.get("failed_pages", []),
+            "manifest": layout_manifest,
+        }
+
     logger.info(f"\n=== Page-wise OCR Summary ===")
     logger.info(
         f"Total pages processed: {len(progress['pages_processed'])}/{total_pages}"
@@ -1401,6 +1426,14 @@ def ocr_full_book_pagewise(
                 f"{len(secondary_summary.get('review_pages', []))} page(s) need visual review"
             )
 
+    if layout_summary.get("enabled"):
+        if layout_summary.get("failed_pages") or layout_summary.get("status") != "complete":
+            logger.error(
+                "PP-DocLayout evidence is incomplete; footnote preparation must stop"
+            )
+        else:
+            logger.info("PP-DocLayout layout evidence complete")
+
     logger.info(f"Output directory: {pages_dir}")
     return {
         "total_pages": total_pages,
@@ -1413,5 +1446,9 @@ def ocr_full_book_pagewise(
         "secondary_review_pages": secondary_summary.get("review_pages", []),
         "secondary_failed_pages": secondary_summary.get("failed_pages", []),
         "secondary_preflight": secondary_preflight,
+        "layout_detection_enabled": bool(layout_summary.get("enabled")),
+        "layout_detection_status": layout_summary.get("status"),
+        "layout_detection_failed_pages": layout_summary.get("failed_pages", []),
+        "layout_detection_manifest": layout_summary.get("manifest"),
         "progress_file": progress_file,
     }

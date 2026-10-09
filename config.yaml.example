@@ -81,6 +81,19 @@ ocr:
       sample_every: 20
       density_ratio: 0.30
       min_neighbor_chars: 800
+  # 独立版面检测：只生成页区域证据，不参与双 OCR 共识，也不直接搬移脚注。
+  # 首次建议只对代表页运行 `layout-detect --start-page ... --end-page ...`。
+  layout:
+    enabled: false
+    backend: pp_doclayout
+    model_name: PP-DocLayout-L
+    model_source: BOS
+    python_executable: .venv-paddle/Scripts/python.exe
+    device: gpu:0
+    dpi: 192
+    layout_nms: true
+    request_timeout: 300
+    worker_startup_timeout: 300
   backends:
     chandra:
       base_url: https://chandra.shenshei.fans/v1

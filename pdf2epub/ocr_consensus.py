@@ -106,15 +106,45 @@ def ocr_evidence_mode(config: Mapping[str, Any] | None) -> str:
 
 
 def validate_ocr_config(config: Mapping[str, Any]) -> None:
-    """Reject an enabled structured secondary OCR block without a backend."""
+    """Validate the independent OCR and PP-DocLayout configuration gates."""
     ocr = _ocr_config(config)
     secondary = ocr.get("secondary")
-    if not isinstance(secondary, Mapping):
-        return
-    if secondary_ocr_enabled(config) and not str(secondary.get("backend") or "").strip():
+    if (
+        isinstance(secondary, Mapping)
+        and secondary_ocr_enabled(config)
+        and not str(secondary.get("backend") or "").strip()
+    ):
         raise ValueError(
             "ocr.secondary.enabled is true but ocr.secondary.backend is missing"
         )
+
+    layout = ocr.get("layout")
+    if not isinstance(layout, Mapping):
+        return
+    if not _config_bool(layout.get("enabled"), False):
+        return
+
+    backend = str(layout.get("backend") or "pp_doclayout").strip().lower()
+    if backend != "pp_doclayout":
+        raise ValueError(
+            "ocr.layout.backend must be 'pp_doclayout' when PP-DocLayout is enabled"
+        )
+    model_name = str(layout.get("model_name") or "PP-DocLayout-L").strip()
+    if not model_name:
+        raise ValueError("ocr.layout.model_name must not be empty")
+    device = str(layout.get("device") or "gpu:0").strip().lower()
+    if device == "gpu":
+        device = "gpu:0"
+    if not device.startswith("gpu:"):
+        raise ValueError(
+            "ocr.layout.device must be a GPU device such as gpu:0; CPU fallback is disabled"
+        )
+    try:
+        dpi = int(layout.get("dpi", 192))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("ocr.layout.dpi must be an integer between 72 and 600") from exc
+    if not 72 <= dpi <= 600:
+        raise ValueError("ocr.layout.dpi must be an integer between 72 and 600")
 
 
 def consensus_settings(config: Mapping[str, Any]) -> Dict[str, Any]:
