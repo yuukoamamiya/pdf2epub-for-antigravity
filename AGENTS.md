@@ -233,6 +233,25 @@ PDF 的单 OCR/双 OCR；它不能把原生文字 PDF 变成双 OCR：
 | 视觉 OCR | `false` | `single_ocr` | 使用 `pages/` 的主 OCR；忽略旧的 `ocr_consensus.json`，不运行 OCR 纠错。 |
 | 视觉 OCR | `true` | `two_ocr` | 必须配置 `ocr.secondary.backend`；`ocr-pages` 生成次 OCR 和当前共识报告，差异页进入 Subagent 复核。 |
 
+已有完整的 `pages/`、`ocr_secondary/` 和次 OCR sidecar，且只是修改了共识判定规则时，按以下
+恢复路径执行，不要重新 OCR：
+
+1. 确认配置仍为视觉 PDF 且 `ocr.secondary.enabled: true`，然后运行
+   `uv run pdf2epub -c config.yaml ocr-consensus-rebuild`。
+2. 检查 `output/<title>/ocr_consensus.json` 的 `complete: true`、`failed_pages: []`，并按每条
+   record 的 `action` 统计 `auto_accept` 与 `visual_review`；行数、全局数字序列和脚注几何
+   差异只出现在 `comparison.diagnostics`/`layout_review` 时，不要把它们当成整页 OCR 错误。
+3. 运行 `ocr-correct`，只把 `action: visual_review` 对应的 `assigned_files` 交给工作区
+   Subagent；Subagent 必须对照页图写入 `ocr_corrected_pages/` 和逐页 review JSON，再运行
+   `ocr-correct-validate`。不得让 Subagent 处理 `auto_accept` 页，也不得把 Paddle 文本直接
+   覆盖主 OCR。
+4. 只有 `ocr-correct-validate` 通过后，才继续 `refine-prepare` → 目录 Subagent 写
+   `toc_tree.json` → `illustration-*` → `refine-local` → `footnote-*`。`footnote-prepare`
+   依赖当前 `tree_progress.json`，不能在 `toc_tree.json`/`refine-local` 完成前提前运行。
+
+`ocr-consensus-rebuild` 只重算既有产物，不启动 Chandra/Paddle；缺页、缺 sidecar、源 PDF 哈希
+或次 OCR 配置不匹配时必须失败并回到 `ocr-pages --resume`，不得以旧报告或文件存在性强行继续。
+
 原生文字 PDF 的判定由 `ocr-pages` 中的 `pdf_text_probe` 保守完成，不要只因 PDF 可以复制
 文字就认定它是原生稿。只有高置信度矢量文字层才走 `native_text`；扫描图、图片上叠加的
 隐藏 OCR 层和混合稿仍走视觉 OCR。原生路径的关键检查是：
@@ -252,7 +271,10 @@ PDF 的单 OCR/双 OCR；它不能把原生文字 PDF 变成双 OCR：
 当前支持的双 OCR 组合是 Chandra + Paddle。Paddle 输出与 Chandra 对齐的 layout sidecar；
 它只在“页底几何位置 + 明确数字开头”足够可靠时生成 `Footnote`/`footnote-def`，并把脚注定义
 规范化成 `[^N]: ...`。它不会把普通上标、序数或行内数字引用臆测成脚注，也不生成 Chandra
-的图片描述。两套 OCR 的文本、脚注标签、编号和垂直范围仍然独立比较；任一差异都应进入视觉复核。
+的图片描述。Chandra 按语义段落输出、Paddle 按物理行输出，因此行数差异、全局数字序列差异
+和脚注垂直分箱差异只能作为诊断/脚注证据，不能单独把整页送入 OCR 纠错；只有实质文本差异、
+空结果和共同漏检哨兵才触发正文视觉复核。脚注候选存在性或 layout 证据不一致仍必须进入脚注
+Subagent；Paddle 独有的连续物理行会合并为一个复核窗口。
 
 对视觉 OCR，脚注和整页插图读取同一个开关。原生文字 PDF 使用独立的原生版面证据；双 OCR 模式下，`footnote-prepare` 和
 `illustration-prepare` 必须看到当前共识检查点；主/次 OCR 的候选差异不能由本地脚本自动
@@ -350,6 +372,9 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
    只增加复核，不会自动改写页面。`enabled: false` 时只运行主 OCR，不进行 OCR 纠错。
    本地 PaddleOCR 依赖使用本节的独立 `.venv-paddle` 环境安装；不要把 Paddle/PaddleX 加入
    主项目 `pyproject.toml` 或 `uv.lock`。worker 通过 JSON Lines 接收页面，完成本批次后关闭。
+   如果只是修改了共识判定规则而已有两套 OCR 产物完整，可运行
+   `uv run pdf2epub -c config.yaml ocr-consensus-rebuild` 离线重建共识；该命令不得重新调用
+   Chandra/Paddle，也不能绕过当前性校验。
 4. 仅对视觉 OCR PDF 且 `ocr.secondary.enabled: true` 时执行 `ocr-correct`。然后打开工作区 Subagent，读取
    生成的 Prompt，按 `ocr-correct_worker_handoffs/` 中 manifest 的 `assigned_files` 对照同名页图；
    该 handoff 自动只包含 `ocr_consensus.json` 标记的差异页。将纠错后的同名文件写入
@@ -427,6 +452,31 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
    sidecar；原生文字稿的 `ocr_evidence_mode` 虽为兼容性的 `single_ocr`，但其实际证据是
    native layout，不能读取旧的双 OCR 报告。切换页面来源、OCR 模式或 PDF 后，旧的脚注
    决定不能复用。
+   双 OCR 下若只有 Paddle 发现脚注，Subagent 必须在决定中写入最终可见的 `text`、目标
+   `source_file` 和 `primary_disposition`：`absent` 表示主 OCR 确实缺失，`remove` 表示
+   主 OCR 有重复块并必须同时给出 `primary_block(s)`。同一脚注编号存在多个正文引用时还要
+   给出唯一 `marker_context`；缺少这些信息时 `footnote-apply` 必须阻断，不能静默追加或
+   选择最后一个编号。
+   `secondary_only_candidates` 会把连续 Paddle 物理行合并成一个窗口：`block` 是窗口首行的
+   锚点，`block_indices`/`block_span` 记录覆盖的物理行；决定仍只引用这个首行 `block`，不要
+   为窗口内每一行重复写决定。最小的 Paddle 独有脚注决定形状为：
+
+   ```json
+   {
+     "page": 126,
+     "source": "secondary",
+     "block": 21,
+     "role": "footnote_start",
+     "key": "37",
+     "source_file": "chapter_1.md",
+     "text": "The final visible footnote text.",
+     "primary_disposition": "absent",
+     "confidence": "high"
+   }
+   ```
+   当 `primary_disposition` 为 `remove` 时，必须改为附带 `primary_block` 或
+   `primary_blocks`；当同编号 marker 不止一个时附带 `marker_context`。不满足合同的决定属于
+   `retry_required`/阻断，不得靠 `--allow-review-warnings` 放行。
 
    脚注阶段至少核对以下产物后才能继续 polish：
 

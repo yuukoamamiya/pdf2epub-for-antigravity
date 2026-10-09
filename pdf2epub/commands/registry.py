@@ -31,6 +31,7 @@ from pdf2epub.commands.page_furniture import (
 from pdf2epub.commands.ocr import (
     ocr_correct_command,
     ocr_correct_validate_command,
+    ocr_consensus_rebuild_command,
     layout_detect_command,
     ocr_pages_command,
 )
@@ -151,6 +152,15 @@ def register_command_parsers(subparsers) -> None:
         ),
     )
     ocr_pages_parser.set_defaults(func=ocr_pages_command)
+
+    ocr_consensus_rebuild_parser = subparsers.add_parser(
+        "ocr-consensus-rebuild",
+        help="Rebuild OCR consensus from existing primary and secondary artifacts",
+        description=(
+            "Recompute the freshness-bound consensus report without invoking either OCR backend."
+        ),
+    )
+    ocr_consensus_rebuild_parser.set_defaults(func=ocr_consensus_rebuild_command)
 
     layout_detect_parser = subparsers.add_parser(
         "layout-detect",

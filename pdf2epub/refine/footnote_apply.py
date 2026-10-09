@@ -409,12 +409,16 @@ def _candidate_decisions(
 ) -> list[dict[str, Any]]:
     """Combine reviewed decisions with deterministic high-confidence ones."""
 
-    decisions_by_address: dict[tuple[int, int], dict[str, Any]] = {}
+    decisions_by_address: dict[tuple[int, str, int], dict[str, Any]] = {}
     for item in validation.get("decisions", []) or []:
         if not isinstance(item, Mapping):
             continue
         try:
-            address = (int(item["page"]), int(item["block"]))
+            address = (
+                int(item["page"]),
+                str(item.get("source") or "primary").strip().lower(),
+                int(item["block"]),
+            )
         except (KeyError, TypeError, ValueError):
             continue
         decisions_by_address[address] = dict(item)
@@ -426,14 +430,19 @@ def _candidate_decisions(
             if not isinstance(candidate, Mapping) or candidate.get("confidence") != "high":
                 continue
             try:
-                address = (int(candidate["page"]), int(candidate["block"]))
+                address = (
+                    int(candidate["page"]),
+                    str(candidate.get("source") or "primary").strip().lower(),
+                    int(candidate["block"]),
+                )
             except (KeyError, TypeError, ValueError):
                 continue
             decisions_by_address.setdefault(
                 address,
                 {
                     "page": address[0],
-                    "block": address[1],
+                    "source": address[1],
+                    "block": address[2],
                     "role": "footnote_start",
                     "key": str(candidate.get("key") or ""),
                     "confidence": "local_high",
@@ -498,6 +507,37 @@ def _marker_spans(source: str, key: str) -> list[tuple[int, int, str]]:
         for match in re.finditer(re.escape(superscript), source):
             spans.append((match.start(), match.end(), "unicode_sup"))
     return sorted(spans)
+
+
+def _marker_context_matches(source: str, span: tuple[int, int, str], context: str) -> bool:
+    """Match a reviewer-provided local phrase around a body marker."""
+    normalized_context = re.sub(r"\s+", " ", str(context or "")).strip().casefold()
+    if not normalized_context:
+        return False
+    start, end, _kind = span
+    window = source[max(0, start - 120) : min(len(source), end + 120)]
+    normalized_window = re.sub(r"\s+", " ", window).strip().casefold()
+    return normalized_context in normalized_window
+
+
+def _secondary_primary_blocks(decision: Mapping[str, Any]) -> list[int]:
+    """Normalize the explicit primary blocks named by a secondary decision."""
+    raw_blocks = decision.get("primary_blocks")
+    if raw_blocks is None:
+        raw_block = decision.get("primary_block")
+        raw_blocks = [raw_block] if raw_block is not None else []
+    if not isinstance(raw_blocks, list):
+        return []
+    blocks: list[int] = []
+    for raw_block in raw_blocks:
+        try:
+            block = int(raw_block)
+        except (TypeError, ValueError):
+            return []
+        if block < 0 or block in blocks:
+            return []
+        blocks.append(block)
+    return blocks
 
 
 def _strip_note_key(text: str, key: str | None) -> str:
@@ -626,9 +666,11 @@ def apply_footnote_normalization(
     resolved: list[dict[str, Any]] = []
     preserved_roles: dict[str, int] = defaultdict(int)
     errors: list[str] = []
+    scheduled_secondary_primary_removals: set[tuple[int, int]] = set()
 
     for decision in decisions:
         role = str(decision.get("role") or "").strip()
+        source = str(decision.get("source") or "primary").strip().lower()
         try:
             page = int(decision["page"])
             block_index = int(decision["block"])
@@ -644,20 +686,118 @@ def apply_footnote_normalization(
         if role not in _MOVED_ROLES:
             errors.append(f"unsupported decision role at {page}:{block_index}: {role}")
             continue
+        if source not in {"primary", "secondary"}:
+            errors.append(f"unsupported footnote source at {page}:{block_index}: {source}")
+            continue
 
         key = str(decision.get("key") or "").strip()
         if not re.fullmatch(r"[A-Za-z0-9_-]+", key):
             errors.append(f"moved footnote at {page}:{block_index} has no valid key")
             continue
-        try:
-            block = _load_sidecar_block(output_dir, page, block_index, sidecar_cache)
-            block_texts = _block_text_variants(output_dir, page, block)
-            if not block_texts:
-                raise ValueError("OCR block is empty")
-            record, span = _locate_block(source_texts, records, page, block_texts)
-        except ValueError as exc:
-            errors.append(f"{page}:{block_index}: {exc}")
-            continue
+        if source == "primary":
+            try:
+                block = _load_sidecar_block(output_dir, page, block_index, sidecar_cache)
+                block_texts = _block_text_variants(output_dir, page, block)
+                if not block_texts:
+                    raise ValueError("OCR block is empty")
+                record, span = _locate_block(source_texts, records, page, block_texts)
+            except ValueError as exc:
+                errors.append(f"{page}:{block_index}: {exc}")
+                continue
+        else:
+            source_file = str(decision.get("source_file") or "").strip()
+            if not source_file or Path(source_file).name != source_file:
+                errors.append(
+                    f"{page}:{block_index}: secondary footnote has no safe source_file"
+                )
+                continue
+            matching_records = [
+                item
+                for item in _records_for_page(records, page)
+                if item["name"] == source_file
+            ]
+            if len(matching_records) != 1:
+                errors.append(
+                    f"{page}:{block_index}: secondary footnote source_file does not uniquely "
+                    "identify a refinement unit"
+                )
+                continue
+            record = matching_records[0]
+            source_page_text = source_texts[record["name"]]
+            span = (len(source_page_text), len(source_page_text))
+            primary_disposition = str(
+                decision.get("primary_disposition") or ""
+            ).strip().lower()
+            if primary_disposition not in {"absent", "remove"}:
+                errors.append(
+                    f"{page}:{block_index}: secondary footnote must declare "
+                    "primary_disposition"
+                )
+                continue
+            if primary_disposition == "remove":
+                primary_blocks = _secondary_primary_blocks(decision)
+                if not primary_blocks:
+                    errors.append(
+                        f"{page}:{block_index}: secondary footnote marked remove "
+                        "without primary block(s)"
+                    )
+                    continue
+                primary_spans: list[tuple[int, int]] = []
+                removal_failed = False
+                for primary_block_index in primary_blocks:
+                    removal_key = (page, primary_block_index)
+                    if removal_key in scheduled_secondary_primary_removals:
+                        errors.append(
+                            f"{page}:{block_index}: primary block {primary_block_index} "
+                            "is scheduled for removal more than once"
+                        )
+                        removal_failed = True
+                        break
+                    try:
+                        primary_block = _load_sidecar_block(
+                            output_dir, page, primary_block_index, sidecar_cache
+                        )
+                        primary_block_texts = _block_text_variants(
+                            output_dir, page, primary_block
+                        )
+                        if not primary_block_texts:
+                            raise ValueError("primary OCR block is empty")
+                        primary_record, primary_span = _locate_block(
+                            source_texts,
+                            records,
+                            page,
+                            primary_block_texts,
+                        )
+                    except ValueError as exc:
+                        errors.append(
+                            f"{page}:{block_index}: could not locate primary duplicate "
+                            f"block {primary_block_index}: {exc}"
+                        )
+                        removal_failed = True
+                        break
+                    if primary_record["name"] != source_file:
+                        errors.append(
+                            f"{page}:{block_index}: primary duplicate block "
+                            f"{primary_block_index} belongs to {primary_record['name']}, "
+                            f"not declared source_file {source_file}"
+                        )
+                        removal_failed = True
+                        break
+                    primary_spans.append(primary_span)
+                if removal_failed:
+                    continue
+                for primary_block_index, primary_span in zip(
+                    primary_blocks, primary_spans
+                ):
+                    scheduled_secondary_primary_removals.add(
+                        (page, primary_block_index)
+                    )
+                    edits_by_file[source_file].append((primary_span[0], primary_span[1], ""))
+                if primary_spans:
+                    span = (
+                        min(item[0] for item in primary_spans),
+                        max(item[1] for item in primary_spans),
+                    )
 
         if record["type"] in {"bibliography", "index"}:
             errors.append(
@@ -678,6 +818,8 @@ def apply_footnote_normalization(
                 "source_file": record["name"],
                 "parts": [],
                 "start_span": span,
+                "source": source,
+                "marker_context": str(decision.get("marker_context") or "").strip(),
             }
             active_by_chapter_key[(chapter_id, key)].append(note)
             notes_by_chapter[chapter_id].append(note)
@@ -691,15 +833,26 @@ def apply_footnote_normalization(
                 continue
             note = active_notes[-1]
 
-        note_text = _strip_note_key(source_texts[record["name"]][span[0] : span[1]], key if role != "footnote_continuation" else None)
+        if source == "secondary":
+            note_text = _strip_note_key(
+                str(decision.get("text") or ""),
+                key if role != "footnote_continuation" else None,
+            )
+        else:
+            note_text = _strip_note_key(
+                source_texts[record["name"]][span[0] : span[1]],
+                key if role != "footnote_continuation" else None,
+            )
         if not note_text:
             errors.append(f"{page}:{block_index}: footnote text is empty after removing its key")
             continue
         note["parts"].append(note_text)
-        edits_by_file[record["name"]].append((span[0], span[1], ""))
+        if source == "primary":
+            edits_by_file[record["name"]].append((span[0], span[1], ""))
         resolved.append(
             {
                 "page": page,
+                "source": source,
                 "block": block_index,
                 "role": role,
                 "key": key,
@@ -707,6 +860,16 @@ def apply_footnote_normalization(
                 "file": record["name"],
                 "chapter_id": chapter_id,
                 "span": [span[0], span[1]],
+                **(
+                    {
+                        "primary_disposition": str(
+                            decision.get("primary_disposition") or ""
+                        ).strip().lower(),
+                        "primary_blocks": _secondary_primary_blocks(decision),
+                    }
+                    if source == "secondary"
+                    else {}
+                ),
             }
         )
 
@@ -753,6 +916,27 @@ def apply_footnote_normalization(
                 errors.append(
                     f"{note['source_page']}:{note['source_file']}: ambiguous body "
                     f"footnote marker for key {note['key']} across logical chapter parts"
+                )
+                continue
+
+        if note.get("source") == "secondary":
+            marker_context = str(note.get("marker_context") or "").strip()
+            if marker_context:
+                marker_candidates = [
+                    item
+                    for item in marker_candidates
+                    if _marker_context_matches(source, item, marker_context)
+                ]
+            if len(marker_candidates) != 1:
+                context_hint = (
+                    "; provide a unique marker_context"
+                    if len(marker_candidates) > 1
+                    else ""
+                )
+                errors.append(
+                    f"{note['source_page']}:{note['source_file']}: secondary-only "
+                    f"footnote marker for key {note['key']} is not unique"
+                    f"{context_hint}"
                 )
                 continue
 

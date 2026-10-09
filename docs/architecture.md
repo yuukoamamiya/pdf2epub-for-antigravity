@@ -104,18 +104,21 @@ Subagent 合同层
 PDF 精修的核心领域模块如下：
 
 - `ocr_consensus.py`：解释 `ocr.secondary.enabled`，生成 `single_ocr`/`two_ocr` 证据模式，
-  校验次 OCR 配置、文件哈希和 `ocr_consensus.json` 是否仍对应当前页面集。
+  校验次 OCR 配置、文件哈希和 `ocr_consensus.json` 是否仍对应当前页面集；提供
+  `ocr-consensus-rebuild`，在已有两套 OCR 产物完整时离线重算共识而不重新调用后端。
 - `refine/illustration_prepare.py`：只做整页插图候选筛选、局部审阅交接、决定校验和哈希绑定；
   不自行判断普通插图是否应该移动。
 - `refine/page_merger.py`：消费已验证的整页插图绑定，恢复“前页半句 → 插图页 → 后页续句”，
   并把图片及说明放回连续正文之后。
 - `refine/footnote_prepare.py`：按页面 layout sidecar 生成脚注候选。视觉 OCR 使用标签、底部
   位置和编号；原生文字 PDF 使用 PDF 坐标、文本块和字体元数据，并只把低置信度页底编号候选
- 交给复核。`footnotes.auto_accept` 是两种来源共用的本地接受策略；双 OCR 模式还比较
- 主/次候选差异。`resolve_footnote_options()` 集中处理配置默认值和 CLI 覆盖。它不直接
- 改写 Markdown，也不把引用推断成脚注。
+  交给复核。`footnotes.auto_accept` 是两种来源共用的本地接受策略；双 OCR 模式比较
+  主/次候选差异，且把 Paddle 的连续物理行合并成一个 secondary-only 复核窗口。
+  `resolve_footnote_options()` 集中处理配置默认值和 CLI 覆盖。它不直接改写 Markdown，也不把引用推断成脚注。
 - `refine/footnote_apply.py`：只消费已验证的脚注决定，按完整 TOC `unit_id` 合并脚注到单元末尾，
-  保留 `citation`、`bibliography` 和普通正文原位。
+  保留 `citation`、`bibliography` 和普通正文原位。Paddle 独有脚注必须带显式文本、来源单元
+  和 `primary_disposition`；主 OCR 重复块只有在明确列出 `primary_block(s)` 时才会删除，重复
+  编号引用无法唯一定位时阻断而不猜测。
 
 `pipeline_policy.py` 是 PDF pipeline 的策略边界。`PipelinePolicy.from_config()` 将缺省
 配置视为传统翻译流程，将 `pipeline: epub_conversion` 和兼容别名
@@ -358,8 +361,29 @@ PP-DocLayout 的预测不复用 `OCRPageResult` sidecar。每页预测至少包�
 
 共识分两层：
 
-1. 文本比较规范化换行、Markdown 外层格式、链接和脚注分隔符，但不吞掉数字、标点或缺行；
+1. 文本比较规范化换行、Markdown 外层格式、链接和脚注分隔符；
 2. layout 比较脚注标签、脚注编号序列和垂直范围。
+
+Chandra 的语义段落与 Paddle 的物理行不是同一粒度。对 Chandra+Paddle，行数差异、全局数字
+序列差异和脚注垂直范围差异会保留在诊断与候选报告中，但不单独升级整页 OCR 纠错；实质文本
+差异、空结果和共同漏检哨兵才触发正文视觉复核。脚注/插图模块仍可把 layout 或候选存在性
+差异交给各自的 Subagent。
+
+共识 record 的职责边界如下：
+
+- `comparison.status` 和顶层 `action` 只表示正文 OCR 是否需要 `ocr-correct`；`action` 不再
+  因 `compare_ocr_layouts()` 的脚注标签、编号序列或垂直范围差异单独变为 `visual_review`。
+- `comparison.diagnostics.heterogeneous_layout_pair` 标记 Chandra/Paddle 的粒度不等价；
+  `line_counts_differ` 和 `numeric_markers_differ` 是审计信号，不是阻断原因。
+- `layout_comparison` 与 `layout_review` 仍必须保留，供 `footnote-prepare` 和
+  `illustration-prepare` 作为候选证据使用。它们不能覆盖主 OCR 文本，也不能由本地脚本直接
+  决定脚注归属。
+- `ocr_consensus.json` 的 schema 当前为 4。`ocr-consensus-rebuild` 必须读取当前
+  `pages/ocr_progress.json`、主/次 Markdown、两套 layout sidecar 和当前配置哈希，逐页重写
+  record；它不调用 OCR 后端。任何缺失或过期输入都使 manifest 不完整。
+
+因此，维护者不能通过提高 `max_line_delta` 或放宽数字正则来“修复”本问题；正确做法是保持
+正文共识与脚注/版面证据分层，并让真正的内容差异进入页图复核。
 
 `agree` 只表示该页通过筛查；`review_required` 表示必须把页图、主 OCR 和次 OCR 一起交给
 `ocr-correct` 的 Subagent。任何后端都不能在共识阶段自动取代主 OCR。共同漏检由固定抽样和
@@ -439,6 +463,30 @@ span 的起始 x 坐标拆分左右栏，再按“左栏自上而下、右栏自
 2. 相同的 decision roles（`body`、`citation`、`bibliography`、三种脚注角色）；
 3. `tree_progress.json` 的完整 `unit_id` 作用域与跨页顺序；
 4. sidecar/source/checkpoint 哈希，可在 apply 前重新验证。
+
+#### 双 OCR 脚注差异合同
+
+Chandra 可能把页底脚注识别成普通正文，或完全漏掉脚注；Paddle 则可能把同一脚注拆成多条
+物理行。`footnote_prepare` 不把这些行逐条交给 Subagent，而是对 secondary-only 候选按物理
+block 顺序聚合：候选的 `block` 是首行锚点，`block_indices` 和 `block_span` 是窗口事实，
+Subagent 只需为首行写一条决定。
+
+secondary-only 的 moved decision 必须包含：
+
+| 字段 | 约束 |
+|---|---|
+| `source: "secondary"`、`page`、`block` | 必须精确命中 `secondary_only_candidates` 的首行锚点 |
+| `text` | Subagent 根据页图确认后的最终可见脚注文本；不能直接信任 Paddle 摘要 |
+| `source_file` | 当前 `tree_progress.json` 中覆盖该页的 refinement unit Markdown 文件名 |
+| `primary_disposition` | `absent` 表示主 OCR 中没有该脚注；`remove` 表示主 OCR 存在重复块 |
+| `primary_block`/`primary_blocks` | 仅 `remove` 时必填；apply 会用主 sidecar 唯一定位并删除这些块 |
+| `marker_context` | 同一逻辑单元内同编号 marker 不唯一时必填，用来选择正文引用 |
+
+`primary_disposition: absent` 不允许附带主 block 地址；`remove` 找不到、跨 refinement unit
+或无法唯一定位主 block 时失败。secondary-only 脚注的正文 marker 也不再使用整个源文件的
+“最后一个同编号 marker”作为隐式选择：候选不唯一且没有 `marker_context` 时，
+`footnote-apply` 生成阻断报告，不写 `footnote_normalized/`。这是防止复杂脚注被重复追加或
+错误绑定到另一处引用的故意 fail-closed 设计。
 
 来源差异只停留在“如何生成候选”和“需要多少 Subagent 复核”：OCR layout 可以在明确
 标签和几何证据下产生高置信度候选，native layout 则只自动接受同页上标与字号双重匹配的

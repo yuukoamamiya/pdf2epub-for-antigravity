@@ -13,6 +13,7 @@ from pdf2epub.commands.runtime import load_book_context
 from pdf2epub.ocr_consensus import (
     auto_accepted_files,
     consensus_is_current,
+    rebuild_ocr_consensus,
     review_required_files,
     secondary_backend_name,
 )
@@ -288,6 +289,32 @@ def ocr_pages_command(args):
         import traceback
         traceback.print_exc()
         return 1
+
+
+def ocr_consensus_rebuild_command(args):
+    """Recompute OCR consensus from an existing secondary OCR batch."""
+    context = load_book_context(args, "ocr-consensus-rebuild")
+    if context is None:
+        return 1
+    try:
+        summary = rebuild_ocr_consensus(context.output_dir, context.config)
+    except Exception as exc:
+        logger.error(f"Could not rebuild OCR consensus: {exc}")
+        return 1
+    if summary.get("failed_pages"):
+        logger.error(
+            "OCR consensus rebuild failed for page(s): "
+            f"{summary.get('failed_pages')}"
+        )
+        return 1
+    logger.success(
+        "OCR consensus rebuilt from existing artifacts; "
+        f"{len(summary.get('review_pages', []))} page(s) need text review"
+    )
+    logger.info(
+        "Secondary OCR Markdown and layout sidecars were reused; no OCR backend was called."
+    )
+    return 0
 
 
 def layout_detect_command(args):

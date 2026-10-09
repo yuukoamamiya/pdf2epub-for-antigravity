@@ -11,8 +11,10 @@ from pdf2epub.ocr_consensus import (
     common_ocr_risk_reasons,
     consensus_is_current,
     load_consensus_manifest,
+    rebuild_ocr_consensus,
     secondary_backend_name,
     secondary_ocr_enabled,
+    write_page_consensus,
 )
 from pdf2epub.ocr_pages import preflight_secondary_ocr, run_secondary_ocr_consensus
 
@@ -70,6 +72,45 @@ def test_consensus_flags_one_missing_line_even_when_text_is_long():
 
     assert report["status"] == "review_required"
     assert "non-empty line counts differ" in report["reasons"]
+
+
+def test_chandra_paddle_ignores_line_and_global_numeric_layout_differences():
+    config = {"ocr": {"consensus": {}}}
+    body = " ".join(["shared prose"] * 120)
+
+    report = compare_ocr_texts(
+        f"{body} 2024\n{body}",
+        f"{body}\n{body} 2025",
+        config,
+        primary_backend="chandra",
+        secondary_backend="paddle",
+    )
+
+    assert "non-empty line counts differ" not in report["reasons"]
+    assert "numeric markers differ" not in report["reasons"]
+    assert report["diagnostics"]["heterogeneous_layout_pair"] is True
+
+
+def test_layout_disagreement_is_evidence_not_page_text_block(tmp_path: Path):
+    record = write_page_consensus(
+        tmp_path,
+        source_name="page_001.md",
+        primary_text="Body text",
+        secondary_text="Body text",
+        primary_backend="chandra",
+        secondary_backend="paddle",
+        config={"ocr": {"consensus": {}}},
+        primary_layout={
+            "blocks": [
+                {"label": "Footnote", "bbox": [0, 700, 1000, 800], "text": "1 note"}
+            ]
+        },
+        secondary_layout={"blocks": [{"label": "Text", "bbox": [0, 700, 1000, 800], "text": "1 note"}]},
+    )
+
+    assert record["layout_review"] is True
+    assert record["comparison"]["status"] == "agree"
+    assert record["action"] == "auto_accept"
 
 
 def test_layout_consensus_flags_single_engine_footnote_label():
@@ -236,6 +277,52 @@ def test_pagewise_secondary_consensus_scopes_visual_review(monkeypatch, tmp_path
         (output_dir / "ocr_consensus" / "page_002.json").read_text(encoding="utf-8")
     )
     assert record["action"] == "visual_review"
+
+
+def test_rebuild_consensus_reuses_existing_page_artifacts(tmp_path: Path):
+    output_dir = tmp_path / "output"
+    pages_dir = output_dir / "pages"
+    secondary_dir = output_dir / "ocr_secondary"
+    pages_dir.mkdir(parents=True)
+    secondary_dir.mkdir()
+    for page in (1, 2):
+        name = f"page_{page:03d}.md"
+        (pages_dir / name).write_text("same text\n", encoding="utf-8")
+        (secondary_dir / name).write_text("same text\n", encoding="utf-8")
+        sidecar = {
+            "page_number": page,
+            "blocks": [{"label": "Text", "text": "same text", "bbox": [0, 0, 1000, 1000]}],
+        }
+        (pages_dir / f"page_{page:03d}.ocr.json").write_text(
+            json.dumps(sidecar), encoding="utf-8"
+        )
+        (secondary_dir / f"page_{page:03d}.ocr.json").write_text(
+            json.dumps(sidecar), encoding="utf-8"
+        )
+    (pages_dir / "ocr_progress.json").write_text(
+        json.dumps(
+            {
+                "total_pages": 2,
+                "backend": "chandra",
+                "source_sha256": "source-sha",
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = {
+        "ocr": {
+            "secondary": {"enabled": True, "backend": "paddle"},
+            "consensus": {"common_miss": {"sample_every": 0}},
+        }
+    }
+
+    summary = rebuild_ocr_consensus(output_dir, config)
+
+    assert summary["failed_pages"] == []
+    assert summary["review_pages"] == []
+    manifest = load_consensus_manifest(output_dir)
+    assert manifest["schema_version"] == 4
+    assert manifest["rebuild_mode"] == "offline_existing_artifacts"
 
 
 def test_paddle_preflight_writes_diagnostics_before_workers(monkeypatch, tmp_path: Path):

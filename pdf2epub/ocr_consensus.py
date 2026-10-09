@@ -20,7 +20,7 @@ from typing import Any, Dict, Mapping, Optional
 from pdf2epub.workflow_contracts import atomic_write_text, sha256_file
 
 
-OCR_CONSENSUS_SCHEMA_VERSION = 3
+OCR_CONSENSUS_SCHEMA_VERSION = 4
 DEFAULT_MAX_EDIT_RATIO = 0.08
 DEFAULT_MIN_CHANGED_CHARS = 2
 # A one-line omission is exactly the failure mode this consensus gate is
@@ -207,8 +207,18 @@ def compare_ocr_texts(
     primary_text: str,
     secondary_text: str,
     config: Mapping[str, Any],
+    *,
+    primary_backend: Optional[str] = None,
+    secondary_backend: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Compare two OCR outputs and classify whether visual review is needed."""
+    """Compare two OCR outputs and classify whether visual review is needed.
+
+    Chandra and Paddle do not emit equivalent line or numeric-marker streams:
+    Chandra is a semantic document OCR while Paddle is a line detector.  Those
+    fields remain useful diagnostics, but they must not independently block the
+    page-level text correction gate for that pair.  Callers that do not provide
+    backend names retain the legacy strict comparison for compatibility.
+    """
     primary = _comparable_text(primary_text)
     secondary = _comparable_text(secondary_text)
     settings = consensus_settings(config)
@@ -218,6 +228,10 @@ def compare_ocr_texts(
     max_edit_ratio = max(0.0, min(1.0, max_edit_ratio))
     min_changed_chars = max(1, min_changed_chars)
     max_line_delta = max(0, max_line_delta)
+    heterogeneous_layout_pair = {
+        str(primary_backend or "").strip().lower(),
+        str(secondary_backend or "").strip().lower(),
+    } == {"chandra", "paddle"}
 
     if not primary or not secondary:
         reasons = ["one OCR result is empty"]
@@ -230,11 +244,13 @@ def compare_ocr_texts(
         changed_chars = _changed_char_count(primary, secondary)
         primary_lines = len([line for line in str(primary_text).splitlines() if line.strip()])
         secondary_lines = len([line for line in str(secondary_text).splitlines() if line.strip()])
-        if abs(primary_lines - secondary_lines) > max_line_delta:
+        line_counts_differ = abs(primary_lines - secondary_lines) > max_line_delta
+        if line_counts_differ and not heterogeneous_layout_pair:
             reasons.append("non-empty line counts differ")
-        if re.findall(r"\d+(?:[./:-]\d+)*", primary) != re.findall(
-            r"\d+(?:[./:-]\d+)*", secondary
-        ):
+        primary_numeric_markers = re.findall(r"\d+(?:[./:-]\d+)*", primary)
+        secondary_numeric_markers = re.findall(r"\d+(?:[./:-]\d+)*", secondary)
+        numeric_markers_differ = primary_numeric_markers != secondary_numeric_markers
+        if numeric_markers_differ and not heterogeneous_layout_pair:
             reasons.append("numeric markers differ")
         if changed_chars >= min_changed_chars and ratio > max_edit_ratio:
             reasons.append("OCR text differs above the configured threshold")
@@ -253,6 +269,25 @@ def compare_ocr_texts(
         "secondary_nonempty_line_count": len(
             [line for line in str(secondary_text).splitlines() if line.strip()]
         ),
+        "diagnostics": {
+            "line_counts_differ": (
+                False
+                if not primary and not secondary
+                else (
+                    abs(
+                        len([line for line in str(primary_text).splitlines() if line.strip()])
+                        - len([line for line in str(secondary_text).splitlines() if line.strip()])
+                    )
+                    > max_line_delta
+                )
+            ),
+            "numeric_markers_differ": (
+                bool(primary and secondary)
+                and re.findall(r"\d+(?:[./:-]\d+)*", primary)
+                != re.findall(r"\d+(?:[./:-]\d+)*", secondary)
+            ),
+            "heterogeneous_layout_pair": heterogeneous_layout_pair,
+        },
     }
 
 
@@ -463,13 +498,14 @@ def write_page_consensus(
     record_dir.mkdir(parents=True, exist_ok=True)
     secondary_path = secondary_dir / source_name
     atomic_write_text(secondary_path, str(secondary_text or ""))
-    comparison = compare_ocr_texts(primary_text, secondary_text, config)
+    comparison = compare_ocr_texts(
+        primary_text,
+        secondary_text,
+        config,
+        primary_backend=primary_backend,
+        secondary_backend=secondary_backend,
+    )
     layout_comparison = compare_ocr_layouts(primary_layout, secondary_layout)
-    if layout_comparison.get("status") == "review_required":
-        comparison["reasons"].extend(
-            f"layout: {reason}" for reason in layout_comparison.get("reasons", [])
-        )
-        comparison["status"] = "review_required"
     record = {
         "schema_version": OCR_CONSENSUS_SCHEMA_VERSION,
         "source_file": source_name,
@@ -481,6 +517,10 @@ def write_page_consensus(
         "secondary_layout_file": f"ocr_secondary/{Path(source_name).stem}.ocr.json",
         "comparison": comparison,
         "layout_comparison": layout_comparison,
+        # Layout disagreement is consumed by footnote/illustration stages as
+        # evidence.  It must not turn a page into an OCR text-correction task:
+        # Chandra and Paddle intentionally use different block granularity.
+        "layout_review": layout_comparison.get("status") == "review_required",
         "action": "visual_review" if comparison["status"] == "review_required" else "auto_accept",
     }
     atomic_write_text(
@@ -488,6 +528,148 @@ def write_page_consensus(
         json.dumps(record, ensure_ascii=False, indent=2),
     )
     return record
+
+
+def rebuild_ocr_consensus(
+    output_dir: Path,
+    config: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Recompute consensus from existing primary/secondary OCR artifacts.
+
+    This is deliberately offline.  It is used after changing comparison
+    policy so a completed secondary OCR batch does not need to be run again.
+    The function still requires the complete page and sidecar set and writes
+    the same freshness-bound manifest as the online OCR path.
+    """
+    output_dir = Path(output_dir)
+    secondary_backend = secondary_backend_name(config)
+    if not secondary_backend:
+        raise ValueError(
+            "ocr-consensus-rebuild requires ocr.secondary.enabled and a backend"
+        )
+
+    pages_dir = output_dir / "pages"
+    secondary_dir = secondary_page_dir(output_dir)
+    try:
+        progress = json.loads(
+            (pages_dir / "ocr_progress.json").read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("pages/ocr_progress.json is missing or invalid") from exc
+    if not isinstance(progress, Mapping):
+        raise ValueError("pages/ocr_progress.json must contain an object")
+
+    try:
+        total_pages = int(progress.get("total_pages") or 0)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("ocr_progress.json has an invalid total_pages value") from exc
+    if total_pages <= 0:
+        raise ValueError("ocr_progress.json has no positive total_pages value")
+
+    primary_backend = str(progress.get("backend") or "").strip().lower()
+    source_sha256 = str(progress.get("source_sha256") or "").strip()
+    if not primary_backend or not source_sha256:
+        raise ValueError(
+            "ocr_progress.json must contain the current primary backend and source hash"
+        )
+
+    source_names = [f"page_{number:03d}.md" for number in range(1, total_pages + 1)]
+    consensus_dir(output_dir).mkdir(parents=True, exist_ok=True)
+    records: Dict[str, Any] = {}
+    failed_pages: list[int] = []
+    page_texts: Dict[str, Dict[str, str]] = {}
+
+    def _load_sidecar(path: Path) -> Optional[Mapping[str, Any]]:
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            return None
+        return value if isinstance(value, Mapping) else None
+
+    for page_number, name in enumerate(source_names, 1):
+        primary_path = pages_dir / name
+        secondary_path = secondary_dir / name
+        primary_sidecar_path = pages_dir / f"{Path(name).stem}.ocr.json"
+        secondary_sidecar_path = secondary_dir / f"{Path(name).stem}.ocr.json"
+        try:
+            primary_text = primary_path.read_text(encoding="utf-8")
+            secondary_text = secondary_path.read_text(encoding="utf-8")
+            primary_sidecar = _load_sidecar(primary_sidecar_path)
+            secondary_sidecar = _load_sidecar(secondary_sidecar_path)
+            if primary_sidecar is None or secondary_sidecar is None:
+                raise ValueError("primary or secondary layout sidecar is missing or invalid")
+            record = write_page_consensus(
+                output_dir,
+                source_name=name,
+                primary_text=primary_text,
+                secondary_text=secondary_text,
+                primary_backend=primary_backend,
+                secondary_backend=secondary_backend,
+                config=config,
+                primary_layout=primary_sidecar,
+                secondary_layout=secondary_sidecar,
+            )
+            record["primary_source_sha256"] = sha256_file(primary_path)
+            record["primary_layout_sha256"] = sha256_file(primary_sidecar_path)
+            record["secondary_layout_sha256"] = sha256_file(secondary_sidecar_path)
+            atomic_write_text(
+                consensus_dir(output_dir) / f"{Path(name).stem}.json",
+                json.dumps(record, ensure_ascii=False, indent=2),
+            )
+            records[name] = record
+            page_texts[name] = {
+                "primary": primary_text,
+                "secondary": secondary_text,
+            }
+        except (OSError, UnicodeError, ValueError) as exc:
+            logger_name = f"{name}: {exc}"
+            # Keep the manifest useful to the caller without introducing a
+            # logging dependency into this low-level module.
+            records[name] = {"source_file": name, "error": logger_name}
+            failed_pages.append(page_number)
+
+    manifest = {
+        "schema_version": OCR_CONSENSUS_SCHEMA_VERSION,
+        "source_sha256": source_sha256,
+        "primary_backend": primary_backend,
+        "secondary_backend": secondary_backend,
+        "config_sha256": secondary_config_hash(config),
+        "files": source_names,
+        "records": records,
+        "failed_pages": sorted(failed_pages),
+        "complete": not failed_pages and len(records) == len(source_names),
+        "rebuild_mode": "offline_existing_artifacts",
+    }
+    if manifest["complete"]:
+        common_risks = common_ocr_risk_reasons(page_texts, config)
+        for name, reasons in common_risks.items():
+            record = records.get(name)
+            if not isinstance(record, dict):
+                continue
+            record["common_miss_risks"] = reasons
+            record["action"] = "visual_review"
+            record["comparison"]["status"] = "review_required"
+            record["comparison"].setdefault("reasons", []).extend(reasons)
+            atomic_write_text(
+                consensus_dir(output_dir) / f"{Path(name).stem}.json",
+                json.dumps(record, ensure_ascii=False, indent=2),
+            )
+    atomic_write_text(
+        consensus_manifest_path(output_dir),
+        json.dumps(manifest, ensure_ascii=False, indent=2),
+    )
+    review_pages = sorted(
+        name
+        for name, record in records.items()
+        if isinstance(record, Mapping) and record.get("action") == "visual_review"
+    )
+    return {
+        "enabled": True,
+        "secondary_backend": secondary_backend,
+        "review_pages": review_pages,
+        "failed_pages": sorted(failed_pages),
+        "manifest": manifest,
+    }
 
 
 def load_consensus_manifest(output_dir: Path) -> Dict[str, Any]:
@@ -596,6 +778,7 @@ __all__ = [
     "consensus_dir",
     "consensus_is_current",
     "consensus_manifest_path",
+    "rebuild_ocr_consensus",
     "review_required_files",
     "ocr_evidence_mode",
     "secondary_ocr_enabled",

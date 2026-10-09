@@ -51,6 +51,9 @@ _DECISION_ROLES = frozenset(
         "review_required",
     }
 )
+_MOVED_ROLES = frozenset(
+    {"footnote_start", "footnote_continuation", "footnote_definition"}
+)
 _FOOTNOTE_LABEL_RE = re.compile(r"(?:foot\s*note|footnote|注脚|脚注|页下注)", re.IGNORECASE)
 _CITATION_LABEL_RE = re.compile(
     r"(?:bibliograph(?:y|ies)|reference(?:s)?|citation|参考文献|引用|文献)",
@@ -150,6 +153,7 @@ def _candidate_for_block(
     bottom_ratio: float,
     force_review: bool = False,
     layout_evidence: Optional[Mapping[str, Any]] = None,
+    source: str = "primary",
 ) -> Optional[dict[str, Any]]:
     text = _text_from_block(block)
     if not text:
@@ -206,6 +210,7 @@ def _candidate_for_block(
 
     candidate = {
         "page": page_number,
+        "source": source,
         "block": block_index,
         "order": block.get("order", block_index),
         "label": label,
@@ -240,7 +245,11 @@ def _window_for_page(
     context_blocks: int,
 ) -> dict[str, Any]:
     blocks = sidecar.get("blocks", [])
-    candidate_indexes = {int(item["block"]) for item in candidate_blocks}
+    candidate_indexes = {
+        block_index
+        for item in candidate_blocks
+        for block_index in _candidate_block_indexes(item)
+    }
     indexes = set(candidate_indexes)
     for index in candidate_indexes:
         for offset in range(1, context_blocks + 1):
@@ -265,7 +274,7 @@ def _window_for_page(
                         (
                             str(item.get("confidence"))
                             for item in candidate_blocks
-                            if int(item.get("block", -1)) == index
+                            if index in _candidate_block_indexes(item)
                         ),
                         None,
                     )
@@ -361,13 +370,117 @@ def _load_consensus_review_pages(output_dir: Path) -> set[int]:
 
 
 def _candidate_signature(candidates: Iterable[Mapping[str, Any]]) -> list[tuple[str, str]]:
-    """Return layout-only evidence that is stable across OCR text errors."""
+    """Return semantic evidence without comparing OCR line fragmentation."""
     result = []
     for candidate in candidates:
         label = str(candidate.get("label") or "").strip().casefold()
         key = str(candidate.get("key") or "")
         result.append((key, label))
     return sorted(result)
+
+
+def _candidate_block_indexes(candidate: Mapping[str, Any]) -> list[int]:
+    """Return every sidecar block represented by a candidate window."""
+    raw_indexes = candidate.get("block_indices")
+    if isinstance(raw_indexes, list):
+        indexes: list[int] = []
+        for value in raw_indexes:
+            try:
+                index = int(value)
+            except (TypeError, ValueError):
+                continue
+            if index >= 0 and index not in indexes:
+                indexes.append(index)
+        if indexes:
+            return indexes
+    try:
+        index = int(candidate.get("block", -1))
+    except (TypeError, ValueError):
+        return []
+    return [index] if index >= 0 else []
+
+
+def _aggregate_secondary_only_candidates(
+    candidates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Collapse adjacent Paddle lines into reviewable note windows.
+
+    Paddle commonly emits one physical line per block while Chandra emits a
+    whole footnote paragraph.  A secondary-only note therefore must be one
+    review decision, not one decision per Paddle line.  We only merge adjacent
+    blocks and never merge two explicit numeric starts; the Subagent can still
+    split or classify the resulting window from the page image.
+    """
+    if not candidates:
+        return []
+    ordered = sorted(candidates, key=lambda item: (item.get("order", 0), item["block"]))
+    groups: list[list[dict[str, Any]]] = []
+    for candidate in ordered:
+        if not groups:
+            groups.append([candidate])
+            continue
+        group = groups[-1]
+        previous = group[-1]
+        previous_block = int(previous["block"])
+        current_block = int(candidate["block"])
+        group_keys = {str(item.get("key") or "") for item in group if item.get("key")}
+        current_key = str(candidate.get("key") or "")
+        adjacent = current_block == previous_block + 1
+        has_two_numeric_starts = bool(current_key and group_keys)
+        if adjacent and not has_two_numeric_starts:
+            group.append(candidate)
+        else:
+            groups.append([candidate])
+
+    aggregated: list[dict[str, Any]] = []
+    for group in groups:
+        first = group[0]
+        block_indices = [int(item["block"]) for item in group]
+        merged = dict(first)
+        merged["block_indices"] = block_indices
+        merged["block_span"] = [block_indices[0], block_indices[-1]]
+        merged["text"] = " ".join(
+            str(item.get("text") or "").strip() for item in group if item.get("text")
+        )[:240]
+        merged["secondary_line_count"] = len(group)
+        aggregated.append(merged)
+    return aggregated
+
+
+def _vertical_overlap(
+    first: Optional[Iterable[float]],
+    second: Optional[Iterable[float]],
+) -> float:
+    """Return vertical overlap ratio for normalized candidate boxes."""
+    if not first or not second:
+        return 0.0
+    try:
+        first_values = [float(value) for value in first]
+        second_values = [float(value) for value in second]
+        first_height = max(0.0, first_values[3] - first_values[1])
+        second_height = max(0.0, second_values[3] - second_values[1])
+        overlap = max(
+            0.0,
+            min(first_values[3], second_values[3])
+            - max(first_values[1], second_values[1]),
+        )
+    except (TypeError, ValueError, IndexError):
+        return 0.0
+    denominator = min(first_height, second_height)
+    return overlap / denominator if denominator > 0 else 0.0
+
+
+def _candidates_match(
+    primary: Mapping[str, Any],
+    secondary: Mapping[str, Any],
+) -> bool:
+    """Match semantic footnote regions across paragraph/line OCR layouts."""
+    primary_key = str(primary.get("key") or "")
+    secondary_key = str(secondary.get("key") or "")
+    overlap = _vertical_overlap(primary.get("bbox"), secondary.get("bbox"))
+    if primary_key and secondary_key:
+        return primary_key == secondary_key and overlap >= 0.20
+    return overlap >= 0.60
 
 
 def _secondary_sidecar_path(output_dir: Path, sidecar_path: Path) -> Path:
@@ -686,11 +799,6 @@ def prepare_footnote_candidates(
                 )
             else:
                 local_acceptance_disabled = not options.auto_accept
-                consensus_review = (
-                    page_number in consensus_review_pages
-                    if legacy_consensus
-                    else False
-                )
                 candidate = _candidate_for_block(
                     page_number,
                     block_index,
@@ -698,7 +806,7 @@ def prepare_footnote_candidates(
                     sidecar,
                     bottom_ratio=options.bottom_ratio,
                     force_review=(
-                        local_acceptance_disabled or consensus_review
+                        local_acceptance_disabled
                     ),
                     layout_evidence=_layout_region_evidence(
                         layout_prediction,
@@ -707,6 +815,7 @@ def prepare_footnote_candidates(
                     )
                     if layout_prediction is not None
                     else None,
+                    source="primary",
                 )
                 if candidate is not None and local_acceptance_disabled:
                     layout_evidence = candidate.get("layout_evidence")
@@ -759,15 +868,29 @@ def prepare_footnote_candidates(
                     )
                     if layout_prediction is not None
                     else None,
+                    source="secondary",
                 )
                 if candidate is not None:
                     secondary_candidates.append(candidate)
             secondary_candidates.sort(key=lambda item: (item["order"], item["block"]))
-            candidate_disagreement = (
+            matched_secondary_blocks = {
+                int(secondary_candidate["block"])
+                for secondary_candidate in secondary_candidates
+                if any(
+                    _candidates_match(primary_candidate, secondary_candidate)
+                    for primary_candidate in candidates
+                )
+            }
+            secondary_only_candidates = [
+                candidate
+                for candidate in secondary_candidates
+                if int(candidate["block"]) not in matched_secondary_blocks
+            ]
+            secondary_only_candidates = _aggregate_secondary_only_candidates(
+                secondary_only_candidates
+            )
+            candidate_disagreement = bool(secondary_only_candidates) or (
                 bool(candidates) != bool(secondary_candidates)
-                or _candidate_signature(candidates)
-                != _candidate_signature(secondary_candidates)
-                or page_number in consensus_review_pages
             )
             if candidate_disagreement:
                 review_pages.add(page_number)
@@ -782,10 +905,16 @@ def prepare_footnote_candidates(
                         if bool(candidates) != bool(secondary_candidates)
                         else "ocr_footnote_candidate_differs"
                     )
+            for candidate in secondary_only_candidates:
+                candidate["confidence"] = "review"
+                candidate["disposition"] = "review_required"
+                candidate["secondary_only"] = True
+                candidate["review_reason"] = "secondary_only_footnote_candidate"
+                review_count += 1
 
         should_emit_page = bool(candidates) or (
             evidence_mode == "two_ocr"
-            and (bool(secondary_candidates) or page_number in consensus_review_pages)
+            and bool(secondary_candidates)
         )
         if should_emit_page:
             legacy_secondary = legacy_consensus and secondary_sidecar.is_file()
@@ -810,6 +939,9 @@ def prepare_footnote_candidates(
                     ) if evidence_mode == "two_ocr" else None,
                     "candidates": candidates,
                     "secondary_candidates": secondary_candidates,
+                    "secondary_only_candidates": secondary_only_candidates
+                    if evidence_mode == "two_ocr"
+                    else [],
                     "window": _window_for_page(
                         page_number,
                         sidecar,
@@ -935,8 +1067,18 @@ def prepare_footnote_subagent(
             "evidence, not a semantic decision. Candidates without matching layout support are "
             "also deliberately sent to review; do not auto-move either kind based on a numeric key alone."
         )
-    prompt = f"""# Footnote layout review\n\nBook: {book_title}\n\nRead `footnote_subagent_manifest.json` and `footnote_candidates.json`. The local script has selected compact bottom-of-page candidate windows. Review only blocks marked `confidence: review`; blocks marked `confidence: high` are already accepted by the deterministic local rule and do not need a decision. Do not reread or rewrite the whole book. {source_guidance}\n\nCandidate page layout sidecars:\n{page_text}\n\nUse these meanings strictly:\n- `footnote_start`: the beginning of a real page footnote; it will be moved to the end of its logical chapter.\n- `footnote_continuation`: text continuing a real footnote from an earlier page; it will be joined to that footnote.\n- `footnote_definition`: a complete footnote definition already presented as a note block.\n- `citation`: an in-text citation, quoted source, parenthetical/numeric reference, or other scholarly reference; it must stay in the body and must never be moved.\n- `bibliography`: a reference-list/bibliography entry; it must stay in place and must never be moved.\n- `body`: ordinary prose or an uncertain block that is not a footnote.\n\nFor each candidate block marked `confidence: review`, assign exactly one role. Keep the block's page and block number. For `footnote_start` and `footnote_definition`, copy the visible numeric key when present. For `footnote_continuation`, provide the key of the footnote it continues. A continuation may appear after ordinary body blocks on the next page; preserve visual order and attach it only when the page image/layout supports that decision. Do not assume that a next-page footnote continuation is at the top of the page. A numeric marker alone is not enough to call something a footnote: if it is a citation or reference, use `citation` or `bibliography`.\n\nWrite only valid JSON to `footnote_decisions.json` with this shape:\n\n```json\n{{\n  "schema_version": {FOOTNOTE_PREPARE_SCHEMA_VERSION},\n  "decisions": [\n    {{\n      "page": 125,\n      "block": 8,\n      "role": "footnote_continuation",\n      "key": "36",\n      "confidence": "high"\n    }}\n  ]\n}}\n```\n\nIf a candidate is genuinely ambiguous, use `role: "review_required"` and explain it in `reason`; do not guess.\n"""
-    prompt += "\n\nDo not reread or rewrite the whole book.\n"
+    prompt = f"""# Footnote layout review\n\nBook: {book_title}\n\nRead `footnote_subagent_manifest.json` and `footnote_candidates.json`. The local script has selected compact bottom-of-page candidate windows. Review only blocks marked `confidence: review`; blocks marked `confidence: high` are already accepted by the deterministic local rule and do not need a decision. Do not reread or rewrite the whole book. {source_guidance}\n\nCandidate page layout sidecars:\n{page_text}\n\nUse these meanings strictly:\n- `footnote_start`: the beginning of a real page footnote; it will be moved to the end of its logical chapter.\n- `footnote_continuation`: text continuing a real footnote from an earlier page; it will be joined to that footnote.\n- `footnote_definition`: a complete footnote definition already presented as a note block.\n- `citation`: an in-text citation, quoted source, parenthetical/numeric reference, or other scholarly reference; it must stay in the body and must never be moved.\n- `bibliography`: a reference-list/bibliography entry; it must stay in place and must never be moved.\n- `body`: ordinary prose or an uncertain block that is not a footnote.\n\nFor each candidate block marked `confidence: review`, assign exactly one role. Keep the block's page, source, and block number. `source` defaults to `primary`; use `source: "secondary"` only for a candidate listed under `secondary_only_candidates`. For `footnote_start` and `footnote_definition`, copy the visible numeric key when present. For `footnote_continuation`, provide the key of the footnote it continues. A continuation may appear after ordinary body blocks on the next page; preserve visual order and attach it only when the page image/layout supports that decision. Do not assume that a next-page footnote continuation is at the top of the page. A numeric marker alone is not enough to call something a footnote: if it is a citation or reference, use `citation` or `bibliography`.\n\nA `secondary` footnote candidate means that Paddle found a possible note which Chandra did not expose as a primary footnote block. For such a decision, do not trust Paddle text blindly: inspect the page image, write the final visible note text in `text`, and provide the logical refinement unit filename in `source_file` (for example `chapter_1.md`). This explicit text is required because the deterministic apply stage cannot safely invent a primary block address.\n\nWrite only valid JSON to `footnote_decisions.json` with this shape:\n\n```json\n{{\n  "schema_version": {FOOTNOTE_PREPARE_SCHEMA_VERSION},\n  "decisions": [\n    {{\n      "page": 125,\n      "source": "primary",\n      "block": 8,\n      "role": "footnote_continuation",\n      "key": "36",\n      "confidence": "high"\n    }},\n    {{\n      "page": 126,\n      "source": "secondary",\n      "block": 21,\n      "role": "footnote_start",\n      "key": "37",\n      "source_file": "chapter_1.md",\n      "text": "The final visible footnote text.",\n      "confidence": "high"\n    }}\n  ]\n}}\n```\n\nIf a candidate is genuinely ambiguous, use `role: "review_required"` and explain it in `reason`; do not guess.\n"""
+    prompt += (
+        "\n\nFor every secondary-only moved decision, also include "
+        "`primary_disposition`: `absent` when the Chandra/refinement text truly "
+        "does not contain this note, or `remove` when it contains a duplicate "
+        "primary block. For `remove`, include `primary_blocks` (or one integer "
+        "`primary_block`) so the local stage can delete only the reviewed block. "
+        "If the body contains more than one possible marker with this key, include "
+        "`marker_context` with a short exact surrounding phrase; the local stage "
+        "will refuse to guess between repeated markers.\n\n"
+        "Do not reread or rewrite the whole book.\n"
+    )
     prompt_path = output_dir / "footnote_subagent_prompt.md"
     atomic_write_text(prompt_path, prompt)
     return {
@@ -946,19 +1088,29 @@ def prepare_footnote_subagent(
     }
 
 
-def _candidate_index(report: Mapping[str, Any]) -> dict[tuple[int, int], dict[str, Any]]:
+def _candidate_index(
+    report: Mapping[str, Any],
+) -> dict[tuple[int, str, int], dict[str, Any]]:
     index = {}
     for page in report.get("pages", []) or []:
         if not isinstance(page, Mapping):
             continue
-        for candidate in page.get("candidates", []) or []:
-            if not isinstance(candidate, Mapping):
-                continue
-            try:
-                address = (int(candidate["page"]), int(candidate["block"]))
-            except (KeyError, TypeError, ValueError):
-                continue
-            index[address] = dict(candidate)
+        for field, default_source in (
+            ("candidates", "primary"),
+            ("secondary_only_candidates", "secondary"),
+        ):
+            for candidate in page.get(field, []) or []:
+                if not isinstance(candidate, Mapping):
+                    continue
+                try:
+                    address = (
+                        int(candidate["page"]),
+                        str(candidate.get("source") or default_source).strip().lower(),
+                        int(candidate["block"]),
+                    )
+                except (KeyError, TypeError, ValueError):
+                    continue
+                index[address] = dict(candidate)
     return index
 
 
@@ -1058,11 +1210,25 @@ def validate_footnote_decisions(
         return result
 
     required = {
-        (int(candidate["page"]), int(candidate["block"]))
+        (
+            int(candidate["page"]),
+            "primary",
+            int(candidate["block"]),
+        )
         for page in report.get("pages", []) or []
         for candidate in page.get("candidates", []) or []
         if candidate.get("confidence") == "review"
     }
+    required.update(
+        (
+            int(candidate["page"]),
+            "secondary",
+            int(candidate["block"]),
+        )
+        for page in report.get("pages", []) or []
+        for candidate in page.get("secondary_only_candidates", []) or []
+        if candidate.get("confidence") == "review"
+    )
     if not required:
         result = {
             "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
@@ -1101,53 +1267,144 @@ def validate_footnote_decisions(
         decisions = []
 
     candidates = _candidate_index(report)
-    seen: set[tuple[int, int]] = set()
+    seen: set[tuple[int, str, int]] = set()
     normalized: list[dict[str, Any]] = []
     for item in decisions:
         if not isinstance(item, Mapping):
             errors.append("each decision must be an object")
             continue
         try:
-            address = (int(item["page"]), int(item["block"]))
+            source = str(item.get("source") or "primary").strip().lower()
+            address = (int(item["page"]), source, int(item["block"]))
         except (KeyError, TypeError, ValueError):
             errors.append("decision is missing an integer page/block address")
             continue
+        if source not in {"primary", "secondary"}:
+            errors.append(
+                f"unsupported decision source for {address[0]}:{address[2]}: {source}"
+            )
+            continue
         if address in seen:
-            errors.append(f"duplicate decision for page {address[0]} block {address[1]}")
+            errors.append(
+                f"duplicate decision for {address[2]}:{address[0]}:{address[1]}"
+            )
             continue
         seen.add(address)
         candidate = candidates.get(address)
         if candidate is None:
-            errors.append(f"decision points to a non-candidate block: {address[0]}:{address[1]}")
+            errors.append(
+                "decision points to a non-candidate block: "
+                f"{address[0]}:{address[1]}:{address[2]}"
+            )
             continue
         role = str(item.get("role") or "").strip()
         if role not in _DECISION_ROLES:
-            errors.append(f"unsupported decision role for {address[0]}:{address[1]}: {role}")
+            errors.append(
+                f"unsupported decision role for {address[0]}:{address[1]}:{address[2]}: {role}"
+            )
             continue
         key = item.get("key")
         if key is not None:
             key = str(key).strip()
             if not re.fullmatch(r"[A-Za-z0-9_-]+", key):
-                errors.append(f"invalid footnote key for {address[0]}:{address[1]}")
+                errors.append(
+                    f"invalid footnote key for {address[0]}:{address[1]}:{address[2]}"
+                )
                 continue
         if role in {"footnote_start", "footnote_continuation", "footnote_definition"} and not key:
-            errors.append(f"footnote decision is missing a key for {address[0]}:{address[1]}")
+            errors.append(
+                f"footnote decision is missing a key for {address[0]}:{address[1]}:{address[2]}"
+            )
             continue
         if candidate.get("key") and role in {"footnote_start", "footnote_definition"} and key != candidate["key"]:
             errors.append(
-                f"decision key does not match OCR key for {address[0]}:{address[1]}"
+                f"decision key does not match OCR key for {address[0]}:{address[1]}:{address[2]}"
             )
             continue
+        if source == "secondary" and role in _MOVED_ROLES:
+            text = str(item.get("text") or "").strip()
+            if not text:
+                errors.append(
+                    "secondary-only footnote decision must include explicit text for "
+                    f"{address[0]}:{address[2]}"
+                )
+                continue
+            source_file = str(item.get("source_file") or "").strip()
+            if not source_file or Path(source_file).name != source_file or not source_file.endswith(".md"):
+                errors.append(
+                    "secondary-only footnote decision must include a safe source_file for "
+                    f"{address[0]}:{address[2]}"
+                )
+                continue
+            primary_disposition = str(
+                item.get("primary_disposition") or ""
+            ).strip().lower()
+            if primary_disposition not in {"absent", "remove"}:
+                errors.append(
+                    "secondary-only footnote decision must declare primary_disposition "
+                    f"as absent or remove for {address[0]}:{address[2]}"
+                )
+                continue
+            if primary_disposition == "remove":
+                raw_primary_blocks = item.get("primary_blocks")
+                if raw_primary_blocks is None:
+                    raw_primary_block = item.get("primary_block")
+                    raw_primary_blocks = (
+                        [raw_primary_block] if raw_primary_block is not None else None
+                    )
+                if not isinstance(raw_primary_blocks, list) or not raw_primary_blocks:
+                    errors.append(
+                        "secondary-only footnote with primary_disposition=remove must "
+                        f"include primary_block(s) for {address[0]}:{address[2]}"
+                    )
+                    continue
+                normalized_primary_blocks: list[int] = []
+                invalid_primary_block = False
+                for raw_block in raw_primary_blocks:
+                    try:
+                        primary_block = int(raw_block)
+                    except (TypeError, ValueError):
+                        invalid_primary_block = True
+                        break
+                    if primary_block < 0 or primary_block in normalized_primary_blocks:
+                        invalid_primary_block = True
+                        break
+                    normalized_primary_blocks.append(primary_block)
+                if invalid_primary_block:
+                    errors.append(
+                        "secondary-only footnote primary_block(s) must be unique "
+                        f"non-negative integers for {address[0]}:{address[2]}"
+                    )
+                    continue
+            else:
+                normalized_primary_blocks = []
+                if item.get("primary_block") is not None or item.get("primary_blocks") is not None:
+                    errors.append(
+                        "secondary-only footnote with primary_disposition=absent must not "
+                        f"include primary_block(s) for {address[0]}:{address[2]}"
+                    )
+                    continue
         decision = dict(item)
-        decision["page"], decision["block"], decision["role"] = address[0], address[1], role
+        decision["page"], decision["source"], decision["block"], decision["role"] = (
+            address[0],
+            address[1],
+            address[2],
+            role,
+        )
         if key is not None:
             decision["key"] = key
+        if source == "secondary" and role in _MOVED_ROLES:
+            decision["primary_disposition"] = primary_disposition
+            decision["primary_blocks"] = normalized_primary_blocks
         if role == "review_required":
-            human_review_required.append(f"{address[0]}:{address[1]}")
+            human_review_required.append(f"{address[0]}:{address[1]}:{address[2]}")
         normalized.append(decision)
 
     missing = sorted(required - seen)
-    errors.extend(f"missing decision for review candidate {page}:{block}" for page, block in missing)
+    errors.extend(
+        f"missing decision for review candidate {page}:{source}:{block}"
+        for page, source, block in missing
+    )
 
     key_sources = {
         str(candidate.get("key"))

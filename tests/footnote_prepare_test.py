@@ -684,10 +684,10 @@ def test_consensus_visual_review_disables_local_footnote_auto_accept(tmp_path: P
     candidate = report["pages"][0]["candidates"][0]
     prompt = paths["prompt"].read_text(encoding="utf-8")
 
-    assert candidate["confidence"] == "review"
-    assert candidate["review_reason"] == "ocr_consensus_visual_review"
+    assert candidate["confidence"] == "high"
+    assert candidate.get("review_reason") != "ocr_consensus_visual_review"
     assert report["consensus_visual_review_pages"] == [1]
-    assert "ocr_secondary/page_001.ocr.json" in prompt
+    assert "ocr_secondary/page_001.ocr.json" not in prompt
 
 
 def test_single_ocr_config_ignores_stale_consensus_artifact(tmp_path: Path):
@@ -1210,3 +1210,281 @@ def test_apply_links_a_footnote_marker_from_the_previous_oversized_part(
     assert "Body [^45]" in part1
     assert "45 Footnote text" not in part2
     assert "[^45]: Footnote text" in part2
+
+
+def test_secondary_only_footnote_decision_materializes_explicit_text(
+    tmp_path: Path,
+):
+    source = tmp_path / "ocr_markdown"
+    source.mkdir()
+    (source / "chapter_1.md").write_text(
+        "Body <sup>36</sup>\n", encoding="utf-8"
+    )
+    (source / "tree_progress.json").write_text(
+        json.dumps(
+            {
+                "units": [
+                    {
+                        "unit_id": "chapter_1",
+                        "index_path": [1],
+                        "file": "chapter_1.md",
+                        "page_range": [1, 1],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    report = {
+        "schema_version": 1,
+        "source_kind": "ocr",
+        "ocr_evidence_mode": "two_ocr",
+        "sidecar_sha256": {},
+        "secondary_sidecar_sha256": {},
+        "pages": [
+            {
+                "page": 1,
+                "candidates": [],
+                "secondary_only_candidates": [
+                    {
+                        "page": 1,
+                        "source": "secondary",
+                        "block": 0,
+                        "key": "36",
+                        "confidence": "review",
+                    }
+                ],
+            }
+        ],
+    }
+    (tmp_path / "footnote_candidates.json").write_text(
+        json.dumps(report), encoding="utf-8"
+    )
+    (tmp_path / "footnote_decisions.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "decisions": [
+                    {
+                        "page": 1,
+                        "source": "secondary",
+                        "block": 0,
+                        "role": "footnote_start",
+                        "key": "36",
+                        "source_file": "chapter_1.md",
+                        "text": "36 Footnote recovered from the page image",
+                        "primary_disposition": "absent",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    validation = validate_footnote_decisions(tmp_path)
+    result = apply_footnote_normalization(tmp_path)
+
+    assert validation["valid"] is True
+    assert result["valid"] is True
+    normalized = (tmp_path / "footnote_normalized" / "chapter_1.md").read_text(
+        encoding="utf-8"
+    )
+    assert "Body [^36]" in normalized
+    assert "[^36]: Footnote recovered from the page image" in normalized
+
+
+def test_secondary_only_adjacent_paddle_lines_are_one_review_window(
+    tmp_path: Path, monkeypatch
+):
+    _write_sidecar(tmp_path, 1, [_block("Body", 0, y0=120)])
+    secondary = tmp_path / "ocr_secondary"
+    secondary.mkdir()
+    (secondary / "page_001.ocr.json").write_text(
+        json.dumps(
+            {
+                "page_number": 1,
+                "page_box": [0, 0, 1000, 1000],
+                "blocks": [
+                    _block("36 first physical line", 0, label="Footnote", y0=820),
+                    _block("continuation physical line", 1, label="Footnote", y0=870),
+                    _block("final physical line", 2, label="Footnote", y0=920),
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "pdf2epub.refine.pdf_evidence.consensus_is_current",
+        lambda output_dir, config: True,
+    )
+
+    report = prepare_footnote_candidates(
+        tmp_path,
+        config={"ocr": {"secondary": {"enabled": True, "backend": "paddle"}}},
+    )
+
+    secondary_only = report["pages"][0]["secondary_only_candidates"]
+    assert len(secondary_only) == 1
+    assert secondary_only[0]["block"] == 0
+    assert secondary_only[0]["block_indices"] == [0, 1, 2]
+    assert secondary_only[0]["secondary_line_count"] == 3
+
+
+def test_secondary_only_repeated_marker_fails_closed(tmp_path: Path):
+    source = tmp_path / "ocr_markdown"
+    source.mkdir()
+    (source / "chapter_1.md").write_text(
+        "First <sup>36</sup> and second <sup>36</sup>\n", encoding="utf-8"
+    )
+    (source / "tree_progress.json").write_text(
+        json.dumps(
+            {
+                "units": [
+                    {
+                        "unit_id": "chapter_1",
+                        "file": "chapter_1.md",
+                        "page_range": [1, 1],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "footnote_candidates.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "source_kind": "ocr",
+                "ocr_evidence_mode": "two_ocr",
+                "pages": [
+                    {
+                        "page": 1,
+                        "candidates": [],
+                        "secondary_only_candidates": [
+                            {
+                                "page": 1,
+                                "source": "secondary",
+                                "block": 0,
+                                "key": "36",
+                                "confidence": "review",
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "footnote_decision_validation.json").write_text(
+        json.dumps(
+            {
+                "valid": True,
+                "status": "validated",
+                "decisions": [
+                    {
+                        "page": 1,
+                        "source": "secondary",
+                        "block": 0,
+                        "role": "footnote_start",
+                        "key": "36",
+                        "source_file": "chapter_1.md",
+                        "text": "36 recovered note",
+                        "primary_disposition": "absent",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = apply_footnote_normalization(tmp_path)
+
+    assert result["valid"] is False
+    assert "not unique" in result["errors"][0]
+
+
+def test_secondary_only_can_remove_an_explicit_primary_duplicate(tmp_path: Path):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [
+            _block("Body <sup>36</sup>", 0, y0=120),
+            _block("36 Chandra duplicate", 1, label="Text", y0=820),
+        ],
+    )
+    source = tmp_path / "ocr_markdown"
+    source.mkdir()
+    (source / "chapter_1.md").write_text(
+        "Body <sup>36</sup>\n\n36 Chandra duplicate\n", encoding="utf-8"
+    )
+    (source / "tree_progress.json").write_text(
+        json.dumps(
+            {
+                "units": [
+                    {
+                        "unit_id": "chapter_1",
+                        "file": "chapter_1.md",
+                        "page_range": [1, 1],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "footnote_candidates.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "source_kind": "ocr",
+                "ocr_evidence_mode": "two_ocr",
+                "pages": [
+                    {
+                        "page": 1,
+                        "candidates": [],
+                        "secondary_only_candidates": [
+                            {
+                                "page": 1,
+                                "source": "secondary",
+                                "block": 0,
+                                "key": "36",
+                                "confidence": "review",
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "footnote_decision_validation.json").write_text(
+        json.dumps(
+            {
+                "valid": True,
+                "status": "validated",
+                "decisions": [
+                    {
+                        "page": 1,
+                        "source": "secondary",
+                        "block": 0,
+                        "role": "footnote_start",
+                        "key": "36",
+                        "source_file": "chapter_1.md",
+                        "text": "36 Recovered note",
+                        "primary_disposition": "remove",
+                        "primary_blocks": [1],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = apply_footnote_normalization(tmp_path)
+
+    assert result["valid"] is True
+    normalized = (tmp_path / "footnote_normalized" / "chapter_1.md").read_text(
+        encoding="utf-8"
+    )
+    assert "Body [^36]" in normalized
+    assert "Chandra duplicate" not in normalized
+    assert "[^36]: Recovered note" in normalized
