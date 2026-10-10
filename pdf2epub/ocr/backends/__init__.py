@@ -1,12 +1,11 @@
 """OCR backend registry and compatibility accessors.
 
-The project historically had two routing layers: the legacy chunk adapters in
-``pdf2epub.ocr_backends`` and the newer page-oriented backends in this
-package.  Keep the old ``get_backend`` API for callers that need it, but make
-``get_backend_spec`` the single discovery point for the page OCR pipeline.
+The page-oriented backends are discovered lazily so optional provider SDKs do
+not become import-time requirements for the default Chandra workflow.
 """
 
 from dataclasses import dataclass
+from importlib import import_module
 from typing import Callable, Optional, Tuple
 
 
@@ -14,8 +13,8 @@ from typing import Callable, Optional, Tuple
 class OCRBackendSpec:
     """Describe one OCR backend without importing provider clients eagerly.
 
-    ``chunk_processor`` is the compatibility interface used by the original
-    Mistral/Vertex/VLLM adapters.  ``image_page_processor`` is the common
+    ``chunk_processor`` is the compatibility interface used by the legacy
+    VLLM adapter.  ``image_page_processor`` is the common
     interface used by Azure and Google Vision.  Chandra has a richer native
     page result and therefore uses ``native_page_processor``.
     """
@@ -27,7 +26,7 @@ class OCRBackendSpec:
     native_page_processor: Optional[Callable] = None
 
 
-_BACKEND_NAMES = ("mistral", "vertex", "vllm", "azure", "vision", "chandra", "paddle")
+_BACKEND_NAMES = ("vllm", "azure", "vision", "chandra")
 
 
 def get_backend(backend_name: str) -> Tuple[Callable, Callable]:
@@ -59,48 +58,49 @@ def get_backend_spec(backend_name: str) -> OCRBackendSpec:
     """Return the normalized backend description used by page OCR.
 
     Imports stay lazy so installing or using one provider does not eagerly
-    initialize every optional SDK.  The legacy adapters remain the source of
-    truth for the chunk-shaped Mistral, Vertex, and VLLM calls.
+    initialize every optional SDK.  The legacy VLLM adapter remains available
+    for callers that still use the chunk-shaped compatibility interface.
     """
     name = str(backend_name or "").strip().lower()
     if name not in _BACKEND_NAMES:
         supported = ", ".join(_BACKEND_NAMES)
         raise ValueError(f"Unknown backend: {backend_name}. Supported: {supported}")
 
-    if name in {"mistral", "vertex", "vllm"}:
-        from pdf2epub.ocr_backends import (
-            ocr_pdf_chunk_mistral,
-            ocr_pdf_chunk_vertex,
-            ocr_pdf_chunk_vllm,
-        )
-
-        processors = {
-            "mistral": ocr_pdf_chunk_mistral,
-            "vertex": ocr_pdf_chunk_vertex,
-            "vllm": ocr_pdf_chunk_vllm,
-        }
-        return OCRBackendSpec(name=name, chunk_processor=processors[name])
-
-    if name == "chandra":
-        from .chandra import process_pdf_page
-
-        return OCRBackendSpec(name=name, native_page_processor=process_pdf_page)
-
-    if name == "paddle":
-        from .paddle import init_client, process_page
-
+    if name == "vllm":
         return OCRBackendSpec(
             name=name,
-            init_client=init_client,
-            image_page_processor=process_page,
+            chunk_processor=_lazy_backend_callable(
+                "pdf2epub.ocr_backends", "ocr_pdf_chunk_vllm"
+            ),
         )
 
-    init_client, process_page = get_backend(name)
+    if name == "chandra":
+        return OCRBackendSpec(
+            name=name,
+            native_page_processor=_lazy_backend_callable(
+                "pdf2epub.ocr.backends.chandra", "process_pdf_page"
+            ),
+        )
+
     return OCRBackendSpec(
         name=name,
-        init_client=init_client,
-        image_page_processor=process_page,
+        init_client=_lazy_backend_callable(
+            f"pdf2epub.ocr.backends.{name}", "init_client"
+        ),
+        image_page_processor=_lazy_backend_callable(
+            f"pdf2epub.ocr.backends.{name}", "process_page"
+        ),
     )
+
+
+def _lazy_backend_callable(module_name: str, attribute: str) -> Callable:
+    """Resolve an optional provider module only when the callable is used."""
+
+    def call(*args, **kwargs):
+        module = import_module(module_name)
+        return getattr(module, attribute)(*args, **kwargs)
+
+    return call
 
 
 def supported_backends() -> tuple[str, ...]:

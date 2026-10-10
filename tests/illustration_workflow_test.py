@@ -154,7 +154,7 @@ def test_native_pdf_uses_native_evidence_for_illustration_review(tmp_path: Path)
     paths = prepare_illustration_subagent(
         tmp_path,
         book_title="Book",
-        config={"ocr": {"secondary": {"enabled": True, "backend": "paddle"}}},
+        config={"ocr": {"secondary": {"enabled": True, "backend": "vision"}}},
     )
     report = json.loads(paths["report"].read_text(encoding="utf-8"))
 

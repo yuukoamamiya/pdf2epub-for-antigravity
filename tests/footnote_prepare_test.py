@@ -2,6 +2,7 @@ import hashlib
 import json
 from pathlib import Path
 
+import pymupdf as fitz
 import pytest
 
 from pdf2epub.refine.footnote_prepare import (
@@ -15,7 +16,6 @@ from pdf2epub.refine.footnote_apply import (
     apply_footnote_normalization,
     footnote_normalization_status,
 )
-from pdf2epub.layout_detection import layout_config_sha256
 
 
 def test_footnote_signature_does_not_match_number_inside_larger_number():
@@ -113,169 +113,6 @@ def _write_sidecar(
         json.dumps(payload, ensure_ascii=False),
         encoding="utf-8",
     )
-
-
-def _write_layout_prediction(
-    output_dir: Path,
-    page: int,
-    config: dict,
-    *,
-    source_sha256: str = "source-sha",
-    boxes: list[dict] | None = None,
-) -> None:
-    layout_dir = output_dir / "layout_detection"
-    layout_dir.mkdir(parents=True, exist_ok=True)
-    prediction = {
-        "schema_version": 1,
-        "page_number": page,
-        "backend": "pp_doclayout",
-        "model_name": "PP-DocLayout-L",
-        "source_pdf_sha256": source_sha256,
-        "layout_config_sha256": layout_config_sha256(config),
-        "coordinate_system": "pixels",
-        "page_box": [0, 0, 1000, 1000],
-        "boxes": boxes or [],
-    }
-    (layout_dir / f"page_{page:03d}.json").write_text(
-        json.dumps(prediction), encoding="utf-8"
-    )
-    (output_dir / "layout_detection_manifest.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "status": "complete",
-                "complete": True,
-                "source_pdf_sha256": source_sha256,
-                "layout_config_sha256": layout_config_sha256(config),
-            }
-        ),
-        encoding="utf-8",
-    )
-
-
-def test_pp_doclayout_footnotes_box_discovers_unlabelled_continuation(
-    tmp_path: Path,
-):
-    config = {
-        "ocr": {
-            "layout": {
-                "enabled": True,
-                "model_name": "PP-DocLayout-L",
-                "device": "gpu:0",
-            }
-        }
-    }
-    _write_sidecar(
-        tmp_path,
-        1,
-        [_block("continuation without a repeated number", 0, y0=820)],
-    )
-    _write_layout_prediction(
-        tmp_path,
-        1,
-        config,
-        boxes=[
-            {
-                "label": "footnotes",
-                "score": 0.93,
-                "bbox": [20, 780, 980, 960],
-            }
-        ],
-    )
-
-    report = prepare_footnote_candidates(tmp_path, config=config)
-
-    candidate = report["pages"][0]["candidates"][0]
-    assert candidate["confidence"] == "review"
-    assert candidate["review_reason"] == "pp_doclayout_footnotes_region"
-    assert candidate["layout_evidence"]["overlap"] > 0.5
-    assert report["layout_detection_enabled"] is True
-
-
-def test_pp_doclayout_stale_prediction_blocks_footnote_prepare(tmp_path: Path):
-    config = {
-        "ocr": {
-            "layout": {
-                "enabled": True,
-                "model_name": "PP-DocLayout-L",
-                "device": "gpu:0",
-            }
-        }
-    }
-    _write_sidecar(
-        tmp_path,
-        1,
-        [_block("36 footnote", 0, label="Footnote", y0=820)],
-    )
-    _write_layout_prediction(tmp_path, 1, config, source_sha256="old-source")
-    prediction_path = tmp_path / "layout_detection" / "page_001.json"
-    prediction = json.loads(prediction_path.read_text(encoding="utf-8"))
-    prediction["source_pdf_sha256"] = "new-source"
-    prediction_path.write_text(json.dumps(prediction), encoding="utf-8")
-
-    with pytest.raises(ValueError, match="missing or stale"):
-        prepare_footnote_candidates(tmp_path, config=config)
-
-
-def test_pp_doclayout_disables_auto_accept_without_region_support(tmp_path: Path):
-    config = {
-        "ocr": {
-            "layout": {
-                "enabled": True,
-                "model_name": "PP-DocLayout-L",
-                "device": "gpu:0",
-            }
-        }
-    }
-    _write_sidecar(
-        tmp_path,
-        1,
-        [_block("36 OCR footnote", 0, label="Footnote", y0=820)],
-    )
-    _write_layout_prediction(tmp_path, 1, config, boxes=[])
-
-    report = prepare_footnote_candidates(tmp_path, config=config)
-
-    candidate = report["pages"][0]["candidates"][0]
-    assert candidate["confidence"] == "review"
-    assert candidate["review_reason"] == "ocr_candidate_without_layout_support"
-
-
-def test_pp_doclayout_generic_region_is_preserved_as_review_evidence(tmp_path: Path):
-    config = {
-        "ocr": {
-            "layout": {
-                "enabled": True,
-                "model_name": "PP-DocLayout-L",
-                "device": "gpu:0",
-            }
-        },
-        "footnotes": {"auto_accept": False},
-    }
-    _write_sidecar(
-        tmp_path,
-        1,
-        [_block("1. Numbered section heading", 0, label="Section-Header", y0=820)],
-    )
-    _write_layout_prediction(
-        tmp_path,
-        1,
-        config,
-        boxes=[
-            {
-                "label": "paragraph_title",
-                "score": 0.91,
-                "bbox": [20, 780, 980, 960],
-            }
-        ],
-    )
-
-    report = prepare_footnote_candidates(tmp_path, config=config)
-
-    candidate = report["pages"][0]["candidates"][0]
-    assert candidate["layout_evidence"]["label"] == "paragraph_title"
-    assert candidate["layout_evidence"]["matched"] is True
-    assert candidate["layout_review_reason"] == "pp_doclayout_paragraph_title_region"
 
 
 def test_footnote_status_reports_candidate_hash_as_root_cause(tmp_path: Path):
@@ -410,7 +247,7 @@ def test_native_layout_candidates_use_page_coordinates_and_ignore_page_numbers(
 
     report = prepare_footnote_candidates(
         tmp_path,
-        config={"ocr": {"secondary": {"enabled": True, "backend": "paddle"}}},
+        config={"ocr": {"secondary": {"enabled": True, "backend": "vision"}}},
     )
 
     assert report["source_kind"] == "native_text"
@@ -576,7 +413,7 @@ def test_native_footnote_decision_reuses_existing_normalization_pipeline(
         encoding="utf-8",
     )
 
-    config = {"ocr": {"secondary": {"enabled": True, "backend": "paddle"}}}
+    config = {"ocr": {"secondary": {"enabled": True, "backend": "vision"}}}
     manifest_paths = prepare_footnote_subagent(
         tmp_path, book_title="Native Test", config=config
     )
@@ -650,6 +487,196 @@ def test_unlabelled_numbered_bottom_block_is_review_only(tmp_path: Path):
     assert report["review_pages"] == [1]
 
 
+def test_ocr_candidate_uses_numeric_start_but_ignores_footer_and_body_numbers(
+    tmp_path: Path,
+):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [
+            _block("42", 0, label="Page-Footer", y0=900),
+            _block("The argument continues on page 36", 1, y0=820),
+            _block("36. A note whose OCR label was lost", 2, y0=820),
+        ],
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    assert [item["block"] for item in report["pages"][0]["candidates"]] == [2]
+    assert report["pages"][0]["candidates"][0]["key"] == "36"
+
+
+def test_footnote_label_cannot_bypass_bottom_geometry_and_numeric_page_numbers_are_ignored(
+    tmp_path: Path,
+):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [
+            _block("36 Labeled but in body", 0, label="Footnote", y0=200),
+            _block("42", 1, label="Text", y0=900),
+            _block("36 Real bottom note", 2, label="Footnote", y0=820),
+        ],
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    candidates = report["pages"][0]["candidates"]
+    assert [item["block"] for item in candidates] == [2]
+    assert report["bottom_detection"]["excluded_numeric_page_count"] == 1
+
+
+def test_bottom_geometry_requires_a_minimum_intersection_ratio(tmp_path: Path):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [_block("36 Only a sliver enters the bottom band", 0, y0=600)],
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    assert report["pages"] == []
+    assert report["bottom_intersection_ratio"] == 0.25
+
+
+def test_consecutive_numeric_region_backtracks_to_adjacent_unnumbered_blocks(
+    tmp_path: Path,
+):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [
+            _block("Body", 0, y0=100),
+            _block("Continuation before the numbered notes", 1, y0=680),
+            _block("18 First note", 2, y0=725),
+            _block("19 Second note", 3, y0=775),
+            _block("20 Third note", 4, y0=825),
+            _block("21 Fourth note", 5, y0=875),
+        ],
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    page = report["pages"][0]
+    assert [item["block"] for item in page["candidates"]] == [1, 2, 3, 4, 5]
+    assert page["continuous_numeric_regions"][0]["keys"] == ["18", "19", "20", "21"]
+    assert page["continuous_numeric_regions"][0]["backtracked_block_indices"] == [1]
+    assert all(item["confidence"] == "review" for item in page["candidates"])
+
+
+def test_page_footer_inside_a_confirmed_numeric_region_is_reviewed_not_dropped(
+    tmp_path: Path,
+):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [
+            _block("18 Note with a footer label", 0, label="Page-Footer", y0=720),
+            _block("19 Note", 1, label="Text", y0=780),
+            _block("20 Note", 2, label="Text", y0=840),
+        ],
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    candidates = report["pages"][0]["candidates"]
+    assert [item["block"] for item in candidates] == [0, 1, 2]
+    assert candidates[0]["continuous_region_evidence"] is True
+    assert candidates[0]["confidence"] == "review"
+
+
+def test_ocr_candidate_accepts_sup_attributes_and_unicode_superscript_keys(
+    tmp_path: Path,
+):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [
+            _block('<sup class="footnote-def">36</sup> Marked note', 0, y0=820),
+            _block("³ Unicode note", 1, y0=900),
+        ],
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    candidates = report["pages"][0]["candidates"]
+    assert [item["key"] for item in candidates] == ["36", "3"]
+    assert all(item["confidence"] == "review" for item in candidates)
+
+
+def test_ocr_bottom_geometry_uses_block_lower_edge(tmp_path: Path):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [_block("36 Above the bottom threshold", 0, y0=580)],
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    assert report["pages"] == []
+
+
+def test_unmarked_footnote_continuation_is_retained_for_review(tmp_path: Path):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [_block("continuation without a repeated number", 0, label="Footnote", y0=820)],
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    candidate = report["pages"][0]["candidates"][0]
+    assert candidate["key"] is None
+    assert candidate["confidence"] == "review"
+    assert candidate["disposition"] == "review_required"
+
+
+_HEGEL_REGRESSION_FIXTURE = Path(__file__).parent / "fixtures" / "footnote_regressions.json"
+
+
+@pytest.mark.parametrize("page_number", [33, 36, 41, 58])
+def test_hegel_page_regression_sidecars_keep_bottom_numeric_notes_and_drop_headers(
+    tmp_path: Path, page_number: int
+):
+    fixture = json.loads(_HEGEL_REGRESSION_FIXTURE.read_text(encoding="utf-8"))
+    page_data = fixture["pages"][str(page_number)]
+    _write_sidecar(tmp_path, page_number, page_data["blocks"])
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    page = report["pages"][0]
+    candidate_blocks = [item["block"] for item in page["candidates"]]
+    expected_candidates = {
+        33: [6],
+        36: [5, 6, 7],
+        41: [4],
+        58: [4],
+    }
+    assert candidate_blocks == expected_candidates[page_number]
+    assert 0 not in candidate_blocks or page_data["blocks"][0]["label"] != "Page-Header"
+    for block in page_data["blocks"]:
+        if block["label"] == "Page-Header" and block["text"].isdigit():
+            assert block["order"] not in candidate_blocks
+
+
+def test_footnote_handoff_renders_page_images_when_a_source_pdf_is_available(
+    tmp_path: Path,
+):
+    _write_sidecar(tmp_path, 1, [_block("36 Review this note", 0, y0=820)])
+    document = fitz.open()
+    document.new_page(width=612, height=792)
+    document.save(tmp_path / "input_original.pdf")
+    document.close()
+
+    paths = prepare_footnote_subagent(tmp_path, book_title="Image test")
+    report = json.loads((tmp_path / "footnote_candidates.json").read_text(encoding="utf-8"))
+    prompt = paths["prompt"].read_text(encoding="utf-8")
+
+    assert report["visual_evidence"]["available"] is True
+    assert report["pages"][0]["visual_file"] == "ocr_review_images/page_001.png"
+    assert "visual: `ocr_review_images/page_001.png`" in prompt
+
+
 def test_consensus_visual_review_disables_local_footnote_auto_accept(tmp_path: Path):
     _write_sidecar(
         tmp_path,
@@ -703,7 +730,7 @@ def test_single_ocr_config_ignores_stale_consensus_artifact(tmp_path: Path):
 
     report = prepare_footnote_candidates(
         tmp_path,
-        config={"ocr": {"secondary": {"enabled": False, "backend": "paddle"}}},
+        config={"ocr": {"secondary": {"enabled": False, "backend": "vision"}}},
     )
 
     assert report["ocr_evidence_mode"] == "single_ocr"
@@ -717,7 +744,7 @@ def test_two_ocr_config_requires_current_consensus(tmp_path: Path):
         1,
         [_block("36 Footnote", 0, label="Footnote", y0=820)],
     )
-    config = {"ocr": {"secondary": {"enabled": True, "backend": "paddle"}}}
+    config = {"ocr": {"secondary": {"enabled": True, "backend": "vision"}}}
 
     with pytest.raises(ValueError, match="current ocr_consensus"):
         prepare_footnote_candidates(tmp_path, config=config)
@@ -736,7 +763,7 @@ def test_footnote_validation_rejects_switching_ocr_mode(tmp_path: Path):
 
     result = validate_footnote_decisions(
         tmp_path,
-        config={"ocr": {"secondary": {"enabled": True, "backend": "paddle"}}},
+        config={"ocr": {"secondary": {"enabled": True, "backend": "vision"}}},
     )
 
     assert result["valid"] is False
@@ -766,7 +793,7 @@ def test_two_ocr_candidate_difference_is_sent_to_review(tmp_path: Path, monkeypa
         "pdf2epub.refine.pdf_evidence.consensus_is_current",
         lambda output_dir, config: True,
     )
-    config = {"ocr": {"secondary": {"enabled": True, "backend": "paddle"}}}
+    config = {"ocr": {"secondary": {"enabled": True, "backend": "vision"}}}
 
     report = prepare_footnote_candidates(tmp_path, config=config)
 
@@ -1293,7 +1320,7 @@ def test_secondary_only_footnote_decision_materializes_explicit_text(
     assert "[^36]: Footnote recovered from the page image" in normalized
 
 
-def test_secondary_only_adjacent_paddle_lines_are_one_review_window(
+def test_secondary_only_adjacent_lines_are_one_review_window(
     tmp_path: Path, monkeypatch
 ):
     _write_sidecar(tmp_path, 1, [_block("Body", 0, y0=120)])
@@ -1320,7 +1347,7 @@ def test_secondary_only_adjacent_paddle_lines_are_one_review_window(
 
     report = prepare_footnote_candidates(
         tmp_path,
-        config={"ocr": {"secondary": {"enabled": True, "backend": "paddle"}}},
+        config={"ocr": {"secondary": {"enabled": True, "backend": "vision"}}},
     )
 
     secondary_only = report["pages"][0]["secondary_only_candidates"]

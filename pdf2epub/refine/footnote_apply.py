@@ -75,7 +75,7 @@ def _signature_with_map(value: str) -> tuple[str, list[int]]:
             if close >= 0:
                 index = close + 1
                 continue
-        if char in "*_~`":
+        if char in "*_~`$":
             index += 1
             continue
         if char.isspace():
@@ -319,7 +319,15 @@ def _block_text_variants(
         compact = re.sub(r"\s+", " ", stripped).strip()
         if compact and compact not in variants:
             variants.append(compact)
+        math_spaced = re.sub(r"(<math>[^<]+</math>)", r" \1 ", str(raw_html))
+        if math_spaced != raw_html:
+            stripped_math = re.sub(r"<[^>]+>", "", html.unescape(math_spaced))
+            compact_math = re.sub(r"\s+", " ", stripped_math).strip()
+            if compact_math and compact_math not in variants:
+                variants.append(compact_math)
     corrected = _corrected_block_text(output_dir, page, raw_text)
+    if not corrected and raw_html:
+        corrected = _corrected_block_text(output_dir, page, raw_html)
     if corrected and corrected not in variants:
         variants.append(corrected)
     return variants
@@ -561,7 +569,10 @@ def _apply_edits(source: str, edits: list[tuple[int, int, str]]) -> str:
     previous_end = -1
     for start, end, _replacement in ordered:
         if start < previous_end:
-            raise ValueError("overlapping footnote edits")
+            raise ValueError(
+                f"overlapping footnote edits: start {start} < previous_end {previous_end}; "
+                f"overlapping text: {repr(source[start:min(len(source), previous_end + 30)])}"
+            )
         previous_end = end
     for start, end, replacement in reversed(ordered):
         source = source[:start] + replacement + source[end:]

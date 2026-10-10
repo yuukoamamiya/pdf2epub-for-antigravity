@@ -12,12 +12,12 @@
 
 ## 当前实现基线
 
-- 默认 PDF 主 OCR 是 Chandra；可选第二套 OCR 是独立 GPU PaddleOCR worker。
+- 默认 PDF 主 OCR 是 Chandra；可选第二套 OCR 使用配置的其他已注册后端。
 - `ocr.secondary.enabled` 是单 OCR/双 OCR 的唯一开关，同时约束 OCR 纠错、脚注候选和整页插图候选。
 - 高置信度矢量文字 PDF 使用 `native_text` 页面源和 PDF page-point layout sidecar；它跳过视觉
   OCR/共识，但仍必须经过 `refine-local`、脚注门禁和 polish。
-- Chandra 写入完整的 layout sidecar；Paddle 次 OCR 在独立子进程中运行并写入逐页文本和
-  layout sidecar，不静默覆盖主 OCR。worker 只在一次 OCR 任务期间运行，任务结束后关闭。
+- Chandra 写入完整的 layout sidecar；次 OCR 只写入独立的逐页文本和 layout sidecar，不静默
+  覆盖主 OCR。
 - EPUB 公式使用 Unicode 优先、MathML 回退方案；当前没有 SVG 公式渲染器，也不要求
   `dvisvgm`、XeLaTeX 或 TeX Live 参与普通 EPUB 构建。
 - 任何“存在文件即可继续”的旧流程都不再成立：必须检查当前源哈希、manifest、validation
@@ -25,26 +25,31 @@
 
 ### OCR 后端的维护边界
 
-当前 OCR 后端分成两条独立运行边界：
+当前 OCR 后端通过延迟注册保持可选依赖隔离：
 
 | 后端 | 运行位置 | 进入主流程的接口 | 本地运行时是否随项目发布 |
 |---|---|---|---|
 | Chandra | 主项目 Python 进程 | `ocr/backends/chandra.py` 的 page result | 否；只发布接口和配置模板 |
-| Paddle | `.venv-paddle` 子进程 | `ocr/backends/paddle.py` + `paddle_worker.py` | 否；用户自行安装 GPU wheel 和模型 |
-| Mistral | 主项目 Python 进程，通过 HTTP | `ocr_backends.py` 的 chunk adapter | 否；只发布接口，用户自行提供密钥 |
 
-Paddle 的主进程代理只负责启动、JSON Lines 请求、超时和回收；Paddle/PaddleOCR 的 import、
-CUDA 检查、模型初始化和图片预测全部发生在 `paddle_worker.py`。因此维护者不能为了方便
-把 Paddle 加入主项目依赖，也不能让 worker 在 CUDA 不可用时改用 CPU。一次 OCR 批次只启动
-一个 worker，配置中的 `max_workers` 对 Paddle 会被限制为 1；批次完成、失败或预检异常都
-必须回收子进程。
+兼容性页面后端 VLLM、Azure Document Intelligence 和 Google Cloud Vision 仍可作为显式主
+后端使用，但不属于默认双 OCR 路径；它们的 SDK 通过可选依赖安装。配置中出现未注册或退役
+的 backend 时，`doctor` 会直接失败，不能把它当作可选依赖缺失来处理。
 
-Mistral 的 API key 只能来自被 Git 忽略的本地凭据目录或用户明确允许的兼容环境变量。额度
-账本是项目级的保守预留，不是账户余额查询；它不得写入 key，也不能被当作 Mistral 账户的
-全局消费证明。发布源码时只包含 adapter、凭据读取和额度保护逻辑，不包含 `.secrets/`、
-`config.yaml`、`mistral_usage.json`、`.venv-paddle/` 或模型缓存。
+本地凭据只能来自被 Git 忽略的凭据目录；发布源码时只包含凭据读取接口和配置模板，不包含
+`.secrets/` 或 `config.yaml`。
 
 ## Subagent 模型配置
+
+在开始长任务或恢复中断任务前，推荐先运行只读诊断：
+
+```text
+uv run pdf2epub -c config.yaml status
+uv run pdf2epub -c config.yaml status --json
+uv run pdf2epub -c config.yaml doctor
+```
+
+`status` 不创建或更新 checkpoint；它只读取当前 manifest、哈希和 validation report。`doctor`
+还会检查配置中的 OCR backend、已选择的可选 SDK 和输入文件。
 
 在 `config.yaml` 或 `config_epub.yaml` 中设置：
 
@@ -254,7 +259,7 @@ span 的横向坐标拆分，并以栏为单位生成 `column_major` 阅读顺�
 `font_size`、`font_names` 和 `source_block`。这里的坐标是 PDF page points，不能使用视觉
 OCR 的 `0..1000` 坐标解释。
 
-原生分支不运行视觉 OCR、Paddle、`ocr-correct`、`ocr-correct-validate` 或
+原生分支不运行视觉 OCR、`ocr-correct`、`ocr-correct-validate` 或
 `ocr_consensus.json`。即使 `ocr.secondary.enabled: true` 残留在配置中，原生脚注仍走
 native layout；候选报告中的 `ocr_evidence_mode: single_ocr` 只是下游兼容字段，不代表
 调用了 OCR 或可以读取旧的双 OCR 检查点。
@@ -326,77 +331,28 @@ OCR 完成不是“有几个 `page_*.md` 文件”就算通过。`ocr_progress.j
 第二套 OCR 关闭时直接使用主 OCR 的 `pages/`，不生成“已纠错”检查点；高置信度原生文字 PDF
 同样不适用该阶段。
 
-可选的双 OCR 配置可以在 `ocr-pages` 阶段启用独立 GPU PaddleOCR；同一个开关同时决定 OCR
-纠错、脚注候选和整页插图候选使用单 OCR 还是双 OCR 证据：
+可选的双 OCR 配置可以在 `ocr-pages` 阶段启用一个不同于主 OCR 的已注册后端；同一个开关
+同时决定 OCR 纠错、脚注候选和整页插图候选使用单 OCR 还是双 OCR 证据：
 
 ```yaml
 ocr:
   backend: chandra
   secondary:
     enabled: true
-    backend: paddle
     performance:
       max_estimated_seconds: 3600
-      estimated_seconds_per_page: 5.0
-  backends:
-    paddle:
-      python_executable: .venv-paddle/Scripts/python.exe
-      device: gpu:0
-      dpi: 192
-      use_doc_orientation_classify: true
-      use_doc_unwarping: true
-      use_textline_orientation: true
-      max_workers: 1
-      request_timeout: 300
 
 ocr_correction:
   review_dpi: 150
 ```
-
-PP-DocLayout-L 是另一条独立的版面证据通道，不要把它配置成
-`ocr.secondary.backend`：
-
-```yaml
-ocr:
-  layout:
-    enabled: true
-    backend: pp_doclayout
-    model_name: PP-DocLayout-L
-    model_source: BOS
-    python_executable: .venv-paddle/Scripts/python.exe
-    device: gpu:0
-    dpi: 192
-    layout_nms: true
-```
-
-首次可只跑代表页：
-
-```text
-uv run pdf2epub -c config.yaml layout-detect --start-page 120 --end-page 130 --resume
-```
-
-确认输出后，视觉 OCR 全部完成时运行 `ocr-pages --resume` 会自动补齐全书版面预测；也可直接
-运行 `layout-detect --resume`。产物位于 `layout_detection/`，由
-`layout_detection_manifest.json`、源 PDF 哈希和 layout 配置哈希约束。`footnote-prepare` 会
-把与 PP-DocLayout 区域框重叠的 OCR block 纳入候选证据；模型可能只输出通用 `text`、
-`paragraph_title` 或 `reference`，不应假定一定有 `footnotes` 类。它不会因为模型框本身自动搬移内容；这些候选
-仍须在脚注、引用、参考文献、正文和不确定项之间作出决定。原生文字 PDF 路径不启动该视觉
-worker。
-
-Paddle GPU worker 使用独立的 `.venv-paddle` 环境。预检会验证 CUDA 编译支持、GPU 数量和
-实际设备；任何一项不满足都会阻断流程，不会退回 CPU。worker 通过 JSON Lines 接收页面，
-模型只在当前 OCR 批次中驻留，批次结束后立即回收。Chandra 的 Cloudflare Access 凭据放在
-`.secrets/chandra-access.json`。远程 Mistral 仍可作为显式兼容后端配置，但不是本地 Paddle
-路径的一部分。
 
 此外，`ocr-pages` 会在主 OCR worker 启动前写入 `ocr_secondary_preflight.json`，按页数、worker
 数和配置的保守页速估算次 OCR 总耗时。超过 `max_estimated_seconds` 时先暂停，只有用户明确
 使用 `ocr-pages --allow-slow-secondary` 才继续。需要退回单 OCR 时，必须明确关闭
 `ocr.secondary.enabled` 后重新运行；旧的双 OCR 共识不得复用，也不会自动降级。
 
-启用 Paddle 后，`ocr-pages` 会把主 OCR 和 PaddleOCR 的结果按页做规范化比较，忽略纯粹的
-Markdown 换行/标记差异。由于 Chandra 输出语义段落、Paddle 输出物理行，行数差异、全局数字
-序列差异和脚注垂直分箱差异只写入诊断/版面证据，不单独触发正文 OCR 纠错；实质字符差异、
+启用双 OCR 后，`ocr-pages` 会把主 OCR 和次 OCR 的结果按页做规范化比较，忽略纯粹的
+Markdown 外层标记差异。行数、全局数字序列和脚注垂直范围差异只写入诊断/版面证据；实质字符差异、
 空结果和共同漏检哨兵仍会进入复核。报告写入 `ocr_consensus.json`；
 没有实质差异的页面直接自动接受，只有 `action: visual_review` 的页面才进入
 `ocr-correct_worker_handoffs/`。双 OCR 只是筛查，不把任一 OCR 结果当作绝对真值；两个引擎
@@ -405,9 +361,9 @@ Markdown 换行/标记差异。由于 Chandra 输出语义段落、Paddle 输出
 共同犯错。`ocr.secondary.enabled: false` 时不运行第二套 OCR，也不运行
 视觉 OCR 纠错，主 OCR 结果直接进入后续结构整理。
 
-Paddle 次 OCR 提供与 Chandra 形状兼容的 layout sidecar，但几何标签仍是保守启发式；脚注候选
-存在性或 layout 证据不一致会进入脚注 Subagent，不能仅凭次 OCR 文本或启发式标签自动改变
-页面结构。两套 OCR 一致仍只是通过筛查，不是正确性证明。已有两套 OCR 产物而只需重算规则时，
+次 OCR 提供与主 OCR 形状兼容的 layout sidecar；脚注候选存在性或 layout 证据不一致会进入
+脚注 Subagent，不能仅凭次 OCR 文本或启发式标签自动改变页面结构。两套 OCR 一致仍只是通过
+筛查，不是正确性证明。已有两套 OCR 产物而只需重算规则时，
 可运行 `uv run pdf2epub -c config.yaml ocr-consensus-rebuild`；该命令离线复用文本和 sidecar，
 不重新调用任何 OCR 后端。
 
@@ -425,7 +381,7 @@ Paddle 次 OCR 提供与 Chandra 形状兼容的 layout sidecar，但几何标�
 3. 运行 `ocr-correct` 生成页图、`ocr-correct_subagent_prompt.md`、总 manifest 和
    `ocr-correct_worker_handoffs/`。Subagent 只能读取自己 scoped manifest 的 `assigned_files`，
    对照同名审阅图，把结果写入 `ocr_corrected_pages/page_NNN.md` 和
-   `ocr_correction_reviews/page_NNN.json`；不能改 `pages/` 或把 Paddle Markdown 当作正文答案。
+   `ocr_correction_reviews/page_NNN.json`；不能改 `pages/` 或把次 OCR Markdown 当作正文答案。
 4. 运行 `ocr-correct-validate`。它通过后才把 `ocr_corrected_pages/validated/` 作为视觉 PDF
    的结构阶段输入；失败时只用原命令 `--resume` 重派 pending/invalid 页。
 5. 继续 `refine-prepare` → 目录 Subagent 写 `toc_tree.json` → `illustration-*` →
@@ -488,12 +444,19 @@ pipeline: epub_conversion
 对于所有 PDF，在 `refine-local` 后、`polish` 前运行 `footnote-prepare`。扫描 PDF 使用
 OCR layout sidecar；高置信度原生文字 PDF 在 `ocr-pages` 阶段生成带 PDF 坐标、文本块和字体
 元数据的 native layout sidecar。两种来源在本地使用不同的候选筛选器，但都按页面内实际顺序
-生成稀疏的 `footnote_contexts/`，并共享 Subagent 决策、校验和 `footnote-apply`。原生文字的
+生成稀疏的 `footnote_contexts/`，并共享 Subagent 决策、校验和 `footnote-apply`。视觉 OCR 只
+使用弱几何证据：block 的 `bbox[3]` 进入页面底部区域（默认 `bottom_ratio: 0.64`），且 block
+高度与该区域的相交比例达到默认 `bottom_intersection_ratio: 0.25`；文本以短数字和分隔符
+开头时才形成数字候选，`Footnote` 标签不能单独绕过几何条件。页眉、页脚、纯页码和引用标签
+会被排除。连续数字开头块（例如 `18, 19, 20, 21`）会向上回溯相邻的同一区域，但回溯结果
+始终只进入 Subagent review，不直接移动。这个筛选器只缩小复核范围，不是脚注判定器。
+原生文字的
 页底编号候选不会仅因底部位置自动判为脚注；默认只有同页对应上标引用和小字号双重匹配的
-候选本地接受，其余候选交 Subagent 复核。扫描/OCR PDF 中明确标签且版面位置可靠的高置信度候选
-默认同样本地接受，只有没有明确标签、跨页续文或正文/脚注交错的候选窗口交给工作区
+候选本地接受，其余候选交 Subagent 复核。扫描/OCR PDF 中只有明确标签、数字开头、几何条件
+同时满足且启用 `auto_accept` 时才会形成高置信度候选；无编号续文、连续区间回溯块、跨页续文
+或正文/脚注交错的候选窗口交给工作区
 Subagent；双 OCR 模式下，主/次候选存在性或 layout 证据不同的页面会把主、次两套 sidecar
-一起交给 Subagent；正文共识的行粒度差异不会单独禁用脚注本地规则。Paddle 独有的连续物理
+一起交给 Subagent；正文共识的行粒度差异不会单独禁用脚注本地规则。次 OCR 独有的连续物理
 行会聚合成一个 `secondary_only_candidates` 窗口。Subagent 只写
 `footnote_decisions.json`，随后用 `footnote-validate` 校验；原生文字 PDF 不运行视觉 OCR
 共识，即使配置残留次 OCR 开关，也只使用原生版面证据。
@@ -520,7 +483,7 @@ Subagent；双 OCR 模式下，主/次候选存在性或 layout 证据不同的�
 `footnote-apply`、`illustration-validate`、`illustration-apply` 和 `refine-local` 都会再次
 检查这个模式及其哈希，因此切换开关后不能复用旧的脚注或插图绑定。
 
-若 Subagent 选择 Paddle 独有脚注，决定必须包含最终可见的 `text`、目标 `source_file` 和
+若 Subagent 选择次 OCR 独有脚注，决定必须包含最终可见的 `text`、目标 `source_file` 和
 `primary_disposition`。`absent` 表示主 OCR 确实没有该脚注；`remove` 表示主 OCR 有重复块，
 并必须列出 `primary_block`/`primary_blocks`。同一脚注编号有多个正文引用时，还必须提供唯一
 `marker_context`；`footnote-apply` 对缺失或不唯一的定位直接阻断，不能追加重复脚注或选择最后
@@ -554,8 +517,10 @@ refinement unit 和正文定位；任何一层失败都必须修正决定后重�
 
 1. 读取 `pages/page_NNN.ocr.json`，按 `page_box` 将 PDF page points 的 block bbox 归一化到
    `0..1` 页面比例；不能把 Letter/A4 的 point 数值误当成 OCR 的 `0..1000` 坐标。
-2. 只关注页面下部（当前默认 `bottom_ratio: 0.64`）、以一至三位数字和空格/标点开头的
-   文本块；纯数字块排除为印刷页码候选。原生 PDF 没有可靠的 OCR 语义标签，因此只有
+2. 只关注页面下部（当前默认 `bottom_ratio: 0.64`，且 block 与页底带相交比例至少为
+   `0.25`）、以一至三位数字和空格/标点开头的文本块；纯数字块排除为印刷页码候选。若
+   连续出现两个以上递增数字开头块，候选器会向上回溯相邻的无编号块，形成一个 review 区域。
+   原生 PDF 没有可靠的 OCR 语义标签，因此只有
    同页更早位置存在对应 `<sup>N</sup>` 引用、且字号比例不超过默认 `0.88` 的候选标为
    `confidence: high`，其余保留下来的候选标为 `review_required`。
 3. 原生提取器依据 PDF 文本 block 内的行顺序，在新的页底数字开头处拆分 layout block，
@@ -577,6 +542,11 @@ refinement unit 和正文定位；任何一层失败都必须修正决定后重�
 | `footnote_decisions.json` | Subagent 对候选 block 的角色决定 | sidecar 或候选事实 |
 | `footnote_decision_validation.json` | 决定地址、角色、键、覆盖率和哈希门禁 | apply 结果 |
 | `footnote_normalization.json` | apply 后的定位、归并和输出检查点 | 上游候选报告 |
+
+`footnote_candidates.json` 的 `bottom_detection` 还会报告页底 block、页底数字 block、已进入
+候选的数字 block、页眉/页脚与纯数字页码排除数，以及 `suspected_missed_count`。它是召回风险
+提示，不是自动决定；有风险的页必须结合 Prompt 中的 `visual_file` 页面 PNG 复核。页面图会
+复用 OCR 校正阶段的 freshness manifest；若没有可用源 PDF，则报告明确标记视觉证据不可用。
 
 原生脚注的典型失败包括 `No page layout sidecars found`、`source_kind` 或
 `coordinate_system` 不一致、sidecar hash 过期、决定引用不存在/重复的 page/block，及脚注
@@ -601,6 +571,8 @@ Subagent 输出。
 ```yaml
 footnotes:
   auto_accept: true
+  bottom_ratio: 0.64
+  bottom_intersection_ratio: 0.25
   native_max_font_ratio: 0.88
 ```
 

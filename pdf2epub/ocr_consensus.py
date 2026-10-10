@@ -18,6 +18,7 @@ from statistics import median
 from typing import Any, Dict, Mapping, Optional
 
 from pdf2epub.workflow_contracts import atomic_write_text, sha256_file
+from pdf2epub.ocr.backends import supported_backends
 
 
 OCR_CONSENSUS_SCHEMA_VERSION = 4
@@ -31,6 +32,23 @@ DEFAULT_COMMON_MISS_SAMPLE_EVERY = 20
 DEFAULT_COMMON_MISS_DENSITY_RATIO = 0.30
 DEFAULT_COMMON_MISS_MIN_NEIGHBOR_CHARS = 800
 DEFAULT_COMMON_MISS_MIN_PAGE_CHARS = 120
+
+# These names are kept only so an old configuration fails with an actionable
+# migration error. They are not backend aliases and must never be registered
+# again as part of the active OCR workflow.
+RETIRED_OCR_BACKENDS = frozenset(
+    {
+        "mistral",
+        "mistralai",
+        "vertex",
+        "paddle",
+        "paddleocr",
+        "pp_doclayout",
+        "pp-doclayout",
+        "ppdoclayout",
+        "doclayout",
+    }
+)
 
 
 def secondary_page_dir(output_dir: Path) -> Path:
@@ -106,45 +124,69 @@ def ocr_evidence_mode(config: Mapping[str, Any] | None) -> str:
 
 
 def validate_ocr_config(config: Mapping[str, Any]) -> None:
-    """Validate the independent OCR and PP-DocLayout configuration gates."""
+    """Validate OCR backend and optional secondary OCR configuration."""
     ocr = _ocr_config(config)
-    secondary = ocr.get("secondary")
+    primary_backend = str(ocr.get("backend") or "chandra").strip().lower()
+    supported = set(supported_backends())
+    configured_secondary = ocr.get("secondary")
+    if isinstance(configured_secondary, Mapping):
+        secondary_backend = str(configured_secondary.get("backend") or "").strip().lower()
+    else:
+        secondary_backend = str(ocr.get("secondary_backend") or "").strip().lower()
+
+    retired_configurations: set[str] = set()
+    # A disabled structured secondary block is otherwise ignored by the
+    # runtime, so surface stale retired settings explicitly. Enabled retired
+    # names still use the normal unsupported-backend error below.
     if (
-        isinstance(secondary, Mapping)
-        and secondary_ocr_enabled(config)
-        and not str(secondary.get("backend") or "").strip()
+        isinstance(configured_secondary, Mapping)
+        and not secondary_ocr_enabled(config)
+        and secondary_backend in RETIRED_OCR_BACKENDS
     ):
+        retired_configurations.add(secondary_backend)
+    configured_backends = ocr.get("backends")
+    if isinstance(configured_backends, Mapping):
+        retired_configurations.update(
+            {
+                str(name).strip().lower()
+                for name in configured_backends
+                if str(name).strip().lower() in RETIRED_OCR_BACKENDS
+            }
+        )
+    if retired_configurations:
         raise ValueError(
-            "ocr.secondary.enabled is true but ocr.secondary.backend is missing"
+            "retired OCR backend configuration is present: "
+            + ", ".join(sorted(retired_configurations))
+            + "; remove it and use Chandra, VLLM, Azure, or Vision"
+        )
+    if primary_backend not in supported:
+        supported_text = ", ".join(sorted(supported))
+        raise ValueError(
+            f"ocr.backend '{primary_backend}' is not supported; "
+            f"choose one of: {supported_text}"
         )
 
-    layout = ocr.get("layout")
-    if not isinstance(layout, Mapping):
-        return
-    if not _config_bool(layout.get("enabled"), False):
-        return
+    secondary = configured_secondary
+    if isinstance(secondary, Mapping) and secondary_ocr_enabled(config):
+        if not secondary_backend:
+            raise ValueError(
+                "ocr.secondary.enabled is true but ocr.secondary.backend is missing"
+            )
+        if secondary_backend not in supported:
+            supported_text = ", ".join(sorted(supported))
+            raise ValueError(
+                f"ocr.secondary.backend '{secondary_backend}' is not supported; "
+                f"choose one of: {supported_text}"
+            )
+        if secondary_backend == primary_backend:
+            raise ValueError(
+                "ocr.secondary.backend must differ from ocr.backend when secondary OCR is enabled"
+            )
 
-    backend = str(layout.get("backend") or "pp_doclayout").strip().lower()
-    if backend != "pp_doclayout":
+    if "layout" in ocr:
         raise ValueError(
-            "ocr.layout.backend must be 'pp_doclayout' when PP-DocLayout is enabled"
+            "ocr.layout / PP-DocLayout is no longer supported; remove the layout block"
         )
-    model_name = str(layout.get("model_name") or "PP-DocLayout-L").strip()
-    if not model_name:
-        raise ValueError("ocr.layout.model_name must not be empty")
-    device = str(layout.get("device") or "gpu:0").strip().lower()
-    if device == "gpu":
-        device = "gpu:0"
-    if not device.startswith("gpu:"):
-        raise ValueError(
-            "ocr.layout.device must be a GPU device such as gpu:0; CPU fallback is disabled"
-        )
-    try:
-        dpi = int(layout.get("dpi", 192))
-    except (TypeError, ValueError) as exc:
-        raise ValueError("ocr.layout.dpi must be an integer between 72 and 600") from exc
-    if not 72 <= dpi <= 600:
-        raise ValueError("ocr.layout.dpi must be an integer between 72 and 600")
 
 
 def consensus_settings(config: Mapping[str, Any]) -> Dict[str, Any]:
@@ -213,11 +255,9 @@ def compare_ocr_texts(
 ) -> Dict[str, Any]:
     """Compare two OCR outputs and classify whether visual review is needed.
 
-    Chandra and Paddle do not emit equivalent line or numeric-marker streams:
-    Chandra is a semantic document OCR while Paddle is a line detector.  Those
-    fields remain useful diagnostics, but they must not independently block the
-    page-level text correction gate for that pair.  Callers that do not provide
-    backend names retain the legacy strict comparison for compatibility.
+    Line counts and numeric markers are diagnostics as well as comparison
+    signals.  Any configured secondary backend must pass the same conservative
+    freshness gate; no provider-specific layout exception is applied here.
     """
     primary = _comparable_text(primary_text)
     secondary = _comparable_text(secondary_text)
@@ -228,11 +268,7 @@ def compare_ocr_texts(
     max_edit_ratio = max(0.0, min(1.0, max_edit_ratio))
     min_changed_chars = max(1, min_changed_chars)
     max_line_delta = max(0, max_line_delta)
-    heterogeneous_layout_pair = {
-        str(primary_backend or "").strip().lower(),
-        str(secondary_backend or "").strip().lower(),
-    } == {"chandra", "paddle"}
-
+    heterogeneous_layout_pair = False
     if not primary or not secondary:
         reasons = ["one OCR result is empty"]
         status = "review_required"
@@ -245,12 +281,12 @@ def compare_ocr_texts(
         primary_lines = len([line for line in str(primary_text).splitlines() if line.strip()])
         secondary_lines = len([line for line in str(secondary_text).splitlines() if line.strip()])
         line_counts_differ = abs(primary_lines - secondary_lines) > max_line_delta
-        if line_counts_differ and not heterogeneous_layout_pair:
+        if line_counts_differ:
             reasons.append("non-empty line counts differ")
         primary_numeric_markers = re.findall(r"\d+(?:[./:-]\d+)*", primary)
         secondary_numeric_markers = re.findall(r"\d+(?:[./:-]\d+)*", secondary)
         numeric_markers_differ = primary_numeric_markers != secondary_numeric_markers
-        if numeric_markers_differ and not heterogeneous_layout_pair:
+        if numeric_markers_differ:
             reasons.append("numeric markers differ")
         if changed_chars >= min_changed_chars and ratio > max_edit_ratio:
             reasons.append("OCR text differs above the configured threshold")
@@ -517,9 +553,8 @@ def write_page_consensus(
         "secondary_layout_file": f"ocr_secondary/{Path(source_name).stem}.ocr.json",
         "comparison": comparison,
         "layout_comparison": layout_comparison,
-        # Layout disagreement is consumed by footnote/illustration stages as
-        # evidence.  It must not turn a page into an OCR text-correction task:
-        # Chandra and Paddle intentionally use different block granularity.
+        # Layout disagreement remains diagnostic evidence for structure stages;
+        # it must not be mistaken for a replacement of the primary OCR text.
         "layout_review": layout_comparison.get("status") == "review_required",
         "action": "visual_review" if comparison["status"] == "review_required" else "auto_accept",
     }

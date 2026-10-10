@@ -312,8 +312,8 @@
     <div class="card" id="config-card">
       <div class="field">
         <label for="base-url">Base URL</label>
-        <input type="text" id="base-url" placeholder="https://paddle-ocr.shenshei.fans/v1" value="https://paddle-ocr.shenshei.fans/v1">
-        <p class="hint">Mistral OCR compatible endpoint (must have /ocr route)</p>
+        <input type="text" id="base-url" placeholder="https://your-ocr-endpoint.example/v1" value="">
+        <p class="hint">OpenAI-compatible OCR endpoint (must provide an /ocr route)</p>
       </div>
       <div class="field">
         <label for="api-key">API Key</label>
@@ -438,7 +438,7 @@
       const dataUrl = `data:application/pdf;base64,${b64}`;
 
       const payload = {
-        model: 'mistral-ocr-latest',
+        model: 'ocr-model',
         document: { type: 'document_url', document_url: dataUrl },
         include_image_base64: false,
       };

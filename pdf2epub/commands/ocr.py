@@ -193,9 +193,7 @@ def ocr_pages_command(args):
 
     # Get OCR settings from config
     ocr_config = config.get('ocr', {})
-    # Chandra is the documented primary OCR. Keep the command-line fallback
-    # aligned with the template and the pagewise API; remote Mistral remains an
-    # explicit opt-in through ocr.backend.
+    # Chandra is the documented primary OCR and the pagewise API default.
     backend = ocr_config.get('backend', 'chandra')
     backend_config = ocr_config.get('backends', {}).get(backend, {})
     max_workers = args.max_workers or backend_config.get(
@@ -210,11 +208,7 @@ def ocr_pages_command(args):
     api_key = None
     base_url = None
 
-    if backend == 'mistral':
-        from pdf2epub.ocr_pages import _resolve_mistral_credentials
-
-        api_key, base_url = _resolve_mistral_credentials(config)
-    elif backend == 'azure':
+    if backend == 'azure':
         azure_config = credentials.get('azure', {})
         api_key = azure_config.get('api_key')
         base_url = azure_config.get('endpoint')
@@ -253,11 +247,6 @@ def ocr_pages_command(args):
             or summary.get("missing_pages")
             or summary.get("empty_pages")
             or summary.get("secondary_failed_pages")
-            or summary.get("layout_detection_failed_pages")
-            or (
-                summary.get("layout_detection_enabled")
-                and summary.get("layout_detection_status") != "complete"
-            )
         ):
             logger.error(
                 "Page-level OCR is incomplete; fix the listed pages and rerun with --resume"
@@ -276,11 +265,6 @@ def ocr_pages_command(args):
             logger.info(
                 "Secondary OCR is disabled; visual OCR correction is skipped. "
                 "Next step: pdf2epub refine-prepare"
-            )
-        if summary.get("layout_detection_enabled"):
-            logger.info(
-                "PP-DocLayout evidence status: "
-                f"{summary.get('layout_detection_status')}"
             )
         return 0
 
@@ -313,69 +297,6 @@ def ocr_consensus_rebuild_command(args):
     )
     logger.info(
         "Secondary OCR Markdown and layout sidecars were reused; no OCR backend was called."
-    )
-    return 0
-
-
-def layout_detect_command(args):
-    """Run the independent PP-DocLayout evidence pass for selected pages."""
-    from pdf2epub.layout_detection import layout_enabled, run_layout_detection
-
-    context = load_book_context(args, "layout-detect")
-    if context is None:
-        return 1
-    if not layout_enabled(context.config):
-        logger.error(
-            "PP-DocLayout is disabled; set ocr.layout.enabled: true in the config first"
-        )
-        return 1
-    pdf_path = resolve_book_input_path(
-        getattr(args, "input", None),
-        config_value=context.config.get("input_pdf") or context.config.get("input"),
-        config_path=context.config_path,
-        output_dir=context.output_dir,
-        extensions=(".pdf",),
-        output_names=("input_original.pdf", "input.pdf"),
-    )
-    if not pdf_path.exists():
-        logger.error(f"PDF not found: {pdf_path}")
-        return 1
-    # PP-DocLayout is a visual-layout evidence pass.  Native text PDFs already
-    # have PDF-coordinate/font evidence and must not be rasterized just because
-    # the optional layout switch is enabled.
-    from pdf2epub.pdf_text_probe import probe_pdf_text_layer
-
-    try:
-        probe = probe_pdf_text_layer(pdf_path)
-    except Exception as exc:
-        logger.error(f"Could not classify the PDF before layout detection: {exc}")
-        return 1
-    if probe.get("recommendation") == "use_text_layer":
-        logger.info(
-            "High-confidence native-text PDF detected; PP-DocLayout visual detection is skipped."
-        )
-        return 0
-    try:
-        manifest = run_layout_detection(
-            pdf_path,
-            context.output_dir,
-            config=context.config,
-            start_page=getattr(args, "start_page", None) or 1,
-            end_page=getattr(args, "end_page", None),
-            resume=bool(getattr(args, "resume", False)),
-        )
-    except Exception as exc:
-        logger.error(f"PP-DocLayout failed: {exc}")
-        return 1
-    if manifest.get("status") != "complete" or not manifest.get("scope_complete"):
-        logger.error(
-            "PP-DocLayout did not complete; failed pages: "
-            f"{manifest.get('failed_pages', [])}"
-        )
-        return 1
-    logger.success(
-        "PP-DocLayout evidence complete: "
-        f"{len(manifest.get('processed_pages', []))} page(s)"
     )
     return 0
 

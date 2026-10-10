@@ -15,7 +15,7 @@ Antigravity 工作区 Subagent 完成，本地程序负责文件整理、校验�
 
 ## 能做什么
 
-- 扫描 PDF OCR：支持主 OCR，并可选用独立 GPU PaddleOCR 做第二套 OCR 交叉筛查。
+- 扫描 PDF OCR：使用主 OCR 生成带页面坐标的 Markdown 和 sidecar。
 - PDF 结构整理：识别目录和章节边界，合并跨页正文，保留图片、表格和公式。
 - 脚注处理：区分脚注、正文引用、参考文献和索引；把确认的脚注归并到实际章节单元末尾，
   处理“正文 → 脚注续文 → 新脚注”的跨页顺序。
@@ -27,20 +27,19 @@ Antigravity 工作区 Subagent 完成，本地程序负责文件整理、校验�
 - 安全恢复：源文件不覆盖，任务通过 manifest、哈希和 validation report 恢复；失败时只重试
   未完成或未通过的部分。
 
-## OCR 有两种工作模式
+## OCR 工作模式
 
 同一个配置开关控制 OCR、脚注和整页插图的证据来源：
 
 | 配置 | 行为 |
 |---|---|
 | `ocr.secondary.enabled: false` | 单 OCR。直接使用主 OCR，忽略旧的双 OCR 共识文件。 |
-| `ocr.secondary.enabled: true` | 双 OCR。主 OCR 与 PaddleOCR 交叉比较，差异交给 Subagent 复核。 |
+| `ocr.secondary.enabled: true` | 使用配置的第二套 OCR 做差异筛查，差异交给 Subagent 复核。 |
 
-此外可以独立启用 PP-DocLayout-L 版面检测，为脚注候选提供版面辅助信息。它不是第二套 OCR，
-也不会直接移动正文；疑难候选仍交给脚注 Subagent 复核。
-
-双 OCR 默认使用独立的 PaddleOCR GPU 环境，不把 Paddle/PaddleX 加载进主项目解释器。
-`.venv-paddle/` 被 `.gitignore` 忽略；worker 在一次 OCR 任务开始时按需启动，完成后立即关闭。
+当前默认主 OCR 是 Chandra。脚注候选使用 OCR sidecar 的 `bbox[3]`、页底相交比例、数字开头
+和跨页上下文；`Footnote` 标签不能单独绕过几何条件，纯数字页码会排除，连续数字开头块会
+形成向上回溯的复核区域。最终角色仍由 Subagent 复核；配置中的未注册或退役后端会被
+`doctor` 阻断。脚注报告还会给出疑似漏检数量，并在有源 PDF 时为复核页附带页面 PNG。
 Chandra 的 Cloudflare Access 凭据放在 `.secrets/chandra-access.json`。YAML 中只配置本地凭据
 目录，不写入密钥本身。
 
@@ -49,65 +48,34 @@ Chandra 的 Cloudflare Access 凭据放在 `.secrets/chandra-access.json`。YAML
 ```yaml
 ocr:
   backend: chandra
-  layout:
-    enabled: true
-    backend: pp_doclayout
-    model_name: PP-DocLayout-L
-    model_source: BOS
-    python_executable: .venv-paddle/Scripts/python.exe
-    device: gpu:0
-    dpi: 192
-    layout_nms: true
   secondary:
-    enabled: true
-    backend: paddle
+    enabled: false
     performance:
       max_estimated_seconds: 3600
-      estimated_seconds_per_page: 5.0
-  backends:
-    paddle:
-      python_executable: .venv-paddle/Scripts/python.exe
-      device: gpu:0
-      dpi: 192
-      use_doc_orientation_classify: true
-      use_doc_unwarping: true
-      use_textline_orientation: true
-      max_workers: 1
-      request_timeout: 300
 ```
 
-首次建议先只检测代表页，确认框位置后再跑全书：
+页面 OCR 的主后端默认是 Chandra；兼容性页面后端还包括 VLLM、Azure Document Intelligence
+和 Google Cloud Vision，按需安装对应可选依赖。
+
+安装可选 OCR 依赖：
 
 ```text
-uv run pdf2epub -c config.yaml layout-detect --start-page 120 --end-page 130 --resume
+uv sync --extra ocr-chandra
+uv sync --extra ocr-vllm
+uv sync --extra ocr-azure
+uv sync --extra ocr-vision
 ```
-
-视觉 OCR 全部完成后，启用 `ocr.layout.enabled: true` 再运行
-`uv run pdf2epub -c config.yaml ocr-pages --resume`，版面证据会自动补齐；随后照常运行
-`refine-local`、`footnote-prepare`。高置信度原生文字 PDF 不运行这个视觉模型。
-
-本地版面检测需要支持 CUDA 的 NVIDIA GPU；不可用时会停止，不会自动退回 CPU。需要改用远程
-Mistral 时仍可显式填写 `secondary.backend: mistral`，但它不属于本地版面检测路径。
 
 启用双 OCR 后，`ocr-pages` 会在主 OCR 开始前写入 `ocr_secondary_preflight.json`，按页数和配置的
 保守页速估算次 OCR 时长。超过 `max_estimated_seconds` 时命令会暂停；确认确实接受耗时后，使用
 `ocr-pages --allow-slow-secondary` 继续。若要退回单 OCR，应明确将
 `ocr.secondary.enabled` 改为 `false` 后重新运行；旧的双 OCR 共识不会被复用，也不会自动降级。
 
-首次安装使用 Python 3.12 的独立环境：
-
-```text
-uv venv --python 3.12 .venv-paddle
-uv pip install --python .venv-paddle/Scripts/python.exe \
-  https://paddle-whl.cdn.bcebos.com/stable/cu126/paddlepaddle-gpu/paddlepaddle_gpu-3.3.1-cp312-cp312-win_amd64.whl \
-  paddleocr==3.7.0
-```
-
 打开双 OCR 后，脚注和整页插图阶段也要求当前的共识检查点；切换开关后必须重新生成相关
 检查点，旧的脚注决定和插图绑定不会被静默复用。两套 OCR 一致只代表通过筛查，不代表一定
 正确；整页插图、脚注归属和引用/参考文献区分仍由 Subagent 复核。
 
-Chandra 是当前主 OCR，PaddleOCR 是可选的本地 GPU 次 OCR。原生文字 PDF 会保留版面信息；
+Chandra 是当前主 OCR。原生文字 PDF 会保留版面信息；
 扫描或混合 PDF 使用视觉 OCR。两种来源都不会把普通上标、序数或行内数字引用自动判成脚注，
 脚注归属仍由 Subagent 复核。
 
@@ -119,7 +87,6 @@ Chandra 是当前主 OCR，PaddleOCR 是可选的本地 GPU 次 OCR。原生文�
 
 - PDF 页面结果保存在 `pages/`，双 OCR 结果保存在 `ocr_secondary/`，比较记录保存在
   `ocr_consensus.json`。
-- 启用 PP-DocLayout 后，版面预测保存在输出目录的 `layout_detection/` 中，供后续脚注复核使用。
 - 目录、页面合并、脚注和插图决定分别有 manifest、prompt、decision 和 validation report，
   可以中断后从 pending 项恢复。
 - EPUB 公式采用 Unicode 优先、复杂公式使用 MathML 的方案；目前不要求安装 XeLaTeX、
@@ -209,6 +176,17 @@ pipeline: epub_conversion
 
 ## 常用命令顺序
 
+开始或恢复任务前，可以先查看只读状态：
+
+```text
+uv run pdf2epub -c config.yaml status
+uv run pdf2epub -c config.yaml status --json
+uv run pdf2epub -c config.yaml doctor
+```
+
+`status` 展示每个阶段的 `passed`、`pending`、`blocked` 或 `skipped`，不会修改任何产物；
+`doctor` 检查配置、输入文件、选中的 OCR 依赖和当前工作区状态。
+
 PDF 翻译或精修的完整顺序是：
 
 ```text
@@ -250,8 +228,7 @@ output/<书名>/<书名>.epub
 
 - 需要翻译、润色、目录判断、术语提取，以及脚注/整页插图的疑难结构判断时，按照
   `AGENTS.md` 使用工作区 Subagent；本地程序只做确定性处理和校验。
-- 双 OCR 使用 Paddle 时，项目只发布接口源码；Paddle GPU 环境、模型缓存和本地凭据由每位
-  使用者自行配置，不会随 GitHub 项目下载。
+- 不要在配置中保留未注册或退役的 OCR backend；`doctor` 会将这类配置标为阻断。
 - 不要把外部术语表仅凭文件名自动加载；使用前先生成候选报告并明确选择。
 - 发现 `human_review_required`、拒答、免责声明或校验失败时，不能继续打包。
 

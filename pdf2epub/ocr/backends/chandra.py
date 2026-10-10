@@ -85,6 +85,12 @@ Use the following labels:
 - Bibliography
 - Blank-Page
 
+Footnote layout rules:
+- Keep a visually separated bottom-of-page note in its own top-level Footnote block, even when the note continues from the previous page.
+- Keep each new numbered note as a separate block; do not merge it into the preceding body paragraph or a page footer.
+- A continuation may have no leading number, but it must remain a Footnote block in the page's visual order.
+- Use Text for ordinary numbered prose, citations, bibliography entries, and printed page numbers.
+
 {PROMPT_ENDING}
 """.strip()
 

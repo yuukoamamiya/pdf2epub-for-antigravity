@@ -129,14 +129,14 @@ def test_single_ocr_mode_uses_raw_pages_without_correction_checkpoint(tmp_path: 
     selected, kind = select_refinement_pages(
         tmp_path,
         require_correction=True,
-        config={"ocr": {"secondary": {"enabled": False, "backend": "paddle"}}},
+        config={"ocr": {"secondary": {"enabled": False, "backend": "vision"}}},
     )
 
     assert selected == pages
     assert kind == "ocr"
     assert not ocr_correction_is_current(
         tmp_path,
-        {"ocr": {"secondary": {"enabled": False, "backend": "paddle"}}},
+        {"ocr": {"secondary": {"enabled": False, "backend": "vision"}}},
     )
 
 
@@ -178,7 +178,7 @@ def test_two_ocr_correction_checkpoint_requires_current_consensus(
 
     assert not ocr_correction_is_current(
         tmp_path,
-        {"ocr": {"secondary": {"enabled": True, "backend": "paddle"}}},
+        {"ocr": {"secondary": {"enabled": True, "backend": "vision"}}},
     )
 
 

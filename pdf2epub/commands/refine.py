@@ -248,6 +248,7 @@ def footnote_prepare_command(args):
         return 1
 
     bottom_ratio = getattr(args, "bottom_ratio", None)
+    bottom_intersection_ratio = getattr(args, "bottom_intersection_ratio", None)
     context_blocks = getattr(args, "context_blocks", None)
     native_max_font_ratio = getattr(args, "native_max_font_ratio", None)
     # Let the preparation layer resolve the config. The CLI flag is an
@@ -259,6 +260,7 @@ def footnote_prepare_command(args):
             book_title=context.book_title,
             config=context.config,
             bottom_ratio=bottom_ratio,
+            bottom_intersection_ratio=bottom_intersection_ratio,
             context_blocks=context_blocks,
             auto_accept=auto_accept,
             native_max_font_ratio=native_max_font_ratio,

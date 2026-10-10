@@ -1,11 +1,13 @@
-"""Prepare a compact, layout-aware footnote review hand-off.
+"""Prepare a compact footnote review hand-off.
 
 The OCR backends already persist page layout sidecars next to the Markdown
 view.  This module uses those sidecars to do the cheap part locally: identify
 bottom-of-page footnote candidates, preserve their *within-page* order, and
-create small review windows for only the ambiguous cases.  It deliberately
-does not decide that a block is a continuation of a previous footnote; that
-is the visual/semantic judgment reserved for the workspace Subagent.
+create small review windows for only the ambiguous cases.  It may group a
+consecutive numeric bottom region and include adjacent unnumbered blocks as
+evidence, but it deliberately does not decide that a block is a continuation
+of a previous footnote; that is the visual/semantic judgment reserved for the
+workspace Subagent.
 """
 
 from __future__ import annotations
@@ -18,7 +20,6 @@ from typing import Any, Iterable, Mapping, Optional
 
 from ..workflow_contracts import atomic_write_text, sha256_file
 from .layout_evidence import (
-    layout_region_evidence as _layout_region_evidence,
     load_layout_sidecar as _load_sidecar,
     normalized_bbox as _normalise_bbox,
     text_from_block as _text_from_block,
@@ -28,15 +29,11 @@ from .pdf_evidence import (
     pdf_evidence_mode,
     require_current_consensus,
 )
-from ..layout_detection import (
-    layout_config_sha256,
-    layout_enabled,
-    load_layout_prediction,
-)
-
-
 FOOTNOTE_PREPARE_SCHEMA_VERSION = 1
 DEFAULT_BOTTOM_RATIO = 0.64
+DEFAULT_BOTTOM_INTERSECTION_RATIO = 0.25
+DEFAULT_CONTINUOUS_REGION_BACKTRACK_RATIO = 0.16
+DEFAULT_CONTINUOUS_REGION_MAX_GAP = 0.045
 DEFAULT_CONTEXT_BLOCKS = 2
 DEFAULT_AUTO_ACCEPT = True
 DEFAULT_NATIVE_MAX_FONT_RATIO = 0.88
@@ -54,21 +51,35 @@ _DECISION_ROLES = frozenset(
 _MOVED_ROLES = frozenset(
     {"footnote_start", "footnote_continuation", "footnote_definition"}
 )
-_FOOTNOTE_LABEL_RE = re.compile(r"(?:foot\s*note|footnote|注脚|脚注|页下注)", re.IGNORECASE)
+_FOOTNOTE_LABEL_RE = re.compile(
+    r"(?:foot[\s_-]*note\b|注脚|脚注|页下注)", re.IGNORECASE
+)
 _CITATION_LABEL_RE = re.compile(
     r"(?:bibliograph(?:y|ies)|reference(?:s)?|citation|参考文献|引用|文献)",
     re.IGNORECASE,
 )
-_FOOTNOTE_KEY_RE = re.compile(
-    r"^\s*(?:<sup>\s*)?(?P<key>\d{1,4})(?:\s*</sup>)?\s*(?=\D|$)",
+_FURNITURE_LABEL_RE = re.compile(
+    r"(?:page[\s_-]*(?:header|footer)|running[\s_-]*(?:header|footer))",
     re.IGNORECASE,
 )
-_NATIVE_NUMERIC_ONLY_RE = re.compile(r"^\s*\d{1,4}\s*$")
-_NATIVE_KEY_START_RE = re.compile(r"^\s*(?P<key>\d{1,3})(?=\s|[.)、，:：])")
+_FOOTNOTE_KEY_RE = re.compile(
+    r"^\s*(?P<key>\d{1,4})(?=\s|[.)、，:：;；\-–—]|$)",
+    re.IGNORECASE,
+)
+_FOOTNOTE_SUP_KEY_RE = re.compile(
+    r"^\s*<sup\b[^>]*>\s*(?P<key>\d{1,4})\s*</sup>(?=\s|[.)、，:：;；\-–—]|$)",
+    re.IGNORECASE,
+)
+_FOOTNOTE_UNICODE_KEY_RE = re.compile(
+    r"^\s*(?P<key>[⁰¹²³⁴⁵⁶⁷⁸⁹]{1,4})(?=\s|[.)、，:：;；\-–—]|$)"
+)
+_NUMERIC_ONLY_RE = re.compile(r"^\s*\d{1,4}\s*$")
+_NATIVE_NUMERIC_ONLY_RE = _NUMERIC_ONLY_RE
 _NATIVE_SUP_MARKER_RE = re.compile(
     r"<sup\b[^>]*>\s*(?P<key>\d{1,4})\s*</sup>|"
     r"(?P<unicode>[⁰¹²³⁴⁵⁶⁷⁸⁹]{1,4})"
 )
+_SUPERSCRIPT_DIGITS = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789")
 
 
 @dataclass(frozen=True)
@@ -76,15 +87,37 @@ class FootnotePrepareOptions:
     """Validated settings shared by candidate and handoff preparation."""
 
     bottom_ratio: float = DEFAULT_BOTTOM_RATIO
+    bottom_intersection_ratio: float = DEFAULT_BOTTOM_INTERSECTION_RATIO
     context_blocks: int = DEFAULT_CONTEXT_BLOCKS
     auto_accept: bool = DEFAULT_AUTO_ACCEPT
     native_max_font_ratio: float = DEFAULT_NATIVE_MAX_FONT_RATIO
+
+
+def _leading_footnote_key(text: str) -> Optional[str]:
+    """Extract a conservative key from the beginning of a layout block.
+
+    Chandra normally stores the block as plain text after HTML tags are
+    stripped, but older sidecars may retain a ``sup`` tag or Unicode
+    superscript digits. Requiring whitespace or punctuation after the key
+    avoids treating years and embedded numbers as note definitions.
+    """
+    value = str(text or "")
+    for pattern in (
+        _FOOTNOTE_SUP_KEY_RE,
+        _FOOTNOTE_KEY_RE,
+        _FOOTNOTE_UNICODE_KEY_RE,
+    ):
+        match = pattern.match(value)
+        if match:
+            return match.group("key").translate(_SUPERSCRIPT_DIGITS)
+    return None
 
 
 def resolve_footnote_options(
     config: Optional[Mapping[str, Any]] = None,
     *,
     bottom_ratio: Optional[float] = None,
+    bottom_intersection_ratio: Optional[float] = None,
     context_blocks: Optional[int] = None,
     auto_accept: Optional[bool] = None,
     native_max_font_ratio: Optional[float] = None,
@@ -105,6 +138,20 @@ def resolve_footnote_options(
         resolved_bottom_ratio = DEFAULT_BOTTOM_RATIO
     if not 0.5 <= resolved_bottom_ratio < 1.0:
         raise ValueError("bottom_ratio must be between 0.5 and 1.0")
+
+    resolved_bottom_intersection_ratio = (
+        bottom_intersection_ratio
+        if bottom_intersection_ratio is not None
+        else footnote_config.get(
+            "bottom_intersection_ratio", DEFAULT_BOTTOM_INTERSECTION_RATIO
+        )
+    )
+    try:
+        resolved_bottom_intersection_ratio = float(resolved_bottom_intersection_ratio)
+    except (TypeError, ValueError):
+        resolved_bottom_intersection_ratio = DEFAULT_BOTTOM_INTERSECTION_RATIO
+    if not 0.0 < resolved_bottom_intersection_ratio <= 1.0:
+        raise ValueError("bottom_intersection_ratio must be between 0 and 1")
 
     resolved_context_blocks = (
         context_blocks
@@ -138,6 +185,7 @@ def resolve_footnote_options(
 
     return FootnotePrepareOptions(
         bottom_ratio=resolved_bottom_ratio,
+        bottom_intersection_ratio=resolved_bottom_intersection_ratio,
         context_blocks=resolved_context_blocks,
         auto_accept=bool(resolved_auto_accept),
         native_max_font_ratio=resolved_font_ratio,
@@ -151,9 +199,10 @@ def _candidate_for_block(
     sidecar: Mapping[str, Any],
     *,
     bottom_ratio: float,
+    bottom_intersection_ratio: float = DEFAULT_BOTTOM_INTERSECTION_RATIO,
     force_review: bool = False,
-    layout_evidence: Optional[Mapping[str, Any]] = None,
     source: str = "primary",
+    region_evidence: bool = False,
 ) -> Optional[dict[str, Any]]:
     text = _text_from_block(block)
     if not text:
@@ -161,25 +210,15 @@ def _candidate_for_block(
     label = str(block.get("label") or "").strip()
     label_is_footnote = bool(_FOOTNOTE_LABEL_RE.search(label))
     label_is_citation = bool(_CITATION_LABEL_RE.search(label))
-    layout_region_label = str(
-        (layout_evidence or {}).get("label") or ""
-    ).casefold()
+    label_is_furniture = bool(_FURNITURE_LABEL_RE.search(label))
     bbox = _normalise_bbox(block, sidecar)
-    is_bottom = bool(bbox and bbox[1] >= bottom_ratio)
-    key_match = _FOOTNOTE_KEY_RE.match(text)
-    key = key_match.group("key") if key_match else None
-    layout_matched = bool(layout_evidence and layout_evidence.get("matched"))
-    layout_bottom = bool(
-        is_bottom
-        or (
-            layout_evidence
-            and layout_evidence.get("bbox")
-            and float(layout_evidence["bbox"][1]) >= bottom_ratio
-        )
+    geometry = _bottom_geometry(
+        bbox,
+        bottom_ratio=bottom_ratio,
+        intersection_ratio=bottom_intersection_ratio,
     )
-    layout_footnote_region = bool(
-        layout_matched and layout_region_label in {"footnote", "footnotes"}
-    )
+    is_bottom = bool(geometry["is_bottom"])
+    key = _leading_footnote_key(text)
 
     # A candidate must have either an explicit OCR footnote label or a strong
     # bottom-of-page + numbered-start signal.  Ordinary low page text is not
@@ -187,21 +226,25 @@ def _candidate_for_block(
     # OCR can label bibliography/reference material as a bottom block too.
     # It is never a page footnote candidate: citations and bibliography are
     # semantic book content and must remain where the chapter puts them.
-    if label_is_citation or (
-        not label_is_footnote
-        and not (is_bottom and key)
-        and not (layout_footnote_region and layout_bottom)
-    ):
+    # A block containing only a short number is overwhelmingly a printed page
+    # number.  This applies to visual OCR as well as native layout; allowing a
+    # ``Footnote`` label to override it would reintroduce page-footer false
+    # positives.
+    if _NUMERIC_ONLY_RE.fullmatch(text):
+        return None
+    if label_is_citation and not region_evidence:
+        return None
+    if label_is_furniture and not region_evidence:
+        return None
+    # The label is semantic evidence only.  It cannot make a block outside the
+    # page-bottom geometry a candidate.  A continuous numbered region may
+    # extend the review window upward, but that path is always review-only.
+    if not (is_bottom or region_evidence):
+        return None
+    if not (label_is_footnote or key or region_evidence):
         return None
 
-    if layout_evidence is not None:
-        # The detector is useful for discovering continuations and for
-        # rescuing OCR blocks whose semantic label was lost, but neither a
-        # positive nor a negative model result is trusted enough to
-        # auto-move a block on its own.
-        confidence = "review"
-        disposition = "review_required"
-    elif label_is_footnote and is_bottom and key and not force_review:
+    if label_is_footnote and is_bottom and key and not force_review and not region_evidence:
         confidence = "high"
         disposition = "local_candidate"
     else:
@@ -216,25 +259,62 @@ def _candidate_for_block(
         "label": label,
         "bbox": bbox,
         "key": key,
+        "bottom_edge": geometry["bottom_edge"],
+        "bottom_intersection_ratio": geometry["intersection_ratio"],
+        "bottom_geometry": "page_bottom" if is_bottom else (
+            "continuous_region" if region_evidence else "none"
+        ),
         "confidence": confidence,
         "disposition": disposition,
         "text": text[:240],
     }
-    if layout_evidence:
-        candidate["layout_evidence"] = dict(layout_evidence)
-        region_label = str(layout_evidence.get("label") or "").casefold()
-        candidate["review_reason"] = (
-            "pp_doclayout_footnotes_region"
-            if layout_matched and region_label in {"footnote", "footnotes"}
-            else (
-                f"pp_doclayout_{region_label or 'unmatched'}_region"
-                if layout_matched
-                else "ocr_candidate_without_layout_support"
-            )
-        )
     if force_review:
         candidate["review_reason"] = "ocr_consensus_visual_review"
+    if region_evidence:
+        candidate["continuous_region_evidence"] = True
     return candidate
+
+
+def _bottom_geometry(
+    bbox: Optional[Iterable[float]],
+    *,
+    bottom_ratio: float,
+    intersection_ratio: float,
+) -> dict[str, Any]:
+    """Return the page-bottom evidence for one normalized block.
+
+    ``bbox[3]`` is the lower edge in normalized page coordinates.  It is
+    necessary but not sufficient: a block only qualifies when the portion of
+    its own height that intersects the bottom band is large enough.  This
+    avoids treating a normal body paragraph that merely clips the top of the
+    band as a footnote candidate.
+    """
+    if not bbox:
+        return {
+            "is_bottom": False,
+            "bottom_edge": None,
+            "intersection_ratio": 0.0,
+        }
+    try:
+        values = [float(value) for value in bbox]
+        height = max(0.0, values[3] - values[1])
+        overlap = max(0.0, values[3] - max(values[1], float(bottom_ratio)))
+        ratio = overlap / height if height > 0 else 0.0
+        bottom_edge = values[3]
+    except (TypeError, ValueError, IndexError):
+        return {
+            "is_bottom": False,
+            "bottom_edge": None,
+            "intersection_ratio": 0.0,
+        }
+    return {
+        "is_bottom": bool(
+            bottom_edge >= float(bottom_ratio)
+            and ratio >= float(intersection_ratio)
+        ),
+        "bottom_edge": round(bottom_edge, 6),
+        "intersection_ratio": round(ratio, 6),
+    }
 
 
 def _window_for_page(
@@ -286,6 +366,322 @@ def _window_for_page(
             }
         )
     return {"page": page_number, "blocks": compact_blocks}
+
+
+def _horizontal_overlap(first: Optional[Iterable[float]], second: Optional[Iterable[float]]) -> float:
+    """Return overlap over the narrower horizontal span."""
+    if not first or not second:
+        return 0.0
+    try:
+        first_values = [float(value) for value in first]
+        second_values = [float(value) for value in second]
+        first_width = max(0.0, first_values[2] - first_values[0])
+        second_width = max(0.0, second_values[2] - second_values[0])
+        overlap = max(
+            0.0,
+            min(first_values[2], second_values[2])
+            - max(first_values[0], second_values[0]),
+        )
+    except (TypeError, ValueError, IndexError):
+        return 0.0
+    denominator = min(first_width, second_width)
+    return overlap / denominator if denominator > 0 else 0.0
+
+
+def _continuous_numeric_regions(
+    sidecar: Mapping[str, Any],
+    *,
+    bottom_ratio: float,
+    backtrack_ratio: float = DEFAULT_CONTINUOUS_REGION_BACKTRACK_RATIO,
+    max_gap: float = DEFAULT_CONTINUOUS_REGION_MAX_GAP,
+) -> list[dict[str, Any]]:
+    """Find consecutive numbered blocks that form one bottom-note region.
+
+    OCR layout models sometimes emit only the last few numbered definitions as
+    bottom blocks.  A run such as ``18, 19, 20, 21`` is a strong signal that
+    the blocks belong to one notes area, so the caller can walk upward from
+    the first number and include adjacent unnumbered lines for visual review.
+    This function only returns evidence; it never assigns a footnote role.
+    """
+    blocks = sidecar.get("blocks", [])
+    if not isinstance(blocks, list):
+        return []
+    records: list[dict[str, Any]] = []
+    minimum_edge = max(0.0, float(bottom_ratio) - float(backtrack_ratio))
+    for index, block in enumerate(blocks):
+        if not isinstance(block, Mapping):
+            continue
+        text = _text_from_block(block)
+        key = _leading_footnote_key(text)
+        bbox = _normalise_bbox(block, sidecar)
+        if not text or not bbox or not key or _NUMERIC_ONLY_RE.fullmatch(text):
+            continue
+        if bbox[3] < minimum_edge:
+            continue
+        label = str(block.get("label") or "").strip()
+        if _CITATION_LABEL_RE.search(label):
+            continue
+        records.append(
+            {
+                "index": index,
+                "key": int(key),
+                "bbox": bbox,
+                "label": label,
+            }
+        )
+
+    regions: list[dict[str, Any]] = []
+    current: list[dict[str, Any]] = []
+    for record in records:
+        if not current:
+            current = [record]
+            continue
+        previous = current[-1]
+        contiguous_key = record["key"] == previous["key"] + 1
+        contiguous_block = record["index"] - previous["index"] <= 3
+        vertical_gap = record["bbox"][1] - previous["bbox"][3]
+        close_enough = (
+            vertical_gap <= max_gap
+            and _horizontal_overlap(record["bbox"], previous["bbox"]) >= 0.2
+        )
+        if contiguous_key and contiguous_block and close_enough:
+            current.append(record)
+        else:
+            if len(current) >= 2:
+                regions.append({"records": current})
+            current = [record]
+    if len(current) >= 2:
+        regions.append({"records": current})
+
+    normalized: list[dict[str, Any]] = []
+    for region in regions:
+        records_in_region = region["records"]
+        first = records_in_region[0]
+        last = records_in_region[-1]
+        min_y = min(item["bbox"][1] for item in records_in_region)
+        max_y = max(item["bbox"][3] for item in records_in_region)
+        normalized.append(
+            {
+                "keys": [str(item["key"]) for item in records_in_region],
+                "numeric_block_indices": [item["index"] for item in records_in_region],
+                "first_block": first["index"],
+                "last_block": last["index"],
+                "bbox": [
+                    min(item["bbox"][0] for item in records_in_region),
+                    min_y,
+                    max(item["bbox"][2] for item in records_in_region),
+                    max_y,
+                ],
+            }
+        )
+    return normalized
+
+
+def _expand_continuous_region_candidates(
+    page_number: int,
+    sidecar: Mapping[str, Any],
+    candidates: list[dict[str, Any]],
+    *,
+    bottom_ratio: float,
+    bottom_intersection_ratio: float,
+    native_text_source: bool,
+    page_markdown: str,
+    auto_accept: bool,
+    native_max_font_ratio: float,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Add review-only blocks surrounding a consecutive numeric note run."""
+    regions = _continuous_numeric_regions(
+        sidecar,
+        bottom_ratio=bottom_ratio,
+    )
+    if not regions:
+        return candidates, []
+    blocks = sidecar.get("blocks", [])
+    existing = {int(item["block"]) for item in candidates}
+    expanded: list[dict[str, Any]] = list(candidates)
+    normalized_regions: list[dict[str, Any]] = []
+    for region in regions:
+        indexes = list(region["numeric_block_indices"])
+        region_indexes = set(indexes)
+        region_top = float(region["bbox"][1])
+        backward_indexes: list[int] = []
+        cursor = int(region["first_block"]) - 1
+        while cursor >= 0:
+            block = blocks[cursor]
+            if not isinstance(block, Mapping):
+                break
+            text = _text_from_block(block)
+            bbox = _normalise_bbox(block, sidecar)
+            if not text or not bbox or _NUMERIC_ONLY_RE.fullmatch(text):
+                break
+            # A different/duplicate numeric start is a region boundary.  The
+            # upward backtrack is for unnumbered continuation lines, not for
+            # ordinary numbered prose immediately above the confirmed run.
+            if _leading_footnote_key(text) is not None:
+                break
+            if bbox[3] < float(region_top) - DEFAULT_CONTINUOUS_REGION_MAX_GAP:
+                break
+            if bbox[3] < float(bottom_ratio) - DEFAULT_CONTINUOUS_REGION_BACKTRACK_RATIO:
+                break
+            if _horizontal_overlap(bbox, region["bbox"]) < 0.12:
+                break
+            backward_indexes.append(cursor)
+            region_indexes.add(cursor)
+            region_top = bbox[1]
+            cursor -= 1
+
+        for block_index in sorted(region_indexes):
+            if block_index in existing:
+                for candidate in expanded:
+                    if int(candidate.get("block", -1)) == block_index:
+                        candidate["continuous_region_evidence"] = True
+                        candidate.setdefault("review_reason", "continuous_numeric_region")
+                continue
+            block = blocks[block_index]
+            if not isinstance(block, Mapping):
+                continue
+            if native_text_source:
+                candidate = _candidate_for_native_block(
+                    page_number,
+                    block_index,
+                    block,
+                    sidecar,
+                    bottom_ratio=bottom_ratio,
+                    bottom_intersection_ratio=bottom_intersection_ratio,
+                    page_markdown=page_markdown,
+                    auto_accept=auto_accept,
+                    native_max_font_ratio=native_max_font_ratio,
+                    region_evidence=True,
+                )
+            else:
+                candidate = _candidate_for_block(
+                    page_number,
+                    block_index,
+                    block,
+                    sidecar,
+                    bottom_ratio=bottom_ratio,
+                    bottom_intersection_ratio=bottom_intersection_ratio,
+                    force_review=True,
+                    source="primary",
+                    region_evidence=True,
+                )
+            if candidate is None:
+                continue
+            candidate["confidence"] = "review"
+            candidate["disposition"] = "review_required"
+            candidate["review_reason"] = "continuous_numeric_region"
+            candidate["continuous_region_evidence"] = True
+            expanded.append(candidate)
+
+        normalized_regions.append(
+            {
+                **region,
+                "backtracked_block_indices": sorted(backward_indexes),
+                "review_block_indices": sorted(region_indexes),
+            }
+        )
+    expanded.sort(key=lambda item: (item.get("order", item.get("block", 0)), item["block"]))
+    return expanded, normalized_regions
+
+
+def _bottom_detection_stats(
+    sidecar: Mapping[str, Any],
+    candidate_indexes: set[int],
+    *,
+    bottom_ratio: float,
+) -> dict[str, int]:
+    """Count bottom numeric evidence that the candidate list did not cover."""
+    stats = {
+        "bottom_block_count": 0,
+        "bottom_numeric_block_count": 0,
+        "bottom_numeric_candidate_count": 0,
+        "excluded_page_furniture_count": 0,
+        "excluded_numeric_page_count": 0,
+        "suspected_missed_count": 0,
+    }
+    for index, block in enumerate(sidecar.get("blocks", [])):
+        if not isinstance(block, Mapping):
+            continue
+        bbox = _normalise_bbox(block, sidecar)
+        if not bbox or bbox[3] < float(bottom_ratio):
+            continue
+        stats["bottom_block_count"] += 1
+        text = _text_from_block(block)
+        key = _leading_footnote_key(text)
+        label = str(block.get("label") or "").strip()
+        is_furniture = bool(_FURNITURE_LABEL_RE.search(label))
+        if is_furniture:
+            stats["excluded_page_furniture_count"] += 1
+        if _NUMERIC_ONLY_RE.fullmatch(text):
+            stats["excluded_numeric_page_count"] += 1
+        if not key:
+            continue
+        stats["bottom_numeric_block_count"] += 1
+        if index in candidate_indexes:
+            stats["bottom_numeric_candidate_count"] += 1
+            continue
+        if is_furniture or _NUMERIC_ONLY_RE.fullmatch(text) or _CITATION_LABEL_RE.search(label):
+            continue
+        stats["suspected_missed_count"] += 1
+    return stats
+
+
+def _ensure_visual_review_images(
+    output_dir: Path,
+    review_pages: Iterable[int],
+    config: Optional[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Render/reuse page PNGs for the pages sent to the Subagent.
+
+    OCR correction already owns freshness-aware PDF page rendering.  Reusing
+    that renderer keeps image hashes and the source-PDF choice consistent
+    across workflow stages.  A sidecar-only library caller (including tests)
+    remains valid when no source PDF is available; it simply gets an explicit
+    ``available: false`` evidence record.
+    """
+    pages = sorted({int(page) for page in review_pages})
+    if not pages:
+        return {"available": False, "reason": "no_review_pages", "pages": []}
+    try:
+        from ..ocr_correction import render_review_images
+
+        correction_config = (
+            config.get("ocr_correction", {})
+            if isinstance(config, Mapping)
+            else {}
+        )
+        try:
+            dpi = int(correction_config.get("review_dpi", 150))
+        except (TypeError, ValueError):
+            dpi = 150
+        manifest = render_review_images(output_dir, dpi=dpi, resume=True)
+        image_dir = str(manifest.get("image_dir") or "ocr_review_images")
+        image_files = {
+            page: f"{image_dir}/page_{page:03d}.png"
+            for page in pages
+            if (output_dir / image_dir / f"page_{page:03d}.png").is_file()
+        }
+        if len(image_files) != len(pages):
+            missing = [page for page in pages if page not in image_files]
+            return {
+                "available": False,
+                "reason": "rendered_page_images_missing",
+                "pages": pages,
+                "missing_pages": missing,
+            }
+        return {
+            "available": True,
+            "pages": pages,
+            "image_dir": image_dir,
+            "files": {str(page): path for page, path in image_files.items()},
+            "manifest": "ocr_review_images.json",
+        }
+    except (OSError, ValueError, RuntimeError, ImportError) as exc:
+        return {
+            "available": False,
+            "pages": pages,
+            "reason": str(exc)[:240],
+        }
 
 
 def _build_cross_page_windows(
@@ -403,13 +799,11 @@ def _candidate_block_indexes(candidate: Mapping[str, Any]) -> list[int]:
 def _aggregate_secondary_only_candidates(
     candidates: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Collapse adjacent Paddle lines into reviewable note windows.
+    """Collapse adjacent secondary OCR lines into reviewable note windows.
 
-    Paddle commonly emits one physical line per block while Chandra emits a
-    whole footnote paragraph.  A secondary-only note therefore must be one
-    review decision, not one decision per Paddle line.  We only merge adjacent
-    blocks and never merge two explicit numeric starts; the Subagent can still
-    split or classify the resulting window from the page image.
+    A secondary OCR backend may emit one physical line per block while the
+    primary backend emits a whole paragraph.  A secondary-only note therefore
+    must be one review decision, not one decision per physical line.
     """
     if not candidates:
         return []
@@ -487,47 +881,6 @@ def _secondary_sidecar_path(output_dir: Path, sidecar_path: Path) -> Path:
     return Path(output_dir) / "ocr_secondary" / sidecar_path.name
 
 
-def _layout_evidence_for_page(
-    output_dir: Path,
-    config: Optional[Mapping[str, Any]],
-    page_number: int,
-) -> tuple[dict[str, Any] | None, str | None]:
-    """Load current PP-DocLayout evidence, failing closed when enabled."""
-    if not layout_enabled(config):
-        return None, None
-    manifest_path = Path(output_dir) / "layout_detection_manifest.json"
-    try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise ValueError(
-            "PP-DocLayout is enabled but layout_detection_manifest.json is missing; "
-            "run ocr-pages --resume or layout-detect first"
-        ) from exc
-    if (
-        not isinstance(manifest, Mapping)
-        or manifest.get("status") != "complete"
-        or not manifest.get("complete", False)
-        or manifest.get("layout_config_sha256") != layout_config_sha256(config)
-    ):
-        raise ValueError(
-            "PP-DocLayout evidence is missing or stale; rerun ocr-pages --resume "
-            "or layout-detect before footnote-prepare"
-        )
-    prediction = load_layout_prediction(output_dir, page_number)
-    if (
-        not prediction
-        or prediction.get("layout_config_sha256") != layout_config_sha256(config)
-        or prediction.get("source_pdf_sha256") != manifest.get("source_pdf_sha256")
-    ):
-        raise ValueError(
-            f"PP-DocLayout prediction for page {page_number} is missing or stale; "
-            "rerun layout-detect"
-        )
-    return prediction, sha256_file(
-        Path(output_dir) / "layout_detection" / f"page_{page_number:03d}.json"
-    )
-
-
 def _candidate_for_native_block(
     page_number: int,
     block_index: int,
@@ -535,9 +888,11 @@ def _candidate_for_native_block(
     sidecar: Mapping[str, Any],
     *,
     bottom_ratio: float,
+    bottom_intersection_ratio: float = DEFAULT_BOTTOM_INTERSECTION_RATIO,
     page_markdown: str = "",
     auto_accept: bool = DEFAULT_AUTO_ACCEPT,
     native_max_font_ratio: float = DEFAULT_NATIVE_MAX_FONT_RATIO,
+    region_evidence: bool = False,
 ) -> Optional[dict[str, Any]]:
     """Find conservative native-text candidates for workspace review.
 
@@ -552,8 +907,10 @@ def _candidate_for_native_block(
     bottom-of-page numbered block to the Subagent.
     """
     text = _text_from_block(block)
-    key_match = _NATIVE_KEY_START_RE.match(text)
-    if not text or _NATIVE_NUMERIC_ONLY_RE.fullmatch(text) or key_match is None:
+    key = _leading_footnote_key(text)
+    if not text or _NATIVE_NUMERIC_ONLY_RE.fullmatch(text) or (
+        key is None and not region_evidence
+    ):
         return None
     try:
         font_size = float(block.get("font_size"))
@@ -566,13 +923,17 @@ def _candidate_for_native_block(
         block,
         sidecar,
         bottom_ratio=bottom_ratio,
+        bottom_intersection_ratio=bottom_intersection_ratio,
         force_review=True,
+        region_evidence=region_evidence,
     )
     if candidate is None:
         return None
-    candidate["key"] = key_match.group("key")
+    candidate["key"] = key
     candidate["source_kind"] = "native_text"
-    candidate["review_reason"] = "native_layout_candidate"
+    candidate["review_reason"] = (
+        "continuous_numeric_region" if region_evidence else "native_layout_candidate"
+    )
     if block.get("font_size") is not None:
         candidate["font_size"] = block.get("font_size")
     if font_size > 0 and body_font_size > 0:
@@ -593,6 +954,7 @@ def _candidate_for_native_block(
     candidate["native_max_font_ratio"] = float(native_max_font_ratio)
     if (
         auto_accept
+        and not region_evidence
         and marker_before_block
         and isinstance(font_ratio, (int, float))
         and font_ratio <= float(native_max_font_ratio)
@@ -709,6 +1071,7 @@ def prepare_footnote_candidates(
     *,
     config: Optional[Mapping[str, Any]] = None,
     bottom_ratio: Optional[float] = None,
+    bottom_intersection_ratio: Optional[float] = None,
     context_blocks: Optional[int] = None,
     auto_accept: Optional[bool] = None,
     native_max_font_ratio: Optional[float] = None,
@@ -726,6 +1089,7 @@ def prepare_footnote_candidates(
     options = resolve_footnote_options(
         config,
         bottom_ratio=bottom_ratio,
+        bottom_intersection_ratio=bottom_intersection_ratio,
         context_blocks=context_blocks,
         auto_accept=auto_accept,
         native_max_font_ratio=native_max_font_ratio,
@@ -749,15 +1113,23 @@ def prepare_footnote_candidates(
     page_reports: list[dict[str, Any]] = []
     sidecar_hashes: dict[str, str] = {}
     secondary_sidecar_hashes: dict[str, str] = {}
-    layout_prediction_hashes: dict[str, str] = {}
     consensus_review_pages = (
         _load_consensus_review_pages(output_dir)
         if not native_text_source and (legacy_consensus or evidence_mode == "two_ocr")
         else set()
     )
     review_pages: set[int] = set()
+    suspected_missed_pages: set[int] = set()
     high_confidence_count = 0
     review_count = 0
+    bottom_detection_totals = {
+        "bottom_block_count": 0,
+        "bottom_numeric_block_count": 0,
+        "bottom_numeric_candidate_count": 0,
+        "excluded_page_furniture_count": 0,
+        "excluded_numeric_page_count": 0,
+        "suspected_missed_count": 0,
+    }
 
     for sidecar_path in sidecars:
         sidecar = _load_sidecar(sidecar_path)
@@ -766,17 +1138,6 @@ def prepare_footnote_candidates(
         except (TypeError, ValueError) as exc:
             raise ValueError(f"OCR sidecar has invalid page_number: {sidecar_path}") from exc
         sidecar_hashes[sidecar_path.relative_to(output_dir).as_posix()] = sha256_file(sidecar_path)
-        layout_prediction = None
-        if not native_text_source:
-            layout_prediction, layout_hash = _layout_evidence_for_page(
-                output_dir,
-                config,
-                page_number,
-            )
-            if layout_hash:
-                layout_prediction_hashes[
-                    f"layout_detection/page_{page_number:03d}.json"
-                ] = layout_hash
         page_markdown_path = pages_dir / f"page_{page_number:03d}.md"
         try:
             page_markdown = page_markdown_path.read_text(encoding="utf-8")
@@ -793,6 +1154,7 @@ def prepare_footnote_candidates(
                     block,
                     sidecar,
                     bottom_ratio=options.bottom_ratio,
+                    bottom_intersection_ratio=options.bottom_intersection_ratio,
                     page_markdown=page_markdown,
                     auto_accept=options.auto_accept,
                     native_max_font_ratio=options.native_max_font_ratio,
@@ -805,43 +1167,49 @@ def prepare_footnote_candidates(
                     block,
                     sidecar,
                     bottom_ratio=options.bottom_ratio,
+                    bottom_intersection_ratio=options.bottom_intersection_ratio,
                     force_review=(
                         local_acceptance_disabled
                     ),
-                    layout_evidence=_layout_region_evidence(
-                        layout_prediction,
-                        block,
-                        sidecar,
-                    )
-                    if layout_prediction is not None
-                    else None,
                     source="primary",
                 )
                 if candidate is not None and local_acceptance_disabled:
-                    layout_evidence = candidate.get("layout_evidence")
-                    if isinstance(layout_evidence, Mapping):
-                        region_label = str(
-                            layout_evidence.get("label") or ""
-                        ).casefold()
-                        candidate["layout_review_reason"] = (
-                            "pp_doclayout_footnotes_region"
-                            if layout_evidence.get("matched")
-                            and region_label in {"footnote", "footnotes"}
-                            else (
-                                f"pp_doclayout_{region_label or 'unmatched'}_region"
-                                if layout_evidence.get("matched")
-                                else "ocr_candidate_without_layout_support"
-                            )
-                        )
                     candidate["review_reason"] = "local_auto_accept_disabled"
             if candidate is None:
                 continue
             candidates.append(candidate)
+
+        candidates, continuous_regions = _expand_continuous_region_candidates(
+            page_number,
+            sidecar,
+            candidates,
+            bottom_ratio=options.bottom_ratio,
+            bottom_intersection_ratio=options.bottom_intersection_ratio,
+            native_text_source=native_text_source,
+            page_markdown=page_markdown,
+            auto_accept=options.auto_accept,
+            native_max_font_ratio=options.native_max_font_ratio,
+        )
+        candidates.sort(key=lambda item: (item["order"], item["block"]))
+        for candidate in candidates:
             if candidate["confidence"] == "high":
                 high_confidence_count += 1
             else:
                 review_count += 1
                 review_pages.add(page_number)
+        bottom_stats = _bottom_detection_stats(
+            sidecar,
+            {
+                int(index)
+                for candidate in candidates
+                for index in _candidate_block_indexes(candidate)
+            },
+            bottom_ratio=options.bottom_ratio,
+        )
+        for field, value in bottom_stats.items():
+            bottom_detection_totals[field] += int(value)
+        if bottom_stats["suspected_missed_count"]:
+            suspected_missed_pages.add(page_number)
 
         candidates.sort(key=lambda item: (item["order"], item["block"]))
         secondary_sidecar = _secondary_sidecar_path(output_dir, sidecar_path)
@@ -861,17 +1229,22 @@ def prepare_footnote_candidates(
                     block,
                     secondary,
                     bottom_ratio=options.bottom_ratio,
-                    layout_evidence=_layout_region_evidence(
-                        layout_prediction,
-                        block,
-                        secondary,
-                    )
-                    if layout_prediction is not None
-                    else None,
+                    bottom_intersection_ratio=options.bottom_intersection_ratio,
                     source="secondary",
                 )
                 if candidate is not None:
                     secondary_candidates.append(candidate)
+            secondary_candidates, secondary_regions = _expand_continuous_region_candidates(
+                page_number,
+                secondary,
+                secondary_candidates,
+                bottom_ratio=options.bottom_ratio,
+                bottom_intersection_ratio=options.bottom_intersection_ratio,
+                native_text_source=False,
+                page_markdown="",
+                auto_accept=False,
+                native_max_font_ratio=options.native_max_font_ratio,
+            )
             secondary_candidates.sort(key=lambda item: (item["order"], item["block"]))
             matched_secondary_blocks = {
                 int(secondary_candidate["block"])
@@ -942,6 +1315,11 @@ def prepare_footnote_candidates(
                     "secondary_only_candidates": secondary_only_candidates
                     if evidence_mode == "two_ocr"
                     else [],
+                    "continuous_numeric_regions": continuous_regions,
+                    "secondary_continuous_numeric_regions": (
+                        secondary_regions if evidence_mode == "two_ocr" else []
+                    ),
+                    "bottom_detection": bottom_stats,
                     "window": _window_for_page(
                         page_number,
                         sidecar,
@@ -962,25 +1340,38 @@ def prepare_footnote_candidates(
     for window in cross_page_windows:
         review_pages.update(int(page) for page in window["pages"])
 
+    visual_evidence = _ensure_visual_review_images(
+        output_dir,
+        review_pages,
+        config,
+    )
+    visual_files = visual_evidence.get("files", {})
+    if isinstance(visual_files, Mapping):
+        for page_report in page_reports:
+            page_report["visual_file"] = visual_files.get(str(page_report["page"]))
+
     report = {
         "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
         "source_dir": "pages",
         "source_kind": source_kind,
         "ocr_evidence_mode": evidence_mode,
         "bottom_ratio": options.bottom_ratio,
+        "bottom_intersection_ratio": options.bottom_intersection_ratio,
         "context_blocks": options.context_blocks,
         "auto_accept": options.auto_accept,
         "native_max_font_ratio": options.native_max_font_ratio,
         "consensus_visual_review_pages": sorted(consensus_review_pages),
         "sidecar_sha256": sidecar_hashes,
         "secondary_sidecar_sha256": secondary_sidecar_hashes,
-        "layout_detection_enabled": bool(layout_prediction_hashes),
-        "layout_prediction_sha256": layout_prediction_hashes,
         "pages": page_reports,
         "cross_page_windows": cross_page_windows,
         "review_pages": sorted(review_pages),
         "high_confidence_candidate_count": high_confidence_count,
         "review_candidate_count": review_count,
+        "bottom_detection": bottom_detection_totals,
+        "suspected_missed_count": bottom_detection_totals["suspected_missed_count"],
+        "suspected_missed_pages": sorted(suspected_missed_pages),
+        "visual_evidence": visual_evidence,
         "review_required": bool(review_pages),
     }
     report_path = output_dir / "footnote_candidates.json"
@@ -994,6 +1385,7 @@ def prepare_footnote_subagent(
     book_title: str,
     config: Optional[Mapping[str, Any]] = None,
     bottom_ratio: Optional[float] = None,
+    bottom_intersection_ratio: Optional[float] = None,
     context_blocks: Optional[int] = None,
     auto_accept: Optional[bool] = None,
     native_max_font_ratio: Optional[float] = None,
@@ -1004,6 +1396,7 @@ def prepare_footnote_subagent(
         output_dir,
         config=config,
         bottom_ratio=bottom_ratio,
+        bottom_intersection_ratio=bottom_intersection_ratio,
         context_blocks=context_blocks,
         auto_accept=auto_accept,
         native_max_font_ratio=native_max_font_ratio,
@@ -1019,7 +1412,12 @@ def prepare_footnote_subagent(
         "review_pages": report["review_pages"],
         "high_confidence_candidate_count": report["high_confidence_candidate_count"],
         "review_candidate_count": report["review_candidate_count"],
+        "bottom_detection": report["bottom_detection"],
+        "suspected_missed_count": report["suspected_missed_count"],
+        "suspected_missed_pages": report["suspected_missed_pages"],
+        "visual_evidence": report["visual_evidence"],
         "auto_accept": report["auto_accept"],
+        "bottom_intersection_ratio": report["bottom_intersection_ratio"],
         "native_max_font_ratio": report["native_max_font_ratio"],
         "cross_page_window_count": len(report["cross_page_windows"]),
         "consensus_visual_review_pages": report["consensus_visual_review_pages"],
@@ -1048,6 +1446,8 @@ def prepare_footnote_subagent(
             line += " (OCR consensus marked this page for visual review)"
         if page_report.get("consensus_status") == "disagree":
             line += " (primary/secondary footnote candidate evidence differs)"
+        if page_report.get("visual_file"):
+            line += f"; visual: `{page_report['visual_file']}`"
         page_lines.append(line)
     page_text = "\n".join(page_lines) or "- 无需 Subagent 复核；仅保留本地高置信度候选。"
     source_guidance = (
@@ -1059,15 +1459,14 @@ def prepare_footnote_subagent(
         if report["source_kind"] == "native_text"
         else "If a page is marked as an OCR-consensus visual review, treat the local label as untrusted even when it says `Footnote`; compare the primary and secondary sidecars and the page image before deciding."
     )
-    if report.get("layout_detection_enabled"):
-        source_guidance += (
-            " PP-DocLayout-L evidence is included in candidate records as layout_evidence. "
-            "The model may label footnote-like material as generic text, paragraph_title, "
-            "or reference rather than footnotes; treat every region label and score as geometric "
-            "evidence, not a semantic decision. Candidates without matching layout support are "
-            "also deliberately sent to review; do not auto-move either kind based on a numeric key alone."
-        )
-    prompt = f"""# Footnote layout review\n\nBook: {book_title}\n\nRead `footnote_subagent_manifest.json` and `footnote_candidates.json`. The local script has selected compact bottom-of-page candidate windows. Review only blocks marked `confidence: review`; blocks marked `confidence: high` are already accepted by the deterministic local rule and do not need a decision. Do not reread or rewrite the whole book. {source_guidance}\n\nCandidate page layout sidecars:\n{page_text}\n\nUse these meanings strictly:\n- `footnote_start`: the beginning of a real page footnote; it will be moved to the end of its logical chapter.\n- `footnote_continuation`: text continuing a real footnote from an earlier page; it will be joined to that footnote.\n- `footnote_definition`: a complete footnote definition already presented as a note block.\n- `citation`: an in-text citation, quoted source, parenthetical/numeric reference, or other scholarly reference; it must stay in the body and must never be moved.\n- `bibliography`: a reference-list/bibliography entry; it must stay in place and must never be moved.\n- `body`: ordinary prose or an uncertain block that is not a footnote.\n\nFor each candidate block marked `confidence: review`, assign exactly one role. Keep the block's page, source, and block number. `source` defaults to `primary`; use `source: "secondary"` only for a candidate listed under `secondary_only_candidates`. For `footnote_start` and `footnote_definition`, copy the visible numeric key when present. For `footnote_continuation`, provide the key of the footnote it continues. A continuation may appear after ordinary body blocks on the next page; preserve visual order and attach it only when the page image/layout supports that decision. Do not assume that a next-page footnote continuation is at the top of the page. A numeric marker alone is not enough to call something a footnote: if it is a citation or reference, use `citation` or `bibliography`.\n\nA `secondary` footnote candidate means that Paddle found a possible note which Chandra did not expose as a primary footnote block. For such a decision, do not trust Paddle text blindly: inspect the page image, write the final visible note text in `text`, and provide the logical refinement unit filename in `source_file` (for example `chapter_1.md`). This explicit text is required because the deterministic apply stage cannot safely invent a primary block address.\n\nWrite only valid JSON to `footnote_decisions.json` with this shape:\n\n```json\n{{\n  "schema_version": {FOOTNOTE_PREPARE_SCHEMA_VERSION},\n  "decisions": [\n    {{\n      "page": 125,\n      "source": "primary",\n      "block": 8,\n      "role": "footnote_continuation",\n      "key": "36",\n      "confidence": "high"\n    }},\n    {{\n      "page": 126,\n      "source": "secondary",\n      "block": 21,\n      "role": "footnote_start",\n      "key": "37",\n      "source_file": "chapter_1.md",\n      "text": "The final visible footnote text.",\n      "confidence": "high"\n    }}\n  ]\n}}\n```\n\nIf a candidate is genuinely ambiguous, use `role: "review_required"` and explain it in `reason`; do not guess.\n"""
+    prompt = f"""# Footnote review\n\nBook: {book_title}\n\nRead `footnote_subagent_manifest.json` and `footnote_candidates.json`. The local script has selected compact bottom-of-page candidate windows. Review only blocks marked `confidence: review`; blocks marked `confidence: high` are already accepted by the deterministic local rule and do not need a decision. Do not reread or rewrite the whole book. {source_guidance}\n\nCandidate page sidecars:\n{page_text}\n\nUse these meanings strictly:\n- `footnote_start`: the beginning of a real page footnote; it will be moved to the end of its logical chapter.\n- `footnote_continuation`: text continuing a real footnote from an earlier page; it will be joined to that footnote.\n- `footnote_definition`: a complete footnote definition already presented as a note block.\n- `citation`: an in-text citation, quoted source, parenthetical/numeric reference, or other scholarly reference; it must stay in the body and must never be moved.\n- `bibliography`: a reference-list/bibliography entry; it must stay in place and must never be moved.\n- `body`: ordinary prose or an uncertain block that is not a footnote.\n\nFor each candidate block marked `confidence: review`, assign exactly one role. Keep the block's page, source, and block number. `source` defaults to `primary`; use `source: "secondary"` only for a candidate listed under `secondary_only_candidates`. For `footnote_start` and `footnote_definition`, copy the visible numeric key when present. For `footnote_continuation`, provide the key of the footnote it continues. A continuation may appear after ordinary body blocks on the next page; preserve visual order and attach it only when the page image supports that decision. Do not assume that a next-page footnote continuation is at the top of the page. A numeric marker alone is not enough to call something a footnote: if it is a citation or reference, use `citation` or `bibliography`.\n\nWrite only valid JSON to `footnote_decisions.json` with this shape:\n\n```json\n{{\n  "schema_version": {FOOTNOTE_PREPARE_SCHEMA_VERSION},\n  "decisions": [\n    {{\n      "page": 125,\n      "source": "primary",\n      "block": 8,\n      "role": "footnote_continuation",\n      "key": "36",\n      "confidence": "high"\n    }}\n  ]\n}}\n```\n\nIf a candidate is genuinely ambiguous, use `role: "review_required"` and explain it in `reason`; do not guess.\n"""
+    prompt = prompt.replace(
+        "Candidate page sidecars:",
+        "When a `visual:` path is present, open that matching page PNG and use it as the visual authority. "
+        "Do not infer a footnote from the label alone. The report's "
+        "`bottom_detection.suspected_missed_count` is a recall warning: inspect those pages' lower region "
+        "even when no candidate was emitted.\n\nCandidate page sidecars and visual evidence:",
+    )
     prompt += (
         "\n\nFor every secondary-only moved decision, also include "
         "`primary_disposition`: `absent` when the Chandra/refinement text truly "
@@ -1185,14 +1584,6 @@ def validate_footnote_decisions(
         _hashes_current("secondary_sidecar_sha256")
     elif secondary_hashes:
         errors.append("single-OCR candidate report unexpectedly contains secondary OCR files")
-    layout_hashes = report.get("layout_prediction_sha256", {})
-    if layout_hashes:
-        _hashes_current("layout_prediction_sha256")
-    elif config is not None and layout_enabled(config) and source_kind == "ocr":
-        errors.append(
-            "PP-DocLayout is enabled but the candidate report contains no layout predictions"
-        )
-
     if errors:
         result = {
             "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,

@@ -12,7 +12,10 @@ from pathlib import Path
 from typing import Any, Mapping, Optional
 
 
-DEFAULT_LOCAL_CREDENTIALS_DIR = ".secrets"
+_DEFAULT_LOCAL_DIR_NAME = ".secrets"
+# Keep the historical public constant for callers, but make it explicit that
+# this is a directory name rather than a secret value.
+DEFAULT_LOCAL_CREDENTIALS_DIR = Path(_DEFAULT_LOCAL_DIR_NAME).name
 
 
 def local_credentials_dir(config: Optional[Mapping[str, Any]] = None) -> Path:
@@ -37,18 +40,6 @@ def local_credential_path(
     return local_credentials_dir(config) / candidate
 
 
-def read_local_secret(
-    config: Optional[Mapping[str, Any]], filename: str
-) -> Optional[str]:
-    """Read a one-line local secret, returning ``None`` when absent."""
-    path = local_credential_path(config, filename)
-    try:
-        value = path.read_text(encoding="utf-8").strip()
-    except (OSError, UnicodeError):
-        return None
-    return value or None
-
-
 def read_local_json(
     config: Optional[Mapping[str, Any]], filename: str
 ) -> Optional[dict[str, Any]]:
@@ -66,5 +57,4 @@ __all__ = [
     "local_credential_path",
     "local_credentials_dir",
     "read_local_json",
-    "read_local_secret",
 ]

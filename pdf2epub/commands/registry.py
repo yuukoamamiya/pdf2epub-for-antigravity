@@ -4,6 +4,7 @@ from pdf2epub.commands.entities import (
     extract_entities_command,
     extract_entities_validate_command,
 )
+from pdf2epub.commands.diagnostics import doctor_command, status_command
 from pdf2epub.commands.glossary import glossary_candidates_command
 from pdf2epub.commands.html import (
     build_html_epub_command,
@@ -32,7 +33,6 @@ from pdf2epub.commands.ocr import (
     ocr_correct_command,
     ocr_correct_validate_command,
     ocr_consensus_rebuild_command,
-    layout_detect_command,
     ocr_pages_command,
 )
 from pdf2epub.commands.pdf import build_epub_command
@@ -59,6 +59,28 @@ from pdf2epub.commands.toc import (
 
 def register_command_parsers(subparsers) -> None:
     """Register every workflow command on an argparse subparser collection."""
+
+    status_parser = subparsers.add_parser(
+        "status",
+        help="Show the read-only stage and checkpoint status for the current book",
+    )
+    status_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print machine-readable JSON instead of a human-readable summary",
+    )
+    status_parser.set_defaults(func=status_command)
+
+    doctor_parser = subparsers.add_parser(
+        "doctor",
+        help="Check configuration, OCR backends, dependencies, and local paths",
+    )
+    doctor_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print machine-readable JSON instead of a human-readable summary",
+    )
+    doctor_parser.set_defaults(func=doctor_command)
 
     check_ready_parser = subparsers.add_parser(
         "check-ready",
@@ -161,35 +183,6 @@ def register_command_parsers(subparsers) -> None:
         ),
     )
     ocr_consensus_rebuild_parser.set_defaults(func=ocr_consensus_rebuild_command)
-
-    layout_detect_parser = subparsers.add_parser(
-        "layout-detect",
-        help="Run independent PP-DocLayout page-region detection",
-        description=(
-            "Generate PP-DocLayout-L region boxes as layout evidence. "
-            "This is separate from secondary OCR and does not produce text."
-        ),
-    )
-    layout_detect_parser.add_argument(
-        "-i", "--input",
-        help="Path to PDF file (default: config/input PDF or output/input_original.pdf)",
-    )
-    layout_detect_parser.add_argument(
-        "--resume",
-        action="store_true",
-        help="Reuse current per-page layout predictions",
-    )
-    layout_detect_parser.add_argument(
-        "--start-page",
-        type=int,
-        help="First page to detect (default: 1)",
-    )
-    layout_detect_parser.add_argument(
-        "--end-page",
-        type=int,
-        help="Last page to detect (default: all pages)",
-    )
-    layout_detect_parser.set_defaults(func=layout_detect_command)
 
     ocr_correct_parser = subparsers.add_parser(
         "ocr-correct",
@@ -333,7 +326,16 @@ def register_command_parsers(subparsers) -> None:
         "--bottom-ratio",
         type=float,
         default=None,
-        help="Minimum normalized top position for a bottom-page candidate (default: 0.64)",
+        help="Normalized lower-edge threshold for the bottom band (default: 0.64)",
+    )
+    footnote_prepare_parser.add_argument(
+        "--bottom-intersection-ratio",
+        type=float,
+        default=None,
+        help=(
+            "Minimum fraction of a block's height intersecting the bottom band "
+            "(default: 0.25)"
+        ),
     )
     footnote_prepare_parser.add_argument(
         "--context-blocks",

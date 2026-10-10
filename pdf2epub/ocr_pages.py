@@ -5,12 +5,10 @@ This module handles OCR at the page level, producing individual markdown files
 for each page. The pages can later be aggregated into chapters.
 
 Supports multiple backends:
-- mistral: Mistral OCR API
-- vertex: Vertex AI Mistral OCR
-- vllm: VLLM-based OCR
+- vllm: VLLM-based OCR (legacy compatibility)
 - azure: Azure Document Intelligence (for Japanese vertical text)
 - vision: Google Cloud Vision API (for Japanese vertical text)
-- paddle: isolated GPU PaddleOCR worker (for secondary OCR consensus)
+- chandra: the default multimodal page OCR backend
 """
 
 import json
@@ -40,7 +38,6 @@ from .ocr_consensus import (
     write_page_consensus,
 )
 from .workflow_contracts import atomic_write_text, sha256_file
-from .local_credentials import read_local_secret
 
 # Configure logger
 logger = configure_logging()
@@ -50,7 +47,6 @@ _backend_clients = {}
 
 SECONDARY_PREFLIGHT_SCHEMA_VERSION = 1
 DEFAULT_SECONDARY_MAX_ESTIMATED_SECONDS = 60 * 60
-DEFAULT_PADDLE_ESTIMATED_SECONDS_PER_PAGE = 5.0
 DEFAULT_SECONDARY_ESTIMATED_SECONDS_PER_PAGE = 2.0
 DEFAULT_PRIMARY_OCR_BACKEND = "chandra"
 
@@ -83,9 +79,8 @@ def ocr_pdf_chunk(
     image_counter: int = 0,
     max_retries: int = 5,
     initial_backoff: float = 4.0,
-    # This legacy chunk adapter is retained for the historical Vertex/Mistral
-    # callers. The user-facing pagewise workflow defaults to Chandra below.
-    backend: str = "vertex",
+    # This legacy chunk adapter is retained for the historical VLLM caller.
+    backend: str = "chandra",
     api_key: str = None,
     base_url: str = None,
     config: Dict = None
@@ -93,23 +88,23 @@ def ocr_pdf_chunk(
     """OCR a PDF chunk using selected backend.
 
     Routes to the appropriate backend based on configuration.
-    Tuple-based adapters are used for vertex, mistral, vllm, azure, and vision.
+    The VLLM adapter is the only remaining chunk-shaped compatibility path.
     Chandra uses :func:`ocr_pdf_page` because it returns richer page artifacts.
 
     Args:
         pdf_bytes: PDF content as bytes
-        session: Authorized session for Vertex AI (required for vertex backend)
-        project_id: GCP project ID (required for vertex backend)
-        location: GCP location (required for vertex backend)
+        session: Retained for compatibility with older callers.
+        project_id: Retained for compatibility with older callers.
+        location: Retained for compatibility with older callers.
         chunk_info: Description of the chunk being processed
         images_dir: Directory to save extracted images
         page_number: Page number for image naming
         image_counter: Starting counter for image numbering
         max_retries: Maximum number of retry attempts for 429 errors
         initial_backoff: Initial backoff time in seconds
-        backend: OCR backend to use ('vertex', 'mistral', 'vllm', 'azure', 'vision')
-        api_key: API key (for mistral backend)
-        base_url: API base URL (for mistral backend)
+        backend: OCR backend to use ('vllm')
+        api_key: Retained for compatibility with older callers.
+        base_url: Retained for compatibility with older callers.
         config: Configuration dict (required for azure/vision backends)
 
     Returns:
@@ -118,12 +113,6 @@ def ocr_pdf_chunk(
     backend = str(backend or "").strip().lower()
     spec = get_backend_spec(backend)
     if spec.chunk_processor is not None:
-        if backend == "mistral" and not api_key:
-            raise ValueError("Mistral API key is required for mistral backend")
-        if backend == "vertex" and (
-            not session or not project_id or not location
-        ):
-            raise ValueError("session, project_id, and location are required for vertex backend")
         if backend == "vllm" and config is None:
             from .utils.common import load_config
             config = load_config()
@@ -137,23 +126,7 @@ def ocr_pdf_chunk(
             "max_retries": max_retries,
             "initial_backoff": initial_backoff,
         }
-        if backend == "mistral":
-            kwargs.update(api_key=api_key)
-            if base_url:
-                kwargs["base_url"] = base_url
-            mistral_config = _secondary_ocr_config(config or {}, "mistral")
-            if "model" in mistral_config:
-                kwargs["model"] = mistral_config["model"]
-            if "include_image_base64" in mistral_config:
-                kwargs["include_image_base64"] = bool(
-                    mistral_config["include_image_base64"]
-                )
-            if "request_timeout" in mistral_config:
-                kwargs["request_timeout"] = mistral_config["request_timeout"]
-        elif backend == "vertex":
-            kwargs.update(session=session, project_id=project_id, location=location)
-        else:
-            kwargs["config"] = config
+        kwargs["config"] = config
         return spec.chunk_processor(**kwargs)
 
     if spec.image_page_processor is not None:
@@ -195,15 +168,6 @@ def _process_image_page_result(
     """Run an image backend while retaining its optional layout artifacts."""
     global _backend_clients
     zoom_factor = config.get("vision_ocr_settings", {}).get("zoom_factor", 1.0)
-    if spec.name == "paddle":
-        ocr_config = config.get("ocr", {}) if isinstance(config, dict) else {}
-        backends = ocr_config.get("backends", {}) if isinstance(ocr_config, dict) else {}
-        paddle_config = backends.get("paddle", {}) if isinstance(backends, dict) else {}
-        if isinstance(paddle_config, dict) and paddle_config.get("dpi"):
-            try:
-                zoom_factor = max(1.0, float(paddle_config["dpi"]) / 72.0)
-            except (TypeError, ValueError):
-                pass
     img_bytes = pdf_to_image(pdf_bytes, zoom_factor)
     if spec.name not in _backend_clients:
         _backend_clients[spec.name] = spec.init_client(config)
@@ -273,37 +237,6 @@ def ocr_pdf_page(
         return _process_image_page_result(
             spec, pdf_bytes, config, images_dir, page_number, image_counter
         )
-
-    # Mistral's OCR endpoint accepts a PDF document rather than a rendered
-    # image.  The secondary pass reaches this function without the primary
-    # command's credential arguments, so resolve the configured credential at
-    # the page boundary before using the shared chunk adapter.
-    if backend == "mistral":
-        resolved_api_key, resolved_base_url = _resolve_mistral_credentials(
-            config or {}, api_key=api_key, base_url=base_url
-        )
-        if not resolved_api_key:
-            raise ValueError(
-                "Mistral API key is required for the Mistral OCR backend; "
-                "put it in .secrets/mistral_api_key or use the legacy environment fallback"
-            )
-        tuple_result = ocr_pdf_chunk(
-            pdf_bytes=pdf_bytes,
-            session=session,
-            project_id=project_id,
-            location=location,
-            chunk_info=chunk_info,
-            images_dir=images_dir,
-            page_number=page_number,
-            image_counter=image_counter,
-            max_retries=max_retries,
-            initial_backoff=initial_backoff,
-            backend=backend,
-            api_key=resolved_api_key,
-            base_url=resolved_base_url,
-            config=config,
-        )
-        return OCRPageResult.from_tuple(tuple_result, backend=backend)
 
     tuple_result = ocr_pdf_chunk(
         pdf_bytes=pdf_bytes,
@@ -501,25 +434,6 @@ def _positive_float(value: Any, default: float) -> float:
     return parsed if parsed > 0 else default
 
 
-def _load_secondary_preflight(output_dir: Path) -> Dict[str, Any]:
-    try:
-        value = json.loads(
-            (Path(output_dir) / "ocr_secondary_preflight.json").read_text(
-                encoding="utf-8"
-            )
-        )
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        return {}
-    return value if isinstance(value, dict) else {}
-
-
-def _write_secondary_preflight(
-    output_dir: Path, report: Dict[str, Any]
-) -> None:
-    """Persist the single report that explains why secondary OCR may run."""
-    _atomic_write_json(output_dir / "ocr_secondary_preflight.json", report)
-
-
 def preflight_secondary_ocr(
     output_dir: Path,
     total_pages: int,
@@ -529,11 +443,9 @@ def preflight_secondary_ocr(
 ) -> Dict[str, Any]:
     """Check secondary OCR policy before any primary page worker starts.
 
-    This check intentionally does not initialize a model. It catches the
-    known Paddle CPU trap from configuration alone and records a conservative
-    runtime estimate before Chandra spends time producing page output. The
-    actual backend/runtime preflight still runs immediately before the
-    secondary pass.
+    This check intentionally does not initialize a model. It records a
+    conservative runtime estimate before the primary OCR spends time producing
+    page output.
     """
     backend = secondary_backend_name(config)
     if secondary_ocr_enabled(config) and not backend:
@@ -561,46 +473,19 @@ def preflight_secondary_ocr(
 
     backend_settings = _secondary_ocr_config(config, backend)
     policy = _secondary_performance_config(config, backend)
-    requested_device = str(backend_settings.get("device") or "").strip().lower()
-    if backend == "paddle" and requested_device in {"", "gpu"}:
-        requested_device = requested_device or "gpu:0"
-
     report: Dict[str, Any] = {
         "schema_version": SECONDARY_PREFLIGHT_SCHEMA_VERSION,
         "status": "ready",
         "evidence_mode": "two_ocr",
         "backend": backend,
-        "device_requested": requested_device or None,
         "total_pages": int(total_pages),
         "policy": "abort_until_explicit_confirmation",
         "requires_confirmation": False,
     }
 
-    if backend == "paddle" and not requested_device.startswith("gpu:"):
-        report.update(
-            {
-                "status": "blocked",
-                "reason": "cpu_device_not_allowed",
-                "error": (
-                    "Paddle secondary OCR is GPU-only; CPU fallback is disabled. "
-                    "Set ocr.backends.paddle.device to gpu:0 or explicitly disable "
-                    "ocr.secondary and rerun as single OCR."
-                ),
-            }
-        )
-        _atomic_write_json(output_dir / "ocr_secondary_preflight.json", report)
-        raise RuntimeError(
-            f"Secondary OCR preflight blocked: {report['error']} "
-            "See ocr_secondary_preflight.json."
-        )
-
-    default_seconds = (
-        DEFAULT_PADDLE_ESTIMATED_SECONDS_PER_PAGE
-        if backend == "paddle"
-        else DEFAULT_SECONDARY_ESTIMATED_SECONDS_PER_PAGE
-    )
     seconds_per_page = _positive_float(
-        policy.get("estimated_seconds_per_page"), default_seconds
+        policy.get("estimated_seconds_per_page"),
+        DEFAULT_SECONDARY_ESTIMATED_SECONDS_PER_PAGE,
     )
     max_estimated_seconds = _positive_float(
         policy.get("max_estimated_seconds", DEFAULT_SECONDARY_MAX_ESTIMATED_SECONDS),
@@ -609,8 +494,6 @@ def preflight_secondary_ocr(
     try:
         workers = max(1, int(backend_settings.get("max_workers", 1)))
     except (TypeError, ValueError):
-        workers = 1
-    if backend == "paddle":
         workers = 1
     estimated_seconds = float(total_pages) * seconds_per_page / workers
     report.update(
@@ -651,127 +534,6 @@ def preflight_secondary_ocr(
         )
     _atomic_write_json(output_dir / "ocr_secondary_preflight.json", report)
     return report
-
-
-def _resolve_mistral_credentials(
-    config: Dict[str, Any],
-    *,
-    api_key: Optional[str] = None,
-    base_url: Optional[str] = None,
-) -> Tuple[Optional[str], str]:
-    """Resolve Mistral credentials without placing secrets in checkpoints."""
-    settings = _secondary_ocr_config(config, "mistral")
-    credentials = config.get("credentials", {}) if isinstance(config, dict) else {}
-    providers = credentials.get("providers", {}) if isinstance(credentials, dict) else {}
-    provider = providers.get("mistral", {}) if isinstance(providers, dict) else {}
-    if not isinstance(provider, dict):
-        provider = {}
-
-    env_name = str(settings.get("api_key_env") or "MISTRAL_API_KEY").strip()
-    local_key = read_local_secret(
-        config,
-        str(settings.get("api_key_file") or "mistral_api_key"),
-    )
-    resolved_key = (
-        api_key
-        or settings.get("api_key")
-        or provider.get("api_key")
-        or local_key
-        or os.getenv(env_name)
-    )
-    resolved_base_url = str(
-        base_url
-        or settings.get("base_url")
-        or provider.get("base_url")
-        or "https://api.mistral.ai/v1"
-    ).rstrip("/")
-    return (str(resolved_key).strip() if resolved_key else None), resolved_base_url
-
-
-def _preflight_secondary_backend(
-    output_dir: Path,
-    backend: str,
-    config: Dict[str, Any],
-) -> None:
-    """Fail before page workers when a configured secondary backend is unusable."""
-
-    def write_runtime_report(diagnostics: Dict[str, Any]) -> None:
-        report = _load_secondary_preflight(output_dir)
-        report.update(
-            {
-                key: value
-                for key, value in diagnostics.items()
-                if key != "status"
-            }
-        )
-        report["runtime_preflight"] = diagnostics
-        report["runtime_status"] = diagnostics.get("status")
-        if diagnostics.get("status") != "ready":
-            report["status"] = "runtime_failed"
-        _write_secondary_preflight(output_dir, report)
-
-    if backend == "mistral":
-        settings = _secondary_ocr_config(config, "mistral")
-        api_key, base_url = _resolve_mistral_credentials(config)
-        diagnostics = {
-            "status": "ready" if api_key else "failed",
-            "backend": "mistral",
-            "base_url": base_url,
-            "model": settings.get("model", "mistral-ocr-latest"),
-            "credential_source": (
-                "configured" if settings.get("api_key") else
-                "environment_or_credentials" if api_key else None
-            ),
-        }
-        if not api_key:
-            diagnostics["error"] = (
-                "Mistral API key is missing; put it in .secrets/mistral_api_key "
-                "or use the legacy environment fallback"
-            )
-        write_runtime_report(diagnostics)
-        if not api_key:
-            raise RuntimeError(
-                "Mistral OCR secondary backend preflight failed: "
-                f"{diagnostics['error']}. See ocr_secondary_preflight.json."
-            )
-        return
-
-    if backend != "paddle":
-        return
-    from .ocr.backends.paddle import preflight
-
-    # A previous OCR invocation may have left a proxy in the process-level
-    # cache (for example when a caller resumed from a failed command). Close it
-    # before starting the next on-demand worker.
-    previous = _backend_clients.pop(backend, None)
-    if previous is not None:
-        close = getattr(previous, "close", None)
-        if callable(close):
-            close()
-    diagnostics, client = preflight(config)
-    write_runtime_report(diagnostics)
-    if diagnostics.get("status") != "ready" or client is None:
-        detail = diagnostics.get("error") or "backend initialization failed"
-        raise RuntimeError(
-            "PaddleOCR secondary backend preflight failed: "
-            f"{detail}. See ocr_secondary_preflight.json for runtime versions; "
-            "use an isolated OCR environment or disable the secondary backend."
-        )
-    # Reuse the initialized client so preflight does not download models or
-    # trigger the same platform-specific initialization twice.
-    _backend_clients[backend] = client
-
-
-def _close_secondary_backend(backend: str) -> None:
-    """Close an on-demand secondary worker after the page batch finishes."""
-    if backend != "paddle":
-        return
-    client = _backend_clients.pop(backend, None)
-    if client is None:
-        return
-    close = getattr(client, "close", None)
-    if callable(close):
-        close()
 
 
 def run_secondary_ocr_consensus(
@@ -831,12 +593,6 @@ def run_secondary_ocr_consensus(
         secondary_workers = max(1, int(secondary_workers))
     except (TypeError, ValueError):
         secondary_workers = 1
-    if secondary_backend == "paddle" and secondary_workers != 1:
-        logger.warning(
-            "Paddle secondary OCR uses one request stream per GPU worker; "
-            "forcing max_workers=1"
-        )
-        secondary_workers = 1
     try:
         secondary_max_retries = max(1, int(backend_settings.get("max_retries", 5)))
     except (TypeError, ValueError):
@@ -847,23 +603,6 @@ def run_secondary_ocr_consensus(
         )
     except (TypeError, ValueError):
         secondary_initial_backoff = 4.0
-
-    _preflight_secondary_backend(output_dir, secondary_backend, config)
-
-    # Reserve the entire secondary OCR page budget before starting the worker
-    # pool.  This is intentionally Mistral-specific: its account allowance is
-    # shared outside this project, so a local ledger is the only project-level
-    # way to fail closed before a request is sent.
-    if secondary_backend == "mistral":
-        from .mistral_budget import reserve_pages
-
-        reserve_pages(
-            config,
-            total_pages,
-            source_sha256=source_sha256,
-            secondary_config_sha256=secondary_config_hash(config),
-            output_dir=output_dir,
-        )
 
     def process_page(page_number: int) -> Dict[str, Any]:
         name = f"page_{page_number:03d}.md"
@@ -916,25 +655,22 @@ def run_secondary_ocr_consensus(
 
     records: Dict[str, Any] = {}
     failed_pages: List[int] = []
-    try:
-        with ThreadPoolExecutor(max_workers=secondary_workers) as executor:
-            futures = {
-                executor.submit(process_page, page_number): page_number
-                for page_number in range(1, total_pages + 1)
-            }
-            for future in as_completed(futures):
-                result = future.result()
-                page_number = result["page"]
-                name = f"page_{page_number:03d}.md"
-                if result["error"]:
-                    failed_pages.append(page_number)
-                    logger.error(
-                        f"Secondary OCR failed for page {page_number}: {result['error']}"
-                    )
-                else:
-                    records[name] = result["record"]
-    finally:
-        _close_secondary_backend(secondary_backend)
+    with ThreadPoolExecutor(max_workers=secondary_workers) as executor:
+        futures = {
+            executor.submit(process_page, page_number): page_number
+            for page_number in range(1, total_pages + 1)
+        }
+        for future in as_completed(futures):
+            result = future.result()
+            page_number = result["page"]
+            name = f"page_{page_number:03d}.md"
+            if result["error"]:
+                failed_pages.append(page_number)
+                logger.error(
+                    f"Secondary OCR failed for page {page_number}: {result['error']}"
+                )
+            else:
+                records[name] = result["record"]
 
     manifest = {
         "schema_version": OCR_CONSENSUS_SCHEMA_VERSION,
@@ -1015,8 +751,8 @@ def ocr_full_book_pagewise(
         start_page: First page to process (default: 1)
         end_page: Last page to process (default: all pages)
         backend: OCR backend to use
-        api_key: API key for Mistral backend
-        base_url: Base URL for Mistral backend
+        api_key: Retained for compatibility with legacy callers.
+        base_url: Retained for compatibility with legacy callers.
         resume: Resume from previous progress
         config: Configuration dict (for retry settings)
         max_workers: Number of parallel OCR requests (default: 5)
@@ -1370,31 +1106,6 @@ def ocr_full_book_pagewise(
             resume=resume,
         )
 
-    layout_summary: Dict[str, Any] = {
-        "enabled": False,
-        "status": "disabled",
-        "failed_pages": [],
-    }
-    # PP-DocLayout is an independent evidence pass.  It runs only after the
-    # visual OCR page set is complete and never participates in OCR consensus.
-    from .layout_detection import layout_enabled, run_layout_detection
-
-    if layout_enabled(config) and not failed_pages and not missing_pages and not unacknowledged_empty:
-        layout_manifest = run_layout_detection(
-            ocr_pdf,
-            output_dir,
-            config=config,
-            start_page=1,
-            end_page=total_pages,
-            resume=resume,
-        )
-        layout_summary = {
-            "enabled": True,
-            "status": layout_manifest.get("status"),
-            "failed_pages": layout_manifest.get("failed_pages", []),
-            "manifest": layout_manifest,
-        }
-
     logger.info(f"\n=== Page-wise OCR Summary ===")
     logger.info(
         f"Total pages processed: {len(progress['pages_processed'])}/{total_pages}"
@@ -1429,14 +1140,6 @@ def ocr_full_book_pagewise(
                 f"{len(secondary_summary.get('review_pages', []))} page(s) need visual review"
             )
 
-    if layout_summary.get("enabled"):
-        if layout_summary.get("failed_pages") or layout_summary.get("status") != "complete":
-            logger.error(
-                "PP-DocLayout evidence is incomplete; footnote preparation must stop"
-            )
-        else:
-            logger.info("PP-DocLayout layout evidence complete")
-
     logger.info(f"Output directory: {pages_dir}")
     return {
         "total_pages": total_pages,
@@ -1449,9 +1152,5 @@ def ocr_full_book_pagewise(
         "secondary_review_pages": secondary_summary.get("review_pages", []),
         "secondary_failed_pages": secondary_summary.get("failed_pages", []),
         "secondary_preflight": secondary_preflight,
-        "layout_detection_enabled": bool(layout_summary.get("enabled")),
-        "layout_detection_status": layout_summary.get("status"),
-        "layout_detection_failed_pages": layout_summary.get("failed_pages", []),
-        "layout_detection_manifest": layout_summary.get("manifest"),
         "progress_file": progress_file,
     }

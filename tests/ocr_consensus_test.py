@@ -74,23 +74,6 @@ def test_consensus_flags_one_missing_line_even_when_text_is_long():
     assert "non-empty line counts differ" in report["reasons"]
 
 
-def test_chandra_paddle_ignores_line_and_global_numeric_layout_differences():
-    config = {"ocr": {"consensus": {}}}
-    body = " ".join(["shared prose"] * 120)
-
-    report = compare_ocr_texts(
-        f"{body} 2024\n{body}",
-        f"{body}\n{body} 2025",
-        config,
-        primary_backend="chandra",
-        secondary_backend="paddle",
-    )
-
-    assert "non-empty line counts differ" not in report["reasons"]
-    assert "numeric markers differ" not in report["reasons"]
-    assert report["diagnostics"]["heterogeneous_layout_pair"] is True
-
-
 def test_layout_disagreement_is_evidence_not_page_text_block(tmp_path: Path):
     record = write_page_consensus(
         tmp_path,
@@ -98,7 +81,7 @@ def test_layout_disagreement_is_evidence_not_page_text_block(tmp_path: Path):
         primary_text="Body text",
         secondary_text="Body text",
         primary_backend="chandra",
-        secondary_backend="paddle",
+        secondary_backend="vision",
         config={"ocr": {"consensus": {}}},
         primary_layout={
             "blocks": [
@@ -169,40 +152,22 @@ def test_common_ocr_risk_flags_anomalously_sparse_internal_page():
 
 def test_secondary_ocr_switch_controls_consensus_and_keeps_legacy_alias():
     disabled = {
-        "ocr": {"secondary": {"enabled": False, "backend": "paddle"}}
+        "ocr": {"secondary": {"enabled": False, "backend": "vision"}}
     }
     enabled = {
-        "ocr": {"secondary": {"enabled": True, "backend": "paddle"}}
+        "ocr": {"secondary": {"enabled": True, "backend": "vision"}}
     }
     missing_backend = {"ocr": {"secondary": {"enabled": True}}}
-    legacy = {"ocr": {"secondary_backend": "paddle"}}
+    legacy = {"ocr": {"secondary_backend": "vision"}}
 
     assert secondary_ocr_enabled(disabled) is False
     assert secondary_backend_name(disabled) is None
     assert secondary_ocr_enabled(enabled) is True
-    assert secondary_backend_name(enabled) == "paddle"
+    assert secondary_backend_name(enabled) == "vision"
     assert secondary_ocr_enabled(missing_backend) is True
     assert secondary_backend_name(missing_backend) is None
     assert secondary_ocr_enabled(legacy) is True
-    assert secondary_backend_name(legacy) == "paddle"
-
-
-def test_secondary_preflight_blocks_paddle_cpu_before_primary_pages(tmp_path: Path):
-    config = {
-        "ocr": {
-            "secondary": {"enabled": True, "backend": "paddle"},
-            "backends": {"paddle": {"device": "cpu"}},
-        }
-    }
-
-    with pytest.raises(RuntimeError, match="GPU-only"):
-        preflight_secondary_ocr(tmp_path, 674, config)
-
-    report = json.loads(
-        (tmp_path / "ocr_secondary_preflight.json").read_text(encoding="utf-8")
-    )
-    assert report["status"] == "blocked"
-    assert report["reason"] == "cpu_device_not_allowed"
+    assert secondary_backend_name(legacy) == "vision"
 
 
 def test_secondary_preflight_requires_explicit_slow_run_confirmation(tmp_path: Path):
@@ -210,13 +175,12 @@ def test_secondary_preflight_requires_explicit_slow_run_confirmation(tmp_path: P
         "ocr": {
             "secondary": {
                 "enabled": True,
-                "backend": "paddle",
+                "backend": "vision",
                 "performance": {
                     "estimated_seconds_per_page": 20,
                     "max_estimated_seconds": 100,
                 },
             },
-            "backends": {"paddle": {"device": "gpu:0"}},
         }
     }
 
@@ -311,7 +275,7 @@ def test_rebuild_consensus_reuses_existing_page_artifacts(tmp_path: Path):
     )
     config = {
         "ocr": {
-            "secondary": {"enabled": True, "backend": "paddle"},
+            "secondary": {"enabled": True, "backend": "vision"},
             "consensus": {"common_miss": {"sample_every": 0}},
         }
     }
@@ -323,103 +287,3 @@ def test_rebuild_consensus_reuses_existing_page_artifacts(tmp_path: Path):
     manifest = load_consensus_manifest(output_dir)
     assert manifest["schema_version"] == 4
     assert manifest["rebuild_mode"] == "offline_existing_artifacts"
-
-
-def test_paddle_preflight_writes_diagnostics_before_workers(monkeypatch, tmp_path: Path):
-    pdf_path = tmp_path / "input.pdf"
-    _make_pdf(pdf_path, page_count=1)
-    pages_dir = tmp_path / "pages"
-    pages_dir.mkdir()
-    (pages_dir / "page_001.md").write_text("text", encoding="utf-8")
-
-    monkeypatch.setattr(
-        "pdf2epub.ocr.backends.paddle.preflight",
-        lambda _config: (
-            {
-                "status": "failed",
-                "error_type": "RuntimeError",
-                "error": "OneDNN operator is unavailable",
-                "paddlepaddle_distribution": "3.0.0",
-                "paddleocr_distribution": "3.0.0",
-                "protobuf_distribution": "7.0.0",
-            },
-            None,
-        ),
-    )
-
-    config = {
-        "ocr": {
-            "backend": "chandra",
-            "secondary": {"enabled": True, "backend": "paddle"},
-        }
-    }
-    with pytest.raises(RuntimeError, match="preflight failed"):
-        run_secondary_ocr_consensus(
-            ocr_pdf=pdf_path,
-            output_dir=tmp_path,
-            total_pages=1,
-            primary_backend="chandra",
-            config=config,
-            max_workers=1,
-            resume=False,
-        )
-
-    diagnostics = json.loads(
-        (tmp_path / "ocr_secondary_preflight.json").read_text(encoding="utf-8")
-    )
-    assert diagnostics["error_type"] == "RuntimeError"
-    assert diagnostics["protobuf_distribution"] == "7.0.0"
-
-
-def test_paddle_worker_is_closed_after_secondary_batch(monkeypatch, tmp_path: Path):
-    pdf_path = tmp_path / "input.pdf"
-    _make_pdf(pdf_path, page_count=1)
-    output_dir = tmp_path / "output"
-    pages_dir = output_dir / "pages"
-    pages_dir.mkdir(parents=True)
-    (pages_dir / "page_001.md").write_text("primary text\n", encoding="utf-8")
-
-    class FakeWorker:
-        def __init__(self):
-            self.closed = False
-
-        def close(self):
-            self.closed = True
-
-    worker = FakeWorker()
-    monkeypatch.setattr(
-        "pdf2epub.ocr.backends.paddle.preflight",
-        lambda _config: (
-            {
-                "status": "ready",
-                "worker_mode": "subprocess",
-                "device_actual": "gpu:0",
-            },
-            worker,
-        ),
-    )
-    monkeypatch.setattr(
-        "pdf2epub.ocr_pages.ocr_pdf_page",
-        lambda *args, **kwargs: OCRPageResult(
-            markdown="secondary text\n", backend="paddle"
-        ),
-    )
-
-    summary = run_secondary_ocr_consensus(
-        ocr_pdf=pdf_path,
-        output_dir=output_dir,
-        total_pages=1,
-        primary_backend="chandra",
-        config={
-            "ocr": {
-                "secondary": {"enabled": True, "backend": "paddle"},
-                "backends": {"paddle": {"max_workers": 4}},
-                "consensus": {},
-            }
-        },
-        max_workers=1,
-        resume=False,
-    )
-
-    assert summary["failed_pages"] == []
-    assert worker.closed is True

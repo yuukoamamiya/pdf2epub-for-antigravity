@@ -47,6 +47,7 @@ def test_command_registry_registers_every_workflow_command():
         "build-html-epub",
         "build-novel-epub",
         "check-ready",
+        "doctor",
         "extract-entities",
         "extract-entities-validate",
         "footnote-apply",
@@ -56,7 +57,6 @@ def test_command_registry_registers_every_workflow_command():
         "illustration-prepare",
         "illustration-validate",
         "glossary-candidates",
-        "layout-detect",
             "html-prepare",
             "html-skeleton-retry",
             "html-skeleton-restore",
@@ -80,6 +80,7 @@ def test_command_registry_registers_every_workflow_command():
         "translate-toc",
         "translate-toc-validate",
         "translate-validate",
+        "status",
     }
     assert all(
         subparser.get_default("func") is not None

@@ -6,7 +6,12 @@ import pytest
 from PIL import Image
 
 from pdf2epub.ocr.artifacts import OCRPageResult
-from pdf2epub.ocr.backends.chandra import ChandraClient, layout_to_markdown, materialize_layout
+from pdf2epub.ocr.backends.chandra import (
+    ChandraClient,
+    OCR_LAYOUT_PROMPT,
+    layout_to_markdown,
+    materialize_layout,
+)
 from pdf2epub.ocr_pages import ocr_full_book_pagewise, save_page_artifacts
 
 
@@ -65,6 +70,12 @@ def test_layout_to_markdown_preserves_footnote_semantics_and_image_boundaries():
     assert "<sup>2</sup>" in markdown
     assert "Generated description" not in markdown
     assert "Printed caption" in markdown
+
+
+def test_chandra_prompt_preserves_separate_footnote_blocks():
+    assert "Keep a visually separated bottom-of-page note" in OCR_LAYOUT_PROMPT
+    assert "A continuation may have no leading number" in OCR_LAYOUT_PROMPT
+    assert "page footer" in OCR_LAYOUT_PROMPT
 
 
 def test_save_page_artifacts_writes_all_views_and_raw_layout(tmp_path):

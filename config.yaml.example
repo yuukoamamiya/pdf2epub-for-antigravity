@@ -69,11 +69,9 @@ credentials:
 ocr:
   backend: chandra
   furigana_mode: attach # 日语振假名: attach / remove / ruby
-  # 可选的第二套 OCR。开启后，ocr-pages 会按需启动独立 GPU Paddle worker，
-  # 逐页生成结果和共识报告；任务结束后 worker 会立即关闭。
+  # 可选的第二套 OCR。开启后逐页生成结果和共识报告，并把差异交给 Subagent 复核。
   secondary:
     enabled: false
-    backend: paddle
     # 双 OCR 会在第 1 页前估算总耗时；超过此阈值时先暂停，不会静默退回单 OCR。
     performance:
       max_estimated_seconds: 3600
@@ -83,19 +81,6 @@ ocr:
       sample_every: 20
       density_ratio: 0.30
       min_neighbor_chars: 800
-  # 独立版面检测：只生成页区域证据，不参与双 OCR 共识，也不直接搬移脚注。
-  # 首次建议只对代表页运行 `layout-detect --start-page ... --end-page ...`。
-  layout:
-    enabled: false
-    backend: pp_doclayout
-    model_name: PP-DocLayout-L
-    model_source: BOS
-    python_executable: .venv-paddle/Scripts/python.exe
-    device: gpu:0
-    dpi: 192
-    layout_nms: true
-    request_timeout: 300
-    worker_startup_timeout: 300
   backends:
     chandra:
       base_url: https://chandra.shenshei.fans/v1
@@ -107,23 +92,14 @@ ocr:
       credentials_file: chandra-access.json
       request_timeout: 300
       max_retries: 6
-    paddle:
-      # Paddle/PaddleOCR 只安装在这个独立环境中，主项目解释器不会加载它们。
-      python_executable: .venv-paddle/Scripts/python.exe
-      # GPU-only：未检测到 CUDA 或无法使用 gpu:0 时，ocr-pages 直接失败。
-      device: gpu:0
-      lang: en
-      dpi: 192
-      use_doc_orientation_classify: true
-      use_doc_unwarping: true
-      use_textline_orientation: true
-      max_workers: 1
-      request_timeout: 300
-      worker_startup_timeout: 300
 
 # 脚注候选的本地高置信度接受策略；false 时扫描/OCR 和原生文字 PDF 都交给 Subagent 复核。
 footnotes:
-  auto_accept: true
+  auto_accept: false
+  # The block lower edge must enter this bottom band, and at least this share
+  # of the block height must intersect the band.
+  bottom_ratio: 0.64
+  bottom_intersection_ratio: 0.25
   # 原生文字 PDF 的字号证据门槛；只影响 native layout 候选。
   native_max_font_ratio: 0.88
 

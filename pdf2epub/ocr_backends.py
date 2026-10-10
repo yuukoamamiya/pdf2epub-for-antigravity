@@ -1,458 +1,21 @@
+"""Legacy chunk-shaped adapter for the optional local VLLM backend.
+
+The normal page workflow uses the registered page backends directly. This
+compatibility adapter is retained only for callers that still pass a PDF
+chunk through the historical VLLM interface.
 """
-OCR backend implementations for Mistral and Vertex AI.
-"""
+
+from __future__ import annotations
 
 import base64
-import time
-import requests
+import io
+import re
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
-from google.oauth2 import service_account
-from google.auth.transport.requests import AuthorizedSession
+from typing import Any, Dict, List, Optional, Tuple
+
 from loguru import logger
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, RetryCallState
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
-
-def is_rate_limit_error(exception):
-    """Check if the exception is a rate limit error (HTTP 429)."""
-    if isinstance(exception, requests.exceptions.HTTPError):
-        return exception.response.status_code == 429
-    if isinstance(exception, requests.exceptions.RequestException):
-        return "429" in str(exception)
-    return False
-
-
-def is_retryable_error(exception):
-    """Check if the exception should trigger a retry."""
-    # Rate limit errors (429)
-    if is_rate_limit_error(exception):
-        return True
-    # Other HTTP errors
-    if isinstance(exception, requests.exceptions.HTTPError):
-        status_code = exception.response.status_code
-        # Retry on server errors (5xx) and some client errors
-        return status_code >= 500 or status_code == 429
-    # Network errors
-    if isinstance(exception, (requests.exceptions.ConnectionError,
-                             requests.exceptions.Timeout,
-                             requests.exceptions.RequestException)):
-        return True
-    return False
-
-
-def ocr_pdf_chunk_mistral(
-    pdf_bytes: bytes,
-    api_key: str,
-    chunk_info: str,
-    images_dir: Optional[Path] = None,
-    page_number: int = 0,
-    image_counter: int = 0,
-    max_retries: int = 5,
-    initial_backoff: float = 4.0,
-    base_url: str = "https://api.mistral.ai/v1",
-    model: str = "mistral-ocr-latest",
-    include_image_base64: bool = True,
-    request_timeout: float = 300,
-) -> Tuple[str, List[Dict], int]:
-    """
-    OCR a PDF chunk using Mistral's official API.
-
-    Args:
-        pdf_bytes: PDF content as bytes
-        api_key: Mistral API key
-        chunk_info: Description of the chunk for logging
-        images_dir: Directory to save extracted images
-        page_number: Page number for image naming
-        image_counter: Current image counter
-        max_retries: Maximum retry attempts for 429 errors
-        initial_backoff: Initial backoff time in seconds
-        base_url: Base URL for Mistral API (default: https://api.mistral.ai/v1)
-        model: Mistral OCR model identifier
-        include_image_base64: Whether to return embedded image assets
-        request_timeout: HTTP request timeout in seconds
-
-    Returns:
-        Tuple of (markdown_content, images_info, updated_image_counter)
-    """
-
-    # Convert PDF to base64 data URL
-    pdf_b64 = base64.b64encode(pdf_bytes).decode("utf-8")
-    data_url = f"data:application/pdf;base64,{pdf_b64}"
-
-    # Mistral OCR API endpoint
-    url = f"{base_url}/ocr"
-
-    # Headers with Bearer token
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-
-    # Request payload
-    payload = {
-        "model": model,
-        "document": {
-            "type": "document_url",
-            "document_url": data_url,
-        },
-        "include_image_base64": include_image_base64,
-    }
-
-    logger.info(f"Sending OCR request to Mistral API for {chunk_info}...")
-
-    # Calculate max wait time for exponential backoff
-    max_wait = int(initial_backoff * (2 ** max_retries))
-
-    # Define retry decorator with exponential backoff
-    @retry(
-        retry=retry_if_exception_type((requests.exceptions.HTTPError, requests.exceptions.RequestException)),
-        stop=stop_after_attempt(max_retries),
-        wait=wait_exponential(multiplier=initial_backoff, max=max_wait),
-        before_sleep=lambda retry_state: logger.warning(
-            f"Retry {retry_state.attempt_number}/{max_retries} for {chunk_info}: {retry_state.outcome.exception()}"
-        ),
-        reraise=True
-    )
-    def _make_ocr_request():
-        """Make OCR request with automatic retry on failures."""
-        resp = requests.post(
-            url,
-            headers=headers,
-            json=payload,
-            timeout=request_timeout,
-        )
-
-        # Check for errors
-        if resp.status_code != 200:
-            if resp.status_code == 429:
-                logger.warning(f"Rate limit hit for {chunk_info}")
-            else:
-                logger.error(f"HTTP {resp.status_code} for {chunk_info}")
-                logger.error(f"Response: {resp.text[:500]}")
-
-            resp.raise_for_status()  # Will raise HTTPError
-
-        return resp.json()
-
-    # Execute request with retry logic
-    try:
-        result = _make_ocr_request()
-    except Exception as e:
-        logger.error(f"Failed after {max_retries} retries for {chunk_info}: {e}")
-        raise
-
-    # Extract markdown and images from all pages
-    pages = result.get("pages", [])
-    markdown_content = []
-    all_images = []
-
-    for page_idx, page in enumerate(pages):
-        md = page.get("markdown", "")
-        if md:
-            markdown_content.append(md)
-
-        # Extract images from this page
-        images = page.get("images", [])
-        for img_idx, img_data in enumerate(images):
-            # Check for image_base64 field (API returns data URL format)
-            if img_data.get("image_base64"):
-                # Extract base64 data from data URL
-                base64_data = img_data["image_base64"]
-                if base64_data.startswith("data:"):
-                    # Remove data URL prefix
-                    base64_data = base64_data.split(",")[1] if "," in base64_data else base64_data
-
-                # Get image ID and format
-                img_id = img_data.get("id", f"img-{img_idx}")
-                # Extract format from ID (e.g., "img-0.jpeg" -> "jpeg")
-                img_format = "jpeg"
-                if "." in img_id:
-                    img_format = img_id.split(".")[-1]
-
-                all_images.append({
-                    "page": page_idx,
-                    "index": img_idx,
-                    "id": img_id,
-                    "format": img_format,
-                    "base64": base64_data
-                })
-
-    # Combine markdown from all pages
-    combined_markdown = "\n\n".join(markdown_content)
-
-    # Save images if directory is provided
-    if images_dir and all_images:
-        images_dir.mkdir(parents=True, exist_ok=True)
-
-        for img_info in all_images:
-            # Create filename using page number and image counter
-            img_filename = f"page_{page_number}_img_{image_counter:03d}.{img_info['format']}"
-            img_path = images_dir / img_filename
-
-            # Decode and save image
-            img_bytes = base64.b64decode(img_info['base64'])
-            with open(img_path, 'wb') as f:
-                f.write(img_bytes)
-
-            # Replace image reference in markdown
-            # OCR services can return references in different formats:
-            # - Markdown: ![img-0.jpeg](img-0.jpeg), ![Image](img-0.jpeg), ![](img-0.jpeg)
-            # - HTML: <img src="imgs/img_in_image_box_XXX.jpg" ... />
-            img_id = img_info['id']
-            new_ref = f"![Image](../images/{img_filename})"
-
-            # Try Markdown formats first
-            possible_refs = [
-                f"![{img_id}]({img_id})",  # ![img-0.jpeg](img-0.jpeg)
-                f"![Image]({img_id})",      # ![Image](img-0.jpeg)
-                f"![]({img_id})",           # ![](img-0.jpeg)
-            ]
-
-            replaced = False
-            for old_ref in possible_refs:
-                if old_ref in combined_markdown:
-                    combined_markdown = combined_markdown.replace(old_ref, new_ref)
-                    logger.debug(f"Saved image: {img_filename}, replaced {old_ref} with {new_ref}")
-                    replaced = True
-                    break
-
-            # If not found, try HTML format with regex
-            if not replaced:
-                import re
-                # Match <img src="imgs/XXX.jpg" ... />
-                # Extract the filename from HTML img tag
-                html_pattern = re.compile(r'<img\s+src="imgs/([^"]+)"[^>]*>')
-                matches = html_pattern.findall(combined_markdown)
-
-                if matches:
-                    # Replace the first unmatched image (assume order matches)
-                    for html_filename in matches:
-                        # Check if this hasn't been replaced yet
-                        old_html_tag = f'<img src="imgs/{html_filename}"'
-                        if old_html_tag in combined_markdown and '../images/' not in combined_markdown[combined_markdown.find(old_html_tag):combined_markdown.find(old_html_tag)+200]:
-                            # Replace this specific img tag
-                            new_html_tag = f'<img src="../images/{img_filename}"'
-                            combined_markdown = combined_markdown.replace(old_html_tag, new_html_tag, 1)
-                            logger.debug(f"Saved image: {img_filename}, replaced HTML img tag for {html_filename}")
-                            replaced = True
-                            break
-
-            if not replaced:
-                logger.warning(f"Could not find reference for {img_id} in markdown")
-            image_counter += 1
-
-        logger.info(f"Saved {len(all_images)} images for {chunk_info}")
-
-    logger.success(f"OCR completed for {chunk_info} ({len(pages)} pages, {len(all_images)} images)")
-    return combined_markdown, all_images, image_counter
-
-
-def ocr_pdf_chunk_vertex(
-    pdf_bytes: bytes,
-    session: AuthorizedSession,
-    project_id: str,
-    location: str,
-    chunk_info: str,
-    images_dir: Optional[Path] = None,
-    page_number: int = 0,
-    image_counter: int = 0,
-    max_retries: int = 5,
-    initial_backoff: float = 4.0
-) -> Tuple[str, List[Dict], int]:
-    """
-    OCR a PDF chunk using Vertex AI Mistral OCR API.
-
-    This is the existing implementation, just renamed for clarity.
-
-    Args:
-        pdf_bytes: PDF content as bytes
-        session: Authorized session for API calls
-        project_id: GCP project ID
-        location: GCP location
-        chunk_info: Description of the chunk for logging
-        images_dir: Directory to save extracted images
-        page_number: Page number for image naming
-        image_counter: Current image counter
-        max_retries: Maximum retry attempts for 429 errors
-        initial_backoff: Initial backoff time in seconds
-
-    Returns:
-        Tuple of (markdown_content, images_info, updated_image_counter)
-    """
-
-    # Check size and compress if needed
-    size_mb = len(pdf_bytes) / (1024 * 1024)
-    logger.debug(f"PDF size for {chunk_info}: {size_mb:.2f}MB")
-
-    # Compress if over 20MB to leave buffer for base64 encoding (which adds ~33%)
-    if size_mb > 20:
-        from .utils.pdf_utils import compress_pdf_bytes
-        pdf_bytes = compress_pdf_bytes(pdf_bytes, max_size_mb=20.0)
-        new_size_mb = len(pdf_bytes) / (1024 * 1024)
-        logger.info(f"Compressed PDF from {size_mb:.2f}MB to {new_size_mb:.2f}MB")
-
-    # Convert PDF to base64 data URL
-    pdf_b64 = base64.b64encode(pdf_bytes).decode("utf-8")
-    data_url = f"data:application/pdf;base64,{pdf_b64}"
-
-    # Vertex AI Mistral OCR endpoint
-    url = (
-        f"https://{location}-aiplatform.googleapis.com/v1/"
-        f"projects/{project_id}/locations/{location}/publishers/mistralai/models/mistral-ocr-2505:rawPredict"
-    )
-
-    # Request payload
-    payload = {
-        "model": "mistral-ocr-2505",
-        "document": {
-            "type": "document_url",
-            "document_url": data_url,
-        },
-        "include_image_base64": True,  # Include images in base64 format
-    }
-
-    logger.info(f"Sending OCR request to Vertex AI for {chunk_info}...")
-
-    # Calculate max wait time for exponential backoff
-    max_wait = int(initial_backoff * (2 ** max_retries))
-
-    # Define retry decorator with exponential backoff
-    @retry(
-        retry=retry_if_exception_type((requests.exceptions.HTTPError, requests.exceptions.RequestException)),
-        stop=stop_after_attempt(max_retries),
-        wait=wait_exponential(multiplier=initial_backoff, max=max_wait),
-        before_sleep=lambda retry_state: logger.warning(
-            f"Retry {retry_state.attempt_number}/{max_retries} for {chunk_info}: {retry_state.outcome.exception()}"
-        ),
-        reraise=True
-    )
-    def _make_ocr_request():
-        """Make OCR request with automatic retry on failures."""
-        resp = session.post(url, json=payload, timeout=300)
-
-        # Check for errors
-        if resp.status_code != 200:
-            if resp.status_code == 429:
-                logger.warning(f"Rate limit hit for {chunk_info}")
-            else:
-                logger.error(f"HTTP {resp.status_code} for {chunk_info}")
-                logger.error(f"Response: {resp.text[:500]}")
-
-            resp.raise_for_status()  # Will raise HTTPError
-
-        return resp.json()
-
-    # Execute request with retry logic
-    try:
-        result = _make_ocr_request()
-    except Exception as e:
-        logger.error(f"Failed after {max_retries} retries for {chunk_info}: {e}")
-        raise
-
-    # Extract markdown and images from all pages
-    pages = result.get("pages", [])
-    markdown_content = []
-    all_images = []
-
-    for page_idx, page in enumerate(pages):
-        md = page.get("markdown", "")
-        if md:
-            markdown_content.append(md)
-
-        # Extract images from this page
-        images = page.get("images", [])
-        for img_idx, img_data in enumerate(images):
-            # Check for image_base64 field (API returns data URL format)
-            if img_data.get("image_base64"):
-                # Extract base64 data from data URL
-                base64_data = img_data["image_base64"]
-                if base64_data.startswith("data:"):
-                    # Remove data URL prefix
-                    base64_data = base64_data.split(",")[1] if "," in base64_data else base64_data
-
-                # Get image ID and format
-                img_id = img_data.get("id", f"img-{img_idx}")
-                # Extract format from ID (e.g., "img-0.jpeg" -> "jpeg")
-                img_format = "jpeg"
-                if "." in img_id:
-                    img_format = img_id.split(".")[-1]
-
-                all_images.append({
-                    "page": page_idx,
-                    "index": img_idx,
-                    "id": img_id,
-                    "format": img_format,
-                    "base64": base64_data
-                })
-
-    # Combine markdown from all pages
-    combined_markdown = "\n\n".join(markdown_content)
-
-    # Save images if directory is provided
-    if images_dir and all_images:
-        images_dir.mkdir(parents=True, exist_ok=True)
-
-        for img_info in all_images:
-            # Create filename using page number and image counter
-            img_filename = f"page_{page_number}_img_{image_counter:03d}.{img_info['format']}"
-            img_path = images_dir / img_filename
-
-            # Decode and save image
-            img_bytes = base64.b64decode(img_info['base64'])
-            with open(img_path, 'wb') as f:
-                f.write(img_bytes)
-
-            # Replace image reference in markdown
-            # OCR services can return references in different formats:
-            # - Markdown: ![img-0.jpeg](img-0.jpeg), ![Image](img-0.jpeg), ![](img-0.jpeg)
-            # - HTML: <img src="imgs/img_in_image_box_XXX.jpg" ... />
-            img_id = img_info['id']
-            new_ref = f"![Image](../images/{img_filename})"
-
-            # Try Markdown formats first
-            possible_refs = [
-                f"![{img_id}]({img_id})",  # ![img-0.jpeg](img-0.jpeg)
-                f"![Image]({img_id})",      # ![Image](img-0.jpeg)
-                f"![]({img_id})",           # ![](img-0.jpeg)
-            ]
-
-            replaced = False
-            for old_ref in possible_refs:
-                if old_ref in combined_markdown:
-                    combined_markdown = combined_markdown.replace(old_ref, new_ref)
-                    logger.debug(f"Saved image: {img_filename}, replaced {old_ref} with {new_ref}")
-                    replaced = True
-                    break
-
-            # If not found, try HTML format with regex
-            if not replaced:
-                import re
-                # Match <img src="imgs/XXX.jpg" ... />
-                # Extract the filename from HTML img tag
-                html_pattern = re.compile(r'<img\s+src="imgs/([^"]+)"[^>]*>')
-                matches = html_pattern.findall(combined_markdown)
-
-                if matches:
-                    # Replace the first unmatched image (assume order matches)
-                    for html_filename in matches:
-                        # Check if this hasn't been replaced yet
-                        old_html_tag = f'<img src="imgs/{html_filename}"'
-                        if old_html_tag in combined_markdown and '../images/' not in combined_markdown[combined_markdown.find(old_html_tag):combined_markdown.find(old_html_tag)+200]:
-                            # Replace this specific img tag
-                            new_html_tag = f'<img src="../images/{img_filename}"'
-                            combined_markdown = combined_markdown.replace(old_html_tag, new_html_tag, 1)
-                            logger.debug(f"Saved image: {img_filename}, replaced HTML img tag for {html_filename}")
-                            replaced = True
-                            break
-
-            if not replaced:
-                logger.warning(f"Could not find reference for {img_id} in markdown")
-            image_counter += 1
-
-        logger.info(f"Saved {len(all_images)} images for {chunk_info}")
-
-    logger.success(f"OCR completed for {chunk_info} ({len(pages)} pages, {len(all_images)} images)")
-    return combined_markdown, all_images, image_counter
 
 def ocr_pdf_chunk_vllm(
     pdf_bytes: bytes,
@@ -462,127 +25,76 @@ def ocr_pdf_chunk_vllm(
     page_number: int = 0,
     image_counter: int = 0,
     max_retries: int = 5,
-    initial_backoff: float = 4.0
+    initial_backoff: float = 4.0,
 ) -> Tuple[str, List[Dict], int]:
-    """
-    OCR a PDF chunk using VLLM backend (processes page by page).
-
-    Args:
-        pdf_bytes: PDF content as bytes
-        config: Configuration dictionary
-        chunk_info: Description of the chunk for logging
-        images_dir: Directory to save extracted images
-        page_number: Page number for image naming
-        image_counter: Current image counter
-        max_retries: Maximum retry attempts for OCR calls
-        initial_backoff: Initial backoff time in seconds
-
-    Returns:
-        Tuple of (markdown_content, images_info, updated_image_counter)
-    """
-    import io
-    import re
+    """OCR a PDF chunk with the configured VLLM-compatible client."""
     import pymupdf as fitz
     from PIL import Image
     from pdf2epub.ocr.backends.vllm import init_client
 
     logger.info(f"Starting VLLM OCR for {chunk_info}")
-
-    # Initialize VLLM client
     client = init_client(config)
-
-    # Open PDF from bytes
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    markdown_parts: list[str] = []
+    all_images: list[dict[str, Any]] = []
+    max_wait = int(initial_backoff * (2**max_retries))
 
-    markdown_parts = []
-    all_images = []
+    try:
+        for page_idx in range(len(doc)):
+            page = doc[page_idx]
+            logger.info(f"  Processing page {page_idx + 1}/{len(doc)}")
+            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+            img = Image.open(io.BytesIO(pix.tobytes("png")))
 
-    # Calculate max wait time for exponential backoff
-    max_wait = int(initial_backoff * (2 ** max_retries))
+            @retry(
+                retry=retry_if_exception_type(Exception),
+                stop=stop_after_attempt(max_retries),
+                wait=wait_exponential(multiplier=initial_backoff, max=max_wait),
+                before_sleep=lambda retry_state: logger.warning(
+                    f"Retry {retry_state.attempt_number}/{max_retries} for page "
+                    f"{page_idx + 1}: {retry_state.outcome.exception()}"
+                ),
+                reraise=True,
+            )
+            def _ocr_page():
+                return client.ocr(img)
 
-    # Process each page
-    for page_idx in range(len(doc)):
-        page = doc[page_idx]
-        logger.info(f"  Processing page {page_idx + 1}/{len(doc)}")
+            try:
+                markdown_parts.append(_ocr_page())
+            except Exception as exc:
+                logger.error(
+                    f"OCR failed for page {page_idx + 1} after {max_retries} retries: {exc}"
+                )
+                markdown_parts.append(f"\n\n[OCR Error on page {page_idx + 1}]\n\n")
+    finally:
+        doc.close()
 
-        # Render page to image
-        mat = fitz.Matrix(2, 2)  # 2x zoom for better quality
-        pix = page.get_pixmap(matrix=mat)
-        img_bytes = pix.tobytes("png")
-        img = Image.open(io.BytesIO(img_bytes))
-
-        # Define retry decorator for this page
-        @retry(
-            retry=retry_if_exception_type(Exception),
-            stop=stop_after_attempt(max_retries),
-            wait=wait_exponential(multiplier=initial_backoff, max=max_wait),
-            before_sleep=lambda retry_state: logger.warning(
-                f"Retry {retry_state.attempt_number}/{max_retries} for page {page_idx + 1}: {retry_state.outcome.exception()}"
-            ),
-            reraise=True
-        )
-        def _ocr_page():
-            """OCR a single page with automatic retry."""
-            return client.ocr(img)
-
-        # Perform OCR with retry
-        try:
-            text = _ocr_page()
-            markdown_parts.append(text)
-        except Exception as e:
-            logger.error(f"OCR failed for page {page_idx + 1} after {max_retries} retries: {e}")
-            markdown_parts.append(f"\n\n[OCR Error on page {page_idx + 1}]\n\n")
-
-    doc.close()
-
-    # Combine all pages
     combined_markdown = "\n\n".join(markdown_parts)
-
-    # Extract and save base64 images from markdown
     if images_dir:
         images_dir.mkdir(parents=True, exist_ok=True)
-
-        # Pattern to match ![...](data:image/...;base64,...)
-        pattern = r'!\[([^\]]*)\]\(data:image/([^;]+);base64,([^\)]+)\)'
+        pattern = r"!\[([^\]]*)\]\(data:image/([^;]+);base64,([^\)]+)\)"
 
         def replace_image(match):
             nonlocal image_counter
-            alt_text = match.group(1)
-            image_format = match.group(2)
-            base64_data = match.group(3)
-
-            # Create filename
+            alt_text, image_format, base64_data = match.groups()
             img_filename = f"page_{page_number}_img_{image_counter:03d}.{image_format}"
             img_path = images_dir / img_filename
-
             try:
-                # Decode and save image
                 img_data = base64.b64decode(base64_data)
-                with open(img_path, 'wb') as f:
-                    f.write(img_data)
-
-                logger.debug(f"Saved image: {img_path} ({len(img_data) / 1024:.2f} KB)")
-
-                # Track image info
-                all_images.append({
-                    "filename": img_filename,
-                    "format": image_format,
-                    "size": len(img_data)
-                })
-
+                img_path.write_bytes(img_data)
+                all_images.append(
+                    {"filename": img_filename, "format": image_format, "size": len(img_data)}
+                )
                 image_counter += 1
-
-                # Return new markdown reference
                 return f"![{alt_text}](../images/{img_filename})"
-            except Exception as e:
-                logger.error(f"Failed to save image: {e}")
+            except Exception as exc:
+                logger.error(f"Failed to save image: {exc}")
                 return match.group(0)
 
-        # Replace all base64 images with file references
         combined_markdown = re.sub(pattern, replace_image, combined_markdown)
 
-        if all_images:
-            logger.info(f"Extracted and saved {len(all_images)} images for {chunk_info}")
-
-    logger.success(f"VLLM OCR completed for {chunk_info} ({len(markdown_parts)} pages, {len(all_images)} images)")
+    logger.success(
+        f"VLLM OCR completed for {chunk_info} "
+        f"({len(markdown_parts)} pages, {len(all_images)} images)"
+    )
     return combined_markdown, all_images, image_counter

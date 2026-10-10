@@ -1,0 +1,56 @@
+{
+  "source": "Hegels Idea of a Phenomenology of Spirit",
+  "pages": {
+    "33": {
+      "bottom_blocks": [6],
+      "blocks": [
+        {"order": 0, "label": "Page-Header", "bbox": [323, 57, 613, 77], "text": "Header"},
+        {"order": 1, "label": "Page-Header", "bbox": [856, 58, 893, 75], "text": "33"},
+        {"order": 2, "label": "Text", "bbox": [44, 99, 896, 228], "text": "Body"},
+        {"order": 3, "label": "Text", "bbox": [44, 228, 895, 334], "text": "Body"},
+        {"order": 4, "label": "Text", "bbox": [424, 341, 513, 353], "text": "Body"},
+        {"order": 5, "label": "Text", "bbox": [46, 372, 897, 605], "text": "Body"},
+        {"order": 6, "label": "Text", "bbox": [46, 603, 899, 937], "text": "36 Note text"}
+      ]
+    },
+    "36": {
+      "bottom_blocks": [5, 6, 7],
+      "blocks": [
+        {"order": 0, "label": "Page-Header", "bbox": [76, 64, 111, 81], "text": "36"},
+        {"order": 1, "label": "Page-Header", "bbox": [255, 62, 746, 82], "text": "Header"},
+        {"order": 2, "label": "Text", "bbox": [76, 103, 925, 362], "text": "Body"},
+        {"order": 3, "label": "Text", "bbox": [76, 395, 924, 495], "text": "Body"},
+        {"order": 4, "label": "Text", "bbox": [76, 494, 926, 577], "text": "18 Body"},
+        {"order": 5, "label": "Text", "bbox": [76, 576, 925, 708], "text": "18 Note one"},
+        {"order": 6, "label": "Text", "bbox": [76, 708, 924, 759], "text": "19 Note two"},
+        {"order": 7, "label": "Text", "bbox": [76, 758, 927, 941], "text": "20 Note three"}
+      ]
+    },
+    "41": {
+      "bottom_blocks": [4, 5],
+      "blocks": [
+        {"order": 0, "label": "Page-Header", "bbox": [321, 56, 607, 76], "text": "Header"},
+        {"order": 1, "label": "Page-Header", "bbox": [847, 56, 884, 73], "text": "41"},
+        {"order": 2, "label": "Text", "bbox": [47, 97, 887, 477], "text": "Body"},
+        {"order": 3, "label": "Text", "bbox": [83, 507, 639, 524], "text": "17 Body"},
+        {"order": 4, "label": "Text", "bbox": [50, 522, 889, 686], "text": "17 Note text"},
+        {"order": 5, "label": "Text", "bbox": [50, 684, 890, 897], "text": "Continuation"}
+      ]
+    },
+    "58": {
+      "bottom_blocks": [4, 5, 6, 7, 8, 9],
+      "blocks": [
+        {"order": 0, "label": "Page-Header", "bbox": [117, 61, 151, 78], "text": "58"},
+        {"order": 1, "label": "Page-Header", "bbox": [290, 60, 776, 79], "text": "Header"},
+        {"order": 2, "label": "Text", "bbox": [117, 101, 959, 164], "text": "Body"},
+        {"order": 3, "label": "Text", "bbox": [117, 165, 959, 415], "text": "Body"},
+        {"order": 4, "label": "Text", "bbox": [117, 449, 959, 723], "text": "21 Note text"},
+        {"order": 5, "label": "Text", "bbox": [117, 724, 959, 805], "text": "Continuation"},
+        {"order": 6, "label": "Text", "bbox": [117, 811, 959, 844], "text": "Continuation"},
+        {"order": 7, "label": "Text", "bbox": [117, 845, 550, 862], "text": "Continuation"},
+        {"order": 8, "label": "Text", "bbox": [117, 861, 959, 879], "text": "Continuation"},
+        {"order": 9, "label": "Text", "bbox": [117, 885, 959, 919], "text": "Continuation"}
+      ]
+    }
+  }
+}

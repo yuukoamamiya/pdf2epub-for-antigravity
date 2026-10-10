@@ -126,44 +126,68 @@ def test_enabled_secondary_ocr_requires_a_backend():
         validate_ocr_config({"ocr": {"secondary": {"enabled": True}}})
 
 
-def test_enabled_pp_doclayout_requires_gpu_and_known_backend():
-    with pytest.raises(ValueError, match="must be a GPU device"):
+def test_unknown_ocr_backend_is_rejected_before_workflow_start():
+    with pytest.raises(ValueError, match="ocr.backend"):
+        validate_ocr_config({"ocr": {"backend": "mistral"}})
+
+
+def test_unknown_secondary_backend_is_rejected_before_workflow_start():
+    with pytest.raises(ValueError, match="ocr.secondary.backend"):
         validate_ocr_config(
             {
                 "ocr": {
-                    "layout": {
-                        "enabled": True,
-                        "backend": "pp_doclayout",
-                        "device": "cpu",
-                    }
+                    "backend": "chandra",
+                    "secondary": {"enabled": True, "backend": "mistral"},
                 }
             }
         )
 
-    with pytest.raises(ValueError, match="must be 'pp_doclayout'"):
+
+def test_retired_backend_configuration_is_rejected_even_when_disabled():
+    with pytest.raises(ValueError, match="retired OCR backend"):
         validate_ocr_config(
             {
                 "ocr": {
-                    "layout": {
-                        "enabled": True,
-                        "backend": "other",
-                        "device": "gpu:0",
-                    }
+                    "backend": "chandra",
+                    "secondary": {"enabled": False, "backend": "vision"},
+                    "backends": {"mistral": {"model": "legacy"}},
                 }
             }
         )
 
-    validate_ocr_config(
-        {
-            "ocr": {
-                "layout": {
-                    "enabled": True,
-                    "backend": "pp_doclayout",
-                    "device": "gpu:0",
+
+def test_enabled_layout_detection_is_rejected_after_removal():
+    with pytest.raises(ValueError, match="no longer supported"):
+        validate_ocr_config({"ocr": {"layout": {"enabled": True}}})
+
+
+def test_retired_secondary_paddle_is_rejected_even_when_disabled():
+    with pytest.raises(ValueError, match="retired OCR backend"):
+        validate_ocr_config(
+            {
+                "ocr": {
+                    "backend": "chandra",
+                    "secondary": {"enabled": False, "backend": "paddle"},
                 }
             }
-        }
-    )
+        )
+
+
+def test_retired_paddle_backend_block_is_rejected_even_when_unused():
+    with pytest.raises(ValueError, match="retired OCR backend"):
+        validate_ocr_config(
+            {
+                "ocr": {
+                    "backend": "chandra",
+                    "backends": {"paddle": {"device": "gpu:0"}},
+                }
+            }
+        )
+
+
+def test_layout_block_is_rejected_even_when_disabled():
+    with pytest.raises(ValueError, match="remove the layout block"):
+        validate_ocr_config({"ocr": {"layout": {"enabled": False}}})
 
 
 def test_arxiv_url_normalization_allows_only_https_arxiv_hosts():
