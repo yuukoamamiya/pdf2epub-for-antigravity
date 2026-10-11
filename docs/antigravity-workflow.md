@@ -323,6 +323,12 @@ OCR 完成不是“有几个 `page_*.md` 文件”就算通过。`ocr_progress.j
 整页插页 → 后页续句”恢复成一个连续段落，并把图片保留在恢复后的段落之后；普通插图和证据不足的
 页面不会改变物理顺序。候选报告存在但未完成 apply 时，`refine-local` 会阻断，避免漏掉这道结构判断。
 
+如果 `candidate_pages` 为空，manifest 状态为 `no_review_required`，不需要启动 Subagent
+或创建 `illustration_decisions.json`。仍应运行 `illustration-validate` 和
+`illustration-apply`；两者会验证当前候选报告并生成空的 `illustration_bindings.json`，
+使后续 `refine-local` 能明确消费“已确认没有整页插图”的检查点。零候选路径不能用来绕过
+存在候选时的哈希和决定校验。
+
 插图候选报告会记录 `ocr_evidence_mode`。`single_ocr` 只依据主 OCR；`two_ocr` 必须有当前
 `ocr_consensus.json`，并比较主/次 OCR 是否都发现视觉候选。只有一套发现候选、候选标签或
 几何证据不一致时，候选页才会带上差异原因交给 Subagent；本地程序不会把次 OCR 直接覆盖到
@@ -647,6 +653,11 @@ polish handoff 会附带源语言 TOC 标签保护清单。唯一出现且匹配
 `binding_mode: container_only`，由 EPUB 构建阶段生成包装器标题，Markdown worker 不得
 自行补写标题。
 
+`notes`/尾注单元还保留一个窄范围的结构标题白名单：形如 `## Chapter 1`、`## 第2章`
+或 `## Notes to Chapter 3` 的二至六级 Markdown 标题不会仅因末尾数字被识别为
+`running_title_plus_page_label`。这只保护尾注的章节分组标题；普通的 `Notes 7`、重复短页眉
+或其他页边装饰仍会进入 review gate，不能把整个 `notes` 单元视为自动豁免。
+
 `extract-entities` 读取 `translation.source_stage` 实际选中的源稿，并生成
 `translation_entities.template.json` 和 `translation_entities.json` 的交接契约。
 默认情况下 `translate` 要求后者存在且合法，
@@ -681,7 +692,14 @@ PDF 正文 Prompt 还会读取已验证的
 translate-toc → translate-toc-validate
 ```
 
-这会保持目录树、顺序、页码、层级和元数据不变，只替换书名与章节标题。
+`translate-toc` 会生成不可变源树的合同快照和扁平模板；Subagent 只读取
+`toc_translation_source.json`/`toc_translation_template.json`，并写入
+`toc_translation_result.json`。结果必须保持条目顺序、JSON 路径和 `original` 字段不变，
+只填写译后书名和标题。`translate-toc-validate` 再从当前且哈希匹配的 `toc_tree.json`
+合并生成 `toc_tree_translated.json`，因此 Subagent 不需要复制页码、层级、边界和 `type`
+等非标题字段。`status`/`doctor` 只验证这份结果而不物化合并文件；显式的
+`translate-toc-validate` 才会写入合并产物。旧版直接提交完整 `toc_tree_translated.json`
+的 contract v1 仍只为恢复历史任务保留兼容校验，新任务必须使用扁平 result 合同。
 
 翻译 Subagent 完成单个 PDF 单元后可以先做低成本闭环校验：
 

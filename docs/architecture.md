@@ -166,13 +166,17 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
 - `markdown_subagent_validation.py`：检查目标文件、结构标记、拒答、哈希和特殊角色内容，
   并在通过后复制到 `validated/`。
 - `markdown_validation.py`：提供纯函数式的 Markdown 风险检测、目标语言审计、规范化辅助
-  函数和 polish 内容保真检查；它会阻断结构性空父标题导致的重复正文。
+  函数和 polish 内容保真检查；它会阻断结构性空父标题导致的重复正文，并对 `notes`
+  单元中的标准尾注章节标题提供窄范围页眉误报豁免。
 - `subagent_runtime.py`：提供模型配置解析、token 估算、批次规划及按章节/批次隔离的 handoff；
   worker 文件数的有效上限为 8。
 - `subagent_safety.py`：集中处理拒答、免责声明和翻译占位套话检测，避免各工作流使用不同规则。
 - `toc_translation_workflow.py`：维护 TOC 的原始结构、节点数量、非标题字段和翻译结果校验。
-  Subagent 只提交扁平的 `toc_translation_result.json`，本地程序从不可变源树合并生成
+  prepare 阶段同时生成源合同和扁平模板；Subagent 只提交
+  `toc_translation_result.json`，本地程序从当前且哈希匹配的不可变源树合并生成
   `toc_tree_translated.json`，再从已验证的译文 TOC 生成按 token 预算自适应的全书方向性轮廓。
+  `status`/`doctor` 调用只读校验，不物化合并文件；旧的 contract v1 完整树格式仅保留兼容
+  恢复路径。
 - TOC 标题绑定区分 `visible` 与 `container_only`：无可见源标签的纯图片/边界单元不要求
   worker 伪造 Markdown 标题，章节容器标题由 EPUB 构建器生成；可见子标题仍使用严格绑定。
 
@@ -270,6 +274,12 @@ translate + 按 TOC 顺序装箱的 worker_handoffs + 工作区 Subagent
   → translated/
 translate-validate → translate_validation.json（retry_required 自动返工；持续 review 升级人工）
 build-epub --translated → 最终译文 EPUB
+
+PDF `build-epub` 的默认输出文件名由 `utils.common.sanitize_filename()` 从当前书名生成：
+Windows 禁止字符和控制字符替换为 `_`，首尾空格/句点会去除，保留设备名会加前缀，长度
+限制为 200 个字符；Unicode 和全角标点保持不变。`output_epub` 显式路径是例外，会按用户
+给定路径写入。输出目录在命令上下文创建时已由配置书名确定，因此翻译后的文件名和输出目录
+可能使用不同书名。
 
 已有译文的单次页眉页脚修复：
 repair-page-furniture（候选片段扫描/worker handoff） + 工作区 Subagent
