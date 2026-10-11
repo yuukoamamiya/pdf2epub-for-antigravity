@@ -76,12 +76,14 @@ EPUB 正文的任务边界来自原始 TOC，而不是压缩单元的文件名�
 | `subagent.batching.max_chapters_per_worker` | `3` | 一个 worker 最多覆盖的顶层分支数 |
 | `subagent.batching.max_files` | `5`（硬上限 `8`） | 一个 worker 的源文件数 |
 | `subagent.batching.max_source_tokens` | 配置默认值 | 一个 worker 的源 token 预算 |
+| `subagent.batching.max_packed_source_tokens` | `max_source_tokens` 的两倍 | 相邻完整章节合并 worker 的总 token 预算 |
 | `subagent.batching.single_file_max_bytes` | `30000` | 超过该值的单文件必须独立成批 |
 
 章节装箱有三条硬边界：需要多个批次的分支只能在自身单元列表内拆分；任一文件超过
 字节/token 限制的分支即使最终只有一个 part 也不能和邻章合并；`--resume` 时已经没有
 待处理文件的分支会冲刷当前装箱队列，不能让它前后的两个待处理分支跨过已完成分支重新
-合并。配置 `pack_adjacent_chapters: false` 时则每个分支单独成为 worker。
+合并。相邻章节合并使用 `max_packed_source_tokens`，但每个章节仍须先在
+`max_source_tokens` 内完整成批；配置 `pack_adjacent_chapters: false` 时则每个分支单独成为 worker。
 
 父级 manifest 保存全书文件、章节映射、pending 状态和审计哈希。真正给 Subagent 的
 `worker_handoffs/translate-html_subagent_manifest_<worker>.json` 只保存当前 worker 的

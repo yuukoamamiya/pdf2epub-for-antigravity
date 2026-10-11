@@ -556,6 +556,58 @@ def test_polish_does_not_flag_index_entries_with_page_labels(tmp_path: Path):
     assert report["polish_page_furniture_warnings"] == []
 
 
+@pytest.mark.parametrize(
+    "heading",
+    ["## Chapter 1", "## 第2章", "## Notes to Chapter 3"],
+)
+def test_polish_does_not_flag_structural_notes_headings(
+    tmp_path: Path, heading: str
+):
+    from pdf2epub.subagent_workflow import validate_markdown_subagent
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    text = f"{heading}\n\nEndnote text.\n"
+    (source_dir / "notes.md").write_text(text, encoding="utf-8")
+    (target_dir / "notes.md").write_text(text, encoding="utf-8")
+
+    report = validate_markdown_subagent(
+        tmp_path,
+        "polish",
+        source_dir,
+        target_dir,
+        file_roles={"notes.md": "notes"},
+    )
+
+    assert report["all_passed"] is True
+    assert report["polish_page_furniture_warnings"] == []
+
+
+def test_polish_still_flags_notes_running_header_with_page_label(tmp_path: Path):
+    from pdf2epub.subagent_workflow import validate_markdown_subagent
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    text = "Notes 7\n\nEndnote text.\nNotes 8\n"
+    (source_dir / "notes.md").write_text(text, encoding="utf-8")
+    (target_dir / "notes.md").write_text(text, encoding="utf-8")
+
+    report = validate_markdown_subagent(
+        tmp_path,
+        "polish",
+        source_dir,
+        target_dir,
+        file_roles={"notes.md": "notes"},
+    )
+
+    assert report["all_passed"] is False
+    assert report["polish_page_furniture_warnings"]
+
+
 def test_polish_allows_removed_top_level_label_at_continuation_prefix(tmp_path: Path):
     from pdf2epub.subagent_workflow import validate_markdown_subagent
 
@@ -1500,7 +1552,9 @@ def test_translate_toc_command_prepares_independent_json_task(tmp_path: Path, mo
     )
     assert source["source_language"] == "German"
     assert source["target_language"] == "Chinese"
+    assert source["contract_version"] == 2
     assert source["output_file"] == "toc_tree_translated.json"
+    assert source["result_file"] == "toc_translation_result.json"
 
 
 def test_translate_task_integrates_toc_contract_into_main_manifest_and_prompt(tmp_path: Path):
@@ -1510,9 +1564,10 @@ def test_translate_task_integrates_toc_contract_into_main_manifest_and_prompt(tm
         json.dumps({"book_title": "Book", "chapters": []}), encoding="utf-8"
     )
     toc_paths = prepare_toc_translation_subagent(output_dir, "English", "Chinese")
-    toc_source = json.loads(toc_paths["source"].read_text(encoding="utf-8"))
-    (output_dir / "toc_tree_translated.json").write_text(
-        json.dumps(toc_source["toc"], ensure_ascii=False), encoding="utf-8"
+    toc_template = json.loads(toc_paths["template"].read_text(encoding="utf-8"))
+    toc_template["book_title"]["translated"] = "Book"
+    (output_dir / "toc_translation_result.json").write_text(
+        json.dumps(toc_template, ensure_ascii=False), encoding="utf-8"
     )
     source_dir = output_dir / "ocr_markdown"
     source_dir.mkdir()
@@ -1534,8 +1589,11 @@ def test_translate_task_integrates_toc_contract_into_main_manifest_and_prompt(tm
     prompt = paths["prompt"].read_text(encoding="utf-8")
 
     assert manifest["toc_translation"]["output_file"] == "toc_tree_translated.json"
+    assert manifest["toc_translation"]["result_file"] == "toc_translation_result.json"
     assert manifest["toc_translation"]["status"] == "pending"
     assert "Required TOC translation (part of this same task)" in prompt
+    assert "toc_translation_result.json" in prompt
+    assert "local validator will merge it" in prompt
     assert integrated["toc_prompt"] == toc_paths["prompt"]
 
 
@@ -1573,9 +1631,10 @@ def test_translate_skip_entities_is_recorded_in_prompt_and_manifest(
         json.dumps({"book_title": "Book", "chapters": []}), encoding="utf-8"
     )
     toc_paths = prepare_toc_translation_subagent(output_dir, "English", "Chinese")
-    toc_source = json.loads(toc_paths["source"].read_text(encoding="utf-8"))
-    (output_dir / "toc_tree_translated.json").write_text(
-        json.dumps(toc_source["toc"], ensure_ascii=False), encoding="utf-8"
+    toc_template = json.loads(toc_paths["template"].read_text(encoding="utf-8"))
+    toc_template["book_title"]["translated"] = "Book"
+    (output_dir / "toc_translation_result.json").write_text(
+        json.dumps(toc_template, ensure_ascii=False), encoding="utf-8"
     )
 
     result = _prepare_pdf_markdown_task(
@@ -2343,6 +2402,61 @@ def test_toc_validation_requires_in_place_translated_fields(tmp_path: Path):
     assert report["resolved_book_title"] == "译名"
 
 
+def test_toc_result_is_merged_into_an_immutable_source_tree(tmp_path: Path):
+    source = {
+        "schema_version": 4,
+        "book_title": "Original",
+        "publisher": "Keep exactly",
+        "chapters": [
+            {
+                "title": "Chapter",
+                "level": 1,
+                "start_page": 1,
+                "end_page": 4,
+                "boundary_info": {"start_line": 2},
+                "children": [{"title": "Section", "level": 2, "start_page": 2}],
+            }
+        ],
+    }
+    (tmp_path / "toc_tree.json").write_text(
+        json.dumps(source, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    paths = prepare_toc_translation_subagent(tmp_path, "English", "Chinese")
+    template = json.loads(paths["template"].read_text(encoding="utf-8"))
+    result = {
+        "schema_version": 1,
+        "workflow": "toc_translation_result",
+        "book_title": {"original": "Original", "translated": "译名"},
+        "entries": [
+            {
+                "path": item["path"],
+                "original": item["original"],
+                "translated": translated,
+            }
+            for item, translated in zip(template["entries"], ("第一章", "小节"))
+        ],
+    }
+    (tmp_path / "toc_translation_result.json").write_text(
+        json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+    report = validate_toc_translation_subagent(tmp_path, materialize=False)
+
+    assert report["valid"] is True
+    assert not (tmp_path / "toc_tree_translated.json").exists()
+
+    report = validate_toc_translation_subagent(tmp_path)
+
+    assert report["valid"] is True
+    assert report["merged_from_source"] is True
+    merged = json.loads((tmp_path / "toc_tree_translated.json").read_text(encoding="utf-8"))
+    assert merged["book_title"] == "译名"
+    assert merged["chapters"][0]["title"] == "第一章"
+    assert merged["chapters"][0]["children"][0]["title"] == "小节"
+    assert merged["publisher"] == source["publisher"]
+    assert merged["chapters"][0]["boundary_info"] == source["chapters"][0]["boundary_info"]
+
+
 def test_prepare_toc_translation_subagent_writes_clean_prompt(tmp_path: Path):
     (tmp_path / "toc_tree.json").write_text(
         json.dumps({"book_title": "A Book", "chapters": []}),
@@ -2363,8 +2477,11 @@ def test_prepare_toc_translation_subagent_writes_clean_prompt(tmp_path: Path):
     assert 'f"Read' not in prompt
     assert 'f"in the same directory' not in prompt
     assert source["model"] == "configured-pro"
+    assert source["contract_version"] == 2
+    assert source["result_file"] == "toc_translation_result.json"
     assert "configured-pro" in prompt
     assert template["book_title"]["original"] == "A Book"
+    assert template["workflow"] == "toc_translation_result"
 
 
 def test_validate_toc_tree_rejects_overlapping_siblings_and_bad_child():

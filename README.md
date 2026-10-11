@@ -205,6 +205,9 @@ ocr-pages --resume
 → build-epub --translated
 ```
 
+`translate-toc` 的工作区 Subagent 只写扁平的 `toc_translation_result.json`；本地
+`translate-toc-validate` 会从源 `toc_tree.json` 合并生成 `toc_tree_translated.json`。
+
 方括号中的阶段只表示是否需要工作区 Subagent。`illustration-validate`、
 `illustration-apply`、`footnote-validate` 和 `footnote-apply` 是确定性检查点，即使没有候选或
 没有待复核项也必须运行；它们会生成空的、可供后续阶段消费的绑定/归一化产物。任何

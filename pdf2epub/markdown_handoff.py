@@ -594,7 +594,7 @@ Batching guidance:
 
 - Prefer the `pending_batches` / `batch_queue` in the manifest. The older
   `recommended_batches` field includes the complete source inventory.
-- Keep each batch at or below {batching['max_files']} files and approximately
+- Keep each ordinary single-chapter batch at or below {batching['max_files']} files and approximately
   {batching['max_source_tokens']} source tokens; keep oversized files in their
   own Subagent task and split them only at complete source-line boundaries.
 - Any file larger than {batching['single_file_max_bytes']} bytes is isolated in
@@ -605,7 +605,9 @@ Batching guidance:
 - When `chapter_groups` is present, adjacent top-level chapter groups may be
   packed into one Subagent task when `pack_adjacent_chapters` is enabled. A
   packed task contains at most {batching['max_chapters_per_worker']} ordinary
-  chapters and still obeys the file/token limits. A run of only tiny chapters
+  chapters and may use up to {batching['max_packed_source_tokens']} combined
+  source tokens. Each individual chapter must still fit the ordinary
+  {batching['max_source_tokens']}-token budget before it can be packed. A run of only tiny chapters
   (each at most {batching['tiny_chapter_max_tokens']} source tokens) may contain
   up to {batching['max_tiny_chapters_per_worker']} chapters, subject to the same
   file/token limits. The tiny allowance does not raise the chapter limit for a

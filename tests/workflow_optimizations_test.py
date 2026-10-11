@@ -10,6 +10,7 @@ from pdf2epub.pipeline_policy import PipelinePolicy
 from pdf2epub.pdf_text_probe import extract_native_text_pages, probe_pdf_text_layer
 from pdf2epub.subagent_runtime import (
     MAX_BATCH_FILES,
+    _chapter_worker_groups,
     effective_max_concurrency,
     write_worker_handoffs,
 )
@@ -605,6 +606,67 @@ def test_adjacent_short_chapters_pack_with_file_scoped_contexts(tmp_path: Path):
     assert "do not let terms leak across files" in prompt
 
 
+def test_adjacent_regular_chapters_use_packed_token_budget():
+    manifest = {
+        "chapter_groups": {
+            "chapter_1": ["chapter_1.md"],
+            "chapter_2": ["chapter_2.md"],
+        },
+        "pending_files": ["chapter_1.md", "chapter_2.md"],
+        "file_stats": {
+            "chapter_1.md": {"estimated_tokens": 12_000, "size_bytes": 20_000},
+            "chapter_2.md": {"estimated_tokens": 12_000, "size_bytes": 20_000},
+        },
+        "batching": {
+            "max_files": 8,
+            "max_source_tokens": 15_000,
+            "max_packed_source_tokens": 24_000,
+            "single_file_max_bytes": 30_000,
+            "max_chapters_per_worker": 3,
+        },
+    }
+
+    groups = _chapter_worker_groups(manifest)
+
+    assert len(groups) == 1
+    assert groups[0]["chapter_ids"] == ["chapter_1", "chapter_2"]
+    assert groups[0]["estimated_tokens"] == 24_000
+
+
+def test_packed_token_budget_does_not_override_ordinary_or_byte_limits():
+    token_overflow = {
+        "chapter_groups": {"one": ["one.md"], "two": ["two.md"]},
+        "pending_files": ["one.md", "two.md"],
+        "file_stats": {
+            "one.md": {"estimated_tokens": 13_000, "size_bytes": 10_000},
+            "two.md": {"estimated_tokens": 12_000, "size_bytes": 10_000},
+        },
+        "batching": {
+            "max_files": 8,
+            "max_source_tokens": 15_000,
+            "max_packed_source_tokens": 24_000,
+            "single_file_max_bytes": 30_000,
+            "max_chapters_per_worker": 3,
+        },
+    }
+    byte_overflow = {
+        **token_overflow,
+        "file_stats": {
+            "one.md": {"estimated_tokens": 1_000, "size_bytes": 30_001},
+            "two.md": {"estimated_tokens": 1_000, "size_bytes": 10_000},
+        },
+    }
+
+    assert [group["chapter_ids"] for group in _chapter_worker_groups(token_overflow)] == [
+        ["one"],
+        ["two"],
+    ]
+    assert [group["chapter_ids"] for group in _chapter_worker_groups(byte_overflow)] == [
+        ["one"],
+        ["two"],
+    ]
+
+
 def test_explicit_max_chapters_remains_strict_without_tiny_override(tmp_path: Path):
     source_dir = tmp_path / "source"
     source_dir.mkdir()
@@ -1050,6 +1112,7 @@ def test_batching_caps_configured_worker_file_count():
     assert batching["max_files"] == MAX_BATCH_FILES == 8
     assert batching["pack_adjacent_chapters"] is True
     assert batching["max_chapters_per_worker"] == 3
+    assert batching["max_packed_source_tokens"] == 24_000
     assert batching["max_tiny_chapters_per_worker"] == 6
     assert batching["tiny_chapter_max_tokens"] == 2000
 

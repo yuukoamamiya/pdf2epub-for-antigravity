@@ -59,6 +59,14 @@ _SPECIAL_ROLE_NUMERIC_MARKER_RE = re.compile(
     r"(?![A-Za-z0-9])"
 )
 
+_NOTES_STRUCTURAL_HEADING_RE = re.compile(
+    r"^#{2,6}\s+(?:"
+    r"(?:chapter|notes?\s+to\s+chapter)\s+\d+(?:[.\-]\d+)*"
+    r"|第\s*\d+(?:[.．]\d+)*\s*章"
+    r")\s*$",
+    re.IGNORECASE,
+)
+
 
 def _special_role_numeric_markers(text: str) -> list[str]:
     """Extract stable numeric markers from bibliography/index content.
@@ -472,6 +480,17 @@ def detect_polish_page_furniture(
         zip(lines, candidate_records), 1
     ):
         if not candidate or candidate.get("confidence") != "high":
+            continue
+        # Endnotes commonly repeat structural headings such as ``## Chapter
+        # 1``.  The generic candidate detector sees the trailing number and
+        # calls them running-title-plus-page-label lines.  Exempt only this
+        # narrow Markdown-heading shape; ordinary notes page furniture still
+        # goes through the normal review gate.
+        if (
+            role == "notes"
+            and candidate.get("kind") == "running_title_plus_page_label"
+            and _NOTES_STRUCTURAL_HEADING_RE.fullmatch(line.strip())
+        ):
             continue
         if special_role:
             kind = candidate.get("kind")

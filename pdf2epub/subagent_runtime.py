@@ -31,6 +31,7 @@ DEFAULT_PACK_ADJACENT_CHAPTERS = True
 DEFAULT_MAX_CHAPTERS_PER_WORKER = 3
 DEFAULT_MAX_TINY_CHAPTERS_PER_WORKER = 6
 DEFAULT_TINY_CHAPTER_MAX_TOKENS = 2_000
+DEFAULT_PACKED_SOURCE_TOKEN_MULTIPLIER = 2
 
 _TRANSLATION_TASKS = {
     "translate",
@@ -124,14 +125,23 @@ def _batching_config(config: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
     configured_max_chapters = configured(
         "max_chapters_per_worker", DEFAULT_MAX_CHAPTERS_PER_WORKER
     )
+    max_source_tokens = _positive_int(
+        batching.get("max_source_tokens"), DEFAULT_BATCH_MAX_SOURCE_TOKENS
+    )
+    max_packed_source_tokens = max(
+        max_source_tokens,
+        _positive_int(
+            batching.get("max_packed_source_tokens"),
+            max_source_tokens * DEFAULT_PACKED_SOURCE_TOKEN_MULTIPLIER,
+        ),
+    )
     return {
         "max_files": min(
             MAX_BATCH_FILES,
             _positive_int(batching.get("max_files"), DEFAULT_BATCH_MAX_FILES),
         ),
-        "max_source_tokens": _positive_int(
-            batching.get("max_source_tokens"), DEFAULT_BATCH_MAX_SOURCE_TOKENS
-        ),
+        "max_source_tokens": max_source_tokens,
+        "max_packed_source_tokens": max_packed_source_tokens,
         "max_concurrency": min(
             MAX_ACTIVE_SUBAGENTS,
             _positive_int(
@@ -318,11 +328,12 @@ def write_batch_handoffs(
         atomic_write_text(scoped_path, json.dumps(scoped, ensure_ascii=False, indent=2))
         toc_instruction = (
             "You are the sole TOC owner for this task. Complete the required "
-            "TOC translation and write toc_tree_translated.json."
+            "TOC translation and write toc_translation_result.json. The local "
+            "validator will merge it into toc_tree_translated.json."
             if scoped["toc_owner"]
             else
             "This batch is not the TOC owner. Do not create or modify "
-            "toc_tree_translated.json."
+            "toc_translation_result.json or toc_tree_translated.json."
         )
         atomic_write_text(
             scoped_prompt_path,
@@ -641,6 +652,13 @@ def _chapter_worker_groups(manifest: Mapping[str, Any]) -> List[Dict[str, Any]]:
     max_tokens = int(
         batching.get("max_source_tokens", DEFAULT_BATCH_MAX_SOURCE_TOKENS)
     )
+    max_packed_tokens = max(
+        max_tokens,
+        _positive_int(
+            batching.get("max_packed_source_tokens"),
+            max_tokens * DEFAULT_PACKED_SOURCE_TOKEN_MULTIPLIER,
+        ),
+    )
     max_bytes = int(
         batching.get("single_file_max_bytes", DEFAULT_SINGLE_FILE_MAX_BYTES)
     )
@@ -800,7 +818,7 @@ def _chapter_worker_groups(manifest: Mapping[str, Any]) -> List[Dict[str, Any]]:
             current_records
             and len(current_records) < chapter_limit
             and len(current_files) + len(batch_files) <= max_files
-            and current_tokens + chapter_tokens <= max_tokens
+            and current_tokens + chapter_tokens <= max_packed_tokens
         )
         if current_records and not can_pack:
             flush_current()

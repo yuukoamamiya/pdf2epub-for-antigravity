@@ -50,7 +50,7 @@ def _load_pdf_file_roles(output_dir: Path) -> dict:
     roles = {}
     for unit in data.get("units", []):
         role = str(unit.get("type") or "").strip().lower()
-        if role in {"bibliography", "index"}:
+        if role in {"bibliography", "index", "notes"}:
             files = unit.get("part_files") or [unit.get("file")]
             for file_name in files:
                 if file_name:
@@ -70,7 +70,7 @@ def _load_pdf_file_roles(output_dir: Path) -> dict:
             for index, node in enumerate(nodes or [], 1):
                 node_path = path + [index]
                 role = str(node.get("type") or "").strip().lower()
-                if role in {"bibliography", "index"}:
+                if role in {"bibliography", "index", "notes"}:
                     roles[f"{generate_unit_id(node_path)}.md"] = role
                 visit(node.get("children", []), node_path)
 

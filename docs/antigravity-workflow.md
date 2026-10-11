@@ -64,6 +64,9 @@ subagent:
     global_toc_tokens: 1200
     pack_adjacent_chapters: true
     max_chapters_per_worker: 3
+    # Packed adjacent chapters may use this combined source-token budget;
+    # default is twice max_source_tokens.
+    max_packed_source_tokens: 24000
   # 可选：覆盖某个具体任务
   # task_models:
   #   refine: <configured task model>
@@ -80,8 +83,9 @@ PDF/EPUB 的 `translate` manifest 会在 `worker_handoffs/` 按 TOC 顺序为相
 只读取自己 handoff 的 `assigned_files`；超过 30,000 字节的单元自动独立成批，但不能与
 其他章节合并。普通单章节 worker 的术语上下文只注入一次；相邻章节合并 worker 使用按
 文件分区的直接上下文；大章节拆分时使用 `shared_entries` 和当前分片的 `local_entries`。
-`translate-toc` 是正文 worker 启动前的
-独立任务，不由任何正文 worker 写入。
+`translate-toc` 是正文 worker 启动前的独立任务。Subagent 只写
+`toc_translation_result.json`；`translate-toc-validate` 从 `toc_tree.json` 本地合并生成
+`toc_tree_translated.json`，正文 worker 不写入这两个文件。
 
 每个 worker handoff 还记录由任务、worker、批次和当前源哈希计算的
 `assignment_sha256`，并把 `assigned_files` 作为显式授权字段。`--resume` 重建完全相同的
@@ -113,6 +117,7 @@ PDF 和 EPUB 的正文翻译有两个不能混淆的范围：`chapter_groups` �
 | `tiny_chapter_max_tokens` | 判定 tiny 章节的单章 token 上限，默认 `2000` |
 | `max_files` | 一个 worker 的源文件数量上限，硬上限为 `8` |
 | `max_source_tokens` | 一个 worker 的源 token 预算 |
+| `max_packed_source_tokens` | 相邻完整章节合并 worker 的源 token 总预算；默认是 `max_source_tokens` 的两倍 |
 | `single_file_max_bytes` | 单个文件超过该值时必须独立成批，默认 `30000` |
 
 装箱具有以下硬边界：
@@ -121,8 +126,10 @@ PDF 和 EPUB 的正文翻译有两个不能混淆的范围：`chapter_groups` �
    part 文件分别派发；这些 part 不得与其他章节组混合。
 2. 一个章节组只要包含超过 `max_source_tokens` 或 `single_file_max_bytes` 的文件，
    即使运行时只生成一个 part，也视为 oversized，不能与相邻章节合并。
-3. 文件数、token 数或章节数即将超出预算时，先提交当前 worker，再从下一个章节组开始
-   新 worker。装箱只允许连续相邻章节，不做跨章节重排或负载均衡重排。
+3. 普通单章节仍受 `max_source_tokens` 约束；多个相邻且各自未拆分的章节合并时，合计
+   token 数可使用 `max_packed_source_tokens`，但文件数、单文件字节数和章节数即将超出
+   对应预算时，先提交当前 worker，再从下一个章节组开始。装箱只允许连续相邻章节，不做
+   跨章节重排或负载均衡重排。
 4. `--resume` 时，已经完成而被跳过的章节组是相邻性屏障；不能把它前后的两个待处理章节
    重新拼成一个 worker。
 5. 若当前批次和新增章节都属于 tiny，章节数可放宽到 `max_tiny_chapters_per_worker`；

@@ -1090,12 +1090,12 @@ def build_epub(config: BuildEpubConfig) -> Path:
         translated_toc_path = config.output_dir / "toc_tree_translated.json"
         if not translated_toc_path.exists():
             raise FileNotFoundError(
-                f"{translated_toc_path} is missing. Ask the Subagent to translate "
-                "the TOC, then run translate-validate before building."
+                f"{translated_toc_path} is missing. Complete the TOC translation "
+                "result and run translate-toc-validate before building."
             )
         with open(translated_toc_path, 'r', encoding='utf-8') as f:
             toc_tree = json.load(f)
-        logger.info("Loaded Subagent-produced toc_tree_translated.json")
+        logger.info("Loaded locally merged, validated toc_tree_translated.json")
 
         translated_title = toc_tree.get('book_title')
         if translated_title:

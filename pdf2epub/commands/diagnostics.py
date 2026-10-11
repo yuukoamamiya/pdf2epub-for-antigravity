@@ -320,7 +320,9 @@ def _pdf_stages(
         try:
             from pdf2epub.toc_translation_workflow import validate_toc_translation_subagent
 
-            toc_translation = validate_toc_translation_subagent(output_dir)
+            toc_translation = validate_toc_translation_subagent(
+                output_dir, materialize=False
+            )
             toc_translation_current = toc_translation.get("valid") is True
         except (OSError, TypeError, ValueError):
             toc_translation_current = False

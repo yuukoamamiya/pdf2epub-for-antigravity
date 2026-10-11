@@ -138,10 +138,11 @@ RECOMMENDED WORKFLOW / 推荐工作流 (uses toc_tree.json):
   # Antigravity Subagent writes translation_entities.json
   pdf2epub extract-entities-validate
   pdf2epub translate-toc
-  # Antigravity Subagent writes toc_tree_translated.json
+  # Antigravity Subagent writes toc_translation_result.json; local validation
+  # merges it into toc_tree_translated.json
   pdf2epub translate-toc-validate
   pdf2epub translate --target-language Chinese
-  # Antigravity Subagent writes translated/*.md; it must not modify toc_tree_translated.json
+  # Antigravity Subagent writes translated/*.md; it must not modify TOC outputs
   pdf2epub translate-validate
   pdf2epub build-epub --translated
 

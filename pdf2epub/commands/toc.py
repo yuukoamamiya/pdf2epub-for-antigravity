@@ -36,6 +36,10 @@ def translate_toc_command(args):
         return 1
     logger.success(f"Wrote TOC Subagent prompt: {paths['prompt']}")
     logger.info(
+        "Subagent output: toc_translation_result.json; local validation will "
+        "merge toc_tree_translated.json"
+    )
+    logger.info(
         "Recommended Antigravity model: "
         f"{resolve_subagent_model(context.config, 'toc-translation')}"
     )

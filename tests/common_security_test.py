@@ -8,6 +8,7 @@ from pdf2epub.utils.html_safety import sanitize_html_document
 
 def test_sanitize_filename_replaces_separators_and_reserved_names() -> None:
     assert sanitize_filename(r"A/B: C") == "A_B_ C"
+    assert sanitize_filename("工作的本质：劳动过程争论导论") == "工作的本质：劳动过程争论导论"
     assert sanitize_filename("CON.txt").startswith("_CON")
     assert sanitize_filename("...") == "untitled"
 

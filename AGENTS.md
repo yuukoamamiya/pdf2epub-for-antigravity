@@ -151,15 +151,18 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
   只能处理自己 manifest 中的 `assigned_files`。PDF/EPUB `translate` 按 TOC 顺序把
   相邻短章节装入同一个 handoff，受文件/字节/token 和 `max_chapters_per_worker`
   限制；超出限制的章节在章节内部拆分，并且不能与其他章节合并。
-  `max_files` 默认值为 5，配置值的有效上限为 8；文件数、字节数和 token 数任一达到
-  限制都必须拆批。
+  `max_files` 默认值为 5，配置值的有效上限为 8；普通单章节的文件数、字节数和 token
+  数任一达到限制都必须拆批。相邻章节合并 worker 可单独使用
+  `max_packed_source_tokens`，但不会放宽单文件字节上限或单章节拆分规则。
   `index` 单元还受 `refine.oversized_unit_split.threshold_tokens_by_type` 与
   `target_tokens_by_type` 的条目级拆分阈值约束；不得用固定字母范围或词典回填替代
   页码、层级和交叉引用校验。
 - `chapter_groups` 是语义分组，不等于 worker 数量。`pack_adjacent_chapters: true`
   时，运行时按 `chapter_groups` 的 TOC 顺序连续装箱；`max_chapters_per_worker` 默认
-  为 3。单个章节只要需要内部拆分，或包含超过单文件字节/token 限制的文件，就必须
-  独立成批；不能为了凑满 worker 跨过它。
+  为 3。普通相邻章节合并时使用 `max_packed_source_tokens`（默认是
+  `max_source_tokens` 的两倍），但每个章节仍必须先在普通预算内完整成批。单个章节只要
+  需要内部拆分，或包含超过单文件字节/token 限制的文件，就必须独立成批；不能为了凑满
+  worker 跨过它。
   连续且每章不超过 `tiny_chapter_max_tokens` 的极短章节可使用
   `max_tiny_chapters_per_worker` 的更高上限（默认 6），但仍受文件/token 预算约束，且
   一旦混入普通章节就回到 `max_chapters_per_worker`。
@@ -504,8 +507,9 @@ uv run pdf2epub -c config.yaml check-ready --stage translate --skip-entities
    写入 `translation_entities.json`。
 2. 执行 `extract-entities-validate`。失败时不得继续。
 3. 执行 `translate-toc`，打开独立的工作区 Subagent，按目录 Prompt 写入
-   `toc_tree_translated.json`，然后运行 `translate-toc-validate`。TOC 必须在正文翻译
-   worker 启动前完成；正文 worker 不得修改该文件。
+   `toc_translation_result.json`，然后运行 `translate-toc-validate`。本地校验会从不可变
+   的 `toc_tree.json` 合并生成 `toc_tree_translated.json`。TOC 必须在正文翻译 worker
+   启动前完成；正文 worker 不得修改这两个 TOC 产物。
 4. 执行完整门禁：
 
    ```text
