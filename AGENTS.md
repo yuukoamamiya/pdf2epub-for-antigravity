@@ -426,6 +426,9 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
    新脚注”的跨页布局，并交给视觉审核。页眉、页脚和纯页码仍会排除，但已进入连续区域的块保留给
    视觉审计判断；明确标注的区域首块也不会仅因上方相邻正文而触发边界审核。页面图和可用的区域裁剪图
    会随任务提供。
+   `footnote_candidates.json` 还会记录跨页续文的置信度：它综合上一页脚注唯一性、当前/上一页的
+   bbox 对齐、字号/字体、块间距和句首句末连续性。中/高置信度且上一页只有一个可匹配脚注编号时，
+   可本地归类为该脚注的 `footnote_continuation`；上一页有多个编号或证据不足时仍交给视觉 Subagent。
    `suspected_missed_count` 不再只是报告警告：达到回溯审计条件的漏检块会成为 `audit_candidates`，
    必须由视觉任务确认。默认使用 `footnotes.auto_accept: true`，只把异常区域交给 Subagent；需要
    全部候选复核时再设置 `false` 或运行 `footnote-prepare --review-all`。

@@ -119,6 +119,9 @@ PDF 精修的核心领域模块如下：
   block、OCR 证据冲突或几何漏检则生成 `footnote_visual_audit_manifest.json`，并附页面图和可用的
   区域裁剪图，交给视觉 Subagent。`suspected_missed_count` 对应的可疑漏检会进入
   `audit_candidates`，不再只是静态统计。原生文字 PDF 仍使用 PDF 坐标、文本块和字体元数据。
+  跨页候选还会写入 `continuation_evidence`，记录上一页脚注唯一性、bbox/字号/字体对齐、块间距和句子
+  边界连续性。中/高置信度且上一页只有一个可匹配编号时，本地可生成 `footnote_continuation` 决定；
+  多编号或低置信度候选仍由 Subagent 决定。视觉审核必须以整页图判断整体边界，区域裁剪图只用于放大细节。
   `footnotes.auto_accept` 是两种来源共用的区域级本地接受策略；双 OCR 模式比较主/次候选差异，
   并把次 OCR 的连续物理行合并成一个 secondary-only 复核窗口。`resolve_footnote_options()` 集中
   处理配置默认值和 CLI 覆盖。它不直接改写 Markdown，也不把引用推断成脚注。

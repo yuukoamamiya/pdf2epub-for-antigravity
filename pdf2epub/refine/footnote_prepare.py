@@ -40,6 +40,8 @@ DEFAULT_NATIVE_MAX_FONT_RATIO = 0.88
 DEFAULT_REGION_MAX_GAP = 0.035
 DEFAULT_REGION_BOUNDARY_MARGIN = 0.12
 DEFAULT_RECALL_AUDIT_EDGE_MARGIN = 0.04
+DEFAULT_CONTINUATION_HIGH_SCORE = 9
+DEFAULT_CONTINUATION_MEDIUM_SCORE = 5
 _DECISION_ROLES = frozenset(
     {
         "body",
@@ -619,6 +621,308 @@ def _has_footnote_evidence(candidates: Iterable[Mapping[str, Any]]) -> bool:
     )
 
 
+def _build_footnote_page_context(
+    page_number: int,
+    sidecar: Mapping[str, Any],
+    candidates: Iterable[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Keep compact prior-page note evidence for continuation scoring."""
+    blocks = sidecar.get("blocks", [])
+    notes: list[dict[str, Any]] = []
+    for candidate in sorted(
+        (item for item in candidates if isinstance(item, Mapping)),
+        key=lambda item: (item.get("order", item.get("block", 0)), item.get("block", 0)),
+    ):
+        label = str(candidate.get("label") or "").strip()
+        if _FURNITURE_LABEL_RE.search(label) or _CITATION_LABEL_RE.search(label):
+            continue
+        if not candidate.get("key") and not _FOOTNOTE_LABEL_RE.search(label):
+            continue
+        try:
+            block_index = int(candidate.get("block"))
+        except (TypeError, ValueError):
+            continue
+        block = blocks[block_index] if 0 <= block_index < len(blocks) else None
+        if not isinstance(block, Mapping):
+            continue
+        notes.append(
+            {
+                "page": int(page_number),
+                "block": block_index,
+                "key": candidate.get("key"),
+                "label": label,
+                "text": _text_from_block(block)[:500],
+                "bbox": _normalise_bbox(block, sidecar),
+                "font_size": block.get("font_size"),
+                "font_names": block.get("font_names"),
+            }
+        )
+    return {"page": int(page_number), "notes": notes}
+
+
+def _safe_float(value: Any) -> Optional[float]:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def _font_names(value: Any) -> set[str]:
+    if isinstance(value, str):
+        return {value.casefold()}
+    if isinstance(value, Iterable) and not isinstance(value, (bytes, Mapping)):
+        return {str(item).casefold() for item in value if str(item).strip()}
+    return set()
+
+
+def _text_looks_unfinished(text: str) -> bool:
+    value = str(text or "").strip()
+    if not value:
+        return False
+    if re.search(r"(?:[-–—,:;([{]|\.\.\.)$", value):
+        return True
+    return not bool(re.search(r"[.!?。！？…][\"'”’)\]]*$", value))
+
+
+def _text_starts_as_continuation(text: str) -> bool:
+    value = str(text or "").lstrip()
+    if not value:
+        return False
+    return value[0].islower() or value[0] in ",.;:)]}%\"'”’"
+
+
+def _score_cross_page_continuation(
+    sidecar: Mapping[str, Any],
+    block_index: int,
+    first_numeric_block: int,
+    previous_context: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Score a possible continuation without changing the local decision."""
+    blocks = sidecar.get("blocks", [])
+    current = blocks[block_index] if 0 <= block_index < len(blocks) else None
+    previous_notes = [
+        note for note in previous_context.get("notes", []) if isinstance(note, Mapping)
+    ]
+    if not isinstance(current, Mapping) or not previous_notes:
+        return {
+            "score": 0,
+            "confidence": "low",
+            "previous_page": previous_context.get("page"),
+            "previous_keys": [],
+            "matched_previous_key": None,
+            "positive_signals": [],
+            "negative_signals": [],
+        }
+
+    previous_keys = [
+        str(note.get("key"))
+        for note in previous_notes
+        if note.get("key") is not None
+    ]
+    current_text = _text_from_block(current)
+    current_label = str(current.get("label") or "").strip()
+    current_bbox = _normalise_bbox(current, sidecar)
+    current_font_size = _safe_float(current.get("font_size"))
+    body_font_size = _safe_float(sidecar.get("body_font_size"))
+    best: Optional[dict[str, Any]] = None
+
+    for previous in previous_notes:
+        score = 2
+        positive: list[str] = ["previous_page_footnote_evidence"]
+        negative: list[str] = []
+        previous_bbox = previous.get("bbox")
+        previous_text = str(previous.get("text") or "")
+
+        if len(set(previous_keys)) == 1:
+            score += 2
+            positive.append("single_previous_footnote_key")
+        if _FOOTNOTE_LABEL_RE.search(current_label):
+            score += 2
+            positive.append("current_footnote_label")
+        if _FOOTNOTE_LABEL_RE.search(str(previous.get("label") or "")):
+            score += 1
+            positive.append("previous_footnote_label")
+
+        if current_bbox and previous_bbox:
+            x_delta = abs(float(current_bbox[0]) - float(previous_bbox[0]))
+            width_delta = abs(
+                (float(current_bbox[2]) - float(current_bbox[0]))
+                - (float(previous_bbox[2]) - float(previous_bbox[0]))
+            )
+            if x_delta <= 0.03:
+                score += 2
+                positive.append("left_edge_aligned")
+            elif x_delta <= 0.08:
+                score += 1
+                positive.append("left_edge_near")
+            if width_delta <= 0.08:
+                score += 1
+                positive.append("line_width_similar")
+
+        previous_font_size = _safe_float(previous.get("font_size"))
+        if current_font_size and previous_font_size:
+            font_delta = abs(current_font_size - previous_font_size) / max(
+                current_font_size, previous_font_size
+            )
+            if font_delta <= 0.10:
+                score += 2
+                positive.append("font_size_matches_previous_note")
+            elif font_delta <= 0.20:
+                score += 1
+                positive.append("font_size_near_previous_note")
+        if _font_names(current.get("font_names")) & _font_names(previous.get("font_names")):
+            score += 1
+            positive.append("font_family_matches_previous_note")
+        if current_font_size and body_font_size:
+            body_ratio = current_font_size / body_font_size
+            if body_ratio <= 0.90:
+                score += 1
+                positive.append("smaller_than_current_body")
+            elif body_ratio >= 0.98:
+                score -= 1
+                negative.append("same_size_as_current_body")
+
+        if _text_looks_unfinished(previous_text):
+            score += 2
+            positive.append("previous_text_looks_unfinished")
+        if _text_starts_as_continuation(current_text):
+            score += 1
+            positive.append("current_text_starts_as_continuation")
+        if block_index + 1 == first_numeric_block:
+            score += 1
+            positive.append("immediately_before_new_number")
+            first_numeric = (
+                blocks[first_numeric_block]
+                if 0 <= first_numeric_block < len(blocks)
+                else None
+            )
+            first_numeric_bbox = (
+                _normalise_bbox(first_numeric, sidecar)
+                if isinstance(first_numeric, Mapping)
+                else None
+            )
+            if current_bbox and first_numeric_bbox:
+                gap = float(first_numeric_bbox[1]) - float(current_bbox[3])
+                if 0.0 <= gap <= DEFAULT_REGION_MAX_GAP:
+                    score += 1
+                    positive.append("small_gap_before_new_number")
+        if _FURNITURE_LABEL_RE.search(current_label) or _CITATION_LABEL_RE.search(current_label):
+            score -= 5
+            negative.append("current_block_is_furniture_or_citation")
+
+        evidence = {
+            "score": score,
+            "confidence": (
+                "high"
+                if score >= DEFAULT_CONTINUATION_HIGH_SCORE
+                else "medium"
+                if score >= DEFAULT_CONTINUATION_MEDIUM_SCORE
+                else "low"
+            ),
+            "previous_page": previous_context.get("page"),
+            "previous_keys": sorted(set(previous_keys)),
+            "matched_previous_key": previous.get("key"),
+            "positive_signals": positive,
+            "negative_signals": negative,
+        }
+        if best is None or int(evidence["score"]) > int(best["score"]):
+            best = evidence
+
+    return best or {
+        "score": 0,
+        "confidence": "low",
+        "previous_page": previous_context.get("page"),
+        "previous_keys": sorted(set(previous_keys)),
+        "matched_previous_key": None,
+        "positive_signals": [],
+        "negative_signals": [],
+    }
+
+
+def _annotate_cross_page_continuations(
+    sidecar: Mapping[str, Any],
+    candidates: list[dict[str, Any]],
+    continuous_regions: Iterable[Mapping[str, Any]],
+    previous_context: Optional[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Attach continuation scores to backtracked candidates."""
+    summary = {
+        "mode": "gated",
+        "candidate_count": 0,
+        "high_confidence_count": 0,
+        "medium_confidence_count": 0,
+        "low_confidence_count": 0,
+    }
+    if not previous_context or not previous_context.get("notes"):
+        return summary
+    by_index = {
+        int(candidate["block"]): candidate
+        for candidate in candidates
+        if str(candidate.get("block", "")).lstrip("-").isdigit()
+    }
+    for region in continuous_regions:
+        first_numeric_block = int(region.get("first_block", -1))
+        for raw_index in region.get("backtracked_block_indices", []) or []:
+            block_index = int(raw_index)
+            evidence = _score_cross_page_continuation(
+                sidecar,
+                block_index,
+                first_numeric_block,
+                previous_context,
+            )
+            candidate = by_index.get(block_index)
+            if candidate is not None:
+                candidate["continuation_evidence"] = evidence
+            summary["candidate_count"] += 1
+            bucket = f"{evidence['confidence']}_confidence_count"
+            summary[bucket] += 1
+    return summary
+
+
+def _auto_continuation_key(candidate: Mapping[str, Any]) -> Optional[str]:
+    """Return a safe prior-page key for medium/high continuation evidence."""
+    evidence = candidate.get("continuation_evidence")
+    if not isinstance(evidence, Mapping):
+        return None
+    if evidence.get("confidence") not in {"high", "medium"}:
+        return None
+    if candidate.get("audit_only"):
+        return None
+    previous_keys = evidence.get("previous_keys")
+    matched_key = str(evidence.get("matched_previous_key") or "").strip()
+    if not isinstance(previous_keys, list) or len(previous_keys) != 1 or not matched_key:
+        return None
+    if str(previous_keys[0]).strip() != matched_key:
+        return None
+    return matched_key
+
+
+def _aggregate_continuation_evidence(
+    page_reports: Iterable[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Aggregate continuation scores without duplicating page-level decisions."""
+    summary = {
+        "mode": "gated",
+        "candidate_count": 0,
+        "high_confidence_count": 0,
+        "medium_confidence_count": 0,
+        "low_confidence_count": 0,
+    }
+    for report in page_reports:
+        evidence = report.get("continuation_evidence", {})
+        if not isinstance(evidence, Mapping):
+            continue
+        for field in (
+            "candidate_count",
+            "high_confidence_count",
+            "medium_confidence_count",
+            "low_confidence_count",
+        ):
+            summary[field] += int(evidence.get(field, 0) or 0)
+    return summary
+
+
 def _bottom_detection_stats(
     sidecar: Mapping[str, Any],
     candidate_indexes: set[int],
@@ -758,6 +1062,7 @@ def _region_compact_blocks(
                 "confidence": candidate.get("confidence"),
                 "font_size": block.get("font_size"),
                 "font_names": block.get("font_names"),
+                "continuation_evidence": candidate.get("continuation_evidence"),
             }
         )
     return compact
@@ -823,6 +1128,12 @@ def _build_page_footnote_regions(
     regions: list[dict[str, Any]] = []
     for region_number, indexes in enumerate(groups, 1):
         item_candidates = [by_index[index] for index in indexes if index in by_index]
+        for item in item_candidates:
+            continuation_key = _auto_continuation_key(item)
+            if continuation_key and not item.get("key"):
+                item["key"] = continuation_key
+                item["auto_continuation"] = True
+                item["local_role"] = "footnote_continuation"
         keys = [str(item.get("key")) for item in item_candidates if item.get("key")]
         numeric_keys: list[int] = []
         for key in keys:
@@ -837,7 +1148,10 @@ def _build_page_footnote_regions(
         reasons: list[str] = []
         if any(item.get("audit_only") for item in item_candidates):
             reasons.append("suspected_missed_bottom_numeric_block")
-        if any(not item.get("key") for item in item_candidates):
+        if any(
+            not item.get("key") and not _auto_continuation_key(item)
+            for item in item_candidates
+        ):
             reasons.append("unclassified_continuation_block")
         if any(
             item.get("continuous_region_evidence")
@@ -876,7 +1190,12 @@ def _build_page_footnote_regions(
         # A two-or-more numeric run is strong local evidence only when the
         # region has no unresolved continuation or boundary signal.  A single
         # block still needs the old explicit Footnote label rule.
-        all_numbered = bool(item_candidates) and all(item.get("key") for item in item_candidates)
+        all_numbered = bool(item_candidates) and all(
+            item.get("key") for item in item_candidates
+        )
+        has_auto_continuation = any(
+            item.get("auto_continuation") for item in item_candidates
+        )
         explicit_labels = all(
             _FOOTNOTE_LABEL_RE.search(str(item.get("label") or ""))
             for item in item_candidates
@@ -888,7 +1207,7 @@ def _build_page_footnote_regions(
             auto_accept
             and not reasons
             and all_numbered
-            and (has_sequence or explicit_labels or existing_high)
+            and (has_sequence or explicit_labels or existing_high or has_auto_continuation)
         )
         region_id = f"page-{int(page_number):03d}-region-{region_number:02d}"
         role = "local_footnote_region" if locally_clear else "visual_audit_required"
@@ -919,7 +1238,7 @@ def _build_page_footnote_regions(
             if locally_clear:
                 item["confidence"] = "high"
                 item["disposition"] = "local_candidate"
-                item["local_role"] = "footnote_start"
+                item.setdefault("local_role", "footnote_start")
                 item["review_reason"] = "page_region_local_accept"
             # An already high-confidence block keeps its local decision even
             # when a neighboring continuation makes the surrounding region
@@ -1540,8 +1859,10 @@ def prepare_footnote_candidates(
     }
     previous_page_number: Optional[int] = None
     previous_page_footnote_evidence = False
+    previous_page_context: Optional[dict[str, Any]] = None
     previous_secondary_page_number: Optional[int] = None
     previous_secondary_page_footnote_evidence = False
+    previous_secondary_page_context: Optional[dict[str, Any]] = None
 
     for sidecar_path in sidecars:
         sidecar = _load_sidecar(sidecar_path)
@@ -1606,6 +1927,14 @@ def prepare_footnote_candidates(
                 and previous_page_footnote_evidence
             ),
         )
+        continuation_evidence = _annotate_cross_page_continuations(
+            sidecar,
+            candidates,
+            continuous_regions,
+            previous_page_context
+            if previous_page_number == page_number - 1
+            else None,
+        )
         candidates.sort(key=lambda item: (item["order"], item["block"]))
         candidate_indexes = {
             int(index)
@@ -1668,6 +1997,14 @@ def prepare_footnote_candidates(
         candidates.sort(key=lambda item: (item["order"], item["block"]))
         secondary_sidecar = _secondary_sidecar_path(output_dir, sidecar_path)
         secondary_candidates: list[dict[str, Any]] = []
+        secondary_regions: list[dict[str, Any]] = []
+        secondary_continuation_evidence = {
+            "mode": "gated",
+            "candidate_count": 0,
+            "high_confidence_count": 0,
+            "medium_confidence_count": 0,
+            "low_confidence_count": 0,
+        }
         candidate_disagreement = False
         if evidence_mode == "two_ocr":
             secondary = _load_sidecar(secondary_sidecar)
@@ -1702,6 +2039,14 @@ def prepare_footnote_candidates(
                     previous_secondary_page_number == page_number - 1
                     and previous_secondary_page_footnote_evidence
                 ),
+            )
+            secondary_continuation_evidence = _annotate_cross_page_continuations(
+                secondary,
+                secondary_candidates,
+                secondary_regions,
+                previous_secondary_page_context
+                if previous_secondary_page_number == page_number - 1
+                else None,
             )
             secondary_candidates.sort(key=lambda item: (item["order"], item["block"]))
             matched_secondary_blocks = {
@@ -1784,9 +2129,11 @@ def prepare_footnote_candidates(
                     if evidence_mode == "two_ocr"
                     else [],
                     "continuous_numeric_regions": continuous_regions,
+                    "continuation_evidence": continuation_evidence,
                     "secondary_continuous_numeric_regions": (
                         secondary_regions if evidence_mode == "two_ocr" else []
                     ),
+                    "secondary_continuation_evidence": secondary_continuation_evidence,
                     "footnote_regions": footnote_regions,
                     "bottom_detection": bottom_stats,
                     "window": _window_for_page(
@@ -1805,9 +2152,19 @@ def prepare_footnote_candidates(
             )
 
         previous_page_number = page_number
+        previous_page_context = _build_footnote_page_context(
+            page_number,
+            sidecar,
+            candidates,
+        )
         previous_page_footnote_evidence = _has_footnote_evidence(candidates)
         if evidence_mode == "two_ocr":
             previous_secondary_page_number = page_number
+            previous_secondary_page_context = _build_footnote_page_context(
+                page_number,
+                secondary,
+                secondary_candidates,
+            )
             previous_secondary_page_footnote_evidence = _has_footnote_evidence(
                 secondary_candidates
             )
@@ -1870,6 +2227,9 @@ def prepare_footnote_candidates(
         "secondary_sidecar_sha256": secondary_sidecar_hashes,
         "pages": page_reports,
         "cross_page_windows": cross_page_windows,
+        "continuation_evidence_summary": _aggregate_continuation_evidence(
+            page_reports
+        ),
         "review_pages": sorted(review_pages),
         "high_confidence_candidate_count": high_confidence_count,
         "review_candidate_count": review_count,
@@ -1981,7 +2341,7 @@ def prepare_footnote_subagent(
         if report["source_kind"] == "native_text"
         else "If a page is marked as an OCR-consensus visual review, treat the local label as untrusted even when it says `Footnote`; compare the primary and secondary sidecars and the page image before deciding."
     )
-    prompt = f"""# Footnote review\n\nBook: {book_title}\n\nRead `footnote_subagent_manifest.json`, `footnote_candidates.json`, and `footnote_visual_audit_manifest.json`. The local script first inferred page-level bottom-note regions. Review only the regions listed as `visual_audit_required` and their blocks marked `confidence: review`; blocks marked `confidence: high` are already accepted by the deterministic local rule and do not need a decision. Do not reread or rewrite the whole book. {source_guidance}\n\nCandidate page sidecars and visual evidence:\n{page_text}\n\nA region audit is one visual decision for the area, but the output must still contain one block decision for every listed review/audit block so the deterministic apply stage can address exact sidecar coordinates. Open `region_visual_file` when present; otherwise open the full `visual_file`. Treat the page image as authoritative for region boundaries, continuations, headers, footers, and OCR omissions.\n\nUse these meanings strictly:\n- `footnote_start`: the beginning of a real page footnote; it will be moved to the end of its logical chapter.\n- `footnote_continuation`: text continuing a real footnote from an earlier page; it will be joined to that footnote.\n- `footnote_definition`: a complete footnote definition already presented as a note block.\n- `citation`: an in-text citation, quoted source, parenthetical/numeric reference, or other scholarly reference; it must stay in the body and must never be moved.\n- `bibliography`: a reference-list/bibliography entry; it must stay in place and must never be moved.\n- `body`: ordinary prose or an uncertain block that is not a footnote.\n\nWrite one `region_audits` entry for every audit region, with its exact `region_id`, a `disposition` of `footnote_region`, `body_region`, or `review_required`, and nested block decisions. A `review_required` region or block is unresolved and will block the workflow. Also keep a flat `decisions` array for compatibility; it may repeat the nested decisions, but do not emit duplicates. For each review/audit block assign exactly one role and keep its page, source, and block number. `source` defaults to `primary`; use `source: "secondary"` only for a candidate listed under `secondary_only_candidates`. For `footnote_start` and `footnote_definition`, copy the visible numeric key when present. For `footnote_continuation`, provide the key of the footnote it continues. A numeric marker alone is not enough to call something a footnote: if it is a citation or reference, use `citation` or `bibliography`.\n\nWrite only valid JSON to `footnote_decisions.json` with this shape:\n\n```json\n{{\n  "schema_version": {FOOTNOTE_PREPARE_SCHEMA_VERSION},\n  "region_audits": [\n    {{\n      "region_id": "page-125-region-01",\n      "disposition": "footnote_region",\n      "decisions": [\n        {{\n          "page": 125,\n          "source": "primary",\n          "block": 8,\n          "role": "footnote_continuation",\n          "key": "36",\n          "confidence": "high"\n        }}\n      ]\n    }}\n  ],\n  "decisions": []\n}}\n```\n\nIf a block or region is genuinely ambiguous, use `role` or `disposition: "review_required"` and explain it in `reason`; do not guess.\n"""
+    prompt = f"""# Footnote review\n\nBook: {book_title}\n\nRead `footnote_subagent_manifest.json`, `footnote_candidates.json`, and `footnote_visual_audit_manifest.json`. The local script first inferred page-level bottom-note regions. Review only the regions listed as `visual_audit_required` and their blocks marked `confidence: review`; blocks marked `confidence: high` are already accepted by the deterministic local rule and do not need a decision. Do not reread or rewrite the whole book. {source_guidance}\n\nCandidate page sidecars and visual evidence:\n{page_text}\n\nFor every listed review page, open the full-page `visual` PNG first. It is authoritative for the overall body/footnote boundary, page furniture, reading order, and cross-page context. When a `crop` PNG is present, open it as a zoomed supplement for small text and block-level details; never use the crop alone to decide whether a region belongs to the page footer or body. If the full-page image is unavailable, use the crop and sidecar coordinates.\n\nA region audit is one visual decision for the area, but the output must still contain one block decision for every listed review/audit block so the deterministic apply stage can address exact sidecar coordinates. Treat the page image as authoritative for region boundaries, continuations, headers, footers, and OCR omissions.\n\nUse these meanings strictly:\n- `footnote_start`: the beginning of a real page footnote; it will be moved to the end of its logical chapter.\n- `footnote_continuation`: text continuing a real footnote from an earlier page; it will be joined to that footnote.\n- `footnote_definition`: a complete footnote definition already presented as a note block.\n- `citation`: an in-text citation, quoted source, parenthetical/numeric reference, or other scholarly reference; it must stay in the body and must never be moved.\n- `bibliography`: a reference-list/bibliography entry; it must stay in place and must never be moved.\n- `body`: ordinary prose or an uncertain block that is not a footnote.\n\nWrite one `region_audits` entry for every audit region, with its exact `region_id`, a `disposition` of `footnote_region`, `body_region`, or `review_required`, and nested block decisions. A `review_required` region or block is unresolved and will block the workflow. Also keep a flat `decisions` array for compatibility; it may repeat the nested decisions, but do not emit duplicates. For each review/audit block assign exactly one role and keep its page, source, and block number. `source` defaults to `primary`; use `source: "secondary"` only for a candidate listed under `secondary_only_candidates`. For `footnote_start` and `footnote_definition`, copy the visible numeric key when present. For `footnote_continuation`, provide the key of the footnote it continues. A numeric marker alone is not enough to call something a footnote: if it is a citation or reference, use `citation` or `bibliography`.\n\nWrite only valid JSON to `footnote_decisions.json` with this shape:\n\n```json\n{{\n  "schema_version": {FOOTNOTE_PREPARE_SCHEMA_VERSION},\n  "region_audits": [\n    {{\n      "region_id": "page-125-region-01",\n      "disposition": "footnote_region",\n      "decisions": [\n        {{\n          "page": 125,\n          "source": "primary",\n          "block": 8,\n          "role": "footnote_continuation",\n          "key": "36",\n          "confidence": "high"\n        }}\n      ]\n    }}\n  ],\n  "decisions": []\n}}\n```\n\nIf a block or region is genuinely ambiguous, use `role` or `disposition: "review_required"` and explain it in `reason`; do not guess.\n"""
     prompt = prompt.replace(
         "Candidate page sidecars and visual evidence:",
         "When a `visual:` or `crop=` path is present, open that matching PNG and use it as the visual authority. "

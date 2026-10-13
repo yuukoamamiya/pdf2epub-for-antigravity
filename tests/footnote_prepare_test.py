@@ -587,7 +587,7 @@ def test_labeled_numeric_region_does_not_backtrack_adjacent_body_text(
     assert report["visual_audit_task_count"] == 0
 
 
-def test_cross_page_labeled_region_keeps_unlabelled_continuation_for_review(
+def test_cross_page_labeled_region_auto_accepts_unique_continuation(
     tmp_path: Path,
 ):
     _write_sidecar(
@@ -613,8 +613,45 @@ def test_cross_page_labeled_region_keeps_unlabelled_continuation_for_review(
 
     page = report["pages"][1]
     assert [item["block"] for item in page["candidates"]] == [1, 2, 3]
+    assert page["footnote_regions"][0]["disposition"] == "local_footnote_region"
+    evidence = page["candidates"][0]["continuation_evidence"]
+    assert evidence["confidence"] == "high"
+    assert evidence["matched_previous_key"] == "36"
+    assert page["candidates"][0]["key"] == "36"
+    assert page["candidates"][0]["local_role"] == "footnote_continuation"
+    assert report["continuation_evidence_summary"]["high_confidence_count"] == 1
+
+
+def test_cross_page_continuation_with_multiple_previous_keys_stays_review(
+    tmp_path: Path,
+):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [
+            _block("36 First note", 0, label="Footnote", y0=760),
+            _block("37 Second note", 1, label="Footnote", y0=820),
+        ],
+    )
+    _write_sidecar(
+        tmp_path,
+        2,
+        [
+            _block("Continuation without a repeated number", 0, label="Text", y0=725),
+            _block("38 New footnote", 1, label="Footnote", y0=775),
+            _block("39 Another new footnote", 2, label="Footnote", y0=825),
+        ],
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    page = report["pages"][1]
     assert page["footnote_regions"][0]["disposition"] == "visual_audit_required"
-    assert "unclassified_continuation_block" in page["footnote_regions"][0]["reasons"]
+    assert page["candidates"][0]["key"] is None
+    assert page["candidates"][0]["continuation_evidence"]["previous_keys"] == [
+        "36",
+        "37",
+    ]
 
 
 def test_page_footer_inside_a_confirmed_numeric_region_is_reviewed_not_dropped(
@@ -959,6 +996,8 @@ def test_prepare_subagent_writes_compact_contract(tmp_path: Path):
     assert manifest["review_pages"] == [1]
     assert manifest["candidate_report"] == "footnote_candidates.json"
     assert "Do not reread or rewrite the whole book" in prompt
+    assert "open the full-page `visual` PNG first" in prompt
+    assert "never use the crop alone" in prompt
     assert "footnote_decisions.json" in prompt
 
 
