@@ -461,17 +461,21 @@ OCR layout sidecar；高置信度原生文字 PDF 在 `ocr-pages` 阶段生成�
 使用弱几何证据：block 的 `bbox[3]` 进入页面底部区域（默认 `bottom_ratio: 0.64`），且 block
 高度与该区域的相交比例达到默认 `bottom_intersection_ratio: 0.25`；文本以短数字和分隔符
 开头时才形成数字候选，`Footnote` 标签不能单独绕过几何条件。页眉、页脚、纯页码和引用标签
-会被排除。连续数字开头块（例如 `18, 19, 20, 21`）会向上回溯相邻的同一区域，但回溯结果
-始终只进入 Subagent review，不直接移动。这个筛选器只缩小复核范围，不是脚注判定器。
+会被排除。随后本地按垂直间距、左右对齐、连续数字和未编号邻块推断页面级脚注区域：清晰的
+区域本地接受，边界不清、续文、正文/脚注重叠、OCR 证据冲突和几何漏检才形成视觉审计任务。
+连续数字开头块（例如 `18, 19, 20, 21`）会向上回溯相邻的同一区域；回溯区间、`audit_candidates`
+和 `footnote_visual_audit_manifest.json` 会交给 Antigravity 视觉 Subagent。准备阶段尽量附带
+区域裁剪图，不能裁剪时附整页图。这个筛选器只把清晰区域留在本地，把异常压缩成区域任务。
 原生文字的
 页底编号候选不会仅因底部位置自动判为脚注；默认只有同页对应上标引用和小字号双重匹配的
 候选本地接受，其余候选交 Subagent 复核。扫描/OCR PDF 中只有明确标签、数字开头、几何条件
-同时满足且启用 `auto_accept` 时才会形成高置信度候选；无编号续文、连续区间回溯块、跨页续文
-或正文/脚注交错的候选窗口交给工作区
+同时满足、所在区域没有异常且启用 `auto_accept` 时才会本地接受；无编号续文、连续区间回溯块、
+跨页续文或正文/脚注交错的区域交给工作区
 Subagent；双 OCR 模式下，主/次候选存在性或 layout 证据不同的页面会把主、次两套 sidecar
 一起交给 Subagent；正文共识的行粒度差异不会单独禁用脚注本地规则。次 OCR 独有的连续物理
-行会聚合成一个 `secondary_only_candidates` 窗口。Subagent 只写
-`footnote_decisions.json`，随后用 `footnote-validate` 校验；原生文字 PDF 不运行视觉 OCR
+行会聚合成一个 `secondary_only_candidates` 窗口。Subagent 写
+`footnote_decisions.json` 中的 `region_audits` 和每个 review block 的决定，随后用
+`footnote-validate` 校验；兼容恢复仍接受 flat `decisions`。原生文字 PDF 不运行视觉 OCR
 共识，即使配置残留次 OCR 开关，也只使用原生版面证据。
 
 脚注和整页插图的证据选择由同一套本地边界负责：`refine/pdf_evidence.py` 统一判断
@@ -530,17 +534,18 @@ refinement unit 和正文定位；任何一层失败都必须修正决定后重�
 
 1. 读取 `pages/page_NNN.ocr.json`，按 `page_box` 将 PDF page points 的 block bbox 归一化到
    `0..1` 页面比例；不能把 Letter/A4 的 point 数值误当成 OCR 的 `0..1000` 坐标。
-2. 只关注页面下部（当前默认 `bottom_ratio: 0.64`，且 block 与页底带相交比例至少为
-   `0.25`）、以一至三位数字和空格/标点开头的文本块；纯数字块排除为印刷页码候选。若
-   连续出现两个以上递增数字开头块，候选器会向上回溯相邻的无编号块，形成一个 review 区域。
+2. 只关注页面下部（未配置时兜底为 `bottom_ratio: 0.64`，且 block 与页底带相交比例至少为
+   `0.25`；扫描稿示例配置使用 `0.50`/`0.08`），以一至三位数字和空格/标点开头的文本块；纯数字块
+   排除为印刷页码候选。若连续出现两个以上递增数字开头块，候选器会向上回溯相邻的无编号块，
+   形成一个 review 区域并生成视觉审计任务。
    原生 PDF 没有可靠的 OCR 语义标签，因此只有
    同页更早位置存在对应 `<sup>N</sup>` 引用、且字号比例不超过默认 `0.88` 的候选标为
    `confidence: high`，其余保留下来的候选标为 `review_required`。
 3. 原生提取器依据 PDF 文本 block 内的行顺序，在新的页底数字开头处拆分 layout block，
    因而同一页的多条脚注各自拥有稳定的 `page`/`block` 地址。`body_font_size`、block
    `font_size`、`font_names` 和上标 flag/位置只作为复核证据。
-4. Subagent 只读取 manifest 列出的 `footnote_contexts/*.json` 和 sidecar 窗口，逐个候选
-   写入 `footnote_decisions.json`。本地已标记 `confidence: high` 的候选不需要重复决定；
+4. Subagent 只读取 manifest 列出的 `footnote_contexts/*.json`、区域 manifest 和 sidecar/图片窗口，
+   逐个异常区域写入 `footnote_decisions.json`。本地已标记 `confidence: high` 的候选不需要重复决定；
    它必须区分 `footnote_start`、
    `footnote_continuation`、`footnote_definition`、`citation`、`bibliography`、`body` 和
    `review_required`；数字开头本身不是决定理由。跨页续文仍按视觉顺序处理，不能默认贴到
@@ -551,15 +556,17 @@ refinement unit 和正文定位；任何一层失败都必须修正决定后重�
 | 产物 | 作用 | 不能替代 |
 |---|---|---|
 | `footnote_candidates.json` | 候选窗口、来源类型、证据模式、sidecar 哈希和 review pages | Subagent 决定 |
+| `footnote_visual_audit_manifest.json` | 异常区域、bbox、原因、页面图/裁剪图和 review block | 视觉区域审计 |
 | `footnote_subagent_manifest.json` | 当前复核页、单位上下文和 pending 状态 | 决定校验 |
 | `footnote_decisions.json` | Subagent 对候选 block 的角色决定 | sidecar 或候选事实 |
 | `footnote_decision_validation.json` | 决定地址、角色、键、覆盖率和哈希门禁 | apply 结果 |
 | `footnote_normalization.json` | apply 后的定位、归并和输出检查点 | 上游候选报告 |
 
 `footnote_candidates.json` 的 `bottom_detection` 还会报告页底 block、页底数字 block、已进入
-候选的数字 block、页眉/页脚与纯数字页码排除数，以及 `suspected_missed_count`。它是召回风险
-提示，不是自动决定；有风险的页必须结合 Prompt 中的 `visual_file` 页面 PNG 复核。页面图会
-复用 OCR 校正阶段的 freshness manifest；若没有可用源 PDF，则报告明确标记视觉证据不可用。
+候选的数字 block、页眉/页脚与纯数字页码排除数，以及 `suspected_missed_count`。达到审计条件的
+漏检还会进入 `audit_candidates` 和视觉 manifest，不再只是静态警告。异常区域会复用 OCR 校正
+阶段的 freshness manifest，并尽量附 `region_visual_file` 裁剪图；若没有可用源 PDF，则报告明确
+标记视觉证据不可用。新版决定可用 `region_audits` 表示区域结论，旧版 flat `decisions` 仍可恢复。
 
 原生脚注的典型失败包括 `No page layout sidecars found`、`source_kind` 或
 `coordinate_system` 不一致、sidecar hash 过期、决定引用不存在/重复的 page/block，及脚注
@@ -584,15 +591,15 @@ Subagent 输出。
 ```yaml
 footnotes:
   auto_accept: true
-  bottom_ratio: 0.64
-  bottom_intersection_ratio: 0.25
+  bottom_ratio: 0.50
+  bottom_intersection_ratio: 0.08
   native_max_font_ratio: 0.88
 ```
 
-需要扫描/OCR PDF 和原生文字 PDF 都逐候选复核时，设置推荐写法
-`footnotes.auto_accept: false`。命令行 `footnote-prepare --review-all` 是同等的临时覆盖。
-无论是否本地接受，候选报告都会保留 `same_page_superscript`、`font_size_ratio` 和哈希证据，
-便于审计。
+默认的 `auto_accept: true` 只让没有异常的清晰区域走本地路径；边界不清、漏检或 OCR 冲突区域
+会自动进入视觉审计。需要把所有候选都交给视觉 Subagent 时，设置 `footnotes.auto_accept: false`
+或使用 `footnote-prepare --review-all` 临时覆盖。无论是否本地接受，候选报告都会保留区域证据、
+`same_page_superscript`、`font_size_ratio` 和哈希信息，便于审计。
 
 ### 公式和 EPUB 阅读器兼容性
 

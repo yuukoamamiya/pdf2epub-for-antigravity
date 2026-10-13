@@ -36,10 +36,11 @@ Antigravity 工作区 Subagent 完成，本地程序负责文件整理、校验�
 | `ocr.secondary.enabled: false` | 单 OCR。直接使用主 OCR，忽略旧的双 OCR 共识文件。 |
 | `ocr.secondary.enabled: true` | 使用配置的第二套 OCR 做差异筛查，差异交给 Subagent 复核。 |
 
-当前默认主 OCR 是 Chandra。脚注候选使用 OCR sidecar 的 `bbox[3]`、页底相交比例、数字开头
-和跨页上下文；`Footnote` 标签不能单独绕过几何条件，纯数字页码会排除，连续数字开头块会
-形成向上回溯的复核区域。最终角色仍由 Subagent 复核；配置中的未注册或退役后端会被
-`doctor` 阻断。脚注报告还会给出疑似漏检数量，并在有源 PDF 时为复核页附带页面 PNG。
+当前默认主 OCR 是 Chandra。脚注阶段先使用 OCR sidecar 的 `bbox[3]`、页底相交比例、数字开头、
+块间距和连续编号推断页面级脚注区域；`Footnote` 标签不能单独绕过几何条件，纯数字页码会排除。
+清晰、连续的区域由本地直接处理，只有边界不清、续文、OCR 证据冲突或疑似漏检才生成区域级视觉
+审计任务。审计任务会附带页面 PNG，能渲染时还附带脚注区域裁剪图；最终仍由本地校验 exact
+`page/block` 决定后才 apply。配置中的未注册或退役后端会被 `doctor` 阻断。
 Chandra 的 Cloudflare Access 凭据放在 `.secrets/chandra-access.json`。YAML 中只配置本地凭据
 目录，不写入密钥本身。
 

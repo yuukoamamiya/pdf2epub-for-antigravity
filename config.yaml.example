@@ -93,13 +93,13 @@ ocr:
       request_timeout: 300
       max_retries: 6
 
-# 脚注候选的本地高置信度接受策略；false 时扫描/OCR 和原生文字 PDF 都交给 Subagent 复核。
+# 脚注页面区域的本地接受策略；清晰区域本地处理，异常区域自动生成视觉审计任务。
 footnotes:
-  auto_accept: false
+  auto_accept: true
   # The block lower edge must enter this bottom band, and at least this share
   # of the block height must intersect the band.
-  bottom_ratio: 0.64
-  bottom_intersection_ratio: 0.25
+  bottom_ratio: 0.50
+  bottom_intersection_ratio: 0.08
   # 原生文字 PDF 的字号证据门槛；只影响 native layout 候选。
   native_max_font_ratio: 0.88
 

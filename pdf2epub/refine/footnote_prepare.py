@@ -37,6 +37,9 @@ DEFAULT_CONTINUOUS_REGION_MAX_GAP = 0.045
 DEFAULT_CONTEXT_BLOCKS = 2
 DEFAULT_AUTO_ACCEPT = True
 DEFAULT_NATIVE_MAX_FONT_RATIO = 0.88
+DEFAULT_REGION_MAX_GAP = 0.035
+DEFAULT_REGION_BOUNDARY_MARGIN = 0.12
+DEFAULT_RECALL_AUDIT_EDGE_MARGIN = 0.04
 _DECISION_ROLES = frozenset(
     {
         "body",
@@ -626,6 +629,267 @@ def _bottom_detection_stats(
     return stats
 
 
+def _suspected_missed_block_indexes(
+    sidecar: Mapping[str, Any],
+    candidate_indexes: set[int],
+    *,
+    bottom_ratio: float,
+    bottom_intersection_ratio: float,
+) -> list[int]:
+    """Return bottom numeric blocks that need visual recall auditing.
+
+    A block that misses the local geometry threshold is not silently promoted
+    to a footnote.  It is kept as an audit address so a visual reviewer can
+    recover a note that OCR or a loose layout block split hid from the normal
+    candidate list.  Page furniture, citations and printed page numbers stay
+    excluded unless a confirmed continuous region already owns the block.
+    """
+    missed: list[int] = []
+    for index, block in enumerate(sidecar.get("blocks", [])):
+        if index in candidate_indexes or not isinstance(block, Mapping):
+            continue
+        text = _text_from_block(block)
+        bbox = _normalise_bbox(block, sidecar)
+        key = _leading_footnote_key(text)
+        label = str(block.get("label") or "").strip()
+        if not text or not bbox or not key:
+            continue
+        if _NUMERIC_ONLY_RE.fullmatch(text):
+            continue
+        if _FURNITURE_LABEL_RE.search(label) or _CITATION_LABEL_RE.search(label):
+            continue
+        geometry = _bottom_geometry(
+            bbox,
+            bottom_ratio=bottom_ratio,
+            intersection_ratio=bottom_intersection_ratio,
+        )
+        if (
+            bbox[3] >= float(bottom_ratio) + DEFAULT_RECALL_AUDIT_EDGE_MARGIN
+            and not geometry["is_bottom"]
+        ) or (
+            _FOOTNOTE_LABEL_RE.search(label)
+            and bbox[3] >= float(bottom_ratio)
+            and not geometry["is_bottom"]
+        ):
+            missed.append(index)
+    return missed
+
+
+def _region_union_bbox(boxes: Iterable[Optional[Iterable[float]]]) -> Optional[list[float]]:
+    values: list[list[float]] = []
+    for box in boxes:
+        if not box:
+            continue
+        try:
+            item = [float(value) for value in box]
+        except (TypeError, ValueError):
+            continue
+        if len(item) == 4 and item[2] > item[0] and item[3] > item[1]:
+            values.append(item)
+    if not values:
+        return None
+    return [
+        min(item[0] for item in values),
+        min(item[1] for item in values),
+        max(item[2] for item in values),
+        max(item[3] for item in values),
+    ]
+
+
+def _region_compact_blocks(
+    sidecar: Mapping[str, Any],
+    candidates: Iterable[Mapping[str, Any]],
+    indexes: Iterable[int],
+) -> list[dict[str, Any]]:
+    by_index = {
+        int(candidate["block"]): candidate
+        for candidate in candidates
+        if isinstance(candidate, Mapping) and str(candidate.get("block", "")).lstrip("-").isdigit()
+    }
+    blocks = sidecar.get("blocks", [])
+    compact: list[dict[str, Any]] = []
+    for raw_index in sorted({int(index) for index in indexes}):
+        if not 0 <= raw_index < len(blocks) or not isinstance(blocks[raw_index], Mapping):
+            continue
+        block = blocks[raw_index]
+        candidate = by_index.get(raw_index, {})
+        compact.append(
+            {
+                "block": raw_index,
+                "order": block.get("order", raw_index),
+                "label": str(block.get("label") or ""),
+                "bbox": _normalise_bbox(block, sidecar),
+                "text": _text_from_block(block)[:240],
+                "key": candidate.get("key"),
+                "candidate": bool(candidate),
+                "audit_only": bool(candidate.get("audit_only")),
+                "confidence": candidate.get("confidence"),
+                "font_size": block.get("font_size"),
+                "font_names": block.get("font_names"),
+            }
+        )
+    return compact
+
+
+def _build_page_footnote_regions(
+    page_number: int,
+    sidecar: Mapping[str, Any],
+    candidates: list[dict[str, Any]],
+    audit_candidates: list[dict[str, Any]],
+    *,
+    bottom_ratio: float,
+    auto_accept: bool,
+    continuous_regions: list[dict[str, Any]],
+    ocr_conflict: bool = False,
+) -> list[dict[str, Any]]:
+    """Infer page-level note areas and mark only uncertain areas for vision.
+
+    This is intentionally a cheap layout pass, not a semantic footnote
+    classifier.  A tight, bottom-aligned run of numbered blocks is safe to
+    accept locally when it has no unclassified neighbor or OCR conflict.  A
+    continuation, a boundary collision, or a recall target keeps the whole
+    small area together for one visual audit instead of creating one model
+    request per block.
+    """
+    all_candidates = [*candidates, *audit_candidates]
+    by_index = {
+        int(item["block"]): item
+        for item in all_candidates
+        if str(item.get("block", "")).lstrip("-").isdigit()
+    }
+    if not by_index:
+        return []
+    blocks = sidecar.get("blocks", [])
+    ordered = sorted(by_index)
+    groups: list[list[int]] = []
+    for index in ordered:
+        if not groups:
+            groups.append([index])
+            continue
+        previous = groups[-1][-1]
+        previous_box = _normalise_bbox(blocks[previous], sidecar) if 0 <= previous < len(blocks) else None
+        current_box = _normalise_bbox(blocks[index], sidecar) if 0 <= index < len(blocks) else None
+        vertical_gap = (
+            float(current_box[1]) - float(previous_box[3])
+            if current_box and previous_box
+            else 1.0
+        )
+        linked = index == previous + 1 and (
+            vertical_gap <= DEFAULT_REGION_MAX_GAP
+            or _horizontal_overlap(current_box, previous_box) >= 0.35
+        )
+        if linked:
+            groups[-1].append(index)
+        else:
+            groups.append([index])
+
+    continuous_indexes = {
+        int(index)
+        for region in continuous_regions
+        for index in region.get("review_block_indices", [])
+    }
+    regions: list[dict[str, Any]] = []
+    for region_number, indexes in enumerate(groups, 1):
+        item_candidates = [by_index[index] for index in indexes if index in by_index]
+        keys = [str(item.get("key")) for item in item_candidates if item.get("key")]
+        numeric_keys: list[int] = []
+        for key in keys:
+            try:
+                numeric_keys.append(int(key))
+            except ValueError:
+                continue
+        has_sequence = any(
+            right == left + 1
+            for left, right in zip(numeric_keys, numeric_keys[1:])
+        )
+        reasons: list[str] = []
+        if any(item.get("audit_only") for item in item_candidates):
+            reasons.append("suspected_missed_bottom_numeric_block")
+        if any(not item.get("key") for item in item_candidates):
+            reasons.append("unclassified_continuation_block")
+        if any(
+            item.get("continuous_region_evidence")
+            and _FURNITURE_LABEL_RE.search(str(item.get("label") or ""))
+            for item in item_candidates
+        ):
+            reasons.append("page_furniture_inside_continuous_region")
+        # Continuous numeric evidence is positive evidence for a region.  It
+        # becomes an anomaly only when the expansion also contains an
+        # unnumbered block (handled above), not merely because the run exists.
+        if ocr_conflict:
+            reasons.append("ocr_candidate_evidence_conflict")
+
+        first_index = indexes[0]
+        if first_index > 0 and first_index - 1 not in by_index:
+            previous_block = blocks[first_index - 1] if first_index - 1 < len(blocks) else None
+            previous_box = _normalise_bbox(previous_block, sidecar) if isinstance(previous_block, Mapping) else None
+            first_box = _normalise_bbox(blocks[first_index], sidecar) if first_index < len(blocks) else None
+            previous_label = str(previous_block.get("label") or "") if isinstance(previous_block, Mapping) else ""
+            if (
+                previous_box
+                and first_box
+                and previous_box[3] >= float(bottom_ratio) - DEFAULT_REGION_BOUNDARY_MARGIN
+                and _horizontal_overlap(previous_box, first_box) >= 0.35
+                and not _FURNITURE_LABEL_RE.search(previous_label)
+            ):
+                reasons.append("footnote_region_boundary_uncertain")
+
+        # A two-or-more numeric run is strong local evidence only when the
+        # region has no unresolved continuation or boundary signal.  A single
+        # block still needs the old explicit Footnote label rule.
+        all_numbered = bool(item_candidates) and all(item.get("key") for item in item_candidates)
+        explicit_labels = all(
+            _FOOTNOTE_LABEL_RE.search(str(item.get("label") or ""))
+            for item in item_candidates
+        )
+        existing_high = bool(item_candidates) and all(
+            item.get("confidence") == "high" for item in item_candidates
+        ) and not any(item.get("audit_only") for item in item_candidates)
+        locally_clear = bool(
+            auto_accept
+            and not reasons
+            and all_numbered
+            and (has_sequence or explicit_labels or existing_high)
+        )
+        region_id = f"page-{int(page_number):03d}-region-{region_number:02d}"
+        role = "local_footnote_region" if locally_clear else "visual_audit_required"
+        bbox = _region_union_bbox(
+            _normalise_bbox(blocks[index], sidecar)
+            for index in indexes
+            if 0 <= index < len(blocks) and isinstance(blocks[index], Mapping)
+        )
+        region = {
+            "region_id": region_id,
+            "page": int(page_number),
+            "block_indices": indexes,
+            "bbox": bbox,
+            "keys": keys,
+            "numeric_sequence": has_sequence,
+            "continuous_numeric_evidence": any(
+                index in continuous_indexes for index in indexes
+            ),
+            "confidence": "high" if locally_clear else "review",
+            "disposition": role,
+            "reasons": sorted(set(reasons)),
+            "blocks": _region_compact_blocks(sidecar, all_candidates, indexes),
+        }
+        regions.append(region)
+        for item in item_candidates:
+            item["region_id"] = region_id
+            item["region_confidence"] = region["confidence"]
+            if locally_clear:
+                item["confidence"] = "high"
+                item["disposition"] = "local_candidate"
+                item["local_role"] = "footnote_start"
+                item["review_reason"] = "page_region_local_accept"
+            # An already high-confidence block keeps its local decision even
+            # when a neighboring continuation makes the surrounding region
+            # reviewable. The region audit still carries that block as visual
+            # context, while only uncertain addresses require a new decision.
+        region["blocks"] = _region_compact_blocks(sidecar, all_candidates, indexes)
+    return regions
+
+
 def _ensure_visual_review_images(
     output_dir: Path,
     review_pages: Iterable[int],
@@ -682,6 +946,111 @@ def _ensure_visual_review_images(
             "pages": pages,
             "reason": str(exc)[:240],
         }
+
+
+def _ensure_region_review_images(
+    output_dir: Path,
+    page_reports: Iterable[Mapping[str, Any]],
+    config: Optional[Mapping[str, Any]],
+) -> dict[str, str]:
+    """Render narrow page crops for visual audit regions when a PDF exists."""
+    regions = [
+        region
+        for report in page_reports
+        for region in report.get("footnote_regions", []) or []
+        if isinstance(region, Mapping)
+        and region.get("disposition") == "visual_audit_required"
+    ]
+    if not regions:
+        return {}
+    pdf_path = Path(output_dir) / "input_original.pdf"
+    if not pdf_path.is_file():
+        pdf_path = Path(output_dir) / "input.pdf"
+    if not pdf_path.is_file():
+        return {}
+    try:
+        import pymupdf as fitz
+
+        correction_config = (
+            config.get("ocr_correction", {})
+            if isinstance(config, Mapping)
+            else {}
+        )
+        try:
+            dpi = int(correction_config.get("review_dpi", 150))
+        except (TypeError, ValueError):
+            dpi = 150
+        dpi = max(72, min(400, dpi))
+        matrix = fitz.Matrix(dpi / 72.0, dpi / 72.0)
+        crop_dir = Path(output_dir) / "footnote_review_images"
+        crop_dir.mkdir(parents=True, exist_ok=True)
+        files: dict[str, str] = {}
+        with fitz.open(pdf_path) as document:
+            for region in regions:
+                try:
+                    page_number = int(region["page"])
+                    bbox = [float(value) for value in region["bbox"]]
+                    region_id = str(region["region_id"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if len(bbox) != 4 or not 1 <= page_number <= len(document):
+                    continue
+                page = document[page_number - 1]
+                rect = page.rect
+                margin_x = rect.width * 0.025
+                margin_y = rect.height * 0.02
+                clip = fitz.Rect(
+                    max(rect.x0, rect.x0 + bbox[0] * rect.width - margin_x),
+                    max(rect.y0, rect.y0 + bbox[1] * rect.height - margin_y),
+                    min(rect.x1, rect.x0 + bbox[2] * rect.width + margin_x),
+                    min(rect.y1, rect.y0 + bbox[3] * rect.height + margin_y),
+                )
+                if clip.width <= 0 or clip.height <= 0:
+                    continue
+                pixmap = page.get_pixmap(matrix=matrix, clip=clip, alpha=False)
+                filename = f"{region_id}.png"
+                (crop_dir / filename).write_bytes(pixmap.tobytes("png"))
+                files[region_id] = (crop_dir / filename).relative_to(output_dir).as_posix()
+        return files
+    except (OSError, RuntimeError, ValueError, ImportError):
+        return {}
+
+
+def _write_visual_audit_manifest(
+    output_dir: Path,
+    page_reports: Iterable[Mapping[str, Any]],
+) -> tuple[Path, dict[str, Any]]:
+    """Persist the small, region-scoped visual audit queue."""
+    tasks: list[dict[str, Any]] = []
+    for report in page_reports:
+        page_visual = report.get("visual_file")
+        for region in report.get("footnote_regions", []) or []:
+            if not isinstance(region, Mapping) or region.get("disposition") != "visual_audit_required":
+                continue
+            task = {
+                "region_id": region.get("region_id"),
+                "page": region.get("page"),
+                "bbox": region.get("bbox"),
+                "block_indices": region.get("block_indices", []),
+                "keys": region.get("keys", []),
+                "reasons": region.get("reasons", []),
+                "visual_file": page_visual,
+                "region_visual_file": region.get("region_visual_file"),
+                "blocks": region.get("blocks", []),
+                "status": "pending",
+            }
+            tasks.append(task)
+    manifest = {
+        "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
+        "task": "footnote-visual-audit",
+        "status": "pending_review" if tasks else "no_audit_required",
+        "tasks": tasks,
+        "task_count": len(tasks),
+        "decision_file": "footnote_decisions.json",
+    }
+    path = Path(output_dir) / "footnote_visual_audit_manifest.json"
+    atomic_write_text(path, json.dumps(manifest, ensure_ascii=False, indent=2))
+    return path, manifest
 
 
 def _build_cross_page_windows(
@@ -1191,25 +1560,63 @@ def prepare_footnote_candidates(
             native_max_font_ratio=options.native_max_font_ratio,
         )
         candidates.sort(key=lambda item: (item["order"], item["block"]))
-        for candidate in candidates:
-            if candidate["confidence"] == "high":
-                high_confidence_count += 1
-            else:
-                review_count += 1
-                review_pages.add(page_number)
+        candidate_indexes = {
+            int(index)
+            for candidate in candidates
+            for index in _candidate_block_indexes(candidate)
+        }
         bottom_stats = _bottom_detection_stats(
             sidecar,
-            {
-                int(index)
-                for candidate in candidates
-                for index in _candidate_block_indexes(candidate)
-            },
+            candidate_indexes,
             bottom_ratio=options.bottom_ratio,
         )
         for field, value in bottom_stats.items():
             bottom_detection_totals[field] += int(value)
         if bottom_stats["suspected_missed_count"]:
             suspected_missed_pages.add(page_number)
+
+        # A bottom numeric block that failed the cheap geometry rule becomes
+        # an explicit visual-audit address instead of disappearing into a
+        # recall warning. It is never locally accepted.
+        audit_candidates: list[dict[str, Any]] = []
+        for missed_index in _suspected_missed_block_indexes(
+            sidecar,
+            candidate_indexes,
+            bottom_ratio=options.bottom_ratio,
+            bottom_intersection_ratio=options.bottom_intersection_ratio,
+        ):
+            block = sidecar["blocks"][missed_index]
+            if native_text_source:
+                audit_candidate = _candidate_for_native_block(
+                    page_number,
+                    missed_index,
+                    block,
+                    sidecar,
+                    bottom_ratio=options.bottom_ratio,
+                    bottom_intersection_ratio=options.bottom_intersection_ratio,
+                    page_markdown=page_markdown,
+                    auto_accept=False,
+                    native_max_font_ratio=options.native_max_font_ratio,
+                    region_evidence=True,
+                )
+            else:
+                audit_candidate = _candidate_for_block(
+                    page_number,
+                    missed_index,
+                    block,
+                    sidecar,
+                    bottom_ratio=options.bottom_ratio,
+                    bottom_intersection_ratio=options.bottom_intersection_ratio,
+                    force_review=True,
+                    source="primary",
+                    region_evidence=True,
+                )
+            if audit_candidate is not None:
+                audit_candidate["audit_only"] = True
+                audit_candidate["confidence"] = "review"
+                audit_candidate["disposition"] = "review_required"
+                audit_candidate["review_reason"] = "suspected_missed_bottom_numeric_block"
+                audit_candidates.append(audit_candidate)
 
         candidates.sort(key=lambda item: (item["order"], item["block"]))
         secondary_sidecar = _secondary_sidecar_path(output_dir, sidecar_path)
@@ -1268,9 +1675,6 @@ def prepare_footnote_candidates(
             if candidate_disagreement:
                 review_pages.add(page_number)
                 for candidate in candidates:
-                    if candidate.get("confidence") == "high":
-                        high_confidence_count -= 1
-                        review_count += 1
                     candidate["confidence"] = "review"
                     candidate["disposition"] = "review_required"
                     candidate["review_reason"] = (
@@ -1283,11 +1687,23 @@ def prepare_footnote_candidates(
                 candidate["disposition"] = "review_required"
                 candidate["secondary_only"] = True
                 candidate["review_reason"] = "secondary_only_footnote_candidate"
-                review_count += 1
 
-        should_emit_page = bool(candidates) or (
-            evidence_mode == "two_ocr"
-            and bool(secondary_candidates)
+        footnote_regions = _build_page_footnote_regions(
+            page_number,
+            sidecar,
+            candidates,
+            audit_candidates,
+            bottom_ratio=options.bottom_ratio,
+            auto_accept=options.auto_accept,
+            continuous_regions=continuous_regions,
+            ocr_conflict=candidate_disagreement,
+        )
+        for region in footnote_regions:
+            if region["disposition"] == "visual_audit_required":
+                review_pages.add(page_number)
+
+        should_emit_page = bool(candidates) or bool(audit_candidates) or (
+            evidence_mode == "two_ocr" and bool(secondary_candidates)
         )
         if should_emit_page:
             legacy_secondary = legacy_consensus and secondary_sidecar.is_file()
@@ -1311,6 +1727,7 @@ def prepare_footnote_candidates(
                         "disagree" if candidate_disagreement else "agree"
                     ) if evidence_mode == "two_ocr" else None,
                     "candidates": candidates,
+                    "audit_candidates": audit_candidates,
                     "secondary_candidates": secondary_candidates,
                     "secondary_only_candidates": secondary_only_candidates
                     if evidence_mode == "two_ocr"
@@ -1319,11 +1736,12 @@ def prepare_footnote_candidates(
                     "secondary_continuous_numeric_regions": (
                         secondary_regions if evidence_mode == "two_ocr" else []
                     ),
+                    "footnote_regions": footnote_regions,
                     "bottom_detection": bottom_stats,
                     "window": _window_for_page(
                         page_number,
                         sidecar,
-                        candidates,
+                        [*candidates, *audit_candidates],
                         context_blocks=options.context_blocks,
                     ),
                     "secondary_window": _window_for_page(
@@ -1350,6 +1768,34 @@ def prepare_footnote_candidates(
         for page_report in page_reports:
             page_report["visual_file"] = visual_files.get(str(page_report["page"]))
 
+    region_visual_files = _ensure_region_review_images(output_dir, page_reports, config)
+    for page_report in page_reports:
+        for region in page_report.get("footnote_regions", []) or []:
+            if isinstance(region, Mapping):
+                region["region_visual_file"] = region_visual_files.get(
+                    str(region.get("region_id"))
+                )
+
+    visual_audit_path, visual_audit_manifest = _write_visual_audit_manifest(
+        output_dir, page_reports
+    )
+    high_confidence_count = sum(
+        1
+        for page_report in page_reports
+        for candidate in page_report.get("candidates", []) or []
+        if candidate.get("confidence") == "high"
+    )
+    review_count = sum(
+        1
+        for page_report in page_reports
+        for candidate in [
+            *(page_report.get("candidates", []) or []),
+            *(page_report.get("audit_candidates", []) or []),
+            *(page_report.get("secondary_only_candidates", []) or []),
+        ]
+        if candidate.get("confidence") == "review"
+    )
+
     report = {
         "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
         "source_dir": "pages",
@@ -1372,6 +1818,8 @@ def prepare_footnote_candidates(
         "suspected_missed_count": bottom_detection_totals["suspected_missed_count"],
         "suspected_missed_pages": sorted(suspected_missed_pages),
         "visual_evidence": visual_evidence,
+        "visual_audit_manifest": visual_audit_path.name,
+        "visual_audit_task_count": visual_audit_manifest["task_count"],
         "review_required": bool(review_pages),
     }
     report_path = output_dir / "footnote_candidates.json"
@@ -1416,6 +1864,8 @@ def prepare_footnote_subagent(
         "suspected_missed_count": report["suspected_missed_count"],
         "suspected_missed_pages": report["suspected_missed_pages"],
         "visual_evidence": report["visual_evidence"],
+        "visual_audit_manifest": report["visual_audit_manifest"],
+        "visual_audit_task_count": report["visual_audit_task_count"],
         "auto_accept": report["auto_accept"],
         "bottom_intersection_ratio": report["bottom_intersection_ratio"],
         "native_max_font_ratio": report["native_max_font_ratio"],
@@ -1448,6 +1898,19 @@ def prepare_footnote_subagent(
             line += " (primary/secondary footnote candidate evidence differs)"
         if page_report.get("visual_file"):
             line += f"; visual: `{page_report['visual_file']}`"
+        region_lines = []
+        for region in page_report.get("footnote_regions", []) or []:
+            if not isinstance(region, Mapping) or region.get("disposition") != "visual_audit_required":
+                continue
+            region_line = str(region.get("region_id"))
+            if region.get("region_visual_file"):
+                region_line += f" crop=`{region['region_visual_file']}`"
+            reasons = ", ".join(str(item) for item in region.get("reasons", []) or [])
+            if reasons:
+                region_line += f" ({reasons})"
+            region_lines.append(region_line)
+        if region_lines:
+            line += "; audit regions: " + ", ".join(region_lines)
         page_lines.append(line)
     page_text = "\n".join(page_lines) or "- 无需 Subagent 复核；仅保留本地高置信度候选。"
     source_guidance = (
@@ -1459,10 +1922,10 @@ def prepare_footnote_subagent(
         if report["source_kind"] == "native_text"
         else "If a page is marked as an OCR-consensus visual review, treat the local label as untrusted even when it says `Footnote`; compare the primary and secondary sidecars and the page image before deciding."
     )
-    prompt = f"""# Footnote review\n\nBook: {book_title}\n\nRead `footnote_subagent_manifest.json` and `footnote_candidates.json`. The local script has selected compact bottom-of-page candidate windows. Review only blocks marked `confidence: review`; blocks marked `confidence: high` are already accepted by the deterministic local rule and do not need a decision. Do not reread or rewrite the whole book. {source_guidance}\n\nCandidate page sidecars:\n{page_text}\n\nUse these meanings strictly:\n- `footnote_start`: the beginning of a real page footnote; it will be moved to the end of its logical chapter.\n- `footnote_continuation`: text continuing a real footnote from an earlier page; it will be joined to that footnote.\n- `footnote_definition`: a complete footnote definition already presented as a note block.\n- `citation`: an in-text citation, quoted source, parenthetical/numeric reference, or other scholarly reference; it must stay in the body and must never be moved.\n- `bibliography`: a reference-list/bibliography entry; it must stay in place and must never be moved.\n- `body`: ordinary prose or an uncertain block that is not a footnote.\n\nFor each candidate block marked `confidence: review`, assign exactly one role. Keep the block's page, source, and block number. `source` defaults to `primary`; use `source: "secondary"` only for a candidate listed under `secondary_only_candidates`. For `footnote_start` and `footnote_definition`, copy the visible numeric key when present. For `footnote_continuation`, provide the key of the footnote it continues. A continuation may appear after ordinary body blocks on the next page; preserve visual order and attach it only when the page image supports that decision. Do not assume that a next-page footnote continuation is at the top of the page. A numeric marker alone is not enough to call something a footnote: if it is a citation or reference, use `citation` or `bibliography`.\n\nWrite only valid JSON to `footnote_decisions.json` with this shape:\n\n```json\n{{\n  "schema_version": {FOOTNOTE_PREPARE_SCHEMA_VERSION},\n  "decisions": [\n    {{\n      "page": 125,\n      "source": "primary",\n      "block": 8,\n      "role": "footnote_continuation",\n      "key": "36",\n      "confidence": "high"\n    }}\n  ]\n}}\n```\n\nIf a candidate is genuinely ambiguous, use `role: "review_required"` and explain it in `reason`; do not guess.\n"""
+    prompt = f"""# Footnote review\n\nBook: {book_title}\n\nRead `footnote_subagent_manifest.json`, `footnote_candidates.json`, and `footnote_visual_audit_manifest.json`. The local script first inferred page-level bottom-note regions. Review only the regions listed as `visual_audit_required` and their blocks marked `confidence: review`; blocks marked `confidence: high` are already accepted by the deterministic local rule and do not need a decision. Do not reread or rewrite the whole book. {source_guidance}\n\nCandidate page sidecars and visual evidence:\n{page_text}\n\nA region audit is one visual decision for the area, but the output must still contain one block decision for every listed review/audit block so the deterministic apply stage can address exact sidecar coordinates. Open `region_visual_file` when present; otherwise open the full `visual_file`. Treat the page image as authoritative for region boundaries, continuations, headers, footers, and OCR omissions.\n\nUse these meanings strictly:\n- `footnote_start`: the beginning of a real page footnote; it will be moved to the end of its logical chapter.\n- `footnote_continuation`: text continuing a real footnote from an earlier page; it will be joined to that footnote.\n- `footnote_definition`: a complete footnote definition already presented as a note block.\n- `citation`: an in-text citation, quoted source, parenthetical/numeric reference, or other scholarly reference; it must stay in the body and must never be moved.\n- `bibliography`: a reference-list/bibliography entry; it must stay in place and must never be moved.\n- `body`: ordinary prose or an uncertain block that is not a footnote.\n\nWrite one `region_audits` entry for every audit region, with its exact `region_id`, a `disposition` of `footnote_region`, `body_region`, or `review_required`, and nested block decisions. A `review_required` region or block is unresolved and will block the workflow. Also keep a flat `decisions` array for compatibility; it may repeat the nested decisions, but do not emit duplicates. For each review/audit block assign exactly one role and keep its page, source, and block number. `source` defaults to `primary`; use `source: "secondary"` only for a candidate listed under `secondary_only_candidates`. For `footnote_start` and `footnote_definition`, copy the visible numeric key when present. For `footnote_continuation`, provide the key of the footnote it continues. A numeric marker alone is not enough to call something a footnote: if it is a citation or reference, use `citation` or `bibliography`.\n\nWrite only valid JSON to `footnote_decisions.json` with this shape:\n\n```json\n{{\n  "schema_version": {FOOTNOTE_PREPARE_SCHEMA_VERSION},\n  "region_audits": [\n    {{\n      "region_id": "page-125-region-01",\n      "disposition": "footnote_region",\n      "decisions": [\n        {{\n          "page": 125,\n          "source": "primary",\n          "block": 8,\n          "role": "footnote_continuation",\n          "key": "36",\n          "confidence": "high"\n        }}\n      ]\n    }}\n  ],\n  "decisions": []\n}}\n```\n\nIf a block or region is genuinely ambiguous, use `role` or `disposition: "review_required"` and explain it in `reason`; do not guess.\n"""
     prompt = prompt.replace(
-        "Candidate page sidecars:",
-        "When a `visual:` path is present, open that matching page PNG and use it as the visual authority. "
+        "Candidate page sidecars and visual evidence:",
+        "When a `visual:` or `crop=` path is present, open that matching PNG and use it as the visual authority. "
         "Do not infer a footnote from the label alone. The report's "
         "`bottom_detection.suspected_missed_count` is a recall warning: inspect those pages' lower region "
         "even when no candidate was emitted.\n\nCandidate page sidecars and visual evidence:",
@@ -1496,6 +1959,7 @@ def _candidate_index(
             continue
         for field, default_source in (
             ("candidates", "primary"),
+            ("audit_candidates", "primary"),
             ("secondary_only_candidates", "secondary"),
         ):
             for candidate in page.get(field, []) or []:
@@ -1620,6 +2084,16 @@ def validate_footnote_decisions(
         for candidate in page.get("secondary_only_candidates", []) or []
         if candidate.get("confidence") == "review"
     )
+    required.update(
+        (
+            int(candidate["page"]),
+            "primary",
+            int(candidate["block"]),
+        )
+        for page in report.get("pages", []) or []
+        for candidate in page.get("audit_candidates", []) or []
+        if candidate.get("confidence") == "review"
+    )
     if not required:
         result = {
             "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
@@ -1656,6 +2130,87 @@ def validate_footnote_decisions(
     if not isinstance(decisions, list):
         errors.append("decision file must contain a decisions array")
         decisions = []
+
+    # New hand-offs are region-first.  Keep accepting the historical flat
+    # array so completed projects can resume, but validate every new region
+    # audit and merge its nested block decisions into the same exact-address
+    # contract consumed by footnote-apply.
+    visual_manifest_path = output_dir / str(
+        report.get("visual_audit_manifest") or "footnote_visual_audit_manifest.json"
+    )
+    visual_manifest: Mapping[str, Any] = {}
+    if visual_manifest_path.is_file():
+        try:
+            loaded_manifest = json.loads(visual_manifest_path.read_text(encoding="utf-8"))
+            if isinstance(loaded_manifest, Mapping):
+                visual_manifest = loaded_manifest
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            errors.append("footnote visual audit manifest is invalid")
+    audit_tasks = {
+        str(task.get("region_id"))
+        for task in visual_manifest.get("tasks", []) or []
+        if isinstance(task, Mapping) and task.get("region_id")
+    }
+    region_audits = (
+        decisions_data.get("region_audits")
+        if isinstance(decisions_data, Mapping)
+        else None
+    )
+    if region_audits is not None and not isinstance(region_audits, list):
+        errors.append("region_audits must be an array")
+        region_audits = []
+    region_audit_ids: set[str] = set()
+    nested_decisions: list[Mapping[str, Any]] = []
+    for audit in region_audits or []:
+        if not isinstance(audit, Mapping):
+            errors.append("each region audit must be an object")
+            continue
+        region_id = str(audit.get("region_id") or "").strip()
+        if not region_id or region_id not in audit_tasks:
+            errors.append(f"region audit references unknown region: {region_id or '<missing>'}")
+            continue
+        if region_id in region_audit_ids:
+            errors.append(f"duplicate region audit: {region_id}")
+            continue
+        region_audit_ids.add(region_id)
+        disposition = str(audit.get("disposition") or "").strip()
+        if disposition not in {"footnote_region", "body_region", "review_required"}:
+            errors.append(f"unsupported region audit disposition for {region_id}: {disposition}")
+        if disposition == "review_required":
+            human_review_required.append(f"region:{region_id}")
+        region_decisions = audit.get("decisions")
+        if not isinstance(region_decisions, list):
+            errors.append(f"region audit {region_id} must contain a decisions array")
+            continue
+        nested_decisions.extend(
+            item for item in region_decisions if isinstance(item, Mapping)
+        )
+    if region_audits is not None:
+        missing_regions = sorted(audit_tasks - region_audit_ids)
+        errors.extend(f"missing region audit for {region_id}" for region_id in missing_regions)
+
+    # Merge nested and flat arrays without making a compatible hand-off fail
+    # merely because the same exact decision was copied into both places.
+    merged_decisions: list[Mapping[str, Any]] = []
+    merged_addresses: set[tuple[int, str, int]] = set()
+    for item in [*nested_decisions, *decisions]:
+        if not isinstance(item, Mapping):
+            merged_decisions.append(item)
+            continue
+        try:
+            address = (
+                int(item["page"]),
+                str(item.get("source") or "primary").strip().lower(),
+                int(item["block"]),
+            )
+        except (KeyError, TypeError, ValueError):
+            merged_decisions.append(item)
+            continue
+        if address in merged_addresses:
+            continue
+        merged_addresses.add(address)
+        merged_decisions.append(item)
+    decisions = merged_decisions
 
     candidates = _candidate_index(report)
     seen: set[tuple[int, str, int]] = set()
@@ -1829,6 +2384,7 @@ def validate_footnote_decisions(
         "status": status,
         "errors": errors,
         "human_review_required": human_review_required,
+        "region_audits": sorted(region_audit_ids),
         "decisions": normalized,
     }
     atomic_write_text(

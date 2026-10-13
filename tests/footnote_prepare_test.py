@@ -631,6 +631,77 @@ def test_unmarked_footnote_continuation_is_retained_for_review(tmp_path: Path):
     assert candidate["disposition"] == "review_required"
 
 
+def test_clear_numeric_page_region_is_accepted_without_subagent_review(tmp_path: Path):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [
+            _block("Body", 0, y0=100),
+            _block("18 First note", 1, y0=700),
+            _block("19 Second note", 2, y0=760),
+            _block("20 Third note", 3, y0=820),
+        ],
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    page = report["pages"][0]
+    assert page["footnote_regions"][0]["disposition"] == "local_footnote_region"
+    assert all(item["confidence"] == "high" for item in page["candidates"])
+    assert report["visual_audit_task_count"] == 0
+    manifest = json.loads(
+        (tmp_path / "footnote_visual_audit_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["status"] == "no_audit_required"
+
+
+def test_region_boundary_creates_one_visual_audit_task(tmp_path: Path):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [
+            _block("Body that reaches the note boundary", 0, y0=580),
+            _block("36 Possibly a footnote", 1, y0=630),
+        ],
+    )
+
+    paths = prepare_footnote_subagent(tmp_path, book_title="Region test")
+    report = json.loads((tmp_path / "footnote_candidates.json").read_text(encoding="utf-8"))
+    audit = json.loads(
+        (tmp_path / "footnote_visual_audit_manifest.json").read_text(encoding="utf-8")
+    )
+
+    assert report["visual_audit_task_count"] == 1
+    assert audit["status"] == "pending_review"
+    assert audit["tasks"][0]["region_id"] == report["pages"][0]["footnote_regions"][0]["region_id"]
+    assert "footnote_region_boundary_uncertain" in audit["tasks"][0]["reasons"]
+    assert "footnote_visual_audit_manifest.json" in paths["prompt"].read_text(
+        encoding="utf-8"
+    )
+
+
+def test_geometry_recall_miss_becomes_an_audit_candidate(tmp_path: Path):
+    missed = _block("36 A block that only partly enters the bottom band", 0, y0=450)
+    missed["bbox"] = [80, 450, 920, 550]
+    _write_sidecar(
+        tmp_path,
+        1,
+        [missed],
+    )
+
+    report = prepare_footnote_candidates(
+        tmp_path,
+        bottom_ratio=0.50,
+        bottom_intersection_ratio=0.90,
+    )
+
+    page = report["pages"][0]
+    assert page["candidates"] == []
+    assert [item["block"] for item in page["audit_candidates"]] == [0]
+    assert report["suspected_missed_count"] == 1
+    assert report["visual_audit_task_count"] == 1
+
+
 _HEGEL_REGRESSION_FIXTURE = Path(__file__).parent / "fixtures" / "footnote_regressions.json"
 
 

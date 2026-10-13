@@ -451,7 +451,7 @@ def _candidate_decisions(
                     "page": address[0],
                     "source": address[1],
                     "block": address[2],
-                    "role": "footnote_start",
+                    "role": str(candidate.get("local_role") or "footnote_start"),
                     "key": str(candidate.get("key") or ""),
                     "confidence": "local_high",
                 },

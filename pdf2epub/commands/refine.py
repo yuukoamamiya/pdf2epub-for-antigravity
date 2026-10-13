@@ -275,8 +275,9 @@ def footnote_prepare_command(args):
     logger.success(f"Wrote footnote subagent prompt: {paths['prompt']}")
     if manifest["status"] == "pending_review":
         logger.info(
-            "请让工作区 Subagent 只复核 footnote_subagent_prompt.md 中列出的局部窗口，"
-            "并写入 footnote_decisions.json。"
+            "请让工作区 Subagent 只复核 footnote_subagent_prompt.md 和 "
+            "footnote_visual_audit_manifest.json 中列出的异常区域，并写入 "
+            "footnote_decisions.json。"
         )
     else:
         logger.info("脚注候选均达到本地预筛选条件，本次不需要 Subagent 复核。")

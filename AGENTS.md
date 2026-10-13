@@ -412,20 +412,19 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
    uv run pdf2epub -c config.yaml footnote-apply
    ```
 
-   对原生文字 PDF，页底以数字开头的文本块只是候选：`bbox[3]`、它与页底带的相交比例、相对正文的字号、字体名和
-   原生上标都是证据，不能单独自动判定为脚注。默认情况下，只有“同页更早位置存在对应
-   `<sup>N</sup>` 引用，且脚注块字号不超过正文字号 0.88 倍”的候选本地接受；其余候选
-   进入 Subagent 复核。扫描/OCR PDF 需要下边缘进入页底带且 block 与页底带相交比例达到
-   `footnotes.bottom_intersection_ratio`；`Footnote` 标签不能单独绕过几何条件。连续的递增
-   数字开头块（如 `18、19、20、21`）会向上回溯相邻无编号块，形成 review 区间；区间内的
-   页脚标签不能直接把块排除，但也不会自动移动。页眉、页脚和纯页码不进入普通脚注候选，其他
-   候选交给 Subagent 复核。纯数字页码会被本地候选器排除。报告还记录页底数字块总量、排除量
-   和 `suspected_missed_count`；有待复核页时 Prompt 会附带当前页面 PNG。需要让两种 PDF 都采用最保守模式时，在配置中设置推荐的
-   `footnotes.auto_accept: false`。也可以运行 `footnote-prepare --review-all` 临时关闭两种来源
-   的本地接受。
-   Subagent 必须在脚注、引用、参考文献、普通正文和不确定项之间作出决定，不确定时使用
-   `review_required`，不要猜测。原生上标引用在 `pages/` 中保留为 `<sup>…</sup>`，后续
-   只有确认存在对应脚注定义时才转换为 `[^N]`。
+   对原生文字 PDF，页底以数字开头的文本块只是版面事实：`bbox[3]`、它与页底带的相交比例、相对正文的字号、字体名和
+   原生上标都要一起看，不能单独自动判定为脚注。扫描/OCR 与原生文字 PDF 都先由本地按块间距、
+   左右对齐、连续编号和跨块连续性推断页面级区域。清晰的底部编号区域可以本地接受；边界不清、
+   无编号续文、正文/脚注重叠、OCR 证据冲突以及疑似漏检会写入
+   `footnote_visual_audit_manifest.json`，交给 Antigravity 视觉 Subagent。连续的递增数字开头块
+   （如 `18、19、20、21`）会向上回溯相邻无编号块，形成一个区域任务；页眉、页脚和纯页码仍会排除，
+   但已进入连续区域的块保留给视觉审计判断。页面图和可用的区域裁剪图会随任务提供。
+   `suspected_missed_count` 不再只是报告警告：达到回溯审计条件的漏检块会成为 `audit_candidates`，
+   必须由视觉任务确认。默认使用 `footnotes.auto_accept: true`，只把异常区域交给 Subagent；需要
+   全部候选复核时再设置 `false` 或运行 `footnote-prepare --review-all`。
+   Subagent 必须输出区域级审计和其中每个 review block 的角色，在脚注、引用、参考文献、普通正文和
+   不确定项之间作出决定；区域或 block 使用 `review_required` 时校验阻断。原生上标引用在 `pages/`
+   中保留为 `<sup>…</sup>`，后续只有确认存在对应脚注定义时才转换为 `[^N]`。
 
    `footnote-apply` 只移动已确认的 `footnote_start`、`footnote_continuation` 和
    `footnote_definition`；`citation`、`bibliography` 和 `body` 保持原位。脚注按实际
@@ -464,10 +463,12 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
    脚注阶段至少核对以下产物后才能继续 polish：
 
    - `footnote_candidates.json`：`source_kind`、`ocr_evidence_mode`、`sidecar_sha256`、
-     `review_pages` 与候选数量；原生稿还要确认候选带有 `font_size_ratio`/`font_names` 等
-     可用的版面证据；
+     `review_pages`、页面区域、`audit_candidates` 与候选数量；原生稿还要确认候选带有
+     `font_size_ratio`/`font_names` 等可用的版面证据；
+   - `footnote_visual_audit_manifest.json`：异常区域、区域 bbox、审计原因、页面图/裁剪图和
+     review block 清单；有 `pending_review` 任务时不能跳过视觉 Subagent；
    - `footnote_subagent_manifest.json`：`status`、`review_candidate_count` 和
-     `unit_context_files`；`pending_review` 时不能跳过 Subagent；
+     `visual_audit_task_count`、`unit_context_files` 和审计 manifest；`pending_review` 时不能跳过 Subagent；
    - `footnote_decision_validation.json`：必须是 `valid: true` 且 `status: validated`，
      或明确的 `no_subagent_review_required`；`retry_required` 和 `human_review_required`
      都阻断；

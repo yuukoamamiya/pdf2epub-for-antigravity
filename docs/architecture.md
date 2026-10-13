@@ -108,13 +108,16 @@ PDF 精修的核心领域模块如下：
   不自行判断普通插图是否应该移动。
 - `refine/page_merger.py`：消费已验证的整页插图绑定，恢复“前页半句 → 插图页 → 后页续句”，
   并把图片及说明放回连续正文之后。
-- `refine/footnote_prepare.py`：按页面 layout sidecar 生成脚注候选。视觉 OCR 要求 block 的
-  `bbox[3]` 进入页底带，并满足 block 与页底带的最小相交比例；标签只能作为辅助证据，不能
-  单独绕过几何条件。它排除页眉、页脚、纯页码和引用标签，并把连续的数字开头块（例如
-  `18, 19, 20, 21`）向上回溯为一个 review 区域。原生文字 PDF 使用 PDF 坐标、文本块和
-  字体元数据，并只把低置信度页底编号候选交给复核。`footnotes.auto_accept` 是两种来源共用的本地接受策略；双 OCR 模式比较
-  主/次候选差异，并把次 OCR 的连续物理行合并成一个 secondary-only 复核窗口。
-  `resolve_footnote_options()` 集中处理配置默认值和 CLI 覆盖。它不直接改写 Markdown，也不把引用推断成脚注。
+- `refine/footnote_prepare.py`：按页面 layout sidecar 生成脚注候选和页面级脚注区域。视觉 OCR 要求
+  block 的 `bbox[3]` 进入页底带，并满足 block 与页底带的最小相交比例；标签只能作为辅助证据，
+  不能单独绕过几何条件。它排除页眉、页脚、纯页码和引用标签，把连续数字开头块（例如
+  `18, 19, 20, 21`）及其相邻续文组织为一个区域。清晰区域由本地接受；边界不清、区域内有未分类
+  block、OCR 证据冲突或几何漏检则生成 `footnote_visual_audit_manifest.json`，并附页面图和可用的
+  区域裁剪图，交给视觉 Subagent。`suspected_missed_count` 对应的可疑漏检会进入
+  `audit_candidates`，不再只是静态统计。原生文字 PDF 仍使用 PDF 坐标、文本块和字体元数据。
+  `footnotes.auto_accept` 是两种来源共用的区域级本地接受策略；双 OCR 模式比较主/次候选差异，
+  并把次 OCR 的连续物理行合并成一个 secondary-only 复核窗口。`resolve_footnote_options()` 集中
+  处理配置默认值和 CLI 覆盖。它不直接改写 Markdown，也不把引用推断成脚注。
 - `refine/footnote_apply.py`：只消费已验证的脚注决定，按完整 TOC `unit_id` 合并脚注到单元末尾，
   保留 `citation`、`bibliography` 和普通正文原位。次 OCR 独有脚注必须带显式文本、来源单元
   和 `primary_disposition`；主 OCR 重复块只有在明确列出 `primary_block(s)` 时才会删除，重复
@@ -421,7 +424,8 @@ span 的起始 x 坐标拆分左右栏，再按“左栏自上而下、右栏自
 - `page_box` 和 `blocks[].bbox` 使用 PyMuPDF/PDF page points；原生稿不能套用 OCR 的
   `0..1000` 坐标启发式。`footnote_prepare._normalise_bbox()` 先按 page box 转成 `0..1`
   比例，再使用 `bbox[3]` 与页底带相交比例共同进行底部判断。默认
-  `bottom_ratio: 0.64`、`bottom_intersection_ratio: 0.25`。
+  未配置时的代码兜底为 `bottom_ratio: 0.64`、`bottom_intersection_ratio: 0.25`；扫描稿示例配置
+  推荐使用 `0.50`/`0.08`，由区域异常审计承担召回兜底。
 - `body_font_size` 是该页文本 span 字号的中位数。它只用于计算候选块的
   `font_size_ratio`；字号小不等于脚注。
 - 每个原生文本 block 的 `source_block` 指向 PDF 原始 block，`order` 保持页面阅读顺序。
@@ -434,15 +438,16 @@ span 的起始 x 坐标拆分左右栏，再按“左栏自上而下、右栏自
   标记为 `confidence: high`/`local_candidate`，由 apply 后端按 `footnote_start` 处理；
   其他候选标记为 `review_required`。字号、坐标、字体和上标仍只是证据，不能把普通上标或
   引用单独升级成脚注。
-- `footnotes.auto_accept: false` 会对扫描/OCR 与原生文字两种 PDF 统一关闭本地高置信度接受，
-  让所有候选进入 Subagent。CLI 的 `--review-all` 也会临时关闭两种来源的本地接受。
+- `footnotes.auto_accept: true` 会让清晰的页面脚注区域走本地路径，只把异常区域交给视觉
+  Subagent；设为 `false` 或使用 CLI 的 `--review-all` 才会把所有候选区域纳入视觉复核。
   `footnotes.native_max_font_ratio`（默认 `0.88`）仍只调节原生 PDF 的字号门槛。
 
 候选报告还会写入 `bottom_detection`：页底 block 总数、页底数字 block 总数、进入候选的数字
-block 数、被排除的页眉/页脚与纯数字页码数，以及 `suspected_missed_count`。后者是召回风险
-提示，不是脚注决定；出现时 Subagent 必须打开对应页图检查。只要存在待复核页，准备阶段会
-复用 OCR 校正阶段的当前 PDF 页面 PNG，并把 `visual_file` 写入 page report、manifest 和
-Prompt；没有源 PDF 的 sidecar-only 测试会明确记录图像证据不可用。
+block 数、被排除的页眉/页脚与纯数字页码数，以及 `suspected_missed_count`。达到审计条件的漏检
+还会进入 `audit_candidates` 和 `footnote_visual_audit_manifest.json`，因此不会只停留在统计层。
+只要存在异常区域，准备阶段会复用 OCR 校正阶段的当前 PDF 页面 PNG，并尽量生成区域裁剪图，
+把 `visual_file`/`region_visual_file` 写入 manifest 和 Prompt；没有源 PDF 的 sidecar-only 运行会
+明确记录图像证据不可用。Subagent 可提交新版 `region_audits`，旧版 flat `decisions` 仍可恢复。
 
 脚注准备报告还记录 `sidecar_sha256`。`footnote_decisions.json` 只能引用候选报告中的
 `page`/`block` 地址；`footnote-validate` 会检查 source kind、sidecar 哈希、决定覆盖率、
