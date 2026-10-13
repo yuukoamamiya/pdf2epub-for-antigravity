@@ -587,6 +587,36 @@ def test_labeled_numeric_region_does_not_backtrack_adjacent_body_text(
     assert report["visual_audit_task_count"] == 0
 
 
+def test_cross_page_labeled_region_keeps_unlabelled_continuation_for_review(
+    tmp_path: Path,
+):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [
+            _block("A page body", 0, y0=120),
+            _block("36 Footnote starts on A", 1, label="Footnote", y0=820),
+        ],
+    )
+    _write_sidecar(
+        tmp_path,
+        2,
+        [
+            _block("B page body", 0, y0=120),
+            _block("Continuation of footnote 36", 1, label="Text", y0=725),
+            _block("37 New footnote", 2, label="Footnote", y0=775),
+            _block("38 Another new footnote", 3, label="Footnote", y0=825),
+        ],
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    page = report["pages"][1]
+    assert [item["block"] for item in page["candidates"]] == [1, 2, 3]
+    assert page["footnote_regions"][0]["disposition"] == "visual_audit_required"
+    assert "unclassified_continuation_block" in page["footnote_regions"][0]["reasons"]
+
+
 def test_page_footer_inside_a_confirmed_numeric_region_is_reviewed_not_dropped(
     tmp_path: Path,
 ):

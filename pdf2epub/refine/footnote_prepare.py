@@ -491,6 +491,7 @@ def _expand_continuous_region_candidates(
     page_markdown: str,
     auto_accept: bool,
     native_max_font_ratio: float,
+    previous_page_footnote_evidence: bool = False,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Add review-only blocks surrounding a consecutive numeric note run."""
     regions = _continuous_numeric_regions(
@@ -531,11 +532,16 @@ def _expand_continuous_region_candidates(
                 break
             # When the numbered run already carries an explicit Footnote
             # label, an adjacent Text block is more likely to be the final
-            # body line than an unlabelled continuation. Do not turn that
-            # common layout into a review region. Unlabelled numeric runs
-            # retain the conservative historical backtracking rule.
-            if numeric_blocks_have_footnote_label and not _FOOTNOTE_LABEL_RE.search(
-                str(block.get("label") or "")
+            # body line than an unlabelled continuation. Suppress that noisy
+            # backtrack for an ordinary page, but keep it when the preceding
+            # page has footnote evidence: ``body -> continuation -> new note``
+            # is a legitimate cross-page layout, and OCR may label the
+            # continuation as ordinary Text. Unlabelled numeric runs retain
+            # the conservative historical backtracking rule.
+            if (
+                numeric_blocks_have_footnote_label
+                and not _FOOTNOTE_LABEL_RE.search(str(block.get("label") or ""))
+                and not previous_page_footnote_evidence
             ):
                 break
             if bbox[3] < float(region_top) - DEFAULT_CONTINUOUS_REGION_MAX_GAP:
@@ -601,6 +607,16 @@ def _expand_continuous_region_candidates(
         )
     expanded.sort(key=lambda item: (item.get("order", item.get("block", 0)), item["block"]))
     return expanded, normalized_regions
+
+
+def _has_footnote_evidence(candidates: Iterable[Mapping[str, Any]]) -> bool:
+    """Return whether a page has a candidate that can continue onto the next."""
+    return any(
+        bool(candidate.get("key"))
+        or bool(_FOOTNOTE_LABEL_RE.search(str(candidate.get("label") or "")))
+        for candidate in candidates
+        if isinstance(candidate, Mapping)
+    )
 
 
 def _bottom_detection_stats(
@@ -1522,6 +1538,10 @@ def prepare_footnote_candidates(
         "excluded_numeric_page_count": 0,
         "suspected_missed_count": 0,
     }
+    previous_page_number: Optional[int] = None
+    previous_page_footnote_evidence = False
+    previous_secondary_page_number: Optional[int] = None
+    previous_secondary_page_footnote_evidence = False
 
     for sidecar_path in sidecars:
         sidecar = _load_sidecar(sidecar_path)
@@ -1581,6 +1601,10 @@ def prepare_footnote_candidates(
             page_markdown=page_markdown,
             auto_accept=options.auto_accept,
             native_max_font_ratio=options.native_max_font_ratio,
+            previous_page_footnote_evidence=(
+                previous_page_number == page_number - 1
+                and previous_page_footnote_evidence
+            ),
         )
         candidates.sort(key=lambda item: (item["order"], item["block"]))
         candidate_indexes = {
@@ -1674,6 +1698,10 @@ def prepare_footnote_candidates(
                 page_markdown="",
                 auto_accept=False,
                 native_max_font_ratio=options.native_max_font_ratio,
+                previous_page_footnote_evidence=(
+                    previous_secondary_page_number == page_number - 1
+                    and previous_secondary_page_footnote_evidence
+                ),
             )
             secondary_candidates.sort(key=lambda item: (item["order"], item["block"]))
             matched_secondary_blocks = {
@@ -1774,6 +1802,14 @@ def prepare_footnote_candidates(
                         context_blocks=options.context_blocks,
                     ) if evidence_mode == "two_ocr" else None,
                 }
+            )
+
+        previous_page_number = page_number
+        previous_page_footnote_evidence = _has_footnote_evidence(candidates)
+        if evidence_mode == "two_ocr":
+            previous_secondary_page_number = page_number
+            previous_secondary_page_footnote_evidence = _has_footnote_evidence(
+                secondary_candidates
             )
 
     page_reports.sort(key=lambda item: item["page"])
