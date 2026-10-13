@@ -30,6 +30,33 @@ def test_markdown_output_normalizes_epub2_ids_and_list_starts() -> None:
     assert 'style="counter-reset: epub-list 1;"' in html
 
 
+def test_single_markdown_newline_is_a_soft_wrap_by_default() -> None:
+    html = convert_markdown_to_html(
+        "A philosophical sentence split by a visual line wrap.\n"
+        "The sentence continues here.",
+        standalone=False,
+    )
+
+    assert "<br" not in html
+    assert "A philosophical sentence split by a visual line wrap." in html
+    assert "The sentence continues here." in html
+
+
+def test_explicit_hard_break_and_legacy_mode_remain_available() -> None:
+    explicit = convert_markdown_to_html(
+        "A line<br />\nThe next line",
+        standalone=False,
+    )
+    legacy = convert_markdown_to_html(
+        "A line\nThe next line",
+        standalone=False,
+        preserve_soft_line_breaks=True,
+    )
+
+    assert "<br" in explicit
+    assert "<br" in legacy
+
+
 def test_japanese_ruby_uses_epub2_compatible_spans() -> None:
     html = convert_markdown_to_html("玄関(げんかん)", standalone=False)
 

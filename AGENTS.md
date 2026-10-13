@@ -290,6 +290,9 @@ ocr-pages
 `polish-validate` 通过后，才能提取实体表或准备正文翻译。高置信度原生矢量文本 PDF
 只跳过视觉 OCR，仍必须用 `polish` 判断视觉换行与真实段落边界。原生文字稿的 polish
 不得进行无依据的拼写或字形改写，重点是合并软换行并保留真实段落、标题和块级结构。
+`refine-local` 的页面合并器会保守地拼接跨页未完的普通正文；完整句子、标题、列表、脚注、
+图片和表格仍保持块边界。Markdown→XHTML 默认遵循标准 Markdown 语义：单换行是软换行，
+空行才创建新段落；只有显式 `<br />` 才生成硬换行。
 `polish-validate` 还会报告高置信度的残留页码/页边行；这些候选默认进入
 `review_required`；首次出现时必须先让 Subagent 重新判断，复核后仍存在则升级为
 `human_review_required`，不授权本地脚本自动删除或继续。仅在明确确认合法保留后使用
@@ -479,7 +482,7 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
    `polish_subagent_prompt.md`，并按 `polish_worker_handoffs/` 中各 manifest 的
    `assigned_files` 写入 `polished_markdown/`，然后运行 `polish-validate`。
    若启用第二套 OCR，对 OCR/混合型 PDF，前置 `ocr-correct` 通过校验后的字符、词语和符号视为权威；
-   该步骤只处理残留换行、段落边界和块级结构，不再纠正 OCR 字符、拼写或措辞。若仍疑似有 OCR 错误，应退回
+   该步骤只处理残留换行、段落边界和块级结构，不再纠正 OCR 字符、拼写或措辞。普通正文段落内部不得为了视觉排版新增换行；若仍疑似有 OCR 错误，应退回
    `ocr-correct`，不得在 polish 中改写。若只启用一套 OCR，则没有 page-level 视觉纠错闸门，polish 仍只处理
    结构，不应静默改写 OCR 字符。对原生矢量文本 PDF，该步骤用于从视觉行重建语义段落，同时保留
    原文字符和块级结构。`polish-validate` 还会将源稿与润色稿按忽略换行、Markdown 外层标记和已确认页边装饰的

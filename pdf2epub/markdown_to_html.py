@@ -709,7 +709,8 @@ def convert_markdown_to_html(
     standalone: bool = True,
     image_mapping: Optional[dict] = None,
     footnote_manager=None,
-    source_chapter: Optional[str] = None
+    source_chapter: Optional[str] = None,
+    preserve_soft_line_breaks: bool = False,
 ) -> str:
     """
     Convert markdown content to HTML.
@@ -722,6 +723,10 @@ def convert_markdown_to_html(
         image_mapping: Optional dict mapping original image names to new names
         footnote_manager: Optional FootnoteManager for cross-chapter footnote handling
         source_chapter: The source chapter name (e.g., "chapter_1") for footnote linking
+        preserve_soft_line_breaks: Render single Markdown newlines as XHTML ``<br />``.
+            The default follows standard Markdown semantics: single newlines are soft
+            wraps and only blank lines create paragraph breaks. Explicit ``<br />``
+            tags remain effective regardless of this option.
     
     Returns:
         HTML string
@@ -741,12 +746,13 @@ def convert_markdown_to_html(
         'markdown.extensions.tables',       # For table support
         'markdown.extensions.fenced_code',  # For code blocks
         'markdown.extensions.codehilite',   # For code syntax highlighting
-        'markdown.extensions.nl2br',        # Convert newlines to <br>
         'markdown.extensions.sane_lists',   # Better list handling
         'markdown.extensions.smarty',       # Smart quotes and dashes
         'markdown.extensions.toc',          # Table of contents
         'markdown.extensions.meta',         # Metadata support
     ]
+    if preserve_soft_line_breaks:
+        extensions.insert(4, 'markdown.extensions.nl2br')
     
     # Configure extension settings
     extension_configs = {

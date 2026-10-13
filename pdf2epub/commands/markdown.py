@@ -426,6 +426,7 @@ def _prepare_pdf_markdown_task(args, task: str):
             "Translate prose to the target language; do not summarize, censor, or add commentary.",
             "Preserve Markdown heading levels, image links, footnote references, formulas, and link destinations exactly.",
             "Keep one output file for every source file and keep filenames unchanged.",
+            "Keep each semantic prose paragraph as one Markdown block. Do not insert visual line wraps inside ordinary paragraphs; use a blank line only for a real paragraph boundary. Preserve intentional line structure in lists, quotations, tables, formulas, poetry, and explicit hard-break markup.",
             "Output only the target-language replacement: never add bilingual paragraphs, parallel English titles, or the original text beside the translation.",
             "Do not upgrade ordinary paragraphs, italic text, or bold text into Markdown headings: preserve exactly whether the source line begins with #.",
             "If a standalone REFERENCES, Bibliography, Literatur, Notes, or equivalent end-of-book label has no # prefix in the source, keep it as an ordinary paragraph in the translation; never upgrade it to a Markdown heading.",

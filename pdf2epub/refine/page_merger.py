@@ -101,7 +101,11 @@ class PageMerger:
             if page_content.strip():
                 content_parts.append((page_num, page_content))
 
-        return _merge_full_page_insertions(content_parts, illustration_pages)
+        return _merge_full_page_insertions(
+            content_parts,
+            illustration_pages,
+            join_soft_page_breaks=True,
+        )
 
     def merge_nodes_content(
         self,
@@ -177,13 +181,17 @@ class PageMerger:
             if page_content.strip():
                 content_parts.append((page_num, page_content))
 
-        return _merge_full_page_insertions(content_parts, illustration_pages)
+        return _merge_full_page_insertions(
+            content_parts,
+            illustration_pages,
+            join_soft_page_breaks=True,
+        )
 
 
 _SENTENCE_END = frozenset("。！？!?；;：:….!?")
 _CLOSING_MARKS = frozenset("\"'”’》）)]】〉〕」』»\u3009\u300b\u300d\u300f\u3011")
 _NEXT_BLOCK_RE = re.compile(
-    r"^(?:#{1,6}\s|[-*+]\s+|\d+[.)]\s+|>\s+|!\[|<img\b|\|)",
+    r"^(?:#{1,6}\s|[-*+]\s+|\d+[.)]\s+|>\s+|!\[|<img\b|<sup\b|<div\b|<table\b|\|)",
     re.IGNORECASE,
 )
 
@@ -201,8 +209,8 @@ def _looks_like_new_block(value: str) -> bool:
     return not stripped or bool(_NEXT_BLOCK_RE.match(stripped)) or stripped.startswith("[^")
 
 
-def _can_join_across_full_page(previous: str, following: str) -> bool:
-    """Conservatively recognize a sentence interrupted by a visual page."""
+def _can_join_across_page(previous: str, following: str) -> bool:
+    """Conservatively recognize a prose block interrupted by a page break."""
     previous = str(previous or "").strip()
     following = str(following or "").strip()
     if not previous or not following or _looks_like_new_block(following):
@@ -239,6 +247,8 @@ def _join_page_fragments(previous: str, following: str) -> str:
 def _merge_full_page_insertions(
     entries: Iterable[Tuple[int, str]],
     illustration_pages: Set[int],
+    *,
+    join_soft_page_breaks: bool = False,
 ) -> str:
     """Keep full-page images, but move them after a repaired interrupted sentence.
 
@@ -258,7 +268,7 @@ def _merge_full_page_insertions(
             and index + 1 < len(ordered)
             and ordered[index - 1][0] not in illustration_pages
             and ordered[index + 1][0] not in illustration_pages
-            and _can_join_across_full_page(merged[-1] if merged else "", ordered[index + 1][1])
+            and _can_join_across_page(merged[-1] if merged else "", ordered[index + 1][1])
         ):
             merged[-1] = _join_page_fragments(merged[-1], ordered[index + 1][1])
             if content.strip():
@@ -266,6 +276,13 @@ def _merge_full_page_insertions(
             index += 2
             continue
         if content.strip():
-            merged.append(content)
+            if (
+                join_soft_page_breaks
+                and merged
+                and _can_join_across_page(merged[-1], content)
+            ):
+                merged[-1] = _join_page_fragments(merged[-1], content)
+            else:
+                merged.append(content)
         index += 1
     return "\n\n".join(merged)

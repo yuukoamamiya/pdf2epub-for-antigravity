@@ -108,3 +108,58 @@ def test_page_merger_keeps_prefix_before_next_midpage_section(tmp_path: Path):
     assert "The previous sentence continues." in result
     assert "It ends here." in result
     assert "# Next section" not in result
+
+
+def test_page_merger_joins_an_unfinished_prose_block_across_pages(tmp_path: Path):
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    (pages / "page_001.md").write_text(
+        "The concept begins at the end of the page and continues",
+        encoding="utf-8",
+    )
+    (pages / "page_002.md").write_text(
+        "on the next page.",
+        encoding="utf-8",
+    )
+
+    node = TOCNode("Section", 1, 1, 2)
+    result = PageMerger().merge_node_content(node, pages)
+
+    assert result == (
+        "The concept begins at the end of the page and continues on the next page."
+    )
+
+
+def test_page_merger_keeps_completed_page_paragraph_boundary(tmp_path: Path):
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    (pages / "page_001.md").write_text("The first paragraph ends.", encoding="utf-8")
+    (pages / "page_002.md").write_text("The next paragraph begins.", encoding="utf-8")
+
+    node = TOCNode("Section", 1, 1, 2)
+    result = PageMerger().merge_node_content(node, pages)
+
+    assert result == "The first paragraph ends.\n\nThe next paragraph begins."
+
+
+def test_page_merger_does_not_join_a_page_starting_with_a_footnote_or_heading(
+    tmp_path: Path,
+):
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    (pages / "page_001.md").write_text(
+        "The body sentence is incomplete at the page edge",
+        encoding="utf-8",
+    )
+    (pages / "page_002.md").write_text(
+        "# New section\n\n[^1]: A footnote definition.",
+        encoding="utf-8",
+    )
+
+    node = TOCNode("Section", 1, 1, 2)
+    result = PageMerger().merge_node_content(node, pages)
+
+    assert result == (
+        "The body sentence is incomplete at the page edge\n\n"
+        "# New section\n\n[^1]: A footnote definition."
+    )
