@@ -12,6 +12,7 @@ from __future__ import annotations
 import html
 import json
 import re
+import string
 from difflib import SequenceMatcher
 from collections import defaultdict
 from pathlib import Path
@@ -19,6 +20,11 @@ from typing import Any, Mapping, Optional
 
 from ..workflow_contracts import atomic_write_text, sha256_file
 from .pdf_evidence import pdf_evidence_mode, require_current_consensus
+from .footnote_prepare import (
+    FOOTNOTE_MODES,
+    FOOTNOTE_STRUCTURE_EXEMPT_TYPES,
+    resolve_footnote_options,
+)
 
 
 FOOTNOTE_NORMALIZATION_SCHEMA_VERSION = 1
@@ -70,6 +76,28 @@ def _signature_with_map(value: str) -> tuple[str, list[int]]:
     index = 0
     while index < len(value):
         char = value[index]
+        if char == "[" and (index == 0 or value[index - 1] == "\n"):
+            definition = re.match(
+                r"\[\^([A-Za-z0-9_-]+)\]\s*:\s*",
+                value[index:],
+            )
+            if definition:
+                key = definition.group(1)
+                key_start = index + 2
+                chars.extend(key)
+                positions.extend(range(key_start, key_start + len(key)))
+                index += len(definition.group(0))
+                if index < len(value) and value[index] != "\n":
+                    chars.append(" ")
+                    positions.append(max(key_start + len(key), index - 1))
+                continue
+        if char == "\\" and index + 1 < len(value):
+            # Markdown escapes are presentation syntax, not OCR content.
+            # Drop the escape slash and let the next iteration handle the
+            # escaped punctuation using the same rules as the raw sidecar.
+            if value[index + 1] in string.punctuation:
+                index += 1
+                continue
         if char == "<":
             close = value.find(">", index + 1)
             if close >= 0:
@@ -94,6 +122,17 @@ def _signature_with_map(value: str) -> tuple[str, list[int]]:
     while end > start and chars[end - 1] == " ":
         end -= 1
     return "".join(chars[start:end]), positions[start:end]
+
+
+def _expand_markdown_definition_prefix(
+    source: str, start: int, end: int
+) -> tuple[int, int]:
+    """Include a leading Markdown footnote-definition prefix in a match."""
+    line_start = source.rfind("\n", 0, start) + 1
+    prefix = re.match(r"\[\^[A-Za-z0-9_-]+\]\s*:\s*", source[line_start:])
+    if prefix and line_start <= start <= line_start + len(prefix.group(0)):
+        return line_start, end
+    return start, end
 
 
 def _is_signature_boundary(text: str, start: int, end: int) -> bool:
@@ -168,13 +207,12 @@ def _find_exact_signature_spans(source: str, needle: str) -> list[tuple[int, int
         if _is_signature_boundary(source_signature, found, end):
             last = end - 1
             if last < len(positions):
-                spans.append(
-                    _expand_mapped_span(
-                        source,
-                        positions[found],
-                        positions[last] + 1,
-                    )
+                mapped = _expand_mapped_span(
+                    source,
+                    positions[found],
+                    positions[last] + 1,
                 )
+                spans.append(_expand_markdown_definition_prefix(source, *mapped))
         cursor = found + 1
     return spans
 
@@ -627,7 +665,26 @@ def apply_footnote_normalization(
         return _write_failure(output_dir, [str(exc)])
 
     report_mode = str(report.get("ocr_evidence_mode") or "single_ocr")
+    report_footnote_mode = str(
+        report.get("footnote_mode") or "footnotes"
+    ).strip().lower()
+    if report_footnote_mode not in FOOTNOTE_MODES:
+        return _write_failure(
+            output_dir,
+            [f"unsupported footnote mode in candidate report: {report_footnote_mode}"],
+        )
     validation_mode = str(validation.get("ocr_evidence_mode") or report_mode)
+    validation_footnote_mode = str(
+        validation.get("footnote_mode") or report_footnote_mode
+    ).strip().lower()
+    if validation_footnote_mode != report_footnote_mode:
+        return _write_failure(
+            output_dir,
+            [
+                "footnote candidate and decision checkpoints use different "
+                "footnotes.mode values; rerun footnote-prepare and footnote-validate",
+            ],
+        )
     if config is not None:
         configured_mode = pdf_evidence_mode(output_dir, config)
         if report_mode != configured_mode or validation_mode != configured_mode:
@@ -648,6 +705,18 @@ def apply_footnote_normalization(
                         "two-OCR footnote checkpoint is stale; rerun ocr-pages and footnote-prepare",
                     ],
                 )
+        try:
+            configured_footnote_mode = resolve_footnote_options(config).mode
+        except ValueError as exc:
+            return _write_failure(output_dir, [str(exc)])
+        if report_footnote_mode != configured_footnote_mode:
+            return _write_failure(
+                output_dir,
+                [
+                    "footnote checkpoints were prepared with a different "
+                    "footnotes.mode; rerun footnote-prepare and footnote-validate",
+                ],
+            )
 
     if validation.get("valid") is not True or validation.get("status") not in {
         "validated",
@@ -665,6 +734,59 @@ def apply_footnote_normalization(
     target_dir = output_dir / "footnote_normalized"
     if not source_dir.is_dir():
         return _write_failure(output_dir, [f"source directory is missing: {source_dir}"])
+
+    if report_footnote_mode != "footnotes":
+        try:
+            source_files = sorted(source_dir.glob("*.md"))
+            if not source_files:
+                raise ValueError(f"source directory contains no Markdown units: {source_dir}")
+            target_dir.mkdir(parents=True, exist_ok=True)
+            for source_path in source_files:
+                atomic_write_text(
+                    target_dir / source_path.name,
+                    source_path.read_text(encoding="utf-8"),
+                )
+            source_hashes = _markdown_inventory(source_dir)
+            target_hashes = _markdown_inventory(target_dir)
+            extra_files = sorted(set(target_hashes) - set(source_hashes))
+            if extra_files:
+                return _write_failure(
+                    output_dir,
+                    [
+                        "footnote_normalized contains stale Markdown units not present "
+                        f"in ocr_markdown: {', '.join(extra_files[:20])}"
+                    ],
+                )
+        except (OSError, UnicodeError, ValueError) as exc:
+            return _write_failure(output_dir, [f"could not preserve source units: {exc}"])
+        result = {
+            "schema_version": FOOTNOTE_NORMALIZATION_SCHEMA_VERSION,
+            "source_kind": report.get("source_kind", "ocr"),
+            "ocr_evidence_mode": report_mode,
+            "footnote_mode": report_footnote_mode,
+            "status": "validated",
+            "valid": True,
+            "source_dir": "ocr_markdown",
+            "target_dir": "footnote_normalized",
+            "source_sha256": source_hashes,
+            "target_sha256": target_hashes,
+            "candidate_report_sha256": sha256_file(
+                output_dir / "footnote_candidates.json"
+            ),
+            "decision_validation_sha256": sha256_file(
+                output_dir / "footnote_decision_validation.json"
+            ),
+            "moved_count": 0,
+            "preserved_roles": {},
+            "notes": [],
+            "skipped_reason": f"footnotes.mode={report_footnote_mode}",
+            "resolved_blocks": [],
+        }
+        atomic_write_text(
+            output_dir / "footnote_normalization.json",
+            json.dumps(result, ensure_ascii=False, indent=2),
+        )
+        return result
 
     try:
         records = _unit_records(output_dir)
@@ -820,7 +942,7 @@ def apply_footnote_normalization(
                         max(item[1] for item in primary_spans),
                     )
 
-        if record["type"] in {"bibliography", "index"}:
+        if record["type"] in FOOTNOTE_STRUCTURE_EXEMPT_TYPES:
             errors.append(
                 f"{page}:{block_index}: footnote decision falls inside "
                 f"{record['type']} content; classify it as citation/bibliography or review it"
@@ -1021,10 +1143,20 @@ def apply_footnote_normalization(
 
     source_hashes = _markdown_inventory(source_dir)
     target_hashes = _markdown_inventory(target_dir)
+    extra_files = sorted(set(target_hashes) - set(source_hashes))
+    if extra_files:
+        return _write_failure(
+            output_dir,
+            [
+                "footnote_normalized contains stale Markdown units not present "
+                f"in ocr_markdown: {', '.join(extra_files[:20])}"
+            ],
+        )
     result = {
         "schema_version": FOOTNOTE_NORMALIZATION_SCHEMA_VERSION,
         "source_kind": report.get("source_kind", "ocr"),
         "ocr_evidence_mode": report_mode,
+        "footnote_mode": report_footnote_mode,
         "status": "validated",
         "valid": True,
         "source_dir": "ocr_markdown",
@@ -1105,6 +1237,22 @@ def footnote_normalization_status(
             "evidence_mode_mismatch",
             "footnote normalization and decision validation use different OCR evidence modes",
         )
+    report_footnote_mode = str(
+        report.get("footnote_mode") or "footnotes"
+    ).strip().lower()
+    validation_footnote_mode = str(
+        validation.get("footnote_mode") or report_footnote_mode
+    ).strip().lower()
+    if report_footnote_mode not in FOOTNOTE_MODES:
+        fail(
+            "unsupported_footnote_mode",
+            f"footnote normalization uses unsupported mode {report_footnote_mode}",
+        )
+    if report_footnote_mode != validation_footnote_mode:
+        fail(
+            "footnote_mode_mismatch",
+            "footnote normalization and decision validation use different footnotes.mode values",
+        )
     if config is not None:
         configured_mode = pdf_evidence_mode(output_dir, config)
         if report_mode != configured_mode:
@@ -1117,8 +1265,27 @@ def footnote_normalization_status(
                 require_current_consensus(output_dir, config, stage="footnote")
             except ValueError as exc:
                 fail("ocr_consensus_stale", str(exc))
+        try:
+            configured_footnote_mode = resolve_footnote_options(config).mode
+            if report_footnote_mode != configured_footnote_mode:
+                fail(
+                    "configured_footnote_mode_mismatch",
+                    f"checkpoint uses footnotes.mode={report_footnote_mode}, "
+                    f"current configuration requires {configured_footnote_mode}",
+                )
+        except ValueError as exc:
+            fail("invalid_footnote_mode", str(exc))
     source_dir = output_dir / "ocr_markdown"
     target_dir = output_dir / "footnote_normalized"
+    source_names = set(_markdown_inventory(source_dir))
+    target_names = set(_markdown_inventory(target_dir))
+    extra_files = sorted(target_names - source_names)
+    if extra_files:
+        fail(
+            "normalized_output_extra_files",
+            "footnote_normalized contains stale Markdown units not present in "
+            f"ocr_markdown: {', '.join(extra_files[:20])}",
+        )
     if report.get("source_sha256") != _markdown_inventory(source_dir):
         fail(
             "source_markdown_changed",

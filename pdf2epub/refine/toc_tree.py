@@ -28,8 +28,8 @@ class TOCNode:
     # the same page.
     boundary_info: Optional[Dict] = None
 
-    # For notes chapters
-    chapter_type: Optional[str] = None  # "notes" or None
+    # Semantic content role used by downstream validation and footnote rules.
+    chapter_type: Optional[str] = None
 
     # Estimated token count (populated during processing)
     estimated_tokens: int = 0

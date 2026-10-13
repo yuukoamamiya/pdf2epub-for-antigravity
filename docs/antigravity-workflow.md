@@ -501,6 +501,9 @@ Subagent；双 OCR 模式下，主/次候选存在性或 layout 证据不同的�
 不再复制这些默认值。
 这里必须区分脚注和引用：正文中的作者—年份/编号引用、引文来源以及
 `bibliography`/`reference` 条目使用 `citation` 或 `bibliography` 角色，脚本不会搬移它们。
+如果 TOC 单元属于集中尾注、作者说明、出版社目录或广告，分别使用
+`type: "notes"`、`type: "author_notes"`、
+`type: "catalog"` 或 `type: "ad"`；这些单元的页底数字不会被当作随页脚注。
 脚注候选必须保留“正文 → 上一脚注续文 → 新脚注”的页内顺序，不能把跨页续文默认移动到
 下一页开头。校验通过后运行 `footnote-apply`：本地脚本会把确认的脚注块从页面流中移除，
 合并跨页续文，并按实际生成的 TOC 单元（完整 `unit_id`；其 `.partM` 分片共享作用域）追加为 `[^N]: ...` 章末注，生成独立的
@@ -610,6 +613,8 @@ Subagent 输出。
 
 ```yaml
 footnotes:
+  # 集中尾注书使用 endnotes_only；无任何脚注/尾注处理时使用 disabled。
+  mode: footnotes
   auto_accept: true
   bottom_ratio: 0.50
   bottom_intersection_ratio: 0.08

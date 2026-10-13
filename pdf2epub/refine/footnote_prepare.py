@@ -12,6 +12,7 @@ visual/semantic judgment reserved for the workspace Subagent.
 
 from __future__ import annotations
 
+import html
 import json
 import re
 from dataclasses import dataclass
@@ -44,6 +45,17 @@ DEFAULT_CONTINUATION_HIGH_SCORE = 9
 DEFAULT_CONTINUATION_MEDIUM_SCORE = 5
 DEFAULT_SEMANTIC_MIN_SIMILARITY = 0.08
 DEFAULT_SEMANTIC_WIN_MARGIN = 0.035
+FOOTNOTE_MODES = frozenset({"footnotes", "endnotes_only", "disabled"})
+FOOTNOTE_STRUCTURE_EXEMPT_TYPES = frozenset(
+    {
+        "notes",
+        "bibliography",
+        "index",
+        "author_notes",
+        "catalog",
+        "ad",
+    }
+)
 _DECISION_ROLES = frozenset(
     {
         "body",
@@ -114,6 +126,7 @@ _SEMANTIC_STOPWORDS = frozenset(
 class FootnotePrepareOptions:
     """Validated settings shared by candidate and handoff preparation."""
 
+    mode: str = "footnotes"
     bottom_ratio: float = DEFAULT_BOTTOM_RATIO
     bottom_intersection_ratio: float = DEFAULT_BOTTOM_INTERSECTION_RATIO
     context_blocks: int = DEFAULT_CONTEXT_BLOCKS
@@ -144,6 +157,7 @@ def _leading_footnote_key(text: str) -> Optional[str]:
 def resolve_footnote_options(
     config: Optional[Mapping[str, Any]] = None,
     *,
+    mode: Optional[str] = None,
     bottom_ratio: Optional[float] = None,
     bottom_intersection_ratio: Optional[float] = None,
     context_blocks: Optional[int] = None,
@@ -154,6 +168,13 @@ def resolve_footnote_options(
     footnote_config = config.get("footnotes", {}) if isinstance(config, Mapping) else {}
     if not isinstance(footnote_config, Mapping):
         footnote_config = {}
+
+    resolved_mode = str(
+        mode if mode is not None else footnote_config.get("mode", "footnotes")
+    ).strip().lower()
+    if resolved_mode not in FOOTNOTE_MODES:
+        allowed = ", ".join(sorted(FOOTNOTE_MODES))
+        raise ValueError(f"footnotes.mode must be one of: {allowed}")
 
     resolved_bottom_ratio = (
         bottom_ratio
@@ -212,6 +233,7 @@ def resolve_footnote_options(
         raise ValueError("native_max_font_ratio must be between 0 and 1")
 
     return FootnotePrepareOptions(
+        mode=resolved_mode,
         bottom_ratio=resolved_bottom_ratio,
         bottom_intersection_ratio=resolved_bottom_intersection_ratio,
         context_blocks=resolved_context_blocks,
@@ -517,6 +539,7 @@ def _expand_continuous_region_candidates(
     auto_accept: bool,
     native_max_font_ratio: float,
     previous_page_footnote_evidence: bool = False,
+    excluded_block_indexes: Optional[set[int]] = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Add review-only blocks surrounding a consecutive numeric note run."""
     regions = _continuous_numeric_regions(
@@ -526,11 +549,17 @@ def _expand_continuous_region_candidates(
     if not regions:
         return candidates, []
     blocks = sidecar.get("blocks", [])
+    excluded_block_indexes = set(excluded_block_indexes or set())
     existing = {int(item["block"]) for item in candidates}
     expanded: list[dict[str, Any]] = list(candidates)
     normalized_regions: list[dict[str, Any]] = []
     for region in regions:
         indexes = list(region["numeric_block_indices"])
+        # A typed auxiliary unit can share a physical page with ordinary
+        # prose. Do not let the numeric-region backtracker bridge into its
+        # blocks; explicit candidates on the ordinary side remain safer.
+        if any(index in excluded_block_indexes for index in indexes):
+            continue
         region_indexes = set(indexes)
         numeric_blocks_have_footnote_label = any(
             _FOOTNOTE_LABEL_RE.search(
@@ -545,6 +574,8 @@ def _expand_continuous_region_candidates(
         while cursor >= 0:
             block = blocks[cursor]
             if not isinstance(block, Mapping):
+                break
+            if cursor in excluded_block_indexes:
                 break
             text = _text_from_block(block)
             bbox = _normalise_bbox(block, sidecar)
@@ -1285,6 +1316,7 @@ def _bottom_detection_stats(
     candidate_indexes: set[int],
     *,
     bottom_ratio: float,
+    excluded_block_indexes: Optional[set[int]] = None,
 ) -> dict[str, int]:
     """Count bottom numeric evidence that the candidate list did not cover."""
     stats = {
@@ -1295,7 +1327,10 @@ def _bottom_detection_stats(
         "excluded_numeric_page_count": 0,
         "suspected_missed_count": 0,
     }
+    excluded_block_indexes = set(excluded_block_indexes or set())
     for index, block in enumerate(sidecar.get("blocks", [])):
+        if index in excluded_block_indexes:
+            continue
         if not isinstance(block, Mapping):
             continue
         bbox = _normalise_bbox(block, sidecar)
@@ -1328,6 +1363,7 @@ def _suspected_missed_block_indexes(
     *,
     bottom_ratio: float,
     bottom_intersection_ratio: float,
+    excluded_block_indexes: Optional[set[int]] = None,
 ) -> list[int]:
     """Return bottom numeric blocks that need visual recall auditing.
 
@@ -1338,8 +1374,13 @@ def _suspected_missed_block_indexes(
     excluded unless a confirmed continuous region already owns the block.
     """
     missed: list[int] = []
+    excluded_block_indexes = set(excluded_block_indexes or set())
     for index, block in enumerate(sidecar.get("blocks", [])):
-        if index in candidate_indexes or not isinstance(block, Mapping):
+        if (
+            index in candidate_indexes
+            or index in excluded_block_indexes
+            or not isinstance(block, Mapping)
+        ):
             continue
         text = _text_from_block(block)
         bbox = _normalise_bbox(block, sidecar)
@@ -1836,7 +1877,183 @@ def _load_refined_units(output_dir: Path) -> list[dict[str, Any]]:
     except (OSError, UnicodeError, json.JSONDecodeError):
         return []
     units = value.get("units", []) if isinstance(value, dict) else []
-    return [item for item in units if isinstance(item, dict)]
+    refined = [dict(item) for item in units if isinstance(item, dict)]
+
+    # A resumable tree_progress from before typed units may not have copied
+    # the current TOC role. Recover it from the same index path used to name
+    # the refinement unit, including roles inherited by typed descendants.
+    toc_roles: dict[tuple[int, ...], str] = {}
+    toc_path = Path(output_dir) / "toc_tree.json"
+    try:
+        toc = json.loads(toc_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        toc = {}
+
+    def visit(nodes: Any, path: tuple[int, ...], inherited: str = "") -> None:
+        if not isinstance(nodes, list):
+            return
+        for index, node in enumerate(nodes, 1):
+            if not isinstance(node, Mapping):
+                continue
+            role = str(node.get("type") or inherited).strip().lower()
+            current = path + (index,)
+            toc_roles[current] = role
+            visit(node.get("children"), current, role)
+
+    if isinstance(toc, Mapping):
+        visit(toc.get("chapters"), ())
+
+    for unit in refined:
+        if str(unit.get("type") or "").strip():
+            unit["type"] = str(unit["type"]).strip().lower()
+            continue
+        raw_path = unit.get("index_path")
+        try:
+            index_path = tuple(int(value) for value in raw_path)
+        except (TypeError, ValueError):
+            index_path = ()
+        if index_path:
+            unit["type"] = toc_roles.get(index_path, "")
+    return refined
+
+
+def _structure_exclusion_for_page(
+    units: Iterable[Mapping[str, Any]], page_number: int
+) -> dict[str, Any]:
+    """Return typed refinement units that make page-footnote detection unsafe."""
+    excluded: list[dict[str, Any]] = []
+    for unit in units:
+        role = str(unit.get("type") or "").strip().lower()
+        if role not in FOOTNOTE_STRUCTURE_EXEMPT_TYPES:
+            continue
+        page_range = unit.get("page_range")
+        if not isinstance(page_range, list) or len(page_range) != 2:
+            continue
+        try:
+            start_page, end_page = int(page_range[0]), int(page_range[1])
+        except (TypeError, ValueError):
+            continue
+        if start_page <= page_number <= end_page:
+            excluded.append(
+                {
+                    "type": role,
+                    "file": str(unit.get("file") or ""),
+                    "page_range": [start_page, end_page],
+                    "boundary_info": dict(unit.get("boundary_info") or {})
+                    if isinstance(unit.get("boundary_info"), Mapping)
+                    else {},
+                }
+            )
+    roles = sorted({str(item["type"]) for item in excluded})
+    return {"roles": roles, "units": excluded}
+
+
+def _structure_text_signature(value: Any) -> str:
+    """Build a tolerant line-search signature for a sidecar block.
+
+    Sidecars can contain raw HTML while the page Markdown contains converted
+    Markdown (and OCR may escape emphasis punctuation).  For boundary mapping
+    we only need a stable alphanumeric anchor, not an editable source span.
+    """
+    text = html.unescape(str(value or ""))
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\\([*_<>{}#$`~])", r"\1", text)
+    text = re.sub(r"\[\^[A-Za-z0-9_-]+\]\s*:\s*", " ", text)
+    return "".join(char.casefold() for char in text if char.isalnum())
+
+
+def _block_line_span(
+    page_markdown: str,
+    sidecar: Mapping[str, Any],
+    block_index: int,
+) -> Optional[tuple[int, int]]:
+    """Locate a sidecar block in page Markdown using a line-aware signature."""
+    blocks = sidecar.get("blocks", [])
+    if not isinstance(blocks, list) or not 0 <= block_index < len(blocks):
+        return None
+    block = blocks[block_index]
+    if not isinstance(block, Mapping):
+        return None
+    needle = _structure_text_signature(_text_from_block(block))
+    if len(needle) < 3:
+        return None
+
+    page_signature: list[str] = []
+    signature_lines: list[int] = []
+    for line_number, line in enumerate(str(page_markdown or "").splitlines(), 1):
+        line_signature = _structure_text_signature(line)
+        page_signature.extend(line_signature)
+        signature_lines.extend([line_number] * len(line_signature))
+    if not page_signature or len(needle) > len(page_signature):
+        return None
+
+    page_value = "".join(page_signature)
+    matches: list[tuple[int, int]] = []
+    cursor = 0
+    while True:
+        found = page_value.find(needle, cursor)
+        if found < 0:
+            break
+        end = found + len(needle)
+        matches.append((signature_lines[found], signature_lines[end - 1] + 1))
+        cursor = found + 1
+    return matches[-1] if matches else None
+
+
+def _structure_excluded_block_indexes(
+    page_markdown: str,
+    sidecar: Mapping[str, Any],
+    page_number: int,
+    structure_exclusion: Mapping[str, Any],
+) -> set[int]:
+    """Map typed TOC units to sidecar blocks on a possibly shared page."""
+    blocks = sidecar.get("blocks", [])
+    if not isinstance(blocks, list):
+        return set()
+    excluded: set[int] = set()
+    for raw_unit in structure_exclusion.get("units", []) or []:
+        if not isinstance(raw_unit, Mapping):
+            continue
+        page_range = raw_unit.get("page_range")
+        if not isinstance(page_range, list) or len(page_range) != 2:
+            continue
+        try:
+            start_page, end_page = int(page_range[0]), int(page_range[1])
+        except (TypeError, ValueError):
+            continue
+        boundary = raw_unit.get("boundary_info")
+        if not isinstance(boundary, Mapping):
+            excluded.update(range(len(blocks)))
+            continue
+        try:
+            start_line = int(boundary["start_line"]) if "start_line" in boundary else 1
+            end_line = (
+                int(boundary["end_line"])
+                if "end_line" in boundary
+                else len(str(page_markdown or "").splitlines()) + 1
+            )
+        except (TypeError, ValueError):
+            excluded.update(range(len(blocks)))
+            continue
+        if page_number == start_page and page_number == end_page:
+            lower, upper = start_line, end_line
+        elif page_number == start_page:
+            lower, upper = start_line, len(str(page_markdown or "").splitlines()) + 1
+        elif page_number == end_page:
+            lower, upper = 1, end_line
+        else:
+            lower, upper = 1, len(str(page_markdown or "").splitlines()) + 1
+        for block_index in range(len(blocks)):
+            span = _block_line_span(page_markdown, sidecar, block_index)
+            if span is None:
+                # Without a reliable text anchor, preserve the previous
+                # conservative page-level behavior for that block.
+                if lower == 1 and upper > len(str(page_markdown or "").splitlines()):
+                    excluded.add(block_index)
+                continue
+            if span[0] < upper and span[1] > lower:
+                excluded.add(block_index)
+    return excluded
 
 
 def _load_consensus_review_pages(output_dir: Path) -> set[int]:
@@ -2165,6 +2382,7 @@ def prepare_footnote_candidates(
     output_dir: Path,
     *,
     config: Optional[Mapping[str, Any]] = None,
+    mode: Optional[str] = None,
     bottom_ratio: Optional[float] = None,
     bottom_intersection_ratio: Optional[float] = None,
     context_blocks: Optional[int] = None,
@@ -2183,6 +2401,7 @@ def prepare_footnote_candidates(
     output_dir = Path(output_dir)
     options = resolve_footnote_options(
         config,
+        mode=mode,
         bottom_ratio=bottom_ratio,
         bottom_intersection_ratio=bottom_intersection_ratio,
         context_blocks=context_blocks,
@@ -2233,6 +2452,8 @@ def prepare_footnote_candidates(
     previous_secondary_page_number: Optional[int] = None
     previous_secondary_page_footnote_evidence = False
     previous_secondary_page_context: Optional[dict[str, Any]] = None
+    refined_units = _load_refined_units(output_dir)
+    structure_excluded_pages: list[dict[str, Any]] = []
 
     for sidecar_path in sidecars:
         sidecar = _load_sidecar(sidecar_path)
@@ -2241,14 +2462,57 @@ def prepare_footnote_candidates(
         except (TypeError, ValueError) as exc:
             raise ValueError(f"OCR sidecar has invalid page_number: {sidecar_path}") from exc
         sidecar_hashes[sidecar_path.relative_to(output_dir).as_posix()] = sha256_file(sidecar_path)
+        secondary_sidecar = _secondary_sidecar_path(output_dir, sidecar_path)
+        if evidence_mode == "two_ocr" and secondary_sidecar.is_file():
+            secondary_sidecar_hashes[
+                secondary_sidecar.relative_to(output_dir).as_posix()
+            ] = sha256_file(secondary_sidecar)
+
+        structure_exclusion = _structure_exclusion_for_page(
+            refined_units, page_number
+        )
+        if options.mode != "footnotes":
+            if structure_exclusion["roles"]:
+                structure_excluded_pages.append(
+                    {
+                        "page": page_number,
+                        **structure_exclusion,
+                    }
+                )
+            # Do not let a notes/bibliography page create a cross-page
+            # continuation context for an adjacent ordinary-text page.
+            previous_page_number = page_number
+            previous_page_footnote_evidence = False
+            previous_page_context = None
+            previous_secondary_page_number = page_number
+            previous_secondary_page_footnote_evidence = False
+            previous_secondary_page_context = None
+            continue
+
         page_markdown_path = pages_dir / f"page_{page_number:03d}.md"
         try:
             page_markdown = page_markdown_path.read_text(encoding="utf-8")
         except (OSError, UnicodeError):
             page_markdown = ""
+        structure_excluded_blocks = _structure_excluded_block_indexes(
+            page_markdown,
+            sidecar,
+            page_number,
+            structure_exclusion,
+        )
+        if structure_exclusion["roles"]:
+            structure_excluded_pages.append(
+                {
+                    "page": page_number,
+                    **structure_exclusion,
+                    "excluded_block_indexes": sorted(structure_excluded_blocks),
+                }
+            )
         candidates = []
         for block_index, block in enumerate(sidecar["blocks"]):
             if not isinstance(block, Mapping):
+                continue
+            if block_index in structure_excluded_blocks:
                 continue
             if native_text_source:
                 candidate = _candidate_for_native_block(
@@ -2296,6 +2560,7 @@ def prepare_footnote_candidates(
                 previous_page_number == page_number - 1
                 and previous_page_footnote_evidence
             ),
+            excluded_block_indexes=structure_excluded_blocks,
         )
         continuation_evidence = _annotate_cross_page_continuations(
             sidecar,
@@ -2321,6 +2586,7 @@ def prepare_footnote_candidates(
             sidecar,
             candidate_indexes,
             bottom_ratio=options.bottom_ratio,
+            excluded_block_indexes=structure_excluded_blocks,
         )
         for field, value in bottom_stats.items():
             bottom_detection_totals[field] += int(value)
@@ -2336,6 +2602,7 @@ def prepare_footnote_candidates(
             candidate_indexes,
             bottom_ratio=options.bottom_ratio,
             bottom_intersection_ratio=options.bottom_intersection_ratio,
+            excluded_block_indexes=structure_excluded_blocks,
         ):
             block = sidecar["blocks"][missed_index]
             if native_text_source:
@@ -2371,7 +2638,6 @@ def prepare_footnote_candidates(
                 audit_candidates.append(audit_candidate)
 
         candidates.sort(key=lambda item: (item["order"], item["block"]))
-        secondary_sidecar = _secondary_sidecar_path(output_dir, sidecar_path)
         secondary_candidates: list[dict[str, Any]] = []
         secondary_regions: list[dict[str, Any]] = []
         secondary_continuation_evidence = {
@@ -2384,11 +2650,19 @@ def prepare_footnote_candidates(
         candidate_disagreement = False
         if evidence_mode == "two_ocr":
             secondary = _load_sidecar(secondary_sidecar)
+            secondary_excluded_blocks = _structure_excluded_block_indexes(
+                page_markdown,
+                secondary,
+                page_number,
+                structure_exclusion,
+            )
             secondary_sidecar_hashes[
                 secondary_sidecar.relative_to(output_dir).as_posix()
             ] = sha256_file(secondary_sidecar)
             for block_index, block in enumerate(secondary["blocks"]):
                 if not isinstance(block, Mapping):
+                    continue
+                if block_index in secondary_excluded_blocks:
                     continue
                 candidate = _candidate_for_block(
                     page_number,
@@ -2415,6 +2689,7 @@ def prepare_footnote_candidates(
                     previous_secondary_page_number == page_number - 1
                     and previous_secondary_page_footnote_evidence
                 ),
+                excluded_block_indexes=secondary_excluded_blocks,
             )
             secondary_continuation_evidence = _annotate_cross_page_continuations(
                 secondary,
@@ -2601,6 +2876,7 @@ def prepare_footnote_candidates(
         "source_dir": "pages",
         "source_kind": source_kind,
         "ocr_evidence_mode": evidence_mode,
+        "footnote_mode": options.mode,
         "bottom_ratio": options.bottom_ratio,
         "bottom_intersection_ratio": options.bottom_intersection_ratio,
         "context_blocks": options.context_blocks,
@@ -2622,6 +2898,8 @@ def prepare_footnote_candidates(
         "bottom_detection": bottom_detection_totals,
         "suspected_missed_count": bottom_detection_totals["suspected_missed_count"],
         "suspected_missed_pages": sorted(suspected_missed_pages),
+        "structure_excluded_pages": structure_excluded_pages,
+        "structure_exempt_unit_types": sorted(FOOTNOTE_STRUCTURE_EXEMPT_TYPES),
         "visual_evidence": visual_evidence,
         "visual_audit_manifest": visual_audit_path.name,
         "visual_audit_task_count": visual_audit_manifest["task_count"],
@@ -2637,6 +2915,7 @@ def prepare_footnote_subagent(
     *,
     book_title: str,
     config: Optional[Mapping[str, Any]] = None,
+    mode: Optional[str] = None,
     bottom_ratio: Optional[float] = None,
     bottom_intersection_ratio: Optional[float] = None,
     context_blocks: Optional[int] = None,
@@ -2648,6 +2927,7 @@ def prepare_footnote_subagent(
     report = prepare_footnote_candidates(
         output_dir,
         config=config,
+        mode=mode,
         bottom_ratio=bottom_ratio,
         bottom_intersection_ratio=bottom_intersection_ratio,
         context_blocks=context_blocks,
@@ -2661,6 +2941,7 @@ def prepare_footnote_subagent(
         "book_title": book_title,
         "source_kind": report["source_kind"],
         "ocr_evidence_mode": report["ocr_evidence_mode"],
+        "footnote_mode": report["footnote_mode"],
         "candidate_report": "footnote_candidates.json",
         "review_pages": report["review_pages"],
         "high_confidence_candidate_count": report["high_confidence_candidate_count"],
@@ -2674,6 +2955,7 @@ def prepare_footnote_subagent(
         "bottom_detection": report["bottom_detection"],
         "suspected_missed_count": report["suspected_missed_count"],
         "suspected_missed_pages": report["suspected_missed_pages"],
+        "structure_excluded_pages": report["structure_excluded_pages"],
         "visual_evidence": report["visual_evidence"],
         "visual_audit_manifest": report["visual_audit_manifest"],
         "visual_audit_task_count": report["visual_audit_task_count"],
@@ -2725,13 +3007,19 @@ def prepare_footnote_subagent(
         page_lines.append(line)
     page_text = "\n".join(page_lines) or "- 无需 Subagent 复核；仅保留本地高置信度候选。"
     source_guidance = (
-        "For native-text pages, use the recorded coordinates and font metadata as layout evidence. "
-        "Candidates marked confidence=high have already passed the conservative local rule: an earlier "
-        "same-page superscript reference matches the key and the note text is materially smaller than "
-        "the body font. Do not create a second decision for those blocks. Review only confidence=review "
-        "blocks, and distinguish them from citations, page furniture, and ordinary numbered prose."
-        if report["source_kind"] == "native_text"
-        else "If a page is marked as an OCR-consensus visual review, treat the local label as untrusted even when it says `Footnote`; compare the primary and secondary sidecars and the page image before deciding."
+        "Footnote extraction is disabled by the configured footnotes.mode. "
+        "Do not create a decision file or classify any page content as a page footnote. "
+        "The local apply stage will preserve the endnote/source Markdown unchanged."
+        if report["footnote_mode"] != "footnotes"
+        else (
+            "For native-text pages, use the recorded coordinates and font metadata as layout evidence. "
+            "Candidates marked confidence=high have already passed the conservative local rule: an earlier "
+            "same-page superscript reference matches the key and the note text is materially smaller than "
+            "the body font. Do not create a second decision for those blocks. Review only confidence=review "
+            "blocks, and distinguish them from citations, page furniture, and ordinary numbered prose."
+            if report["source_kind"] == "native_text"
+            else "If a page is marked as an OCR-consensus visual review, treat the local label as untrusted even when it says `Footnote`; compare the primary and secondary sidecars and the page image before deciding."
+        )
     )
     prompt = f"""# Footnote review\n\nBook: {book_title}\n\nRead `footnote_subagent_manifest.json`, `footnote_candidates.json`, and `footnote_visual_audit_manifest.json`. The local script first inferred page-level bottom-note regions. Review only the regions listed as `visual_audit_required` and their blocks marked `confidence: review`; blocks marked `confidence: high` are already accepted by the deterministic local rule and do not need a decision. Do not reread or rewrite the whole book. {source_guidance}\n\nCandidate page sidecars and visual evidence:\n{page_text}\n\nFor every listed review page, open the full-page `visual` PNG first. It is authoritative for the overall body/footnote boundary, page furniture, reading order, and cross-page context. When a `crop` PNG is present, open it as a zoomed supplement for small text and block-level details; never use the crop alone to decide whether a region belongs to the page footer or body. If the full-page image is unavailable, use the crop and sidecar coordinates.\n\nA region audit is one visual decision for the area, but the output must still contain one block decision for every listed review/audit block so the deterministic apply stage can address exact sidecar coordinates. Treat the page image as authoritative for region boundaries, continuations, headers, footers, and OCR omissions.\n\nUse these meanings strictly:\n- `footnote_start`: the beginning of a real page footnote; it will be moved to the end of its logical chapter.\n- `footnote_continuation`: text continuing a real footnote from an earlier page; it will be joined to that footnote.\n- `footnote_definition`: a complete footnote definition already presented as a note block.\n- `citation`: an in-text citation, quoted source, parenthetical/numeric reference, or other scholarly reference; it must stay in the body and must never be moved.\n- `bibliography`: a reference-list/bibliography entry; it must stay in place and must never be moved.\n- `body`: ordinary prose or an uncertain block that is not a footnote.\n\nWrite one `region_audits` entry for every audit region, with its exact `region_id`, a `disposition` of `footnote_region`, `body_region`, or `review_required`, and nested block decisions. A `review_required` region or block is unresolved and will block the workflow. Also keep a flat `decisions` array for compatibility; it may repeat the nested decisions, but do not emit duplicates. For each review/audit block assign exactly one role and keep its page, source, and block number. `source` defaults to `primary`; use `source: "secondary"` only for a candidate listed under `secondary_only_candidates`. For `footnote_start` and `footnote_definition`, copy the visible numeric key when present. For `footnote_continuation`, provide the key of the footnote it continues. A numeric marker alone is not enough to call something a footnote: if it is a citation or reference, use `citation` or `bibliography`.\n\nWrite only valid JSON to `footnote_decisions.json` with this shape:\n\n```json\n{{\n  "schema_version": {FOOTNOTE_PREPARE_SCHEMA_VERSION},\n  "region_audits": [\n    {{\n      "region_id": "page-125-region-01",\n      "disposition": "footnote_region",\n      "decisions": [\n        {{\n          "page": 125,\n          "source": "primary",\n          "block": 8,\n          "role": "footnote_continuation",\n          "key": "36",\n          "confidence": "high"\n        }}\n      ]\n    }}\n  ],\n  "decisions": []\n}}\n```\n\nIf a block or region is genuinely ambiguous, use `role` or `disposition: "review_required"` and explain it in `reason`; do not guess.\n"""
     prompt = prompt.replace(
@@ -2821,11 +3109,14 @@ def validate_footnote_decisions(
 
     source_kind = str(report.get("source_kind") or "ocr")
     evidence_mode = str(report.get("ocr_evidence_mode") or "single_ocr")
+    footnote_mode = str(report.get("footnote_mode") or "footnotes").strip().lower()
     errors: list[str] = []
     if source_kind not in {"ocr", "native_text"}:
         errors.append("candidate report has an unsupported page source kind")
     if evidence_mode not in {"single_ocr", "two_ocr"}:
         errors.append("candidate report has an unsupported OCR evidence mode")
+    if footnote_mode not in FOOTNOTE_MODES:
+        errors.append("candidate report has an unsupported footnote mode")
     if config is not None:
         configured_mode = pdf_evidence_mode(output_dir, config)
         if evidence_mode != configured_mode:
@@ -2837,6 +3128,16 @@ def validate_footnote_decisions(
                 require_current_consensus(output_dir, config, stage="footnote")
             except ValueError as exc:
                 errors.append(str(exc))
+        try:
+            configured_footnote_mode = resolve_footnote_options(config).mode
+            if footnote_mode != configured_footnote_mode:
+                errors.append(
+                    "candidate report was prepared with footnotes.mode="
+                    f"{footnote_mode}, but configuration requires "
+                    f"{configured_footnote_mode}"
+                )
+        except ValueError as exc:
+            errors.append(str(exc))
 
     def _hashes_current(field: str) -> bool:
         expected_hashes = report.get(field, {})
@@ -2864,6 +3165,7 @@ def validate_footnote_decisions(
             "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
             "source_kind": source_kind,
             "ocr_evidence_mode": evidence_mode,
+            "footnote_mode": footnote_mode,
             "valid": False,
             "status": "retry_required",
             "errors": errors,
@@ -2910,6 +3212,7 @@ def validate_footnote_decisions(
             "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
             "source_kind": source_kind,
             "ocr_evidence_mode": evidence_mode,
+            "footnote_mode": footnote_mode,
             "valid": True,
             "status": "no_subagent_review_required",
             "errors": [],
@@ -3191,6 +3494,7 @@ def validate_footnote_decisions(
         "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
         "source_kind": source_kind,
         "ocr_evidence_mode": evidence_mode,
+        "footnote_mode": footnote_mode,
         "valid": not errors and not human_review_required,
         "status": status,
         "errors": errors,

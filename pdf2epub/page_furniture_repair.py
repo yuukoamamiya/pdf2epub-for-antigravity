@@ -39,6 +39,11 @@ _STANDALONE_PAGE_LABEL_RE = re.compile(
 _SYNTHETIC_PAGE_LABEL_RE = re.compile(
     r"^pdf\s+page\s*[:#-]?\s*\d{1,4}$", re.IGNORECASE
 )
+_STANDALONE_SUP_PAGE_LABEL_RE = re.compile(
+    r"^<sup\b[^>]*>\s*(?:page\s*[:#-]?\s*)?"
+    r"(\d{1,4}|[ivxlcdm]{1,12})\s*</sup>$",
+    re.IGNORECASE,
+)
 _COMBINED_PAGE_LABEL_RE = re.compile(
     r"^(?P<title>.+?)\s+(?P<label>\d{1,4}|[ivxlcdm]{1,12})$",
     re.IGNORECASE,
@@ -81,6 +86,14 @@ def _candidate_for_line(line: str) -> Optional[dict[str, Any]]:
         return {"kind": "publisher_metadata", "text": stripped, "confidence": "high"}
     if _SYNTHETIC_PAGE_LABEL_RE.fullmatch(stripped):
         return {"kind": "synthetic_page_label", "text": stripped, "confidence": "high"}
+    sup_match = _STANDALONE_SUP_PAGE_LABEL_RE.fullmatch(stripped)
+    if sup_match:
+        return {
+            "kind": "standalone_page_label",
+            "text": stripped,
+            "label": sup_match.group(1),
+            "confidence": "high",
+        }
     if _STANDALONE_PAGE_LABEL_RE.fullmatch(stripped):
         return {"kind": "standalone_page_label", "text": stripped, "confidence": "medium"}
     if len(stripped) > _MAX_COMBINED_LINE_LENGTH:

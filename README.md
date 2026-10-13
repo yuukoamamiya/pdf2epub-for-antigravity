@@ -216,6 +216,10 @@ ocr-pages --resume
 `*_subagent_prompt.md` 或 manifest 出现后，都要先交给工作区 Subagent，再运行后续校验；
 不要跳过中间门禁。
 
+集中尾注书可在配置中设置 `footnotes.mode: endnotes_only`，完全没有脚注/尾注处理时可设置
+`footnotes.mode: disabled`；明确标记为 `notes`、`bibliography`、`index`、`author_notes`、
+`catalog` 或 `ad` 的 TOC 单元不会被页面脚注检测误搬移。
+
 ## 结果在哪里
 
 最终文件通常位于：

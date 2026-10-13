@@ -133,6 +133,10 @@ PDF 精修的核心领域模块如下：
   `footnotes.auto_accept` 是两种来源共用的区域级本地接受策略；双 OCR 模式比较主/次候选差异，
   并把次 OCR 的连续物理行合并成一个 secondary-only 复核窗口。`resolve_footnote_options()` 集中
   处理配置默认值和 CLI 覆盖。它不直接改写 Markdown，也不把引用推断成脚注。
+  `footnotes.mode` 可设为 `footnotes`、`endnotes_only` 或 `disabled`；
+  后两者跳过页面脚注提取并原样生成后续阶段使用的源稿。TOC 中标记为
+  `notes`、`bibliography`、`index`、`author_notes`、
+  `catalog` 或 `ad` 的单元也不会进入页面脚注候选。
 - `refine/footnote_apply.py`：只消费已验证的脚注决定，按完整 TOC `unit_id` 合并脚注到单元末尾，
   保留 `citation`、`bibliography` 和普通正文原位。次 OCR 独有脚注必须带显式文本、来源单元
   和 `primary_disposition`；主 OCR 重复块只有在明确列出 `primary_block(s)` 时才会删除，重复

@@ -87,6 +87,13 @@ The `suggested_translation` values form the canonical terminology reference for
 the later translation task. Prefer one stable translation for the same entity;
 record meaningful variants in a separate note rather than creating duplicate
 entries.
+Keep semantic categories and grammatical number distinct. In particular, do not
+reuse an organization's, movement's, or group noun's source form as an alias
+for a different abstract concept, and do not put an abstract concept's source
+form into an organization entry merely because the translations look similar.
+If two nearby forms are genuinely ambiguous, preserve the distinction in the
+description and report the ambiguity instead of manufacturing cross-category
+aliases.
 Do not modify source OCR files, add Markdown fences, or call an API.
 """
 

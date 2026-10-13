@@ -411,6 +411,13 @@ def register_command_parsers(subparsers) -> None:
         help="Validate and stage Subagent polishing output (no API calls)",
     )
     polish_validate_parser.add_argument(
+        "--file",
+        help=(
+            "Validate one Markdown unit and update its resumable checkpoint; "
+            "book-level gates still require a later full validation"
+        ),
+    )
+    polish_validate_parser.add_argument(
         "--allow-review-warnings",
         action="store_true",
         help=(

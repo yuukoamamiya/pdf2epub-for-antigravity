@@ -348,6 +348,34 @@ def test_markdown_validation_excludes_bibliography_from_target_language_gate(
     assert report["target_language_audits"] == {}
 
 
+@pytest.mark.parametrize("role", ["notes", "author_notes", "catalog", "ad"])
+def test_markdown_validation_excludes_nonprose_roles_from_density_gate(
+    tmp_path: Path, role: str
+):
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    text = (
+        "Author biography and publisher catalog entry ISBN 978-1-2345-6789-0. "
+        "Foreign title and DOI 10.1234/example.\\n"
+    )
+    (source_dir / "unit.md").write_text(text, encoding="utf-8")
+    (target_dir / "unit.md").write_text(text, encoding="utf-8")
+
+    report = validate_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        target_dir,
+        file_roles={"unit.md": role},
+        target_language="Chinese",
+    )
+
+    assert report["all_passed"] is True
+    assert report["target_language_audits"] == {}
+
+
 def test_markdown_validation_blocks_unchanged_short_cip_front_matter(
     tmp_path: Path,
 ):

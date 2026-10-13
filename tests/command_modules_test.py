@@ -88,6 +88,16 @@ def test_command_registry_registers_every_workflow_command():
     )
 
 
+def test_polish_validate_parser_accepts_single_file_checkpoint():
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers(dest="command")
+    register_command_parsers(subparsers)
+
+    args = parser.parse_args(["polish-validate", "--file", "chapter_8.5.md"])
+
+    assert args.file == "chapter_8.5.md"
+
+
 def test_pdf_source_stage_selects_only_current_polished_output(tmp_path: Path):
     ocr_dir = tmp_path / "ocr_markdown"
     polished_dir = tmp_path / "polished_markdown" / "validated"

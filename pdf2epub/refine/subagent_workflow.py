@@ -188,10 +188,12 @@ Rules:
   visible, and record the relevant OCR page numbers in `metadata_source_pages`.
 - Classify each node by its content when applicable: use `type: "notes"` for
   endnotes/notes, `type: "bibliography"` for references, and `type: "index"`
-  for an index. Omit `type` for ordinary prose chapters and sections. This is
-  an AI-assigned content role used by later translation and footnote rules; it
-  is not a token-size or splitting setting. Do not invent a role when the
-  evidence is unclear.
+  for an index. Use `type: "author_notes"` for an author biography or similar
+  author/publisher note, `type: "catalog"` for a publisher catalog or
+  advertisement section, and `type: "ad"` for a standalone advertisement.
+  Omit `type` for ordinary prose chapters and sections. These are AI-assigned
+  content roles used by later translation and footnote rules; this is not a token-size or splitting setting.
+  Do not invent a role when the evidence is unclear.
 - You may include `boundary_info` or other book metadata, but do not change
   the required field names.
 - The local step will estimate tokens using `{max_tokens}` as the unit limit;

@@ -45,8 +45,18 @@ _TRANSLATION_SPECIAL_ROLES = {
     "copyright",
     "cover",
     "notes",
+    "author_notes",
+    "catalog",
+    "ad",
 }
-_DENSITY_EXEMPT_ROLES = {"bibliography", "index"}
+_DENSITY_EXEMPT_ROLES = {
+    "bibliography",
+    "index",
+    "notes",
+    "author_notes",
+    "catalog",
+    "ad",
+}
 
 
 def _structural_mismatch_reason(
@@ -398,7 +408,14 @@ def validate_markdown_subagent(
             else:
                 valid_files.append(source.name)
 
-        if role in {"bibliography", "index"}:
+        if role in {
+            "bibliography",
+            "index",
+            "notes",
+            "author_notes",
+            "catalog",
+            "ad",
+        }:
             role_errors = _validate_special_role_markers(
                 source_text,
                 target_text,

@@ -11,6 +11,7 @@ from pdf2epub.refine.footnote_prepare import (
     validate_footnote_decisions,
 )
 from pdf2epub.refine.footnote_apply import (
+    _block_text_variants,
     _find_exact_signature_spans,
     _locate_block,
     apply_footnote_normalization,
@@ -91,6 +92,39 @@ def test_footnote_signature_does_not_insert_space_before_punctuation_after_html(
     assert len(spans) == 1
     start, end = spans[0]
     assert source[start:end] == "In the Spirit of Hegel,"
+
+
+def test_footnote_signature_normalizes_markdown_escapes_and_definitions():
+    source = "[^2]: 1\\*-28\\* ( MEJB 2003, p. 4 )\n"
+
+    spans = _find_exact_signature_spans(
+        source,
+        "[^2]: 1*-28* ( MEJB 2003, p. 4 )",
+    )
+
+    assert len(spans) == 1
+    start, end = spans[0]
+    assert source[start:end] == source.rstrip("\n")
+
+    definition_source = "[^2]: note"
+    definition_spans = _find_exact_signature_spans(definition_source, "2 note")
+    assert len(definition_spans) == 1
+    assert definition_source[definition_spans[0][0] : definition_spans[0][1]] == definition_source
+
+
+def test_footnote_block_variants_include_a_matching_page_tail_line(tmp_path: Path):
+    (tmp_path / "pages").mkdir()
+    (tmp_path / "pages" / "page_016.md").write_text(
+        "Body text\n\n[^2]: 1\\*-28\\* (MEJB 2003, p. 4)\n",
+        encoding="utf-8",
+    )
+    variants = _block_text_variants(
+        tmp_path,
+        16,
+        {"html": "1*-28* (MEJB 2003, p. 4)"},
+    )
+
+    assert "[^2]: 1\\*-28\\* (MEJB 2003, p. 4)" in variants
 
 
 def _write_sidecar(
@@ -1164,6 +1198,153 @@ def test_bibliography_block_is_not_a_footnote_candidate(tmp_path: Path):
     assert report["pages"] == []
     assert report["high_confidence_candidate_count"] == 0
     assert report["review_candidate_count"] == 0
+
+
+def test_typed_notes_unit_excludes_page_footnote_candidates(tmp_path: Path):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [_block("10 Endnote entry", 0, label="Text", y0=820)],
+    )
+    progress_dir = tmp_path / "ocr_markdown"
+    progress_dir.mkdir()
+    (progress_dir / "tree_progress.json").write_text(
+        json.dumps(
+            {
+                "units": [
+                    {
+                        "unit_id": "chapter_12",
+                        "index_path": [12],
+                        "file": "chapter_12.md",
+                        "page_range": [1, 1],
+                        "type": "notes",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    assert report["pages"] == []
+    assert report["structure_excluded_pages"][0]["roles"] == ["notes"]
+    assert report["review_required"] is False
+
+
+def test_typed_notes_boundary_only_excludes_the_notes_side_of_a_shared_page(
+    tmp_path: Path,
+):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [
+            _block("Body with marker 3", 0, y0=80),
+            _block("3 Real page footnote", 1, label="Footnote", y0=700),
+            _block("Notes", 2, y0=780),
+            _block("10 Endnote entry", 3, y0=840),
+        ],
+    )
+    (tmp_path / "pages" / "page_001.md").write_text(
+        "Body with marker <sup>3</sup>\n\n"
+        "3 Real page footnote\n\n"
+        "# Notes\n\n"
+        "10 Endnote entry\n",
+        encoding="utf-8",
+    )
+    progress_dir = tmp_path / "ocr_markdown"
+    progress_dir.mkdir()
+    (progress_dir / "tree_progress.json").write_text(
+        json.dumps(
+            {
+                "units": [
+                    {
+                        "unit_id": "chapter_12",
+                        "index_path": [12],
+                        "file": "chapter_12.md",
+                        "page_range": [1, 1],
+                        "type": "notes",
+                        "boundary_info": {"start_line": 5},
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    assert report["pages"][0]["candidates"][0]["key"] == "3"
+    assert report["structure_excluded_pages"][0]["excluded_block_indexes"] == [2, 3]
+
+
+def test_endnotes_only_mode_preserves_source_without_page_footnote_candidates(
+    tmp_path: Path,
+):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [_block("10 Endnote entry", 0, label="Footnote", y0=820)],
+    )
+    source_dir = tmp_path / "ocr_markdown"
+    source_dir.mkdir()
+    source = source_dir / "chapter_12.md"
+    source.write_text("Body [^10].\n\n[^10]: Endnote entry.\n", encoding="utf-8")
+    (source_dir / "tree_progress.json").write_text(
+        json.dumps(
+            {
+                "units": [
+                    {
+                        "unit_id": "chapter_12",
+                        "file": source.name,
+                        "page_range": [1, 1],
+                        "type": "notes",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = {"footnotes": {"mode": "endnotes_only"}}
+
+    report = prepare_footnote_candidates(tmp_path, config=config)
+    assert report["footnote_mode"] == "endnotes_only"
+    assert report["pages"] == []
+
+    validation = validate_footnote_decisions(tmp_path, config=config)
+    assert validation["valid"] is True
+    result = apply_footnote_normalization(tmp_path, config=config)
+
+    assert result["valid"] is True
+    assert result["moved_count"] == 0
+    assert (tmp_path / "footnote_normalized" / source.name).read_text(
+        encoding="utf-8"
+    ) == source.read_text(encoding="utf-8")
+
+
+def test_footnote_apply_rejects_stale_normalized_units_in_disabled_mode(
+    tmp_path: Path,
+):
+    _write_sidecar(tmp_path, 1, [_block("10 Endnote entry", 0, label="Footnote", y0=820)])
+    source_dir = tmp_path / "ocr_markdown"
+    source_dir.mkdir()
+    source = source_dir / "chapter_12.md"
+    source.write_text("Endnotes stay in place.\n", encoding="utf-8")
+    (source_dir / "tree_progress.json").write_text(
+        json.dumps({"units": [{"file": source.name, "page_range": [1, 1]}]}),
+        encoding="utf-8",
+    )
+    target_dir = tmp_path / "footnote_normalized"
+    target_dir.mkdir()
+    (target_dir / "stale.md").write_text("old\n", encoding="utf-8")
+
+    config = {"footnotes": {"mode": "disabled"}}
+    prepare_footnote_candidates(tmp_path, config=config)
+    validate_footnote_decisions(tmp_path, config=config)
+    result = apply_footnote_normalization(tmp_path, config=config)
+
+    assert result["valid"] is False
+    assert "stale Markdown units" in result["errors"][0]
 
 
 def test_prepare_subagent_writes_compact_contract(tmp_path: Path):
