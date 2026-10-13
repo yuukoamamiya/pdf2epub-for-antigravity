@@ -558,10 +558,15 @@ def test_consecutive_numeric_region_backtracks_to_adjacent_unnumbered_blocks(
     report = prepare_footnote_candidates(tmp_path)
 
     page = report["pages"][0]
-    assert [item["block"] for item in page["candidates"]] == [1, 2, 3, 4, 5]
+    assert [item["block"] for item in page["candidates"]] == [2, 3, 4, 5]
+    assert [
+        item["block"] for item in page["suppressed_continuation_candidates"]
+    ] == [1]
+    assert page["suppressed_continuation_candidates"][0]["confidence"] == "context"
+    assert report["soft_continuation_context_count"] == 1
     assert page["continuous_numeric_regions"][0]["keys"] == ["18", "19", "20", "21"]
     assert page["continuous_numeric_regions"][0]["backtracked_block_indices"] == [1]
-    assert all(item["confidence"] == "review" for item in page["candidates"])
+    assert all(item["confidence"] == "high" for item in page["candidates"])
 
 
 def test_labeled_numeric_region_does_not_backtrack_adjacent_body_text(
@@ -587,7 +592,7 @@ def test_labeled_numeric_region_does_not_backtrack_adjacent_body_text(
     assert report["visual_audit_task_count"] == 0
 
 
-def test_cross_page_labeled_region_auto_accepts_unique_continuation(
+def test_cross_page_labeled_region_auto_accepts_single_note_continuation(
     tmp_path: Path,
 ):
     _write_sidecar(
@@ -622,7 +627,7 @@ def test_cross_page_labeled_region_auto_accepts_unique_continuation(
     assert report["continuation_evidence_summary"]["high_confidence_count"] == 1
 
 
-def test_cross_page_continuation_with_multiple_previous_keys_stays_review(
+def test_cross_page_continuation_targets_last_previous_footnote(
     tmp_path: Path,
 ):
     _write_sidecar(
@@ -646,12 +651,194 @@ def test_cross_page_continuation_with_multiple_previous_keys_stays_review(
     report = prepare_footnote_candidates(tmp_path)
 
     page = report["pages"][1]
-    assert page["footnote_regions"][0]["disposition"] == "visual_audit_required"
-    assert page["candidates"][0]["key"] is None
+    assert page["footnote_regions"][0]["disposition"] == "local_footnote_region"
+    assert page["candidates"][0]["key"] == "37"
+    assert page["candidates"][0]["local_role"] == "footnote_continuation"
     assert page["candidates"][0]["continuation_evidence"]["previous_keys"] == [
         "36",
         "37",
     ]
+    assert page["candidates"][0]["continuation_evidence"]["last_physical_key"] == "37"
+    assert "previous_page_has_multiple_footnotes" in page["candidates"][0][
+        "continuation_evidence"
+    ]["positive_signals"]
+
+
+def test_cross_page_body_marker_and_context_outvote_unfinished_note(
+    tmp_path: Path,
+):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [
+            _block("36 The previous note ends without closure", 0, label="Footnote", y0=820),
+        ],
+    )
+    _write_sidecar(
+        tmp_path,
+        2,
+        [
+            _block("The body discusses the philosophical system", 0, y0=120),
+            _block(
+                "The system's introduction continues here. <sup>37</sup>",
+                1,
+                y0=680,
+            ),
+            _block("37 A new footnote", 2, label="Footnote", y0=725),
+            _block("38 Another new footnote", 3, label="Footnote", y0=775),
+        ],
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    page = report["pages"][1]
+    context = page["suppressed_continuation_candidates"][0]
+    assert context["block"] == 1
+    assert context["suppression_reason"] == "body_context_outvotes_cross_page_continuation"
+    evidence = context["continuation_evidence"]
+    assert evidence["semantic_comparison"]["winner"] == "body"
+    assert "inline_body_superscript" in evidence["semantic_comparison"]["signals"]
+    assert report["visual_audit_task_count"] == 0
+
+
+def test_cross_page_body_semantics_outvote_note_without_inline_marker(
+    tmp_path: Path,
+):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [
+            _block("36 A note about textual evidence and citation", 0, label="Footnote", y0=820),
+        ],
+    )
+    _write_sidecar(
+        tmp_path,
+        2,
+        [
+            _block("The body develops the philosophical system's introduction", 0, y0=120),
+            _block(
+                "The introduction develops the philosophical system's central task",
+                1,
+                y0=680,
+            ),
+            _block("37 A new footnote", 2, label="Footnote", y0=725),
+            _block("38 Another new footnote", 3, label="Footnote", y0=775),
+        ],
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    page = report["pages"][1]
+    context = page["suppressed_continuation_candidates"][0]
+    evidence = context["continuation_evidence"]
+    comparison = evidence["semantic_comparison"]
+    assert comparison["winner"] == "body"
+    assert comparison["body_similarity"] > comparison["footnote_similarity"]
+    assert context["suppression_reason"] == "body_context_outvotes_cross_page_continuation"
+    assert report["visual_audit_task_count"] == 0
+
+
+def test_cross_page_footnote_semantics_can_auto_link_continuation(
+    tmp_path: Path,
+):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [
+            _block(
+                "36 The argument about recognition remains unfinished",
+                0,
+                label="Footnote",
+                y0=820,
+            ),
+        ],
+    )
+    _write_sidecar(
+        tmp_path,
+        2,
+        [
+            _block("An unrelated body paragraph.", 0, y0=120),
+            _block(
+                "The argument about recognition continues in its historical form",
+                1,
+                y0=680,
+            ),
+            _block("37 A new footnote", 2, label="Footnote", y0=725),
+            _block("38 Another new footnote", 3, label="Footnote", y0=775),
+        ],
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    page = report["pages"][1]
+    continuation = page["candidates"][0]
+    evidence = continuation["continuation_evidence"]
+    assert evidence["semantic_comparison"]["winner"] == "footnote"
+    assert continuation["key"] == "36"
+    assert continuation["local_role"] == "footnote_continuation"
+    assert report["visual_audit_task_count"] == 0
+
+
+def test_cross_page_complete_last_footnote_stays_visual_review(
+    tmp_path: Path,
+):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [
+            _block("36 First note.", 0, label="Footnote", y0=760),
+            _block("37 Complete final note.", 1, label="Footnote", y0=820),
+        ],
+    )
+    _write_sidecar(
+        tmp_path,
+        2,
+        [
+            _block("Ordinary body text", 0, label="Text", y0=725),
+            _block("38 New footnote", 1, label="Footnote", y0=775),
+            _block("39 Another new footnote", 2, label="Footnote", y0=825),
+        ],
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    page = report["pages"][1]
+    context_candidate = page["suppressed_continuation_candidates"][0]
+    assert page["footnote_regions"][0]["disposition"] == "local_footnote_region"
+    assert context_candidate["key"] is None
+    assert context_candidate["continuation_evidence"]["matched_previous_key"] == "37"
+    assert "previous_text_looks_complete" in context_candidate[
+        "continuation_evidence"
+    ][
+        "negative_signals"
+    ]
+    assert report["visual_audit_task_count"] == 0
+
+
+def test_cross_page_single_complete_footnote_does_not_become_implicit_target(
+    tmp_path: Path,
+):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [_block("36 Complete note.", 0, label="Footnote", y0=820)],
+    )
+    _write_sidecar(
+        tmp_path,
+        2,
+        [
+            _block("Ordinary body text", 0, label="Text", y0=725),
+            _block("37 New footnote", 1, label="Footnote", y0=775),
+            _block("38 Another new footnote", 2, label="Footnote", y0=825),
+        ],
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    page = report["pages"][1]
+    assert page["footnote_regions"][0]["disposition"] == "local_footnote_region"
+    assert page["suppressed_continuation_candidates"][0]["key"] is None
+    assert report["visual_audit_task_count"] == 0
 
 
 def test_page_footer_inside_a_confirmed_numeric_region_is_reviewed_not_dropped(
