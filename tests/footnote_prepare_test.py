@@ -564,6 +564,29 @@ def test_consecutive_numeric_region_backtracks_to_adjacent_unnumbered_blocks(
     assert all(item["confidence"] == "review" for item in page["candidates"])
 
 
+def test_labeled_numeric_region_does_not_backtrack_adjacent_body_text(
+    tmp_path: Path,
+):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [
+            _block("Body", 0, y0=100),
+            _block("Last body line before the notes", 1, y0=680),
+            _block("18 First note", 2, label="Footnote", y0=725),
+            _block("19 Second note", 3, label="Footnote", y0=775),
+            _block("20 Third note", 4, label="Footnote", y0=825),
+        ],
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    page = report["pages"][0]
+    assert [item["block"] for item in page["candidates"]] == [2, 3, 4]
+    assert page["footnote_regions"][0]["disposition"] == "local_footnote_region"
+    assert report["visual_audit_task_count"] == 0
+
+
 def test_page_footer_inside_a_confirmed_numeric_region_is_reviewed_not_dropped(
     tmp_path: Path,
 ):

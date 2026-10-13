@@ -506,6 +506,13 @@ def _expand_continuous_region_candidates(
     for region in regions:
         indexes = list(region["numeric_block_indices"])
         region_indexes = set(indexes)
+        numeric_blocks_have_footnote_label = any(
+            _FOOTNOTE_LABEL_RE.search(
+                str(blocks[index].get("label") or "")
+            )
+            for index in indexes
+            if 0 <= index < len(blocks) and isinstance(blocks[index], Mapping)
+        )
         region_top = float(region["bbox"][1])
         backward_indexes: list[int] = []
         cursor = int(region["first_block"]) - 1
@@ -521,6 +528,15 @@ def _expand_continuous_region_candidates(
             # upward backtrack is for unnumbered continuation lines, not for
             # ordinary numbered prose immediately above the confirmed run.
             if _leading_footnote_key(text) is not None:
+                break
+            # When the numbered run already carries an explicit Footnote
+            # label, an adjacent Text block is more likely to be the final
+            # body line than an unlabelled continuation. Do not turn that
+            # common layout into a review region. Unlabelled numeric runs
+            # retain the conservative historical backtracking rule.
+            if numeric_blocks_have_footnote_label and not _FOOTNOTE_LABEL_RE.search(
+                str(block.get("label") or "")
+            ):
                 break
             if bbox[3] < float(region_top) - DEFAULT_CONTINUOUS_REGION_MAX_GAP:
                 break
@@ -825,12 +841,19 @@ def _build_page_footnote_regions(
             previous_box = _normalise_bbox(previous_block, sidecar) if isinstance(previous_block, Mapping) else None
             first_box = _normalise_bbox(blocks[first_index], sidecar) if first_index < len(blocks) else None
             previous_label = str(previous_block.get("label") or "") if isinstance(previous_block, Mapping) else ""
+            first_label = (
+                str(blocks[first_index].get("label") or "")
+                if first_index < len(blocks)
+                and isinstance(blocks[first_index], Mapping)
+                else ""
+            )
             if (
                 previous_box
                 and first_box
                 and previous_box[3] >= float(bottom_ratio) - DEFAULT_REGION_BOUNDARY_MARGIN
                 and _horizontal_overlap(previous_box, first_box) >= 0.35
                 and not _FURNITURE_LABEL_RE.search(previous_label)
+                and not _FOOTNOTE_LABEL_RE.search(first_label)
             ):
                 reasons.append("footnote_region_boundary_uncertain")
 
