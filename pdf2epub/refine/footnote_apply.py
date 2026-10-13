@@ -330,6 +330,16 @@ def _block_text_variants(
         corrected = _corrected_block_text(output_dir, page, raw_html)
     if corrected and corrected not in variants:
         variants.append(corrected)
+    raw_md_path = Path(output_dir) / "pages" / f"page_{page:03d}.md"
+    if raw_md_path.is_file():
+        try:
+            for line in reversed(raw_md_path.read_text(encoding="utf-8").splitlines()):
+                line = line.strip()
+                if line and re.match(r"^(?:\[\^\w+\]|\d+\b|<sup\b)", line):
+                    if line not in variants:
+                        variants.append(line)
+        except (OSError, UnicodeDecodeError):
+            pass
     return variants
 
 

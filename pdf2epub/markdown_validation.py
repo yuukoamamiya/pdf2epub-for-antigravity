@@ -206,11 +206,21 @@ def _validate_footnote_markers(source_text: str, target_text: str) -> list[str]:
     if source_markers:
         for key in dict.fromkeys(source_markers):
             escaped = re.escape(key)
-            if re.search(
-                rf"<sup\b[^>]*>\s*{escaped}\s*</sup>",
-                target_text,
-                flags=re.IGNORECASE,
-            ) or re.search(
+            target_sup_count = len(
+                re.findall(
+                    rf"<sup\b[^>]*>\s*{escaped}\s*</sup>",
+                    target_text,
+                    flags=re.IGNORECASE,
+                )
+            )
+            source_sup_count = len(
+                re.findall(
+                    rf"<sup\b[^>]*>\s*{escaped}\s*</sup>",
+                    source_text,
+                    flags=re.IGNORECASE,
+                )
+            )
+            if target_sup_count > source_sup_count or re.search(
                 rf"\[(?:注|note)\s*{escaped}\]",
                 target_text,
                 flags=re.IGNORECASE,
