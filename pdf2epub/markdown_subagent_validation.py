@@ -17,6 +17,7 @@ from .markdown_validation import (
     detect_bilingual_output,
     detect_polish_page_furniture,
     fix_reference_heading_mismatch,
+    is_bibliography_text,
     is_front_matter_text,
     polish_content_integrity_check,
     strip_outer_markdown_fences,
@@ -296,6 +297,9 @@ def validate_markdown_subagent(
             invalid.append({"file": source.name, "reason": "target is empty"})
             continue
         role = normalized_roles.get(source.name)
+        if not role and is_bibliography_text(source_text):
+            role = "bibliography"
+            normalized_roles[source.name] = role
         if task == "translate" and role not in _DENSITY_EXEMPT_ROLES:
             language_kwargs = {}
             if role in {"metadata", "frontmatter", "copyright", "cover"} or is_front_matter_text(source_text):

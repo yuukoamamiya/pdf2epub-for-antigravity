@@ -44,8 +44,15 @@ _STANDALONE_SUP_PAGE_LABEL_RE = re.compile(
     r"(\d{1,4}|[ivxlcdm]{1,12})\s*</sup>$",
     re.IGNORECASE,
 )
+_PAGE_LABEL_CORE = (
+    r"(?:<sup\b[^>]*>\s*)?(?P<label>\d{1,4}|[ivxlcdm]{1,12})(?:\s*</sup>)?"
+)
 _COMBINED_PAGE_LABEL_RE = re.compile(
-    r"^(?P<title>.+?)\s+(?P<label>\d{1,4}|[ivxlcdm]{1,12})$",
+    rf"^(?P<title>.+?)\s+{_PAGE_LABEL_CORE}$",
+    re.IGNORECASE,
+)
+_PREFIXED_PAGE_LABEL_RE = re.compile(
+    rf"^{_PAGE_LABEL_CORE}\s+(?P<title>.+?)$",
     re.IGNORECASE,
 )
 _NUMBERED_RUNNING_HEADER_RE = re.compile(
@@ -53,7 +60,7 @@ _NUMBERED_RUNNING_HEADER_RE = re.compile(
     re.IGNORECASE,
 )
 _PUBLISHER_METADATA_RE = re.compile(
-    r"^(?:(?:W\.\s+)?Jaeschke,\s+Hegel-Handbuch,?|DOI\s+10\.\d{4}.*|[©\xa9]\s*\d{4}\s+J\.\s*B\.\s*Metzler.*)$",
+    r"^(?:(?:W\.\s+)?Jaeschke,\s+Hegel-Handbuch,?|DOI:?\s+10\.\d{4}.*|[©\xa9]\s*\d{4}\s+J\.\s*B\.\s*Metzler.*)$",
     re.IGNORECASE,
 )
 _REPAIR_CONTEXT_RADIUS = 2
@@ -101,7 +108,16 @@ def _candidate_for_line(line: str) -> Optional[dict[str, Any]]:
 
     raw_stripped = line.strip()
     title_line = re.sub(r"^#{1,6}\s+", "", stripped).strip()
+    if _NUMBERED_RUNNING_HEADER_RE.fullmatch(title_line) and not re.search(r"[。！？；.!?;]", title_line):
+        return {
+            "kind": "running_header",
+            "text": stripped,
+            "confidence": "high",
+        }
+
     match = _COMBINED_PAGE_LABEL_RE.fullmatch(title_line)
+    if not match:
+        match = _PREFIXED_PAGE_LABEL_RE.fullmatch(title_line)
     if match and not raw_stripped.endswith(("-", "–", "—", ",", ":", ";")):
         title = match.group("title").strip()
         label = match.group("label")
@@ -114,13 +130,6 @@ def _candidate_for_line(line: str) -> Optional[dict[str, Any]]:
                 "label": label,
                 "confidence": "high",
             }
-
-    if _NUMBERED_RUNNING_HEADER_RE.fullmatch(title_line) and not re.search(r"[。！？；.!?;]", title_line):
-        return {
-            "kind": "running_header",
-            "text": stripped,
-            "confidence": "high",
-        }
 
     return None
 
@@ -451,6 +460,7 @@ def prepare_page_furniture_repair(
         batching["max_files"],
         batching["max_source_tokens"],
         batching["single_file_max_bytes"],
+        batching["max_nonempty_lines"],
     )
     pending_stats = {name: repair_file_stats[name] for name in pending}
     pending_batches = _recommended_batches(
@@ -458,6 +468,7 @@ def prepare_page_furniture_repair(
         batching["max_files"],
         batching["max_source_tokens"],
         batching["single_file_max_bytes"],
+        batching["max_nonempty_lines"],
     )
     # Repair batches are independent and do not share terminology or chapter
     # context.  Keep the configured concurrency instead of collapsing all

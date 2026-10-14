@@ -667,6 +667,58 @@ def test_packed_token_budget_does_not_override_ordinary_or_byte_limits():
     ]
 
 
+def test_dense_index_parts_are_line_bounded_and_isolated_from_bibliography():
+    manifest = {
+        "chapter_groups": {
+            "index": ["Index.part1.md", "Index.part2.md"],
+            "bibliography": ["Bibliography.md"],
+        },
+        "file_roles": {
+            "Index.part1.md": "index",
+            "Index.part2.md": "index",
+            "Bibliography.md": "bibliography",
+        },
+        "pending_files": [
+            "Index.part1.md",
+            "Index.part2.md",
+            "Bibliography.md",
+        ],
+        "file_stats": {
+            "Index.part1.md": {
+                "estimated_tokens": 900,
+                "size_bytes": 10_000,
+                "nonempty_line_count": 350,
+            },
+            "Index.part2.md": {
+                "estimated_tokens": 900,
+                "size_bytes": 10_000,
+                "nonempty_line_count": 350,
+            },
+            "Bibliography.md": {
+                "estimated_tokens": 500,
+                "size_bytes": 20_000,
+                "nonempty_line_count": 239,
+            },
+        },
+        "batching": {
+            "max_files": 8,
+            "max_source_tokens": 15_000,
+            "max_packed_source_tokens": 24_000,
+            "single_file_max_bytes": 30_000,
+            "max_nonempty_lines": 350,
+            "max_chapters_per_worker": 3,
+        },
+    }
+
+    groups = _chapter_worker_groups(manifest)
+
+    assert [group["files"] for group in groups] == [
+        ["Index.part1.md"],
+        ["Index.part2.md"],
+        ["Bibliography.md"],
+    ]
+
+
 def test_explicit_max_chapters_remains_strict_without_tiny_override(tmp_path: Path):
     source_dir = tmp_path / "source"
     source_dir.mkdir()

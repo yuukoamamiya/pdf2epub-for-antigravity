@@ -27,7 +27,12 @@ from .validation import nonempty_lines, tag_mismatch_count
 from pdf2epub.subagent_runtime import resolve_subagent_model
 from pdf2epub.subagent_safety import detect_refusal
 from pdf2epub.glossary import validate_translation_context
-from pdf2epub.markdown_validation import target_language_ratio_check
+from pdf2epub.markdown_validation import (
+    _validate_special_role_markers,
+    infer_translation_file_role,
+    is_density_exempt_role,
+    target_language_ratio_check,
+)
 from pdf2epub.utils.common import sanitize_filename
 from pdf2epub.utils.html_safety import sanitize_html_document
 from pdf2epub.workflow_contracts import atomic_write_text
@@ -1408,10 +1413,39 @@ class HTMLEpubPipeline:
         names = []
         for mapping_path in sorted(self.compressed_units_dir.glob("*.mapping.json")):
             stem = mapping_path.name[:-len(".mapping.json")]
+            parts = []
+            try:
+                mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
+                raw_parts = mapping.get("translation_parts", [])
+                if isinstance(raw_parts, list):
+                    parts = [
+                        str(name)
+                        for name in raw_parts
+                        if Path(str(name)).name == str(name)
+                        and Path(str(name)).suffix.lower() == ".md"
+                    ]
+            except (OSError, UnicodeError, json.JSONDecodeError, TypeError):
+                parts = []
+            if parts:
+                # Keep the mapping-declared inventory even if a part is
+                # missing; validation must report the missing hand-off rather
+                # than silently falling back to the unsplit source file.
+                names.extend(parts)
+                continue
             source_path = self.compressed_units_dir / f"{stem}.md"
             if source_path.is_file():
                 names.append(source_path.name)
         return names
+
+    def translation_file_roles(self, names: Optional[List[str]] = None) -> Dict[str, str]:
+        """Return conservative special-unit roles for HTML hand-offs."""
+        names = names if names is not None else self.declared_translation_files()
+        roles = {}
+        for name in names:
+            role = infer_translation_file_role(name)
+            if role:
+                roles[str(name)] = role
+        return roles
 
     def _get_language_code(self, language: str) -> str:
         """Convert language name to ISO 639-1 code for EPUB metadata."""
@@ -1448,8 +1482,23 @@ class HTMLEpubPipeline:
             Number of files extracted
         """
         import json
+        from pdf2epub.subagent_runtime import _batching_config
         from .compressor import HTMLCompressor
         from .verified_compactor import VerifiedCompactor
+
+        batching = _batching_config(self.config)
+        if self._compressed_cache_is_current(
+            max_nonempty_lines=batching["max_nonempty_lines"]
+        ):
+            logger.info(
+                "Reusing current compressed EPUB cache; skipping XHTML extraction "
+                "and HTML compaction"
+            )
+            self.create_metadata_translation_source(
+                target_language=target_language,
+                context_files=translation_context,
+            )
+            return len(list(self.compressed_units_dir.glob("*.mapping.json")))
 
         # Get all CSS content for compactor
         css_content = ""
@@ -1494,7 +1543,11 @@ class HTMLEpubPipeline:
                 # Compress HTML
                 compressed, mapping = compressor.compress(content, author_css=css_content)
 
-                # Save compressed content (.md - one translation unit per line)
+                # Save compressed content (.md - one translation unit per line).
+                # Very dense EPUB indexes/references are split into resumable
+                # source parts so each worker receives a bounded number of
+                # translation units.  The full mapping remains attached to the
+                # logical base file and is merged again only at build time.
                 href_path = Path(href)
                 file_stem = href_path.stem
                 original_extension = href_path.suffix  # .html or .xhtml
@@ -1507,6 +1560,36 @@ class HTMLEpubPipeline:
                 mapping_path = self.compressed_units_dir / f"{file_stem}.mapping.json"
                 # Serialize first, then write — prevents truncated files if
                 # json.dumps fails mid-serialization (e.g. non-serializable lxml objects)
+                nonempty_lines = [
+                    line for line in compressed.splitlines() if line.strip()
+                ]
+                if len(nonempty_lines) > batching["max_nonempty_lines"]:
+                    part_names = []
+                    for part_index in range(
+                        0, len(nonempty_lines), batching["max_nonempty_lines"]
+                    ):
+                        part_name = (
+                            f"{file_stem}.part{part_index // batching['max_nonempty_lines'] + 1}.md"
+                        )
+                        (self.compressed_units_dir / part_name).write_text(
+                            "\n".join(
+                                nonempty_lines[
+                                    part_index : part_index + batching["max_nonempty_lines"]
+                                ]
+                            )
+                            + "\n",
+                            encoding="utf-8",
+                        )
+                        part_names.append(part_name)
+                    mapping["translation_parts"] = part_names
+                    mapping["translation_split"] = {
+                        "unit": "nonempty_lines",
+                        "limit": batching["max_nonempty_lines"],
+                    }
+                    logger.info(
+                        f"Split dense unit {file_stem} into {len(part_names)} source parts "
+                        f"({batching['max_nonempty_lines']} non-empty lines/part)"
+                    )
                 mapping_path.write_text(
                     json.dumps(_make_json_safe(mapping), ensure_ascii=False),
                     encoding='utf-8'
@@ -1529,7 +1612,70 @@ class HTMLEpubPipeline:
         )
 
         logger.info(f"Compressed {extracted} XHTML files to {self.compressed_units_dir}")
+        self._write_compressed_cache(max_nonempty_lines=batching["max_nonempty_lines"])
         return extracted
+
+    def _compressed_cache_path(self) -> Path:
+        return self.output_dir / "html_prepare_cache.json"
+
+    def _compressed_cache_files(self) -> Dict[str, str]:
+        """Hash the active compressed units and their mappings."""
+        files: Dict[str, str] = {}
+        for mapping_path in sorted(self.compressed_units_dir.glob("*.mapping.json")):
+            files[mapping_path.name] = hashlib.sha256(mapping_path.read_bytes()).hexdigest()
+            stem = mapping_path.name[:-len(".mapping.json")]
+            try:
+                mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                mapping = {}
+            active_names = mapping.get("translation_parts")
+            if not isinstance(active_names, list) or not active_names:
+                active_names = [f"{stem}.md"]
+            for name in active_names:
+                path = self.compressed_units_dir / str(name)
+                if path.is_file():
+                    files[path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
+        return files
+
+    def _compressed_cache_is_current(self, *, max_nonempty_lines: int) -> bool:
+        """Check whether extraction output can be reused safely."""
+        cache_path = self._compressed_cache_path()
+        if not cache_path.is_file() or not self.epub_path.is_file():
+            return False
+        try:
+            cache = json.loads(cache_path.read_text(encoding="utf-8"))
+            if cache.get("schema_version") != 1:
+                return False
+            if cache.get("input_epub_sha256") != hashlib.sha256(
+                self.epub_path.read_bytes()
+            ).hexdigest():
+                return False
+            if int(cache.get("max_nonempty_lines", 0)) != int(max_nonempty_lines):
+                return False
+            expected = cache.get("compressed_files")
+            if not isinstance(expected, dict) or not expected:
+                return False
+            actual = self._compressed_cache_files()
+            return expected == actual
+        except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
+            return False
+
+    def _write_compressed_cache(self, *, max_nonempty_lines: int) -> None:
+        """Record the reusable extraction snapshot after a complete pass."""
+        if not self.epub_path.is_file():
+            return
+        cache = {
+            "schema_version": 1,
+            "input_epub_sha256": hashlib.sha256(
+                self.epub_path.read_bytes()
+            ).hexdigest(),
+            "max_nonempty_lines": int(max_nonempty_lines),
+            "compressed_files": self._compressed_cache_files(),
+        }
+        atomic_write_text(
+            self._compressed_cache_path(),
+            json.dumps(cache, ensure_ascii=False, indent=2),
+        )
 
     def create_metadata_translation_source(
         self,
@@ -1787,14 +1933,17 @@ The output must have this shape:
             translated_path = self.translated_dir / f"{base_stem}.md"
 
             source_content = ""
-            if source_path.exists():
+            has_translation_parts = isinstance(mapping.get("translation_parts"), list) and bool(
+                mapping.get("translation_parts")
+            )
+            if not has_translation_parts and source_path.exists():
                 source_content = source_path.read_text(encoding="utf-8")
             elif base_stem in merged_sources:
                 source_content = merged_sources[base_stem]
 
             translated_content = ""
             translated_exists = False
-            if base_stem in merged_translated:
+            if has_translation_parts and base_stem in merged_translated:
                 translated_content = merged_translated[base_stem]
                 translated_exists = True
             elif translated_path.exists():
@@ -2022,6 +2171,7 @@ The output must have this shape:
         mapping_names = self.declared_translation_files()
         manifest_path = self.output_dir / "translate-html_subagent_manifest.json"
         manifest: Dict[str, Any] = {}
+        manifest_file_roles: Dict[str, str] = {}
         snapshot_errors: List[str] = []
         snapshot_expected_hashes: Dict[str, str] = {}
         if manifest_path.is_file():
@@ -2029,6 +2179,13 @@ The output must have this shape:
                 loaded_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
                 if isinstance(loaded_manifest, dict):
                     manifest = loaded_manifest
+                    raw_roles = manifest.get("file_roles", {})
+                    if isinstance(raw_roles, dict):
+                        manifest_file_roles = {
+                            str(name): str(role).strip().lower()
+                            for name, role in raw_roles.items()
+                            if str(name).strip() and str(role).strip()
+                        }
                 else:
                     snapshot_errors.append("HTML translation manifest is not a JSON object")
             except (OSError, UnicodeError, json.JSONDecodeError) as exc:
@@ -2104,6 +2261,7 @@ The output must have this shape:
         source_sha256 = {}
         target_sha256 = {}
         target_language_audits: Dict[str, Dict[str, Any]] = {}
+        special_role_groups: Dict[str, Dict[str, Any]] = {}
         target_language = (
             (getattr(self, "config", {}) or {}).get("translation", {}) or {}
         ).get("target_language", "Chinese")
@@ -2116,6 +2274,21 @@ The output must have this shape:
 
             src_content = src_file.read_text(encoding="utf-8")
             tgt_content = tgt_file.read_text(encoding="utf-8")
+            role = manifest_file_roles.get(src_file.name) or infer_translation_file_role(
+                src_file.name, src_content
+            )
+            if role:
+                logical_stem = re.sub(
+                    r"\.part\d+$", "", src_file.stem, flags=re.IGNORECASE
+                )
+                group = special_role_groups.setdefault(
+                    logical_stem,
+                    {"role": role, "sources": [], "targets": [], "files": []},
+                )
+                group["role"] = role
+                group["sources"].append(src_content)
+                group["targets"].append(tgt_content)
+                group["files"].append(src_file.name)
             source_sha256[src_file.name] = hashlib.sha256(src_file.read_bytes()).hexdigest()
             target_sha256[src_file.name] = hashlib.sha256(tgt_file.read_bytes()).hexdigest()
 
@@ -2157,11 +2330,20 @@ The output must have this shape:
             if "```" in tgt_content:
                 invalid.append({"file": src_file.name, "reason": "Markdown code fence is not allowed"})
                 continue
-            language_audit = target_language_ratio_check(
-                src_content,
-                tgt_content,
-                target_language,
-            )
+            if is_density_exempt_role(role):
+                language_audit = {
+                    "applicable": False,
+                    "blocked": False,
+                    "exempt": True,
+                    "role": role,
+                    "reason": "special unit role is exempt from prose density gate",
+                }
+            else:
+                language_audit = target_language_ratio_check(
+                    src_content,
+                    tgt_content,
+                    target_language,
+                )
             target_language_audits[src_file.name] = language_audit
             if language_audit.get("blocked"):
                 invalid.append({
@@ -2174,6 +2356,25 @@ The output must have this shape:
             else:
                 valid += 1
                 valid_files.append(src_file.name)
+
+        for group in special_role_groups.values():
+            role = str(group.get("role") or "").strip().lower()
+            if not role:
+                continue
+            marker_errors = _validate_special_role_markers(
+                "\n".join(group["sources"]),
+                "\n".join(group["targets"]),
+                role,
+            )
+            if marker_errors:
+                file_name = group["files"][0]
+                invalid.extend(
+                    {"file": file_name, "reason": error}
+                    for error in marker_errors
+                )
+                for name in group["files"]:
+                    if name in valid_files:
+                        valid_files.remove(name)
 
         if file_name is None:
             metadata_report = self.validate_translated_metadata()

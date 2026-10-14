@@ -5,6 +5,7 @@ delegated to the workspace Subagent through the generated hand-off.
 """
 
 import json
+import re
 from pathlib import Path, PurePosixPath
 
 from loguru import logger
@@ -62,18 +63,24 @@ def _load_html_chapter_groups(pipeline, declared_files):
     """Group compressed EPUB units by top-level TOC entry."""
     from pdf2epub.html_translation.toc_extractor import TOCExtractor
 
-    files_by_stem = {Path(name).stem: str(name) for name in declared_files}
+    files_by_stem = {}
+    for name in declared_files:
+        name = str(name)
+        stem = Path(name).stem
+        files_by_stem.setdefault(stem, []).append(name)
+        base_stem = re.sub(r"\.part\d+$", "", stem, flags=re.IGNORECASE)
+        files_by_stem.setdefault(base_stem, []).append(name)
     groups = {}
     used = set()
 
     def file_for_href(href):
         path = str(href or "").split("#", 1)[0]
-        return files_by_stem.get(PurePosixPath(path).stem)
+        return list(dict.fromkeys(files_by_stem.get(PurePosixPath(path).stem, [])))
 
     def collect(entry, names):
-        name = file_for_href(getattr(entry, "href", ""))
-        if name and name not in names:
-            names.append(name)
+        for name in file_for_href(getattr(entry, "href", "")):
+            if name not in names:
+                names.append(name)
         for child in getattr(entry, "children", []) or []:
             collect(child, names)
 
@@ -257,6 +264,7 @@ def _prepare_html_command(args):
             resume=getattr(args, "resume", False),
             context_files=context_files or None,
             skipped_context_files=skipped_context_files,
+            file_roles=pipeline.translation_file_roles(declared_files),
             prompt_context_files={
                 name: path
                 for name, path in context_files.items()

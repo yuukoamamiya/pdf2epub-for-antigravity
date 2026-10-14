@@ -154,6 +154,9 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
   `max_files` 默认值为 5，配置值的有效上限为 8；普通单章节的文件数、字节数和 token
   数任一达到限制都必须拆批。相邻章节合并 worker 可单独使用
   `max_packed_source_tokens`，但不会放宽单文件字节上限或单章节拆分规则。
+  `max_nonempty_lines` 默认值为 350；EPUB 的密集单元超过该值时在准备阶段生成有序的
+  `.partN.md`，每个 part 单独交给 worker，最终构建前再按原 mapping 合并。`index` 和
+  `bibliography` 即使未超行数预算也不得与相邻章节合并。
   `index` 单元还受 `refine.oversized_unit_split.threshold_tokens_by_type` 与
   `target_tokens_by_type` 的条目级拆分阈值约束；不得用固定字母范围或词典回填替代
   页码、层级和交叉引用校验。
@@ -630,8 +633,12 @@ uv run pdf2epub -c config.yaml build-epub
    ```
 
    首次产物包括 `compressed_units/`、mapping、元数据输入/Prompt 和实体提取 Prompt。
+   `html-prepare` 会记录 `html_prepare_cache.json`；输入 EPUB、压缩单元和行数预算未变化
+   时，后续运行复用该缓存，只刷新实体/术语上下文和 worker handoff，不重复解包和压缩。
 4. 立即打开工作区 Subagent，读取实体 Prompt/manifest，写入 `translation_entities.json`；
    完成后再次运行 `html-prepare`，让正文和元数据任务挂载当前实体表及外部术语表。
+   EPUB 实体提取默认排除 `Index`、`Bibliography`、`Copyright` 和 `Cover` 等确定性附录，
+   其余正文章节仍按 manifest 逐文件读取。
    确实不需要实体表时才使用 `html-prepare --skip-entities`。
 5. 读取第二次生成的 `translate-html_subagent_prompt.md`、父级 manifest 和
    `worker_handoffs/`，打开每个 handoff 对应的工作区 Subagent，将同名译文写入

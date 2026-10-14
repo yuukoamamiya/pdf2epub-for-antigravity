@@ -42,8 +42,14 @@ build-html-epub
 `html-prepare` 负责解析 XHTML、压缩结构并生成映射文件。默认情况下，它还会生成
 `entity_subagent_prompt.md`，要求 Subagent 从整本书的压缩单元提取
 `translation_entities.json`。实体文件完成后再次运行 `html-prepare`，正文和元数据
-任务才会挂载这份书内术语上下文。确实不需要书内术语表时，可以使用
+任务才会挂载这份书内术语上下文。EPUB 实体提取默认排除 `Index`、`Bibliography`、
+`Copyright` 和 `Cover` 等确定性附录，减少无效上下文；manifest 会同时记录纳入和排除的
+文件，便于恢复校验。确实不需要书内术语表时，可以使用
 `html-prepare --skip-entities`，但只建议用于预览或特殊任务。
+
+重复运行 `html-prepare` 时会优先检查 `html_prepare_cache.json`。只有输入 EPUB、压缩单元
+哈希和 `max_nonempty_lines` 预算均未变化，才复用已有的解包/压缩结果；实体表、外部术语表
+和正文 handoff 仍会重新生成，因此不会复用过期的翻译上下文。
 
 外部领域术语表通过配置中的 `translation.glossaries` 按书选择。它们不会默认全局
 生效，可以选择零个、一个或多个 YAML/JSON 文件。原文件只读，程序会把规范化快照
@@ -78,9 +84,11 @@ EPUB 正文的任务边界来自原始 TOC，而不是压缩单元的文件名�
 | `subagent.batching.max_source_tokens` | 配置默认值 | 一个 worker 的源 token 预算 |
 | `subagent.batching.max_packed_source_tokens` | `max_source_tokens` 的两倍 | 相邻完整章节合并 worker 的总 token 预算 |
 | `subagent.batching.single_file_max_bytes` | `30000` | 超过该值的单文件必须独立成批 |
+| `subagent.batching.max_nonempty_lines` | `350` | 单个 worker 的非空源行预算；EPUB 密集单元超限时生成 `.partN.md` |
 
-章节装箱有三条硬边界：需要多个批次的分支只能在自身单元列表内拆分；任一文件超过
-字节/token 限制的分支即使最终只有一个 part 也不能和邻章合并；`--resume` 时已经没有
+章节装箱有四条硬边界：需要多个批次的分支只能在自身单元列表内拆分；任一文件超过
+字节/token/非空行限制的分支即使最终只有一个 part 也不能和邻章合并；`Index` 与
+`Bibliography` 始终独立；`--resume` 时已经没有
 待处理文件的分支会冲刷当前装箱队列，不能让它前后的两个待处理分支跨过已完成分支重新
 合并。相邻章节合并使用 `max_packed_source_tokens`，但每个章节仍须先在
 `max_source_tokens` 内完整成批；配置 `pack_adjacent_chapters: false` 时则每个分支单独成为 worker。

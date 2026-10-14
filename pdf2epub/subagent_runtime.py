@@ -15,6 +15,7 @@ from .subagent_dispatch import (
     dispatch_lease_path,
     inspect_dispatch_assignment,
 )
+from .markdown_validation import infer_translation_file_role
 
 DEFAULT_TRANSLATION_MODEL = "gemini-3.1-pro-preview"
 DEFAULT_SUBAGENT_MODEL = "gemini-3.6-flash"
@@ -24,6 +25,7 @@ DEFAULT_BATCH_MAX_SOURCE_TOKENS = 12_000
 DEFAULT_BATCH_MAX_CONCURRENCY = 3
 MAX_ACTIVE_SUBAGENTS = 3
 DEFAULT_SINGLE_FILE_MAX_BYTES = 30_000
+DEFAULT_BATCH_MAX_NONEMPTY_LINES = 350
 DEFAULT_LARGE_FILE_TOKEN_THRESHOLD = 12_000
 DEFAULT_EXTREME_FILE_TOKEN_THRESHOLD = 24_000
 DEFAULT_GLOBAL_TOC_TOKENS = 1_200
@@ -151,6 +153,9 @@ def _batching_config(config: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
         "single_file_max_bytes": _positive_int(
             batching.get("single_file_max_bytes"), DEFAULT_SINGLE_FILE_MAX_BYTES
         ),
+        "max_nonempty_lines": _positive_int(
+            batching.get("max_nonempty_lines"), DEFAULT_BATCH_MAX_NONEMPTY_LINES
+        ),
         "large_file_token_threshold": _positive_int(
             batching.get("large_file_token_threshold"), DEFAULT_LARGE_FILE_TOKEN_THRESHOLD
         ),
@@ -215,35 +220,45 @@ def _recommended_batches(
     max_files: int,
     max_source_tokens: int,
     single_file_max_bytes: int = DEFAULT_SINGLE_FILE_MAX_BYTES,
+    max_nonempty_lines: int = DEFAULT_BATCH_MAX_NONEMPTY_LINES,
 ) -> List[List[str]]:
     """Create advisory, file-safe batches without splitting source lines."""
     batches: List[List[str]] = []
     current: List[str] = []
     current_tokens = 0
+    current_nonempty_lines = 0
     for name, stats in file_stats.items():
         tokens = stats["estimated_tokens"]
         isolated = (
             stats.get("size_bytes", 0) > single_file_max_bytes
             or tokens > max_source_tokens
+            or stats.get("nonempty_line_count", 0) > max_nonempty_lines
         )
         if isolated and current:
             batches.append(current)
             current = []
             current_tokens = 0
+            current_nonempty_lines = 0
         if current and (
-            len(current) >= max_files or current_tokens + tokens > max_source_tokens
+            len(current) >= max_files
+            or current_tokens + tokens > max_source_tokens
+            or current_nonempty_lines + stats.get("nonempty_line_count", 0)
+            > max_nonempty_lines
         ):
             batches.append(current)
             current = []
             current_tokens = 0
+            current_nonempty_lines = 0
         current.append(name)
         current_tokens += tokens
+        current_nonempty_lines += stats.get("nonempty_line_count", 0)
         # A large file remains alone; the manifest explicitly flags it so the
         # operator can give it an independent Subagent task.
         if isolated:
             batches.append(current)
             current = []
             current_tokens = 0
+            current_nonempty_lines = 0
     if current:
         batches.append(current)
     return batches
@@ -662,6 +677,9 @@ def _chapter_worker_groups(manifest: Mapping[str, Any]) -> List[Dict[str, Any]]:
     max_bytes = int(
         batching.get("single_file_max_bytes", DEFAULT_SINGLE_FILE_MAX_BYTES)
     )
+    max_nonempty_lines = _positive_int(
+        batching.get("max_nonempty_lines"), DEFAULT_BATCH_MAX_NONEMPTY_LINES
+    )
     pack_adjacent = batching.get(
         "pack_adjacent_chapters", DEFAULT_PACK_ADJACENT_CHAPTERS
     ) is not False
@@ -683,6 +701,9 @@ def _chapter_worker_groups(manifest: Mapping[str, Any]) -> List[Dict[str, Any]]:
         batching.get("tiny_chapter_max_tokens"),
         DEFAULT_TINY_CHAPTER_MAX_TOKENS,
     )
+    manifest_roles = manifest.get("file_roles", {})
+    if not isinstance(manifest_roles, Mapping):
+        manifest_roles = {}
 
     def make_group(
         chapter_records: List[Dict[str, Any]],
@@ -746,15 +767,18 @@ def _chapter_worker_groups(manifest: Mapping[str, Any]) -> List[Dict[str, Any]]:
     current_records: List[Dict[str, Any]] = []
     current_files: List[str] = []
     current_tokens = 0
+    current_nonempty_lines = 0
     current_tiny_count = 0
 
     def flush_current() -> None:
-        nonlocal current_records, current_files, current_tokens, current_tiny_count
+        nonlocal current_records, current_files, current_tokens
+        nonlocal current_nonempty_lines, current_tiny_count
         if current_records:
             groups.append(make_group(current_records, current_files))
             current_records = []
             current_files = []
             current_tokens = 0
+            current_nonempty_lines = 0
             current_tiny_count = 0
 
     for chapter_id, raw_names in chapter_groups.items():
@@ -774,11 +798,23 @@ def _chapter_worker_groups(manifest: Mapping[str, Any]) -> List[Dict[str, Any]]:
             for name in assigned
             if isinstance(file_stats.get(name), Mapping)
         }
-        batches = _recommended_batches(stats, max_files, max_tokens, max_bytes)
+        batches = _recommended_batches(
+            stats,
+            max_files,
+            max_tokens,
+            max_bytes,
+            max_nonempty_lines,
+        )
         chapter_split = len(batches) > 1
         chapter_oversized = any(
             int(stats[name].get("estimated_tokens", 0)) > max_tokens
             or int(stats[name].get("size_bytes", 0)) > max_bytes
+            or int(stats[name].get("nonempty_line_count", 0)) > max_nonempty_lines
+            for name in assigned
+        )
+        chapter_has_special_appendix = any(
+            str(manifest_roles.get(name) or infer_translation_file_role(name) or "")
+            in {"index", "bibliography"}
             for name in assigned
         )
         record = {
@@ -789,7 +825,12 @@ def _chapter_worker_groups(manifest: Mapping[str, Any]) -> List[Dict[str, Any]]:
 
         # A split or oversized chapter is a hard boundary.  Flush any short
         # chapters before it, then keep every part isolated from neighbours.
-        if chapter_split or chapter_oversized or not pack_adjacent:
+        if (
+            chapter_split
+            or chapter_oversized
+            or chapter_has_special_appendix
+            or not pack_adjacent
+        ):
             flush_current()
             for part_index, batch_files in enumerate(batches, 1):
                 groups.append(
@@ -807,6 +848,9 @@ def _chapter_worker_groups(manifest: Mapping[str, Any]) -> List[Dict[str, Any]]:
         chapter_tokens = sum(
             int(stats[name].get("estimated_tokens", 0)) for name in batch_files
         )
+        chapter_nonempty_lines = sum(
+            int(stats[name].get("nonempty_line_count", 0)) for name in batch_files
+        )
         chapter_is_tiny = chapter_tokens <= tiny_chapter_max_tokens
         tiny_pack_limit_applies = (
             bool(current_records)
@@ -819,12 +863,14 @@ def _chapter_worker_groups(manifest: Mapping[str, Any]) -> List[Dict[str, Any]]:
             and len(current_records) < chapter_limit
             and len(current_files) + len(batch_files) <= max_files
             and current_tokens + chapter_tokens <= max_packed_tokens
+            and current_nonempty_lines + chapter_nonempty_lines <= max_nonempty_lines
         )
         if current_records and not can_pack:
             flush_current()
         current_records.append(record)
         current_files.extend(batch_files)
         current_tokens += chapter_tokens
+        current_nonempty_lines += chapter_nonempty_lines
         if chapter_is_tiny:
             current_tiny_count += 1
 

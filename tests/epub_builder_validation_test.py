@@ -13,6 +13,7 @@ from pdf2epub.build_epub import (
     process_chapter_content,
     generate_hierarchical_toc_ncx,
     resolve_book_metadata,
+    relocate_leading_page_carryover,
     write_combined_markdown,
 )
 from pdf2epub.epub.builder import EpubBuilder
@@ -324,7 +325,85 @@ def test_build_epub_structure_gives_structural_parent_a_virtual_file(
     assert generate_hierarchical_toc_html(structure, "Book", toc_path)
     toc = toc_path.read_text(encoding="utf-8")
     assert 'href="chapter_1.html">Parent</a>' in toc
-    assert 'href="chapter_1.1.html">Child</a>' in toc
+    assert 'href="chapter_1.1.html#toc-1-1">Child</a>' in toc
+
+
+def test_toc_file_target_uses_unit_fragment(tmp_path: Path) -> None:
+    chapter = tmp_path / "chapter_1.md"
+    chapter.write_text("# Parent\n\nBody", encoding="utf-8")
+    structure = build_epub_structure(
+        flatten_toc_tree([{
+            "title": "Parent",
+            "level": 1,
+        }]),
+        tmp_path,
+    )
+
+    toc_path = tmp_path / "toc.html"
+    ncx_path = tmp_path / "toc.ncx"
+    assert generate_hierarchical_toc_html(structure, "Book", toc_path)
+    assert generate_hierarchical_toc_ncx(structure, "Book", ncx_path)
+    assert 'href="chapter_1.html#toc-1">Parent</a>' in toc_path.read_text(
+        encoding="utf-8"
+    )
+    assert 'src="text/chapter_1.html#toc-1"' in ncx_path.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_relocate_leading_carryover_before_previous_footnotes() -> None:
+    generated = {
+        "chapter_1.html": (
+            '<html><body><h1 id="toc-1">Previous</h1>'
+            "<p>Previous body</p>"
+            '<div class="footnote-def" id="fn-1">Previous note</div>'
+            "</body></html>"
+        ),
+        "chapter_2.html": (
+            '<html><body>'
+            '<p>Carry-over <a class="footnote-ref" '
+            'href="chapter_2.html#fn-2" id="fnref-chapter_2-2">[2]</a></p>'
+            '<h1 id="toc-2">Current</h1><p>Current body</p>'
+            '<div class="footnote-def" id="fn-2">'
+            '<a class="footnote-backref" '
+            'href="chapter_2.html#fnref-chapter_2-2">↩</a>'
+            "</div></body></html>"
+        ),
+    }
+    structure = [
+        {
+            "unit_id": "chapter_1",
+            "file_path": Path("chapter_1.md"),
+            "part_files": [Path("chapter_1.md")],
+            "anchor": "toc-1",
+            "children": [],
+        },
+        {
+            "unit_id": "chapter_2",
+            "file_path": Path("chapter_2.md"),
+            "part_files": [Path("chapter_2.md")],
+            "anchor": "toc-2",
+            "children": [],
+        },
+    ]
+
+    records = relocate_leading_page_carryover(generated, structure)
+
+    assert records == [
+        {
+            "source": "chapter_2.html",
+            "destination": "chapter_1.html",
+            "moved_blocks": 1,
+            "moved_footnotes": ["2"],
+        }
+    ]
+    previous = generated["chapter_1.html"]
+    assert previous.index("Carry-over") < previous.index("fn-1")
+    assert 'href="chapter_1.html#fn-2"' in previous
+    assert 'href="chapter_1.html#fnref-chapter_1-2"' in previous
+    current = generated["chapter_2.html"]
+    assert "Carry-over" not in current
+    assert "id=\"fn-2\"" not in current
 
 
 def test_combined_markdown_follows_toc_and_split_part_order(tmp_path: Path) -> None:

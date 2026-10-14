@@ -61,6 +61,58 @@ def test_html_validation_blocks_long_source_left_in_english(tmp_path: Path):
     assert any("untranslated_source_detected" in item["reason"] for item in report["invalid"])
 
 
+def test_html_validation_exempts_index_density_but_keeps_numeric_markers(tmp_path: Path):
+    pipeline = object.__new__(HTMLEpubPipeline)
+    pipeline.output_dir = tmp_path
+    pipeline.compressed_units_dir = tmp_path / "compressed_units"
+    pipeline.translated_dir = tmp_path / "translated_compressed"
+    pipeline.config = {"translation": {"target_language": "Chinese"}}
+    pipeline.compressed_units_dir.mkdir()
+    pipeline.translated_dir.mkdir()
+    source = (
+        "Systems architecture and historical context for the Atari video computer "
+        "system, including hardware design, software tools, and game development. "
+        "12, 14-16\n"
+    )
+    source_path = pipeline.compressed_units_dir / "Index.md"
+    source_path.write_text(source, encoding="utf-8")
+    (pipeline.compressed_units_dir / "Index.mapping.json").write_text(
+        "{}", encoding="utf-8"
+    )
+    target_path = pipeline.translated_dir / "Index.md"
+    target_path.write_text(source, encoding="utf-8")
+    input_epub = tmp_path / "input.epub"
+    input_epub.write_bytes(b"epub snapshot")
+    (tmp_path / "translate-html_subagent_manifest.json").write_text(
+        json.dumps(
+            {
+                "files": ["Index.md"],
+                "source_sha256": {
+                    "Index.md": hashlib.sha256(source_path.read_bytes()).hexdigest()
+                },
+                "input_epub_sha256": hashlib.sha256(input_epub.read_bytes()).hexdigest(),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = pipeline.validate_translated_units(file_name="Index.md")
+
+    assert report["all_passed"] is True
+    assert report["target_language_audits"]["Index.md"] == {
+        "applicable": False,
+        "blocked": False,
+        "exempt": True,
+        "role": "index",
+        "reason": "special unit role is exempt from prose density gate",
+    }
+
+    target_path.write_text(source.replace("12, 14-16", "12, 14-17"), encoding="utf-8")
+    report = pipeline.validate_translated_units(file_name="Index.md")
+    assert report["all_passed"] is False
+    assert any("numeric marker mismatch" in item["reason"] for item in report["invalid"])
+
+
 def test_html_validation_rejects_changed_source_and_input_snapshot(tmp_path: Path):
     pipeline = _html_contract(tmp_path, "Original source paragraph.\n", "译文段落。\n")
     (pipeline.compressed_units_dir / "chapter.md").write_text(

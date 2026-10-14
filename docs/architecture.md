@@ -562,9 +562,17 @@ HTML 构建还会把 NCX/nav 更新结果写入导航报告；已有导航文档
 
 EPUB 正文也使用 2.4 节的章节装箱器。`html-prepare` 先依据原始 TOC 生成
 `chapter_groups`，再让 `write_worker_handoffs()` 按 TOC 顺序装入 `worker_handoffs/`；
-默认允许相邻短分支共享一个 worker，超过文件数、token、单文件字节数或章节数上限时封箱。
+默认允许相邻短分支共享一个 worker，超过文件数、token、单文件字节数、非空行数或章节数
+上限时封箱。默认 `max_nonempty_lines` 为 350；超过该值的 EPUB 压缩单元会在准备阶段
+生成有序 `.partN.md`，并在最终恢复时按原 mapping 合并。`Index` 和 `Bibliography`
+即使未超行数预算也会独立成批。
 大分支只能在自己的单元列表内拆分，不能和邻章拼接。元数据翻译始终是独立的
 `translated_metadata.json` 任务，不计入正文 worker 的章节装箱。
+
+`html_prepare_cache.json` 记录输入 EPUB、当前压缩单元和行数预算的哈希。第二次运行
+`html-prepare` 在快照仍然有效时跳过 XHTML 解包、图片/CSS 重读和压缩，只重新生成实体、
+术语上下文、元数据与 worker handoff。EPUB 实体提取默认只读取正文等高价值单元，
+排除 `Index`、`Bibliography`、`Copyright` 和 `Cover`，排除清单和版本写入实体 manifest。
 
 EPUB 的“合并”只影响 Subagent 的工作上下文：`adjacent_chapter_direct_file_contexts`
 按文件提供术语条目，同时允许同一个 Subagent 维持相邻章节的风格连续；恢复和校验仍以

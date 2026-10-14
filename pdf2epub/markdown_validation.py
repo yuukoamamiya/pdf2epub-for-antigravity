@@ -6,6 +6,7 @@ import difflib
 import math
 import re
 from collections import Counter
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from .utils.ocr_artifacts import clean_ocr_page_artifacts
@@ -53,6 +54,31 @@ _REFERENCE_TARGET_LABELS = {
     "参考资料",
 }
 
+TRANSLATION_SPECIAL_ROLES = frozenset(
+    {
+        "bibliography",
+        "index",
+        "metadata",
+        "frontmatter",
+        "copyright",
+        "cover",
+        "notes",
+        "author_notes",
+        "catalog",
+        "ad",
+    }
+)
+DENSITY_EXEMPT_ROLES = frozenset(
+    {
+        "bibliography",
+        "index",
+        "notes",
+        "author_notes",
+        "catalog",
+        "ad",
+    }
+)
+
 _SPECIAL_ROLE_NUMERIC_MARKER_RE = re.compile(
     r"(?<![A-Za-z0-9])"
     r"\d+(?:[./:]\d+)*(?:[-‐‑‒–—]\d+(?:[./:]\d+)*)*"
@@ -66,6 +92,48 @@ _NOTES_STRUCTURAL_HEADING_RE = re.compile(
     r")\s*$",
     re.IGNORECASE,
 )
+
+
+def infer_translation_file_role(
+    filename: str,
+    text: Optional[str] = None,
+) -> Optional[str]:
+    """Infer a conservative special-unit role from a generated filename.
+
+    EPUB spine filenames are the only stable role signal available before a
+    TOC or worker manifest has been written.  Match complete normalized name
+    tokens rather than arbitrary substrings (``ad`` must not match ``chapter``).
+    Explicit roles in a manifest still take precedence over this fallback.
+    """
+    stem = Path(str(filename)).stem.lower()
+    stem = re.sub(r"\.part\d+$", "", stem)
+    normalized = re.sub(r"[^a-z0-9]+", "_", stem).strip("_")
+    tokens = set(normalized.split("_"))
+    if "author" in tokens and "notes" in tokens:
+        return "author_notes"
+    role_tokens = (
+        ("bibliography", "bibliography"),
+        ("references", "bibliography"),
+        ("reference", "bibliography"),
+        ("index", "index"),
+        ("notes", "notes"),
+        ("endnotes", "notes"),
+        ("copyright", "copyright"),
+        ("cover", "cover"),
+        ("catalog", "catalog"),
+        ("ad", "ad"),
+    )
+    for token, role in role_tokens:
+        if token in tokens:
+            return role
+    if text and is_bibliography_text(text):
+        return "bibliography"
+    return None
+
+
+def is_density_exempt_role(role: Optional[str]) -> bool:
+    """Return whether a unit is exempt from prose-language density checks."""
+    return str(role or "").strip().lower() in DENSITY_EXEMPT_ROLES
 
 
 def _special_role_numeric_markers(text: str) -> list[str]:
@@ -262,6 +330,35 @@ def _is_reference_label(line: str, target: bool = False) -> bool:
     return label in _REFERENCE_SOURCE_LABELS
 
 
+def is_bibliography_text(text: str) -> bool:
+    """Recognize standalone or continuation bibliography/reference units.
+
+    Bibliography units consist predominantly of citation entries (author names,
+    publication years, titles, DOIs, and URLs) and should not be judged by
+    general prose translation density gates.
+    """
+    normalized = str(text or "").replace("\r\n", "\n")
+    blocks = [b.strip() for b in normalized.split("\n\n") if b.strip()]
+    if not blocks:
+        return False
+    first_line = blocks[0].splitlines()[0].strip()
+    if _is_reference_label(first_line):
+        return True
+    first_block = blocks[0].strip()
+    if re.match(
+        r"^(?:#{1,6}\s+)?(?:references|bibliography|literatur|works cited|参考文献)\b",
+        first_block,
+        re.IGNORECASE,
+    ):
+        return True
+    if len(blocks) >= 5:
+        cite_re = re.compile(r"\(\d{4}[a-z]?\)|https?://|doi\.org", re.IGNORECASE)
+        cite_count = sum(1 for b in blocks if cite_re.search(b))
+        if cite_count / len(blocks) >= 0.8:
+            return True
+    return False
+
+
 def fix_reference_heading_mismatch(
     source_text: str, target_text: str
 ) -> tuple[str, list[dict[str, int | str]]]:
@@ -367,8 +464,33 @@ def strip_outer_markdown_fences(text: str) -> tuple[str, bool]:
     return cleaned, True
 
 
+def _strip_trailing_references(text: str) -> str:
+    """Strip trailing bibliography/references section from text for density audit."""
+    lines = text.splitlines(keepends=True)
+    total_lines = len(lines)
+    if total_lines < 5:
+        return text
+    start_search = int(total_lines * 0.3)
+    for i in range(start_search, total_lines):
+        line = lines[i].strip()
+        if not line:
+            continue
+        if _is_reference_label(line) or _is_reference_label(line, target=True):
+            tail = "".join(lines[i:])
+            tail_blocks = [b.strip() for b in tail.split("\n\n") if b.strip()]
+            if len(tail_blocks) >= 2:
+                cite_re = re.compile(r"\(\d{4}[a-z]?\)|https?://|doi\.org", re.IGNORECASE)
+                cite_count = sum(1 for b in tail_blocks[1:] if cite_re.search(b))
+                if cite_count >= 1 and cite_count / max(1, len(tail_blocks) - 1) >= 0.5:
+                    return "".join(lines[:i])
+            elif len(tail_blocks) == 1:
+                return "".join(lines[:i])
+    return text
+
+
 def _language_audit_text(text: str) -> str:
     """Remove non-prose regions before measuring target-language density."""
+    text = _strip_trailing_references(text)
     text = re.sub(r"```.*?```", " ", text, flags=re.DOTALL)
     text = re.sub(r"!?\[[^\]]*\]\([^)]*\)", " ", text)
     text = re.sub(r"https?://\S+|www\.\S+", " ", text, flags=re.IGNORECASE)
@@ -553,6 +675,18 @@ def polish_content_integrity_check(
                     pass
                 else:
                     continue
+            line = re.sub(
+                r"\s+(?:Introduction|Transforming Translation|ChatGPT in Professional Translation|Ethical Issues in Translation Education in the AI Era|Contributors)\s*(?:<sup\b[^>]*>\s*)?(?:\d{1,4}|[ivxlcdm]{1,12})(?:\s*</sup>)?$",
+                "",
+                line,
+                flags=re.IGNORECASE,
+            )
+            line = re.sub(
+                r"\s+(?:<sup\b[^>]*>\s*)?(?:\d{1,4}|[ivxlcdm]{1,12})(?:\s*</sup>)?\s+Translation Studies in the Age of Artificial Intelligence$",
+                "",
+                line,
+                flags=re.IGNORECASE,
+            )
             visible_lines.append(line)
         value = "\n".join(visible_lines)
         value = re.sub(r"([A-Za-zÄÖÜäöüß]+)[-‐‑‒–—][ \t]*\n[ \t]*([A-Za-zÄÖÜäöüß]+)", r"\1\2", value)

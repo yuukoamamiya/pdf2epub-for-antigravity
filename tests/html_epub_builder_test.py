@@ -51,6 +51,91 @@ def test_package_relative_href_strips_fragment_before_windows_path_comparison(
     ) == "OEBPS/ack.xhtml#ack"
 
 
+def test_html_prepare_cache_and_split_inventory_are_resumable(tmp_path: Path) -> None:
+    pipeline = object.__new__(HTMLEpubPipeline)
+    pipeline.output_dir = tmp_path
+    pipeline.compressed_units_dir = tmp_path / "compressed_units"
+    pipeline.compressed_units_dir.mkdir()
+    pipeline.epub_path = tmp_path / "input.epub"
+    pipeline.epub_path.write_bytes(b"source epub")
+
+    mapping = {
+        "original_extension": ".xhtml",
+        "translation_parts": ["Index.part1.md", "Index.part2.md"],
+    }
+    (pipeline.compressed_units_dir / "Index.mapping.json").write_text(
+        json.dumps(mapping), encoding="utf-8"
+    )
+    (pipeline.compressed_units_dir / "Index.md").write_text(
+        "full source kept for logical reconstruction\n", encoding="utf-8"
+    )
+    for name, text in (
+        ("Index.part1.md", "first\n"),
+        ("Index.part2.md", "second\n"),
+    ):
+        (pipeline.compressed_units_dir / name).write_text(text, encoding="utf-8")
+
+    assert pipeline.declared_translation_files() == [
+        "Index.part1.md",
+        "Index.part2.md",
+    ]
+    pipeline._write_compressed_cache(max_nonempty_lines=350)
+    assert pipeline._compressed_cache_is_current(max_nonempty_lines=350) is True
+
+    (pipeline.compressed_units_dir / "Index.part2.md").write_text(
+        "changed\n", encoding="utf-8"
+    )
+    assert pipeline._compressed_cache_is_current(max_nonempty_lines=350) is False
+    (pipeline.compressed_units_dir / "Index.part2.md").write_text(
+        "second\n", encoding="utf-8"
+    )
+    pipeline.epub_path.write_bytes(b"changed source epub")
+    assert pipeline._compressed_cache_is_current(max_nonempty_lines=350) is False
+
+
+def test_html_prepare_splits_dense_compressed_units_into_mapping_parts(tmp_path: Path) -> None:
+    class FakeParser:
+        resources = {"css": []}
+        spine = [{"href": "text/Index.xhtml"}]
+
+        def get_raw_content(self, href: str) -> str:
+            assert href == "text/Index.xhtml"
+            return "<html><body>" + "".join(
+                f"<p>Index entry {index}</p>" for index in range(5)
+            ) + "</body></html>"
+
+    pipeline = object.__new__(HTMLEpubPipeline)
+    pipeline.output_dir = tmp_path
+    pipeline.compressed_units_dir = tmp_path / "compressed_units"
+    pipeline.translated_dir = tmp_path / "translated_compressed"
+    pipeline.final_dir = tmp_path / "final_xhtml"
+    pipeline.compressed_units_dir.mkdir()
+    pipeline.translated_dir.mkdir()
+    pipeline.final_dir.mkdir()
+    pipeline.epub_path = tmp_path / "input.epub"
+    pipeline.epub_path.write_bytes(b"source epub")
+    pipeline.parser = FakeParser()
+    pipeline.config = {
+        "subagent": {"batching": {"max_nonempty_lines": 2}},
+    }
+    pipeline.create_metadata_translation_source = lambda **_kwargs: None
+
+    assert pipeline.extract_and_preprocess(target_language="Chinese") == 1
+
+    mapping = json.loads(
+        (pipeline.compressed_units_dir / "Index.mapping.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert mapping["translation_parts"] == [
+        "Index.part1.md",
+        "Index.part2.md",
+        "Index.part3.md",
+    ]
+    assert pipeline.declared_translation_files() == mapping["translation_parts"]
+    assert pipeline._compressed_cache_is_current(max_nonempty_lines=2) is True
+
+
 def test_update_content_opf_preserves_authors_and_namespaced_attrs(
     tmp_path: Path,
 ) -> None:

@@ -108,6 +108,7 @@ def prepare_markdown_subagent(
         batching["max_files"],
         batching["max_source_tokens"],
         batching["single_file_max_bytes"],
+        batching["max_nonempty_lines"],
     )
     oversized_files = [
         name
@@ -115,6 +116,7 @@ def prepare_markdown_subagent(
         if (
             stats["estimated_tokens"] > batching["max_source_tokens"]
             or stats["size_bytes"] > batching["single_file_max_bytes"]
+            or stats["nonempty_line_count"] > batching["max_nonempty_lines"]
         )
     ]
     validated_files = None
@@ -326,6 +328,7 @@ def prepare_markdown_subagent(
         batching["max_files"],
         batching["max_source_tokens"],
         batching["single_file_max_bytes"],
+        batching["max_nonempty_lines"],
     )
     manifest = {
         "schema_version": 1,
@@ -599,6 +602,12 @@ Batching guidance:
   own Subagent task and split them only at complete source-line boundaries.
 - Any file larger than {batching['single_file_max_bytes']} bytes is isolated in
   its own batch, even when its token estimate would fit beside other files.
+- Keep each worker at or below {batching['max_nonempty_lines']} non-empty source
+  lines when possible; dense units above that limit are isolated or prepared as
+  resumable `.partN.md` files by the EPUB extractor.
+- Index and bibliography units are isolated from adjacent chapters; an index
+  above the line budget is split into ordered parts so those parts can be
+  processed independently and merged only for final validation/building.
 - Keep at most {manifest['effective_max_concurrency']} Subagent tasks active at once
   for this hand-off (configured ceiling: {batching['max_concurrency']}; reason:
   {manifest['concurrency_reason']}).

@@ -16,7 +16,47 @@ from pdf2epub.commands.sources import (
     _resolve_pdf_polish_source,
 )
 from pdf2epub.pipeline_policy import PipelinePolicy
+from pdf2epub.markdown_validation import infer_translation_file_role
 from pdf2epub.utils.common import book_output_dir
+
+
+ENTITY_SOURCE_FILTER_VERSION = 1
+EPUB_ENTITY_EXCLUDED_ROLES = frozenset(
+    {"index", "bibliography", "copyright", "cover"}
+)
+
+
+def _entity_source_selection(
+    source_dir: Path,
+    source_stage: str,
+) -> tuple[list[Path], list[Path]]:
+    """Select high-value EPUB units and exclude deterministic appendices."""
+    all_files = sorted(source_dir.glob("*.md"))
+    if source_stage != "epub-compressed":
+        return all_files, []
+    active_names = set()
+    for mapping_path in sorted(source_dir.glob("*.mapping.json")):
+        stem = mapping_path.name[: -len(".mapping.json")]
+        try:
+            mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            mapping = {}
+        parts = mapping.get("translation_parts")
+        if isinstance(parts, list) and parts:
+            active_names.update(str(name) for name in parts)
+        else:
+            active_names.add(f"{stem}.md")
+    if active_names:
+        all_files = [path for path in all_files if path.name in active_names]
+    included = []
+    excluded = []
+    for path in all_files:
+        role = infer_translation_file_role(path.name)
+        if role in EPUB_ENTITY_EXCLUDED_ROLES:
+            excluded.append(path)
+        else:
+            included.append(path)
+    return included, excluded
 
 
 def _prepare_entity_subagent_task(
@@ -31,9 +71,12 @@ def _prepare_entity_subagent_task(
     """Create the reusable book-specific terminology hand-off."""
     from pdf2epub.subagent_runtime import resolve_subagent_model
 
-    source_files = sorted(source_dir.glob("*.md"))
+    source_files, excluded_files = _entity_source_selection(source_dir, source_stage)
     if not source_files:
-        raise ValueError(f"No Markdown source found in {source_dir}")
+        raise ValueError(
+            f"No eligible Markdown source found in {source_dir}; "
+            "all units were excluded from EPUB entity extraction"
+        )
     output_dir.mkdir(parents=True, exist_ok=True)
     model = resolve_subagent_model(config, "extract-entities")
     from pdf2epub.entity_extractor import create_entity_template, create_entity_extraction_prompt
@@ -62,6 +105,11 @@ def _prepare_entity_subagent_task(
         "source_dir": source_dir.relative_to(output_dir).as_posix(),
         "source_stage": source_stage,
         "files": [path.name for path in source_files],
+        "excluded_files": [path.name for path in excluded_files],
+        "source_filter_version": ENTITY_SOURCE_FILTER_VERSION,
+        "excluded_roles": sorted(EPUB_ENTITY_EXCLUDED_ROLES)
+        if source_stage == "epub-compressed"
+        else [],
         "source_sha256": {
             path.name: hashlib.sha256(path.read_bytes()).hexdigest()
             for path in source_files
@@ -104,11 +152,24 @@ def _entity_context_is_current(
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         if Path(manifest.get("source_dir", "")).as_posix() != source_dir.relative_to(output_dir).as_posix():
             return False
+        if manifest.get("source_stage") == "epub-compressed" and manifest.get(
+            "source_filter_version"
+        ) != ENTITY_SOURCE_FILTER_VERSION:
+            return False
         expected_hashes = manifest.get("source_sha256", {}) or {}
         if not isinstance(expected_hashes, dict) or not expected_hashes:
             return False
-        actual_names = {path.name for path in source_dir.glob("*.md") if path.is_file()}
-        if set(expected_hashes) != actual_names:
+        excluded_names = {
+            str(name)
+            for name in (manifest.get("excluded_files", []) or [])
+            if str(name).strip()
+        }
+        selected_files, selected_excluded = _entity_source_selection(
+            source_dir, str(manifest.get("source_stage") or "")
+        )
+        actual_names = {path.name for path in selected_files + selected_excluded}
+        expected_names = set(expected_hashes) | excluded_names
+        if expected_names != actual_names:
             return False
         for name, expected in expected_hashes.items():
             path = source_dir / name
@@ -202,10 +263,18 @@ def extract_entities_validate_command(args):
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             source_dir = entity_path.parent / manifest.get("source_dir", "")
             expected_hashes = manifest.get("source_sha256", {})
-            actual_names = {
-                path.name for path in source_dir.glob("*.md") if path.is_file()
+            excluded_names = {
+                str(name)
+                for name in (manifest.get("excluded_files", []) or [])
+                if str(name).strip()
             }
-            if set(expected_hashes) != actual_names:
+            selected_files, selected_excluded = _entity_source_selection(
+                source_dir, str(manifest.get("source_stage") or "")
+            )
+            actual_names = {
+                path.name for path in selected_files + selected_excluded
+            }
+            if set(expected_hashes) | excluded_names != actual_names:
                 errors.append(
                     "entity source file set changed after extraction"
                 )

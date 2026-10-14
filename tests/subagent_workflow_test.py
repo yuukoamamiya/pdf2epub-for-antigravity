@@ -14,6 +14,7 @@ from pdf2epub.refine.subagent_workflow import (
 from pdf2epub.refine.pdf_outline import extract_pdf_outline
 from pdf2epub.refine.unit_splitter import split_markdown_unit
 from pdf2epub.entity_extractor import validate_entities
+from pdf2epub.commands.entities import _prepare_entity_subagent_task
 from pdf2epub.subagent_workflow import (
     DEFAULT_SUBAGENT_MODEL,
     DEFAULT_TRANSLATION_MODEL,
@@ -185,6 +186,24 @@ def test_target_language_ratio_ignores_html_tags():
     assert report["blocked"] is False
     assert report["target_latin_letters"] == 0
     assert report["target_cjk_ratio"] == 1.0
+
+
+def test_target_language_ratio_ignores_trailing_references():
+    source_prose = "This is a philosophical inquiry into translation studies and education. " * 10
+    target_prose = "这是一篇关于翻译研究与教育的哲学探讨。深入分析了相关理论与实践路径。" * 10
+    references = (
+        "\n\nReferences\n\n"
+        "Abu-Rayyash, H. (2024). AI meets comedy. Ampersand, 12, 100162.\n\n"
+        "Barrot, J. S. (2023). Using ChatGPT for second language writing. Assessing Writing, 57, 100745.\n\n"
+        "Hattie, J., & Timperley, H. (2007). The power of feedback. Review of Educational Research, 77(1), 81–112.\n"
+    )
+    source = source_prose + references
+    target = target_prose + "\n\n参考文献\n\n" + references.split("References\n\n")[1]
+
+    report = target_language_ratio_check(source, target, "Chinese")
+    assert report["applicable"] is True
+    assert report["blocked"] is False
+    assert report["target_cjk_ratio"] > 0.80
 
 
 def test_strip_outer_markdown_fences_only_removes_wrapping_fence():
@@ -374,6 +393,38 @@ def test_markdown_validation_excludes_nonprose_roles_from_density_gate(
 
     assert report["all_passed"] is True
     assert report["target_language_audits"] == {}
+
+
+def test_markdown_validation_auto_detects_bibliography_continuation_without_role(
+    tmp_path: Path,
+):
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    entries = [
+        "Author, A. (2020). First paper title. Journal of AI, 1(1), 1-10. https://doi.org/10.1000/1",
+        "Author, B. (2021). Second paper title. Journal of AI, 2(2), 20-30. https://doi.org/10.1000/2",
+        "Author, C. (2022). Third paper title. Journal of AI, 3(3), 40-50. https://doi.org/10.1000/3",
+        "Author, D. (2023). Fourth paper title. Journal of AI, 4(4), 60-70. https://doi.org/10.1000/4",
+        "Author, E. (2024). Fifth paper title. Journal of AI, 5(5), 80-90. https://doi.org/10.1000/5",
+    ]
+    text = "\n\n".join(entries)
+    (source_dir / "chapter_split.part2.md").write_text(text, encoding="utf-8")
+    (target_dir / "chapter_split.part2.md").write_text(text, encoding="utf-8")
+
+    report = validate_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        target_dir,
+        file_roles={},
+        target_language="Chinese",
+    )
+
+    assert report["all_passed"] is True
+    assert report["target_language_audits"] == {}
+    assert report["file_roles"].get("chapter_split.part2.md") == "bibliography"
 
 
 def test_markdown_validation_blocks_unchanged_short_cip_front_matter(
@@ -1308,6 +1359,34 @@ def test_prepare_markdown_subagent_records_special_file_roles(tmp_path: Path):
     prompt = paths["prompt"].read_text(encoding="utf-8")
     assert manifest["file_roles"] == {"refs.md": "bibliography"}
     assert "preserve author names" in prompt
+
+
+def test_epub_entity_extraction_excludes_deterministic_appendices(tmp_path: Path):
+    source_dir = tmp_path / "compressed_units"
+    source_dir.mkdir()
+    for name in ("chapter_1.md", "Index.md", "Bibliography.md", "Copyright.md", "Cover.md"):
+        (source_dir / name).write_text(name, encoding="utf-8")
+
+    _prepare_entity_subagent_task(
+        tmp_path,
+        "Book",
+        source_dir,
+        "epub-compressed",
+        "English",
+        "Chinese",
+        {},
+    )
+
+    manifest = json.loads(
+        (tmp_path / "entity_subagent_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["files"] == ["chapter_1.md"]
+    assert manifest["excluded_files"] == [
+        "Bibliography.md",
+        "Copyright.md",
+        "Cover.md",
+        "Index.md",
+    ]
 
 
 def test_prepare_markdown_subagent_isolates_large_units_and_writes_scoped_handoffs(

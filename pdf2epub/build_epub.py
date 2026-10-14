@@ -708,6 +708,253 @@ def build_epub_structure(
     return [process_entry(ch) for ch in toc_structure]
 
 
+def _ordered_markdown_html_entries(structure: List[Dict]) -> List[Tuple[str, Dict, int, str]]:
+    """Return Markdown-backed EPUB files in their reading order.
+
+    Virtual structural pages are intentionally omitted: page-boundary
+    carry-over belongs to the preceding prose unit, not to a generated
+    parent-container page.
+    """
+    result: List[Tuple[str, Dict, int, str]] = []
+
+    def visit(entries: List[Dict]) -> None:
+        for entry in entries:
+            if entry.get("file_path") and entry.get("unit_id"):
+                part_files = entry.get("part_files") or [entry["file_path"]]
+                for part_index, part_file in enumerate(part_files):
+                    unit_id = str(entry["unit_id"])
+                    if len(part_files) > 1:
+                        html_name = f"{unit_id}_part{part_index + 1}.html"
+                    else:
+                        html_name = f"{unit_id}.html"
+                    result.append(
+                        (
+                            html_name,
+                            entry,
+                            part_index,
+                            Path(part_file).stem,
+                        )
+                    )
+            if entry.get("children"):
+                visit(entry["children"])
+
+    visit(structure)
+    return result
+
+
+def relocate_leading_page_carryover(
+    generated_html: Dict[str, str],
+    structure: List[Dict],
+) -> List[Dict[str, object]]:
+    """Move page-boundary carry-over before the preceding unit's footnotes.
+
+    The legacy PDF refinement only knows that a TOC unit starts on a page; it
+    cannot identify the exact line.  A translated unit can therefore begin
+    with the final paragraphs of the preceding unit.  Moving only the TOC
+    link would leave those paragraphs after the preceding unit's footnotes.
+
+    This pass operates on the generated XHTML, leaving validated Markdown
+    immutable.  It moves leading non-heading blocks before the current unit's
+    title to the preceding Markdown-backed HTML file, and moves any footnote
+    definitions used exclusively by those blocks with them.  Footnote links
+    are rewritten to the destination file so the link graph remains closed.
+    """
+    from collections import Counter
+
+    from bs4 import BeautifulSoup
+    from bs4.element import Tag
+
+    ordered = _ordered_markdown_html_entries(structure)
+    records: List[Dict[str, object]] = []
+    heading_names = {f"h{level}" for level in range(1, 7)}
+
+    def iter_tags(nodes):
+        for node in nodes:
+            if isinstance(node, Tag):
+                yield node
+                yield from node.find_all(True)
+
+    def footnote_keys(nodes, aliases: set[str]) -> Counter[str]:
+        counts: Counter[str] = Counter()
+        for tag in iter_tags(nodes):
+            if tag.name.lower() != "a":
+                continue
+            classes = tag.get("class") or []
+            if "footnote-ref" not in classes:
+                continue
+            href = str(tag.get("href") or "")
+            base, separator, fragment = href.partition("#")
+            if not separator or not fragment.startswith("fn-"):
+                continue
+            if base and base not in aliases:
+                continue
+            counts[fragment[3:]] += 1
+        return counts
+
+    def rewrite_footnote_links(
+        nodes,
+        current_aliases: set[str],
+        current_text_aliases: set[str],
+        previous_filename: str,
+        current_stems: set[str],
+        previous_stem: str,
+    ) -> None:
+        for tag in iter_tags(nodes):
+            tag_id = str(tag.get("id") or "")
+            for current_stem in current_stems:
+                prefix = f"fnref-{current_stem}-"
+                if tag_id.startswith(prefix):
+                    tag["id"] = f"fnref-{previous_stem}-{tag_id[len(prefix):]}"
+                    break
+            href = tag.get("href")
+            if not isinstance(href, str):
+                continue
+            base, separator, fragment = href.partition("#")
+            if not separator:
+                if href.startswith("#fnref-"):
+                    for current_stem in current_stems:
+                        prefix = f"#fnref-{current_stem}-"
+                        if href.startswith(prefix):
+                            tag["href"] = f"#fnref-{previous_stem}-{href[len(prefix):]}"
+                            break
+                continue
+            rewritten_fragment = fragment
+            for current_stem in current_stems:
+                prefix = f"fnref-{current_stem}-"
+                if rewritten_fragment.startswith(prefix):
+                    rewritten_fragment = (
+                        f"fnref-{previous_stem}-"
+                        f"{rewritten_fragment[len(prefix):]}"
+                    )
+                    break
+            if base in current_aliases:
+                tag["href"] = f"{previous_filename}#{rewritten_fragment}"
+            elif base in {"text/" + alias for alias in current_text_aliases}:
+                tag["href"] = f"text/{previous_filename}#{rewritten_fragment}"
+
+    previous_content: Optional[Tuple[str, Path, str]] = None
+
+    for html_name, entry, part_index, source_stem in ordered:
+        if part_index != 0 or html_name not in generated_html:
+            if html_name in generated_html:
+                previous_content = (html_name, Path(html_name), source_stem)
+            continue
+
+        current_aliases = {html_name, f"{source_stem}.html"}
+        current_text_aliases = set(current_aliases)
+        soup = BeautifulSoup(generated_html[html_name], "html.parser")
+        body = soup.body
+        anchor = str(entry.get("anchor") or "").lstrip("#")
+        target = body.find(id=anchor) if body is not None and anchor else None
+        if body is None or target is None or previous_content is None:
+            previous_content = (html_name, Path(html_name), source_stem)
+            continue
+
+        direct_nodes = list(body.children)
+        try:
+            target_index = direct_nodes.index(target)
+        except ValueError:
+            previous_content = (html_name, Path(html_name), source_stem)
+            continue
+
+        # Ancestor headings are structural context and must stay with the
+        # current unit.  Only the initial non-heading blocks are carry-over.
+        leading_nodes: List[Tag] = []
+        for node in direct_nodes[:target_index]:
+            if not isinstance(node, Tag):
+                continue
+            if node.name.lower() in heading_names:
+                break
+            leading_nodes.append(node)
+
+        if not leading_nodes:
+            previous_content = (html_name, Path(html_name), source_stem)
+            continue
+
+        previous_filename, _previous_path, previous_stem = previous_content
+        previous_html = generated_html.get(previous_filename)
+        if not previous_html:
+            previous_content = (html_name, Path(html_name), source_stem)
+            continue
+        previous_soup = BeautifulSoup(previous_html, "html.parser")
+        previous_body = previous_soup.body
+        if previous_body is None:
+            previous_content = (html_name, Path(html_name), source_stem)
+            continue
+
+        moved_refs = footnote_keys(leading_nodes, current_aliases)
+        all_refs = footnote_keys([soup], current_aliases)
+        movable_keys = {
+            key
+            for key, count in moved_refs.items()
+            if count == all_refs.get(key, 0)
+            and soup.find(id=f"fn-{key}") is not None
+            and previous_soup.find(id=f"fn-{key}") is None
+        }
+
+        current_stems = {source_stem, Path(html_name).stem}
+        for node in leading_nodes:
+            rewrite_footnote_links(
+                [node],
+                current_aliases,
+                current_text_aliases,
+                previous_filename,
+                current_stems,
+                previous_stem,
+            )
+            node.extract()
+
+        definitions = []
+        for definition in soup.find_all(class_="footnote-def"):
+            key = str(definition.get("id") or "")
+            if not key.startswith("fn-") or key[3:] not in movable_keys:
+                continue
+            if definition is None:
+                continue
+            rewrite_footnote_links(
+                [definition],
+                current_aliases,
+                current_text_aliases,
+                previous_filename,
+                current_stems,
+                previous_stem,
+            )
+            definition.extract()
+            definitions.append(definition)
+
+        insertion_point = next(
+            (
+                index
+                for index, node in enumerate(previous_body.contents)
+                if isinstance(node, Tag)
+                and "footnote-def" in (node.get("class") or [])
+            ),
+            len(previous_body.contents),
+        )
+        for node in [*leading_nodes, *definitions]:
+            previous_body.insert(insertion_point, node)
+            insertion_point += 1
+
+        generated_html[previous_filename] = str(previous_soup)
+        generated_html[html_name] = str(soup)
+        records.append(
+            {
+                "source": html_name,
+                "destination": previous_filename,
+                "moved_blocks": len(leading_nodes),
+                "moved_footnotes": sorted(movable_keys),
+            }
+        )
+        logger.info(
+            f"Moved {len(leading_nodes)} page-boundary block(s) from "
+            f"{html_name} to {previous_filename}; "
+            f"moved footnotes: {sorted(movable_keys) or 'none'}"
+        )
+        previous_content = (html_name, Path(html_name), source_stem)
+
+    return records
+
+
 def load_refinement_part_order(output_dir: Path) -> Dict[str, List[str]]:
     """Load authoritative continuation order from the refinement checkpoint."""
     progress_path = Path(output_dir) / "ocr_markdown" / "tree_progress.json"
@@ -837,6 +1084,13 @@ def generate_hierarchical_toc_ncx(
                     href = f"text/{unit_id}.html"
             else:
                 href = parent_href  # Use parent's file
+            # A PDF page is not a sufficiently precise TOC target when a
+            # unit begins part-way through that page.  The builder adds the
+            # stable unit anchor to the actual heading below; keep the
+            # navigation link pointed at that heading rather than the file
+            # start.
+            if entry.get('anchor'):
+                href = f"{href.split('#', 1)[0]}#{entry['anchor']}"
         else:
             # No file, link to first child with file, or parent's file
             href = find_first_child_href(entry, parent_href)
@@ -963,6 +1217,10 @@ def generate_hierarchical_toc_html(
                     href = f"{unit_id}.html"
             else:
                 href = parent_href  # Use parent's file
+            # See the NCX generator above: file-level targets are refined to
+            # the current unit's heading whenever a stable anchor exists.
+            if entry.get('anchor'):
+                href = f"{href.split('#', 1)[0]}#{entry['anchor']}"
         else:
             # No file - link to first child with file, or parent's file
             href = find_first_child_href_html(entry, parent_href)
@@ -1273,6 +1531,21 @@ def build_epub(config: BuildEpubConfig) -> Path:
                             source_chapter=part_file_stem
                         )
 
+                        # Page-only TOC boundaries can leave the current
+                        # unit's heading after a short carry-over from the
+                        # preceding page/section.  Give the current entry a
+                        # stable fragment at its actual heading so navigation
+                        # lands on the semantic section start.
+                        if is_first_part and entry.get('anchor'):
+                            html_content = converter._add_subchapter_anchors(
+                                html_content,
+                                0,
+                                [{
+                                    'title': entry['title'],
+                                    'anchor': entry['anchor'],
+                                }],
+                            )
+
                         # Add subchapter anchors for TOC navigation
                         if is_first_part and 'children' in entry and entry['children']:
                             # Extract chapter index from unit_id (e.g., "chapter_8" -> 8)
@@ -1316,6 +1589,24 @@ def build_epub(config: BuildEpubConfig) -> Path:
 
     process_chapters(epub_structure)
     logger.info(f"Converted {len(all_html_files)} HTML files")
+    relocation_records = relocate_leading_page_carryover(
+        generated_html,
+        epub_structure,
+    )
+    if relocation_records:
+        changed_files = {
+            filename
+            for record in relocation_records
+            for filename in (record["source"], record["destination"])
+        }
+        for filename in changed_files:
+            (epub_dir / "text" / str(filename)).write_text(
+                generated_html[str(filename)],
+                encoding="utf-8",
+            )
+        logger.info(
+            f"Applied {len(relocation_records)} page-boundary carry-over relocation(s)"
+        )
     footnote_report = validate_footnote_graph(generated_html)
     if footnote_report["unlinked_sup_count"]:
         logger.warning(
