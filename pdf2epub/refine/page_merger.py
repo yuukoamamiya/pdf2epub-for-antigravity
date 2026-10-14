@@ -5,6 +5,7 @@ Merges page content for TOC nodes, using boundary_info (start_line/end_line)
 to precisely cut content at section boundaries.
 """
 
+import json
 from pathlib import Path
 import re
 from typing import Iterable, List, Optional, Set, Tuple
@@ -13,8 +14,10 @@ from loguru import logger
 from .toc_tree import TOCNode
 from ..utils.ocr_artifacts import (
     clean_ocr_page_artifacts,
+    native_repeated_edge_furniture_index,
     remove_printed_page_number_lines,
     remove_repeated_page_header,
+    remove_native_page_furniture,
 )
 
 
@@ -24,6 +27,35 @@ class PageMerger:
 
     Uses start_line/end_line from boundary_info to handle mid-page splits.
     """
+
+    def __init__(self) -> None:
+        self._native_furniture_cache: dict[Path, dict[str, int]] = {}
+
+    def _native_furniture_index(self, pages_dir: Path) -> dict[str, int]:
+        pages_dir = Path(pages_dir).resolve()
+        cached = self._native_furniture_cache.get(pages_dir)
+        if cached is not None:
+            return cached
+        sidecars = []
+        for path in sorted(pages_dir.glob("page_*.ocr.json")):
+            try:
+                value = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                continue
+            if isinstance(value, dict):
+                sidecars.append(value)
+        index = native_repeated_edge_furniture_index(sidecars)
+        self._native_furniture_cache[pages_dir] = index
+        return index
+
+    @staticmethod
+    def _native_sidecar(pages_dir: Path, page_num: int) -> dict:
+        path = Path(pages_dir) / f"page_{page_num:03d}.ocr.json"
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            return {}
+        return value if isinstance(value, dict) else {}
 
     def merge_node_content(
         self,
@@ -93,6 +125,19 @@ class PageMerger:
             page_content = clean_ocr_page_artifacts(page_content)
             lines = page_content.split('\n')
             lines = remove_printed_page_number_lines(lines)
+            page_content, removed_furniture = remove_native_page_furniture(
+                '\n'.join(lines),
+                self._native_sidecar(pages_dir, page_num),
+                repeated_index=self._native_furniture_index(pages_dir),
+                page_number=page_num,
+            )
+            for item in removed_furniture:
+                logger.debug(
+                    "Removed deterministic native page furniture on page %s: %s",
+                    page_num,
+                    item["kind"],
+                )
+            lines = page_content.split('\n')
             lines, current_header = remove_repeated_page_header(lines, previous_header)
             if current_header is not None and current_header == previous_header:
                 logger.debug(f"Removed repeated running header on page {page_num}")
@@ -173,6 +218,19 @@ class PageMerger:
             page_content = clean_ocr_page_artifacts(page_content)
             lines = page_content.split('\n')
             lines = remove_printed_page_number_lines(lines)
+            page_content, removed_furniture = remove_native_page_furniture(
+                '\n'.join(lines),
+                self._native_sidecar(pages_dir, page_num),
+                repeated_index=self._native_furniture_index(pages_dir),
+                page_number=page_num,
+            )
+            for item in removed_furniture:
+                logger.debug(
+                    "Removed deterministic native page furniture on page %s: %s",
+                    page_num,
+                    item["kind"],
+                )
+            lines = page_content.split('\n')
             lines, current_header = remove_repeated_page_header(lines, previous_header)
             if current_header is not None and current_header == previous_header:
                 logger.debug(f"Removed repeated running header on page {page_num}")

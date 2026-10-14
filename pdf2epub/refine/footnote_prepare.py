@@ -48,6 +48,7 @@ DEFAULT_SEMANTIC_WIN_MARGIN = 0.035
 FOOTNOTE_MODES = frozenset({"footnotes", "endnotes_only", "disabled"})
 FOOTNOTE_STRUCTURE_EXEMPT_TYPES = frozenset(
     {
+        "toc",
         "notes",
         "bibliography",
         "index",
@@ -1612,11 +1613,21 @@ def _build_page_footnote_regions(
         existing_high = bool(item_candidates) and all(
             item.get("confidence") == "high" for item in item_candidates
         ) and not any(item.get("audit_only") for item in item_candidates)
+        native_candidates = any(
+            str(item.get("source_kind") or "").strip().lower() == "native_text"
+            for item in item_candidates
+        )
+        native_region_has_body_evidence = all(
+            bool(item.get("same_page_superscript"))
+            or _FOOTNOTE_LABEL_RE.search(str(item.get("label") or ""))
+            for item in item_candidates
+        )
         locally_clear = bool(
             auto_accept
             and not reasons
             and all_numbered
             and (has_sequence or explicit_labels or existing_high or has_auto_continuation)
+            and (not native_candidates or native_region_has_body_evidence)
         )
         region_id = f"page-{int(page_number):03d}-region-{region_number:02d}"
         role = "local_footnote_region" if locally_clear else "visual_audit_required"

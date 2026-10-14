@@ -182,6 +182,10 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
   和必要的章节元数据），不得复制全书 `file_stats`、`chapter_groups`、推荐队列或审计快照路径。
   章节术语上下文只记录 `chapter_file_count` 或 `chapter_file_counts`，不得重复写入完整
   `chapter_files` 列表。
+- 翻译 worker 必须按 manifest 的 `atomic_output_contract` 先写入临时同级文件，再原子替换
+  正式目标；校验器会清理遗留临时文件，并把无效/半截目标移到 `scratch/<task>/invalid_outputs/`
+  供恢复诊断。`--resume` 重建 handoff 时，所有 assigned 文件均已有当前校验 checkpoint 的旧
+  handoff 标记为 `completed`，源哈希已变化的旧 handoff 标记为 `superseded`，不得再次派发。
 - 不删除源文件、输出目录或已有中间结果。额度中断或失败时先校验，再使用原命令的
   `--resume`，只处理 pending 项。
 - 新 manifest 的 `--resume` 按单元比较 `unit_context_sha256` 和该单元的精确 TOC 上下文；
@@ -403,6 +407,9 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
    新章节从页面中部开始时，上一单元保留同页标题前的前缀；父标题和首个子标题同页时，
    两者都必须提供 `start_line`，本地步骤把父标题/导语放入首个子章节单元。
    `tree_progress.json` 会锁定 TOC/OCR 指纹；输入变化后必须重新生成受影响单元。
+   对原生文字 PDF，`refine-local` 还会读取当前页的 PDF 坐标 sidecar，在不改写原始
+   `pages/` 的前提下确定性移除页边 5% 内的 DOI/孤立页码，以及跨页重复的短页眉页脚；
+   唯一正文或书目 DOI 不因单次出现而删除。
 8. `refine-local` 完成后处理脚注：
 
    ```text
@@ -411,7 +418,7 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
 
    集中尾注书应在配置中设置 `footnotes.mode: endnotes_only`；明确没有页面脚注或尾注处理时
    可设置 `footnotes.mode: disabled`。默认 `footnotes.mode: footnotes`。TOC 中标记为
-   `notes`、`bibliography`、`index`、`author_notes`、`catalog` 或 `ad` 的单元不会把其内容
+   `toc`、`notes`、`bibliography`、`index`、`author_notes`、`catalog` 或 `ad` 的单元不会把其内容
    当作页面脚注；若这类单元与正文共用一页，优先依据 `boundary_info.start_line`/
    `end_line` 做块级过滤，缺少边界证据时采用保守的整页排除。
 
@@ -557,7 +564,9 @@ uv run pdf2epub -c config.yaml check-ready --stage translate --skip-entities
    ```
 
    单文件结果只作为 checkpoint，不能替代最终全量校验。
-7. 所有单元完成后运行 `translate-validate`。`retry_required` 中的明确错误直接重新交给
+7. 所有单元完成后运行 `translate-validate`。翻译未完工时，全量命令会先输出完成度和
+   pending 清单，并暂缓 TOC heading binding；只有所有目标文件存在时才运行该终审门，或显式
+   使用 `translate-validate --final` 强制检查不完整输出。`retry_required` 中的明确错误直接重新交给
    Subagent；首次 `review_required` 也重新派发。若报告出现 `human_review_required`，必须暂停
    并询问人工，不能继续自动重试。只有完成复核后才可显式使用
    `translate-validate --allow-review-warnings` 放行。

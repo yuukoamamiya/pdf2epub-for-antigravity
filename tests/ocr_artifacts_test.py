@@ -1,8 +1,11 @@
+import json
 from pathlib import Path
 
 from pdf2epub.utils.ocr_artifacts import (
     clean_ocr_page_artifacts,
+    native_repeated_edge_furniture_index,
     remove_printed_page_number_lines,
+    remove_native_page_furniture,
 )
 from pdf2epub.refine.page_merger import PageMerger
 from pdf2epub.refine.toc_tree import TOCNode
@@ -43,6 +46,50 @@ def test_remove_printed_page_number_lines_leaves_mixed_running_title_for_polish(
     assert remove_printed_page_number_lines(lines) == lines
 
 
+def test_native_edge_furniture_removes_doi_and_repeated_header_only_after_first_page():
+    page_box = [0, 0, 100, 100]
+    sidecars = [
+        {
+            "source_kind": "native_text",
+            "page_number": 1,
+            "page_box": page_box,
+            "blocks": [
+                {"bbox": [0, 2, 100, 6], "markdown_text": "Running header"},
+                {"bbox": [0, 92, 100, 96], "markdown_text": "DOI: 10.1234/example-1"},
+            ],
+        },
+        {
+            "source_kind": "native_text",
+            "page_number": 2,
+            "page_box": page_box,
+            "blocks": [
+                {"bbox": [0, 2, 100, 6], "markdown_text": "Running header"},
+            ],
+        },
+    ]
+    repeated = native_repeated_edge_furniture_index(sidecars)
+
+    first, first_removed = remove_native_page_furniture(
+        "Running header\n\nBody text.\n\nDOI: 10.1234/example-1",
+        sidecars[0],
+        repeated_index=repeated,
+        page_number=1,
+    )
+    second, second_removed = remove_native_page_furniture(
+        "Running header\n\nSecond body.",
+        sidecars[1],
+        repeated_index=repeated,
+        page_number=2,
+    )
+
+    assert "Running header" in first
+    assert "DOI: 10.1234/example-1" not in first
+    assert "Running header" not in second
+    assert "Second body." in second
+    assert {item["kind"] for item in first_removed} == {"doi_edge"}
+    assert {item["kind"] for item in second_removed} == {"repeated_edge_text"}
+
+
 def test_page_merger_removes_repeated_h2_header_and_keeps_blank_page_cleaned(tmp_path: Path):
     pages = tmp_path / "pages"
     pages.mkdir()
@@ -65,6 +112,48 @@ def test_page_merger_removes_repeated_h2_header_and_keeps_blank_page_cleaned(tmp
     assert "Second page text." in result
     assert "blank page" not in result.lower()
     assert "graphical elements" not in result.lower()
+
+
+def test_page_merger_applies_native_sidecar_furniture_cleanup(tmp_path: Path):
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    page_box = [0, 0, 100, 100]
+    (pages / "page_001.md").write_text(
+        "Running header\n\nFirst body.", encoding="utf-8"
+    )
+    (pages / "page_002.md").write_text(
+        "Running header\n\nSecond body.\n\nDOI: 10.1234/example-1",
+        encoding="utf-8",
+    )
+    for page_number, blocks in {
+        1: [
+            {"bbox": [0, 2, 100, 6], "markdown_text": "Running header"},
+            {"bbox": [10, 30, 90, 40], "markdown_text": "First body."},
+        ],
+        2: [
+            {"bbox": [0, 2, 100, 6], "markdown_text": "Running header"},
+            {"bbox": [10, 30, 90, 40], "markdown_text": "Second body."},
+            {"bbox": [0, 92, 100, 96], "markdown_text": "DOI: 10.1234/example-1"},
+        ],
+    }.items():
+        (pages / f"page_{page_number:03d}.ocr.json").write_text(
+            json.dumps(
+                {
+                    "source_kind": "native_text",
+                    "page_number": page_number,
+                    "page_box": page_box,
+                    "blocks": blocks,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    result = PageMerger().merge_node_content(TOCNode("Section", 1, 1, 2), pages)
+
+    assert result.count("Running header") == 1
+    assert "First body." in result
+    assert "Second body." in result
+    assert "DOI: 10.1234/example-1" not in result
 
 
 def test_page_merger_uses_absolute_start_and_end_lines_on_one_page(tmp_path: Path):

@@ -108,7 +108,9 @@ PDF 精修的核心领域模块如下：
   不自行判断普通插图是否应该移动。
 - `refine/page_merger.py`：消费已验证的整页插图绑定，恢复“前页半句 → 插图页 → 后页续句”，
   并把图片及说明放回连续正文之后；普通页面边界也会在前后均为未结束的正文块时保守拼接，
-  不把完整句子、标题、列表、脚注、图片或表格误合并。
+  不把完整句子、标题、列表、脚注、图片或表格误合并。原生文字 PDF 还会根据 page-point
+  sidecar 在页边 5% 内确定性清除 DOI/孤立页码，并仅清除跨页重复短页眉页脚；原始 `pages/`
+  不会被覆盖，sidecar 会参与 refine checkpoint 指纹。
 - `refine/footnote_prepare.py`：按页面 layout sidecar 生成脚注候选和页面级脚注区域。视觉 OCR 要求
   block 的 `bbox[3]` 进入页底带，并满足 block 与页底带的最小相交比例；标签只能作为辅助证据，
  不能单独绕过几何条件。它排除页眉、页脚、纯页码和引用标签，把连续数字开头块（例如
@@ -135,7 +137,7 @@ PDF 精修的核心领域模块如下：
   处理配置默认值和 CLI 覆盖。它不直接改写 Markdown，也不把引用推断成脚注。
   `footnotes.mode` 可设为 `footnotes`、`endnotes_only` 或 `disabled`；
   后两者跳过页面脚注提取并原样生成后续阶段使用的源稿。TOC 中标记为
-  `notes`、`bibliography`、`index`、`author_notes`、
+  `toc`、`notes`、`bibliography`、`index`、`author_notes`、
   `catalog` 或 `ad` 的单元也不会进入页面脚注候选。
 - `refine/footnote_apply.py`：只消费已验证的脚注决定，按完整 TOC `unit_id` 合并脚注到单元末尾，
   保留 `citation`、`bibliography` 和普通正文原位。次 OCR 独有脚注必须带显式文本、来源单元
@@ -255,6 +257,10 @@ Subagent 实际读写哪些文件。两者不能互相替代。
    组成；重新生成完全相同的 assignment 时只继承 `assigned`/`running` 的 lease 元数据，
    不继承 `completed` 状态。该字段帮助调度端去重，但不伪装成 IDE 进程锁；真正派发前仍
    需要查询工作区 Subagent 的实际活动状态。
+6. 翻译 handoff 的 `atomic_output_contract` 要求临时同级文件原子替换正式目标；校验器会
+   清理遗留临时文件，把无效目标移入可恢复的 scratch 区。恢复重建不会重新派发已有当前
+   checkpoint 的 worker，旧 handoff 会保留为 `retired_worker_handoffs` 审计记录并标记
+   `completed` 或 `superseded`。
 
 这一设计的可维护不变量是：TOC 顺序不变、章节组不跨越大单元硬边界、worker 不拥有组外
 文件权限、术语上下文不跨文件广播、输出文件集合与源文件集合保持一一对应。任何改变装箱

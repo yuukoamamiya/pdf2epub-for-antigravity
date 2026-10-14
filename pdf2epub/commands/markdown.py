@@ -691,6 +691,16 @@ def _validate_pdf_markdown_task(args, task: str):
             getattr(args, "allow_review_warnings", False)
         ),
     )
+    selected_scope = bool(getattr(args, "file", None))
+    book_outputs_complete = not selected_scope and not report.get("missing")
+    force_full_final = bool(getattr(args, "final", False)) and not selected_scope
+    report["completion"] = {
+        "ready_for_book_level_gates": bool(book_outputs_complete),
+        "completed_files": int(report.get("completed", 0) or 0),
+        "total_files": int(report.get("total", 0) or 0),
+        "pending_files": list(report.get("missing", []) or []),
+        "book_level_gates_forced": force_full_final,
+    }
     if task == "translate":
         # File mode is intentionally cheap: the Subagent can close the loop
         # on one unit without making a book-level TOC/context decision.
@@ -712,7 +722,15 @@ def _validate_pdf_markdown_task(args, task: str):
                     logger.error(f"TOC: {error}")
             from pdf2epub.toc_translation_workflow import validate_toc_heading_bindings
 
-            heading_report = validate_toc_heading_bindings(output_dir)
+            if book_outputs_complete or force_full_final:
+                heading_report = validate_toc_heading_bindings(output_dir)
+            else:
+                heading_report = {
+                    "valid": True,
+                    "skipped": True,
+                    "reason": "translated outputs are incomplete",
+                    "pending_files": list(report.get("missing", []) or []),
+                }
             report["toc_heading_bindings"] = heading_report
             report["all_passed"] = report["all_passed"] and heading_report["valid"]
             if not heading_report["valid"]:
@@ -750,8 +768,19 @@ def _validate_pdf_markdown_task(args, task: str):
         f"{task} 校验: {report['completed']}/{report['total']} completed, "
         f"{len(report['invalid'])} invalid"
     )
-    for name in report["missing"][:10]:
-        logger.error(f"Missing: {name}")
+    if report.get("missing"):
+        pending = report["missing"]
+        logger.info(
+            f"{task.capitalize()} progress: {report.get('completed', 0)}/{report.get('total', 0)} "
+            f"files present; {len(pending)} pending. "
+            + (
+                "Book-level TOC binding is deferred."
+                if task == "translate"
+                else "Book-level validation is deferred."
+            )
+        )
+        for name in pending[:10]:
+            logger.info(f"Pending: {name}")
     for item in report["invalid"][:10]:
         logger.error(f"Invalid: {item['file']}: {item['reason']}")
     if report.get("safety_blocked"):

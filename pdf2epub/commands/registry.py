@@ -532,6 +532,14 @@ def register_command_parsers(subparsers) -> None:
             "human review and stage the files anyway"
         ),
     )
+    translate_validate_parser.add_argument(
+        "--final",
+        action="store_true",
+        help=(
+            "Run book-level TOC heading binding even when translated files are "
+            "still missing; normally this gate waits for complete output."
+        ),
+    )
     translate_validate_parser.set_defaults(func=translate_validate_command)
 
     # arXiv / TeX whole-mode translation

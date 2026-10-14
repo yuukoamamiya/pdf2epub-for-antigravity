@@ -392,6 +392,77 @@ def test_resume_prepare_carries_active_handoff_to_new_manifest(tmp_path: Path):
     assert handoffs[0]["conversation_id"] == "conversation-resume"
 
 
+def test_resume_marks_completed_worker_handoffs_and_dispatches_nothing(
+    tmp_path: Path,
+):
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    for index in range(2):
+        (source_dir / f"unit_{index}.md").write_text(
+            f"source {index}", encoding="utf-8"
+        )
+        (target_dir / f"unit_{index}.md").write_text(
+            f"译文 {index}", encoding="utf-8"
+        )
+    first_paths = prepare_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        target_dir,
+        "English",
+        "Chinese",
+    )
+    first_handoffs = write_worker_handoffs(
+        tmp_path, first_paths["manifest"], first_paths["prompt"]
+    )
+    source_hashes = {
+        name: hashlib.sha256((source_dir / name).read_bytes()).hexdigest()
+        for name in ("unit_0.md", "unit_1.md")
+    }
+    target_hashes = {
+        name: hashlib.sha256((target_dir / name).read_bytes()).hexdigest()
+        for name in ("unit_0.md", "unit_1.md")
+    }
+    (tmp_path / "translate_validation.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "valid_files": ["unit_0.md", "unit_1.md"],
+                "source_sha256": source_hashes,
+                "target_sha256": target_hashes,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    resumed = prepare_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        target_dir,
+        "English",
+        "Chinese",
+        resume=True,
+    )
+    second_handoffs = write_worker_handoffs(
+        tmp_path, resumed["manifest"], resumed["prompt"]
+    )
+    manifest = json.loads(resumed["manifest"].read_text(encoding="utf-8"))
+
+    assert first_handoffs
+    assert second_handoffs == []
+    assert manifest["worker_handoffs"] == []
+    assert {
+        item["status"] for item in manifest["retired_worker_handoffs"]
+    } == {"completed"}
+    old_scoped = tmp_path / first_handoffs[0]["manifest"]
+    old_manifest = json.loads(old_scoped.read_text(encoding="utf-8"))
+    assert old_manifest["handoff_status"] == "completed"
+    assert old_manifest["pending_files"] == []
+
+
 def test_validation_receipt_rejects_changed_staged_target(tmp_path: Path) -> None:
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"

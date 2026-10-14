@@ -319,6 +319,31 @@ def test_native_candidate_with_same_page_superscript_is_locally_accepted(
     assert report["review_required"] is False
 
 
+def test_native_continuous_numeric_region_without_body_markers_stays_in_review(
+    tmp_path: Path,
+):
+    _write_native_sidecar(
+        tmp_path,
+        1,
+        [
+            _native_block("1 TOC entry", 0, y0=680, font_size=8),
+            _native_block("2 Another TOC entry", 1, y0=720, font_size=8),
+        ],
+    )
+    (tmp_path / "pages" / "page_001.md").write_text(
+        "1 TOC entry\n\n2 Another TOC entry\n", encoding="utf-8"
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    assert report["high_confidence_candidate_count"] == 0
+    assert report["review_candidate_count"] == 2
+    assert all(
+        item["confidence"] == "review"
+        for item in report["pages"][0]["candidates"]
+    )
+
+
 def test_native_definition_number_is_not_its_own_superscript_evidence(
     tmp_path: Path,
 ):
@@ -1229,6 +1254,37 @@ def test_typed_notes_unit_excludes_page_footnote_candidates(tmp_path: Path):
 
     assert report["pages"] == []
     assert report["structure_excluded_pages"][0]["roles"] == ["notes"]
+    assert report["review_required"] is False
+
+
+def test_typed_toc_unit_excludes_page_footnote_candidates(tmp_path: Path):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [_block("2 Chapter title", 0, label="Text", y0=820)],
+    )
+    progress_dir = tmp_path / "ocr_markdown"
+    progress_dir.mkdir()
+    (progress_dir / "tree_progress.json").write_text(
+        json.dumps(
+            {
+                "units": [
+                    {
+                        "unit_id": "chapter_1",
+                        "file": "chapter_1.md",
+                        "page_range": [1, 1],
+                        "type": "toc",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    assert report["pages"] == []
+    assert report["structure_excluded_pages"][0]["roles"] == ["toc"]
     assert report["review_required"] is False
 
 

@@ -879,6 +879,34 @@ def test_markdown_validation_quarantines_invalid_utf8_target(tmp_path: Path):
     assert "UTF-8 decode error" in report["invalid"][0]["reason"]
 
 
+def test_markdown_validation_cleans_atomic_temp_and_quarantines_invalid_output(
+    tmp_path: Path,
+):
+    from pdf2epub.subagent_workflow import validate_markdown_subagent
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "unit.md").write_text("# Source\nBody\n", encoding="utf-8")
+    (target_dir / "unit.md").write_text("\n", encoding="utf-8")
+    (target_dir / ".unit.md.tmp").write_text("partial", encoding="utf-8")
+
+    report = validate_markdown_subagent(
+        tmp_path,
+        "translate",
+        source_dir,
+        target_dir,
+        structural_patterns=(r"^#{1,6}\s",),
+    )
+
+    assert report["discarded_temp_files"] == [".unit.md.tmp"]
+    assert not (target_dir / ".unit.md.tmp").exists()
+    assert not (target_dir / "unit.md").exists()
+    quarantined = tmp_path / report["quarantined_files"]["unit.md"]
+    assert quarantined.is_file()
+
+
 def test_markdown_validation_reports_heading_levels_and_lines(tmp_path: Path):
     from pdf2epub.subagent_workflow import validate_markdown_subagent
 

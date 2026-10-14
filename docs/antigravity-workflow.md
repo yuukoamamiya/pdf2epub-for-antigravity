@@ -76,7 +76,7 @@ subagent:
 
 ## 额度耗尽与断点续传
 
-正文任务按文件拆分。使用 `--resume` 重新准备任务时，manifest 会根据目标目录写出 `completed_files` 和 `pending_files`；提示词要求 Subagent 只处理 `pending_files`。已经通过校验的输出不会被重新覆盖。新 manifest 还会按单元比较 `unit_context_sha256` 和精确 TOC 上下文，因此外部术语表变化只会使受影响单元重新进入 `pending`；没有单元哈希的旧 manifest 才采用整批重做的兼容策略。恢复前建议先运行对应的 `*-validate`，这样可以先发现空文件、行数不一致或标签损坏。
+正文任务按文件拆分。使用 `--resume` 重新准备任务时，manifest 会根据目标目录写出 `completed_files` 和 `pending_files`；提示词要求 Subagent 只处理 `pending_files`。已经通过校验的输出不会被重新覆盖。新 manifest 还会按单元比较 `unit_context_sha256` 和精确 TOC 上下文，因此外部术语表变化只会使受影响单元重新进入 `pending`；没有单元哈希的旧 manifest 才采用整批重做的兼容策略。Subagent 输出遵守 `atomic_output_contract`：先写临时同级文件，再原子替换正式文件；校验器会清理遗留临时文件，并把无效目标移到可恢复的 scratch 区。恢复前建议先运行对应的 `*-validate`，这样可以先发现空文件、行数不一致或标签损坏。
 
 PDF/EPUB 的 `translate` manifest 会在 `worker_handoffs/` 按 TOC 顺序为相邻短章节装箱，生成隔离的最小 manifest 和提示词；父级 manifest 保留完整审计索引，worker 只接收自己的文件、批次、上下文哈希和必要的章节元数据，不重复携带全书文件统计、章节映射或审计快照路径；
 `polish` 使用独立的 `polish_worker_handoffs/`，避免不同阶段的任务被误认。每个 Subagent
@@ -86,6 +86,10 @@ PDF/EPUB 的 `translate` manifest 会在 `worker_handoffs/` 按 TOC 顺序为相
 `translate-toc` 是正文 worker 启动前的独立任务。Subagent 只写
 `toc_translation_result.json`；`translate-toc-validate` 从 `toc_tree.json` 本地合并生成
 `toc_tree_translated.json`，正文 worker 不写入这两个文件。
+
+恢复重建时，当前校验 checkpoint 已覆盖全部 `assigned_files` 的旧 handoff 不会重新生成；
+父级 manifest 在 `retired_worker_handoffs` 中保留 `completed` 审计记录。源哈希变化导致
+assignment 失效的旧 handoff 标记为 `superseded`，只生成新的 pending assignment。
 
 每个 worker handoff 还记录由任务、worker、批次和当前源哈希计算的
 `assignment_sha256`，并把 `assigned_files` 作为显式授权字段。`--resume` 重建完全相同的
@@ -503,7 +507,7 @@ Subagent；双 OCR 模式下，主/次候选存在性或 layout 证据不同的�
 `bibliography`/`reference` 条目使用 `citation` 或 `bibliography` 角色，脚本不会搬移它们。
 如果 TOC 单元属于集中尾注、作者说明、出版社目录或广告，分别使用
 `type: "notes"`、`type: "author_notes"`、
-`type: "catalog"` 或 `type: "ad"`；这些单元的页底数字不会被当作随页脚注。
+`type: "toc"`、`type: "catalog"` 或 `type: "ad"`；这些单元的页底数字不会被当作随页脚注。
 脚注候选必须保留“正文 → 上一脚注续文 → 新脚注”的页内顺序，不能把跨页续文默认移动到
 下一页开头。校验通过后运行 `footnote-apply`：本地脚本会把确认的脚注块从页面流中移除，
 合并跨页续文，并按实际生成的 TOC 单元（完整 `unit_id`；其 `.partM` 分片共享作用域）追加为 `[^N]: ...` 章末注，生成独立的
@@ -740,7 +744,10 @@ translate-toc → translate-toc-validate
 translate-validate --file chapter_5.3.2.md
 ```
 
-单文件结果会写入 `translate_file_validation.json`，供 `--resume` 使用；它不等同于全书校验，打包前仍须运行不带 `--file` 的完整校验。
+单文件结果会写入 `translate_file_validation.json`，供 `--resume` 使用；它不等同于全书校验。
+未完工时运行不带 `--file` 的校验会输出 `[完成/总数]` 和 pending 清单，并暂缓 TOC heading
+binding；所有目标文件存在后才运行该门禁。需要显式提前做不完整终审时使用
+`translate-validate --final`，打包前仍须完成不带 `--file` 的最终校验。
 
 参考文献和索引单元会额外进行离线数字标记校验，覆盖年份、版次、DOI/ISBN 片段、页码、页码范围和索引交叉引用；数字标记发生丢失、改写或重排时，校验会拒绝该单元。
 

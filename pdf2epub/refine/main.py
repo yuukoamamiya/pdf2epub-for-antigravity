@@ -35,9 +35,11 @@ DEFAULT_OVERSIZED_SPLIT_TARGETS_BY_TYPE = {"index": 4_500}
 
 
 def _pages_fingerprint(pages_dir: Path) -> str:
-    """Hash page names and contents so resume cannot reuse stale OCR input."""
+    """Hash page text and native layout sidecars for safe refine resume."""
     digest = hashlib.sha256()
-    for page in sorted(pages_dir.glob("page_*.md")):
+    for page in sorted(
+        [*pages_dir.glob("page_*.md"), *pages_dir.glob("page_*.ocr.json")]
+    ):
         digest.update(page.name.encode("utf-8"))
         digest.update(hashlib.sha256(page.read_bytes()).digest())
     return digest.hexdigest()
@@ -51,6 +53,7 @@ def _insert_toc_chapter(toc_tree: List[TOCNode], toc_info: Dict) -> TOCNode:
         start_page=toc_info['start_page'],
         end_page=toc_info['end_page'],
         children=[],
+        chapter_type="toc",
     )
     for chapter in toc_tree:
         if (

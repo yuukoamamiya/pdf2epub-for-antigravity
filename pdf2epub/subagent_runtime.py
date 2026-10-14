@@ -513,6 +513,7 @@ def _worker_manifest_projection(
         "source_dir",
         "target_dir",
         "scratch_dir",
+        "atomic_output_contract",
         "batching",
         "effective_max_concurrency",
         "concurrency_reason",
@@ -1368,8 +1369,77 @@ def write_worker_handoffs(
                     entry[key] = prior[key]
         handoffs.append(entry)
         worker_queue.append(dict(entry))
+    current_assignments = {str(item.get("assignment_sha256") or "") for item in handoffs}
+    completed_files = {
+        str(name) for name in (manifest.get("completed_files") or []) if str(name).strip()
+    }
+    current_handoff_paths = {
+        str(item.get("manifest") or "") for item in handoffs
+    }
+    retired_handoffs: list[dict[str, Any]] = []
+    for prior in previous_handoffs:
+        if not isinstance(prior, Mapping):
+            continue
+        assignment = str(prior.get("assignment_sha256") or "").strip()
+        if not assignment or assignment in current_assignments:
+            continue
+        assigned_files = {
+            str(name) for name in (prior.get("files") or prior.get("assigned_files") or [])
+            if str(name).strip()
+        }
+        if not assigned_files:
+            continue
+        retired = dict(prior)
+        retired["status"] = (
+            "completed"
+            if assigned_files <= completed_files
+            else "superseded"
+        )
+        retired["retired_reason"] = (
+            "all_assigned_files_have_current_validation_checkpoint"
+            if retired["status"] == "completed"
+            else "assignment_hash_is_no_longer_current"
+        )
+        retired_handoffs.append(retired)
+
+        # Keep old scoped manifests readable for operators. Do not overwrite a
+        # path that is being reused by a newly generated assignment below.
+        scoped_name = str(prior.get("manifest") or "")
+        if not scoped_name or scoped_name in current_handoff_paths:
+            continue
+        scoped_path = (output_dir / scoped_name).resolve()
+        try:
+            scoped_path.relative_to(output_dir.resolve())
+        except ValueError:
+            continue
+        if not scoped_path.is_file():
+            continue
+        try:
+            scoped_value = json.loads(scoped_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            continue
+        if not isinstance(scoped_value, dict):
+            continue
+        scoped_value["handoff_status"] = retired["status"]
+        scoped_value["retired_reason"] = retired["retired_reason"]
+        if retired["status"] == "completed":
+            scoped_value["completed_files"] = sorted(assigned_files)
+            scoped_value["pending_files"] = []
+        atomic_write_text(
+            scoped_path,
+            json.dumps(scoped_value, ensure_ascii=False, indent=2),
+        )
+    previous_retired = manifest.get("retired_worker_handoffs", [])
+    if not isinstance(previous_retired, list):
+        previous_retired = []
+    retired_by_assignment = {
+        str(item.get("assignment_sha256")): dict(item)
+        for item in [*previous_retired, *retired_handoffs]
+        if isinstance(item, Mapping) and item.get("assignment_sha256")
+    }
     manifest["worker_queue"] = worker_queue
     manifest["worker_handoffs"] = handoffs
+    manifest["retired_worker_handoffs"] = list(retired_by_assignment.values())
     atomic_write_text(manifest_path, json.dumps(manifest, ensure_ascii=False, indent=2))
     return handoffs
 

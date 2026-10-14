@@ -352,6 +352,12 @@ def prepare_markdown_subagent(
         "oversized_files": oversized_files,
         "completed_files": completed_files,
         "pending_files": pending_files,
+        "atomic_output_contract": {
+            "temporary_pattern": ".<assigned_filename>.tmp",
+            "final_pattern": "<assigned_filename>",
+            "promotion": "atomic_replace_after_complete_write",
+            "validator_checkpoint": "validated/<assigned_filename>",
+        },
         "scratch_dir": relative_posix_path(output_dir / "scratch" / task, output_dir),
         "effective_max_concurrency": effective_concurrency,
         "concurrency_reason": concurrency_reason,

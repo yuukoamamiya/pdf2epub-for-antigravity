@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any, Iterable, Mapping
 
 
 _MARKDOWN_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
@@ -21,6 +22,145 @@ _BLANK_PAGE_TEXT_RE = re.compile(
     re.IGNORECASE,
 )
 _HEADING_RE = re.compile(r"^(#{2,3})\s+(.+?)\s*$")
+_NATIVE_DOI_RE = re.compile(r"^\s*DOI\s*:?\s*10\.\d{4,9}/\S+\s*$", re.IGNORECASE)
+_NATIVE_EDGE_RATIO = 0.05
+
+
+def _native_furniture_signature(value: Any) -> str:
+    """Normalize a native sidecar block for repeated-edge comparison."""
+    value = re.sub(r"<[^>]+>", " ", str(value or ""))
+    return "".join(char.casefold() for char in value if char.isalnum())
+
+
+def _native_edge_block(
+    block: Mapping[str, Any], sidecar: Mapping[str, Any], *, edge_ratio: float
+) -> tuple[bool, bool]:
+    """Return whether a native block touches the physical top or bottom edge."""
+    bbox = block.get("bbox")
+    page_box = sidecar.get("page_box")
+    if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
+        return False, False
+    if not isinstance(page_box, (list, tuple)) or len(page_box) != 4:
+        return False, False
+    try:
+        _x0, y0, _x1, y1 = (float(value) for value in bbox)
+        _px0, py0, _px1, py1 = (float(value) for value in page_box)
+    except (TypeError, ValueError):
+        return False, False
+    height = py1 - py0
+    if height <= 0 or y1 <= y0:
+        return False, False
+    return (
+        (y0 - py0) / height <= edge_ratio,
+        (py1 - y1) / height <= edge_ratio,
+    )
+
+
+def native_repeated_edge_furniture_index(
+    sidecars: Iterable[Mapping[str, Any]], *, edge_ratio: float = _NATIVE_EDGE_RATIO
+) -> dict[str, int]:
+    """Index repeated native edge blocks by signature and first page number."""
+    pages_by_signature: dict[str, set[int]] = {}
+    for sidecar in sidecars:
+        if str(sidecar.get("source_kind") or "").strip().lower() != "native_text":
+            continue
+        try:
+            page_number = int(sidecar.get("page_number"))
+        except (TypeError, ValueError):
+            continue
+        for block in sidecar.get("blocks", []) or []:
+            if not isinstance(block, Mapping):
+                continue
+            top, bottom = _native_edge_block(block, sidecar, edge_ratio=edge_ratio)
+            if not (top or bottom):
+                continue
+            text = str(block.get("markdown_text") or block.get("text") or "").strip()
+            signature = _native_furniture_signature(text)
+            if not signature or len(signature) > 160:
+                continue
+            pages_by_signature.setdefault(signature, set()).add(page_number)
+    return {
+        signature: min(pages)
+        for signature, pages in pages_by_signature.items()
+        if len(pages) >= 2
+    }
+
+
+def _native_line_span(lines: list[str], value: str) -> set[int]:
+    """Find the physical lines containing one sidecar block or line."""
+    needle = _native_furniture_signature(value)
+    if not needle:
+        return set()
+    page_signature: list[str] = []
+    line_for_character: list[int] = []
+    for line_number, line in enumerate(lines):
+        signature = _native_furniture_signature(line)
+        page_signature.extend(signature)
+        line_for_character.extend([line_number] * len(signature))
+    joined = "".join(page_signature)
+    start = joined.find(needle)
+    if start < 0:
+        return set()
+    end = start + len(needle)
+    return set(line_for_character[start:end])
+
+
+def remove_native_page_furniture(
+    content: str,
+    sidecar: Mapping[str, Any],
+    *,
+    repeated_index: Mapping[str, int] | None = None,
+    page_number: int | None = None,
+    edge_ratio: float = _NATIVE_EDGE_RATIO,
+) -> tuple[str, list[dict[str, Any]]]:
+    """Remove deterministic native edge furniture from one page fragment.
+
+    The original page Markdown remains immutable. Repeated text is retained
+    on its first physical page so a legitimate section opening is preserved.
+    """
+    if str(sidecar.get("source_kind") or "").strip().lower() != "native_text":
+        return str(content), []
+    lines = str(content).split("\n")
+    repeated_index = repeated_index or {}
+    remove_lines: dict[int, dict[str, Any]] = {}
+    for block_index, block in enumerate(sidecar.get("blocks", []) or []):
+        if not isinstance(block, Mapping):
+            continue
+        top, bottom = _native_edge_block(block, sidecar, edge_ratio=edge_ratio)
+        if not (top or bottom):
+            continue
+        block_text = str(block.get("markdown_text") or block.get("text") or "").strip()
+        if not block_text:
+            continue
+        signature = _native_furniture_signature(block_text)
+        candidates: list[tuple[str, str]] = []
+        candidate_lines = [block_text, *block_text.splitlines()]
+        for candidate_line in candidate_lines:
+            if _NATIVE_DOI_RE.fullmatch(candidate_line):
+                candidates.append(("doi_edge", candidate_line))
+            elif _PRINTED_PAGE_LABEL_RE.fullmatch(
+                re.sub(r"<[^>]+>", "", candidate_line).strip()
+            ):
+                candidates.append(("edge_page_label", candidate_line))
+        if not candidates and (
+            signature in repeated_index
+            and page_number is not None
+            and int(page_number) != int(repeated_index[signature])
+        ):
+            candidates.append(("repeated_edge_text", block_text))
+        for kind, candidate_text in candidates:
+            span = _native_line_span(lines, candidate_text)
+            for line_number in span:
+                remove_lines.setdefault(
+                    line_number,
+                    {"block": block_index, "kind": kind, "text": candidate_text},
+                )
+    if not remove_lines:
+        return str(content), []
+    cleaned = "\n".join(
+        line for index, line in enumerate(lines) if index not in remove_lines
+    )
+    return cleaned, [remove_lines[index] for index in sorted(remove_lines)]
 
 
 def is_blank_page_marker(line: str) -> bool:
