@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from xml.etree import ElementTree as ET
 
-from pdf2epub.cli import _resolve_pdf_markdown_source
+from pdf2epub.commands.pdf import _resolve_pdf_markdown_source
 from pdf2epub.build_epub import (
     flatten_toc_tree,
     build_epub_structure,

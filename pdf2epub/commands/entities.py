@@ -1,8 +1,7 @@
 """Entity extraction command handlers.
 
 The format-neutral entity contract lives in :mod:`pdf2epub.entity_context`.
-This module keeps command-specific PDF preparation and validation, plus
-compatibility aliases for callers of the former helper locations.
+This module keeps command-specific PDF preparation and validation.
 """
 
 import hashlib
@@ -19,11 +18,8 @@ from pdf2epub.commands.sources import (
 )
 from pdf2epub.pipeline_policy import PipelinePolicy
 from pdf2epub.entity_context import (
-    ENTITY_SOURCE_FILTER_VERSION,
-    EPUB_ENTITY_EXCLUDED_ROLES,
-    entity_context_is_current as _entity_context_is_current,
-    entity_source_selection as _entity_source_selection,
-    prepare_entity_subagent_task as _prepare_entity_subagent_task,
+    prepare_entity_subagent_task,
+    validate_entity_source_manifest,
 )
 from pdf2epub.utils.common import book_output_dir
 from pdf2epub.workflow_contracts import atomic_write_json
@@ -62,7 +58,7 @@ def extract_entities_command(args):
     source_language = args.source_lang or policy.source_language or "English"
     target_language = args.target_lang or policy.target_language or "Chinese"
     try:
-        _prepare_entity_subagent_task(
+        prepare_entity_subagent_task(
             output_dir,
             book_title,
             source_dir,
@@ -112,28 +108,9 @@ def extract_entities_validate_command(args):
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             source_dir = entity_path.parent / manifest.get("source_dir", "")
-            expected_hashes = manifest.get("source_sha256", {})
-            excluded_names = {
-                str(name)
-                for name in (manifest.get("excluded_files", []) or [])
-                if str(name).strip()
-            }
-            selected_files, selected_excluded = _entity_source_selection(
-                source_dir, str(manifest.get("source_stage") or "")
+            errors.extend(
+                validate_entity_source_manifest(manifest, entity_path.parent, source_dir)
             )
-            actual_names = {
-                path.name for path in selected_files + selected_excluded
-            }
-            if set(expected_hashes) | excluded_names != actual_names:
-                errors.append(
-                    "entity source file set changed after extraction"
-                )
-            for name, expected in expected_hashes.items():
-                source_path = source_dir / name
-                if not source_path.is_file():
-                    errors.append(f"entity source file is missing: {name}")
-                elif hashlib.sha256(source_path.read_bytes()).hexdigest() != expected:
-                    errors.append(f"entity source file changed after extraction: {name}")
         except (OSError, json.JSONDecodeError, TypeError):
             errors.append("invalid entity_subagent_manifest.json")
     report = {

@@ -18,7 +18,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
-from ..workflow_contracts import atomic_write_text, relative_posix_path, sha256_file
+from ..workflow_contracts import atomic_write_json, atomic_write_text, relative_posix_path, sha256_file
 from ..subagent_runtime import resolve_subagent_model
 from .layout_evidence import (
     load_layout_sidecar,
@@ -211,7 +211,7 @@ def _report_digest(report: Mapping[str, Any]) -> str:
 def _write_report(output_dir: Path, report: dict[str, Any]) -> Path:
     report["report_sha256"] = _report_digest(report)
     path = Path(output_dir) / "illustration_candidate_report.json"
-    atomic_write_text(path, json.dumps(report, ensure_ascii=False, indent=2))
+    atomic_write_json(path, report)
     return path
 
 
@@ -347,7 +347,7 @@ def prepare_illustration_subagent(
         "status": report["status"],
     }
     manifest_path = output_dir / "illustration_subagent_manifest.json"
-    atomic_write_text(manifest_path, json.dumps(manifest, ensure_ascii=False, indent=2))
+    atomic_write_json(manifest_path, manifest)
 
     prompt_path = output_dir / "illustration_subagent_prompt.md"
     if candidates:
@@ -561,7 +561,7 @@ def validate_illustration_decisions(
         "ocr_evidence_mode": report.get("ocr_evidence_mode"),
         "decisions": decisions.get("decisions", []),
     }
-    atomic_write_text(output_dir / "illustration_validation.json", json.dumps(result, ensure_ascii=False, indent=2))
+    atomic_write_json(output_dir / "illustration_validation.json", result)
     return result
 
 
@@ -675,7 +675,7 @@ def apply_illustration_bindings(
             if isinstance(item, Mapping)
         },
     }
-    atomic_write_text(output_dir / "illustration_bindings.json", json.dumps(result, ensure_ascii=False, indent=2))
+    atomic_write_json(output_dir / "illustration_bindings.json", result)
     return {**result, "valid": True}
 
 

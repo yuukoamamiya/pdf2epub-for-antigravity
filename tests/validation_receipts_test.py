@@ -6,10 +6,8 @@ from pdf2epub.validation_receipts import (
     build_input_snapshot,
     validation_receipt_is_current,
 )
-from pdf2epub.commands.markdown import (
-    _load_pdf_continuation_files,
-    _sync_subagent_manifest_progress,
-)
+from pdf2epub.commands.markdown import _sync_subagent_manifest_progress
+from pdf2epub.commands.markdown_context import _load_pdf_continuation_files
 from pdf2epub.markdown_handoff import prepare_markdown_subagent
 from pdf2epub.workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION
 

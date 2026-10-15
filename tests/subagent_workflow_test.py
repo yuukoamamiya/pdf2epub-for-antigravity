@@ -14,20 +14,24 @@ from pdf2epub.refine.subagent_workflow import (
 from pdf2epub.refine.pdf_outline import extract_pdf_outline
 from pdf2epub.refine.unit_splitter import split_markdown_unit
 from pdf2epub.entity_extractor import validate_entities
-from pdf2epub.commands.entities import _prepare_entity_subagent_task
-from pdf2epub.subagent_workflow import (
+from pdf2epub.entity_context import prepare_entity_subagent_task
+from pdf2epub.markdown_handoff import prepare_markdown_subagent
+from pdf2epub.markdown_validation import (
+    detect_bilingual_output,
+    fix_reference_heading_mismatch,
+    strip_outer_markdown_fences,
+)
+from pdf2epub.subagent_runtime import (
     DEFAULT_SUBAGENT_MODEL,
     DEFAULT_TRANSLATION_MODEL,
-    detect_refusal,
-    detect_bilingual_output,
-    strip_outer_markdown_fences,
-    integrate_toc_translation_task,
-    prepare_markdown_subagent,
-    prepare_toc_translation_subagent,
-    write_batch_handoffs,
     resolve_subagent_model,
+    write_batch_handoffs,
+)
+from pdf2epub.subagent_safety import detect_refusal
+from pdf2epub.toc_translation_workflow import (
+    integrate_toc_translation_task,
+    prepare_toc_translation_subagent,
     validate_toc_translation_subagent,
-    fix_reference_heading_mismatch,
 )
 from pdf2epub.subagent_runtime import write_worker_handoffs
 from pdf2epub.markdown_validation import (
@@ -36,26 +40,14 @@ from pdf2epub.markdown_validation import (
 )
 from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 from pdf2epub.footnote_normalization import validate_polish_footnote_normalization
-from pdf2epub.cli import (
+from pdf2epub.commands.entities import extract_entities_command
+from pdf2epub.commands.markdown import (
     _prepare_pdf_markdown_task,
     _validate_translation_entities,
-    extract_entities_command,
+)
+from pdf2epub.commands.toc import (
     translate_toc_command,
 )
-
-
-def test_legacy_workflow_module_reexports_split_contracts():
-    import pdf2epub.subagent_workflow as legacy
-    from pdf2epub.markdown_validation import detect_bilingual_output
-    from pdf2epub.subagent_runtime import estimate_tokens, resolve_subagent_model
-    from pdf2epub.subagent_safety import detect_refusal
-    from pdf2epub.toc_translation_workflow import validate_toc_translation_subagent
-
-    assert legacy.detect_bilingual_output is detect_bilingual_output
-    assert legacy.detect_refusal is detect_refusal
-    assert legacy.estimate_tokens is estimate_tokens
-    assert legacy.resolve_subagent_model is resolve_subagent_model
-    assert legacy.validate_toc_translation_subagent is validate_toc_translation_subagent
 
 
 def test_resolve_subagent_model_uses_translation_and_default_defaults():
@@ -216,7 +208,7 @@ def test_strip_outer_markdown_fences_only_removes_wrapping_fence():
 
 
 def test_markdown_validation_requires_review_for_bilingual_warning(tmp_path: Path):
-    from pdf2epub.subagent_workflow import validate_markdown_subagent
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"
@@ -231,7 +223,7 @@ def test_markdown_validation_requires_review_for_bilingual_warning(tmp_path: Pat
     assert report["review_required_files"] == ["unit.md"]
     assert not (target_dir / "validated" / "unit.md").exists()
 
-    from pdf2epub.subagent_workflow import prepare_markdown_subagent
+    from pdf2epub.markdown_handoff import prepare_markdown_subagent
 
     retry_paths = prepare_markdown_subagent(
         tmp_path,
@@ -296,7 +288,7 @@ def test_markdown_validation_requires_review_for_bilingual_warning(tmp_path: Pat
 
 
 def test_markdown_validation_blocks_bilingual_output_for_chinese_target(tmp_path: Path):
-    from pdf2epub.subagent_workflow import validate_markdown_subagent
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"
@@ -325,7 +317,7 @@ def test_markdown_validation_blocks_bilingual_output_for_chinese_target(tmp_path
 
 
 def test_markdown_validation_excludes_bibliography_from_bilingual_warning(tmp_path: Path):
-    from pdf2epub.subagent_workflow import validate_markdown_subagent
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"
@@ -344,7 +336,7 @@ def test_markdown_validation_excludes_bibliography_from_bilingual_warning(tmp_pa
 def test_markdown_validation_excludes_bibliography_from_target_language_gate(
     tmp_path: Path,
 ):
-    from pdf2epub.subagent_workflow import validate_markdown_subagent
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"
@@ -526,7 +518,7 @@ def test_markdown_validation_rejects_parallel_original_and_translated_headings(
 
 
 def test_polish_requires_review_for_page_furniture(tmp_path: Path):
-    from pdf2epub.subagent_workflow import validate_markdown_subagent
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"
@@ -559,7 +551,7 @@ def test_polish_requires_review_for_page_furniture(tmp_path: Path):
 
 
 def test_polish_does_not_flag_unique_bibliography_title_like_lines(tmp_path: Path):
-    from pdf2epub.subagent_workflow import validate_markdown_subagent
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"
@@ -582,7 +574,7 @@ def test_polish_does_not_flag_unique_bibliography_title_like_lines(tmp_path: Pat
 
 
 def test_polish_still_flags_repeated_bibliography_running_headers(tmp_path: Path):
-    from pdf2epub.subagent_workflow import validate_markdown_subagent
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"
@@ -609,7 +601,7 @@ def test_polish_still_flags_repeated_bibliography_running_headers(tmp_path: Path
 
 
 def test_polish_does_not_flag_index_entries_with_page_labels(tmp_path: Path):
-    from pdf2epub.subagent_workflow import validate_markdown_subagent
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"
@@ -642,7 +634,7 @@ def test_polish_does_not_flag_index_entries_with_page_labels(tmp_path: Path):
 def test_polish_does_not_flag_structural_notes_headings(
     tmp_path: Path, heading: str
 ):
-    from pdf2epub.subagent_workflow import validate_markdown_subagent
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"
@@ -665,7 +657,7 @@ def test_polish_does_not_flag_structural_notes_headings(
 
 
 def test_polish_still_flags_notes_running_header_with_page_label(tmp_path: Path):
-    from pdf2epub.subagent_workflow import validate_markdown_subagent
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"
@@ -688,7 +680,7 @@ def test_polish_still_flags_notes_running_header_with_page_label(tmp_path: Path)
 
 
 def test_polish_allows_removed_top_level_label_at_continuation_prefix(tmp_path: Path):
-    from pdf2epub.subagent_workflow import validate_markdown_subagent
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"
@@ -722,7 +714,7 @@ def test_polish_allows_removed_top_level_label_at_continuation_prefix(tmp_path: 
 
 
 def test_polish_does_not_exempt_a_continuation_parts_own_toc_label(tmp_path: Path):
-    from pdf2epub.subagent_workflow import validate_markdown_subagent
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"
@@ -754,7 +746,7 @@ def test_polish_does_not_exempt_a_continuation_parts_own_toc_label(tmp_path: Pat
 
 
 def test_markdown_validation_rejects_bibliography_marker_loss(tmp_path: Path):
-    from pdf2epub.subagent_workflow import validate_markdown_subagent
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"
@@ -784,7 +776,7 @@ def test_markdown_validation_rejects_bibliography_marker_loss(tmp_path: Path):
 def test_markdown_validation_preserves_index_page_ranges_and_cross_references(
     tmp_path: Path,
 ):
-    from pdf2epub.subagent_workflow import validate_markdown_subagent
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"
@@ -812,7 +804,7 @@ def test_markdown_validation_preserves_index_page_ranges_and_cross_references(
 
 
 def test_markdown_validation_rejects_index_page_mapping_change(tmp_path: Path):
-    from pdf2epub.subagent_workflow import validate_markdown_subagent
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"
@@ -840,7 +832,7 @@ def test_markdown_validation_rejects_index_page_mapping_change(tmp_path: Path):
 
 
 def test_markdown_validation_includes_structural_diff_summary(tmp_path: Path):
-    from pdf2epub.subagent_workflow import validate_markdown_subagent
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"
@@ -856,7 +848,7 @@ def test_markdown_validation_includes_structural_diff_summary(tmp_path: Path):
 
 
 def test_markdown_validation_quarantines_invalid_utf8_target(tmp_path: Path):
-    from pdf2epub.subagent_workflow import validate_markdown_subagent
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"
@@ -882,7 +874,7 @@ def test_markdown_validation_quarantines_invalid_utf8_target(tmp_path: Path):
 def test_markdown_validation_cleans_atomic_temp_and_quarantines_invalid_output(
     tmp_path: Path,
 ):
-    from pdf2epub.subagent_workflow import validate_markdown_subagent
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"
@@ -908,7 +900,7 @@ def test_markdown_validation_cleans_atomic_temp_and_quarantines_invalid_output(
 
 
 def test_markdown_validation_reports_heading_levels_and_lines(tmp_path: Path):
-    from pdf2epub.subagent_workflow import validate_markdown_subagent
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"
@@ -956,7 +948,7 @@ def test_reference_heading_fix_does_not_relax_unique_heading_changes():
 
 
 def test_markdown_validation_stages_repaired_reference_heading(tmp_path: Path):
-    from pdf2epub.subagent_workflow import validate_markdown_subagent
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"
@@ -986,7 +978,7 @@ def test_markdown_validation_stages_repaired_reference_heading(tmp_path: Path):
 
 
 def test_markdown_validation_preserves_source_code_fences(tmp_path: Path):
-    from pdf2epub.subagent_workflow import validate_markdown_subagent
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"
@@ -1007,7 +999,7 @@ def test_markdown_validation_preserves_source_code_fences(tmp_path: Path):
 
 
 def test_markdown_validation_rejects_added_code_fence(tmp_path: Path):
-    from pdf2epub.subagent_workflow import validate_markdown_subagent
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"
@@ -1025,7 +1017,7 @@ def test_markdown_validation_rejects_added_code_fence(tmp_path: Path):
 
 
 def test_polish_validation_allows_only_duplicate_heading_reduction(tmp_path: Path):
-    from pdf2epub.subagent_workflow import validate_markdown_subagent
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"
@@ -1055,7 +1047,7 @@ def test_polish_validation_allows_only_duplicate_heading_reduction(tmp_path: Pat
 
 
 def test_polish_validation_still_rejects_unique_heading_removal(tmp_path: Path):
-    from pdf2epub.subagent_workflow import validate_markdown_subagent
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"
@@ -1143,7 +1135,7 @@ def test_polish_footnote_normalization_rejects_unconverted_superscripts():
 
 
 def test_polish_validation_ignores_known_blank_page_image_artifact(tmp_path: Path):
-    from pdf2epub.subagent_workflow import validate_markdown_subagent
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"
@@ -1395,7 +1387,7 @@ def test_epub_entity_extraction_excludes_deterministic_appendices(tmp_path: Path
     for name in ("chapter_1.md", "Index.md", "Bibliography.md", "Copyright.md", "Cover.md"):
         (source_dir / name).write_text(name, encoding="utf-8")
 
-    _prepare_entity_subagent_task(
+    prepare_entity_subagent_task(
         tmp_path,
         "Book",
         source_dir,
@@ -1505,7 +1497,7 @@ def test_worker_handoff_deduplicates_unit_terminology_contexts(tmp_path: Path):
 
 
 def test_single_file_validation_preserves_other_validated_units(tmp_path: Path):
-    from pdf2epub.subagent_workflow import validate_markdown_subagent
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"

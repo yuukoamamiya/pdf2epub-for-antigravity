@@ -24,7 +24,7 @@ from .subagent_runtime import (
     write_worker_handoffs,
 )
 from .page_furniture_rules import candidate_for_line
-from .workflow_contracts import atomic_write_text, relative_posix_path
+from .workflow_contracts import atomic_write_json, atomic_write_text, relative_posix_path
 
 
 REPAIR_TASK = "page-furniture-repair"
@@ -42,12 +42,6 @@ def _normalized_repair_line(line: str) -> str:
     return re.sub(r"\s+", " ", line.strip()).casefold()
 
 
-# Private compatibility alias retained for callers and tests that imported the
-# old repair-module helper.  The implementation now lives in a pure rule
-# module, so validation no longer depends on this workflow module.
-_candidate_for_line = candidate_for_line
-
-
 def _candidate_windows(
     text: str,
     *,
@@ -58,7 +52,7 @@ def _candidate_windows(
     lines = text.splitlines()
     candidates: list[dict[str, Any]] = []
     for index, line in enumerate(lines):
-        candidate = _candidate_for_line(line)
+        candidate = candidate_for_line(line)
         if candidate is not None:
             candidates.append({"line": index + 1, **candidate})
 
@@ -70,7 +64,7 @@ def _candidate_windows(
                 not normalized
                 or len(line.strip()) > _MAX_REPEATED_LINE_LENGTH
                 or normalized.startswith(("[", "!", "```"))
-                or _candidate_for_line(line) is not None
+                or candidate_for_line(line) is not None
             ):
                 continue
             occurrences.setdefault(normalized, []).append(index)
@@ -427,9 +421,7 @@ def prepare_page_furniture_repair(
     }
     manifest_path = output_dir / MANIFEST_NAME
     prompt_path = output_dir / PROMPT_NAME
-    atomic_write_text(
-        manifest_path, json.dumps(manifest, ensure_ascii=False, indent=2)
-    )
+    atomic_write_json(manifest_path, manifest)
     atomic_write_text(
         prompt_path,
         _repair_prompt(
@@ -521,10 +513,7 @@ def validate_page_furniture_repair(
         for name, target_hash in report.get("target_sha256", {}).items()
         if snapshot_hashes.get(name) != target_hash
     ]
-    atomic_write_text(
-        output_dir / f"{REPAIR_TASK}_validation.json",
-        json.dumps(report, ensure_ascii=False, indent=2),
-    )
+    atomic_write_json(output_dir / f"{REPAIR_TASK}_validation.json", report)
     return report
 
 

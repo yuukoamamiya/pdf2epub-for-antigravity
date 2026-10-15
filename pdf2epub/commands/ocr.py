@@ -19,7 +19,12 @@ from pdf2epub.ocr_consensus import (
 )
 from pdf2epub.ocr_progress import assess_progress
 from pdf2epub.utils.common import resolve_book_input_path
-from pdf2epub.workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION, atomic_write_text, sha256_file
+from pdf2epub.workflow_contracts import (
+    MARKDOWN_VALIDATION_SCHEMA_VERSION,
+    atomic_write_json,
+    atomic_write_text,
+    sha256_file,
+)
 
 
 def _load_probe(output_dir: Path) -> dict:
@@ -130,10 +135,7 @@ def _write_auto_accepted_validation(output_dir: Path, files: list[str]) -> None:
         "all_passed": True,
         "files_checked": sorted(files),
     }
-    atomic_write_text(
-        Path(output_dir) / "ocr-correct_validation.json",
-        json.dumps(report, ensure_ascii=False, indent=2),
-    )
+    atomic_write_json(Path(output_dir) / "ocr-correct_validation.json", report)
 
 
 def ocr_pages_command(args):
@@ -182,10 +184,7 @@ def ocr_pages_command(args):
                     f"PDF text probe: page {current}/{total}"
                 ),
             )
-            atomic_write_text(
-                output_dir / "pdf_text_probe.json",
-                json.dumps(probe, ensure_ascii=False, indent=2),
-            )
+            atomic_write_json(output_dir / "pdf_text_probe.json", probe)
         except Exception as exc:
             logger.warning(f"PDF text probe failed; continuing with visual OCR: {exc}")
             probe = {"recommendation": "ocr_required", "classification": "probe_failed"}
@@ -567,18 +566,14 @@ def ocr_correct_validate_command(args):
         record["ocr_correction_review"] = review_report
         record["valid"] = bool(record.get("valid"))
         records[selected_file] = record
-        atomic_write_text(
+        atomic_write_json(
             ledger_path,
-            json.dumps(
-                {
-                    "schema_version": 2,
-                    "task": "ocr-correct",
-                    "scope": "file-checkpoints",
-                    "files": records,
-                },
-                ensure_ascii=False,
-                indent=2,
-            ),
+            {
+                "schema_version": 2,
+                "task": "ocr-correct",
+                "scope": "file-checkpoints",
+                "files": records,
+            },
         )
     if not review_report["valid"]:
         invalid_files = set()
@@ -631,24 +626,17 @@ def ocr_correct_validate_command(args):
                 if item.get("file") == selected_file
             )
             records[selected_file] = record
-            atomic_write_text(
+            atomic_write_json(
                 ledger_path,
-                json.dumps(
-                    {
-                        "schema_version": 2,
-                        "task": "ocr-correct",
-                        "scope": "file-checkpoints",
-                        "files": records,
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                ),
+                {
+                    "schema_version": 2,
+                    "task": "ocr-correct",
+                    "scope": "file-checkpoints",
+                    "files": records,
+                },
             )
     if not selected_file:
-        atomic_write_text(
-            output_dir / "ocr-correct_validation.json",
-            json.dumps(report, ensure_ascii=False, indent=2),
-        )
+        atomic_write_json(output_dir / "ocr-correct_validation.json", report)
     logger.info(
         f"ocr-correct 校验: {report['completed']}/{report['total']} completed, "
         f"{len(report['invalid'])} invalid"

@@ -47,6 +47,7 @@ def translate_novel_command(args):
 
     from pdf2epub.subagent_runtime import resolve_subagent_model
     from pdf2epub.workflow_contracts import (
+        atomic_write_json,
         atomic_write_text,
         is_reusable_checkpoint,
         load_json_object,
@@ -153,10 +154,7 @@ def translate_novel_command(args):
         manifest["pending_files"] = [
             name for name in manifest["files"] if name not in completed_files
         ]
-        atomic_write_text(
-            output_dir / "novel_subagent_manifest.json",
-            json.dumps(manifest, ensure_ascii=False, indent=2),
-        )
+        atomic_write_json(output_dir / "novel_subagent_manifest.json", manifest)
         (output_dir / "novel_subagent_prompt.md").write_text(
             f"""# Light-novel translation Subagent task
 

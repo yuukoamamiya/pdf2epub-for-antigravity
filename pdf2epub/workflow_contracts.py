@@ -60,13 +60,22 @@ def atomic_write_json(
     path: Path,
     value: Any,
     *,
-    indent: int = 2,
+    indent: int | None = 2,
     encoding: str = "utf-8",
+    sort_keys: bool = False,
+    separators: tuple[str, str] | None = None,
 ) -> None:
     """Serialize a JSON contract through the same atomic write boundary."""
+    dump_kwargs: dict[str, Any] = {
+        "ensure_ascii": False,
+        "indent": indent,
+        "sort_keys": sort_keys,
+    }
+    if separators is not None:
+        dump_kwargs["separators"] = separators
     atomic_write_text(
         path,
-        json.dumps(value, ensure_ascii=False, indent=indent),
+        json.dumps(value, **dump_kwargs),
         encoding=encoding,
     )
 

@@ -34,6 +34,7 @@ from .subagent_safety import detect_refusal
 from .utils.ocr_artifacts import clean_ocr_page_artifacts
 from .workflow_contracts import (
     MARKDOWN_VALIDATION_SCHEMA_VERSION,
+    atomic_write_json,
     atomic_write_text,
 )
 
@@ -730,9 +731,9 @@ def validate_markdown_subagent(
             "scope": "file-checkpoints",
             "files": records,
         }
-        atomic_write_text(report_path, json.dumps(ledger, ensure_ascii=False, indent=2))
+        atomic_write_json(report_path, ledger)
     else:
-        atomic_write_text(report_path, json.dumps(report, ensure_ascii=False, indent=2))
+        atomic_write_json(report_path, report)
     invalid_target_names = {
         str(item.get("file"))
         for item in invalid
@@ -748,9 +749,9 @@ def validate_markdown_subagent(
     if partial:
         ledger["discarded_temp_files"] = discarded_temp_files
         ledger["quarantined_files"] = quarantined_files
-        atomic_write_text(report_path, json.dumps(ledger, ensure_ascii=False, indent=2))
+        atomic_write_json(report_path, ledger)
     else:
-        atomic_write_text(report_path, json.dumps(report, ensure_ascii=False, indent=2))
+        atomic_write_json(report_path, report)
     return report
 
 __all__ = ["validate_markdown_subagent"]

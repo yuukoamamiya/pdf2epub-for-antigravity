@@ -17,6 +17,7 @@ def translate_arxiv_command(args):
     """Materialize a TeX project and prepare a Subagent translation task."""
     from pdf2epub.subagent_runtime import estimate_tokens, resolve_subagent_model
     from pdf2epub.workflow_contracts import (
+        atomic_write_json,
         atomic_write_text,
         is_reusable_checkpoint,
         load_json_object,
@@ -133,10 +134,7 @@ def translate_arxiv_command(args):
             ],
         }
         control_dir.mkdir(parents=True, exist_ok=True)
-        atomic_write_text(
-            control_dir / "tex_subagent_manifest.json",
-            json.dumps(manifest, ensure_ascii=False, indent=2),
-        )
+        atomic_write_json(control_dir / "tex_subagent_manifest.json", manifest)
         (control_dir / "tex_subagent_prompt.md").write_text(
             f"""# TeX translation Subagent task
 
@@ -292,10 +290,7 @@ def translate_arxiv_validate_command(args):
         # so --resume never trusts a truncated or compile-breaking file.
         manifest["validated_units"] = []
         manifest["safety_blocked_units"] = safety_blocked_units
-        atomic_write_text(
-            manifest_path,
-            json.dumps(manifest, ensure_ascii=False, indent=2),
-        )
+        atomic_write_json(manifest_path, manifest)
         if snapshot_errors or missing_units or invalid_units:
             if snapshot_errors:
                 logger.error(f"Invalid TeX source snapshot: {snapshot_errors[:10]}")
@@ -321,10 +316,7 @@ def translate_arxiv_validate_command(args):
             logger.error(f"TeX validation failed:\n{result.tail()}")
             return 1
         manifest["validated_units"] = completed_units
-        atomic_write_text(
-            manifest_path,
-            json.dumps(manifest, ensure_ascii=False, indent=2),
-        )
+        atomic_write_json(manifest_path, manifest)
         logger.success(f"TeX Subagent output compiled successfully: {result.pdf_path}")
         return 0
     except Exception as exc:

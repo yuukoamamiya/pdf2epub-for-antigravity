@@ -16,7 +16,7 @@ from typing import Any, Callable, Dict
 
 import pymupdf
 
-from .workflow_contracts import atomic_write_text, sha256_file
+from .workflow_contracts import atomic_write_json, atomic_write_text, sha256_file
 from .ocr_progress import OCR_PROGRESS_SCHEMA_VERSION
 
 
@@ -672,10 +672,9 @@ def extract_native_text_pages(
             )
             page_path = pages_dir / f"page_{page_number:03d}.md"
             sidecar_path = pages_dir / f"page_{page_number:03d}.ocr.json"
-            atomic_write_text(
+            atomic_write_json(
                 sidecar_path,
-                json.dumps(
-                    {
+                {
                         "schema_version": 1,
                         "page_number": page_number,
                         "backend": "native_text",
@@ -698,10 +697,7 @@ def extract_native_text_pages(
                             for block in layout_blocks
                             if block.get("asset")
                         ],
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                ),
+                },
             )
             atomic_write_text(page_path, markdown)
             pages_processed.append(page_number)
@@ -714,10 +710,9 @@ def extract_native_text_pages(
                 "artifact_file": sidecar_path.relative_to(output_dir).as_posix(),
             }
 
-    atomic_write_text(
+    atomic_write_json(
         pages_dir / "ocr_progress.json",
-        json.dumps(
-            {
+        {
                 "schema_version": OCR_PROGRESS_SCHEMA_VERSION,
                 "mode": "native_text",
                 "backend": "native_text",
@@ -729,12 +724,6 @@ def extract_native_text_pages(
                 "allowed_empty_pages": [],
                 "missing_pages": [],
                 "global_image_counter": sum(item["image_count"] for item in page_stats.values()),
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
+        },
     )
-    atomic_write_text(
-        pages_dir / "page_stats.json",
-        json.dumps(page_stats, ensure_ascii=False, indent=2),
-    )
+    atomic_write_json(pages_dir / "page_stats.json", page_stats)

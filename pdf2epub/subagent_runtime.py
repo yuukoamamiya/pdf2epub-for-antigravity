@@ -9,7 +9,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
-from .workflow_contracts import atomic_write_text, relative_posix_path
+from .workflow_contracts import atomic_write_json, atomic_write_text, relative_posix_path
 from .subagent_dispatch import (
     build_assignment_sha256,
     dispatch_lease_path,
@@ -340,7 +340,7 @@ def write_batch_handoffs(
         scoped_prompt_name = f"translate_subagent_prompt_{batch_id}.md"
         scoped_path = handoff_dir / scoped_name
         scoped_prompt_path = handoff_dir / scoped_prompt_name
-        atomic_write_text(scoped_path, json.dumps(scoped, ensure_ascii=False, indent=2))
+        atomic_write_json(scoped_path, scoped)
         toc_instruction = (
             "You are the sole TOC owner for this task. Complete the required "
             "TOC translation and write toc_translation_result.json. The local "
@@ -382,7 +382,7 @@ def write_batch_handoffs(
         )
     manifest["batch_handoffs"] = handoffs
     manifest["toc_owner_batch_id"] = owner_id
-    atomic_write_text(manifest_path, json.dumps(manifest, ensure_ascii=False, indent=2))
+    atomic_write_json(manifest_path, manifest)
     return handoffs
 
 
@@ -1158,13 +1158,11 @@ def write_worker_handoffs(
                         "selection": "worker_sparse_direct_file_contexts",
                         "files": file_entries,
                     }
-                atomic_write_text(
+                atomic_write_json(
                     worker_context_path,
-                    json.dumps(
-                        worker_context,
-                        ensure_ascii=False,
-                        separators=(",", ":"),
-                    ),
+                    worker_context,
+                    indent=None,
+                    separators=(",", ":"),
                 )
                 worker_context_relative = relative_posix_path(
                     worker_context_path, output_dir
@@ -1179,7 +1177,7 @@ def write_worker_handoffs(
         scoped_prompt_name = f"{task}_subagent_prompt_{worker_id}.md"
         scoped_path = handoff_dir / scoped_name
         scoped_prompt_path = handoff_dir / scoped_prompt_name
-        atomic_write_text(scoped_path, json.dumps(scoped, ensure_ascii=False, indent=2))
+        atomic_write_json(scoped_path, scoped)
         worker_context_instruction = ""
         if worker_context_files:
             worker_context_instruction = (
@@ -1425,10 +1423,7 @@ def write_worker_handoffs(
         if retired["status"] == "completed":
             scoped_value["completed_files"] = sorted(assigned_files)
             scoped_value["pending_files"] = []
-        atomic_write_text(
-            scoped_path,
-            json.dumps(scoped_value, ensure_ascii=False, indent=2),
-        )
+        atomic_write_json(scoped_path, scoped_value)
     previous_retired = manifest.get("retired_worker_handoffs", [])
     if not isinstance(previous_retired, list):
         previous_retired = []
@@ -1440,7 +1435,7 @@ def write_worker_handoffs(
     manifest["worker_queue"] = worker_queue
     manifest["worker_handoffs"] = handoffs
     manifest["retired_worker_handoffs"] = list(retired_by_assignment.values())
-    atomic_write_text(manifest_path, json.dumps(manifest, ensure_ascii=False, indent=2))
+    atomic_write_json(manifest_path, manifest)
     return handoffs
 
 __all__ = [

@@ -206,6 +206,8 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
   单元中的标准尾注章节标题提供窄范围页眉误报豁免。该模块把角色判断委托给
   `document_roles.py`，把页眉页脚候选判断委托给 `page_furniture_rules.py`，避免校验模块
   反向依赖具体修复工作流。
+- `commands/markdown_context.py`：只读加载 TOC、续文和章节分组上下文；准备、校验和
+  worker 装箱共享同一份 PDF 单元投影，`commands.markdown` 不再承载这组状态读取细节。
 - `document_roles.py`：集中维护特殊翻译角色、参考文献/前置内容识别、目标语言密度豁免和
   文件名角色回退规则。它只处理文本与文件名事实，不读取工作流状态，也不执行写入。
 - `entity_context.py`：集中维护 PDF/EPUB 共用的书内实体源文件选择、Subagent 交接和源哈希
@@ -213,7 +215,7 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
   直接依赖该格式无关服务，不再跨 command 导入私有 helper。
 - `page_furniture_rules.py`：提供无副作用的页眉、页脚、页码和出版信息候选识别；候选只是
   交给 Subagent 复核的提示，绝不在规则层删除正文。`page_furniture_repair.py` 只负责编排、
-  快照和校验，并保留旧的 `_candidate_for_line` 兼容别名。
+  快照和校验，并直接依赖规则模块的正式接口。
 - `pdf_unit_roles.py`：从当前 `tree_progress.json` 或兼容的 `toc_tree.json` 投影 PDF 单元角色。
   `commands.markdown` 和页眉页脚修复命令共享该只读投影，不再互相导入私有 helper。
 - Markdown→XHTML 默认遵循标准 Markdown 的软换行语义：单换行不会生成 `<br />`，只有
@@ -230,9 +232,8 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
 - TOC 标题绑定区分 `visible` 与 `container_only`：无可见源标签的纯图片/边界单元不要求
   worker 伪造 Markdown 标题，章节容器标题由 EPUB 构建器生成；可见子标题仍使用严格绑定。
 
-旧代码可能仍从 [`subagent_workflow.py`](../pdf2epub/subagent_workflow.py) 导入这些函数。
-该文件现在是兼容门面。新代码应直接导入具体模块；如果移动公共函数，必须保留门面转出
-并增加兼容性测试。
+Subagent 合同已按职责拆分到上述具体模块，不再提供聚合式兼容门面。调用方应直接导入
+所属模块；移动公共函数时必须同步更新调用方、文档和契约测试。
 
 ### 2.4 按 TOC 章节装箱的实现边界
 

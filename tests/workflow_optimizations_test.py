@@ -5,7 +5,7 @@ from pathlib import Path
 import pymupdf
 
 from pdf2epub.markdown_handoff import prepare_markdown_subagent
-from pdf2epub.commands.markdown import _load_pdf_continuation_toc_titles
+from pdf2epub.commands.markdown_context import _load_pdf_continuation_toc_titles
 from pdf2epub.commands.ocr import _load_current_probe
 from pdf2epub.pipeline_policy import PipelinePolicy
 from pdf2epub.pdf_text_probe import extract_native_text_pages, probe_pdf_text_layer

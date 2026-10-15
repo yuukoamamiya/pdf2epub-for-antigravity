@@ -8,11 +8,9 @@ import pytest
 from pdf2epub.commands import __all__ as command_modules
 from pdf2epub.commands import html as html_commands
 import pdf2epub.commands.registry as command_registry
-from pdf2epub.commands.markdown import (
-    _load_pdf_file_contexts,
-    _load_pdf_file_roles,
-)
+from pdf2epub.commands.markdown_context import _load_pdf_file_contexts
 from pdf2epub.commands.pdf import _resolve_pdf_markdown_source
+from pdf2epub.pdf_unit_roles import load_pdf_file_roles
 from pdf2epub.commands.sources import _resolve_pdf_polish_source
 from pdf2epub.commands.registry import register_command_parsers
 from pdf2epub.commands.runtime import load_book_context
@@ -243,7 +241,7 @@ def test_pdf_markdown_context_helpers_propagate_roles_and_hierarchy(tmp_path: Pa
         encoding="utf-8",
     )
 
-    assert _load_pdf_file_roles(tmp_path) == {
+    assert load_pdf_file_roles(tmp_path) == {
         "chapter_1.1.part1.md": "bibliography"
     }
     contexts = _load_pdf_file_contexts(tmp_path)

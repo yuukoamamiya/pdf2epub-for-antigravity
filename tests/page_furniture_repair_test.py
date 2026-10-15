@@ -5,10 +5,10 @@ from pdf2epub.page_furniture_repair import (
     HANDOFF_DIR_NAME,
     MANIFEST_NAME,
     PROMPT_NAME,
-    _candidate_for_line,
     prepare_page_furniture_repair,
     validate_page_furniture_repair,
 )
+from pdf2epub.page_furniture_rules import candidate_for_line
 
 
 def _config():
@@ -21,19 +21,19 @@ def _config():
 
 
 def test_standalone_superscript_page_labels_are_high_confidence_furniture():
-    assert _candidate_for_line("<sup>142</sup>") == {
+    assert candidate_for_line("<sup>142</sup>") == {
         "kind": "standalone_page_label",
         "text": "<sup>142</sup>",
         "label": "142",
         "confidence": "high",
     }
-    assert _candidate_for_line('<sup class="page-number"> XIV </sup>') == {
+    assert candidate_for_line('<sup class="page-number"> XIV </sup>') == {
         "kind": "standalone_page_label",
         "text": '<sup class="page-number"> XIV </sup>',
         "label": "XIV",
         "confidence": "high",
     }
-    assert _candidate_for_line("word<sup>3</sup>") is None
+    assert candidate_for_line("word<sup>3</sup>") is None
 
 
 def test_prepare_page_furniture_repair_snapshots_and_scopes_files(tmp_path: Path):

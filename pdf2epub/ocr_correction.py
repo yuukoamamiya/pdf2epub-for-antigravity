@@ -22,6 +22,7 @@ from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 
 from pdf2epub.workflow_contracts import (
     MARKDOWN_VALIDATION_SCHEMA_VERSION,
+    atomic_write_json,
     atomic_write_text,
     sha256_file,
 )
@@ -190,10 +191,7 @@ def render_review_images(
         "image_dir": image_dir.name,
         "images": expected_names,
     }
-    atomic_write_text(
-        Path(output_dir) / "ocr_review_images.json",
-        json.dumps(manifest, ensure_ascii=False, indent=2),
-    )
+    atomic_write_json(Path(output_dir) / "ocr_review_images.json", manifest)
     return manifest
 
 

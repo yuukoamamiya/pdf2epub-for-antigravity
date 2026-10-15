@@ -19,6 +19,7 @@ from .subagent_runtime import (
 )
 from .workflow_contracts import (
     MARKDOWN_VALIDATION_SCHEMA_VERSION,
+    atomic_write_json,
     atomic_write_text,
     is_reusable_checkpoint,
     relative_posix_path,
@@ -517,9 +518,7 @@ def prepare_markdown_subagent(
         manifest["prompt_context_files"] = normalized_prompt_context
         manifest["audit_only_context_files"] = normalized_audit_context
     manifest_path = output_dir / f"{task}_subagent_manifest.json"
-    atomic_write_text(
-        manifest_path, json.dumps(manifest, ensure_ascii=False, indent=2)
-    )
+    atomic_write_json(manifest_path, manifest)
 
     native_layout_rules = []
     polish_boundary_rules = []

@@ -1337,7 +1337,7 @@ def build_epub(config: BuildEpubConfig) -> Path:
 
     # Load translated TOC if building translated EPUB
     if config.translated:
-        from .subagent_workflow import validate_toc_translation_subagent
+        from .toc_translation_workflow import validate_toc_translation_subagent
 
         toc_validation = validate_toc_translation_subagent(config.output_dir)
         if not toc_validation["valid"]:

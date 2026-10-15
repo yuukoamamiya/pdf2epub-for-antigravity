@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from typing import Any, Mapping
 
 from loguru import logger
 
@@ -130,6 +131,56 @@ def prepare_entity_subagent_task(
     return output_dir / "translation_entities.json"
 
 
+def validate_entity_source_manifest(
+    manifest: Mapping[str, Any],
+    output_dir: Path,
+    source_dir: Path,
+) -> list[str]:
+    """Validate the source snapshot recorded for an entity hand-off.
+
+    Entity extraction and readiness checks must use exactly the same source
+    selection and hash contract.  Returning diagnostics keeps the command
+    handler responsible for presentation while centralizing the contract.
+    """
+    output_dir = Path(output_dir)
+    source_dir = Path(source_dir)
+    errors: list[str] = []
+    try:
+        expected_source_dir = source_dir.relative_to(output_dir).as_posix()
+    except ValueError:
+        return ["entity source directory is outside the book output directory"]
+    if Path(str(manifest.get("source_dir") or "")).as_posix() != expected_source_dir:
+        errors.append("entity source directory changed after extraction")
+    if manifest.get("source_stage") == "epub-compressed" and manifest.get(
+        "source_filter_version"
+    ) != ENTITY_SOURCE_FILTER_VERSION:
+        errors.append("entity source filter version is stale")
+
+    expected_hashes = manifest.get("source_sha256", {}) or {}
+    if not isinstance(expected_hashes, dict) or not expected_hashes:
+        errors.append("entity source snapshot is missing")
+        expected_hashes = {}
+    excluded_names = {
+        str(name)
+        for name in (manifest.get("excluded_files", []) or [])
+        if str(name).strip()
+    }
+    selected_files, selected_excluded = entity_source_selection(
+        source_dir, str(manifest.get("source_stage") or "")
+    )
+    actual_names = {path.name for path in selected_files + selected_excluded}
+    expected_names = set(expected_hashes) | excluded_names
+    if expected_names != actual_names:
+        errors.append("entity source file set changed after extraction")
+    for name, expected in expected_hashes.items():
+        source_path = source_dir / str(name)
+        if not source_path.is_file():
+            errors.append(f"entity source file is missing: {name}")
+        elif hashlib.sha256(source_path.read_bytes()).hexdigest() != expected:
+            errors.append(f"entity source file changed after extraction: {name}")
+    return errors
+
+
 def entity_context_is_current(
     output_dir: Path,
     source_dir: Path,
@@ -154,38 +205,7 @@ def entity_context_is_current(
         ):
             return False
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        if (
-            Path(manifest.get("source_dir", "")).as_posix()
-            != source_dir.relative_to(output_dir).as_posix()
-        ):
-            return False
-        if manifest.get("source_stage") == "epub-compressed" and manifest.get(
-            "source_filter_version"
-        ) != ENTITY_SOURCE_FILTER_VERSION:
-            return False
-        expected_hashes = manifest.get("source_sha256", {}) or {}
-        if not isinstance(expected_hashes, dict) or not expected_hashes:
-            return False
-        excluded_names = {
-            str(name)
-            for name in (manifest.get("excluded_files", []) or [])
-            if str(name).strip()
-        }
-        selected_files, selected_excluded = entity_source_selection(
-            source_dir, str(manifest.get("source_stage") or "")
-        )
-        actual_names = {path.name for path in selected_files + selected_excluded}
-        expected_names = set(expected_hashes) | excluded_names
-        if expected_names != actual_names:
-            return False
-        for name, expected in expected_hashes.items():
-            path = source_dir / name
-            if (
-                not path.is_file()
-                or hashlib.sha256(path.read_bytes()).hexdigest() != expected
-            ):
-                return False
-        return bool(manifest.get("source_sha256"))
+        return not validate_entity_source_manifest(manifest, output_dir, source_dir)
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
         return False
 
@@ -196,4 +216,5 @@ __all__ = [
     "entity_context_is_current",
     "entity_source_selection",
     "prepare_entity_subagent_task",
+    "validate_entity_source_manifest",
 ]

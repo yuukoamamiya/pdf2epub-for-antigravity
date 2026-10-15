@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from lxml import etree
 import pytest
 
-from pdf2epub.cli import _convert_txt_to_xhtml
+from pdf2epub.commands.novel import _convert_txt_to_xhtml
 
 
 class _ParserStub:

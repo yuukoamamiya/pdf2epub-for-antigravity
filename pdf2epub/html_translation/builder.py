@@ -37,7 +37,7 @@ from pdf2epub.markdown_validation import (
 )
 from pdf2epub.utils.common import sanitize_filename
 from pdf2epub.utils.html_safety import sanitize_html_document
-from pdf2epub.workflow_contracts import atomic_write_text
+from pdf2epub.workflow_contracts import atomic_write_json, atomic_write_text
 
 
 PART_FILE_RE = re.compile(r'^(.+)\.part(\d+)\.md$')
@@ -1674,10 +1674,7 @@ class HTMLEpubPipeline:
             "max_nonempty_lines": int(max_nonempty_lines),
             "compressed_files": self._compressed_cache_files(),
         }
-        atomic_write_text(
-            self._compressed_cache_path(),
-            json.dumps(cache, ensure_ascii=False, indent=2),
-        )
+        atomic_write_json(self._compressed_cache_path(), cache)
 
     def create_metadata_translation_source(
         self,
@@ -2486,13 +2483,9 @@ The output must have this shape:
                 "invalid": [item for item in report.get("invalid", []) if item.get("file") == str(name)],
                 "safety_blocked": str(name) in report.get("safety_blocked", []),
             }
-        atomic_write_text(
+        atomic_write_json(
             path,
-            json.dumps(
-                {"task": "translate-html", "scope": "file-checkpoints", "files": records},
-                ensure_ascii=False,
-                indent=2,
-            ),
+            {"task": "translate-html", "scope": "file-checkpoints", "files": records},
         )
 
     def validate_translated_metadata(self) -> Dict[str, Any]:

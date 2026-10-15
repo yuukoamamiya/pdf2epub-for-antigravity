@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator, Mapping, Optional
 
-from .workflow_contracts import atomic_write_text
+from .workflow_contracts import atomic_write_json
 
 
 DISPATCH_LEASE_SCHEMA_VERSION = 1
@@ -158,7 +158,7 @@ def _load_state(path: Path) -> dict[str, Any]:
 
 
 def _write_state(path: Path, state: Mapping[str, Any]) -> None:
-    atomic_write_text(path, json.dumps(dict(state), ensure_ascii=False, indent=2))
+    atomic_write_json(path, dict(state))
 
 
 def _is_active(lease: Mapping[str, Any], now: datetime) -> bool:

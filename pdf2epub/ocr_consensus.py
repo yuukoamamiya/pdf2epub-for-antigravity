@@ -17,7 +17,7 @@ from pathlib import Path
 from statistics import median
 from typing import Any, Dict, Mapping, Optional
 
-from pdf2epub.workflow_contracts import atomic_write_text, sha256_file
+from pdf2epub.workflow_contracts import atomic_write_json, atomic_write_text, sha256_file
 from pdf2epub.ocr.backends import supported_backends
 
 
@@ -558,10 +558,7 @@ def write_page_consensus(
         "layout_review": layout_comparison.get("status") == "review_required",
         "action": "visual_review" if comparison["status"] == "review_required" else "auto_accept",
     }
-    atomic_write_text(
-        record_dir / f"{Path(source_name).stem}.json",
-        json.dumps(record, ensure_ascii=False, indent=2),
-    )
+    atomic_write_json(record_dir / f"{Path(source_name).stem}.json", record)
     return record
 
 
@@ -647,9 +644,8 @@ def rebuild_ocr_consensus(
             record["primary_source_sha256"] = sha256_file(primary_path)
             record["primary_layout_sha256"] = sha256_file(primary_sidecar_path)
             record["secondary_layout_sha256"] = sha256_file(secondary_sidecar_path)
-            atomic_write_text(
-                consensus_dir(output_dir) / f"{Path(name).stem}.json",
-                json.dumps(record, ensure_ascii=False, indent=2),
+            atomic_write_json(
+                consensus_dir(output_dir) / f"{Path(name).stem}.json", record
             )
             records[name] = record
             page_texts[name] = {
@@ -685,14 +681,10 @@ def rebuild_ocr_consensus(
             record["action"] = "visual_review"
             record["comparison"]["status"] = "review_required"
             record["comparison"].setdefault("reasons", []).extend(reasons)
-            atomic_write_text(
-                consensus_dir(output_dir) / f"{Path(name).stem}.json",
-                json.dumps(record, ensure_ascii=False, indent=2),
+            atomic_write_json(
+                consensus_dir(output_dir) / f"{Path(name).stem}.json", record
             )
-    atomic_write_text(
-        consensus_manifest_path(output_dir),
-        json.dumps(manifest, ensure_ascii=False, indent=2),
-    )
+    atomic_write_json(consensus_manifest_path(output_dir), manifest)
     review_pages = sorted(
         name
         for name, record in records.items()

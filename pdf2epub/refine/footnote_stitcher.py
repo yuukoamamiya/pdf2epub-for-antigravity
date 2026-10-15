@@ -14,7 +14,7 @@ import re
 from pathlib import Path
 from typing import Any, Iterable
 
-from ..workflow_contracts import atomic_write_text
+from ..workflow_contracts import atomic_write_json
 
 
 _DEFINITION_RE = re.compile(r"^\s*\[\^([A-Za-z0-9_-]+)\]:")
@@ -129,7 +129,7 @@ def scan_boundary_footnotes(
         "bindings": bindings,
     }
     destination = Path(output_path) if output_path else markdown_dir / "footnote_boundary_bindings.json"
-    atomic_write_text(destination, json.dumps(report, ensure_ascii=False, indent=2))
+    atomic_write_json(destination, report)
     return report
 
 

@@ -7,7 +7,7 @@ import pytest
 from pdf2epub.html_translation import builder as html_builder
 from pdf2epub.html_translation.builder import HTMLEpubPipeline
 from pdf2epub.commands.novel import _novel_child_dir
-from pdf2epub.commands.entities import _entity_context_is_current
+from pdf2epub.entity_context import entity_context_is_current
 from pdf2epub.entity_extractor import create_entity_template
 from pdf2epub.ocr_consensus import validate_ocr_config
 from pdf2epub.tex_translation.arxiv import normalize_arxiv_id
@@ -280,11 +280,11 @@ def test_entity_checkpoint_rejects_a_new_source_unit(tmp_path: Path):
         encoding="utf-8",
     )
 
-    assert _entity_context_is_current(
+    assert entity_context_is_current(
         tmp_path, source_dir, "English", "Chinese"
     ) is True
     (source_dir / "new.md").write_text("New source", encoding="utf-8")
-    assert _entity_context_is_current(
+    assert entity_context_is_current(
         tmp_path, source_dir, "English", "Chinese"
     ) is False
 

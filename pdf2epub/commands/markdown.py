@@ -20,6 +20,13 @@ from pdf2epub.commands.sources import (
     _resolve_pdf_polish_source,
     _resolve_pdf_markdown_source,
 )
+from pdf2epub.commands.markdown_context import (
+    _load_pdf_chapter_groups,
+    _load_pdf_continuation_files,
+    _load_pdf_continuation_toc_titles,
+    _load_pdf_file_contexts,
+    _load_pdf_toc_titles,
+)
 from pdf2epub.pdf_unit_roles import load_pdf_file_roles
 from pdf2epub.pipeline_policy import PipelinePolicy
 from pdf2epub.ocr_correction import (
@@ -30,6 +37,7 @@ from pdf2epub.ocr_progress import assess_progress
 from pdf2epub.utils.common import book_output_dir, load_config
 from pdf2epub.workflow_contracts import (
     MARKDOWN_VALIDATION_SCHEMA_VERSION,
+    atomic_write_json,
     atomic_write_text,
     relative_posix_path,
 )
@@ -37,215 +45,6 @@ from pdf2epub.validation_receipts import (
     build_input_snapshot,
     validation_receipt_is_current,
 )
-
-
-# Private compatibility alias for callers that imported the old command helper.
-_load_pdf_file_roles = load_pdf_file_roles
-
-
-def _load_pdf_file_contexts(output_dir: Path) -> dict:
-    """Map each generated unit to its human-readable TOC hierarchy."""
-    toc_path = Path(output_dir) / "toc_tree.json"
-    if not toc_path.is_file():
-        return {}
-    try:
-        toc = json.loads(toc_path.read_text(encoding="utf-8"))
-        from pdf2epub.utils.unit_id import generate_unit_id
-    except (OSError, json.JSONDecodeError, ImportError):
-        return {}
-
-    contexts: Dict[str, str] = {}
-
-    def visit(nodes: Any, path: list[int], parents: list[str]) -> None:
-        if not isinstance(nodes, list):
-            return
-        for index, node in enumerate(nodes, 1):
-            if not isinstance(node, dict):
-                continue
-            title = str(node.get("title") or "").strip()
-            current = parents + ([title] if title else [])
-            unit_name = f"{generate_unit_id(path + [index])}.md"
-            if current:
-                contexts[unit_name] = " → ".join(current)
-            visit(node.get("children", []), path + [index], current)
-
-    visit(toc.get("chapters", []), [], [])
-
-    # Refinement may split a unit into chapter_N.partM.md files.  Reuse the
-    # same hierarchy for every part without making the Subagent infer it.
-    progress_path = Path(output_dir) / "ocr_markdown" / "tree_progress.json"
-    if progress_path.is_file():
-        try:
-            progress = json.loads(progress_path.read_text(encoding="utf-8"))
-            for unit in progress.get("units", []):
-                base = str(unit.get("file") or "")
-                context = contexts.get(base)
-                if context:
-                    for part in unit.get("part_files") or [base]:
-                        contexts[str(part)] = context
-        except (OSError, json.JSONDecodeError, AttributeError, TypeError):
-            pass
-    return contexts
-
-
-def _load_pdf_toc_titles(output_dir: Path) -> list[str]:
-    """Return source-language TOC labels used to protect polish headings."""
-    toc_path = Path(output_dir) / "toc_tree.json"
-    if not toc_path.is_file():
-        return []
-    try:
-        toc = json.loads(toc_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        return []
-    titles: list[str] = []
-
-    def visit(nodes: Any) -> None:
-        if not isinstance(nodes, list):
-            return
-        for node in nodes:
-            if not isinstance(node, dict):
-                continue
-            title = str(node.get("title") or "").strip()
-            if title and title not in titles:
-                titles.append(title)
-            visit(node.get("children", []))
-
-    visit(toc.get("chapters", []))
-    return titles
-
-
-def _load_pdf_continuation_files(output_dir: Path, source_dir: Path) -> dict:
-    """Read continuation metadata from refinement rather than filenames."""
-    progress_path = Path(output_dir) / "ocr_markdown" / "tree_progress.json"
-    if not progress_path.is_file():
-        return {}
-    try:
-        progress = json.loads(progress_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        return {}
-
-    available = {path.name for path in Path(source_dir).glob("*.md")}
-    metadata: dict[str, dict[str, Any]] = {}
-    for unit in progress.get("units", []) or []:
-        if not isinstance(unit, dict):
-            continue
-        names = [str(name) for name in (unit.get("part_files") or []) if name]
-        if len(names) < 2:
-            continue
-        part_count = len(names)
-        for index, name in enumerate(names, 1):
-            if index > 1 and name in available:
-                metadata[name] = {
-                    "is_continuation": True,
-                    "part_number": index,
-                    "part_count": part_count,
-                }
-    return metadata
-
-
-def _load_pdf_continuation_toc_titles(output_dir: Path) -> dict[str, list[str]]:
-    """Map split parts to the top-level ancestor labels they may repeat.
-
-    A split Markdown unit can begin with a repeated top-level part label that
-    was present at the top of the source page.  That label is not the unit's
-    own heading, so polish validation may accept its removal when it is the
-    unique opening line of a continuation part.  Keep this exception narrow:
-    only the actual top-level ancestor from the TOC is eligible, never every
-    protected title in the book.
-    """
-    progress_path = Path(output_dir) / "ocr_markdown" / "tree_progress.json"
-    toc_path = Path(output_dir) / "toc_tree.json"
-    try:
-        progress = json.loads(progress_path.read_text(encoding="utf-8"))
-        toc = json.loads(toc_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        return {}
-    if not isinstance(progress, Mapping) or not isinstance(toc, Mapping):
-        return {}
-
-    chapters = toc.get("chapters", [])
-
-    def top_level_title(index_path: Any) -> str:
-        if not isinstance(index_path, list) or not index_path:
-            return ""
-        nodes = chapters
-        first_title = ""
-        try:
-            for depth, raw_index in enumerate(index_path):
-                if not isinstance(nodes, list):
-                    return ""
-                index = int(raw_index) - 1
-                node = nodes[index]
-                if not isinstance(node, Mapping):
-                    return ""
-                if depth == 0:
-                    first_title = str(node.get("title") or "").strip()
-                nodes = node.get("children", [])
-        except (IndexError, TypeError, ValueError):
-            return ""
-        return first_title
-
-    result: dict[str, list[str]] = {}
-    for unit in progress.get("units", []) or []:
-        if not isinstance(unit, Mapping):
-            continue
-        names = [
-            str(name)
-            for name in (unit.get("part_files") or [])
-            if str(name).strip()
-        ]
-        if len(names) < 2:
-            continue
-        ancestor = top_level_title(unit.get("index_path"))
-        own_title = str(unit.get("title") or "").strip()
-        if not ancestor or ancestor.casefold() == own_title.casefold():
-            continue
-        for name in names[1:]:
-            result[name] = [ancestor]
-    return result
-
-
-def _load_pdf_chapter_groups(output_dir: Path, source_dir: Path) -> dict:
-    """Group PDF units by top-level chapter, including split part files."""
-    from pdf2epub.chapter_identity import ChapterIdentity
-
-    source_names = [path.name for path in sorted(Path(source_dir).glob("*.md"))]
-    groups = {}
-
-    def chapter_id(name: str) -> str:
-        identity = ChapterIdentity.parse(name)
-        if identity is None:
-            return f"unit:{name}"
-        if identity.number:
-            return f"{identity.prefix}_{identity.index_path[0]}"
-        return identity.prefix
-
-    # tree_progress is the authoritative source for split membership.  The
-    # filename fallback below keeps old/refined outputs usable when the
-    # progress file predates part_files.
-    progress_path = Path(output_dir) / "ocr_markdown" / "tree_progress.json"
-    if progress_path.is_file():
-        try:
-            progress = json.loads(progress_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            progress = {}
-        for unit in progress.get("units", []) or []:
-            if not isinstance(unit, dict):
-                continue
-            names = unit.get("part_files") or [unit.get("file")]
-            names = [str(name) for name in names if name]
-            if not names:
-                continue
-            group = groups.setdefault(chapter_id(names[0]), [])
-            for name in names:
-                if name in source_names and name not in group:
-                    group.append(name)
-
-    for name in source_names:
-        group = groups.setdefault(chapter_id(name), [])
-        if name not in group:
-            group.append(name)
-    return groups
 
 
 def polish_command(args):
@@ -441,7 +240,7 @@ def _prepare_pdf_markdown_task(args, task: str):
             allow_human_review_retry=bool(
                 getattr(args, "retry_after_human_review", False)
             ),
-            file_roles=_load_pdf_file_roles(output_dir) if task in {"translate", "polish"} else None,
+            file_roles=load_pdf_file_roles(output_dir) if task in {"translate", "polish"} else None,
             context_files=context_files or None,
             skipped_context_files=skipped_context_files,
             prompt_context_files=prompt_context_files,
@@ -620,7 +419,7 @@ def _validate_pdf_markdown_task(args, task: str):
             r"!\[[^\]]*\]\([^)]+\)",
             *( () if task == "polish" else (r"\[\^[^\]]+\]",) ),
         ),
-        file_roles=_load_pdf_file_roles(output_dir) if task in {"translate", "polish"} else None,
+        file_roles=load_pdf_file_roles(output_dir) if task in {"translate", "polish"} else None,
         tolerate_duplicate_headings=task == "polish",
         validate_footnote_normalization=task == "polish",
         fix_reference_headings=task == "translate" and bool(
@@ -822,10 +621,7 @@ def _persist_full_validation_report(
             config_path,
             translated=task == "translate",
         )
-    atomic_write_text(
-        Path(output_dir) / f"{task}_validation.json",
-        json.dumps(report, ensure_ascii=False, indent=2),
-    )
+    atomic_write_json(Path(output_dir) / f"{task}_validation.json", report)
     _sync_subagent_manifest_progress(output_dir, task, report)
 
 
@@ -863,10 +659,7 @@ def _sync_subagent_manifest_progress(
                 item["status"] = "completed"
             elif assigned & pending:
                 item["status"] = "pending"
-    atomic_write_text(
-        manifest_path,
-        json.dumps(manifest, ensure_ascii=False, indent=2),
-    )
+    atomic_write_json(manifest_path, manifest)
 
 
 def _persist_file_validation_checkpoint(output_dir: Path, report: dict, task: str) -> None:
@@ -924,18 +717,14 @@ def _persist_file_validation_checkpoint(output_dir: Path, report: dict, task: st
                 )
             ),
         }
-    atomic_write_text(
+    atomic_write_json(
         path,
-        json.dumps(
-            {
-                "schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION,
-                "task": task,
-                "scope": "file-checkpoints",
-                "files": records,
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
+        {
+            "schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION,
+            "task": task,
+            "scope": "file-checkpoints",
+            "files": records,
+        },
     )
 
 
@@ -978,9 +767,7 @@ def _run_readiness_check(
         record("config", False, "title is missing")
         report = {"schema_version": 1, "stage": stage, "ready": False, "checks": checks, "errors": errors}
         output_dir.mkdir(parents=True, exist_ok=True)
-        (output_dir / "readiness.json").write_text(
-            json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        atomic_write_json(output_dir / "readiness.json", report)
         return report
 
     raw_pages_dir = output_dir / "pages"
@@ -1303,9 +1090,7 @@ def _run_readiness_check(
         "errors": errors,
     }
     output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "readiness.json").write_text(
-        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    atomic_write_json(output_dir / "readiness.json", report)
     return report
 
 

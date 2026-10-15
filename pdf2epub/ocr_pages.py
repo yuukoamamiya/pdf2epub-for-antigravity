@@ -358,7 +358,7 @@ def save_page_artifacts(result: OCRPageResult, pages_dir: Path, page_number: int
         "blocks": result.blocks,
         "assets": result.assets,
     }
-    _atomic_write_text(sidecar_path, json.dumps(sidecar, ensure_ascii=False, indent=2))
+    _atomic_write_json(sidecar_path, sidecar)
     _atomic_write_text(markdown_path, result.markdown)
     return markdown_path
 
@@ -645,10 +645,7 @@ def run_secondary_ocr_consensus(
                 record["primary_layout_sha256"] = sha256_file(primary_sidecar)
             record["secondary_layout_sha256"] = sha256_file(secondary_sidecar)
             record_path = record_dir / f"{Path(name).stem}.json"
-            atomic_write_text(
-                record_path,
-                json.dumps(record, ensure_ascii=False, indent=2),
-            )
+            _atomic_write_json(record_path, record)
             return {"page": page_number, "record": record, "error": None}
         except Exception as exc:
             return {"page": page_number, "record": None, "error": str(exc)}
@@ -700,14 +697,8 @@ def run_secondary_ocr_consensus(
             record["action"] = "visual_review"
             record["comparison"]["status"] = "review_required"
             record["comparison"].setdefault("reasons", []).extend(reasons)
-            atomic_write_text(
-                record_dir / f"{Path(name).stem}.json",
-                json.dumps(record, ensure_ascii=False, indent=2),
-            )
-    atomic_write_text(
-        output_dir / "ocr_consensus.json",
-        json.dumps(manifest, ensure_ascii=False, indent=2),
-    )
+            _atomic_write_json(record_dir / f"{Path(name).stem}.json", record)
+    _atomic_write_json(output_dir / "ocr_consensus.json", manifest)
     review_pages = sorted(
         name
         for name, record in records.items()

@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Mapping, Optional
 
 
 from .subagent_runtime import estimate_tokens, resolve_subagent_model
-from .workflow_contracts import atomic_write_text, relative_posix_path
+from .workflow_contracts import atomic_write_json, atomic_write_text, relative_posix_path
 
 
 TOC_TRANSLATION_CONTRACT_VERSION = 2
@@ -80,30 +80,26 @@ def prepare_toc_translation_subagent(
 
     template = _translation_result_template(source)
     template_path = output_dir / "toc_translation_template.json"
-    atomic_write_text(template_path, json.dumps(template, ensure_ascii=False, indent=2))
+    atomic_write_json(template_path, template)
 
     source_contract = output_dir / "toc_translation_source.json"
-    source_contract.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "contract_version": TOC_TRANSLATION_CONTRACT_VERSION,
-                "workflow": "antigravity-subagent",
-                "source_language": source_language,
-                "target_language": target_language,
-                "model": resolve_subagent_model(config, "toc-translation"),
-                "source_file": "toc_tree.json",
-                "source_sha256": hashlib.sha256(source_path.read_bytes()).hexdigest(),
-                "output_file": "toc_tree_translated.json",
-                "result_file": "toc_translation_result.json",
-                "result_schema_version": TOC_TRANSLATION_RESULT_SCHEMA_VERSION,
-                "template_file": "toc_translation_template.json",
-                "toc": source,
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
+    atomic_write_json(
+        source_contract,
+        {
+            "schema_version": 1,
+            "contract_version": TOC_TRANSLATION_CONTRACT_VERSION,
+            "workflow": "antigravity-subagent",
+            "source_language": source_language,
+            "target_language": target_language,
+            "model": resolve_subagent_model(config, "toc-translation"),
+            "source_file": "toc_tree.json",
+            "source_sha256": hashlib.sha256(source_path.read_bytes()).hexdigest(),
+            "output_file": "toc_tree_translated.json",
+            "result_file": "toc_translation_result.json",
+            "result_schema_version": TOC_TRANSLATION_RESULT_SCHEMA_VERSION,
+            "template_file": "toc_translation_template.json",
+            "toc": source,
+        },
     )
     prompt_path = output_dir / "toc_translation_prompt.md"
     prompt_path.write_text(
@@ -180,9 +176,7 @@ def integrate_toc_translation_task(
         "source_sha256": hashlib.sha256(toc_source.read_bytes()).hexdigest(),
         "status": "pending",
     }
-    manifest_path.write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    atomic_write_json(manifest_path, manifest)
 
     prompt = prompt_path.read_text(encoding="utf-8")
     prompt += f"""
@@ -406,7 +400,7 @@ def validate_toc_translation_subagent(
 
         merge_titles(merged.get("chapters", []), "chapters")
         try:
-            atomic_write_text(target_path, json.dumps(merged, ensure_ascii=False, indent=2))
+            atomic_write_json(target_path, merged)
         except OSError as exc:
             return {
                 "valid": False,

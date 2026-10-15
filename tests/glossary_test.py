@@ -14,7 +14,7 @@ from pdf2epub.glossary import (
     validate_translation_context,
 )
 from pdf2epub.entity_extractor import validate_entities
-from pdf2epub.subagent_workflow import prepare_markdown_subagent
+from pdf2epub.markdown_handoff import prepare_markdown_subagent
 
 
 def _write_glossary(path: Path, entries=None, name="domain"):

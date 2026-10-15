@@ -297,10 +297,7 @@ def _prepare_html_command(args):
             # letting validation reject a non-canonical snapshot later.
             manifest["input_epub"] = str(canonical_input.resolve())
         manifest["input_epub_sha256"] = sha256_file(canonical_input)
-        atomic_write_text(
-            manifest_path,
-            json.dumps(manifest, ensure_ascii=False, indent=2),
-        )
+        atomic_write_json(manifest_path, manifest)
         from pdf2epub.subagent_runtime import write_worker_handoffs
 
         worker_handoffs = write_worker_handoffs(
