@@ -293,7 +293,8 @@ ocr-pages
 
 ```text
 uv run pdf2epub -c config.yaml refine-prepare
-# 工作区 Subagent 写 toc_tree.json
+# 原生 PDF 若生成 toc_fast_path_prompt.md：工作区 Subagent 先做选定页面视觉确认
+# 否则/回退时：工作区 Subagent 阅读 refine_subagent_prompt.md 并写 toc_tree.json
 uv run pdf2epub -c config.yaml illustration-prepare
 # 如果 manifest 为 pending_review：工作区 Subagent 写 illustration_decisions.json
 uv run pdf2epub -c config.yaml illustration-validate
@@ -308,6 +309,31 @@ uv run pdf2epub -c config.yaml footnote-apply
 `illustration-prepare` 必须先于 `refine-local`，因为已确认的整页插图会影响页面合并；
 `footnote-prepare` 必须后于 `refine-local`，因为脚注归并范围取自实际生成的
 `tree_progress.json` 单元，而不是抽象的顶层 TOC。
+
+### 原生 PDF 的 TOC 选择性视觉确认
+
+高置信度原生文字 PDF 且存在可用 PDF 书签时，`refine-prepare` 会先运行一个保守的快速路径预检。
+本地只做证据筛选，不生成最终 `toc_tree.json`：它检查书签标题是否能在对应物理页找到，并选择
+印刷目录页、每个书签起始页、起始页前一页以及封面/版权页，渲染为
+`toc_review_images/`。这些页面及其哈希写入 `toc_fast_path_manifest.json`，视觉任务写入
+`toc_fast_path_prompt.md`。
+
+快速路径 Subagent 必须先确认目录条目与书签的标题、层级、顺序和物理页码，再逐个确认章节是否
+从页面中部开始。中部起始必须在 `toc_fast_path_decisions.json` 中记录原始
+`page_XXX.md` 的 1-based `start_line`；父标题和首个子标题同页时两者都要记录。只有全部确认
+通过后才写入 `toc_tree.json`，且不得修改书签的标题、层级、页码或树结构。
+
+如果目录有漏项、书签指向不匹配、页面视觉证据不足或页内边界无法确定，Subagent 必须写入
+`status: fallback_required`，不要写快速路径的 `toc_tree.json`。此时运行：
+
+```text
+uv run pdf2epub -c config.yaml refine-prepare --full-review
+# 工作区 Subagent 阅读完整 refine_subagent_prompt.md 并写 toc_tree.json
+```
+
+`refine-local` 会重新核对快速路径的书签哈希、PDF 哈希、审阅页哈希、树结构和边界行号；
+任何过期、缺失或不一致都会阻断并要求完整审查。没有书签、没有可识别印刷目录页、不是原生
+文字 PDF 或预检标题不匹配时，快速路径自动失效，仍使用原有全页 TOC Subagent 流程。
 
 OCR 完成不是“有几个 `page_*.md` 文件”就算通过。`ocr_progress.json` 会记录源 PDF
 哈希、真实物理页数、已处理页、失败页、缺失页和空结果页；失败、缺页或未确认的空结果

@@ -218,6 +218,13 @@ ocr-pages --resume
 `translate-toc` 的工作区 Subagent 只写扁平的 `toc_translation_result.json`；本地
 `translate-toc-validate` 会从源 `toc_tree.json` 合并生成 `toc_tree_translated.json`。
 
+高置信度原生文字 PDF 的 `refine-prepare` 会额外检查 PDF 书签和前置目录页；若书签标题都能
+在对应正文页找到，会生成 `toc_fast_path_prompt.md`、`toc_fast_path_manifest.json` 和只包含
+目录页、书签起始页及其前页的审阅图。工作区 Subagent 只确认这些页面，并为页内起始章节写入
+`boundary_info.start_line`。任何目录条目、书签页码或页内边界不确定，都应在决定文件中要求回退；
+随后运行 `refine-prepare --full-review` 使用原有的全页 TOC 审查。`refine-local` 会校验快速路径的
+源哈希、页面集合、书签结构和边界行号，不会把本地书签草稿直接当成最终 TOC。
+
 若当前 TOC 明确标记第 1 页为封面，且该页是几乎无文字的全页图，
 `illustration-prepare` 可生成 `auto_resolved` 的封面决定；仍必须运行后续的
 `illustration-validate` 和 `illustration-apply`。

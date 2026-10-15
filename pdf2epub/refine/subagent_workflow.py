@@ -16,6 +16,7 @@ from pdf2epub.subagent_runtime import resolve_subagent_model
 from pdf2epub.workflow_contracts import atomic_write_json, atomic_write_text, relative_posix_path
 from .pagination import build_pagination_map
 from .pdf_outline import extract_pdf_outline
+from .toc_fast_path import prepare_toc_fast_path
 
 
 PAGE_RE = re.compile(r"^page_(\d+)\.md$")
@@ -37,7 +38,8 @@ def prepare_refine_subagent(
     max_tokens: int,
     config: Optional[Mapping[str, Any]] = None,
     pages_dir: Optional[Path] = None,
-) -> Dict[str, Path]:
+    enable_fast_path: bool = True,
+) -> Dict[str, Any]:
     """Write the prompt and manifest consumed by the Antigravity subagent."""
     pages_dir = Path(pages_dir) if pages_dir is not None else output_dir / "pages"
     available = page_numbers(pages_dir)
@@ -202,7 +204,28 @@ Rules:
         encoding="utf-8",
     )
 
-    return {"manifest": manifest_path, "prompt": prompt_path}
+    fast_path = prepare_toc_fast_path(
+        output_dir,
+        pdf_path=pdf_path,
+        pages_dir=pages_dir,
+        book_title=book_title,
+        model=model,
+        page_source_kind=page_source_kind,
+        outline_path=outline_path,
+        outline_draft=outline_draft,
+        config=config,
+        enabled=enable_fast_path,
+    )
+    manifest["toc_fast_path"] = fast_path["data"]
+    atomic_write_json(manifest_path, manifest)
+
+    return {
+        "manifest": manifest_path,
+        "prompt": prompt_path,
+        "fast_manifest": fast_path["manifest"],
+        "fast_prompt": fast_path["prompt"],
+        "fast_path": fast_path["data"],
+    }
 
 
 def validate_toc_tree_data(

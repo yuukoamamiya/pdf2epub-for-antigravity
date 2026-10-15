@@ -39,6 +39,7 @@ RECOMMENDED WORKFLOW / 推荐工作流 (uses toc_tree.json):
   # Antigravity Subagent writes ocr_corrected_pages/*.md
   pdf2epub ocr-correct-validate       # Otherwise skip both correction commands
   pdf2epub refine-prepare            # Prepare Subagent TOC analysis
+  # Native PDFs may use a selective visual TOC review; use --full-review on fallback.
   # Antigravity Subagent writes toc_tree.json
   pdf2epub illustration-prepare      # Candidate report; no Subagent if there are no candidates
   # Antigravity Subagent writes illustration_decisions.json when candidates exist
