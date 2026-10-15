@@ -323,6 +323,50 @@ def test_native_candidate_with_same_page_superscript_is_locally_accepted(
     assert report["review_required"] is False
 
 
+def test_native_font_ladder_excludes_body_size_numeric_false_positives(
+    tmp_path: Path,
+):
+    for page, key in ((1, "1"), (2, "2")):
+        _write_native_sidecar(
+            tmp_path,
+            page,
+            [
+                _native_block("Body text", 0, y0=90, font_size=9),
+                _native_block(f"{key} Native footnote text", 1, y0=680, font_size=8),
+            ],
+            body_font_size=9,
+        )
+        (tmp_path / "pages" / f"page_{page:03d}.md").write_text(
+            f"Body text <sup>{key}</sup>\n\n{key} Native footnote text\n",
+            encoding="utf-8",
+        )
+    _write_native_sidecar(
+        tmp_path,
+        3,
+        [
+            _native_block("Body text", 0, y0=90, font_size=9),
+            _native_block(
+                "2009 marks the beginning of the discussion.",
+                1,
+                y0=680,
+                font_size=9,
+            ),
+        ],
+        body_font_size=9,
+    )
+    (tmp_path / "pages" / "page_003.md").write_text(
+        "Body text\n\n2009 marks the beginning of the discussion.\n",
+        encoding="utf-8",
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    assert report["native_font_profile"]["enabled"] is True
+    assert report["native_font_profile"]["body_font_size"] == 9.0
+    assert report["native_font_profile"]["note_font_sizes"] == [8.0]
+    assert [item["page"] for item in report["pages"]] == [1, 2]
+
+
 def test_native_continuous_numeric_region_without_body_markers_stays_in_review(
     tmp_path: Path,
 ):
@@ -1394,6 +1438,48 @@ def test_typed_toc_unit_excludes_page_footnote_candidates(tmp_path: Path):
     assert report["pages"] == []
     assert report["structure_excluded_pages"][0]["roles"] == ["toc"]
     assert report["review_required"] is False
+
+
+def test_contents_title_recovers_legacy_toc_role_for_footnote_exclusion(
+    tmp_path: Path,
+):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [_block("1 Chapter title", 0, label="Text", y0=820)],
+    )
+    progress_dir = tmp_path / "ocr_markdown"
+    progress_dir.mkdir()
+    (progress_dir / "tree_progress.json").write_text(
+        json.dumps(
+            {
+                "units": [
+                    {
+                        "unit_id": "chapter_2",
+                        "index_path": [1],
+                        "file": "chapter_1.md",
+                        "page_range": [1, 1],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "toc_tree.json").write_text(
+        json.dumps(
+            {
+                "chapters": [
+                    {"title": "CONTENTS", "start_page": 1, "end_page": 1}
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    assert report["pages"] == []
+    assert report["structure_excluded_pages"][0]["roles"] == ["toc"]
 
 
 def test_typed_notes_boundary_only_excludes_the_notes_side_of_a_shared_page(

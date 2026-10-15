@@ -71,6 +71,7 @@ def build_footnote_report(
     bottom_detection: Mapping[str, int],
     suspected_missed_pages: set[int],
     structure_excluded_pages: list[dict[str, Any]],
+    native_font_profile: Optional[Mapping[str, Any]],
     config: Optional[Mapping[str, Any]],
 ) -> dict[str, Any]:
     """Attach final evidence, summarize counts, and atomically write JSON."""
@@ -113,6 +114,7 @@ def build_footnote_report(
         "context_blocks": context_blocks,
         "auto_accept": auto_accept,
         "native_max_font_ratio": native_max_font_ratio,
+        "native_font_profile": dict(native_font_profile or {}),
         "consensus_visual_review_pages": sorted({int(page) for page in consensus_review_pages}),
         "sidecar_sha256": dict(sidecar_hashes),
         "secondary_sidecar_sha256": dict(secondary_sidecar_hashes),

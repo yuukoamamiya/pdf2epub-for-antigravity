@@ -215,9 +215,13 @@ ocr-pages --resume
 `translate-toc` 的工作区 Subagent 只写扁平的 `toc_translation_result.json`；本地
 `translate-toc-validate` 会从源 `toc_tree.json` 合并生成 `toc_tree_translated.json`。
 
+若当前 TOC 明确标记第 1 页为封面，且该页是几乎无文字的全页图，
+`illustration-prepare` 可生成 `auto_resolved` 的封面决定；仍必须运行后续的
+`illustration-validate` 和 `illustration-apply`。
+
 方括号中的阶段只表示是否需要工作区 Subagent。`illustration-validate`、
 `illustration-apply`、`footnote-validate` 和 `footnote-apply` 是确定性检查点，即使没有候选或
-没有待复核项也必须运行；它们会生成空的、可供后续阶段消费的绑定/归一化产物。任何
+没有待复核项也必须运行；它们会生成空的或已绑定的、可供后续阶段消费的产物。任何
 `*_subagent_prompt.md` 或 manifest 出现后，都要先交给工作区 Subagent，再运行后续校验；
 不要跳过中间门禁。
 

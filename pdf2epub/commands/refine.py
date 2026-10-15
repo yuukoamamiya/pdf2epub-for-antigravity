@@ -172,6 +172,11 @@ def illustration_prepare_command(args):
             "请让工作区 Subagent 只复核 illustration_subagent_prompt.md 列出的候选页，"
             "并写入 illustration_decisions.json。"
         )
+    elif manifest.get("status") == "auto_resolved":
+        logger.info(
+            "封面候选满足确定性规则，已生成带哈希绑定的 illustration_decisions.json；"
+            "无需启动 Subagent。"
+        )
     else:
         logger.info("没有发现需要复核的整页插图候选，本次不需要 Subagent。")
     return 0

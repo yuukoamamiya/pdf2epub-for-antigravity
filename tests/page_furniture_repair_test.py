@@ -36,6 +36,25 @@ def test_standalone_superscript_page_labels_are_high_confidence_furniture():
     assert candidate_for_line("word<sup>3</sup>") is None
 
 
+def test_ornamented_running_headers_are_shared_furniture_candidates():
+    for line in (
+        "• • • The Political Economy of Communication • • •",
+        "* * * Index * * *",
+        "~ ~ ~ References ~ ~ ~",
+    ):
+        candidate = candidate_for_line(line)
+        assert candidate == {
+            "kind": "running_header",
+            "text": line,
+            "confidence": "high",
+            "ornamented": True,
+        }
+
+
+def test_ornamented_header_with_sentence_punctuation_is_not_auto_furniture():
+    assert candidate_for_line("• • • This is a sentence. • • •") is None
+
+
 def test_prepare_page_furniture_repair_snapshots_and_scopes_files(tmp_path: Path):
     translated = tmp_path / "translated"
     reference = tmp_path / "polished_markdown" / "validated"

@@ -45,12 +45,28 @@ _DATE_SUFFIX_RE = re.compile(
     r"\b(?:im\s+)?(?:Frühjahr|Fruehjahr|Sommer|Herbst|Winter|Januar|Februar|März|Maerz|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)\b",
     re.IGNORECASE,
 )
+_ORNAMENTED_HEADER_RE = re.compile(
+    r"^(?P<ornament>[•*~])\s*(?P=ornament)\s*(?P=ornament)\s+"
+    r"(?P<title>.+?)\s+(?P=ornament)\s*(?P=ornament)\s*(?P=ornament)$",
+    re.IGNORECASE,
+)
 _MAX_COMBINED_LINE_LENGTH = 96
 
 
 def candidate_for_line(line: str) -> Optional[dict[str, Any]]:
     """Return a conservative page-furniture candidate for one Markdown line."""
-    stripped = line.strip().strip("|•·—–-").strip()
+    raw_stripped = line.strip()
+    ornament_match = _ORNAMENTED_HEADER_RE.fullmatch(raw_stripped)
+    if ornament_match and not re.search(
+        r"[。！？；.!?;]", ornament_match.group("title")
+    ):
+        return {
+            "kind": "running_header",
+            "text": raw_stripped,
+            "confidence": "high",
+            "ornamented": True,
+        }
+    stripped = raw_stripped.strip("|•·—–-").strip()
     if not stripped or stripped.startswith(("[", "!")):
         return None
     if _PUBLISHER_METADATA_RE.fullmatch(stripped):

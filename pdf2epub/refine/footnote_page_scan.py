@@ -35,6 +35,7 @@ from .footnote_layout import (
     page_layout_profile,
     suspected_missed_block_indexes,
 )
+from .footnote_font_evidence import native_body_font_excluded_blocks
 from .footnote_options import FootnotePrepareOptions
 from .footnote_regions import build_page_footnote_regions
 from .footnote_structure import (
@@ -140,6 +141,7 @@ def _scan_primary_candidates(
     previous_page_footnote_evidence: bool,
     previous_page_context: Optional[Mapping[str, Any]],
     structure_excluded_blocks: set[int],
+    native_font_profile: Mapping[str, Any],
 ) -> tuple[
     list[dict[str, Any]],
     list[dict[str, Any]],
@@ -152,8 +154,18 @@ def _scan_primary_candidates(
     """Build primary candidates, continuation context, and audit misses."""
     candidates: list[dict[str, Any]] = []
     blocks = sidecar.get("blocks", [])
+    native_font_excluded = (
+        native_body_font_excluded_blocks(
+            sidecar,
+            native_font_profile,
+            bottom_ratio=options.bottom_ratio,
+        )
+        if native_text_source
+        else set()
+    )
+    excluded_block_indexes = set(structure_excluded_blocks) | native_font_excluded
     for block_index, block in enumerate(blocks):
-        if not isinstance(block, Mapping) or block_index in structure_excluded_blocks:
+        if not isinstance(block, Mapping) or block_index in excluded_block_indexes:
             continue
         if native_text_source:
             candidate = candidate_for_native_block(
@@ -199,7 +211,7 @@ def _scan_primary_candidates(
         native_max_font_ratio=options.native_max_font_ratio,
         layout_profile=layout_profile,
         previous_page_footnote_evidence=previous_page_footnote_evidence,
-        excluded_block_indexes=structure_excluded_blocks,
+        excluded_block_indexes=excluded_block_indexes,
     )
     continuation_evidence = annotate_cross_page_continuations(
         sidecar,
@@ -218,7 +230,7 @@ def _scan_primary_candidates(
         sidecar,
         candidate_indexes,
         bottom_ratio=options.bottom_ratio,
-        excluded_block_indexes=structure_excluded_blocks,
+        excluded_block_indexes=excluded_block_indexes,
     )
     audit_candidates = [
         candidate
@@ -227,7 +239,7 @@ def _scan_primary_candidates(
             candidate_indexes,
             bottom_ratio=options.bottom_ratio,
             bottom_intersection_ratio=options.bottom_intersection_ratio,
-            excluded_block_indexes=structure_excluded_blocks,
+            excluded_block_indexes=excluded_block_indexes,
         )
         if (
             candidate := _candidate_for_audit_block(
@@ -326,6 +338,7 @@ def scan_footnote_page(
     legacy_consensus: bool,
     structure_units: list[dict[str, Any]],
     state: FootnoteScanState,
+    native_font_profile: Optional[Mapping[str, Any]] = None,
 ) -> FootnotePageScanResult:
     """Scan a primary sidecar and update adjacent-page continuation state."""
     sidecar = load_layout_sidecar(sidecar_path)
@@ -414,6 +427,7 @@ def scan_footnote_page(
                 state.page_context if state.page_number == page_number - 1 else None
             ),
             structure_excluded_blocks=excluded_blocks,
+            native_font_profile=native_font_profile or {},
         )
     )
 

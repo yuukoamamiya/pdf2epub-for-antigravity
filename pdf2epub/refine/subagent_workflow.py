@@ -185,8 +185,9 @@ Rules:
   Copy the author and publisher exactly as printed; do not translate, normalize,
   or guess them. Use an empty string only when the information is genuinely not
   visible, and record the relevant OCR page numbers in `metadata_source_pages`.
-- Classify each node by its content when applicable: use `type: "notes"` for
-  endnotes/notes, `type: "bibliography"` for references, and `type: "index"`
+- Classify each node by its content when applicable: use `type: "toc"` for a
+  table of contents/contents section, `type: "notes"` for endnotes/notes,
+  `type: "bibliography"` for references, and `type: "index"`
   for an index. Use `type: "author_notes"` for an author biography or similar
   author/publisher note, `type: "catalog"` for a publisher catalog or
   advertisement section, and `type: "ad"` for a standalone advertisement.

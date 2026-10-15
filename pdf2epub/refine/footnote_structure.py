@@ -30,6 +30,28 @@ FOOTNOTE_STRUCTURE_EXEMPT_TYPES = frozenset(
     }
 )
 
+_TOC_TITLE_ALIASES = frozenset(
+    {
+        "toc",
+        "contents",
+        "table of contents",
+        "table contents",
+        "contents page",
+    }
+)
+
+
+def _role_from_title(title: Any) -> str:
+    """Recover only the unambiguous TOC role from legacy TOC output.
+
+    Older Subagent TOCs were instructed to type notes, bibliographies and
+    indexes, but not always the contents unit.  This narrow compatibility
+    fallback is limited to exact conventional labels; all other semantic
+    roles still require an explicit ``type`` from the TOC handoff.
+    """
+    value = " ".join(str(title or "").casefold().split())
+    return "toc" if value in _TOC_TITLE_ALIASES else ""
+
 
 def load_refined_units(output_dir: Path) -> list[dict[str, Any]]:
     """Load refinement units and recover missing TOC roles from index paths."""
@@ -55,6 +77,8 @@ def load_refined_units(output_dir: Path) -> list[dict[str, Any]]:
             if not isinstance(node, Mapping):
                 continue
             role = str(node.get("type") or inherited).strip().lower()
+            if not role:
+                role = _role_from_title(node.get("title"))
             current = path + (index,)
             toc_roles[current] = role
             visit(node.get("children"), current, role)

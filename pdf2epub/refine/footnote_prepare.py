@@ -23,6 +23,7 @@ from .footnote_options import (
     resolve_footnote_options,
 )
 from .footnote_page_scan import FootnoteScanState, scan_footnote_page
+from .footnote_font_evidence import native_font_profile
 from .footnote_report import (
     FOOTNOTE_PREPARE_SCHEMA_VERSION,
     build_footnote_report,
@@ -96,6 +97,11 @@ def prepare_footnote_candidates(
     structure_excluded_pages: list[dict[str, Any]] = []
     state = FootnoteScanState()
     refined_units = load_refined_units(output_dir)
+    native_profile = (
+        native_font_profile(sidecars, bottom_ratio=options.bottom_ratio)
+        if native_text_source
+        else {}
+    )
 
     for sidecar_path in sidecars:
         result = scan_footnote_page(
@@ -106,6 +112,7 @@ def prepare_footnote_candidates(
             evidence_mode=evidence_mode,
             legacy_consensus=legacy_consensus,
             structure_units=refined_units,
+            native_font_profile=native_profile,
             state=state,
         )
         sidecar_name, sidecar_hash = result.sidecar_hash
@@ -150,6 +157,7 @@ def prepare_footnote_candidates(
         bottom_detection=bottom_detection_totals,
         suspected_missed_pages=suspected_missed_pages,
         structure_excluded_pages=structure_excluded_pages,
+        native_font_profile=native_profile,
         config=config,
     )
 

@@ -96,8 +96,14 @@ def _validate_special_role_markers(
     target_markers = _special_role_numeric_markers(target_text)
 
     if role == "index":
-        source_entries = _index_entry_groups(source_text)
-        target_entries = _index_entry_groups(target_text)
+        source_entries = _index_entry_groups(
+            source_text,
+            allow_page_furniture_deletion=allow_page_furniture_deletion,
+        )
+        target_entries = _index_entry_groups(
+            target_text,
+            allow_page_furniture_deletion=allow_page_furniture_deletion,
+        )
         if len(source_entries) != len(target_entries):
             return [
                 "index entry count mismatch: "
@@ -153,7 +159,11 @@ def _validate_special_role_markers(
     ]
 
 
-def _index_entry_groups(text: str) -> list[str]:
+def _index_entry_groups(
+    text: str,
+    *,
+    allow_page_furniture_deletion: bool = False,
+) -> list[str]:
     """Group an index into stable entries while allowing indented wrapping.
 
     The translation contract requires a new top-level entry to start at the
@@ -167,6 +177,15 @@ def _index_entry_groups(text: str) -> list[str]:
     for line in str(text or "").splitlines():
         if not line.strip() or re.match(r"^\s*#{1,6}\s+", line):
             continue
+        if allow_page_furniture_deletion:
+            candidate = candidate_for_line(line)
+            if (
+                candidate
+                and candidate.get("confidence") == "high"
+                and candidate.get("kind")
+                in {"running_header", "running_title_plus_page_label"}
+            ):
+                continue
         stripped = line.strip()
         if current and line[:1].isspace():
             current.append(stripped)
@@ -526,6 +545,8 @@ def polish_content_integrity_check(
         for line_number, line in enumerate(clean_lines(text), 1):
             candidate = candidate_for_line(line)
             if candidate and candidate.get("confidence") == "high":
+                if candidate.get("ornamented"):
+                    continue
                 if candidate.get("kind") == "running_header" and line_number <= 5:
                     pass
                 else:

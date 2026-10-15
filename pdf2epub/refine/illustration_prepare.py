@@ -49,6 +49,9 @@ _VISUAL_LABELS = frozenset(
 _DECISION_ROLES = frozenset(
     {"full_page_insert", "ordinary_illustration", "blank_scan", "body", "review_required"}
 )
+_COVER_TITLE_ALIASES = frozenset(
+    {"cover", "front cover", "cover page", "book cover"}
+)
 
 
 def _sha256_bytes(value: bytes) -> str:
@@ -70,6 +73,97 @@ def _load_sidecar(path: Path) -> dict[str, Any]:
 def _page_number(path: Path) -> Optional[int]:
     match = _PAGE_RE.fullmatch(path.name)
     return int(match.group("number")) if match else None
+
+
+def _cover_pages(output_dir: Path) -> set[int]:
+    """Return pages explicitly identified as a cover by the current TOC."""
+    try:
+        toc = json.loads(
+            (Path(output_dir) / "toc_tree.json").read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return set()
+
+    pages: set[int] = set()
+
+    def visit(nodes: Any) -> None:
+        if not isinstance(nodes, list):
+            return
+        for node in nodes:
+            if not isinstance(node, Mapping):
+                continue
+            role = str(node.get("type") or "").strip().casefold()
+            title = " ".join(str(node.get("title") or "").casefold().split())
+            if role == "cover" or title in _COVER_TITLE_ALIASES:
+                try:
+                    start_page = int(node.get("start_page"))
+                    end_page = int(node.get("end_page"))
+                except (TypeError, ValueError):
+                    start_page = end_page = 0
+                if start_page > 0 and end_page >= start_page:
+                    pages.update(range(start_page, end_page + 1))
+            visit(node.get("children"))
+
+    visit(toc.get("chapters") if isinstance(toc, Mapping) else None)
+    return pages
+
+
+def _cover_visual_signals_are_deterministic(
+    signals: Optional[Mapping[str, Any]],
+    *,
+    max_text_chars: int,
+) -> bool:
+    if not isinstance(signals, Mapping):
+        return False
+    try:
+        visible_text_chars = int(signals.get("visible_text_chars", 0))
+        image_references = int(signals.get("image_references", 0))
+        largest_visual_area = float(signals.get("largest_visual_area", 0.0))
+    except (TypeError, ValueError):
+        return False
+    labels = signals.get("labels")
+    return bool(
+        visible_text_chars <= min(int(max_text_chars), 64)
+        and image_references >= 1
+        and largest_visual_area >= 0.95
+        and isinstance(labels, Mapping)
+        and any(
+            str(label).casefold() in _VISUAL_LABELS and int(count) > 0
+            for label, count in labels.items()
+        )
+    )
+
+
+def _is_deterministic_cover_candidate(
+    candidate: Mapping[str, Any],
+    *,
+    cover_pages: set[int],
+    evidence_mode: str,
+    max_text_chars: int,
+) -> bool:
+    """Allow only the narrow, unambiguous front-cover fast path."""
+    try:
+        page = int(candidate.get("page"))
+    except (TypeError, ValueError):
+        return False
+    if page != 1 or page not in cover_pages:
+        return False
+    if not _cover_visual_signals_are_deterministic(
+        candidate.get("primary_signals"),
+        max_text_chars=max_text_chars,
+    ):
+        return False
+    if evidence_mode == "two_ocr":
+        return bool(
+            candidate.get("primary_candidate")
+            and candidate.get("secondary_candidate")
+            and _cover_visual_signals_are_deterministic(
+                candidate.get("secondary_signals"),
+                max_text_chars=max_text_chars,
+            )
+            and candidate.get("consensus_status") == "agree"
+        )
+    return True
 
 
 def _candidate_for_page(
@@ -295,8 +389,38 @@ def prepare_illustration_subagent(
                     candidate["review_reason"] = "ocr_candidate_presence_differs"
             candidates.append(candidate)
 
+    cover_pages = _cover_pages(output_dir)
+    deterministic_cover_candidates = [
+        item
+        for item in candidates
+        if _is_deterministic_cover_candidate(
+            item,
+            cover_pages=cover_pages,
+            evidence_mode=evidence_mode,
+            max_text_chars=max_text_chars,
+        )
+    ]
+    # Do not partially auto-resolve a mixed candidate set.  A cover fast path
+    # is useful only when every candidate is covered by the same deterministic
+    # evidence; otherwise the Subagent must review the complete set together.
+    auto_resolved = (
+        deterministic_cover_candidates
+        if candidates and len(deterministic_cover_candidates) == len(candidates)
+        else []
+    )
+    auto_resolved_pages = sorted(int(item["page"]) for item in auto_resolved)
+    review_candidates = [item for item in candidates if item not in auto_resolved]
     candidate_pages = [int(item["page"]) for item in candidates]
-    review_images = _render_candidate_images(output_dir, candidate_pages, dpi=int(review_dpi)) if candidates else {}
+    review_candidate_pages = [int(item["page"]) for item in review_candidates]
+    review_images = (
+        _render_candidate_images(
+            output_dir,
+            review_candidate_pages,
+            dpi=int(review_dpi),
+        )
+        if review_candidates
+        else {}
+    )
     for candidate in candidates:
         page = int(candidate["page"])
         candidate["previous_page"] = page - 1 if page - 1 in pages_by_number else None
@@ -310,6 +434,19 @@ def prepare_illustration_subagent(
         candidate["previous_excerpt"] = _excerpt(pages_by_number.get(page - 1, Path("")))
         candidate["next_excerpt"] = _excerpt(pages_by_number.get(page + 1, Path("")))
 
+    if auto_resolved:
+        for item in auto_resolved:
+            item["auto_resolution"] = {
+                "rule": "toc_cover_plus_full_page_visual",
+                "confidence": "high",
+            }
+    report_status = (
+        "auto_resolved"
+        if auto_resolved and not review_candidates
+        else "pending_review"
+        if review_candidates
+        else "no_review_required"
+    )
     report: dict[str, Any] = {
         "schema_version": ILLUSTRATION_PREPARE_SCHEMA_VERSION,
         "task": "illustration-prepare",
@@ -324,8 +461,17 @@ def prepare_illustration_subagent(
             "max_text_chars": max_text_chars,
         },
         "candidate_pages": candidates,
-        "review_pages": sorted({page for page in candidate_pages for page in (page - 1, page, page + 1) if page > 0}),
-        "status": "pending_review" if candidates else "no_review_required",
+        "auto_resolved_pages": auto_resolved_pages,
+        "review_candidate_pages": review_candidate_pages,
+        "review_pages": sorted(
+            {
+                page
+                for page in review_candidate_pages
+                for page in (page - 1, page, page + 1)
+                if page > 0
+            }
+        ),
+        "status": report_status,
     }
     report_path = _write_report(output_dir, report)
     report_hash = report["report_sha256"]
@@ -342,7 +488,9 @@ def prepare_illustration_subagent(
         "candidate_report_sha256": report_hash,
         "candidate_pages": candidate_pages,
         "review_pages": report["review_pages"],
-        "review_image_dir": "illustration_review_images" if candidates else None,
+        "auto_resolved_pages": auto_resolved_pages,
+        "review_candidate_pages": review_candidate_pages,
+        "review_image_dir": "illustration_review_images" if review_candidates else None,
         "output_file": "illustration_decisions.json",
         "status": report["status"],
     }
@@ -350,7 +498,7 @@ def prepare_illustration_subagent(
     atomic_write_json(manifest_path, manifest)
 
     prompt_path = output_dir / "illustration_subagent_prompt.md"
-    if candidates:
+    if review_candidates:
         candidate_lines = "\n".join(
             f"- page {item['page']}: "
             f"{', '.join(image['path'] for image in item.get('review_images', []) if image.get('path')) or '(review image missing)'}; "
@@ -367,7 +515,29 @@ following page are the complete visual context needed for this task:
 {candidate_lines}
 """
     else:
-        review_instruction = "\nNo candidate page was found. Do not create a decisions file with invented pages.\n"
+        review_instruction = (
+            "\nNo candidate page requires a workspace review. Do not create or "
+            "change decisions for pages outside the manifest.\n"
+        )
+    if auto_resolved:
+        decisions_path = output_dir / "illustration_decisions.json"
+        atomic_write_json(
+            decisions_path,
+            {
+                "schema_version": ILLUSTRATION_PREPARE_SCHEMA_VERSION,
+                "candidate_report_sha256": report_hash,
+                "decisions": [
+                    {
+                        "page": int(item["page"]),
+                        "role": "full_page_insert",
+                        "confidence": "high",
+                        "reason": "TOC marks page 1 as COVER and the page is a full-page visual with negligible visible text.",
+                        "decision_source": "deterministic_cover_rule",
+                    }
+                    for item in auto_resolved
+                ],
+            },
+        )
     atomic_write_text(
         prompt_path,
         f"""# Full-page illustration review

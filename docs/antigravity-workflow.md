@@ -328,9 +328,13 @@ OCR 完成不是“有几个 `page_*.md` 文件”就算通过。`ocr_progress.j
 页面不会改变物理顺序。候选报告存在但未完成 apply 时，`refine-local` 会阻断，避免漏掉这道结构判断。
 
 如果 `candidate_pages` 为空，manifest 状态为 `no_review_required`，不需要启动 Subagent
-或创建 `illustration_decisions.json`。仍应运行 `illustration-validate` 和
+或创建 `illustration_decisions.json`。对于当前 TOC 明确标记为 `COVER`（或等价的
+`cover` 类型）、且第 1 页同时满足全页视觉块、几乎没有可见文字和图像证据一致的窄场景，
+manifest 状态为 `auto_resolved`，本地会生成带候选报告哈希的
+`illustration_decisions.json`，无需启动 Subagent；这条规则不会自动处理普通插图或混合候选页。
+两种无需 Subagent 的路径仍应运行 `illustration-validate` 和
 `illustration-apply`；两者会验证当前候选报告并生成空的 `illustration_bindings.json`，
-使后续 `refine-local` 能明确消费“已确认没有整页插图”的检查点。零候选路径不能用来绕过
+或生成已验证的封面绑定，使后续 `refine-local` 能明确消费检查点。零候选路径不能用来绕过
 存在候选时的哈希和决定校验。
 
 插图候选报告会记录 `ocr_evidence_mode`。`single_ocr` 只依据主 OCR；`two_ocr` 必须有当前
@@ -577,7 +581,9 @@ refinement unit 和正文定位；任何一层失败都必须修正决定后重�
    `review_required`。
 3. 原生提取器依据 PDF 文本 block 内的行顺序，在新的页底数字开头处拆分 layout block，
    因而同一页的多条脚注各自拥有稳定的 `page`/`block` 地址。`body_font_size`、block
-   `font_size`、`font_names` 和上标 flag/位置只作为复核证据。
+   `font_size`、`font_names` 和上标 flag/位置只作为复核证据；只有当前书稿反复显示稳定的
+   正文/脚注字号阶梯时，本地才启用 `native_font_profile`，把与主导正文同大或更大的页底数字
+   block 排除为正文。没有形成阶梯时，字号不能单独排除候选。
 4. Subagent 只读取 manifest 列出的 `footnote_contexts/*.json`、区域 manifest 和 sidecar/图片窗口，
    逐个异常区域写入 `footnote_decisions.json`。本地已标记 `confidence: high` 的候选不需要重复决定；
    它必须区分 `footnote_start`、

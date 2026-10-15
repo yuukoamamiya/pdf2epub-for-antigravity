@@ -131,6 +131,64 @@ def test_illustration_decision_is_hash_bound_and_applied(tmp_path: Path):
         load_current_illustration_pages(tmp_path)
 
 
+def test_explicit_cover_full_page_is_auto_resolved(tmp_path: Path):
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    (pages / "page_001.md").write_text(
+        "![Image](../images/cover.png)", encoding="utf-8"
+    )
+    (pages / "page_002.md").write_text("The first page.", encoding="utf-8")
+    (pages / "page_001.ocr.json").write_text(
+        json.dumps(
+            {
+                "page_number": 1,
+                "page_box": [0, 0, 1000, 1000],
+                "blocks": [
+                    {
+                        "order": 0,
+                        "label": "Image",
+                        "bbox": [0, 0, 1000, 1000],
+                        "html": "<img>",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "toc_tree.json").write_text(
+        json.dumps(
+            {
+                "chapters": [
+                    {"title": "COVER", "start_page": 1, "end_page": 1}
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    _write_one_page_pdf(tmp_path / "input.pdf")
+
+    paths = prepare_illustration_subagent(tmp_path, book_title="Book", config={})
+    report = json.loads(paths["report"].read_text(encoding="utf-8"))
+
+    assert report["status"] == "auto_resolved"
+    assert report["auto_resolved_pages"] == [1]
+    decisions = json.loads(
+        (tmp_path / "illustration_decisions.json").read_text(encoding="utf-8")
+    )
+    assert decisions["decisions"][0]["decision_source"] == (
+        "deterministic_cover_rule"
+    )
+    assert validate_illustration_decisions(tmp_path)["valid"] is True
+    assert apply_illustration_bindings(tmp_path)["bindings"] == [
+        {
+            "page": 1,
+            "kind": "full_page_insert",
+            "page_file": "pages/page_001.md",
+            "reason": "TOC marks page 1 as COVER and the page is a full-page visual with negligible visible text.",
+        }
+    ]
+
+
 def test_no_candidate_does_not_require_subagent(tmp_path: Path):
     pages = tmp_path / "pages"
     pages.mkdir()

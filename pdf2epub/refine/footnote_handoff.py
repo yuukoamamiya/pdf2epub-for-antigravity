@@ -125,6 +125,7 @@ def prepare_footnote_subagent(
         "auto_accept": report["auto_accept"],
         "bottom_intersection_ratio": report["bottom_intersection_ratio"],
         "native_max_font_ratio": report["native_max_font_ratio"],
+        "native_font_profile": report.get("native_font_profile", {}),
         "cross_page_window_count": len(report["cross_page_windows"]),
         "consensus_visual_review_pages": report["consensus_visual_review_pages"],
         "unit_context_files": unit_context_files,

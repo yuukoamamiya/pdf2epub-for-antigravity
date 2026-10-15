@@ -473,6 +473,35 @@ def test_markdown_validation_requires_one_to_one_index_entries(
     assert "index entry count mismatch" in report["invalid"][0]["reason"]
 
 
+def test_markdown_validation_ignores_ornamented_index_running_header(
+    tmp_path: Path,
+):
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "index.md").write_text(
+        "* * * Index * * *\n\nalpha 12\n\nbeta 18-19\n",
+        encoding="utf-8",
+    )
+    (target_dir / "index.md").write_text(
+        "alpha 12\n\nbeta 18-19\n",
+        encoding="utf-8",
+    )
+
+    report = validate_markdown_subagent(
+        tmp_path,
+        "polish",
+        source_dir,
+        target_dir,
+        file_roles={"index.md": "index"},
+    )
+
+    assert report["all_passed"] is True
+
+
 def test_markdown_validation_preserves_exact_footnote_marker_syntax(
     tmp_path: Path,
 ):
@@ -1083,6 +1112,15 @@ def test_polish_content_integrity_rejects_substantial_source_loss():
 def test_polish_content_integrity_allows_reflow_and_footnote_normalization():
     source = "First paragraph with enough words.\ncontinued here.<sup>1</sup>\n\n[^1]: Note."
     target = "First paragraph with enough words. continued here.[^1]\n\n[^1]: Note."
+
+    report = polish_content_integrity_check(source, target)
+
+    assert report["valid"] is True
+
+
+def test_polish_content_integrity_allows_ornamented_header_removal():
+    source = "• • • Index • • •\n\nalpha 12\n"
+    target = "alpha 12\n"
 
     report = polish_content_integrity_check(source, target)
 
