@@ -12,6 +12,7 @@ import tiktoken
 
 from ..utils.unit_id import generate_unit_id
 from ..utils.fingerprints import pages_fingerprint
+from ..workflow_contracts import atomic_write_json
 from .toc_tree import TOCNode, dict_list_to_toc_tree
 from .page_merger import PageMerger
 from .subagent_workflow import page_numbers, validate_toc_tree_data
@@ -281,18 +282,14 @@ class RefinedBreakdown:
             ocr_markdown_dir,
             illustration_pages=illustration_pages,
         )
-        tree_progress_file.write_text(
-            json.dumps(
-                {
-                    "schema": REFINE_CHECKPOINT_SCHEMA,
-                    "fingerprint": source_fingerprint or {},
-                    "units": unit_metadata,
-                    "book_metadata": book_metadata,
-                },
-                indent=2,
-                ensure_ascii=False,
-            ),
-            encoding="utf-8",
+        atomic_write_json(
+            tree_progress_file,
+            {
+                "schema": REFINE_CHECKPOINT_SCHEMA,
+                "fingerprint": source_fingerprint or {},
+                "units": unit_metadata,
+                "book_metadata": book_metadata,
+            },
         )
         logger.success(f"Refined breakdown complete: {len(work_units)} units")
         return unit_metadata

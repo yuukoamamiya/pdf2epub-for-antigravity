@@ -6,6 +6,7 @@ from pathlib import Path
 from loguru import logger
 
 from pdf2epub.commands.runtime import load_book_context
+from pdf2epub.workflow_contracts import atomic_write_text
 
 
 def glossary_candidates_command(args):
@@ -45,7 +46,8 @@ def glossary_candidates_command(args):
     output_dir = context.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
     report_path = output_dir / "glossary_candidates.json"
-    report_path.write_text(
+    atomic_write_text(
+        report_path,
         json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
     eligible = [item for item in candidates if item.get("eligible")]

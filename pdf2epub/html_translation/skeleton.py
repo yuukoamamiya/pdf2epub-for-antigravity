@@ -13,6 +13,8 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+from pdf2epub.workflow_contracts import atomic_write_json
+
 from .validation import _PROTECTED_TOKEN_RE
 
 
@@ -101,9 +103,7 @@ def write_masked_unit(source_path: Path, masked_path: Path, contract_path: Path)
     masked_path.parent.mkdir(parents=True, exist_ok=True)
     contract_path.parent.mkdir(parents=True, exist_ok=True)
     masked_path.write_text(masked, encoding="utf-8")
-    contract_path.write_text(
-        json.dumps(contract, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    atomic_write_json(contract_path, contract)
 
 
 def restore_unit(

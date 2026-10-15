@@ -20,7 +20,7 @@ from pathlib import Path
 from statistics import median
 from typing import Any, Iterable, Mapping, Optional
 
-from ..workflow_contracts import atomic_write_text, sha256_file
+from ..workflow_contracts import atomic_write_json, atomic_write_text, sha256_file
 from .layout_evidence import (
     load_layout_sidecar as _load_sidecar,
     normalized_bbox as _normalise_bbox,
@@ -2214,7 +2214,7 @@ def _write_visual_audit_manifest(
         "decision_file": "footnote_decisions.json",
     }
     path = Path(output_dir) / "footnote_visual_audit_manifest.json"
-    atomic_write_text(path, json.dumps(manifest, ensure_ascii=False, indent=2))
+    atomic_write_json(path, manifest)
     return path, manifest
 
 
@@ -2779,7 +2779,7 @@ def _write_unit_contexts(
         }
         for name in names:
             context_path = _unit_context_path(output_dir, name)
-            atomic_write_text(context_path, json.dumps(context, ensure_ascii=False, indent=2))
+            atomic_write_json(context_path, context)
             unit_context_files[name] = context_path.relative_to(output_dir).as_posix()
     return unit_context_files
 
@@ -3323,7 +3323,7 @@ def prepare_footnote_candidates(
         "review_required": bool(review_pages),
     }
     report_path = output_dir / "footnote_candidates.json"
-    atomic_write_text(report_path, json.dumps(report, ensure_ascii=False, indent=2))
+    atomic_write_json(report_path, report)
     return report
 
 
@@ -3386,7 +3386,7 @@ def prepare_footnote_subagent(
         "status": "pending_review" if report["review_required"] else "no_subagent_review_required",
     }
     manifest_path = output_dir / "footnote_subagent_manifest.json"
-    atomic_write_text(manifest_path, json.dumps(manifest, ensure_ascii=False, indent=2))
+    atomic_write_json(manifest_path, manifest)
 
     review_pages = report["review_pages"]
     page_reports = {
@@ -3511,17 +3511,11 @@ def validate_footnote_decisions(
         report = json.loads(report_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         result = {"valid": False, "status": "retry_required", "errors": [f"invalid candidate report: {exc}"]}
-        atomic_write_text(
-            output_dir / "footnote_decision_validation.json",
-            json.dumps(result, ensure_ascii=False, indent=2),
-        )
+        atomic_write_json(output_dir / "footnote_decision_validation.json", result)
         return result
     if not isinstance(report, dict):
         result = {"valid": False, "status": "retry_required", "errors": ["candidate report must be an object"]}
-        atomic_write_text(
-            output_dir / "footnote_decision_validation.json",
-            json.dumps(result, ensure_ascii=False, indent=2),
-        )
+        atomic_write_json(output_dir / "footnote_decision_validation.json", result)
         return result
 
     source_kind = str(report.get("source_kind") or "ocr")
@@ -3588,10 +3582,7 @@ def validate_footnote_decisions(
             "errors": errors,
             "decisions": [],
         }
-        atomic_write_text(
-            output_dir / "footnote_decision_validation.json",
-            json.dumps(result, ensure_ascii=False, indent=2),
-        )
+        atomic_write_json(output_dir / "footnote_decision_validation.json", result)
         return result
 
     required = {
@@ -3635,13 +3626,10 @@ def validate_footnote_decisions(
             "errors": [],
             "decisions": [],
         }
-        atomic_write_text(
-            output_dir / "footnote_decision_validation.json",
-            json.dumps(result, ensure_ascii=False, indent=2),
-        )
+        atomic_write_json(output_dir / "footnote_decision_validation.json", result)
         report["decisions"] = []
         report["decisions_status"] = "validated"
-        atomic_write_text(report_path, json.dumps(report, ensure_ascii=False, indent=2))
+        atomic_write_json(report_path, report)
         _write_unit_contexts(output_dir, report)
         return result
 
@@ -3649,10 +3637,7 @@ def validate_footnote_decisions(
         decisions_data = json.loads(decision_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         result = {"valid": False, "status": "retry_required", "errors": [f"invalid decision file: {exc}"]}
-        atomic_write_text(
-            output_dir / "footnote_decision_validation.json",
-            json.dumps(result, ensure_ascii=False, indent=2),
-        )
+        atomic_write_json(output_dir / "footnote_decision_validation.json", result)
         return result
     decisions = decisions_data.get("decisions") if isinstance(decisions_data, dict) else None
     human_review_required: list[str] = []
@@ -3919,14 +3904,11 @@ def validate_footnote_decisions(
         "region_audits": sorted(region_audit_ids),
         "decisions": normalized,
     }
-    atomic_write_text(
-        output_dir / "footnote_decision_validation.json",
-        json.dumps(result, ensure_ascii=False, indent=2),
-    )
+    atomic_write_json(output_dir / "footnote_decision_validation.json", result)
     if result["valid"]:
         report["decisions"] = normalized
         report["decisions_status"] = "validated"
-        atomic_write_text(report_path, json.dumps(report, ensure_ascii=False, indent=2))
+        atomic_write_json(report_path, report)
         _write_unit_contexts(output_dir, report)
     return result
 

@@ -48,7 +48,6 @@ def translate_novel_command(args):
     from pdf2epub.subagent_runtime import resolve_subagent_model
     from pdf2epub.workflow_contracts import (
         atomic_write_json,
-        atomic_write_text,
         is_reusable_checkpoint,
         load_json_object,
         sha256_file,
@@ -193,7 +192,7 @@ def translate_novel_validate_command(args):
     """Validate novel text and metadata written by the Subagent."""
     from pdf2epub.subagent_safety import detect_refusal
     from pdf2epub.markdown_validation import target_language_ratio_check
-    from pdf2epub.workflow_contracts import sha256_file
+    from pdf2epub.workflow_contracts import atomic_write_json, sha256_file
     from pdf2epub.html_translation.epub_parser import EPUBParser
     from pdf2epub.html_translation.novel_extractor import NovelExtractor
     from pdf2epub.html_translation.builder import HTMLEpubPipeline
@@ -346,74 +345,39 @@ def translate_novel_validate_command(args):
             and not source_snapshot_errors
             and metadata_report["valid"]
         )
-        if not all_passed:
-            atomic_write_text(
-                output_dir / "translate-novel_validation.json",
-                json.dumps(
-                    {
-                        "task": "translate-novel",
-                        "valid_files": valid_files,
-                        "source_sha256": source_sha256,
-                        "target_sha256": {
-                            name: sha256_file(target_dir / name)
-                            for name in expected_files
-                            if (target_dir / name).is_file()
-                        },
-                        "source_snapshot": {
-                            "valid": not source_snapshot_errors,
-                            "expected_files": sorted(expected_files),
-                            "actual_files": sorted(actual_source_files),
-                            "actual_target_files": sorted(actual_target_files),
-                            "errors": source_snapshot_errors,
-                        },
-                        "target_language_audits": target_language_audits,
-                        "target_language_blocked": sorted(
-                            name
-                            for name, audit in target_language_audits.items()
-                            if audit.get("blocked")
-                        ),
-                        "missing": missing,
-                        "invalid": refusal_files + invalid_files,
-                        "safety_blocked": [item["file"] for item in refusal_files],
-                        "metadata": metadata_report,
-                        "all_passed": False,
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                ),
-            )
-            return 1
-        atomic_write_text(
-            output_dir / "translate-novel_validation.json",
-            json.dumps(
-                    {
-                        "task": "translate-novel",
-                        "valid_files": valid_files,
-                        "source_sha256": source_sha256,
-                        "target_sha256": {
-                            name: sha256_file(target_dir / name)
-                            for name in expected_files
-                            if (target_dir / name).is_file()
-                        },
-                        "source_snapshot": {
-                            "valid": True,
-                            "expected_files": sorted(expected_files),
-                            "actual_files": sorted(actual_source_files),
-                            "actual_target_files": sorted(actual_target_files),
-                            "errors": [],
-                        },
-                        "target_language_audits": target_language_audits,
-                        "target_language_blocked": [],
-                        "missing": [],
-                        "invalid": [],
-                        "safety_blocked": [],
-                        "metadata": metadata_report,
-                        "all_passed": all_passed,
-                },
-                ensure_ascii=False,
-                indent=2,
+        validation_report = {
+            "task": "translate-novel",
+            "valid_files": valid_files,
+            "source_sha256": source_sha256,
+            "target_sha256": {
+                name: sha256_file(target_dir / name)
+                for name in expected_files
+                if (target_dir / name).is_file()
+            },
+            "source_snapshot": {
+                "valid": not source_snapshot_errors,
+                "expected_files": sorted(expected_files),
+                "actual_files": sorted(actual_source_files),
+                "actual_target_files": sorted(actual_target_files),
+                "errors": source_snapshot_errors,
+            },
+            "target_language_audits": target_language_audits,
+            "target_language_blocked": sorted(
+                name
+                for name, audit in target_language_audits.items()
+                if audit.get("blocked")
             ),
+            "missing": missing,
+            "invalid": refusal_files + invalid_files,
+            "safety_blocked": [item["file"] for item in refusal_files],
+            "metadata": metadata_report,
+            "all_passed": all_passed,
+        }
+        atomic_write_json(
+            output_dir / "translate-novel_validation.json", validation_report
         )
+        if not all_passed:
+            return 1
         logger.success(f"Novel Subagent output validated: {len(manifest.get('files', []))} files")
         return 0
     except Exception as exc:

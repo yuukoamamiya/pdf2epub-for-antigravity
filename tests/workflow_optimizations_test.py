@@ -7,7 +7,7 @@ import pymupdf
 from pdf2epub.markdown_handoff import prepare_markdown_subagent
 from pdf2epub.commands.markdown_context import _load_pdf_continuation_toc_titles
 from pdf2epub.commands.ocr import _load_current_probe
-from pdf2epub.pipeline_policy import PipelinePolicy
+from pdf2epub.pipeline_policy import PipelinePolicy, SUPPORTED_PIPELINE_NAMES
 from pdf2epub.pdf_text_probe import extract_native_text_pages, probe_pdf_text_layer
 from pdf2epub.subagent_runtime import (
     MAX_BATCH_FILES,
@@ -195,6 +195,17 @@ def test_pipeline_policy_centralizes_conversion_and_translation_requirements():
         }
     )
     assert consensus_translation.requires_ocr_correction is True
+
+
+def test_pipeline_policy_exposes_one_supported_pipeline_registry():
+    assert SUPPORTED_PIPELINE_NAMES == {
+        "translation",
+        "epub_conversion",
+        "ocr_to_epub",
+    }
+    assert PipelinePolicy.from_config({"pipeline": "translation"}).kind == "translation"
+    assert PipelinePolicy.from_config({"pipeline": "epub_conversion"}).kind == "epub_conversion"
+    assert PipelinePolicy.from_config({"pipeline": "ocr_to_epub"}).kind == "epub_conversion"
 
 
 def test_native_text_extraction_writes_page_contract(tmp_path: Path):

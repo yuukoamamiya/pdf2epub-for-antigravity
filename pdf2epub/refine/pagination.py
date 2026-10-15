@@ -7,10 +7,11 @@ front matter and Arabic body pagination without silently changing ranges.
 
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from ..workflow_contracts import atomic_write_json
 
 
 _ARABIC = re.compile(r"^(?:page\s*)?(\d{1,4})$", re.IGNORECASE)
@@ -89,5 +90,5 @@ def build_pagination_map(pages_dir: Path, output_path: Path) -> Dict[str, Any]:
         "notes": "Printed labels are OCR heuristics for Subagent review; do not use them as physical page ranges.",
     }
     output_path = Path(output_path)
-    output_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    atomic_write_json(output_path, result)
     return result

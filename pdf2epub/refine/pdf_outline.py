@@ -8,10 +8,11 @@ and correct before producing ``toc_tree.json``.
 
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 from typing import Any, Dict, List
+
+from ..workflow_contracts import atomic_write_json
 
 
 def _empty_draft(pdf_path: Path, total_pages: int, warning: str) -> Dict[str, Any]:
@@ -151,7 +152,7 @@ def extract_pdf_outline(
 
     if not pdf_path.is_file():
         draft = _empty_draft(pdf_path, total_pages, "PDF input was not found")
-        output_path.write_text(json.dumps(draft, ensure_ascii=False, indent=2), encoding="utf-8")
+        atomic_write_json(output_path, draft)
         return draft
 
     try:
@@ -162,7 +163,7 @@ def extract_pdf_outline(
             pdf_page_count = int(document.page_count)
     except Exception as exc:
         draft = _empty_draft(pdf_path, total_pages, f"Could not read PDF outline: {exc}")
-        output_path.write_text(json.dumps(draft, ensure_ascii=False, indent=2), encoding="utf-8")
+        atomic_write_json(output_path, draft)
         return draft
 
     warnings: List[str] = []
@@ -235,7 +236,7 @@ def extract_pdf_outline(
             "operations": normalization,
         },
     }
-    output_path.write_text(json.dumps(draft, ensure_ascii=False, indent=2), encoding="utf-8")
+    atomic_write_json(output_path, draft)
     return draft
 
 

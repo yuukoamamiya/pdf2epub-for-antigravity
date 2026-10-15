@@ -13,6 +13,7 @@ from pdf2epub.ocr_consensus import secondary_ocr_enabled
 
 
 CONVERSION_PIPELINE_NAMES = frozenset({"epub_conversion", "ocr_to_epub"})
+SUPPORTED_PIPELINE_NAMES = frozenset({"translation", *CONVERSION_PIPELINE_NAMES})
 
 
 @dataclass(frozen=True)
@@ -90,6 +91,7 @@ def pipeline_policy(config: Optional[Mapping[str, Any]]) -> PipelinePolicy:
 
 __all__ = [
     "CONVERSION_PIPELINE_NAMES",
+    "SUPPORTED_PIPELINE_NAMES",
     "PipelinePolicy",
     "pipeline_policy",
 ]

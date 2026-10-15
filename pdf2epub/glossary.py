@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Mapping, Optional
 import yaml
 
 from pdf2epub.utils.common import sanitize_filename
+from pdf2epub.workflow_contracts import atomic_write_text
 
 
 SUPPORTED_SUFFIXES = {".yaml", ".yml", ".json"}
@@ -763,13 +764,14 @@ def build_unit_glossary_contexts(
             "selection": "normalized_exact_source_form_match_with_reference_aliases",
         }
         context_path = context_dir / f"{source.stem}.json"
-        context_path.write_text(
+        atomic_write_text(
+            context_path,
             json.dumps(context, ensure_ascii=False, separators=(",", ":")) + "\n",
-            encoding="utf-8",
         )
         report_dir = Path(output_dir) / "translation_glossaries" / "keyword_hits"
         report_dir.mkdir(parents=True, exist_ok=True)
-        (report_dir / f"{source.stem}.json").write_text(
+        atomic_write_text(
+            report_dir / f"{source.stem}.json",
             json.dumps(
                 {
                     "schema_version": 1,
@@ -782,7 +784,6 @@ def build_unit_glossary_contexts(
                 indent=2,
             )
             + "\n",
-            encoding="utf-8",
         )
         result[source.name] = context_path
     return result
@@ -859,9 +860,9 @@ def build_metadata_glossary_context(
     }
     context_path = Path(output_dir) / "translation_glossaries" / "metadata_context.json"
     context_path.parent.mkdir(parents=True, exist_ok=True)
-    context_path.write_text(
+    atomic_write_text(
+        context_path,
         json.dumps(context, ensure_ascii=False, separators=(",", ":")) + "\n",
-        encoding="utf-8",
     )
     return context_path
 
@@ -914,7 +915,8 @@ def load_selected_glossaries(
         translation = config.get("translation", {}) or {}
         selection_path = Path(output_dir) / "glossary_selection.json"
         selection_path.parent.mkdir(parents=True, exist_ok=True)
-        selection_path.write_text(
+        atomic_write_text(
+            selection_path,
             json.dumps(
                 {
                     "schema_version": 1,
@@ -929,7 +931,6 @@ def load_selected_glossaries(
                 indent=2,
             )
             + "\n",
-            encoding="utf-8",
         )
         return GlossaryBundle({}, {}, 0, [], [])
 
@@ -988,9 +989,9 @@ def load_selected_glossaries(
             if snapshot_name in used_snapshot_names:
                 raise GlossaryError(f"duplicate glossary id: {glossary_id}")
             used_snapshot_names.add(snapshot_name)
-            snapshot_path.write_text(
+            atomic_write_text(
+                snapshot_path,
                 json.dumps(glossary, ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8",
             )
 
             prefix = "domain" if kind == "authoritative" else "reference"
@@ -1063,7 +1064,8 @@ def load_selected_glossaries(
             ]
         )
     selection_path = Path(output_dir) / "glossary_selection.json"
-    selection_path.write_text(
+    atomic_write_text(
+        selection_path,
         json.dumps(
             {
                 "schema_version": 1,
@@ -1074,7 +1076,6 @@ def load_selected_glossaries(
             indent=2,
         )
         + "\n",
-        encoding="utf-8",
     )
     return GlossaryBundle(
         context_files=context_files,

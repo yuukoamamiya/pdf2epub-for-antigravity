@@ -6,11 +6,12 @@ module deliberately contains no model client and no network execution path.
 
 from __future__ import annotations
 
-import json
 import re
 import unicodedata
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
+
+from pdf2epub.workflow_contracts import atomic_write_json
 
 
 ENTITY_COLLECTIONS = (
@@ -196,7 +197,5 @@ def save_entities(entities: Dict[str, Any], output_dir: Path) -> Path:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / "translation_entities.json"
-    output_path.write_text(
-        json.dumps(entities, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    atomic_write_json(output_path, entities)
     return output_path

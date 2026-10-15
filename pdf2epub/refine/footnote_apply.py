@@ -18,7 +18,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
-from ..workflow_contracts import atomic_write_text, sha256_file
+from ..workflow_contracts import atomic_write_json, atomic_write_text, sha256_file
 from .pdf_evidence import pdf_evidence_mode, require_current_consensus
 from .footnote_prepare import (
     FOOTNOTE_MODES,
@@ -634,10 +634,7 @@ def _write_failure(output_dir: Path, errors: list[str]) -> dict[str, Any]:
         "valid": False,
         "errors": errors,
     }
-    atomic_write_text(
-        Path(output_dir) / "footnote_normalization.json",
-        json.dumps(result, ensure_ascii=False, indent=2),
-    )
+    atomic_write_json(Path(output_dir) / "footnote_normalization.json", result)
     return result
 
 
@@ -782,10 +779,7 @@ def apply_footnote_normalization(
             "skipped_reason": f"footnotes.mode={report_footnote_mode}",
             "resolved_blocks": [],
         }
-        atomic_write_text(
-            output_dir / "footnote_normalization.json",
-            json.dumps(result, ensure_ascii=False, indent=2),
-        )
+        atomic_write_json(output_dir / "footnote_normalization.json", result)
         return result
 
     try:
@@ -1182,10 +1176,7 @@ def apply_footnote_normalization(
         ],
         "resolved_blocks": resolved,
     }
-    atomic_write_text(
-        output_dir / "footnote_normalization.json",
-        json.dumps(result, ensure_ascii=False, indent=2),
-    )
+    atomic_write_json(output_dir / "footnote_normalization.json", result)
     return result
 
 

@@ -18,7 +18,7 @@ import yaml
 from pdf2epub.ocr.backends import supported_backends
 from pdf2epub.ocr_consensus import secondary_ocr_enabled, secondary_backend_name
 from pdf2epub.ocr_progress import assess_progress
-from pdf2epub.pipeline_policy import PipelinePolicy
+from pdf2epub.pipeline_policy import PipelinePolicy, SUPPORTED_PIPELINE_NAMES
 from pdf2epub.utils.common import (
     book_output_dir,
     resolve_book_input_path,
@@ -506,7 +506,7 @@ def build_doctor(config_path: str | Path = "config.yaml") -> dict[str, Any]:
     configured_kind = str(config.get("pipeline") or config.get("mode") or "translation").strip().lower()
     check(
         "pipeline",
-        configured_kind in {"translation", "epub_conversion", "ocr_to_epub"},
+        configured_kind in SUPPORTED_PIPELINE_NAMES,
         f"pipeline: {configured_kind or 'translation'}",
     )
     output_dir = book_output_dir(title) if title else Path("output") / "untitled"

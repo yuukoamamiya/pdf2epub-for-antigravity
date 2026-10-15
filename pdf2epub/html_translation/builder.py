@@ -1592,9 +1592,10 @@ class HTMLEpubPipeline:
                         f"Split dense unit {file_stem} into {len(part_names)} source parts "
                         f"({batching['max_nonempty_lines']} non-empty lines/part)"
                     )
-                mapping_path.write_text(
-                    json.dumps(_make_json_safe(mapping), ensure_ascii=False),
-                    encoding='utf-8'
+                atomic_write_json(
+                    mapping_path,
+                    _make_json_safe(mapping),
+                    indent=None,
                 )
 
                 extracted += 1
@@ -1794,10 +1795,7 @@ class HTMLEpubPipeline:
             }
 
         source_path = self.output_dir / "metadata_translation_source.json"
-        source_path.write_text(
-            json.dumps(source, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        atomic_write_json(source_path, source)
 
         prompt_path = self.output_dir / "metadata_translation_prompt.md"
         prompt_path.write_text(
@@ -2124,7 +2122,7 @@ The output must have this shape:
         }
 
         report_path = self.output_dir / "translation_report.json"
-        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        atomic_write_json(report_path, report)
         logger.info(f"Wrote translation report: {report_path}")
         return report_path
 
