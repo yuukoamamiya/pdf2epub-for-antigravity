@@ -6,9 +6,18 @@ import difflib
 import math
 import re
 from collections import Counter
-from pathlib import Path
 from typing import Any, Dict, Optional
 
+from .document_roles import (
+    DENSITY_EXEMPT_ROLES,
+    TRANSLATION_SPECIAL_ROLES,
+    _is_reference_label,
+    infer_translation_file_role,
+    is_bibliography_text,
+    is_density_exempt_role,
+    is_front_matter_text,
+)
+from .page_furniture_rules import candidate_for_line
 from .utils.ocr_artifacts import clean_ocr_page_artifacts
 
 
@@ -31,54 +40,6 @@ _LANGUAGE_AUDIT_MIN_TARGET_LETTERS = 80
 _LANGUAGE_AUDIT_MIN_CJK_RATIO = 0.60
 
 
-_REFERENCE_SOURCE_LABELS = {
-    "references",
-    "reference",
-    "bibliography",
-    "literatur",
-    "literature",
-    "bibliographie",
-    "works cited",
-    "sources",
-    "notes",
-    "endnotes",
-}
-_REFERENCE_TARGET_LABELS = {
-    "参考文献",
-    "参考书目",
-    "文献",
-    "书目",
-    "注释",
-    "脚注",
-    "尾注",
-    "参考资料",
-}
-
-TRANSLATION_SPECIAL_ROLES = frozenset(
-    {
-        "bibliography",
-        "index",
-        "metadata",
-        "frontmatter",
-        "copyright",
-        "cover",
-        "notes",
-        "author_notes",
-        "catalog",
-        "ad",
-    }
-)
-DENSITY_EXEMPT_ROLES = frozenset(
-    {
-        "bibliography",
-        "index",
-        "notes",
-        "author_notes",
-        "catalog",
-        "ad",
-    }
-)
-
 _SPECIAL_ROLE_NUMERIC_MARKER_RE = re.compile(
     r"(?<![A-Za-z0-9])"
     r"\d+(?:[./:]\d+)*(?:[-‐‑‒–—]\d+(?:[./:]\d+)*)*"
@@ -92,48 +53,6 @@ _NOTES_STRUCTURAL_HEADING_RE = re.compile(
     r")\s*$",
     re.IGNORECASE,
 )
-
-
-def infer_translation_file_role(
-    filename: str,
-    text: Optional[str] = None,
-) -> Optional[str]:
-    """Infer a conservative special-unit role from a generated filename.
-
-    EPUB spine filenames are the only stable role signal available before a
-    TOC or worker manifest has been written.  Match complete normalized name
-    tokens rather than arbitrary substrings (``ad`` must not match ``chapter``).
-    Explicit roles in a manifest still take precedence over this fallback.
-    """
-    stem = Path(str(filename)).stem.lower()
-    stem = re.sub(r"\.part\d+$", "", stem)
-    normalized = re.sub(r"[^a-z0-9]+", "_", stem).strip("_")
-    tokens = set(normalized.split("_"))
-    if "author" in tokens and "notes" in tokens:
-        return "author_notes"
-    role_tokens = (
-        ("bibliography", "bibliography"),
-        ("references", "bibliography"),
-        ("reference", "bibliography"),
-        ("index", "index"),
-        ("notes", "notes"),
-        ("endnotes", "notes"),
-        ("copyright", "copyright"),
-        ("cover", "cover"),
-        ("catalog", "catalog"),
-        ("ad", "ad"),
-    )
-    for token, role in role_tokens:
-        if token in tokens:
-            return role
-    if text and is_bibliography_text(text):
-        return "bibliography"
-    return None
-
-
-def is_density_exempt_role(role: Optional[str]) -> bool:
-    """Return whether a unit is exempt from prose-language density checks."""
-    return str(role or "").strip().lower() in DENSITY_EXEMPT_ROLES
 
 
 def _special_role_numeric_markers(text: str) -> list[str]:
@@ -200,11 +119,10 @@ def _validate_special_role_markers(
 
     if allow_page_furniture_deletion:
         import difflib
-        from .page_furniture_repair import _candidate_for_line
 
         furniture_numbers = []
         for line in source_text.splitlines():
-            if _candidate_for_line(line):
+            if candidate_for_line(line):
                 furniture_numbers.extend(_special_role_numeric_markers(line))
         matcher = difflib.SequenceMatcher(None, source_markers, target_markers)
         mismatch = False
@@ -298,65 +216,6 @@ def _validate_footnote_markers(source_text: str, target_text: str) -> list[str]:
                     "[^N] syntax to an alternate notation"
                 ]
     return []
-
-
-def is_front_matter_text(text: str) -> bool:
-    """Recognize common copyright/CIP front-matter labels for stricter audits."""
-    head = "\n".join(str(text or "").splitlines()[:24])
-    return bool(
-        re.search(
-            r"\b(?:cataloging[- ]in[- ]publication|library of congress|"
-            r"copyright|all rights reserved|isbn|cip data)\b",
-            head,
-            flags=re.IGNORECASE,
-        )
-    )
-
-
-def _plain_markdown_label(line: str) -> str:
-    """Normalize a standalone label without treating it as a heading."""
-    value = line.strip()
-    value = re.sub(r"^#{1,6}\s+", "", value)
-    value = re.sub(r"^\*{1,3}|\*{1,3}$|^_{1,3}|_{1,3}$", "", value)
-    value = value.strip().strip("：:—–-·• ")
-    return re.sub(r"\s+", " ", value).casefold()
-
-
-def _is_reference_label(line: str, target: bool = False) -> bool:
-    """Return whether a line is an exact, standalone references label."""
-    label = _plain_markdown_label(line)
-    if target and label in _REFERENCE_TARGET_LABELS:
-        return True
-    return label in _REFERENCE_SOURCE_LABELS
-
-
-def is_bibliography_text(text: str) -> bool:
-    """Recognize standalone or continuation bibliography/reference units.
-
-    Bibliography units consist predominantly of citation entries (author names,
-    publication years, titles, DOIs, and URLs) and should not be judged by
-    general prose translation density gates.
-    """
-    normalized = str(text or "").replace("\r\n", "\n")
-    blocks = [b.strip() for b in normalized.split("\n\n") if b.strip()]
-    if not blocks:
-        return False
-    first_line = blocks[0].splitlines()[0].strip()
-    if _is_reference_label(first_line):
-        return True
-    first_block = blocks[0].strip()
-    if re.match(
-        r"^(?:#{1,6}\s+)?(?:references|bibliography|literatur|works cited|参考文献)\b",
-        first_block,
-        re.IGNORECASE,
-    ):
-        return True
-    if len(blocks) >= 5:
-        cite_re = re.compile(r"\(\d{4}[a-z]?\)|https?://|doi\.org", re.IGNORECASE)
-        cite_count = sum(1 for b in blocks if cite_re.search(b))
-        if cite_count / len(blocks) >= 0.8:
-            return True
-    return False
 
 
 def fix_reference_heading_mismatch(
@@ -572,8 +431,6 @@ def detect_polish_page_furniture(
     polishing Subagent, so this function never edits text; the caller decides
     whether an unresolved candidate blocks the hand-off.
     """
-    from .page_furniture_repair import _candidate_for_line
-
     def repeat_key(candidate: Dict[str, Any]) -> str:
         """Normalize a candidate for repeated-header detection.
 
@@ -595,7 +452,7 @@ def detect_polish_page_furniture(
 
     lines = text.splitlines()
     candidate_records = [
-        _candidate_for_line(line)
+        candidate_for_line(line)
         for line in lines
     ]
     repeated_candidate_keys = Counter(
@@ -665,11 +522,9 @@ def polish_content_integrity_check(
     """
 
     def tokens(text: str) -> list[str]:
-        from .page_furniture_repair import _candidate_for_line
-
         visible_lines: list[str] = []
         for line_number, line in enumerate(clean_lines(text), 1):
-            candidate = _candidate_for_line(line)
+            candidate = candidate_for_line(line)
             if candidate and candidate.get("confidence") == "high":
                 if candidate.get("kind") == "running_header" and line_number <= 5:
                     pass

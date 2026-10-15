@@ -280,7 +280,7 @@ def _prepare_html_command(args):
             declared_files=declared_files,
             chapter_groups=_load_html_chapter_groups(pipeline, declared_files),
         )
-        from pdf2epub.workflow_contracts import atomic_write_text, sha256_file
+        from pdf2epub.workflow_contracts import atomic_write_json, atomic_write_text, sha256_file
 
         manifest_path = Path(body_paths["manifest"])
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -368,9 +368,9 @@ def html_validate_command(args):
         if not file_name
         else "translate-html_validation.single.json"
     )
-    report_path.write_text(
-        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    from pdf2epub.workflow_contracts import atomic_write_json
+
+    atomic_write_json(report_path, report)
     if file_name:
         pipeline.persist_file_validation_checkpoint(report)
 

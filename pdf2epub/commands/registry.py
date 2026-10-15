@@ -1,60 +1,17 @@
 """Argparse registration for the pdf2epub command groups."""
 
-from pdf2epub.commands.entities import (
-    extract_entities_command,
-    extract_entities_validate_command,
-)
-from pdf2epub.commands.diagnostics import doctor_command, status_command
-from pdf2epub.commands.glossary import glossary_candidates_command
-from pdf2epub.commands.html import (
-    build_html_epub_command,
-    html_prepare_command,
-    html_skeleton_restore_command,
-    html_skeleton_retry_command,
-    html_validate_command,
-)
-from pdf2epub.commands.markdown import (
-    check_ready_command,
-    polish_command,
-    polish_validate_command,
-    translate_command,
-    translate_validate_command,
-)
-from pdf2epub.commands.novel import (
-    build_novel_epub_command,
-    translate_novel_command,
-    translate_novel_validate_command,
-)
-from pdf2epub.commands.page_furniture import (
-    repair_page_furniture_command,
-    repair_page_furniture_validate_command,
-)
-from pdf2epub.commands.ocr import (
-    ocr_correct_command,
-    ocr_correct_validate_command,
-    ocr_consensus_rebuild_command,
-    ocr_pages_command,
-)
-from pdf2epub.commands.pdf import build_epub_command
-from pdf2epub.commands.refine import (
-    footnote_apply_command,
-    footnote_prepare_command,
-    footnote_validate_command,
-    illustration_apply_command,
-    illustration_prepare_command,
-    illustration_validate_command,
-    refine_command,
-    refine_local_command,
-    refine_prepare_command,
-)
-from pdf2epub.commands.tex import (
-    translate_arxiv_command,
-    translate_arxiv_validate_command,
-)
-from pdf2epub.commands.toc import (
-    translate_toc_command,
-    translate_toc_validate_command,
-)
+from importlib import import_module
+from typing import Any, Callable
+
+
+def _lazy_handler(module_name: str, attribute: str) -> Callable[[Any], Any]:
+    """Resolve a command handler only after argparse has selected it."""
+    def invoke(args: Any) -> Any:
+        handler = getattr(import_module(module_name), attribute)
+        return handler(args)
+
+    invoke.__name__ = attribute
+    return invoke
 
 
 def register_command_parsers(subparsers) -> None:
@@ -69,7 +26,7 @@ def register_command_parsers(subparsers) -> None:
         action="store_true",
         help="Print machine-readable JSON instead of a human-readable summary",
     )
-    status_parser.set_defaults(func=status_command)
+    status_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.diagnostics", "status_command"))
 
     doctor_parser = subparsers.add_parser(
         "doctor",
@@ -80,7 +37,7 @@ def register_command_parsers(subparsers) -> None:
         action="store_true",
         help="Print machine-readable JSON instead of a human-readable summary",
     )
-    doctor_parser.set_defaults(func=doctor_command)
+    doctor_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.diagnostics", "doctor_command"))
 
     check_ready_parser = subparsers.add_parser(
         "check-ready",
@@ -97,7 +54,7 @@ def register_command_parsers(subparsers) -> None:
         action="store_true",
         help="Explicitly skip the book-specific entity glossary gate",
     )
-    check_ready_parser.set_defaults(func=check_ready_command)
+    check_ready_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.markdown", "check_ready_command"))
 
     glossary_candidates_parser = subparsers.add_parser(
         "glossary-candidates",
@@ -115,7 +72,7 @@ def register_command_parsers(subparsers) -> None:
         "--target-language",
         help="Target language (default: from config or Chinese)",
     )
-    glossary_candidates_parser.set_defaults(func=glossary_candidates_command)
+    glossary_candidates_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.glossary", "glossary_candidates_command"))
 
     # Breakdown subcommand (DEPRECATED)
 
@@ -173,7 +130,7 @@ def register_command_parsers(subparsers) -> None:
             "configured preflight limit"
         ),
     )
-    ocr_pages_parser.set_defaults(func=ocr_pages_command)
+    ocr_pages_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.ocr", "ocr_pages_command"))
 
     ocr_consensus_rebuild_parser = subparsers.add_parser(
         "ocr-consensus-rebuild",
@@ -182,7 +139,7 @@ def register_command_parsers(subparsers) -> None:
             "Recompute the freshness-bound consensus report without invoking either OCR backend."
         ),
     )
-    ocr_consensus_rebuild_parser.set_defaults(func=ocr_consensus_rebuild_command)
+    ocr_consensus_rebuild_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.ocr", "ocr_consensus_rebuild_command"))
 
     ocr_correct_parser = subparsers.add_parser(
         "ocr-correct",
@@ -203,7 +160,7 @@ def register_command_parsers(subparsers) -> None:
         default=None,
         help="Review-image resolution (default: ocr_correction.review_dpi or 150)",
     )
-    ocr_correct_parser.set_defaults(func=ocr_correct_command)
+    ocr_correct_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.ocr", "ocr_correct_command"))
 
     ocr_correct_validate_parser = subparsers.add_parser(
         "ocr-correct-validate",
@@ -213,7 +170,7 @@ def register_command_parsers(subparsers) -> None:
         "--file",
         help="Validate one page as a checkpoint instead of the full OCR correction",
     )
-    ocr_correct_validate_parser.set_defaults(func=ocr_correct_validate_command)
+    ocr_correct_validate_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.ocr", "ocr_correct_validate_command"))
 
     # Refine subcommand (refined breakdown with boundary verification)
     refine_parser = subparsers.add_parser(
@@ -230,7 +187,7 @@ def register_command_parsers(subparsers) -> None:
         default=None,
         help="Maximum tokens per unit (default: from config or 8000)"
     )
-    refine_parser.set_defaults(func=refine_command)
+    refine_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.refine", "refine_command"))
 
     # Antigravity Subagent refine workflow (no API calls in these commands)
     refine_prepare_parser = subparsers.add_parser(
@@ -247,7 +204,7 @@ def register_command_parsers(subparsers) -> None:
         default=None,
         help="Maximum tokens per unit (default: from config or 8000)",
     )
-    refine_prepare_parser.set_defaults(func=refine_prepare_command)
+    refine_prepare_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.refine", "refine_prepare_command"))
 
     refine_local_parser = subparsers.add_parser(
         "refine-local",
@@ -268,7 +225,7 @@ def register_command_parsers(subparsers) -> None:
         default=None,
         help="Maximum tokens per unit (default: from config or 8000)",
     )
-    refine_local_parser.set_defaults(func=refine_local_command)
+    refine_local_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.refine", "refine_local_command"))
 
     illustration_prepare_parser = subparsers.add_parser(
         "illustration-prepare",
@@ -296,13 +253,13 @@ def register_command_parsers(subparsers) -> None:
         default=None,
         help="Maximum visible text for sparse-image candidates (default: 180)",
     )
-    illustration_prepare_parser.set_defaults(func=illustration_prepare_command)
+    illustration_prepare_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.refine", "illustration_prepare_command"))
 
     illustration_validate_parser = subparsers.add_parser(
         "illustration-validate",
         help="Validate full-page illustration decisions from the Subagent",
     )
-    illustration_validate_parser.set_defaults(func=illustration_validate_command)
+    illustration_validate_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.refine", "illustration_validate_command"))
 
     illustration_apply_parser = subparsers.add_parser(
         "illustration-apply",
@@ -312,7 +269,7 @@ def register_command_parsers(subparsers) -> None:
             "full_page_insert pages can affect sentence joining."
         ),
     )
-    illustration_apply_parser.set_defaults(func=illustration_apply_command)
+    illustration_apply_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.refine", "illustration_apply_command"))
 
     footnote_prepare_parser = subparsers.add_parser(
         "footnote-prepare",
@@ -357,7 +314,7 @@ def register_command_parsers(subparsers) -> None:
         action="store_true",
         help="Disable local auto-acceptance and send every PDF candidate to the workspace Subagent",
     )
-    footnote_prepare_parser.set_defaults(func=footnote_prepare_command)
+    footnote_prepare_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.refine", "footnote_prepare_command"))
 
     footnote_validate_parser = subparsers.add_parser(
         "footnote-validate",
@@ -367,7 +324,7 @@ def register_command_parsers(subparsers) -> None:
             "context for the following polish hand-off."
         ),
     )
-    footnote_validate_parser.set_defaults(func=footnote_validate_command)
+    footnote_validate_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.refine", "footnote_validate_command"))
 
     footnote_apply_parser = subparsers.add_parser(
         "footnote-apply",
@@ -377,7 +334,7 @@ def register_command_parsers(subparsers) -> None:
             "are moved; citations and bibliography entries remain in place."
         ),
     )
-    footnote_apply_parser.set_defaults(func=footnote_apply_command)
+    footnote_apply_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.refine", "footnote_apply_command"))
 
     # Polish subcommand
     polish_parser = subparsers.add_parser(
@@ -404,7 +361,7 @@ def register_command_parsers(subparsers) -> None:
             "persistent warning"
         ),
     )
-    polish_parser.set_defaults(func=polish_command)
+    polish_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.markdown", "polish_command"))
 
     polish_validate_parser = subparsers.add_parser(
         "polish-validate",
@@ -425,7 +382,7 @@ def register_command_parsers(subparsers) -> None:
             "Subagent or human review and stage the files anyway"
         ),
     )
-    polish_validate_parser.set_defaults(func=polish_validate_command)
+    polish_validate_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.markdown", "polish_validate_command"))
 
     repair_page_furniture_parser = subparsers.add_parser(
         "repair-page-furniture",
@@ -440,14 +397,14 @@ def register_command_parsers(subparsers) -> None:
         action="store_true",
         help="Keep files already passed by repair-page-furniture-validate",
     )
-    repair_page_furniture_parser.set_defaults(func=repair_page_furniture_command)
+    repair_page_furniture_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.page_furniture", "repair_page_furniture_command"))
 
     repair_page_furniture_validate_parser = subparsers.add_parser(
         "repair-page-furniture-validate",
         help="Validate and stage the one-time page-furniture repair",
     )
     repair_page_furniture_validate_parser.set_defaults(
-        func=repair_page_furniture_validate_command
+        func=_lazy_handler("pdf2epub.commands.page_furniture", "repair_page_furniture_validate_command")
     )
 
     # Translate subcommand
@@ -482,7 +439,7 @@ def register_command_parsers(subparsers) -> None:
         action="store_true",
         help="Skip the translation glossary gate for a genuinely non-terminological task",
     )
-    translate_parser.set_defaults(func=translate_command)
+    translate_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.markdown", "translate_command"))
 
     translate_toc_parser = subparsers.add_parser(
         "translate-toc",
@@ -497,13 +454,13 @@ def register_command_parsers(subparsers) -> None:
         "--target-language",
         help="Target language (default: from config or Chinese)",
     )
-    translate_toc_parser.set_defaults(func=translate_toc_command)
+    translate_toc_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.toc", "translate_toc_command"))
 
     translate_toc_validate_parser = subparsers.add_parser(
         "translate-toc-validate",
         help="Validate the translated PDF TOC JSON",
     )
-    translate_toc_validate_parser.set_defaults(func=translate_toc_validate_command)
+    translate_toc_validate_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.toc", "translate_toc_validate_command"))
 
     translate_validate_parser = subparsers.add_parser(
         "translate-validate",
@@ -540,7 +497,7 @@ def register_command_parsers(subparsers) -> None:
             "still missing; normally this gate waits for complete output."
         ),
     )
-    translate_validate_parser.set_defaults(func=translate_validate_command)
+    translate_validate_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.markdown", "translate_validate_command"))
 
     # arXiv / TeX whole-mode translation
     translate_arxiv_parser = subparsers.add_parser(
@@ -586,7 +543,7 @@ def register_command_parsers(subparsers) -> None:
         action="store_true",
         help="Keep existing translated TeX unit files and prepare only pending units",
     )
-    translate_arxiv_parser.set_defaults(func=translate_arxiv_command)
+    translate_arxiv_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.tex", "translate_arxiv_command"))
 
     translate_arxiv_validate_parser = subparsers.add_parser(
         "translate-arxiv-validate",
@@ -598,7 +555,7 @@ def register_command_parsers(subparsers) -> None:
     translate_arxiv_validate_parser.add_argument(
         "--compile-timeout", type=int, help="XeLaTeX timeout in seconds (default: 180)"
     )
-    translate_arxiv_validate_parser.set_defaults(func=translate_arxiv_validate_command)
+    translate_arxiv_validate_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.tex", "translate_arxiv_validate_command"))
 
     # Entity extraction subcommand
     entity_parser = subparsers.add_parser(
@@ -624,14 +581,14 @@ def register_command_parsers(subparsers) -> None:
         default=None,
         help="Target language (default: from config or Chinese)"
     )
-    entity_parser.set_defaults(func=extract_entities_command)
+    entity_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.entities", "extract_entities_command"))
 
     entity_validate_parser = subparsers.add_parser(
         "extract-entities-validate",
         help="Validate entity JSON written by a Subagent",
         description="Validate the optional translation entity hand-off locally.",
     )
-    entity_validate_parser.set_defaults(func=extract_entities_validate_command)
+    entity_validate_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.entities", "extract_entities_validate_command"))
 
     # Build EPUB subcommand (toc_tree.json driven - new approach)
     build_epub_parser = subparsers.add_parser(
@@ -648,7 +605,7 @@ def register_command_parsers(subparsers) -> None:
         "--cover",
         help="Path to cover image file"
     )
-    build_epub_parser.set_defaults(func=build_epub_command)
+    build_epub_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.pdf", "build_epub_command"))
 
     # HTML Prepare subcommand (pure local extraction and compression)
     html_prepare_parser = subparsers.add_parser(
@@ -678,7 +635,7 @@ def register_command_parsers(subparsers) -> None:
         action="store_true",
         help="Skip EPUB book-wide terminology extraction (external glossaries still apply)",
     )
-    html_prepare_parser.set_defaults(func=html_prepare_command)
+    html_prepare_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.html", "html_prepare_command"))
 
     # HTML Validate subcommand (pure local validation)
     html_validate_parser = subparsers.add_parser(
@@ -694,7 +651,7 @@ def register_command_parsers(subparsers) -> None:
         "--file",
         help="Validate one compressed translation unit only (for example 20_Chapter1.md); skips book-level checks",
     )
-    html_validate_parser.set_defaults(func=html_validate_command)
+    html_validate_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.html", "html_validate_command"))
 
     html_skeleton_retry_parser = subparsers.add_parser(
         "html-skeleton-retry",
@@ -702,14 +659,14 @@ def register_command_parsers(subparsers) -> None:
     )
     html_skeleton_retry_parser.add_argument("--file", required=True)
     html_skeleton_retry_parser.add_argument("--resume", action="store_true")
-    html_skeleton_retry_parser.set_defaults(func=html_skeleton_retry_command)
+    html_skeleton_retry_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.html", "html_skeleton_retry_command"))
 
     html_skeleton_restore_parser = subparsers.add_parser(
         "html-skeleton-restore",
         help="Restore a completed protected-token HTML retry into the normal target",
     )
     html_skeleton_restore_parser.add_argument("--file", required=True)
-    html_skeleton_restore_parser.set_defaults(func=html_skeleton_restore_command)
+    html_skeleton_restore_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.html", "html_skeleton_restore_command"))
 
     # Build HTML EPUB subcommand (rebuild EPUB with translated HTML)
     build_html_epub_parser = subparsers.add_parser(
@@ -738,7 +695,7 @@ def register_command_parsers(subparsers) -> None:
             "(unsafe; explicit acknowledgement required)"
         ),
     )
-    build_html_epub_parser.set_defaults(func=build_html_epub_command)
+    build_html_epub_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.html", "build_html_epub_command"))
 
     # Novel Translation subcommand (text-mode for light novels)
     translate_novel_parser = subparsers.add_parser(
@@ -763,13 +720,13 @@ def register_command_parsers(subparsers) -> None:
         action="store_true",
         help="Keep existing translated novel units and prepare only pending files",
     )
-    translate_novel_parser.set_defaults(func=translate_novel_command)
+    translate_novel_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.novel", "translate_novel_command"))
 
     translate_novel_validate_parser = subparsers.add_parser(
         "translate-novel-validate",
         help="Validate Subagent light-novel output (no API calls)",
     )
-    translate_novel_validate_parser.set_defaults(func=translate_novel_validate_command)
+    translate_novel_validate_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.novel", "translate_novel_validate_command"))
 
     # Build Novel EPUB subcommand (rebuild from translated text, no re-translation)
     build_novel_epub_parser = subparsers.add_parser(
@@ -777,6 +734,6 @@ def register_command_parsers(subparsers) -> None:
         help="Build EPUB from validated Subagent novel text",
         description="Rebuild EPUB only after translate-novel-validate succeeds."
     )
-    build_novel_epub_parser.set_defaults(func=build_novel_epub_command)
+    build_novel_epub_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.novel", "build_novel_epub_command"))
 
 __all__ = ["register_command_parsers"]

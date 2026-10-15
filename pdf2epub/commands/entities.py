@@ -16,8 +16,9 @@ from pdf2epub.commands.sources import (
     _resolve_pdf_polish_source,
 )
 from pdf2epub.pipeline_policy import PipelinePolicy
-from pdf2epub.markdown_validation import infer_translation_file_role
+from pdf2epub.document_roles import infer_translation_file_role
 from pdf2epub.utils.common import book_output_dir
+from pdf2epub.workflow_contracts import atomic_write_json, atomic_write_text
 
 
 ENTITY_SOURCE_FILTER_VERSION = 1
@@ -82,18 +83,14 @@ def _prepare_entity_subagent_task(
     from pdf2epub.entity_extractor import create_entity_template, create_entity_extraction_prompt
 
     template_path = output_dir / "translation_entities.template.json"
-    template_path.write_text(
-        json.dumps(
-            create_entity_template(
-                book_title,
-                source_language,
-                target_language,
-                (path.name for path in source_files),
-            ),
-            ensure_ascii=False,
-            indent=2,
+    atomic_write_json(
+        template_path,
+        create_entity_template(
+            book_title,
+            source_language,
+            target_language,
+            (path.name for path in source_files),
         ),
-        encoding="utf-8",
     )
     manifest = {
         "schema_version": 1,
@@ -117,13 +114,14 @@ def _prepare_entity_subagent_task(
         "output_file": "translation_entities.json",
         "template_file": "translation_entities.template.json",
     }
-    (output_dir / "entity_subagent_manifest.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    atomic_write_json(
+        output_dir / "entity_subagent_manifest.json",
+        manifest,
     )
-    (output_dir / "entity_subagent_prompt.md").write_text(
+    atomic_write_text(
+        output_dir / "entity_subagent_prompt.md",
         create_entity_extraction_prompt(book_title, (source_language, target_language))
         + f"\n\nRecommended Antigravity model: `{model}`\n",
-        encoding="utf-8",
     )
     logger.info(
         f"已生成实体提取 Subagent 任务：{output_dir / 'entity_subagent_prompt.md'}；"
@@ -293,8 +291,9 @@ def extract_entities_validate_command(args):
         "entity_sha256": hashlib.sha256(entity_path.read_bytes()).hexdigest(),
         "file": str(entity_path),
     }
-    (entity_path.parent / "translation_entities_validation.json").write_text(
-        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+    atomic_write_json(
+        entity_path.parent / "translation_entities_validation.json",
+        report,
     )
     if errors:
         for error in errors:

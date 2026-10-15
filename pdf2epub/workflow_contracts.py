@@ -56,6 +56,21 @@ def atomic_write_text(path: Path, content: str, *, encoding: str = "utf-8") -> N
         raise
 
 
+def atomic_write_json(
+    path: Path,
+    value: Any,
+    *,
+    indent: int = 2,
+    encoding: str = "utf-8",
+) -> None:
+    """Serialize a JSON contract through the same atomic write boundary."""
+    atomic_write_text(
+        path,
+        json.dumps(value, ensure_ascii=False, indent=indent),
+        encoding=encoding,
+    )
+
+
 def load_json_object(path: Path, *, default: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Load a JSON object, returning ``default`` for missing/invalid files."""
     fallback = dict(default or {})

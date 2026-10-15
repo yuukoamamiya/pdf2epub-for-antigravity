@@ -2,8 +2,8 @@
 
 from loguru import logger
 
-from pdf2epub.commands.markdown import _load_pdf_file_roles
 from pdf2epub.commands.runtime import load_book_context
+from pdf2epub.pdf_unit_roles import load_pdf_file_roles
 from pdf2epub.pipeline_policy import PipelinePolicy
 
 
@@ -62,7 +62,7 @@ def repair_page_furniture_validate_command(args):
 
         report = validate_page_furniture_repair(
             context.output_dir,
-            file_roles=_load_pdf_file_roles(context.output_dir),
+            file_roles=load_pdf_file_roles(context.output_dir),
         )
     except Exception as exc:
         logger.error(f"Could not validate page-furniture repair: {exc}")

@@ -9,6 +9,10 @@ import shutil
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
+from .document_roles import (
+    DENSITY_EXEMPT_ROLES,
+    TRANSLATION_SPECIAL_ROLES,
+)
 from .footnote_normalization import validate_polish_footnote_normalization
 from .markdown_validation import (
     _heading_reduction_is_duplicate_only,
@@ -38,28 +42,6 @@ from .workflow_contracts import (
 # were allowed to stage files while carrying advisory warnings, so callers
 # must not treat a pre-v2 report as proof that the new gate was evaluated.
 VALIDATION_SCHEMA_VERSION = MARKDOWN_VALIDATION_SCHEMA_VERSION
-_TRANSLATION_SPECIAL_ROLES = {
-    "bibliography",
-    "index",
-    "metadata",
-    "frontmatter",
-    "copyright",
-    "cover",
-    "notes",
-    "author_notes",
-    "catalog",
-    "ad",
-}
-_DENSITY_EXEMPT_ROLES = {
-    "bibliography",
-    "index",
-    "notes",
-    "author_notes",
-    "catalog",
-    "ad",
-}
-
-
 def _structural_mismatch_reason(
     pattern: str,
     source_text: str,
@@ -225,7 +207,7 @@ def validate_markdown_subagent(
     normalized_roles = {
         str(name): str(role).strip().lower()
         for name, role in (file_roles or {}).items()
-        if str(role).strip().lower() in _TRANSLATION_SPECIAL_ROLES
+        if str(role).strip().lower() in TRANSLATION_SPECIAL_ROLES
     }
     normalized_protected_toc_titles = list(
         dict.fromkeys(
@@ -360,7 +342,7 @@ def validate_markdown_subagent(
         if not role and is_bibliography_text(source_text):
             role = "bibliography"
             normalized_roles[source.name] = role
-        if task == "translate" and role not in _DENSITY_EXEMPT_ROLES:
+        if task == "translate" and role not in DENSITY_EXEMPT_ROLES:
             language_kwargs = {}
             if role in {"metadata", "frontmatter", "copyright", "cover"} or is_front_matter_text(source_text):
                 language_kwargs = {

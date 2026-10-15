@@ -7,71 +7,12 @@ including polishing OCR output and translating content.
 """
 
 import argparse
-import hashlib
-import json
+from importlib import import_module
 import sys
-from pathlib import Path
-from typing import Any, Dict
-from loguru import logger
-from pdf2epub.utils.logging_config import configure_logging
-from pdf2epub.utils.common import (
-    book_output_dir,
-    load_config,
-    resolve_book_input_path,
-    sanitize_filename,
-)
+
 from pdf2epub.utils.encoding import configure_utf8_stdio
-from pdf2epub.commands.novel import (
-    _convert_txt_to_xhtml,
-    build_novel_epub_command,
-    translate_novel_command,
-    translate_novel_validate_command,
-)
-from pdf2epub.commands.tex import (
-    translate_arxiv_command,
-    translate_arxiv_validate_command,
-)
-from pdf2epub.commands.pdf import (
-    _resolve_pdf_markdown_source,
-    build_epub_command,
-)
-from pdf2epub.commands.entities import (
-    _entity_context_is_current,
-    _prepare_entity_subagent_task,
-    extract_entities_command,
-    extract_entities_validate_command,
-)
-from pdf2epub.commands.html import (
-    _prepare_html_command,
-    build_html_epub_command,
-    html_prepare_command,
-    html_validate_command,
-)
-from pdf2epub.commands.markdown import (
-    _load_pdf_file_contexts,
-    _load_pdf_file_roles,
-    _prepare_pdf_markdown_task,
-    _run_readiness_check,
-    _validate_translation_entities,
-    _validate_pdf_markdown_task,
-    check_ready_command,
-    polish_command,
-    polish_validate_command,
-    translate_command,
-    translate_validate_command,
-)
-from pdf2epub.commands.ocr import ocr_pages_command
-from pdf2epub.commands.refine import (
-    refine_command,
-    refine_local_command,
-    refine_prepare_command,
-)
-from pdf2epub.commands.glossary import glossary_candidates_command
 from pdf2epub.commands.registry import register_command_parsers
-from pdf2epub.commands.toc import (
-    translate_toc_command,
-    translate_toc_validate_command,
-)
+from pdf2epub.utils.logging_config import configure_logging
 
 # Windows consoles may still default to an active code page such as GBK.
 # Configure before loguru captures stderr so international filenames cannot
@@ -80,6 +21,59 @@ configure_utf8_stdio()
 
 # Configure logger
 logger = configure_logging()
+
+
+# A few older library callers imported workflow helpers from ``cli`` because
+# the original entrypoint re-exported every command module.  Keep those names
+# available lazily while removing the eager dependency on every workflow from
+# normal CLI startup.  New code should import the owning module directly.
+_LEGACY_EXPORTS = {
+    "_convert_txt_to_xhtml": ("pdf2epub.commands.novel", "_convert_txt_to_xhtml"),
+    "build_novel_epub_command": ("pdf2epub.commands.novel", "build_novel_epub_command"),
+    "translate_novel_command": ("pdf2epub.commands.novel", "translate_novel_command"),
+    "translate_novel_validate_command": ("pdf2epub.commands.novel", "translate_novel_validate_command"),
+    "translate_arxiv_command": ("pdf2epub.commands.tex", "translate_arxiv_command"),
+    "translate_arxiv_validate_command": ("pdf2epub.commands.tex", "translate_arxiv_validate_command"),
+    "_resolve_pdf_markdown_source": ("pdf2epub.commands.pdf", "_resolve_pdf_markdown_source"),
+    "build_epub_command": ("pdf2epub.commands.pdf", "build_epub_command"),
+    "_entity_context_is_current": ("pdf2epub.commands.entities", "_entity_context_is_current"),
+    "_prepare_entity_subagent_task": ("pdf2epub.commands.entities", "_prepare_entity_subagent_task"),
+    "extract_entities_command": ("pdf2epub.commands.entities", "extract_entities_command"),
+    "extract_entities_validate_command": ("pdf2epub.commands.entities", "extract_entities_validate_command"),
+    "_prepare_html_command": ("pdf2epub.commands.html", "_prepare_html_command"),
+    "build_html_epub_command": ("pdf2epub.commands.html", "build_html_epub_command"),
+    "html_prepare_command": ("pdf2epub.commands.html", "html_prepare_command"),
+    "html_validate_command": ("pdf2epub.commands.html", "html_validate_command"),
+    "_load_pdf_file_contexts": ("pdf2epub.commands.markdown", "_load_pdf_file_contexts"),
+    "_load_pdf_file_roles": ("pdf2epub.commands.markdown", "_load_pdf_file_roles"),
+    "_prepare_pdf_markdown_task": ("pdf2epub.commands.markdown", "_prepare_pdf_markdown_task"),
+    "_run_readiness_check": ("pdf2epub.commands.markdown", "_run_readiness_check"),
+    "_validate_translation_entities": ("pdf2epub.commands.markdown", "_validate_translation_entities"),
+    "_validate_pdf_markdown_task": ("pdf2epub.commands.markdown", "_validate_pdf_markdown_task"),
+    "check_ready_command": ("pdf2epub.commands.markdown", "check_ready_command"),
+    "polish_command": ("pdf2epub.commands.markdown", "polish_command"),
+    "polish_validate_command": ("pdf2epub.commands.markdown", "polish_validate_command"),
+    "translate_command": ("pdf2epub.commands.markdown", "translate_command"),
+    "translate_validate_command": ("pdf2epub.commands.markdown", "translate_validate_command"),
+    "ocr_pages_command": ("pdf2epub.commands.ocr", "ocr_pages_command"),
+    "refine_command": ("pdf2epub.commands.refine", "refine_command"),
+    "refine_local_command": ("pdf2epub.commands.refine", "refine_local_command"),
+    "refine_prepare_command": ("pdf2epub.commands.refine", "refine_prepare_command"),
+    "glossary_candidates_command": ("pdf2epub.commands.glossary", "glossary_candidates_command"),
+    "translate_toc_command": ("pdf2epub.commands.toc", "translate_toc_command"),
+    "translate_toc_validate_command": ("pdf2epub.commands.toc", "translate_toc_validate_command"),
+}
+
+
+def __getattr__(name: str):
+    """Resolve legacy helper exports only when an old caller asks for them."""
+    target = _LEGACY_EXPORTS.get(name)
+    if target is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name, attribute = target
+    value = getattr(import_module(module_name), attribute)
+    globals()[name] = value
+    return value
 
 
 def main():

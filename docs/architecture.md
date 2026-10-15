@@ -48,6 +48,9 @@ Subagent 合同层
 ├── markdown_handoff.py              Markdown handoff 生成
 ├── markdown_subagent_validation.py  Markdown 输出校验和 validated staging
 ├── markdown_validation.py           结构、脚注、双语和特殊标记规则
+├── document_roles.py                特殊单元角色和参考文献识别
+├── page_furniture_rules.py          页眉、页脚、页码候选的纯规则
+├── pdf_unit_roles.py                PDF 精修单元角色的只读投影
 ├── toc_translation_workflow.py      PDF TOC handoff、合并和校验
 ├── subagent_runtime.py              模型选择、token 估算和批次 handoff
 ├── subagent_dispatch.py             assignment digest、原子 lease 和冲突检测
@@ -65,6 +68,8 @@ Subagent 合同层
 
 命令注册集中在 [`commands/registry.py`](../pdf2epub/commands/registry.py)。注册模块只
 定义命令名称、参数和 handler，不实现业务逻辑。这样新增命令时不会再次扩大 CLI 入口。
+注册器只保存 handler 的模块路径和名称，在 argparse 真正选中命令后才导入所属工作流；因此
+显示用法或构建参数表时不会加载 OCR、PDF、HTML、TeX 和翻译运行时。
 
 ### 2.2 命令编排层
 
@@ -155,6 +160,10 @@ polish。`commands/markdown.py`、`entities.py`、`toc.py` 和 `pdf.py` 均应�
 新命令应优先使用 `runtime.py` 的公共上下文；不要从 `cli.py` 导入业务函数，也不要把
 配置解析和输出目录推断复制到每个 handler 中。
 
+`cli.py` 仅保留命令注册和启动逻辑。为兼容历史上从入口模块导入工作流 helper 的调用方，
+少量旧名称通过模块级懒加载映射按需解析；新代码必须直接从所属领域模块导入。这样普通 CLI
+启动不会预先导入全部 OCR、PDF、HTML、TeX 和翻译工作流，也不会把入口文件变成共享服务层。
+
 #### 2.2.1 OCR 后端边界和运行时隔离
 
 OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。注册层只描述后端
@@ -193,7 +202,16 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
   并在通过后复制到 `validated/`。
 - `markdown_validation.py`：提供纯函数式的 Markdown 风险检测、目标语言审计、规范化辅助
   函数和 polish 内容保真检查；它会阻断结构性空父标题导致的重复正文，并对 `notes`
-  单元中的标准尾注章节标题提供窄范围页眉误报豁免。
+  单元中的标准尾注章节标题提供窄范围页眉误报豁免。该模块把角色判断委托给
+  `document_roles.py`，把页眉页脚候选判断委托给 `page_furniture_rules.py`，避免校验模块
+  反向依赖具体修复工作流。
+- `document_roles.py`：集中维护特殊翻译角色、参考文献/前置内容识别、目标语言密度豁免和
+  文件名角色回退规则。它只处理文本与文件名事实，不读取工作流状态，也不执行写入。
+- `page_furniture_rules.py`：提供无副作用的页眉、页脚、页码和出版信息候选识别；候选只是
+  交给 Subagent 复核的提示，绝不在规则层删除正文。`page_furniture_repair.py` 只负责编排、
+  快照和校验，并保留旧的 `_candidate_for_line` 兼容别名。
+- `pdf_unit_roles.py`：从当前 `tree_progress.json` 或兼容的 `toc_tree.json` 投影 PDF 单元角色。
+  `commands.markdown` 和页眉页脚修复命令共享该只读投影，不再互相导入私有 helper。
 - Markdown→XHTML 默认遵循标准 Markdown 的软换行语义：单换行不会生成 `<br />`，只有
   空行或显式硬换行标记创建段落/硬换行；需要旧式单换行渲染时只能显式启用兼容参数。
 - `subagent_runtime.py`：提供模型配置解析、token 估算、批次规划及按章节/批次隔离的 handoff；

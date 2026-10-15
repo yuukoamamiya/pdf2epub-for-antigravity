@@ -15,7 +15,7 @@ from .subagent_dispatch import (
     dispatch_lease_path,
     inspect_dispatch_assignment,
 )
-from .markdown_validation import infer_translation_file_role
+from .document_roles import infer_translation_file_role
 
 DEFAULT_TRANSLATION_MODEL = "gemini-3.1-pro-preview"
 DEFAULT_SUBAGENT_MODEL = "gemini-3.6-flash"

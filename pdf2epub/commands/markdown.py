@@ -20,6 +20,7 @@ from pdf2epub.commands.sources import (
     _resolve_pdf_polish_source,
     _resolve_pdf_markdown_source,
 )
+from pdf2epub.pdf_unit_roles import load_pdf_file_roles
 from pdf2epub.pipeline_policy import PipelinePolicy
 from pdf2epub.ocr_correction import (
     ocr_correction_is_current,
@@ -38,60 +39,8 @@ from pdf2epub.validation_receipts import (
 )
 
 
-def _load_pdf_file_roles(output_dir: Path) -> dict:
-    """Load chapter roles produced by refine-local for translation prompts."""
-    progress = output_dir / "ocr_markdown" / "tree_progress.json"
-    if not progress.is_file():
-        return {}
-    try:
-        data = json.loads(progress.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    roles = {}
-    for unit in data.get("units", []):
-        role = str(unit.get("type") or "").strip().lower()
-        if role in {
-            "bibliography",
-            "index",
-            "notes",
-            "author_notes",
-            "catalog",
-            "ad",
-        }:
-            files = unit.get("part_files") or [unit.get("file")]
-            for file_name in files:
-                if file_name:
-                    roles[str(file_name)] = role
-    if roles:
-        return roles
-
-    # Older tree_progress files predate the ``type`` field.  Recover roles
-    # from the current TOC so adding a type to toc_tree.json does not require
-    # deleting a resumable refinement checkpoint.
-    toc_path = output_dir / "toc_tree.json"
-    try:
-        toc = json.loads(toc_path.read_text(encoding="utf-8"))
-        from pdf2epub.utils.unit_id import generate_unit_id
-
-        def visit(nodes, path):
-            for index, node in enumerate(nodes or [], 1):
-                node_path = path + [index]
-                role = str(node.get("type") or "").strip().lower()
-                if role in {
-                    "bibliography",
-                    "index",
-                    "notes",
-                    "author_notes",
-                    "catalog",
-                    "ad",
-                }:
-                    roles[f"{generate_unit_id(node_path)}.md"] = role
-                visit(node.get("children", []), node_path)
-
-        visit(toc.get("chapters", []), [])
-    except (OSError, json.JSONDecodeError, AttributeError, TypeError, ValueError):
-        pass
-    return roles
+# Private compatibility alias for callers that imported the old command helper.
+_load_pdf_file_roles = load_pdf_file_roles
 
 
 def _load_pdf_file_contexts(output_dir: Path) -> dict:

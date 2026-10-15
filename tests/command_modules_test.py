@@ -7,6 +7,7 @@ import pytest
 
 from pdf2epub.commands import __all__ as command_modules
 from pdf2epub.commands import html as html_commands
+import pdf2epub.commands.registry as command_registry
 from pdf2epub.commands.markdown import (
     _load_pdf_file_contexts,
     _load_pdf_file_roles,
@@ -88,6 +89,15 @@ def test_command_registry_registers_every_workflow_command():
     )
 
 
+def test_command_registry_defers_workflow_imports(monkeypatch):
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers(dest="command")
+
+    def fail_import(*args, **kwargs):
+        raise AssertionError("workflow modules should load only when a command runs")
+
+    monkeypatch.setattr(command_registry, "import_module", fail_import)
+    register_command_parsers(subparsers)
 def test_polish_validate_parser_accepts_single_file_checkpoint():
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command")

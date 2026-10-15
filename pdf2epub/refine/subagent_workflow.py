@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 from pdf2epub.subagent_runtime import resolve_subagent_model
-from pdf2epub.workflow_contracts import relative_posix_path
+from pdf2epub.workflow_contracts import atomic_write_text, relative_posix_path
 from .pagination import build_pagination_map
 from .pdf_outline import extract_pdf_outline
 
@@ -80,14 +80,16 @@ def prepare_refine_subagent(
         "outline_entry_count": outline_draft["entry_count"],
     }
     manifest_path = output_dir / "refine_subagent_manifest.json"
-    manifest_path.write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    atomic_write_text(
+        manifest_path,
+        json.dumps(manifest, ensure_ascii=False, indent=2),
     )
     pagination_path = output_dir / "pagination_map.json"
     build_pagination_map(pages_dir, pagination_path)
 
     prompt_path = output_dir / "refine_subagent_prompt.md"
-    prompt_path.write_text(
+    atomic_write_text(
+        prompt_path,
         f"""# PDF structure refinement
 
 The book title is stored as data in `refine_subagent_manifest.json`; copy it

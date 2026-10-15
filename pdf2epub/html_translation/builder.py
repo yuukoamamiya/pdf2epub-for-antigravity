@@ -27,10 +27,12 @@ from .validation import nonempty_lines, tag_mismatch_count
 from pdf2epub.subagent_runtime import resolve_subagent_model
 from pdf2epub.subagent_safety import detect_refusal
 from pdf2epub.glossary import validate_translation_context
-from pdf2epub.markdown_validation import (
-    _validate_special_role_markers,
+from pdf2epub.document_roles import (
     infer_translation_file_role,
     is_density_exempt_role,
+)
+from pdf2epub.markdown_validation import (
+    _validate_special_role_markers,
     target_language_ratio_check,
 )
 from pdf2epub.utils.common import sanitize_filename

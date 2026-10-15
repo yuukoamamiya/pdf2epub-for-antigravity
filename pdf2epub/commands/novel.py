@@ -47,6 +47,7 @@ def translate_novel_command(args):
 
     from pdf2epub.subagent_runtime import resolve_subagent_model
     from pdf2epub.workflow_contracts import (
+        atomic_write_text,
         is_reusable_checkpoint,
         load_json_object,
         sha256_file,
@@ -152,8 +153,9 @@ def translate_novel_command(args):
         manifest["pending_files"] = [
             name for name in manifest["files"] if name not in completed_files
         ]
-        (output_dir / "novel_subagent_manifest.json").write_text(
-            json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+        atomic_write_text(
+            output_dir / "novel_subagent_manifest.json",
+            json.dumps(manifest, ensure_ascii=False, indent=2),
         )
         (output_dir / "novel_subagent_prompt.md").write_text(
             f"""# Light-novel translation Subagent task
@@ -347,7 +349,8 @@ def translate_novel_validate_command(args):
             and metadata_report["valid"]
         )
         if not all_passed:
-            (output_dir / "translate-novel_validation.json").write_text(
+            atomic_write_text(
+                output_dir / "translate-novel_validation.json",
                 json.dumps(
                     {
                         "task": "translate-novel",
@@ -380,10 +383,10 @@ def translate_novel_validate_command(args):
                     ensure_ascii=False,
                     indent=2,
                 ),
-                encoding="utf-8",
             )
             return 1
-        (output_dir / "translate-novel_validation.json").write_text(
+        atomic_write_text(
+            output_dir / "translate-novel_validation.json",
             json.dumps(
                     {
                         "task": "translate-novel",
@@ -412,7 +415,6 @@ def translate_novel_validate_command(args):
                 ensure_ascii=False,
                 indent=2,
             ),
-            encoding="utf-8",
         )
         logger.success(f"Novel Subagent output validated: {len(manifest.get('files', []))} files")
         return 0
