@@ -90,9 +90,16 @@ def refine_prepare_command(args):
     if fast_path.get("status") == "eligible" and paths.get("fast_prompt"):
         logger.success(f"Wrote TOC fast-path manifest: {paths['fast_manifest']}")
         logger.success(f"Wrote TOC fast-path prompt: {paths['fast_prompt']}")
+        review_mode = fast_path.get("review_mode", "selective_review")
+        review_hint = (
+            "本次为少量异常的定向复核，只检查目录页、异常书签起始页及其前页；"
+            if review_mode == "targeted_review"
+            else "本次为高置信度选择性复核，检查目录页、书签起始页及其前页；"
+        )
         logger.info(
-            "请让工作区 Subagent 阅读 toc_fast_path_prompt.md，只检查清单中的目录页、"
-            "书签起始页及其前页，并按要求写入 toc_fast_path_decisions.json；确认通过后再写入 toc_tree.json。"
+            f"请让工作区 Subagent 阅读 toc_fast_path_prompt.md。{review_hint}"
+            "同时使用 toc_line_evidence.json 核对原生 block、bbox 和 Markdown 行号，"
+            "按要求写入 toc_fast_path_decisions.json；确认通过后再写入 toc_tree.json。"
             "若结果要求回退，请运行 refine-prepare --full-review，再使用完整 refine_subagent_prompt.md。"
         )
     else:

@@ -205,3 +205,68 @@ def test_fast_path_visual_fallback_blocks_local_refinement(tmp_path: Path):
     assert report["status"] == "fallback_required"
     assert "refine_subagent_prompt.md" in str(report["full_review_prompt"])
 
+
+def test_fast_path_uses_targeted_review_for_a_small_number_of_mismatches(tmp_path: Path):
+    _write_pages(tmp_path)
+    (tmp_path / "pages" / "page_005.md").write_text(
+        "A heading was not found here\nSecond body paragraph\n", encoding="utf-8"
+    )
+    _write_pdf(tmp_path / "input.pdf")
+    outline = _outline()
+    outline_path = tmp_path / "outline_toc_draft.json"
+    outline_path.write_text(json.dumps(outline), encoding="utf-8")
+
+    result = prepare_toc_fast_path(
+        tmp_path,
+        pdf_path=tmp_path / "input.pdf",
+        pages_dir=tmp_path / "pages",
+        book_title="A Book",
+        model="configured-model",
+        page_source_kind="native_text",
+        outline_path=outline_path,
+        outline_draft=outline,
+    )
+
+    manifest = result["data"]
+    assert manifest["status"] == "eligible"
+    assert manifest["review_mode"] == "targeted_review"
+    assert manifest["targeted_outline_entries"] == [2]
+    assert manifest["line_evidence"]["path"] == "toc_line_evidence.json"
+    evidence = json.loads(
+        (tmp_path / "toc_line_evidence.json").read_text(encoding="utf-8")
+    )
+    assert len(evidence["records"]) == 2
+
+    tree = copy.deepcopy(outline)
+    tree.update({"book_title": "A Book", "author": "Author Name", "publisher": "Example Press"})
+    (tmp_path / "toc_tree.json").write_text(json.dumps(tree), encoding="utf-8")
+    (tmp_path / "toc_fast_path_decisions.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "status": "accepted",
+                "outline_sha256": manifest["outline_sha256"],
+                "review_pages": manifest["review_pages"],
+                "entries": [
+                    {
+                        "outline_entry": 1,
+                        "title": "Chapter One",
+                        "start_page": 3,
+                        "mid_page": False,
+                    },
+                    {
+                        "outline_entry": 2,
+                        "title": "Chapter Two",
+                        "start_page": 5,
+                        "mid_page": False,
+                        "reviewed": True,
+                    },
+                ],
+                "fallback_reasons": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert validate_toc_fast_path_review(tmp_path)["valid"] is True
+

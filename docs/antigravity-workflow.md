@@ -313,13 +313,19 @@ uv run pdf2epub -c config.yaml footnote-apply
 ### 原生 PDF 的 TOC 选择性视觉确认
 
 高置信度原生文字 PDF 且存在可用 PDF 书签时，`refine-prepare` 会先运行一个保守的快速路径预检。
-本地只做证据筛选，不生成最终 `toc_tree.json`：它检查书签标题是否能在对应物理页找到，并选择
-印刷目录页、每个书签起始页、起始页前一页以及封面/版权页，渲染为
-`toc_review_images/`。这些页面及其哈希写入 `toc_fast_path_manifest.json`，视觉任务写入
-`toc_fast_path_prompt.md`。
+本地只做证据筛选，不生成最终 `toc_tree.json`。预检没有书签页匹配异常时进入
+`selective_review`，选择印刷目录页、每个书签起始页、起始页前一页以及封面/版权页；只有少量
+匹配异常时进入 `targeted_review`，只选择印刷目录页、异常书签起始页及其前页和元数据页。异常
+超过阈值、审阅页过多或缺少目录证据时才直接要求完整审查。选定页面及其哈希写入
+`toc_fast_path_manifest.json`，视觉任务写入 `toc_fast_path_prompt.md`。
 
-快速路径 Subagent 必须先确认目录条目与书签的标题、层级、顺序和物理页码，再逐个确认章节是否
-从页面中部开始。中部起始必须在 `toc_fast_path_decisions.json` 中记录原始
+原生 PDF 还会生成 `toc_line_evidence.json`，其中只保存书签起始页的 block、bbox、字体、页首/页中
+提示和原始 Markdown 行范围。它是给视觉任务定位证据的只读索引，不是本地结构判断，也不能替代
+页面图。快速路径校验会同时检查该索引和它引用的原生 sidecar 是否过期。
+
+快速路径 Subagent 必须先确认目录条目与书签的标题、层级、顺序和物理页码，再确认章节是否
+从页面中部开始。`targeted_review` 只要求对异常条目进行直接视觉复核，其余条目仍必须留下决定
+记录。中部起始必须在 `toc_fast_path_decisions.json` 中记录原始
 `page_XXX.md` 的 1-based `start_line`；父标题和首个子标题同页时两者都要记录。只有全部确认
 通过后才写入 `toc_tree.json`，且不得修改书签的标题、层级、页码或树结构。
 
@@ -331,7 +337,7 @@ uv run pdf2epub -c config.yaml refine-prepare --full-review
 # 工作区 Subagent 阅读完整 refine_subagent_prompt.md 并写 toc_tree.json
 ```
 
-`refine-local` 会重新核对快速路径的书签哈希、PDF 哈希、审阅页哈希、树结构和边界行号；
+`refine-local` 会重新核对快速路径的书签哈希、PDF 哈希、审阅页哈希、原生证据哈希、树结构和边界行号；
 任何过期、缺失或不一致都会阻断并要求完整审查。没有书签、没有可识别印刷目录页、不是原生
 文字 PDF 或预检标题不匹配时，快速路径自动失效，仍使用原有全页 TOC Subagent 流程。
 
