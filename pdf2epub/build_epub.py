@@ -320,6 +320,55 @@ def process_chapter_content(
     return relevel_content('\n'.join(lines), toc_level, skip_first=True)
 
 
+def add_subchapter_anchors_to_parts(
+    converter: ContentConverter,
+    rendered_parts: list[tuple[str, str]],
+    chapter_index: int,
+    subchapter_info: list[dict],
+) -> tuple[list[tuple[str, str]], dict[str, str]]:
+    """Place each child anchor in the part that actually contains its title.
+
+    A logical PDF unit may be split into multiple HTML files after Markdown
+    processing.  Searching only part 1 makes later child entries appear to
+    have missing anchors.  Searching all parts is not enough by itself: the
+    navigation href must also follow the part where the anchor was found.
+    """
+    locations: dict[str, str] = {}
+    for child_index, info in enumerate(subchapter_info, 1):
+        title = str(info.get("title") or "")
+        anchor = str(info.get("anchor") or f"toc-{chapter_index}-{child_index}")
+        found = False
+        for part_index, (filename, html_content) in enumerate(rendered_parts):
+            updated, found = converter._add_subchapter_anchor(
+                html_content,
+                title,
+                anchor,
+            )
+            if not found:
+                continue
+            rendered_parts[part_index] = (filename, updated)
+            locations[anchor.lstrip("#")] = filename
+            break
+        if not found:
+            logger.warning(
+                f"Could not locate heading for stable anchor #{anchor}: '{title}'"
+            )
+    return rendered_parts, locations
+
+
+def _embedded_subchapter_entries(entries: list[dict]) -> list[dict]:
+    """Collect descendants that share the current unit's rendered HTML."""
+    result: list[dict] = []
+    for entry in entries:
+        if entry.get('file_path') or entry.get('virtual_file_name'):
+            # A real or virtual child has its own navigation target; its
+            # descendants must be resolved while processing that child.
+            continue
+        result.append(entry)
+        result.extend(_embedded_subchapter_entries(entry.get('children', [])))
+    return result
+
+
 def _find_first_heading(lines: list[str]) -> Optional[int]:
     """Return the first Markdown heading line in a unit."""
     for index, line in enumerate(lines):
@@ -353,6 +402,36 @@ def _find_matching_heading(lines: list[str], toc_title: str) -> Optional[int]:
         if difflib.SequenceMatcher(None, normalized_title, normalized_heading).ratio() >= 0.9:
             return index
     return None
+
+
+def find_replaced_heading_lines(lines: list[str], toc_title: str) -> list[int]:
+    """Return 1-indexed line numbers of headings replaced or pruned by process_chapter_content."""
+    first_heading_idx = _find_first_heading(lines)
+    title_line_idx = _find_matching_heading(lines, toc_title)
+    if (
+        first_heading_idx is not None
+        and title_line_idx is not None
+        and title_line_idx != first_heading_idx
+    ):
+        prefix = lines[:title_line_idx]
+        if _is_structural_heading_prefix(prefix):
+            return [
+                idx + 1
+                for idx in range(title_line_idx + 1)
+                if re.match(r"^\s*#+\s+", lines[idx])
+            ]
+
+    if title_line_idx is not None:
+        target_idx = title_line_idx
+    elif first_heading_idx is not None:
+        target_idx = first_heading_idx
+    else:
+        target_idx = None
+
+    if target_idx is not None:
+        return [target_idx + 1]
+    return []
+
 
 
 def _remove_duplicate_heading(lines: list, title_line_idx: int, toc_title: str):
@@ -1044,6 +1123,7 @@ def generate_hierarchical_toc_ncx(
     output_path: Path,
     uid: Optional[str] = None,
     language: str = "en",
+    anchor_locations: Optional[Dict[str, str]] = None,
 ) -> bool:
     """
     Generate NCX TOC with unlimited hierarchy levels.
@@ -1061,6 +1141,7 @@ def generate_hierarchical_toc_ncx(
 
     uid = uid or str(uuid.uuid4())
     toc_label = localized_toc_label(language)
+    anchor_locations = anchor_locations or {}
 
     # Calculate actual depth from structure (+1 for TOC entry)
     toc_depth = calculate_tree_depth(structure) + 1
@@ -1116,15 +1197,24 @@ def generate_hierarchical_toc_ncx(
             # stable unit anchor to the actual heading below; keep the
             # navigation link pointed at that heading rather than the file
             # start.
-            if entry.get('anchor'):
-                href = f"{href.split('#', 1)[0]}#{entry['anchor']}"
+            anchor = str(entry.get('anchor') or '').lstrip('#')
+            located_file = anchor_locations.get(anchor) if anchor else None
+            if located_file:
+                href = f"text/{located_file}#{anchor}"
+            elif anchor:
+                href = f"{href.split('#', 1)[0]}#{anchor}"
         else:
             # No file, link to first child with file, or parent's file
             href = find_first_child_href(entry, parent_href)
-            if not entry.get('children') and entry.get('anchor'):
-                base_href = href.split('#', 1)[0]
-                if base_href != "text/toc.html":
-                    href = f"{base_href}#{entry['anchor']}"
+            anchor = str(entry.get('anchor') or '').lstrip('#')
+            if anchor:
+                located_file = anchor_locations.get(anchor)
+                if located_file:
+                    href = f"text/{located_file}#{anchor}"
+                elif not entry.get('children'):
+                    base_href = href.split('#', 1)[0]
+                    if base_href != "text/toc.html":
+                        href = f"{base_href}#{entry['anchor']}"
 
         nav_id = f"navpoint-{nav_counter[0]}"
         nav_counter[0] += 1
@@ -1191,7 +1281,8 @@ def generate_hierarchical_toc_html(
     structure: List[Dict],
     book_title: str,
     output_path: Path,
-    language: str = "en"
+    language: str = "en",
+    anchor_locations: Optional[Dict[str, str]] = None,
 ) -> bool:
     """
     Generate HTML TOC with unlimited hierarchy levels.
@@ -1209,6 +1300,7 @@ def generate_hierarchical_toc_html(
 
     lang_class = f"lang-{language}"
     toc_label = localized_toc_label(language)
+    anchor_locations = anchor_locations or {}
 
     toc_html = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
@@ -1246,15 +1338,24 @@ def generate_hierarchical_toc_html(
                 href = parent_href  # Use parent's file
             # See the NCX generator above: file-level targets are refined to
             # the current unit's heading whenever a stable anchor exists.
-            if entry.get('anchor'):
-                href = f"{href.split('#', 1)[0]}#{entry['anchor']}"
+            anchor = str(entry.get('anchor') or '').lstrip('#')
+            located_file = anchor_locations.get(anchor) if anchor else None
+            if located_file:
+                href = f"{located_file}#{anchor}"
+            elif anchor:
+                href = f"{href.split('#', 1)[0]}#{anchor}"
         else:
             # No file - link to first child with file, or parent's file
             href = find_first_child_href_html(entry, parent_href)
-            if not entry.get('children') and entry.get('anchor'):
-                base_href = href.split('#', 1)[0]
-                if base_href != "toc.html":
-                    href = f"{base_href}#{entry['anchor']}"
+            anchor = str(entry.get('anchor') or '').lstrip('#')
+            if anchor:
+                located_file = anchor_locations.get(anchor)
+                if located_file:
+                    href = f"{located_file}#{anchor}"
+                elif not entry.get('children'):
+                    base_href = href.split('#', 1)[0]
+                    if base_href != "toc.html":
+                        href = f"{base_href}#{entry['anchor']}"
 
         result += f"{indent}<li>\n"
         result += f"{indent}    <a href=\"{href}\">{title}</a>\n"
@@ -1500,19 +1601,10 @@ def build_epub(config: BuildEpubConfig) -> Path:
     builder.create_container_xml(epub_dir / "META-INF" / "container.xml")
     builder.create_stylesheet(epub_dir / "stylesheet.css")
 
-    # Generate hierarchical TOC
-    generate_hierarchical_toc_ncx(
-        epub_structure,
-        config.book_title,
-        epub_dir / "toc.ncx",
-        uid=builder.uid,
-        language=language,
-    )
-    generate_hierarchical_toc_html(epub_structure, config.book_title, epub_dir / "text" / "toc.html", language)
-
     # Process and convert chapters
     all_html_files = []
     generated_html = {}
+    anchor_locations: dict[str, str] = {}
 
     def process_chapters(entries: List[Dict]):
         """Recursively process all chapters with files."""
@@ -1543,6 +1635,7 @@ def build_epub(config: BuildEpubConfig) -> Path:
                 if unit_id:
                     # Process this chapter
                     part_files = entry.get('part_files', [entry['file_path']])
+                    rendered_parts: list[tuple[str, str]] = []
 
                     for part_idx, part_file in enumerate(part_files):
                         is_first_part = (part_idx == 0)
@@ -1576,45 +1669,73 @@ def build_epub(config: BuildEpubConfig) -> Path:
                         # preceding page/section.  Give the current entry a
                         # stable fragment at its actual heading so navigation
                         # lands on the semantic section start.
-                        if is_first_part and entry.get('anchor'):
-                            html_content = converter._add_subchapter_anchors(
-                                html_content,
-                                0,
-                                [{
-                                    'title': entry['title'],
-                                    'anchor': entry['anchor'],
-                                }],
-                            )
-
-                        # Add subchapter anchors for TOC navigation
-                        if is_first_part and 'children' in entry and entry['children']:
-                            # Extract chapter index from unit_id (e.g., "chapter_8" -> 8)
-                            try:
-                                from .chapter_identity import ChapterIdentity
-                                identity = ChapterIdentity.parse(unit_id)
-                                if identity and identity.index_path:
-                                    chapter_index = identity.index_path[0]
-                                    # Build subchapter_info from children
-                                    subchapter_info = [
-                                        {
-                                            'title': child['title'],
-                                            'anchor': child.get('anchor'),
-                                        }
-                                        for child in entry['children']
-                                    ]
-                                    html_content = converter._add_subchapter_anchors(
-                                        html_content, chapter_index, subchapter_info
-                                    )
-                            except Exception as e:
-                                logger.debug(f"Could not add subchapter anchors for {unit_id}: {e}")
-
                         # Determine output filename using unit_id
                         if len(part_files) > 1:
                             html_filename = f"{unit_id}_part{part_idx + 1}.html"
                         else:
                             html_filename = f"{unit_id}.html"
 
-                        # Write HTML file
+                        # Page-only TOC boundaries can leave the current
+                        # unit's heading after a short carry-over from the
+                        # preceding page/section.  Give the current entry a
+                        # stable fragment at its actual heading so navigation
+                        # lands on the semantic section start.
+                        if is_first_part and entry.get('anchor'):
+                            html_content, anchor_added = converter._add_subchapter_anchor(
+                                html_content,
+                                entry['title'],
+                                entry['anchor'],
+                            )
+                            if anchor_added:
+                                anchor_locations[
+                                    str(entry['anchor']).lstrip('#')
+                                ] = html_filename
+                            else:
+                                logger.warning(
+                                    f"Could not locate heading for stable anchor "
+                                    f"#{entry['anchor']}: '{entry['title']}'"
+                                )
+
+                        rendered_parts.append((html_filename, html_content))
+
+                    # A child without its own Markdown unit is rendered inside
+                    # this logical unit.  Locate it across every generated
+                    # part, then bind its TOC anchor to that exact HTML file.
+                    child_entries = _embedded_subchapter_entries(
+                        entry.get('children', [])
+                    )
+                    if child_entries:
+                        try:
+                            from .chapter_identity import ChapterIdentity
+
+                            identity = ChapterIdentity.parse(unit_id)
+                            chapter_index = (
+                                identity.index_path[0]
+                                if identity and identity.index_path
+                                else 0
+                            )
+                            if chapter_index:
+                                rendered_parts, child_locations = (
+                                    add_subchapter_anchors_to_parts(
+                                        converter,
+                                        rendered_parts,
+                                        chapter_index,
+                                        [
+                                            {
+                                                'title': child['title'],
+                                                'anchor': child.get('anchor'),
+                                            }
+                                            for child in child_entries
+                                        ],
+                                    )
+                                )
+                                anchor_locations.update(child_locations)
+                        except Exception as exc:
+                            logger.debug(
+                                f"Could not add subchapter anchors for {unit_id}: {exc}"
+                            )
+
+                    for html_filename, html_content in rendered_parts:
                         html_path = epub_dir / "text" / html_filename
                         with open(html_path, 'w', encoding='utf-8') as f:
                             f.write(html_content)
@@ -1647,6 +1768,25 @@ def build_epub(config: BuildEpubConfig) -> Path:
         logger.info(
             f"Applied {len(relocation_records)} page-boundary carry-over relocation(s)"
         )
+
+    # Navigation is generated after conversion so child anchors can point to
+    # the actual split part containing their heading rather than always part 1.
+    generate_hierarchical_toc_ncx(
+        epub_structure,
+        config.book_title,
+        epub_dir / "toc.ncx",
+        uid=builder.uid,
+        language=language,
+        anchor_locations=anchor_locations,
+    )
+    generate_hierarchical_toc_html(
+        epub_structure,
+        config.book_title,
+        epub_dir / "text" / "toc.html",
+        language,
+        anchor_locations=anchor_locations,
+    )
+
     footnote_report = validate_footnote_graph(generated_html)
     if auto_global and footnote_manager.definitions and footnote_report["unlinked_sup_count"]:
         raise ValueError(

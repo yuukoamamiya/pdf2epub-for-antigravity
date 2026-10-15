@@ -16,7 +16,8 @@ Antigravity 工作区 Subagent 完成，本地程序负责文件整理、校验�
 ## 能做什么
 
 - 扫描 PDF OCR：使用主 OCR 生成带页面坐标的 Markdown 和 sidecar。
-- PDF 结构整理：识别目录和章节边界，保守合并跨页续句，保留真实段落、图片、表格和公式。
+- PDF 结构整理：识别目录和章节边界，保守合并跨页续句，保留真实段落、图片、表格和公式；
+  对有充分页码与正文标题证据的 OCR 目录页码残留做可审计清洗。
 - 脚注处理：区分脚注、正文引用、参考文献和索引；把确认的脚注归并到实际章节单元末尾，
   处理“正文 → 脚注续文 → 新脚注”的跨页顺序。
 - 彩页和整页插图：识别疑似整页插页，恢复被插图打断的句子；普通插图不会自动移位，
@@ -89,7 +90,8 @@ Chandra 是当前主 OCR。原生文字 PDF 会保留版面信息；
 
 - PDF 页面结果保存在 `pages/`，双 OCR 结果保存在 `ocr_secondary/`，比较记录保存在
   `ocr_consensus.json`。
-- 目录、页面合并、脚注和插图决定分别有 manifest、prompt、decision 和 validation report，
+- 目录、页面合并、脚注和插图决定分别有 manifest、prompt、decision 和 validation report；
+  `refine-local` 还会写入 `toc_title_normalization.json`，记录目录标题页码清洗的证据，
   可以中断后从 pending 项恢复。
 - EPUB 公式采用 Unicode 优先、复杂公式使用 MathML 的方案；目前不要求安装 XeLaTeX、
   `dvisvgm` 或额外 SVG 工具链。MathML 已够用时不会引入更重的系统依赖。

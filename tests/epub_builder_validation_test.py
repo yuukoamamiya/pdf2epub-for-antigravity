@@ -6,6 +6,8 @@ from xml.etree import ElementTree as ET
 
 from pdf2epub.commands.pdf import _resolve_pdf_markdown_source
 from pdf2epub.build_epub import (
+    add_subchapter_anchors_to_parts,
+    _embedded_subchapter_entries,
     flatten_toc_tree,
     build_epub_structure,
     load_refinement_part_order,
@@ -266,6 +268,74 @@ def test_subchapter_anchor_supports_deep_headings_and_nested_markup() -> None:
     )
     assert 'id="toc-1-1"' in result
     assert '<strong>Child title</strong>' in result
+
+
+def test_subchapter_anchor_searches_later_rendered_part_and_updates_navigation(
+    tmp_path: Path,
+) -> None:
+    converter = object.__new__(ContentConverter)
+    rendered = [
+        ("chapter_1_part1.html", "<h1>Chapter</h1><p>Early body</p>"),
+        ("chapter_1_part2.html", "<h2>Late child</h2><p>Later body</p>"),
+    ]
+
+    rendered, locations = add_subchapter_anchors_to_parts(
+        converter,
+        rendered,
+        chapter_index=1,
+        subchapter_info=[{"title": "Late child", "anchor": "toc-1-2"}],
+    )
+
+    assert 'id="toc-1-2"' in rendered[1][1]
+    assert 'id="toc-1-2"' not in rendered[0][1]
+    assert locations == {"toc-1-2": "chapter_1_part2.html"}
+
+    structure = [{
+        "title": "Chapter",
+        "level": 1,
+        "unit_id": "chapter_1",
+        "file_path": tmp_path / "chapter_1.md",
+        "part_files": [
+            tmp_path / "chapter_1.part1.md",
+            tmp_path / "chapter_1.part2.md",
+        ],
+        "anchor": "toc-1",
+        "children": [{
+            "title": "Late child",
+            "level": 2,
+            "anchor": "toc-1-2",
+            "children": [{
+                "title": "Nested late child",
+                "level": 3,
+                "anchor": "toc-1-2-1",
+            }],
+        }],
+    }]
+    embedded = _embedded_subchapter_entries(structure[0]["children"])
+    assert [entry["title"] for entry in embedded] == [
+        "Late child",
+        "Nested late child",
+    ]
+    toc_path = tmp_path / "toc.html"
+    ncx_path = tmp_path / "toc.ncx"
+    assert generate_hierarchical_toc_html(
+        structure,
+        "Book",
+        toc_path,
+        anchor_locations=locations,
+    )
+    assert generate_hierarchical_toc_ncx(
+        structure,
+        "Book",
+        ncx_path,
+        anchor_locations=locations,
+    )
+    assert 'href="chapter_1_part2.html#toc-1-2"' in toc_path.read_text(
+        encoding="utf-8"
+    )
+    assert 'src="text/chapter_1_part2.html#toc-1-2"' in ncx_path.read_text(
+        encoding="utf-8"
+    )
 
 
 def test_process_chapter_content_keeps_related_subsection_heading() -> None:

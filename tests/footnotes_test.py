@@ -13,6 +13,11 @@ from pdf2epub.epub.footnotes import (
 from pdf2epub.epub.footnotes.content_index import ContentAddressIndex
 from pdf2epub.markdown_to_html import convert_markdown_to_html
 from pdf2epub.refine.footnote_stitcher import scan_boundary_footnotes
+from pdf2epub.refine.footnote_matching import (
+    find_exact_signature_spans,
+    marker_spans,
+    plain_block_text,
+)
 
 
 def _entry(unit_id: str, *part_files: Path, children=None, entry_type=None) -> dict:
@@ -319,3 +324,62 @@ def test_graph_inspection_allows_explicit_unlinked_reference() -> None:
     assert report["unlinked_sup_count"] == 1
     assert report["forward_broken_count"] == 0
     assert report["backref_broken_count"] == 0
+
+
+def test_replaced_source_heading_with_structural_prefix_suppresses_phantom_backlinks(
+    tmp_path: Path,
+) -> None:
+    body = tmp_path / "chapter_1.part1.md"
+    notes = tmp_path / "chapter_1.part2.md"
+    body.write_text(
+        "## Part I\n\n"
+        "# Raw Title [^1]\n\n"
+        "Body prose.\n",
+        encoding="utf-8",
+    )
+    notes.write_text(
+        "[^1]: Heading note definition.\n",
+        encoding="utf-8",
+    )
+    structure = [
+        {
+            **_entry("chapter_1", body, notes),
+            "title": "Raw Title",
+            "level": 1,
+        }
+    ]
+
+    manager = FootnoteManager(tmp_path, epub_structure=structure)
+    report = validate_footnote_graph(_render(structure, manager))
+
+    assert report["forward_hrefs"] == 0
+    assert report["backref_hrefs"] == 0
+    assert report["forward_broken_count"] == 0
+    assert report["backref_broken_count"] == 0
+    assert report["unlinked_sup_count"] == 0
+
+
+def test_footnote_matching_preserves_markdown_autolinks() -> None:
+    source = "注释包含 <https://example.com/a> 后续文字。"
+    assert plain_block_text({"html": source}) == source.replace("<", "", 1).replace(
+        ">", "", 1
+    )
+    assert find_exact_signature_spans(source, "注释包含 https://example.com/a 后续文字。") == [
+        (0, len(source))
+    ]
+
+
+def test_footnote_signature_allows_cjk_neighbors_without_relaxing_latin_boundaries() -> None:
+    source = "这是脚注文本继续正文"
+    spans = find_exact_signature_spans(source, "脚注文本")
+
+    assert len(spans) == 1
+    start, end = spans[0]
+    assert source[start:end] == "脚注文本"
+
+
+def test_circled_superscript_is_one_marker_even_with_html_attributes() -> None:
+    source = '正文<sup class="footnote-ref">①</sup>继续。'
+    spans = marker_spans(source, "1")
+    assert len(spans) == 1
+    assert spans[0][2] == "sup"

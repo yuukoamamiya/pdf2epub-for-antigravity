@@ -534,6 +534,15 @@ def apply_footnote_normalization(
             for earlier_record in reversed(sibling_records):
                 earlier_source = source_texts[earlier_record["name"]]
                 earlier_spans = _marker_spans(earlier_source, note["key"])
+                claimed_spans = {
+                    (start, end)
+                    for start, end, _ in edits_by_file.get(earlier_record["name"], [])
+                }
+                earlier_spans = [
+                    span
+                    for span in earlier_spans
+                    if (span[0], span[1]) not in claimed_spans
+                ]
                 if earlier_spans:
                     cross_part_candidates.extend(
                         (earlier_record["name"], span) for span in earlier_spans

@@ -439,6 +439,9 @@ pipeline: epub_conversion
 - 校验页码范围、层级、父子包含关系和兄弟节点重叠；
 - 用本地 tokenizer 估算单元大小；
 - 用 `PageMerger` 合并页面并生成 `ocr_markdown/`；
+- 从当前 `pages/` 生成 `pagination_map.json`；对于 TOC 标题末尾的阿拉伯数字，只有在
+  节点物理起始页同时出现相同印刷页码和去掉该数字后的正文标题时才自动清洗。原始/规范化
+  哈希、修改项、保留候选和证据写入 `toc_title_normalization.json`，证据不足不会改写标题；
 - 处理页内章节边界：`toc_tree.json` 中的 `boundary_info.start_line` 使用对应
   `page_XXX.md` 的 1-based 行号，`end_line` 是不包含该行的结束位置。若新章节从
   下一页的中部开始，上一章节会自动拥有该页标题之前的前缀；若父章节标题和首个

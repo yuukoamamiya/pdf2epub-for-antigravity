@@ -112,6 +112,9 @@ PDF 精修的核心领域模块如下：
   `ocr-consensus-rebuild`，在已有两套 OCR 产物完整时离线重算共识而不重新调用后端。
 - `refine/illustration_prepare.py`：只做整页插图候选筛选、局部审阅交接、决定校验和哈希绑定；
   不自行判断普通插图是否应该移动。
+- `refine/toc_sanitization.py`：只在当前物理起始页同时提供匹配的印刷页码和去掉该数字后的
+  正文标题时清洗 TOC 末尾页码；所有候选、证据和源/目标哈希写入
+  `toc_title_normalization.json`，证据不足时保留原题名。
 - `refine/page_merger.py`：消费已验证的整页插图绑定，恢复“前页半句 → 插图页 → 后页续句”，
   并把图片及说明放回连续正文之后；普通页面边界也会在前后均为未结束的正文块时保守拼接，
   不把完整句子、标题、列表、脚注、图片或表格误合并。原生文字 PDF 还会根据 page-point
@@ -336,6 +339,7 @@ illustration-prepare + 工作区 Subagent（只复核疑似整页插图页）
   → illustration_candidate_report.json → illustration-validate → illustration-apply
   → illustration_bindings.json
 refine-local
+  → pagination_map.json + toc_title_normalization.json
   → ocr_markdown/ + tree_progress.json
 footnote-prepare +（必要时）工作区 Subagent
   → footnote_candidates.json → footnote-validate → footnote-apply

@@ -721,32 +721,67 @@ class ContentConverter:
             return re.sub(r"\s+", " ", value).strip().lower()
 
         for _j, sub_title, anchor_id in subchapters:
-            target_title = visible_heading(sub_title)
-            anchor_added = False
-            for match in heading_pattern.finditer(html_content):
-                heading_text = visible_heading(match.group(3))
-                similarity = difflib.SequenceMatcher(
-                    None, target_title, heading_text
-                ).ratio()
-                if target_title != heading_text and similarity <= 0.8:
-                    continue
-                tag, attrs, inner = match.group(1), match.group(2), match.group(3)
-                attrs = re.sub(
-                    r"\s+id=\"[^\"]*\"", "", attrs, flags=re.IGNORECASE
-                )
-                replacement = f'<{tag} id="{anchor_id}"{attrs}>{inner}</{tag}>'
-                html_content = (
-                    html_content[:match.start()]
-                    + replacement
-                    + html_content[match.end():]
-                )
-                anchor_added = True
-                logger.debug(f"Added stable anchor #{anchor_id} to '{sub_title}'")
-                break
-
+            html_content, anchor_added = self._add_subchapter_anchor(
+                html_content,
+                sub_title,
+                anchor_id,
+                heading_pattern=heading_pattern,
+                visible_heading=visible_heading,
+            )
             if not anchor_added:
                 logger.warning(
                     f"Could not locate heading for stable anchor #{anchor_id}: '{sub_title}'"
                 )
 
         return html_content
+
+    def _add_subchapter_anchor(
+        self,
+        html_content: str,
+        sub_title: str,
+        anchor_id: str,
+        *,
+        heading_pattern: Optional[re.Pattern] = None,
+        visible_heading=None,
+    ) -> Tuple[str, bool]:
+        """Add one stable anchor and report whether a matching block was found.
+
+        The build pipeline uses this one-at-a-time form when a logical unit is
+        split over several physical HTML parts.  A caller can therefore stop
+        after the first matching part instead of asking every part to locate
+        every child and emitting false missing-heading warnings.
+        """
+        import html as html_module
+
+        if heading_pattern is None:
+            heading_pattern = re.compile(
+                r'<(h[1-6]|p)([^>]*)>(.*?)</\1>',
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+        if visible_heading is None:
+            def visible_heading(value: str) -> str:
+                value = re.sub(r"<[^>]+>", "", value)
+                value = html_module.unescape(value)
+                return re.sub(r"\s+", " ", value).strip().lower()
+
+        target_title = visible_heading(sub_title)
+        for match in heading_pattern.finditer(html_content):
+            heading_text = visible_heading(match.group(3))
+            similarity = difflib.SequenceMatcher(
+                None, target_title, heading_text
+            ).ratio()
+            if target_title != heading_text and similarity <= 0.8:
+                continue
+            tag, attrs, inner = match.group(1), match.group(2), match.group(3)
+            attrs = re.sub(
+                r"\s+id=\"[^\"]*\"", "", attrs, flags=re.IGNORECASE
+            )
+            replacement = f'<{tag} id="{anchor_id}"{attrs}>{inner}</{tag}>'
+            updated = (
+                html_content[:match.start()]
+                + replacement
+                + html_content[match.end():]
+            )
+            logger.debug(f"Added stable anchor #{anchor_id} to '{sub_title}'")
+            return updated, True
+        return html_content, False

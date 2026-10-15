@@ -19,7 +19,19 @@ from ..workflow_contracts import sha256_file
 
 _MARKDOWN_REF_RE = re.compile(r"\[\^(?P<key>[A-Za-z0-9_-]+)\]")
 _HTML_SUP_RE_TEMPLATE = r"<sup\b[^>]*>\s*{key}\s*</sup>"
+_HTML_SUP_BLOCK_RE = re.compile(
+    r"<sup\b[^>]*>.*?</sup>", re.IGNORECASE | re.DOTALL
+)
+_AUTO_LINK_RE = re.compile(
+    r"<(?P<url>(?:https?://|mailto:)[^>\n]+)>", re.IGNORECASE
+)
 _SUPERSCRIPT_DIGITS = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789")
+_CIRCLED_DIGITS_MAP = {
+    "1": "①", "2": "②", "3": "③", "4": "④", "5": "⑤",
+    "6": "⑥", "7": "⑦", "8": "⑧", "9": "⑨", "10": "⑩",
+    "11": "⑪", "12": "⑫", "13": "⑬", "14": "⑭", "15": "⑮",
+    "16": "⑯", "17": "⑰", "18": "⑱", "19": "⑲", "20": "⑳",
+}
 
 
 def plain_block_text(block: Mapping[str, Any]) -> str:
@@ -28,6 +40,7 @@ def plain_block_text(block: Mapping[str, Any]) -> str:
     if value is None:
         value = block.get("html", "")
     value = html.unescape(str(value or ""))
+    value = _AUTO_LINK_RE.sub(r"\g<url>", value)
     value = re.sub(r"<[^>]+>", " ", value)
     return re.sub(r"\s+", " ", value).strip()
 
@@ -55,15 +68,52 @@ def signature_with_map(value: str) -> tuple[str, list[int]]:
                     chars.append(" ")
                     positions.append(max(key_start + len(key), index - 1))
                 continue
+        if char == "[":
+            link_match = re.match(r"^\[([^\]\n]+)\]\(([^)\n]+)\)", value[index:])
+            if link_match:
+                anchor = link_match.group(1)
+                anchor_start = index + 1
+                for offset, c in enumerate(anchor):
+                    if c in "*_~`$":
+                        continue
+                    if c.isspace():
+                        if chars and chars[-1] != " ":
+                            chars.append(" ")
+                            positions.append(anchor_start + offset)
+                    else:
+                        chars.append(c)
+                        positions.append(anchor_start + offset)
+                index += len(link_match.group(0))
+                continue
         if char == "\\" and index + 1 < len(value):
             if value[index + 1] in string.punctuation:
                 index += 1
                 continue
         if char == "<":
+            auto_link_match = _AUTO_LINK_RE.match(value, index)
+            if auto_link_match:
+                url = auto_link_match.group("url")
+                url_start = auto_link_match.start("url")
+                chars.extend(url)
+                positions.extend(
+                    range(url_start, url_start + len(url))
+                )
+                index = auto_link_match.end()
+                continue
+            if re.match(r"^<https?://", value[index:]):
+                index += 1
+                continue
+            tag_match = re.match(r"^</?[A-Za-z][\w:-]*\b[^>]*>", value[index:])
+            if tag_match:
+                index += len(tag_match.group(0))
+                continue
             close = value.find(">", index + 1)
             if close >= 0:
                 index = close + 1
                 continue
+        if char == ">" and index > 0 and value[index - 1] not in " \n":
+            index += 1
+            continue
         if char in "*_~`$":
             index += 1
             continue
@@ -95,9 +145,23 @@ def _expand_markdown_definition_prefix(
     return start, end
 
 
+def _is_cjk(ch: str) -> bool:
+    return ("\u4e00" <= ch <= "\u9fff") or ("\u3040" <= ch <= "\u30ff")
+
+
 def _is_signature_boundary(text: str, start: int, end: int) -> bool:
-    left_ok = (start == 0) or (not text[start - 1].isalnum())
-    right_ok = (end >= len(text)) or (not text[end].isalnum())
+    left_ok = (
+        (start == 0)
+        or (not text[start - 1].isalnum())
+        or _is_cjk(text[start - 1])
+        or (start < len(text) and _is_cjk(text[start]))
+    )
+    right_ok = (
+        (end >= len(text))
+        or (not text[end].isalnum())
+        or _is_cjk(text[end])
+        or (end > 0 and _is_cjk(text[end - 1]))
+    )
     return left_ok and right_ok
 
 
@@ -348,19 +412,52 @@ def load_sidecar_block(
 def marker_spans(source: str, key: str) -> list[tuple[int, int, str]]:
     escaped = re.escape(str(key))
     spans: list[tuple[int, int, str]] = []
+    html_sup_ranges = [
+        (match.start(), match.end())
+        for match in _HTML_SUP_BLOCK_RE.finditer(source)
+    ]
+
+    def append_span(start: int, end: int, kind: str) -> None:
+        # One visible marker must produce one candidate.  In particular, a
+        # circled digit inside ``<sup class=...>`` is also found by the raw
+        # circled-digit scan; retaining both spans makes cross-part matching
+        # look ambiguous even though the source contains one marker.
+        if any(existing_start == start and existing_end == end for existing_start, existing_end, _ in spans):
+            return
+        spans.append((start, end, kind))
+
+    def is_inside_html_sup(index: int) -> bool:
+        return any(start <= index < end for start, end in html_sup_ranges)
+
     for match in re.finditer(
         _HTML_SUP_RE_TEMPLATE.format(key=escaped),
         source,
         flags=re.IGNORECASE,
     ):
-        spans.append((match.start(), match.end(), "sup"))
+        append_span(match.start(), match.end(), "sup")
     for match in _MARKDOWN_REF_RE.finditer(source):
         if match.group("key") == str(key):
-            spans.append((match.start(), match.end(), "markdown"))
+            append_span(match.start(), match.end(), "markdown")
     superscript = str(key).translate(_SUPERSCRIPT_DIGITS)
     if superscript != str(key):
         for match in re.finditer(re.escape(superscript), source):
-            spans.append((match.start(), match.end(), "unicode_sup"))
+            if not is_inside_html_sup(match.start()):
+                append_span(match.start(), match.end(), "unicode_sup")
+    if str(key) in _CIRCLED_DIGITS_MAP:
+        circled = _CIRCLED_DIGITS_MAP[str(key)]
+        for match in re.finditer(
+            _HTML_SUP_RE_TEMPLATE.format(key=re.escape(circled)),
+            source,
+            flags=re.IGNORECASE,
+        ):
+            append_span(match.start(), match.end(), "sup")
+        for match in re.finditer(re.escape(circled), source):
+            idx = match.start()
+            if idx == 0 or source[idx - 1] == "\n":
+                continue
+            if is_inside_html_sup(idx):
+                continue
+            append_span(match.start(), match.end(), "unicode_circled")
     return sorted(spans)
 
 

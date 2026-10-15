@@ -16,6 +16,8 @@ from ..workflow_contracts import atomic_write_json
 from .toc_tree import TOCNode, dict_list_to_toc_tree
 from .page_merger import PageMerger
 from .subagent_workflow import page_numbers, validate_toc_tree_data
+from .pagination import build_pagination_map
+from .toc_sanitization import sanitize_toc_titles
 from .unit_splitter import split_markdown_unit
 from .footnote_stitcher import scan_boundary_footnotes
 from .illustration_prepare import load_current_illustration_pages
@@ -208,6 +210,47 @@ class RefinedBreakdown:
         if errors:
             raise ValueError("Invalid subagent TOC: " + "; ".join(errors[:10]))
 
+        # The Subagent's TOC can inherit a right-aligned printed page number
+        # from the scan (for example, ``Chapter title 197``).  Regenerate the
+        # local page-label evidence from the current OCR pages, then remove a
+        # suffix only when that physical page also contains the title without
+        # the suffix.  The report and TOC hash make this deterministic change
+        # visible to resume/checkpoint logic.
+        pagination_map_path = output_dir / "pagination_map.json"
+        build_pagination_map(pages_dir, pagination_map_path)
+        original_toc_bytes = toc_tree_file.read_bytes()
+        normalized_toc_data, normalization_report = sanitize_toc_titles(
+            toc_data,
+            pages_dir,
+            pagination_map_path,
+        )
+        normalized_errors = validate_toc_tree_data(
+            normalized_toc_data,
+            max(available),
+            available,
+        )
+        if normalized_errors:
+            raise ValueError(
+                "Invalid normalized TOC: " + "; ".join(normalized_errors[:10])
+            )
+        if normalization_report["changed_count"]:
+            atomic_write_json(toc_tree_file, normalized_toc_data)
+        toc_data = normalized_toc_data
+        normalization_report.update(
+            {
+                "toc_path": str(toc_tree_file),
+                "pagination_map_path": str(pagination_map_path),
+                "source_toc_sha256": hashlib.sha256(original_toc_bytes).hexdigest(),
+                "normalized_toc_sha256": hashlib.sha256(
+                    toc_tree_file.read_bytes()
+                ).hexdigest(),
+            }
+        )
+        atomic_write_json(
+            output_dir / "toc_title_normalization.json",
+            normalization_report,
+        )
+
         illustration_pages = load_current_illustration_pages(
             output_dir,
             config=self.config,
@@ -361,13 +404,14 @@ class RefinedBreakdown:
         # (allowing heading-only/page-furniture gaps), use leaf units so every
         # TOC leaf has a real file and EPUB navigation does not point at a
         # non-existent chapter_N.M file.
+        children_cover_parent = self._children_cover_parent(node, pages_dir)
+        if not children_cover_parent:
+            # Preserve parent-only introductory material in one file.
+            return [self._create_unit(node, index_path, include_children=True)]
+
         total_children_tokens = sum(child.estimated_tokens for child in node.children)
 
         if total_children_tokens <= self.max_tokens:
-            children_cover_parent = self._children_cover_parent(node, pages_dir)
-            if not children_cover_parent:
-                # Preserve parent-only introductory material in one file.
-                return [self._create_unit(node, index_path, include_children=True)]
             units = []
             for child_idx, child in enumerate(node.children):
                 child_start_line = self._parent_preamble_start_line(node, child, child_idx)

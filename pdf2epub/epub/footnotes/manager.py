@@ -411,13 +411,14 @@ class FootnoteManager:
                     except OSError:
                         lines = []
 
-                    for line_idx, line in enumerate(lines[:3], 1):
-                        if line.strip().startswith('#'):
-                            raw_keys = set(re.findall(r'\[\^(\w+)\](?!:)', line))
-                            title_keys = set(re.findall(r'\[\^(\w+)\](?!:)', entry.get('title', '')))
-                            for key in raw_keys - title_keys:
-                                suppressed_positions.add((first_part.stem, line_idx, key))
-                            break
+                    from pdf2epub.build_epub import find_replaced_heading_lines
+
+                    for line_idx in find_replaced_heading_lines(lines, entry.get('title', '')):
+                        line = lines[line_idx - 1]
+                        raw_keys = set(re.findall(r'\[\^(\w+)\](?!:)', line))
+                        title_keys = set(re.findall(r'\[\^(\w+)\](?!:)', entry.get('title', '')))
+                        for key in raw_keys - title_keys:
+                            suppressed_positions.add((first_part.stem, line_idx, key))
 
                 walk(entry.get('children', []))
 

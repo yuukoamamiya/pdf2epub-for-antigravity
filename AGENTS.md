@@ -406,7 +406,10 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
    `page_XXX.md` 的 1-based 行号，其中 `start_line` 包含该行、`end_line` 不包含该行。
    新章节从页面中部开始时，上一单元保留同页标题前的前缀；父标题和首个子标题同页时，
    两者都必须提供 `start_line`，本地步骤把父标题/导语放入首个子章节单元。
-   `tree_progress.json` 会锁定 TOC/OCR 指纹；输入变化后必须重新生成受影响单元。
+   `refine-local` 还会从当前页面生成 `pagination_map.json`，并以页码候选加起始页正文标题
+   的双重证据保守清洗 TOC 末尾页码；所有修改、未修改候选和源/目标哈希写入
+   `toc_title_normalization.json`，证据不足时保持原题名。`tree_progress.json` 会锁定规范化后的
+   TOC/OCR 指纹；输入变化后必须重新生成受影响单元。
    对原生文字 PDF，`refine-local` 还会读取当前页的 PDF 坐标 sidecar，在不改写原始
    `pages/` 的前提下确定性移除页边 5% 内的 DOI/孤立页码，以及跨页重复的短页眉页脚；
    唯一正文或书目 DOI 不因单次出现而删除。
