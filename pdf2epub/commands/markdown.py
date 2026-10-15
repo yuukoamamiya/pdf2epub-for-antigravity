@@ -13,7 +13,7 @@ from typing import Any, Dict, Mapping
 
 from loguru import logger
 
-from pdf2epub.commands.entities import _entity_context_is_current
+from pdf2epub.entity_context import entity_context_is_current
 from pdf2epub.commands.runtime import load_book_context
 from pdf2epub.commands.sources import (
     _polished_stage_is_current,
@@ -1140,7 +1140,7 @@ def _run_readiness_check(
         entity_ready = (
             False
             if not footnote_status.get("current")
-            else _entity_context_is_current(
+            else entity_context_is_current(
                 output_dir,
                 source_dir,
                 policy.source_language,

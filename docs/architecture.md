@@ -49,6 +49,7 @@ Subagent 合同层
 ├── markdown_subagent_validation.py  Markdown 输出校验和 validated staging
 ├── markdown_validation.py           结构、脚注、双语和特殊标记规则
 ├── document_roles.py                特殊单元角色和参考文献识别
+├── entity_context.py               书内实体术语交接和新鲜度合同
 ├── page_furniture_rules.py          页眉、页脚、页码候选的纯规则
 ├── pdf_unit_roles.py                PDF 精修单元角色的只读投影
 ├── toc_translation_workflow.py      PDF TOC handoff、合并和校验
@@ -207,6 +208,9 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
   反向依赖具体修复工作流。
 - `document_roles.py`：集中维护特殊翻译角色、参考文献/前置内容识别、目标语言密度豁免和
   文件名角色回退规则。它只处理文本与文件名事实，不读取工作流状态，也不执行写入。
+- `entity_context.py`：集中维护 PDF/EPUB 共用的书内实体源文件选择、Subagent 交接和源哈希
+  新鲜度检查。`commands.entities` 只负责命令参数和 PDF 前置条件，HTML、Markdown 与诊断模块
+  直接依赖该格式无关服务，不再跨 command 导入私有 helper。
 - `page_furniture_rules.py`：提供无副作用的页眉、页脚、页码和出版信息候选识别；候选只是
   交给 Subagent 复核的提示，绝不在规则层删除正文。`page_furniture_repair.py` 只负责编排、
   快照和校验，并保留旧的 `_candidate_for_line` 兼容别名。

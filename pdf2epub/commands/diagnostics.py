@@ -161,12 +161,12 @@ def _current_polish(output_dir: Path, config: Mapping[str, Any]) -> bool:
 
 def _current_entities(output_dir: Path, config: Mapping[str, Any]) -> bool:
     try:
-        from pdf2epub.commands.entities import _entity_context_is_current
+        from pdf2epub.entity_context import entity_context_is_current
         from pdf2epub.commands.sources import _resolve_pdf_markdown_source
 
         source_dir, _ = _resolve_pdf_markdown_source(output_dir, dict(config))
         report = _read_json(output_dir / "translation_entities_validation.json")
-        return report.get("valid") is True and _entity_context_is_current(
+        return report.get("valid") is True and entity_context_is_current(
             output_dir,
             source_dir,
             (config.get("translation") or {}).get("source_language", "English"),

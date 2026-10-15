@@ -10,9 +10,9 @@ from pathlib import Path, PurePosixPath
 
 from loguru import logger
 
-from pdf2epub.commands.entities import (
-    _entity_context_is_current,
-    _prepare_entity_subagent_task,
+from pdf2epub.entity_context import (
+    entity_context_is_current,
+    prepare_entity_subagent_task,
 )
 from pdf2epub.utils.common import book_output_dir, load_config, resolve_book_input_path
 from pdf2epub.utils.logging_config import configure_logging
@@ -173,7 +173,7 @@ def _prepare_html_command(args):
         translation_config = config.get("translation", {}) or {}
         require_entities = translation_config.get("require_entities", True)
         entity_path = output_dir / "translation_entities.json"
-        entity_ready = _entity_context_is_current(
+        entity_ready = entity_context_is_current(
             output_dir,
             output_dir / "compressed_units",
             source_language,
@@ -206,7 +206,7 @@ def _prepare_html_command(args):
         # the body and metadata translation contracts.
         if not skip_entities and require_entities:
             try:
-                _prepare_entity_subagent_task(
+                prepare_entity_subagent_task(
                     output_dir,
                     book_title or pipeline.book_title,
                     output_dir / "compressed_units",
@@ -218,7 +218,7 @@ def _prepare_html_command(args):
             except Exception as exc:
                 logger.error(f"Could not prepare EPUB entity task: {exc}")
                 return 1
-            entity_ready = _entity_context_is_current(
+            entity_ready = entity_context_is_current(
                 output_dir,
                 output_dir / "compressed_units",
                 source_language,
