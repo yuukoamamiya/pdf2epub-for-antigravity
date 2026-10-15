@@ -592,9 +592,18 @@ def test_bottom_geometry_requires_a_minimum_intersection_ratio(tmp_path: Path):
         [_block("36 Only a sliver enters the bottom band", 0, y0=600)],
     )
 
-    report = prepare_footnote_candidates(tmp_path)
+    report = prepare_footnote_candidates(
+        tmp_path,
+        bottom_ratio=0.64,
+        bottom_intersection_ratio=0.25,
+    )
 
-    assert report["pages"] == []
+    # The configured band is only a shortlist hint.  A block at this page's
+    # own content tail remains reviewable even when it barely intersects the
+    # configured band; it is never locally accepted from geometry alone.
+    candidate = report["pages"][0]["candidates"][0]
+    assert candidate["bottom_geometry"] == "page_tail_profile"
+    assert candidate["confidence"] == "review"
     assert report["bottom_intersection_ratio"] == 0.25
 
 
@@ -625,7 +634,8 @@ def test_consecutive_numeric_region_backtracks_to_adjacent_unnumbered_blocks(
     assert report["soft_continuation_context_count"] == 1
     assert page["continuous_numeric_regions"][0]["keys"] == ["18", "19", "20", "21"]
     assert page["continuous_numeric_regions"][0]["backtracked_block_indices"] == [1]
-    assert all(item["confidence"] == "high" for item in page["candidates"])
+    assert all(item["confidence"] == "review" for item in page["candidates"])
+    assert page["footnote_regions"][0]["disposition"] == "visual_audit_required"
 
 
 def test_labeled_numeric_region_does_not_backtrack_adjacent_body_text(
@@ -947,9 +957,15 @@ def test_ocr_bottom_geometry_uses_block_lower_edge(tmp_path: Path):
         [_block("36 Above the bottom threshold", 0, y0=580)],
     )
 
-    report = prepare_footnote_candidates(tmp_path)
+    report = prepare_footnote_candidates(
+        tmp_path,
+        bottom_ratio=0.64,
+        bottom_intersection_ratio=0.25,
+    )
 
-    assert report["pages"] == []
+    candidate = report["pages"][0]["candidates"][0]
+    assert candidate["bottom_geometry"] == "page_tail_profile"
+    assert candidate["confidence"] == "review"
 
 
 def test_unmarked_footnote_continuation_is_retained_for_review(tmp_path: Path):
@@ -967,7 +983,7 @@ def test_unmarked_footnote_continuation_is_retained_for_review(tmp_path: Path):
     assert candidate["disposition"] == "review_required"
 
 
-def test_clear_numeric_page_region_is_accepted_without_subagent_review(tmp_path: Path):
+def test_unlabelled_numeric_page_region_requires_independent_evidence(tmp_path: Path):
     _write_sidecar(
         tmp_path,
         1,
@@ -982,13 +998,65 @@ def test_clear_numeric_page_region_is_accepted_without_subagent_review(tmp_path:
     report = prepare_footnote_candidates(tmp_path)
 
     page = report["pages"][0]
-    assert page["footnote_regions"][0]["disposition"] == "local_footnote_region"
-    assert all(item["confidence"] == "high" for item in page["candidates"])
-    assert report["visual_audit_task_count"] == 0
+    assert page["footnote_regions"][0]["disposition"] == "visual_audit_required"
+    assert all(item["confidence"] == "review" for item in page["candidates"])
+    assert report["visual_audit_task_count"] == 1
     manifest = json.loads(
         (tmp_path / "footnote_visual_audit_manifest.json").read_text(encoding="utf-8")
     )
-    assert manifest["status"] == "no_audit_required"
+    assert manifest["status"] == "pending_review"
+
+
+def test_unlabelled_numeric_tail_with_same_page_markers_can_be_accepted(
+    tmp_path: Path,
+):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [
+            _block("Body <sup>18</sup> <sup>19</sup> <sup>20</sup>", 0, y0=100),
+            _block("18 First note", 1, y0=700),
+            _block("19 Second note", 2, y0=760),
+            _block("20 Third note", 3, y0=820),
+        ],
+    )
+    (tmp_path / "pages" / "page_001.md").write_text(
+        "Body <sup>18</sup> <sup>19</sup> <sup>20</sup>\n\n"
+        "18 First note\n\n19 Second note\n\n20 Third note\n",
+        encoding="utf-8",
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    page = report["pages"][0]
+    assert page["footnote_regions"][0]["disposition"] == "local_footnote_region"
+    assert all(item["same_page_marker"] for item in page["candidates"])
+    assert page["footnote_regions"][0]["local_acceptance_evidence"] == [
+        "same_page_markers_and_detached_tail"
+    ]
+    assert report["visual_audit_task_count"] == 0
+
+
+def test_body_flow_below_numeric_region_forces_review_of_entire_region(
+    tmp_path: Path,
+):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [
+            _block("1 Materiality of production", 0, label="Footnote", y0=700),
+            _block("2 It is mandatory", 1, label="Footnote", y0=760),
+            _block("Ordinary policy prose continues to the page tail.", 2, y0=850),
+        ],
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    page = report["pages"][0]
+    assert all(item["confidence"] == "review" for item in page["candidates"])
+    assert page["footnote_regions"][0]["disposition"] == "visual_audit_required"
+    assert "ordinary_text_below_numeric_block" in page["footnote_regions"][0]["reasons"]
+    assert report["visual_audit_task_count"] == 1
 
 
 def test_region_boundary_creates_one_visual_audit_task(tmp_path: Path):
@@ -1032,9 +1100,11 @@ def test_geometry_recall_miss_becomes_an_audit_candidate(tmp_path: Path):
     )
 
     page = report["pages"][0]
-    assert page["candidates"] == []
-    assert [item["block"] for item in page["audit_candidates"]] == [0]
-    assert report["suspected_missed_count"] == 1
+    assert [item["block"] for item in page["candidates"]] == [0]
+    assert page["candidates"][0]["relative_tail"] is True
+    assert page["candidates"][0]["confidence"] == "review"
+    assert page["audit_candidates"] == []
+    assert report["suspected_missed_count"] == 0
     assert report["visual_audit_task_count"] == 1
 
 
@@ -1055,8 +1125,8 @@ def test_hegel_page_regression_sidecars_keep_bottom_numeric_notes_and_drop_heade
     candidate_blocks = [item["block"] for item in page["candidates"]]
     expected_candidates = {
         33: [6],
-        36: [5, 6, 7],
-        41: [4],
+        36: [4, 5, 6, 7],
+        41: [3, 4],
         58: [4],
     }
     assert candidate_blocks == expected_candidates[page_number]

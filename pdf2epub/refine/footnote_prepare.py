@@ -17,6 +17,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from statistics import median
 from typing import Any, Iterable, Mapping, Optional
 
 from ..workflow_contracts import atomic_write_text, sha256_file
@@ -31,8 +32,11 @@ from .pdf_evidence import (
     require_current_consensus,
 )
 FOOTNOTE_PREPARE_SCHEMA_VERSION = 1
-DEFAULT_BOTTOM_RATIO = 0.64
-DEFAULT_BOTTOM_INTERSECTION_RATIO = 0.25
+# Compatibility recall floors for the candidate shortlist.  They are not
+# classification thresholds: page-relative tail evidence can admit a block
+# above this band, and no block is locally accepted from these values alone.
+DEFAULT_BOTTOM_RATIO = 0.50
+DEFAULT_BOTTOM_INTERSECTION_RATIO = 0.08
 DEFAULT_CONTINUOUS_REGION_BACKTRACK_RATIO = 0.16
 DEFAULT_CONTINUOUS_REGION_MAX_GAP = 0.045
 DEFAULT_CONTEXT_BLOCKS = 2
@@ -41,6 +45,8 @@ DEFAULT_NATIVE_MAX_FONT_RATIO = 0.88
 DEFAULT_REGION_MAX_GAP = 0.035
 DEFAULT_REGION_BOUNDARY_MARGIN = 0.12
 DEFAULT_RECALL_AUDIT_EDGE_MARGIN = 0.04
+DEFAULT_LAYOUT_GAP_FACTOR = 2.0
+DEFAULT_LAYOUT_TAIL_FACTOR = 1.5
 DEFAULT_CONTINUATION_HIGH_SCORE = 9
 DEFAULT_CONTINUATION_MEDIUM_SCORE = 5
 DEFAULT_SEMANTIC_MIN_SIMILARITY = 0.08
@@ -186,8 +192,8 @@ def resolve_footnote_options(
         resolved_bottom_ratio = float(resolved_bottom_ratio)
     except (TypeError, ValueError):
         resolved_bottom_ratio = DEFAULT_BOTTOM_RATIO
-    if not 0.5 <= resolved_bottom_ratio < 1.0:
-        raise ValueError("bottom_ratio must be between 0.5 and 1.0")
+    if not 0.0 <= resolved_bottom_ratio < 1.0:
+        raise ValueError("bottom_ratio must be between 0 and 1")
 
     resolved_bottom_intersection_ratio = (
         bottom_intersection_ratio
@@ -254,6 +260,8 @@ def _candidate_for_block(
     force_review: bool = False,
     source: str = "primary",
     region_evidence: bool = False,
+    page_markdown: str = "",
+    layout_profile: Optional[Mapping[str, Any]] = None,
 ) -> Optional[dict[str, Any]]:
     text = _text_from_block(block)
     if not text:
@@ -270,6 +278,18 @@ def _candidate_for_block(
     )
     is_bottom = bool(geometry["is_bottom"])
     key = _leading_footnote_key(text)
+    layout_profile = (
+        dict(layout_profile)
+        if isinstance(layout_profile, Mapping)
+        else _page_layout_profile(sidecar)
+    )
+    content_bottom = layout_profile.get("content_bottom")
+    tail_tolerance = float(layout_profile.get("tail_tolerance") or 0.0)
+    relative_tail = bool(
+        bbox
+        and content_bottom is not None
+        and float(bbox[3]) >= float(content_bottom) - tail_tolerance
+    )
 
     # A candidate must have either an explicit OCR footnote label or a strong
     # bottom-of-page + numbered-start signal.  Ordinary low page text is not
@@ -290,7 +310,10 @@ def _candidate_for_block(
     # The label is semantic evidence only.  It cannot make a block outside the
     # page-bottom geometry a candidate.  A continuous numbered region may
     # extend the review window upward, but that path is always review-only.
-    if not (is_bottom or region_evidence):
+    # The configured band is a recall floor, not the only route into review.
+    # A block at the tail of this page's own content distribution is also a
+    # candidate, even if unusual margins put it above the configured band.
+    if not (is_bottom or relative_tail or region_evidence):
         return None
     if not (label_is_footnote or key or region_evidence):
         return None
@@ -313,17 +336,298 @@ def _candidate_for_block(
         "bottom_edge": geometry["bottom_edge"],
         "bottom_intersection_ratio": geometry["intersection_ratio"],
         "bottom_geometry": "page_bottom" if is_bottom else (
-            "continuous_region" if region_evidence else "none"
+            "continuous_region"
+            if region_evidence
+            else "page_tail_profile"
+            if relative_tail
+            else "none"
         ),
+        "relative_tail": relative_tail,
+        "page_tail_tolerance": round(tail_tolerance, 6),
         "confidence": confidence,
         "disposition": disposition,
         "text": text[:240],
     }
+    if key and page_markdown:
+        candidate["same_page_marker"] = _marker_before_block(
+            page_markdown,
+            sidecar,
+            block_index,
+            text,
+            key=str(key),
+        )
+    body_flow_warning = _body_flow_warning(
+        sidecar,
+        block_index,
+        bbox,
+        layout_profile=layout_profile,
+    )
+    if body_flow_warning:
+        candidate["body_flow_warning"] = body_flow_warning
+        candidate["confidence"] = "review"
+        candidate["disposition"] = "review_required"
+        candidate["review_reason"] = body_flow_warning
     if force_review:
-        candidate["review_reason"] = "ocr_consensus_visual_review"
+        candidate.setdefault("review_reason", "ocr_consensus_visual_review")
     if region_evidence:
         candidate["continuous_region_evidence"] = True
     return candidate
+
+
+def _is_ordinary_body_block(block: Mapping[str, Any]) -> bool:
+    """Return whether a later layout block can represent flowing body text."""
+    label = str(block.get("label") or "").strip().lower()
+    if (
+        _FOOTNOTE_LABEL_RE.search(label)
+        or _CITATION_LABEL_RE.search(label)
+        or _FURNITURE_LABEL_RE.search(label)
+    ):
+        return False
+    if _leading_footnote_key(_text_from_block(block)) is not None:
+        return False
+    return label in {"", "text", "body", "paragraph", "prose"}
+
+
+def _layout_records(sidecar: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Return text blocks with normalized geometry for relative layout checks.
+
+    The records deliberately contain no fixed page-coordinate cutoff.  They
+    are used to compare a candidate with the other blocks on the same page:
+    where the page's content ends, how large its normal blocks are, and how
+    much whitespace normally separates adjacent blocks.
+    """
+    records: list[dict[str, Any]] = []
+    blocks = sidecar.get("blocks", [])
+    if not isinstance(blocks, list):
+        return records
+    for index, block in enumerate(blocks):
+        if not isinstance(block, Mapping):
+            continue
+        text = _text_from_block(block)
+        bbox = _normalise_bbox(block, sidecar)
+        if not text or not bbox:
+            continue
+        # A bare printed page number must not define the page's content tail.
+        if _NUMERIC_ONLY_RE.fullmatch(text):
+            continue
+        label = str(block.get("label") or "").strip()
+        if _FURNITURE_LABEL_RE.search(label):
+            continue
+        records.append(
+            {
+                "index": index,
+                "bbox": bbox,
+                "height": max(0.0, float(bbox[3]) - float(bbox[1])),
+                "label": label,
+                "text": text,
+            }
+        )
+    return records
+
+
+def _page_layout_profile(sidecar: Mapping[str, Any]) -> dict[str, Any]:
+    """Describe the page tail using only its own block distribution.
+
+    ``bottom_ratio`` is intentionally not used here.  The profile is a
+    relative prior for a particular page, not a second global y-coordinate
+    threshold.  Its tolerances scale with the observed block heights and
+    inter-block gaps, so a page with generous margins and a dense page use
+    different effective geometry.
+    """
+    records = _layout_records(sidecar)
+    if not records:
+        return {
+            "content_top": None,
+            "content_bottom": None,
+            "median_block_height": 0.0,
+            "median_vertical_gap": 0.0,
+            "tail_tolerance": 0.0,
+            "records": [],
+        }
+    heights = [record["height"] for record in records if record["height"] > 0]
+    gaps: list[float] = []
+    ordered = sorted(records, key=lambda item: int(item["index"]))
+    for previous, current in zip(ordered, ordered[1:]):
+        gap = float(current["bbox"][1]) - float(previous["bbox"][3])
+        if gap >= 0:
+            gaps.append(gap)
+    if heights:
+        sorted_heights = sorted(heights)
+        typical_heights = sorted_heights[
+            : max(1, (len(sorted_heights) + 1) // 2)
+        ]
+        median_height = float(median(typical_heights))
+    else:
+        median_height = 0.0
+    # Large paragraph/notes gaps are the very boundary we are trying to
+    # detect, not the page's normal line spacing.  Estimate ordinary spacing
+    # from gaps that are plausibly typography-scale; if none exist, let block
+    # height alone determine the tail tolerance.
+    close_gaps = [
+        gap for gap in gaps if median_height <= 0 or gap <= median_height * 4
+    ]
+    median_gap = float(median(close_gaps)) if close_gaps else 0.0
+    # A tail tolerance is relative to this page's typography and spacing.  It
+    # is only used to decide whether a region reaches the final content block;
+    # it never promotes a block into the candidate set by itself.
+    tail_tolerance = max(
+        median_height * DEFAULT_LAYOUT_TAIL_FACTOR,
+        median_gap * DEFAULT_LAYOUT_GAP_FACTOR,
+        1e-6,
+    )
+    return {
+        "content_top": min(float(record["bbox"][1]) for record in records),
+        "content_bottom": max(float(record["bbox"][3]) for record in records),
+        "median_block_height": round(median_height, 6),
+        "median_vertical_gap": round(median_gap, 6),
+        "tail_tolerance": round(tail_tolerance, 6),
+        "records": records,
+    }
+
+
+def _region_layout_evidence(
+    sidecar: Mapping[str, Any],
+    indexes: Iterable[int],
+    *,
+    context_indexes: Iterable[int] = (),
+) -> dict[str, Any]:
+    """Return page-relative evidence for one candidate region."""
+    profile = _page_layout_profile(sidecar)
+    index_set = {int(index) for index in indexes}
+    context_index_set = {int(index) for index in context_indexes}
+    records = profile.get("records", [])
+    region_records = [
+        record for record in records if int(record["index"]) in index_set
+    ]
+    if not region_records or profile.get("content_bottom") is None:
+        return {
+            "available": False,
+            "tail_aligned": False,
+            "detached_from_body": False,
+            "body_continues_after_region": False,
+        }
+
+    first_index = min(index_set)
+    region_top = min(float(record["bbox"][1]) for record in region_records)
+    region_bottom = max(float(record["bbox"][3]) for record in region_records)
+    content_bottom = float(profile["content_bottom"])
+    tail_tolerance = float(profile.get("tail_tolerance") or 0.0)
+    tail_gap = max(0.0, content_bottom - region_bottom)
+
+    previous_records = [
+        record
+        for record in records
+        if int(record["index"]) < first_index
+        and int(record["index"]) not in index_set
+        and int(record["index"]) not in context_index_set
+    ]
+    previous = previous_records[-1] if previous_records else None
+    preceding_gap = (
+        max(0.0, region_top - float(previous["bbox"][3]))
+        if previous is not None
+        else None
+    )
+    median_gap = float(profile.get("median_vertical_gap") or 0.0)
+    median_height = float(profile.get("median_block_height") or 0.0)
+    detach_gap = max(
+        median_gap * DEFAULT_LAYOUT_GAP_FACTOR,
+        median_height * 0.75,
+        1e-6,
+    )
+    detached = previous is None or preceding_gap >= detach_gap
+
+    body_continues = False
+    body_after_indexes: list[int] = []
+    for record in records:
+        record_index = int(record["index"])
+        if record_index <= max(index_set) or record_index in index_set:
+            continue
+        block = sidecar.get("blocks", [])[record_index]
+        if not isinstance(block, Mapping) or not _is_ordinary_body_block(block):
+            continue
+        later_bottom = float(record["bbox"][3])
+        if later_bottom >= content_bottom - tail_tolerance:
+            body_continues = True
+            body_after_indexes.append(record_index)
+
+    return {
+        "available": True,
+        "content_top": round(float(profile["content_top"]), 6),
+        "content_bottom": round(content_bottom, 6),
+        "region_top": round(region_top, 6),
+        "region_bottom": round(region_bottom, 6),
+        "tail_gap": round(tail_gap, 6),
+        "tail_tolerance": round(tail_tolerance, 6),
+        "preceding_gap": (
+            round(preceding_gap, 6) if preceding_gap is not None else None
+        ),
+        "detach_gap": round(detach_gap, 6),
+        "tail_aligned": tail_gap <= tail_tolerance,
+        "detached_from_body": detached,
+        "body_continues_after_region": body_continues,
+        "body_after_block_indices": body_after_indexes,
+        "median_block_height": round(median_height, 6),
+        "median_vertical_gap": round(median_gap, 6),
+    }
+
+
+def _body_flow_warning(
+    sidecar: Mapping[str, Any],
+    block_index: int,
+    bbox: Optional[Iterable[float]],
+    *,
+    layout_profile: Optional[Mapping[str, Any]] = None,
+) -> Optional[str]:
+    """Detect a numbered candidate that is still embedded in body flow.
+
+    A loose bottom band can classify numbered policy/list paragraphs as notes.
+    Do not auto-accept a candidate whose own block is an unusually tall body
+    block at the page tail, or whose following ordinary-text block continues
+    to the page tail. Both shapes are strong layout evidence of body prose and
+    must be resolved by the visual reviewer.
+    """
+    if not bbox:
+        return None
+    try:
+        values = [float(value) for value in bbox]
+    except (TypeError, ValueError):
+        return None
+    if len(values) != 4:
+        return None
+    profile = (
+        dict(layout_profile)
+        if isinstance(layout_profile, Mapping)
+        else _page_layout_profile(sidecar)
+    )
+    content_bottom = profile.get("content_bottom")
+    tail_tolerance = float(profile.get("tail_tolerance") or 0.0)
+    median_height = float(profile.get("median_block_height") or 0.0)
+    if content_bottom is not None and median_height > 0:
+        block_height = max(0.0, values[3] - values[1])
+        if (
+            values[3] >= float(content_bottom) - tail_tolerance
+            and block_height >= median_height * 3
+        ):
+            return "numbered_block_spans_body_flow"
+
+    blocks = sidecar.get("blocks", [])
+    if not isinstance(blocks, list):
+        return None
+    for later_index in range(block_index + 1, len(blocks)):
+        later = blocks[later_index]
+        if not isinstance(later, Mapping) or not _is_ordinary_body_block(later):
+            continue
+        later_bbox = _normalise_bbox(later, sidecar)
+        if not later_bbox:
+            continue
+        if later_bbox[1] < values[3] - DEFAULT_REGION_MAX_GAP:
+            continue
+        if (
+            content_bottom is not None
+            and later_bbox[3] >= float(content_bottom) - tail_tolerance
+        ):
+            return "ordinary_text_below_numeric_block"
+    return None
 
 
 def _bottom_geometry(
@@ -539,6 +843,7 @@ def _expand_continuous_region_candidates(
     page_markdown: str,
     auto_accept: bool,
     native_max_font_ratio: float,
+    layout_profile: Optional[Mapping[str, Any]] = None,
     previous_page_footnote_evidence: bool = False,
     excluded_block_indexes: Optional[set[int]] = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -637,6 +942,7 @@ def _expand_continuous_region_candidates(
                     auto_accept=auto_accept,
                     native_max_font_ratio=native_max_font_ratio,
                     region_evidence=True,
+                    layout_profile=layout_profile,
                 )
             else:
                 candidate = _candidate_for_block(
@@ -649,6 +955,8 @@ def _expand_continuous_region_candidates(
                     force_review=True,
                     source="primary",
                     region_evidence=True,
+                    page_markdown=page_markdown,
+                    layout_profile=layout_profile,
                 )
             if candidate is None:
                 continue
@@ -1570,6 +1878,8 @@ def _build_page_footnote_regions(
         # unnumbered block (handled above), not merely because the run exists.
         if ocr_conflict:
             reasons.append("ocr_candidate_evidence_conflict")
+        if any(item.get("body_flow_warning") for item in item_candidates):
+            reasons.append("ordinary_text_below_numeric_block")
 
         first_index = indexes[0]
         if (
@@ -1597,9 +1907,16 @@ def _build_page_footnote_regions(
             ):
                 reasons.append("footnote_region_boundary_uncertain")
 
-        # A two-or-more numeric run is strong local evidence only when the
-        # region has no unresolved continuation or boundary signal.  A single
-        # block still needs the old explicit Footnote label rule.
+        layout_evidence = _region_layout_evidence(
+            sidecar,
+            indexes,
+            context_indexes=context_indexes,
+        )
+        # A numeric run is not semantic proof.  Local acceptance requires an
+        # independent signal (a consistent Footnote label, a same-page
+        # superscript reference, or a native-text equivalent) plus page-
+        # relative tail evidence.  The configured bottom band only got the
+        # block into this shortlist; it cannot make the region local by itself.
         all_numbered = bool(item_candidates) and all(
             item.get("key") for item in item_candidates
         )
@@ -1610,24 +1927,63 @@ def _build_page_footnote_regions(
             _FOOTNOTE_LABEL_RE.search(str(item.get("label") or ""))
             for item in item_candidates
         )
-        existing_high = bool(item_candidates) and all(
-            item.get("confidence") == "high" for item in item_candidates
-        ) and not any(item.get("audit_only") for item in item_candidates)
         native_candidates = any(
             str(item.get("source_kind") or "").strip().lower() == "native_text"
             for item in item_candidates
         )
-        native_region_has_body_evidence = all(
-            bool(item.get("same_page_superscript"))
-            or _FOOTNOTE_LABEL_RE.search(str(item.get("label") or ""))
-            for item in item_candidates
+        keyed_candidates = [item for item in item_candidates if item.get("key")]
+        marker_support = bool(keyed_candidates) and all(
+            bool(item.get("same_page_marker"))
+            for item in keyed_candidates
         )
+        native_structural_support = native_candidates and all(
+            bool(item.get("same_page_superscript"))
+            and isinstance(item.get("font_size_ratio"), (int, float))
+            and float(item["font_size_ratio"])
+            <= float(item.get("native_max_font_ratio", DEFAULT_NATIVE_MAX_FONT_RATIO))
+            for item in keyed_candidates
+        )
+        explicit_layout_support = bool(
+            explicit_labels
+            and layout_evidence.get("tail_aligned")
+        )
+        marker_layout_support = bool(
+            has_sequence
+            and marker_support
+            and layout_evidence.get("tail_aligned")
+            and layout_evidence.get("detached_from_body")
+        )
+        continuation_layout_support = bool(
+            has_auto_continuation
+            and keyed_candidates
+            and any(not item.get("auto_continuation") for item in keyed_candidates)
+            and layout_evidence.get("tail_aligned")
+            and all(
+                _FOOTNOTE_LABEL_RE.search(str(item.get("label") or ""))
+                for item in keyed_candidates
+                if not item.get("auto_continuation")
+            )
+        )
+        native_layout_support = bool(
+            native_structural_support
+            and layout_evidence.get("tail_aligned")
+        )
+        local_acceptance_evidence: list[str] = []
+        if explicit_layout_support:
+            local_acceptance_evidence.append("consistent_footnote_labels")
+        if marker_layout_support:
+            local_acceptance_evidence.append("same_page_markers_and_detached_tail")
+        if continuation_layout_support:
+            local_acceptance_evidence.append("cross_page_continuation_and_labeled_tail")
+        if native_layout_support:
+            local_acceptance_evidence.append("native_marker_font_and_detached_tail")
+        if all_numbered and not local_acceptance_evidence:
+            reasons.append("insufficient_independent_footnote_evidence")
         locally_clear = bool(
             auto_accept
             and not reasons
             and all_numbered
-            and (has_sequence or explicit_labels or existing_high or has_auto_continuation)
-            and (not native_candidates or native_region_has_body_evidence)
+            and bool(local_acceptance_evidence)
         )
         region_id = f"page-{int(page_number):03d}-region-{region_number:02d}"
         role = "local_footnote_region" if locally_clear else "visual_audit_required"
@@ -1649,21 +2005,52 @@ def _build_page_footnote_regions(
             "confidence": "high" if locally_clear else "review",
             "disposition": role,
             "reasons": sorted(set(reasons)),
+            "layout_evidence": layout_evidence,
+            "local_acceptance_evidence": local_acceptance_evidence,
             "blocks": _region_compact_blocks(sidecar, all_candidates, indexes),
         }
         regions.append(region)
         for item in item_candidates:
             item["region_id"] = region_id
             item["region_confidence"] = region["confidence"]
-            if locally_clear:
+            item["layout_evidence"] = layout_evidence
+            if "ordinary_text_below_numeric_block" in reasons:
+                # A body-flow warning invalidates the whole numeric region.
+                # Do not leave an earlier high-confidence block in the same
+                # false-positive list locally accepted.
+                item["confidence"] = "review"
+                item["disposition"] = "review_required"
+                item["review_reason"] = "ordinary_text_below_numeric_block"
+            elif locally_clear:
                 item["confidence"] = "high"
                 item["disposition"] = "local_candidate"
                 item.setdefault("local_role", "footnote_start")
                 item["review_reason"] = "page_region_local_accept"
-            # An already high-confidence block keeps its local decision even
-            # when a neighboring continuation makes the surrounding region
-            # reviewable. The region audit still carries that block as visual
-            # context, while only uncertain addresses require a new decision.
+            else:
+                # Region-level evidence is the final local-acceptance gate.
+                # A block-level label must not remain locally actionable when
+                # its neighboring region is ambiguous or OCR-conflicted.
+                mixed_region_only = set(reasons) <= {
+                    "unclassified_continuation_block"
+                }
+                if (
+                    mixed_region_only
+                    and item.get("confidence") == "high"
+                    and item.get("key")
+                    and _FOOTNOTE_LABEL_RE.search(str(item.get("label") or ""))
+                    and not item.get("audit_only")
+                ):
+                    # A strong, explicitly labelled note can remain local
+                    # while an adjacent unnumbered continuation is reviewed.
+                    # Hard region conflicts (body flow, OCR disagreement,
+                    # boundary uncertainty) still downgrade every member.
+                    continue
+                existing_reason = str(item.get("review_reason") or "").strip()
+                item["confidence"] = "review"
+                item["disposition"] = "review_required"
+                item["review_reason"] = existing_reason or (
+                    reasons[0] if reasons else "region_requires_visual_review"
+                )
         region["blocks"] = _region_compact_blocks(sidecar, all_candidates, indexes)
     return regions
 
@@ -2215,6 +2602,7 @@ def _candidate_for_native_block(
     page_markdown: str = "",
     auto_accept: bool = DEFAULT_AUTO_ACCEPT,
     native_max_font_ratio: float = DEFAULT_NATIVE_MAX_FONT_RATIO,
+    layout_profile: Optional[Mapping[str, Any]] = None,
     region_evidence: bool = False,
 ) -> Optional[dict[str, Any]]:
     """Find conservative native-text candidates for workspace review.
@@ -2249,6 +2637,8 @@ def _candidate_for_native_block(
         bottom_intersection_ratio=bottom_intersection_ratio,
         force_review=True,
         region_evidence=region_evidence,
+        page_markdown=page_markdown,
+        layout_profile=layout_profile,
     )
     if candidate is None:
         return None
@@ -2265,7 +2655,7 @@ def _candidate_for_native_block(
         candidate["font_names"] = block.get("font_names")
 
     font_ratio = candidate.get("font_size_ratio")
-    marker_before_block = _native_marker_before_block(
+    marker_before_block = _marker_before_block(
         page_markdown,
         sidecar,
         block_index,
@@ -2281,6 +2671,7 @@ def _candidate_for_native_block(
         and marker_before_block
         and isinstance(font_ratio, (int, float))
         and font_ratio <= float(native_max_font_ratio)
+        and not candidate.get("body_flow_warning")
     ):
         candidate["confidence"] = "high"
         candidate["disposition"] = "local_candidate"
@@ -2291,7 +2682,7 @@ def _candidate_for_native_block(
     return candidate
 
 
-def _native_marker_before_block(
+def _marker_before_block(
     page_markdown: str,
     sidecar: Mapping[str, Any],
     block_index: int,
@@ -2341,6 +2732,10 @@ def _native_marker_before_block(
         if match.group("unicode") in marker_keys:
             return True
     return False
+
+
+# Kept as a private compatibility alias for older library callers and tests.
+_native_marker_before_block = _marker_before_block
 
 
 def _write_unit_contexts(
@@ -2505,6 +2900,7 @@ def prepare_footnote_candidates(
             page_markdown = page_markdown_path.read_text(encoding="utf-8")
         except (OSError, UnicodeError):
             page_markdown = ""
+        layout_profile = _page_layout_profile(sidecar)
         structure_excluded_blocks = _structure_excluded_block_indexes(
             page_markdown,
             sidecar,
@@ -2536,6 +2932,7 @@ def prepare_footnote_candidates(
                     page_markdown=page_markdown,
                     auto_accept=options.auto_accept,
                     native_max_font_ratio=options.native_max_font_ratio,
+                    layout_profile=layout_profile,
                 )
             else:
                 local_acceptance_disabled = not options.auto_accept
@@ -2550,6 +2947,8 @@ def prepare_footnote_candidates(
                         local_acceptance_disabled
                     ),
                     source="primary",
+                    page_markdown=page_markdown,
+                    layout_profile=layout_profile,
                 )
                 if candidate is not None and local_acceptance_disabled:
                     candidate["review_reason"] = "local_auto_accept_disabled"
@@ -2567,6 +2966,7 @@ def prepare_footnote_candidates(
             page_markdown=page_markdown,
             auto_accept=options.auto_accept,
             native_max_font_ratio=options.native_max_font_ratio,
+            layout_profile=layout_profile,
             previous_page_footnote_evidence=(
                 previous_page_number == page_number - 1
                 and previous_page_footnote_evidence
@@ -2627,6 +3027,7 @@ def prepare_footnote_candidates(
                     page_markdown=page_markdown,
                     auto_accept=False,
                     native_max_font_ratio=options.native_max_font_ratio,
+                    layout_profile=layout_profile,
                     region_evidence=True,
                 )
             else:
@@ -2640,6 +3041,8 @@ def prepare_footnote_candidates(
                     force_review=True,
                     source="primary",
                     region_evidence=True,
+                    page_markdown=page_markdown,
+                    layout_profile=layout_profile,
                 )
             if audit_candidate is not None:
                 audit_candidate["audit_only"] = True
@@ -2661,6 +3064,7 @@ def prepare_footnote_candidates(
         candidate_disagreement = False
         if evidence_mode == "two_ocr":
             secondary = _load_sidecar(secondary_sidecar)
+            secondary_layout_profile = _page_layout_profile(secondary)
             secondary_excluded_blocks = _structure_excluded_block_indexes(
                 page_markdown,
                 secondary,
@@ -2683,6 +3087,7 @@ def prepare_footnote_candidates(
                     bottom_ratio=options.bottom_ratio,
                     bottom_intersection_ratio=options.bottom_intersection_ratio,
                     source="secondary",
+                    layout_profile=secondary_layout_profile,
                 )
                 if candidate is not None:
                     secondary_candidates.append(candidate)
@@ -2696,6 +3101,7 @@ def prepare_footnote_candidates(
                 page_markdown="",
                 auto_accept=False,
                 native_max_font_ratio=options.native_max_font_ratio,
+                layout_profile=secondary_layout_profile,
                 previous_page_footnote_evidence=(
                     previous_secondary_page_number == page_number - 1
                     and previous_secondary_page_footnote_evidence

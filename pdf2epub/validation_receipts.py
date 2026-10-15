@@ -8,6 +8,10 @@ from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 
 from .workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION
+from .utils.fingerprints import pages_fingerprint
+
+# Compatibility alias for older diagnostic integrations.
+_pages_fingerprint = pages_fingerprint
 
 
 def markdown_directory_sha256(directory: Path) -> Dict[str, str]:
@@ -20,24 +24,6 @@ def markdown_directory_sha256(directory: Path) -> Dict[str, str]:
         for path in sorted(directory.glob("*.md"))
         if path.is_file()
     }
-
-
-def _pages_fingerprint(pages_dir: Path) -> Optional[str]:
-    """Hash the page Markdown inputs using the refinement checkpoint scheme."""
-    pages_dir = Path(pages_dir)
-    if not pages_dir.is_dir():
-        return None
-    digest = hashlib.sha256()
-    pages = sorted(pages_dir.glob("page_*.md"))
-    if not pages:
-        return None
-    for page in pages:
-        try:
-            digest.update(page.name.encode("utf-8"))
-            digest.update(hashlib.sha256(page.read_bytes()).digest())
-        except OSError:
-            return None
-    return digest.hexdigest()
 
 
 def _file_sha256_or_none(path: Path) -> Optional[str]:
@@ -80,7 +66,7 @@ def build_input_snapshot(
     fingerprint: Dict[str, Any] = {
         "toc_sha256": None,
         "pages_sha256": None,
-        "current_pages_sha256": _pages_fingerprint(output_dir / "pages"),
+        "current_pages_sha256": pages_fingerprint(output_dir / "pages"),
     }
     progress_path = output_dir / "ocr_markdown" / "tree_progress.json"
     try:

@@ -998,7 +998,7 @@ def _run_readiness_check(
 ) -> dict:
     """Run deterministic gates before translation or packaging."""
     from pdf2epub.refine.subagent_workflow import page_numbers, validate_toc_tree_data
-    from pdf2epub.refine.main import _pages_fingerprint
+    from pdf2epub.utils.fingerprints import pages_fingerprint
 
     config = load_config(config_path)
     policy = PipelinePolicy.from_config(config)
@@ -1113,7 +1113,7 @@ def _run_readiness_check(
             fingerprint_ready = (
                 fingerprint.get("toc_sha256")
                 == hashlib.sha256(toc_path.read_bytes()).hexdigest()
-                and fingerprint.get("pages_sha256") == _pages_fingerprint(pages_dir)
+                and fingerprint.get("pages_sha256") == pages_fingerprint(pages_dir)
             )
         except (OSError, json.JSONDecodeError, AttributeError, TypeError):
             fingerprint_ready = False

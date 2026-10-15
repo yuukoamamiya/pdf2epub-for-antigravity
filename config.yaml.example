@@ -96,8 +96,10 @@ ocr:
 # 脚注页面区域的本地接受策略；清晰区域本地处理，异常区域自动生成视觉审计任务。
 footnotes:
   auto_accept: true
-  # The block lower edge must enter this bottom band, and at least this share
-  # of the block height must intersect the band.
+  # These are shortlist recall floors only. They do not classify a block as a
+  # footnote; page-relative tail layout and independent semantic evidence are
+  # required for local acceptance. Keep them permissive unless the review
+  # volume for a particular OCR backend is demonstrably too high.
   bottom_ratio: 0.50
   bottom_intersection_ratio: 0.08
   # 原生文字 PDF 的字号证据门槛；只影响 native layout 候选。

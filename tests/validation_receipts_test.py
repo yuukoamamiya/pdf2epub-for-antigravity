@@ -16,7 +16,9 @@ from pdf2epub.workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION
 
 def _pages_fingerprint(pages_dir: Path) -> str:
     digest = hashlib.sha256()
-    for page in sorted(pages_dir.glob("page_*.md")):
+    for page in sorted(
+        [*pages_dir.glob("page_*.md"), *pages_dir.glob("page_*.ocr.json")]
+    ):
         digest.update(page.name.encode("utf-8"))
         digest.update(hashlib.sha256(page.read_bytes()).digest())
     return digest.hexdigest()
@@ -97,6 +99,45 @@ def test_package_receipt_covers_toc_refinement_config_and_translated_toc(tmp_pat
         output_dir=tmp_path,
         config_path=config,
         require_build_inputs=True,
+    )
+
+
+def test_package_receipt_fingerprint_includes_native_layout_sidecars(tmp_path: Path):
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    pages_dir = tmp_path / "pages"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    pages_dir.mkdir()
+    (source_dir / "chapter.md").write_text("source", encoding="utf-8")
+    (target_dir / "chapter.md").write_text("target", encoding="utf-8")
+    (pages_dir / "page_001.md").write_text("page", encoding="utf-8")
+    (pages_dir / "page_001.ocr.json").write_text("{\"layout\": 1}", encoding="utf-8")
+    toc = tmp_path / "toc_tree.json"
+    toc.write_text(json.dumps({"chapters": []}), encoding="utf-8")
+    config = tmp_path / "config.yaml"
+    config.write_text("title: Book\n", encoding="utf-8")
+    progress_dir = tmp_path / "ocr_markdown"
+    progress_dir.mkdir()
+    (progress_dir / "tree_progress.json").write_text(
+        json.dumps(
+            {
+                "fingerprint": {
+                    "toc_sha256": hashlib.sha256(toc.read_bytes()).hexdigest(),
+                    "pages_sha256": _pages_fingerprint(pages_dir),
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    snapshot = build_input_snapshot(tmp_path, config, translated=False)
+    assert snapshot["refinement_fingerprint"]["current_pages_sha256"] == _pages_fingerprint(
+        pages_dir
+    )
+
+    (pages_dir / "page_001.ocr.json").write_text("{\"layout\": 2}", encoding="utf-8")
+    assert snapshot["refinement_fingerprint"]["current_pages_sha256"] != _pages_fingerprint(
+        pages_dir
     )
 
 

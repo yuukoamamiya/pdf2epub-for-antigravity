@@ -11,6 +11,7 @@ from loguru import logger
 import tiktoken
 
 from ..utils.unit_id import generate_unit_id
+from ..utils.fingerprints import pages_fingerprint
 from .toc_tree import TOCNode, dict_list_to_toc_tree
 from .page_merger import PageMerger
 from .subagent_workflow import page_numbers, validate_toc_tree_data
@@ -33,16 +34,9 @@ DEFAULT_OVERSIZED_SPLIT_TYPES = ("all",)
 DEFAULT_OVERSIZED_SPLIT_THRESHOLDS_BY_TYPE = {"index": 6_000}
 DEFAULT_OVERSIZED_SPLIT_TARGETS_BY_TYPE = {"index": 4_500}
 
-
-def _pages_fingerprint(pages_dir: Path) -> str:
-    """Hash page text and native layout sidecars for safe refine resume."""
-    digest = hashlib.sha256()
-    for page in sorted(
-        [*pages_dir.glob("page_*.md"), *pages_dir.glob("page_*.ocr.json")]
-    ):
-        digest.update(page.name.encode("utf-8"))
-        digest.update(hashlib.sha256(page.read_bytes()).digest())
-    return digest.hexdigest()
+# Kept as a compatibility alias for callers that imported the old private
+# helper; the implementation now lives in one shared utility.
+_pages_fingerprint = pages_fingerprint
 
 
 def _insert_toc_chapter(toc_tree: List[TOCNode], toc_info: Dict) -> TOCNode:
@@ -224,7 +218,7 @@ class RefinedBreakdown:
         source_fingerprint = {
             "schema": REFINE_CHECKPOINT_SCHEMA,
             "toc_sha256": hashlib.sha256(toc_tree_file.read_bytes()).hexdigest(),
-            "pages_sha256": _pages_fingerprint(pages_dir),
+            "pages_sha256": pages_fingerprint(pages_dir),
             "illustration_bindings_sha256": (
                 hashlib.sha256(illustration_bindings_path.read_bytes()).hexdigest()
                 if illustration_bindings_path.is_file()

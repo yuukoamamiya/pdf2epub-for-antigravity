@@ -111,16 +111,18 @@ PDF 精修的核心领域模块如下：
   不把完整句子、标题、列表、脚注、图片或表格误合并。原生文字 PDF 还会根据 page-point
   sidecar 在页边 5% 内确定性清除 DOI/孤立页码，并仅清除跨页重复短页眉页脚；原始 `pages/`
   不会被覆盖，sidecar 会参与 refine checkpoint 指纹。
-- `refine/footnote_prepare.py`：按页面 layout sidecar 生成脚注候选和页面级脚注区域。视觉 OCR 要求
-  block 的 `bbox[3]` 进入页底带，并满足 block 与页底带的最小相交比例；标签只能作为辅助证据，
- 不能单独绕过几何条件。它排除页眉、页脚、纯页码和引用标签，把连续数字开头块（例如
+- `refine/footnote_prepare.py`：按页面 layout sidecar 生成脚注候选和页面级脚注区域。视觉 OCR 先用
+  宽松的页底召回地板收集候选，再结合页面自身的内容尾部、相对块间距和独立语义证据决定是否本地接受；
+  全书固定的 `bbox[3]` 不再是自动判定条件。标签只能作为辅助证据，不能单独绕过几何条件。它排除
+  页眉、页脚、纯页码和引用标签，把连续数字开头块（例如
  `18, 19, 20, 21`）及其相邻续文组织为一个区域；如果数字组已有明确的 `Footnote` 标签，普通
  `Text` 块默认不会被机械回溯，只有同样带脚注标签的相邻块才可作为续文加入；若紧邻上一页已有脚注
  证据，则恢复无编号续文回溯并交给视觉审核，以覆盖跨页的“正文 → 上一脚注续文 → 新脚注”布局。
- 明确标注的区域首块也不会仅因上方相邻正文触发边界不确定审核。连续数字区向上回溯得到的普通 `Text` 块若
+明确标注的区域首块也不会仅因上方相邻正文触发边界不确定审核。连续数字区向上回溯得到的普通 `Text` 块若
  没有跨页证据或只有低置信度且数字区已有 `Footnote` 标签，只写入 `suppressed_continuation_candidates`
  作为上下文，不触发视觉任务；明确标注、较强连续性和真正的边界冲突仍保留审核。清晰区域由本地接受；边界不清、区域内有未分类
-  block、OCR 证据冲突或几何漏检则生成 `footnote_visual_audit_manifest.json`，并附页面图和可用的
+ block、只有连续数字而没有独立证据、正文流延伸到页尾、OCR 证据冲突或几何漏检则生成
+ `footnote_visual_audit_manifest.json`，并附页面图和可用的
   区域裁剪图，交给视觉 Subagent。`suspected_missed_count` 对应的可疑漏检会进入
   `audit_candidates`，不再只是静态统计。原生文字 PDF 仍使用 PDF 坐标、文本块和字体元数据。
   跨页候选还会写入 `continuation_evidence`，记录上一页最后一个物理脚注、当前页候选前的最近正文块、
@@ -450,9 +452,10 @@ span 的起始 x 坐标拆分左右栏，再按“左栏自上而下、右栏自
 
 - `page_box` 和 `blocks[].bbox` 使用 PyMuPDF/PDF page points；原生稿不能套用 OCR 的
   `0..1000` 坐标启发式。`footnote_prepare._normalise_bbox()` 先按 page box 转成 `0..1`
-  比例，再使用 `bbox[3]` 与页底带相交比例共同进行底部判断。默认
-  未配置时的代码兜底为 `bottom_ratio: 0.64`、`bottom_intersection_ratio: 0.25`；扫描稿示例配置
-  推荐使用 `0.50`/`0.08`，由区域异常审计承担召回兜底。
+  比例。`bottom_ratio: 0.50` 和 `bottom_intersection_ratio: 0.08` 只是候选召回地板，不能
+  单独决定脚注；页面自身的内容尾部和相对块间距会产生自适应版面证据，独立的脚注标签、同页
+  上标引用或原生字号/标记证据才可支持本地接受。正文流异常、证据冲突或只有连续数字的区域
+  必须降级到视觉审计。
 - `body_font_size` 是该页文本 span 字号的中位数。它只用于计算候选块的
   `font_size_ratio`；字号小不等于脚注。
 - 每个原生文本 block 的 `source_block` 指向 PDF 原始 block，`order` 保持页面阅读顺序。
@@ -460,11 +463,11 @@ span 的起始 x 坐标拆分左右栏，再按“左栏自上而下、右栏自
   脚注可以独立复核和定位。
 - 识别到的短数字/符号上标在 Markdown 中保留为 `<sup>…</sup>`；sidecar 的原始 `text`
   不被改写。PDF superscript flag 和“字号明显小且位于行上方”只提供上标证据。
-- 原生候选检测要求块位于页面底部、以数字加分隔符开头且不是纯数字页码。默认只有同页
-  更早位置存在对应 `<sup>N</sup>` 引用、且 `font_size / body_font_size <= 0.88` 的候选
-  标记为 `confidence: high`/`local_candidate`，由 apply 后端按 `footnote_start` 处理；
-  其他候选标记为 `review_required`。字号、坐标、字体和上标仍只是证据，不能把普通上标或
-  引用单独升级成脚注。
+- 原生候选检测要求块位于页面候选尾部、以数字加分隔符开头且不是纯数字页码。默认只有同页
+  更早位置存在对应 `<sup>N</sup>` 引用、字号比例不超过 `0.88`，并且所在区域与页面相对
+  内容尾部对齐的候选，才标记为 `confidence: high`/`local_candidate`，由 apply 后端按
+  `footnote_start` 处理；其他候选标记为 `review_required`。字号、坐标、字体和上标仍只是
+  证据，不能把普通上标或引用单独升级成脚注。
 - `footnotes.auto_accept: true` 会让清晰的页面脚注区域走本地路径，只把异常区域交给视觉
   Subagent；设为 `false` 或使用 CLI 的 `--review-all` 才会把所有候选区域纳入视觉复核。
   `footnotes.native_max_font_ratio`（默认 `0.88`）仍只调节原生 PDF 的字号门槛。

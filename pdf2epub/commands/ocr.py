@@ -32,6 +32,30 @@ def _load_probe(output_dir: Path) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+def _load_current_probe(output_dir: Path, pdf_path: Path) -> dict:
+    """Reuse a probe only when it attests to the exact current PDF."""
+    probe_path = Path(output_dir) / "pdf_text_probe.json"
+    if not probe_path.is_file():
+        return {}
+    probe = _load_probe(output_dir)
+    from pdf2epub.pdf_text_probe import PDF_TEXT_PROBE_SCHEMA_VERSION
+
+    if probe.get("schema_version") != PDF_TEXT_PROBE_SCHEMA_VERSION:
+        return {}
+    if not isinstance(probe.get("source_sha256"), str):
+        return {}
+    try:
+        if sha256_file(Path(pdf_path)) != probe["source_sha256"]:
+            return {}
+    except OSError:
+        return {}
+    if not isinstance(probe.get("page_count"), int) or probe["page_count"] <= 0:
+        return {}
+    if not probe.get("classification") or not probe.get("recommendation"):
+        return {}
+    return probe
+
+
 def _require_complete_ocr_pages(output_dir: Path) -> bool:
     """Stop correction until the raw page-level OCR checkpoint is complete."""
     probe = _load_probe(output_dir)
@@ -147,15 +171,24 @@ def ocr_pages_command(args):
     )
     from pdf2epub.workflow_contracts import atomic_write_text
 
-    try:
-        probe = probe_pdf_text_layer(pdf_path)
-        atomic_write_text(
-            output_dir / "pdf_text_probe.json",
-            json.dumps(probe, ensure_ascii=False, indent=2),
-        )
-    except Exception as exc:
-        logger.warning(f"PDF text probe failed; continuing with visual OCR: {exc}")
-        probe = {"recommendation": "ocr_required", "classification": "probe_failed"}
+    probe = _load_current_probe(output_dir, pdf_path)
+    if probe:
+        logger.info("Reusing current PDF text probe; source PDF hash is unchanged")
+    else:
+        try:
+            probe = probe_pdf_text_layer(
+                pdf_path,
+                progress_callback=lambda current, total: logger.info(
+                    f"PDF text probe: page {current}/{total}"
+                ),
+            )
+            atomic_write_text(
+                output_dir / "pdf_text_probe.json",
+                json.dumps(probe, ensure_ascii=False, indent=2),
+            )
+        except Exception as exc:
+            logger.warning(f"PDF text probe failed; continuing with visual OCR: {exc}")
+            probe = {"recommendation": "ocr_required", "classification": "probe_failed"}
 
     if probe.get("recommendation") == "use_text_layer":
         output_dir.mkdir(parents=True, exist_ok=True)

@@ -131,11 +131,11 @@ def _pdf_tree_status(output_dir: Path, config: Mapping[str, Any]) -> tuple[str, 
         return "pending", "tree_progress.json is invalid or lacks its input fingerprint"
     try:
         from pdf2epub.ocr_correction import select_refinement_pages
-        from pdf2epub.refine.main import _pages_fingerprint
+        from pdf2epub.utils.fingerprints import pages_fingerprint
 
         current_toc = hashlib.sha256(toc_path.read_bytes()).hexdigest()
         pages_dir, _ = select_refinement_pages(output_dir, config=config)
-        current_pages = _pages_fingerprint(pages_dir)
+        current_pages = pages_fingerprint(pages_dir)
         if fingerprint.get("toc_sha256") != current_toc or fingerprint.get("pages_sha256") != current_pages:
             return "pending", "tree_progress.json is stale after a TOC or page change"
         binding_path = output_dir / "illustration_bindings.json"

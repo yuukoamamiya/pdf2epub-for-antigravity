@@ -8,16 +8,15 @@ vector-text candidates; every other PDF remains on the configured OCR path.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 from pathlib import Path
 from statistics import median
-from typing import Any, Dict
+from typing import Any, Callable, Dict
 
 import pymupdf
 
-from .workflow_contracts import atomic_write_text
+from .workflow_contracts import atomic_write_text, sha256_file
 from .ocr_progress import OCR_PROGRESS_SCHEMA_VERSION
 
 
@@ -28,6 +27,7 @@ _MULTI_COLUMN_MIN_GAP_RATIO = 0.15
 _MULTI_COLUMN_MIN_SIDE_RATIO = 0.20
 _MULTI_COLUMN_MIN_Y_OVERLAP_RATIO = 0.45
 _MULTI_COLUMN_MAX_MEDIAN_WIDTH_RATIO = 0.55
+PDF_TEXT_PROBE_SCHEMA_VERSION = 1
 
 
 def _image_coverage(page: Any) -> float:
@@ -147,7 +147,11 @@ def _detect_multi_column_layout(page: Any) -> Dict[str, Any] | None:
     return best[1] if best is not None else None
 
 
-def probe_pdf_text_layer(pdf_path: Path) -> Dict[str, Any]:
+def probe_pdf_text_layer(
+    pdf_path: Path,
+    *,
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> Dict[str, Any]:
     """Classify a PDF conservatively as native text or OCR-required.
 
     The classification is intentionally asymmetric: false negatives cost OCR
@@ -166,6 +170,9 @@ def probe_pdf_text_layer(pdf_path: Path) -> Dict[str, Any]:
     multi_column_pages: list[dict[str, Any]] = []
     with pymupdf.open(pdf_path) as document:
         page_count = len(document)
+        if progress_callback is not None:
+            progress_callback(0, page_count)
+        progress_interval = max(1, page_count // 20) if page_count else 1
         for page_number, page in enumerate(document, 1):
             text = page.get_text("text", sort=True) or ""
             chars = len(text.strip())
@@ -173,18 +180,25 @@ def probe_pdf_text_layer(pdf_path: Path) -> Dict[str, Any]:
             replacement_chars += len(_REPLACEMENT_RE.findall(text))
             if chars:
                 pages_with_text += 1
-            try:
-                if page.get_fonts():
-                    pages_with_fonts += 1
-            except (AttributeError, RuntimeError):
-                pass
+            if chars:
+                try:
+                    if page.get_fonts():
+                        pages_with_fonts += 1
+                except (AttributeError, RuntimeError):
+                    pass
             if _image_coverage(page) >= 0.70:
                 pages_with_large_images += 1
-            multi_column_signal = _detect_multi_column_layout(page)
-            if multi_column_signal is not None:
-                multi_column_pages.append(
-                    {"page": page_number, **multi_column_signal}
-                )
+            if chars:
+                multi_column_signal = _detect_multi_column_layout(page)
+                if multi_column_signal is not None:
+                    multi_column_pages.append(
+                        {"page": page_number, **multi_column_signal}
+                    )
+            if (
+                progress_callback is not None
+                and (page_number == page_count or page_number % progress_interval == 0)
+            ):
+                progress_callback(page_number, page_count)
 
     total_chars = sum(page_chars)
     text_page_ratio = pages_with_text / page_count if page_count else 0.0
@@ -218,9 +232,9 @@ def probe_pdf_text_layer(pdf_path: Path) -> Dict[str, Any]:
         recommendation = "ocr_required"
 
     return {
-        "schema_version": 1,
+        "schema_version": PDF_TEXT_PROBE_SCHEMA_VERSION,
         "pdf_path": pdf_path.name,
-        "source_sha256": hashlib.sha256(pdf_path.read_bytes()).hexdigest(),
+        "source_sha256": sha256_file(pdf_path),
         "page_count": page_count,
         "pages_with_text": pages_with_text,
         "text_page_ratio": round(text_page_ratio, 6),

@@ -23,7 +23,11 @@ MARKDOWN_VALIDATION_SCHEMA_VERSION = 2
 
 def sha256_file(path: Path) -> str:
     """Return the SHA-256 digest of a workspace file."""
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def relative_posix_path(path: Path, root: Path) -> str:

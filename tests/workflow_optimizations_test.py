@@ -6,6 +6,7 @@ import pymupdf
 
 from pdf2epub.markdown_handoff import prepare_markdown_subagent
 from pdf2epub.commands.markdown import _load_pdf_continuation_toc_titles
+from pdf2epub.commands.ocr import _load_current_probe
 from pdf2epub.pipeline_policy import PipelinePolicy
 from pdf2epub.pdf_text_probe import extract_native_text_pages, probe_pdf_text_layer
 from pdf2epub.subagent_runtime import (
@@ -86,6 +87,44 @@ def test_pdf_probe_only_accepts_clean_vector_text(tmp_path: Path):
     assert searchable_report["classification"] == "searchable_ocr_or_mixed"
     assert searchable_report["recommendation"] == "ocr_required"
     assert native_report["multi_column_page_ratio"] == 0.0
+
+
+def test_pdf_probe_reports_page_progress_without_changing_classification(tmp_path: Path):
+    source = tmp_path / "native.pdf"
+    _make_native_pdf(source)
+    progress = []
+
+    report = probe_pdf_text_layer(
+        source,
+        progress_callback=lambda current, total: progress.append((current, total)),
+    )
+
+    assert report["classification"] == "native_text"
+    assert progress[0] == (0, 4)
+    assert progress[-1] == (4, 4)
+
+
+def test_pdf_probe_cache_requires_matching_source_hash(tmp_path: Path):
+    source = tmp_path / "source.pdf"
+    source.write_bytes(b"source")
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    (output_dir / "pdf_text_probe.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+                "page_count": 1,
+                "classification": "scanned_or_low_text",
+                "recommendation": "ocr_required",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert _load_current_probe(output_dir, source)["recommendation"] == "ocr_required"
+    source.write_bytes(b"changed")
+    assert _load_current_probe(output_dir, source) == {}
 
 
 def test_pdf_probe_keeps_two_column_native_text_on_native_path(tmp_path: Path):
