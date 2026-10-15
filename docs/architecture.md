@@ -146,8 +146,9 @@ PDF 精修的核心领域模块如下：
   `footnotes.auto_accept` 是两种来源共用的区域级本地接受策略；双 OCR 模式比较主/次候选差异，
   并把次 OCR 的连续物理行合并成一个 secondary-only 复核窗口。`resolve_footnote_options()` 集中
   处理配置默认值和 CLI 覆盖。它不直接改写 Markdown，也不把引用推断成脚注。
-  `footnotes.mode` 可设为 `footnotes`、`endnotes_only` 或 `disabled`；
-  后两者跳过页面脚注提取并原样生成后续阶段使用的源稿。TOC 中标记为
+`footnotes.mode` 可设为 `footnotes`、`endnotes_only` 或 `disabled`；
+`endnotes_only` 跳过页面脚注提取，但仍归一化 typed Notes；`disabled` 才原样生成后续阶段使用的源稿。
+TOC 中标记为
   `toc`、`notes`、`bibliography`、`index`、`author_notes`、
   `catalog` 或 `ad` 的单元也不会进入页面脚注候选。
 - `refine/footnote_options.py`：集中维护脚注模式、默认阈值和 CLI/config 覆盖解析；候选、
@@ -401,6 +402,17 @@ heading contract 始终优先；标题绑定只容忍安全的展示格式差异
 `footnote_definition` 时移动。脚注的作用域来自 `tree_progress.json` 的完整 `unit_id`，
 而不是顶层 TOC；相同数字在不同实际单元中可以重新开始。跨页顺序由页面和 block 顺序保留，
 所以“正文 → A 脚注 → B 正文 → A 脚注续文 → B 脚注”不会被错误重排。
+
+集中尾注走独立的确定性归一化路径：`tree_progress.json`/TOC 中 `type: notes` 的文件是
+尾注定义源，不要求 Markdown 内再次出现 `# Notes` 标题。`footnote-apply` 在生成
+`footnote_normalized/` 时识别 `N. text`、`N text`、`<sup>N</sup> text` 和已有
+`[^N]: text`，并只把与这些定义匹配的普通单元上标转为 `[^N]`。原始 OCR 单元不覆盖；
+重复尾注编号会阻断归一化。`footnote_normalization.json` 的 `endnotes` 子报告记录定义键、
+转换引用数和孤立定义，供后续审计。
+
+Polish 校验依据文件角色而不是正文标题检查尾注；EPUB 构建还会拒绝 Notes 单元中残留的
+原始编号定义或正文中残留的对应上标。这样页脚脚注仍由页面版面证据决定，集中尾注则由
+TOC 语义角色决定，两者不会互相吞并。
 
 ### 3.1.2 页面 layout sidecar 和共识比较
 

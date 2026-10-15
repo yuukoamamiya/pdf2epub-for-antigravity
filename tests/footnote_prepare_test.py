@@ -11,6 +11,7 @@ from pdf2epub.refine.footnote_prepare import (
 from pdf2epub.refine.footnote_handoff import prepare_footnote_subagent
 from pdf2epub.refine.footnote_apply import (
     _locate_block,
+    _candidate_decisions,
     apply_footnote_normalization,
 )
 from pdf2epub.refine.footnote_matching import (
@@ -171,6 +172,7 @@ def test_footnote_status_reports_candidate_hash_as_root_cause(tmp_path: Path):
     normalization.write_text(
         json.dumps(
             {
+                "schema_version": 2,
                 "valid": True,
                 "status": "validated",
                 "ocr_evidence_mode": "single_ocr",
@@ -494,6 +496,40 @@ def test_native_footnote_decision_reuses_existing_normalization_pipeline(
     assert "Body text [^36]" in normalized
     assert "[^36]: Native footnote text" in normalized
     assert "36 Native footnote text" not in normalized
+
+
+def test_repeated_body_decision_cannot_override_local_high_confidence_candidate():
+    report = {
+        "pages": [
+            {
+                "candidates": [
+                    {
+                        "page": 1,
+                        "source": "primary",
+                        "block": 2,
+                        "confidence": "high",
+                        "local_role": "footnote_start",
+                        "key": "36",
+                    }
+                ]
+            }
+        ]
+    }
+    validation = {
+        "decisions": [
+            {
+                "page": 1,
+                "source": "primary",
+                "block": 2,
+                "role": "body",
+            }
+        ]
+    }
+
+    decisions = _candidate_decisions(report, validation)
+
+    assert decisions[0]["role"] == "footnote_start"
+    assert decisions[0]["key"] == "36"
 
 
 def test_candidate_report_preserves_body_then_continuation_then_new_note_order(
@@ -1448,6 +1484,63 @@ def test_endnotes_only_mode_preserves_source_without_page_footnote_candidates(
     assert (tmp_path / "footnote_normalized" / source.name).read_text(
         encoding="utf-8"
     ) == source.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("mode", ["footnotes", "endnotes_only"])
+def test_typed_notes_are_normalized_without_an_embedded_notes_heading(
+    tmp_path: Path, mode: str
+):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [_block("1 Endnote entry", 0, label="Text", y0=820)],
+    )
+    source_dir = tmp_path / "ocr_markdown"
+    source_dir.mkdir()
+    (source_dir / "chapter_1.md").write_text(
+        "Body <sup>1</sup>.\n", encoding="utf-8"
+    )
+    (source_dir / "chapter_12.md").write_text(
+        "1. Endnote entry.\n", encoding="utf-8"
+    )
+    (source_dir / "tree_progress.json").write_text(
+        json.dumps(
+            {
+                "units": [
+                    {
+                        "unit_id": "chapter_1",
+                        "file": "chapter_1.md",
+                        "page_range": [1, 1],
+                        "type": "",
+                    },
+                    {
+                        "unit_id": "chapter_12",
+                        "file": "chapter_12.md",
+                        "page_range": [1, 1],
+                        "type": "notes",
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = {"footnotes": {"mode": mode}}
+
+    prepare_footnote_candidates(tmp_path, config=config)
+    validation = validate_footnote_decisions(tmp_path, config=config)
+    assert validation["valid"] is True
+
+    result = apply_footnote_normalization(tmp_path, config=config)
+
+    assert result["valid"] is True
+    assert result["endnotes"]["definition_keys"] == ["1"]
+    assert result["endnotes"]["converted_reference_count"] == 1
+    assert (
+        tmp_path / "footnote_normalized" / "chapter_1.md"
+    ).read_text(encoding="utf-8") == "Body [^1].\n"
+    assert (
+        tmp_path / "footnote_normalized" / "chapter_12.md"
+    ).read_text(encoding="utf-8") == "[^1]: Endnote entry.\n"
 
 
 def test_footnote_apply_rejects_stale_normalized_units_in_disabled_mode(

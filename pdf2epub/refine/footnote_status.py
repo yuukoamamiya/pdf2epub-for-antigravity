@@ -12,7 +12,7 @@ from .footnote_options import FOOTNOTE_MODES, resolve_footnote_options
 from .pdf_evidence import pdf_evidence_mode, require_current_consensus
 
 
-FOOTNOTE_NORMALIZATION_SCHEMA_VERSION = 1
+FOOTNOTE_NORMALIZATION_SCHEMA_VERSION = 2
 _SAFE_FILENAME_RE = re.compile(r"^[^/\\]+\.md$")
 
 
@@ -108,6 +108,12 @@ def footnote_normalization_status(
             "run footnote-prepare, footnote-validate, and footnote-apply",
         }
 
+    if report.get("schema_version") != FOOTNOTE_NORMALIZATION_SCHEMA_VERSION:
+        fail(
+            "normalization_schema_mismatch",
+            "footnote_normalization.json uses an older normalization contract; "
+            "rerun footnote-prepare, footnote-validate, and footnote-apply",
+        )
     if report.get("valid") is not True or report.get("status") != "validated":
         fail(
             "normalization_not_validated",
@@ -197,6 +203,16 @@ def footnote_normalization_status(
         fail(
             "decision_validation_stale",
             "footnote_decision_validation.json changed after footnote-apply",
+        )
+    tree_progress_path = output_dir / "ocr_markdown" / "tree_progress.json"
+    expected_tree_progress_hash = report.get("tree_progress_sha256")
+    if expected_tree_progress_hash and (
+        not tree_progress_path.is_file()
+        or expected_tree_progress_hash != sha256_file(tree_progress_path)
+    ):
+        fail(
+            "tree_progress_stale",
+            "tree_progress.json changed after footnote normalization",
         )
 
     current = not failures

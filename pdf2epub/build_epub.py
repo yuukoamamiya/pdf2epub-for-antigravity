@@ -598,6 +598,33 @@ def has_notes_chapter(chapters: List[Dict]) -> bool:
     return False
 
 
+def validate_centralized_endnotes_for_build(structure: List[Dict]) -> dict:
+    """Fail closed when a typed Notes unit still contains raw endnotes."""
+    from .refine.endnote_normalization import validate_normalized_endnotes
+
+    source_texts: dict[str, str] = {}
+    file_roles: dict[str, str] = {}
+
+    def visit(entries: List[Dict]) -> None:
+        for entry in entries:
+            role = str(entry.get("type") or "").strip().lower()
+            part_files = entry.get("part_files") or (
+                [entry["file_path"]] if entry.get("file_path") else []
+            )
+            for part_file in part_files:
+                path = Path(part_file)
+                if not path.is_file():
+                    continue
+                name = path.name
+                source_texts[name] = path.read_text(encoding="utf-8")
+                if role:
+                    file_roles[name] = role
+            visit(entry.get("children") or [])
+
+    visit(structure)
+    return validate_normalized_endnotes(source_texts, file_roles)
+
+
 def flatten_toc_tree(
     chapters: List[Dict],
     parent_index_path: List[int] = None,
@@ -1372,6 +1399,19 @@ def build_epub(config: BuildEpubConfig) -> Path:
         config.markdown_dir,
         part_order=load_refinement_part_order(config.output_dir),
     )
+    from .refine.footnote_options import resolve_footnote_options
+
+    footnote_mode = resolve_footnote_options(config.config).mode
+    endnote_build_report = (
+        validate_centralized_endnotes_for_build(epub_structure)
+        if footnote_mode != "disabled"
+        else {"valid": True, "definition_keys": [], "errors": [], "status": "disabled"}
+    )
+    if not endnote_build_report["valid"]:
+        raise ValueError(
+            "Centralized endnote normalization is incomplete: "
+            + "; ".join(endnote_build_report["errors"][:10])
+        )
 
     # Count chapters with files
     def count_with_files(entries):
@@ -1608,6 +1648,14 @@ def build_epub(config: BuildEpubConfig) -> Path:
             f"Applied {len(relocation_records)} page-boundary carry-over relocation(s)"
         )
     footnote_report = validate_footnote_graph(generated_html)
+    if auto_global and footnote_manager.definitions and footnote_report["unlinked_sup_count"]:
+        raise ValueError(
+            "Global footnote graph contains unlinked references: "
+            + "; ".join(
+                f"{filename}#{sup_id}"
+                for filename, sup_id, _text in footnote_report["unlinked_samples"][:10]
+            )
+        )
     if footnote_report["unlinked_sup_count"]:
         logger.warning(
             f"Kept {footnote_report['unlinked_sup_count']} ambiguous footnote "

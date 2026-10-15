@@ -13,7 +13,10 @@ from .document_roles import (
     DENSITY_EXEMPT_ROLES,
     TRANSLATION_SPECIAL_ROLES,
 )
-from .footnote_normalization import validate_polish_footnote_normalization
+from .footnote_normalization import (
+    endnote_definition_keys,
+    validate_polish_footnote_normalization,
+)
 from .markdown_validation import (
     _heading_reduction_is_duplicate_only,
     _special_role_numeric_markers,
@@ -210,6 +213,20 @@ def validate_markdown_subagent(
         for name, role in (file_roles or {}).items()
         if str(role).strip().lower() in TRANSLATION_SPECIAL_ROLES
     }
+    expected_endnote_keys: set[str] = set()
+    if task == "polish":
+        for source in sources:
+            if normalized_roles.get(source.name) != "notes":
+                continue
+            try:
+                expected_endnote_keys.update(
+                    endnote_definition_keys(
+                        source.read_text(encoding="utf-8"),
+                        file_role="notes",
+                    )
+                )
+            except (OSError, UnicodeError):
+                continue
     normalized_protected_toc_titles = list(
         dict.fromkeys(
             str(title).strip()
@@ -443,7 +460,12 @@ def validate_markdown_subagent(
                 )
         else:
             footnote_errors = (
-                validate_polish_footnote_normalization(source_text, target_text)
+                validate_polish_footnote_normalization(
+                    source_text,
+                    target_text,
+                    file_role=role,
+                    expected_endnote_keys=expected_endnote_keys,
+                )
                 if validate_footnote_normalization
                 else []
             )

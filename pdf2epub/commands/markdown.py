@@ -79,6 +79,15 @@ def _prepare_pdf_markdown_task(args, task: str):
     heading_contexts = {}
     global_toc_outline = ""
     prompt_context_files = None
+    footnote_mode = None
+    if task == "polish":
+        from pdf2epub.refine.footnote_options import resolve_footnote_options
+
+        try:
+            footnote_mode = resolve_footnote_options(config).mode
+        except ValueError as exc:
+            logger.error(f"Invalid footnotes configuration: {exc}")
+            return 1
     if task == "translate":
         from pdf2epub.glossary import load_selected_glossaries
 
@@ -94,7 +103,7 @@ def _prepare_pdf_markdown_task(args, task: str):
             logger.error(f"Could not load external glossary: {exc}")
             return 1
     if task == "polish":
-        source_dir, _ = _resolve_pdf_polish_source(output_dir)
+        source_dir, _ = _resolve_pdf_polish_source(output_dir, config)
         target_dir = output_dir / "polished_markdown"
         rules = [
             "Repair source layout and line wrapping while preserving meaning and document structure.",
@@ -103,8 +112,11 @@ def _prepare_pdf_markdown_task(args, task: str):
             "Do not remove numbers that belong to prose, headings, lists, dates, citations, formulas, footnotes, bibliography entries, or index entries. Bibliography and index page numbers are semantic content and must be preserved.",
             "Never add a # heading marker to an ordinary paragraph, bold line, italic line, Roman numeral, or numbered section that does not already begin with #. Preserve the source heading marker and level exactly.",
             "Only remove a heading when it is an obvious duplicated running header; never remove a unique section heading.",
-            "When a Notes/注释 section contains numbered endnotes, convert only verified footnote superscripts from <sup>N</sup> to [^N], and convert the matching endnote lines to [^N]: text. Do not convert mathematical, table, ordinal, citation, bibliography, or other non-footnote superscripts.",
         ]
+        if footnote_mode != "disabled":
+            rules.append(
+                "When a Notes/注释 section contains numbered endnotes, convert only verified footnote superscripts from <sup>N</sup> to [^N], and convert the matching endnote lines to [^N]: text. Do not convert mathematical, table, ordinal, citation, bibliography, or other non-footnote superscripts."
+            )
         from pdf2epub.refine.footnote_handoff import load_footnote_unit_contexts
 
         footnote_unit_contexts = load_footnote_unit_contexts(output_dir)
@@ -388,8 +400,19 @@ def _validate_pdf_markdown_task(args, task: str):
         or policy.target_language
         or "Chinese"
     )
+    footnote_validation_enabled = task == "polish"
     if task == "polish":
-        source_dir, _ = _resolve_pdf_polish_source(output_dir)
+        from pdf2epub.refine.footnote_options import resolve_footnote_options
+
+        try:
+            footnote_validation_enabled = (
+                resolve_footnote_options(config).mode != "disabled"
+            )
+        except ValueError as exc:
+            logger.error(f"Invalid footnotes configuration: {exc}")
+            return 1
+    if task == "polish":
+        source_dir, _ = _resolve_pdf_polish_source(output_dir, config)
         target_dir = output_dir / "polished_markdown"
     else:
         source_dir, _ = _resolve_pdf_markdown_source(output_dir, config)
@@ -416,7 +439,7 @@ def _validate_pdf_markdown_task(args, task: str):
         ),
         file_roles=load_pdf_file_roles(output_dir) if task in {"translate", "polish"} else None,
         tolerate_duplicate_headings=task == "polish",
-        validate_footnote_normalization=task == "polish",
+        validate_footnote_normalization=footnote_validation_enabled,
         fix_reference_headings=task == "translate" and bool(
             getattr(args, "fix_reference_heading", False)
         ),

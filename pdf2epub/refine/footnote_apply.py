@@ -34,6 +34,7 @@ from .footnote_status import (
     markdown_inventory as _markdown_inventory,
     unit_records as _unit_records,
 )
+from .endnote_normalization import normalize_endnotes
 
 
 _MOVED_ROLES = frozenset(
@@ -49,6 +50,23 @@ def _candidate_decisions(
     """Combine reviewed decisions with deterministic high-confidence ones."""
 
     decisions_by_address: dict[tuple[int, str, int], dict[str, Any]] = {}
+    high_confidence_addresses: set[tuple[int, str, int]] = set()
+    for page_report in report.get("pages", []) or []:
+        if not isinstance(page_report, Mapping):
+            continue
+        for candidate in page_report.get("candidates", []) or []:
+            if not isinstance(candidate, Mapping) or candidate.get("confidence") != "high":
+                continue
+            try:
+                high_confidence_addresses.add(
+                    (
+                        int(candidate["page"]),
+                        str(candidate.get("source") or "primary").strip().lower(),
+                        int(candidate["block"]),
+                    )
+                )
+            except (KeyError, TypeError, ValueError):
+                continue
     for item in validation.get("decisions", []) or []:
         if not isinstance(item, Mapping):
             continue
@@ -60,7 +78,12 @@ def _candidate_decisions(
             )
         except (KeyError, TypeError, ValueError):
             continue
-        decisions_by_address[address] = dict(item)
+        # High-confidence candidates are already accepted by the local,
+        # deterministic rule.  Older handoffs sometimes repeated them as
+        # ``body`` decisions; allowing that stale review output to override the
+        # local result silently dropped valid page footnotes.
+        if address not in high_confidence_addresses:
+            decisions_by_address[address] = dict(item)
 
     for page_report in report.get("pages", []) or []:
         if not isinstance(page_report, Mapping):
@@ -234,56 +257,6 @@ def apply_footnote_normalization(
     if not source_dir.is_dir():
         return _write_failure(output_dir, [f"source directory is missing: {source_dir}"])
 
-    if report_footnote_mode != "footnotes":
-        try:
-            source_files = sorted(source_dir.glob("*.md"))
-            if not source_files:
-                raise ValueError(f"source directory contains no Markdown units: {source_dir}")
-            target_dir.mkdir(parents=True, exist_ok=True)
-            for source_path in source_files:
-                atomic_write_text(
-                    target_dir / source_path.name,
-                    source_path.read_text(encoding="utf-8"),
-                )
-            source_hashes = _markdown_inventory(source_dir)
-            target_hashes = _markdown_inventory(target_dir)
-            extra_files = sorted(set(target_hashes) - set(source_hashes))
-            if extra_files:
-                return _write_failure(
-                    output_dir,
-                    [
-                        "footnote_normalized contains stale Markdown units not present "
-                        f"in ocr_markdown: {', '.join(extra_files[:20])}"
-                    ],
-                )
-        except (OSError, UnicodeError, ValueError) as exc:
-            return _write_failure(output_dir, [f"could not preserve source units: {exc}"])
-        result = {
-            "schema_version": FOOTNOTE_NORMALIZATION_SCHEMA_VERSION,
-            "source_kind": report.get("source_kind", "ocr"),
-            "ocr_evidence_mode": report_mode,
-            "footnote_mode": report_footnote_mode,
-            "status": "validated",
-            "valid": True,
-            "source_dir": "ocr_markdown",
-            "target_dir": "footnote_normalized",
-            "source_sha256": source_hashes,
-            "target_sha256": target_hashes,
-            "candidate_report_sha256": sha256_file(
-                output_dir / "footnote_candidates.json"
-            ),
-            "decision_validation_sha256": sha256_file(
-                output_dir / "footnote_decision_validation.json"
-            ),
-            "moved_count": 0,
-            "preserved_roles": {},
-            "notes": [],
-            "skipped_reason": f"footnotes.mode={report_footnote_mode}",
-            "resolved_blocks": [],
-        }
-        atomic_write_json(output_dir / "footnote_normalization.json", result)
-        return result
-
     try:
         records = _unit_records(output_dir)
         source_texts = {
@@ -297,13 +270,31 @@ def apply_footnote_normalization(
     except (OSError, UnicodeError, ValueError) as exc:
         return _write_failure(output_dir, [str(exc)])
 
+    transformed: dict[str, str] = dict(source_texts)
+    resolved: list[dict[str, Any]] = []
+    preserved_roles: dict[str, int] = defaultdict(int)
+    endnote_report: dict[str, Any] = {
+        "status": "disabled" if report_footnote_mode == "disabled" else "not_started",
+        "valid": True,
+        "source_files": [],
+        "definition_keys": [],
+        "definition_count": 0,
+        "normalized_definition_count": 0,
+        "converted_reference_count": 0,
+        "reference_counts": {},
+        "orphan_definition_keys": [],
+        "errors": [],
+    }
+
     sidecar_cache: dict[int, dict[str, Any]] = {}
-    decisions = _candidate_decisions(report, validation)
+    decisions = (
+        _candidate_decisions(report, validation)
+        if report_footnote_mode == "footnotes"
+        else []
+    )
     edits_by_file: dict[str, list[tuple[int, int, str]]] = defaultdict(list)
     notes_by_chapter: dict[str, list[dict[str, Any]]] = defaultdict(list)
     active_by_chapter_key: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
-    resolved: list[dict[str, Any]] = []
-    preserved_roles: dict[str, int] = defaultdict(int)
     errors: list[str] = []
     scheduled_secondary_primary_removals: set[tuple[int, int]] = set()
 
@@ -596,42 +587,51 @@ def apply_footnote_normalization(
     if errors:
         return _write_failure(output_dir, errors)
 
+    transformed = {
+        name: _apply_edits(source_texts[name], edits)
+        for name, edits in edits_by_file.items()
+    }
+    for name, text in source_texts.items():
+        if name not in transformed:
+            transformed[name] = text
+
+    # Append to the last physical file of each emitted logical TOC unit.
+    # Parts of one oversized unit share the same scope; sibling TOC units
+    # do not, so their independently restarted footnote numbers remain
+    # independent.
+    final_file_by_chapter: dict[str, dict[str, Any]] = {}
+    for record in records:
+        current = final_file_by_chapter.get(record["chapter_id"])
+        if current is None or (record["unit_order"], record["part_index"]) >= (
+            current["unit_order"],
+            current["part_index"],
+        ):
+            final_file_by_chapter[record["chapter_id"]] = record
+    for chapter_id, notes in notes_by_chapter.items():
+        target_record = final_file_by_chapter.get(chapter_id)
+        if target_record is None:
+            raise ValueError(f"no chapter-end unit found for {chapter_id}")
+        definitions = []
+        for note in notes:
+            joined = " ".join(part for part in note["parts"] if part).strip()
+            definitions.append(f"[^{note['output_key']}]: {joined}")
+        if definitions:
+            current = transformed[target_record["name"]].rstrip()
+            transformed[target_record["name"]] = (
+                current + "\n\n" + "\n\n".join(definitions) + "\n"
+            )
+
+    if report_footnote_mode != "disabled":
+        try:
+            transformed, endnote_report = normalize_endnotes(
+                transformed,
+                {record["name"]: record["type"] for record in records},
+            )
+        except (OSError, UnicodeError, ValueError) as exc:
+            return _write_failure(output_dir, [f"could not normalize centralized endnotes: {exc}"])
+
     try:
         target_dir.mkdir(parents=True, exist_ok=True)
-        transformed: dict[str, str] = {
-            name: _apply_edits(source_texts[name], edits)
-            for name, edits in edits_by_file.items()
-        }
-        for name, text in source_texts.items():
-            if name not in transformed:
-                transformed[name] = text
-
-        # Append to the last physical file of each emitted logical TOC unit.
-        # Parts of one oversized unit share the same scope; sibling TOC units
-        # do not, so their independently restarted footnote numbers remain
-        # independent.
-        final_file_by_chapter: dict[str, dict[str, Any]] = {}
-        for record in records:
-            current = final_file_by_chapter.get(record["chapter_id"])
-            if current is None or (record["unit_order"], record["part_index"]) >= (
-                current["unit_order"],
-                current["part_index"],
-            ):
-                final_file_by_chapter[record["chapter_id"]] = record
-        for chapter_id, notes in notes_by_chapter.items():
-            target_record = final_file_by_chapter.get(chapter_id)
-            if target_record is None:
-                raise ValueError(f"no chapter-end unit found for {chapter_id}")
-            definitions = []
-            for note in notes:
-                joined = " ".join(part for part in note["parts"] if part).strip()
-                definitions.append(f"[^{note['output_key']}]: {joined}")
-            if definitions:
-                current = transformed[target_record["name"]].rstrip()
-                transformed[target_record["name"]] = (
-                    current + "\n\n" + "\n\n".join(definitions) + "\n"
-                )
-
         for name, text in transformed.items():
             atomic_write_text(target_dir / name, text)
     except (OSError, UnicodeError, ValueError) as exc:
@@ -677,6 +677,10 @@ def apply_footnote_normalization(
             for note in notes
         ],
         "resolved_blocks": resolved,
+        "endnotes": endnote_report,
+        "tree_progress_sha256": sha256_file(
+            output_dir / "ocr_markdown" / "tree_progress.json"
+        ),
     }
     atomic_write_json(output_dir / "footnote_normalization.json", result)
     return result

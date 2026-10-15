@@ -593,6 +593,20 @@ refinement unit 和正文定位；任何一层失败都必须修正决定后重�
 | `footnote_decision_validation.json` | 决定地址、角色、键、覆盖率和哈希门禁 | apply 结果 |
 | `footnote_normalization.json` | apply 后的定位、归并和输出检查点 | 上游候选报告 |
 
+### 集中尾注归一化
+
+`type: notes` 是集中尾注的结构合同，不要求对应 Markdown 文件保留 `# Notes` 标题。
+`footnote-apply` 会在写入 `footnote_normalized/` 时识别尾注定义，并把普通正文中匹配的
+`<sup>N</sup>` 或 Unicode 数字上标转换为 `[^N]`；尾注定义转换为 `[^N]: text`。已有
+Markdown 脚注语法会被保留，页脚脚注仍按上一节的页面候选和 Subagent 决定处理。
+
+`footnotes.mode: endnotes_only` 只关闭页面脚注候选，不关闭这条 typed Notes 归一化路径；
+只有 `footnotes.mode: disabled` 才会原样保留；该模式同时跳过这条 Polish 尾注归一化校验和
+构建门禁。其他模式下，`polish-validate` 会按 `file_roles` 检查 Notes 文件及所有普通单元的
+对应标记，EPUB 构建前还会再次阻断残留的原始定义或未链接上标。
+重复尾注编号、结构角色变化或归一化报告版本过期时，必须重新运行
+`footnote-prepare → footnote-validate → footnote-apply`，不能手工修改派生产物。
+
 `footnote_candidates.json` 的 `bottom_detection` 还会报告页底 block、页底数字 block、已进入
 候选的数字 block、页眉/页脚与纯数字页码排除数，以及 `suspected_missed_count`。达到审计条件的
 漏检还会进入 `audit_candidates` 和视觉 manifest，不再只是静态警告。异常区域会复用 OCR 校正
