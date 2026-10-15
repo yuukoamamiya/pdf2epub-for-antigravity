@@ -108,6 +108,10 @@ def _prepare_pdf_markdown_task(args, task: str):
         rules = [
             "Repair source layout and line wrapping while preserving meaning and document structure.",
             "Preserve Markdown heading levels, image links, footnote references, formulas, and link destinations.",
+            "Treat a single newline caused by PDF visual layout as a soft line wrap. In ordinary prose, join visual lines with spaces and use a blank line only for a real semantic paragraph boundary; never make every extracted visual line its own Markdown paragraph.",
+            "For poetry, verse, drama/dialogue, epigraphs, or line-by-line quotations, preserve the intentional line boundaries instead of merging them into prose, but keep the whole item in one Markdown block and use explicit `<br />` between lines. Do not represent such a passage as a chain of ordinary one-line paragraphs.",
+            "Keep lists, tables, formulas, code, captions, footnotes, TOC entries, bibliography entries, and index entries in their own appropriate block/entry structure; do not apply ordinary-prose paragraph joining across those boundaries.",
+            "Before writing each file, perform a structural audit: check that ordinary prose is not still split into many short single-line blocks, that each intentional verse/dialogue block has explicit hard breaks, and that no genuine block boundary was accidentally merged.",
             "Remove confirmed printed page furniture from the polished text: standalone Arabic or Roman page labels, synthetic labels such as `PDF Page: N`, and page-edge running headers or footers that are clearly repeated layout artifacts. A short running title combined with a page label (for example `Preface XII`) must be removed when it is clearly page furniture, not translated as prose.",
             "Do not remove numbers that belong to prose, headings, lists, dates, citations, formulas, footnotes, bibliography entries, or index entries. Bibliography and index page numbers are semantic content and must be preserved.",
             "Never add a # heading marker to an ordinary paragraph, bold line, italic line, Roman numeral, or numbered section that does not already begin with #. Preserve the source heading marker and level exactly.",
@@ -579,12 +583,24 @@ def _validate_pdf_markdown_task(args, task: str):
             f"{len(report['polish_page_furniture_warnings'])}; "
             "these require Subagent or human review before continuing"
         )
+    polish_structure_audits = report.get("polish_structure_audits", {})
+    fragmented_units = [
+        name
+        for name, audit in polish_structure_audits.items()
+        if isinstance(audit, dict) and audit.get("status") == "review"
+    ]
+    if fragmented_units:
+        logger.warning(
+            "Polish paragraph-fragmentation review required for: "
+            f"{fragmented_units[:10]}"
+        )
     first_pass_review_retries = [
         item
         for item in report.get("retry_required", [])
         if item.get("kind") in {
             "bilingual_output",
             "polish_page_furniture",
+            "polish_paragraph_fragmentation",
             "polish_unique_toc_label_removed",
         }
     ]

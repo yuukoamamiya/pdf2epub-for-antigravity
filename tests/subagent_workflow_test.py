@@ -36,6 +36,7 @@ from pdf2epub.toc_translation_workflow import (
 from pdf2epub.subagent_runtime import write_worker_handoffs
 from pdf2epub.markdown_validation import (
     polish_content_integrity_check,
+    polish_structure_audit,
     target_language_ratio_check,
 )
 from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
@@ -1166,6 +1167,94 @@ def test_polish_content_integrity_rejects_duplicate_child_prose_under_empty_pare
     assert report["valid"] is False
     assert report["duplicated_prose_blocks"]
     assert any("duplication" in error for error in report["errors"])
+
+
+def test_polish_structure_audit_flags_visual_line_paragraph_fragmentation():
+    lines = [
+        f"This is visual line {index} that belongs to the same ordinary paragraph."
+        for index in range(10)
+    ]
+    source = "\n".join(lines)
+    target = "\n\n".join(lines)
+
+    audit = polish_structure_audit(source, target)
+
+    assert audit["applicable"] is True
+    assert audit["status"] == "review"
+    assert audit["single_line_block_count"] == 10
+    assert audit["explicit_hard_break_count"] == 0
+
+
+def test_polish_validation_review_gates_fragmented_ordinary_prose(tmp_path: Path):
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    lines = [
+        f"This is visual line {index} that belongs to the same ordinary paragraph."
+        for index in range(10)
+    ]
+    (source_dir / "unit.md").write_text("\n".join(lines), encoding="utf-8")
+    (target_dir / "unit.md").write_text("\n\n".join(lines), encoding="utf-8")
+
+    report = validate_markdown_subagent(
+        tmp_path,
+        "polish",
+        source_dir,
+        target_dir,
+        validate_footnote_normalization=False,
+    )
+
+    assert report["all_passed"] is False
+    assert report["polish_structure_audits"]["unit.md"]["status"] == "review"
+    assert any(
+        item["kind"] == "polish_paragraph_fragmentation"
+        for item in report["review_required"]
+    )
+    assert not (target_dir / "validated" / "unit.md").exists()
+
+
+def test_polish_structure_audit_accepts_explicit_hard_break_verse_block():
+    source = "# Poem\n\nFirst line\nSecond line\nThird line\n"
+    target = "# Poem\n\nFirst line<br />\nSecond line<br />\nThird line\n"
+
+    audit = polish_structure_audit(source, target)
+
+    assert audit["status"] == "ok"
+    assert audit["explicit_hard_break_count"] == 2
+    assert audit["intentional_line_structure_candidates"] == 1
+
+
+def test_polish_structure_audit_exempts_special_units():
+    source = "Author, A. 2020. First title.\n\nAuthor, B. 2021. Second title.\n"
+    target = source
+
+    audit = polish_structure_audit(source, target, role="bibliography")
+
+    assert audit["applicable"] is False
+    assert audit["status"] == "exempt"
+
+
+def test_polish_prompt_explains_line_structure_audit_and_exceptions(tmp_path: Path):
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    (source_dir / "unit.md").write_text("A line\nAnother line\n", encoding="utf-8")
+
+    paths = prepare_markdown_subagent(
+        tmp_path,
+        "polish",
+        source_dir,
+        tmp_path / "target",
+        "English",
+        "English",
+    )
+    prompt = paths["prompt"].read_text(encoding="utf-8")
+
+    assert "ordinary prose" in prompt
+    assert "poetry" in prompt
+    assert "drama/dialogue" in prompt
+    assert "explicit `<br />`" in prompt
+    assert "structural audit" in prompt
 
 
 def test_polish_footnote_normalization_accepts_verified_legacy_notes():

@@ -54,6 +54,167 @@ _NOTES_STRUCTURAL_HEADING_RE = re.compile(
     re.IGNORECASE,
 )
 
+_POLISH_HARD_BREAK_RE = re.compile(r"<br\b[^>]*?/?>", re.IGNORECASE)
+_POLISH_CODE_FENCE_RE = re.compile(r"^\s*(```|~~~)")
+_POLISH_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+\S")
+_POLISH_LIST_RE = re.compile(r"^\s*(?:[-+*]|\d+[.)])\s+\S")
+_POLISH_FOOTNOTE_DEFINITION_RE = re.compile(r"^\s*\[\^[^\]]+\]:")
+_POLISH_IMAGE_RE = re.compile(r"^\s*!\[[^\]]*\]\([^)]*\)\s*$")
+_POLISH_HORIZONTAL_RULE_RE = re.compile(r"^\s*(?:\*\s*){3,}$|^\s*(?:-\s*){3,}$|^\s*(?:_\s*){3,}$")
+
+
+def _polish_markdown_blocks(text: str) -> list[list[str]]:
+    """Split Markdown into blank-line blocks for the polish structure audit."""
+    blocks: list[list[str]] = []
+    current: list[str] = []
+    for line in clean_ocr_page_artifacts(str(text or "")).splitlines():
+        if line.strip():
+            current.append(line)
+        elif current:
+            blocks.append(current)
+            current = []
+    if current:
+        blocks.append(current)
+    return blocks
+
+
+def _polish_block_visible_text(lines: list[str]) -> str:
+    """Return a conservative visible-text approximation for one Markdown block."""
+    value = "\n".join(lines)
+    value = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", value)
+    value = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", value)
+    value = _POLISH_HARD_BREAK_RE.sub(" ", value)
+    value = re.sub(r"<[^>]+>", " ", value)
+    value = re.sub(r"^\s{0,3}#{1,6}\s+", "", value, flags=re.MULTILINE)
+    value = re.sub(r"^\s*(?:[-+*]|\d+[.)])\s+", "", value, flags=re.MULTILINE)
+    value = re.sub(r"[*_`~]", "", value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def _polish_block_is_structural(lines: list[str]) -> bool:
+    """Exclude blocks whose short lines are intentional Markdown structure."""
+    stripped = [line.strip() for line in lines if line.strip()]
+    if not stripped:
+        return True
+    if any(_POLISH_CODE_FENCE_RE.match(line) for line in stripped):
+        return True
+    if all(
+        _POLISH_HEADING_RE.match(line)
+        or _POLISH_IMAGE_RE.match(line)
+        or _POLISH_HORIZONTAL_RULE_RE.match(line)
+        or _POLISH_FOOTNOTE_DEFINITION_RE.match(line)
+        for line in stripped
+    ):
+        return True
+    if all(line.startswith(">") for line in stripped):
+        return True
+    if all(_POLISH_LIST_RE.match(line) for line in stripped):
+        return True
+    if len(stripped) >= 2 and all(
+        line.startswith("|") or re.fullmatch(r"\s*[:| -]+\s*", line)
+        for line in stripped
+    ):
+        return True
+    return False
+
+
+def polish_structure_audit(
+    source_text: str,
+    target_text: str,
+    role: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Audit polish output for visual-line paragraph fragmentation.
+
+    The audit is intentionally advisory/review-gated rather than an automatic
+    rewriter.  Short one-line blocks can be aphorisms, dialogue, or verse, so
+    the validator only asks the Subagent to review them.  Explicit ``<br />``
+    blocks are treated as an intentional line-structure representation and do
+    not count as ordinary paragraph fragments.  Bibliography, index, notes,
+    catalog, advertisement, TOC, and other declared special units are exempt
+    because their line/entry boundaries carry meaning of their own.
+    """
+
+    effective_role = str(role or "").strip().lower() or None
+    if effective_role is None and is_bibliography_text(source_text):
+        effective_role = "bibliography"
+
+    source_blocks = _polish_markdown_blocks(source_text)
+    target_blocks = _polish_markdown_blocks(target_text)
+
+    def metrics(blocks: list[list[str]]) -> Dict[str, Any]:
+        candidate_blocks = 0
+        single_line_blocks = 0
+        short_blocks = 0
+        hard_break_blocks = 0
+        hard_break_count = 0
+        samples: list[str] = []
+        for lines in blocks:
+            if _polish_block_is_structural(lines):
+                continue
+            visible = _polish_block_visible_text(lines)
+            if not visible:
+                continue
+            hard_breaks = _POLISH_HARD_BREAK_RE.findall("\n".join(lines))
+            hard_break_count += len(hard_breaks)
+            if hard_breaks:
+                hard_break_blocks += 1
+                if len(samples) < 5:
+                    samples.append(visible[:160])
+                continue
+            candidate_blocks += 1
+            if len(lines) == 1:
+                single_line_blocks += 1
+            visible_length = len(re.sub(r"\s+", "", visible))
+            word_count = len(re.findall(r"\w+", visible, flags=re.UNICODE))
+            if visible_length <= 90 or word_count <= 14:
+                short_blocks += 1
+        return {
+            "block_count": len(blocks),
+            "candidate_block_count": candidate_blocks,
+            "single_line_block_count": single_line_blocks,
+            "short_block_count": short_blocks,
+            "single_line_ratio": round(
+                single_line_blocks / max(1, candidate_blocks), 6
+            ),
+            "short_block_ratio": round(short_blocks / max(1, candidate_blocks), 6),
+            "explicit_hard_break_count": hard_break_count,
+            "intentional_line_structure_candidates": hard_break_blocks,
+            "intentional_line_structure_samples": samples,
+        }
+
+    source_metrics = metrics(source_blocks)
+    target_metrics = metrics(target_blocks)
+    result: Dict[str, Any] = {
+        "applicable": effective_role not in TRANSLATION_SPECIAL_ROLES,
+        "status": "ok",
+        "role": effective_role,
+        "source": source_metrics,
+        **target_metrics,
+    }
+    if not result["applicable"]:
+        result["status"] = "exempt"
+        result["reason"] = (
+            f"special Markdown unit role {effective_role!r} is exempt from "
+            "ordinary prose paragraph-fragmentation checks"
+        )
+        return result
+
+    candidate_count = int(target_metrics["candidate_block_count"])
+    single_ratio = float(target_metrics["single_line_ratio"])
+    short_ratio = float(target_metrics["short_block_ratio"])
+    if candidate_count >= 8 and single_ratio >= 0.60 and short_ratio >= 0.60:
+        result["status"] = "review"
+        result["reason"] = (
+            "polish paragraph fragmentation: target contains "
+            f"{target_metrics['single_line_block_count']}/{candidate_count} "
+            "ordinary candidate blocks as short single-line blocks "
+            f"(single-line ratio {single_ratio:.1%}, short-block ratio "
+            f"{short_ratio:.1%}); merge visual line wraps in ordinary prose, "
+            "but preserve verse/dialogue/epigraph lines inside one block with "
+            "explicit <br /> breaks"
+        )
+    return result
+
 
 def _special_role_numeric_markers(text: str) -> list[str]:
     """Extract stable numeric markers from bibliography/index content.
@@ -737,6 +898,7 @@ __all__ = [
     "detect_polish_page_furniture",
     "fix_reference_heading_mismatch",
     "polish_content_integrity_check",
+    "polish_structure_audit",
     "strip_outer_markdown_fences",
     "target_language_ratio_check",
     "translation_diff_summary",

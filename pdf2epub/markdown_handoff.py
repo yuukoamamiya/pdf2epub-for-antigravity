@@ -522,7 +522,14 @@ def prepare_markdown_subagent(
 
     native_layout_rules = []
     polish_boundary_rules = []
+    polish_structure_rules = []
     if task == "polish":
+        polish_structure_rules = [
+            "Treat a single newline caused by PDF visual layout as a soft line wrap. In ordinary prose, join visual lines with spaces and use a blank line only for a real semantic paragraph boundary; never make every extracted visual line its own Markdown paragraph.",
+            "For poetry, verse, drama/dialogue, epigraphs, or line-by-line quotations, preserve intentional line boundaries instead of merging them into prose, but keep the complete item in one Markdown block and use explicit `<br />` between lines. Do not emit a chain of ordinary one-line paragraphs for an intentional line structure.",
+            "Keep lists, tables, formulas, code, captions, footnotes, TOC entries, bibliography entries, and index entries in their own appropriate block/entry structure; do not apply ordinary-prose paragraph joining across those boundaries.",
+            "Before writing each file, perform a structural audit: check that ordinary prose is not still split into many short single-line blocks, that each intentional verse/dialogue block has explicit hard breaks, and that no genuine block boundary was accidentally merged.",
+        ]
         if config is None or secondary_ocr_enabled(config):
             polish_boundary_rules = [
                 "The source for this task has already passed the page-level OCR correction gate. Treat its characters, words, symbols, and line content as authoritative.",
@@ -546,6 +553,7 @@ def prepare_markdown_subagent(
                 "This is a high-confidence native vector-text PDF, not a visual OCR result. Do not perform speculative spelling, glyph, or wording corrections; preserve the extracted source text except for necessary whitespace and line-wrap normalization.",
                 "The native PDF text layer records positioned visual lines, not reliable semantic paragraphs. Determine paragraph boundaries from the layout and content: merge soft line wraps belonging to one prose paragraph with spaces, while preserving true paragraph breaks, headings, lists, quotations, tables, captions, formulas, and footnote blocks.",
                 "Never treat every extracted visual line as an independent Markdown paragraph. Keep genuine blank-line and block boundaries, and do not merge distinct blocks merely because they are adjacent.",
+                "For poetry, verse, drama/dialogue, epigraphs, or line-by-line quotations, preserve intentional line boundaries instead of merging them into prose, but keep the complete item in one Markdown block and use explicit `<br />` between lines. Do not emit a chain of ordinary one-line paragraphs for an intentional line structure.",
             ]
 
     rules = [
@@ -559,6 +567,7 @@ def prepare_markdown_subagent(
         "When the scoped manifest marks a file as a continuation unit, preserve the source opening exactly and never add a Markdown heading at the beginning of that file. Do not invent labels such as '(continued)' or '参考文献（续）'.",
         *polish_boundary_rules,
         *native_layout_rules,
+        *polish_structure_rules,
         *extra_rules,
     ]
     role_rules = []

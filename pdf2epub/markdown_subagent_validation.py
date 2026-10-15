@@ -27,6 +27,7 @@ from .markdown_validation import (
     is_bibliography_text,
     is_front_matter_text,
     polish_content_integrity_check,
+    polish_structure_audit,
     strip_outer_markdown_fences,
     target_language_ratio_check,
     translation_diff_summary,
@@ -207,6 +208,7 @@ def validate_markdown_subagent(
     polish_page_furniture_warnings: List[Dict[str, Any]] = []
     polish_toc_label_exemptions: List[Dict[str, Any]] = []
     polish_content_integrity: Dict[str, Dict[str, Any]] = {}
+    polish_structure_audits: Dict[str, Dict[str, Any]] = {}
     review_required: List[Dict[str, Any]] = []
     normalized_roles = {
         str(name): str(role).strip().lower()
@@ -530,6 +532,26 @@ def validate_markdown_subagent(
                         **finding,
                     }
                 )
+            structure_audit = polish_structure_audit(
+                source_text,
+                target_text,
+                role=role,
+            )
+            polish_structure_audits[source.name] = structure_audit
+            if structure_audit.get("status") == "review":
+                review_required.append(
+                    {
+                        "file": source.name,
+                        "kind": "polish_paragraph_fragmentation",
+                        "reason": str(
+                            structure_audit.get(
+                                "reason",
+                                "polish output may contain visual-line paragraph fragmentation",
+                            )
+                        ),
+                        "audit": structure_audit,
+                    }
+                )
 
         if source.name in target_language_blocked and source.name in valid_files:
             valid_files.remove(source.name)
@@ -660,6 +682,7 @@ def validate_markdown_subagent(
         "polish_page_furniture_warnings": polish_page_furniture_warnings,
         "polish_toc_label_exemptions": polish_toc_label_exemptions,
         "polish_content_integrity": polish_content_integrity,
+        "polish_structure_audits": polish_structure_audits,
         "review_required": review_required,
         "review_required_files": review_required_files,
         "retry_required": retry_required,
@@ -746,6 +769,7 @@ def validate_markdown_subagent(
                     )
                 ),
                 "polish_content_integrity": polish_content_integrity.get(name),
+                "polish_structure_audit": polish_structure_audits.get(name),
             }
         ledger = {
             "schema_version": VALIDATION_SCHEMA_VERSION,
