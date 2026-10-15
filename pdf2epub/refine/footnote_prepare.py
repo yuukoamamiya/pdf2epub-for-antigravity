@@ -2,8 +2,8 @@
 
 The implementation is intentionally a small coordinator.  Configuration,
 current OCR evidence, page scanning, visual evidence, and report persistence
-live in focused modules; this module preserves the historical public entry
-points used by the command layer and older library callers.
+live in focused modules; this module exposes only the candidate-preparation
+coordinator.
 """
 
 from __future__ import annotations
@@ -11,12 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
-from .footnote_consensus import (
-    load_consensus_review_pages,
-    secondary_sidecar_path,
-)
-from .footnote_contracts import DECISION_ROLES as _DECISION_ROLES
-from .footnote_contracts import MOVED_ROLES as _MOVED_ROLES
+from .footnote_consensus import load_consensus_review_pages
 from .footnote_options import (
     DEFAULT_AUTO_ACCEPT,
     DEFAULT_BOTTOM_INTERSECTION_RATIO,
@@ -38,12 +33,6 @@ from .pdf_evidence import (
     pdf_evidence_mode,
     require_current_consensus,
 )
-
-
-# Private aliases retained for callers that imported these helpers from the
-# former monolithic module.
-_load_consensus_review_pages = load_consensus_review_pages
-_secondary_sidecar_path = secondary_sidecar_path
 
 
 def prepare_footnote_candidates(
@@ -164,34 +153,11 @@ def prepare_footnote_candidates(
         config=config,
     )
 
-
-_HANDOFF_EXPORTS = frozenset(
-    {"load_footnote_unit_contexts", "prepare_footnote_subagent"}
-)
-_VALIDATION_EXPORTS = frozenset({"validate_footnote_decisions"})
-
-
-def __getattr__(name: str):
-    """Resolve hand-off exports lazily for older library callers."""
-    if name in _HANDOFF_EXPORTS:
-        from . import footnote_handoff
-
-        return getattr(footnote_handoff, name)
-    if name in _VALIDATION_EXPORTS:
-        from . import footnote_validation
-
-        return getattr(footnote_validation, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
 __all__ = [
     "DEFAULT_BOTTOM_RATIO",
     "FootnotePrepareOptions",
     "FOOTNOTE_PREPARE_SCHEMA_VERSION",
     "FOOTNOTE_STRUCTURE_EXEMPT_TYPES",
-    "load_footnote_unit_contexts",
     "prepare_footnote_candidates",
-    "prepare_footnote_subagent",
     "resolve_footnote_options",
-    "validate_footnote_decisions",
 ]

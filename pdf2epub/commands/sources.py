@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from pdf2epub.ocr_progress import assess_progress
-from pdf2epub.refine.footnote_apply import footnote_normalization_is_current
+from pdf2epub.refine.footnote_status import footnote_normalization_is_current
 from pdf2epub.validation_receipts import validation_receipt_is_current
 
 

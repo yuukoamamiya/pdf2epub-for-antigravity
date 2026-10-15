@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Any, Iterable, Mapping
 
 from .footnote_candidates import DEFAULT_NATIVE_MAX_FONT_RATIO
-from .footnote_continuation import (
+from .footnote_continuation_regions import (
     _auto_continuation_key,
     _horizontal_overlap,
 )

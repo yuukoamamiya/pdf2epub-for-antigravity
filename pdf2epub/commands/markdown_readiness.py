@@ -160,7 +160,7 @@ def run_readiness_check(
 
     footnote_status = {"current": True, "detail": "not required at this stage"}
     if stage in {"translate", "package"} and policy.requires_polish:
-        from pdf2epub.refine.footnote_apply import footnote_normalization_status
+        from pdf2epub.refine.footnote_status import footnote_normalization_status
 
         footnote_status = footnote_normalization_status(output_dir, config=config)
         record(

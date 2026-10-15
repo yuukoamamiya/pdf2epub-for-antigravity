@@ -118,7 +118,9 @@ PDF 精修的核心领域模块如下：
   sidecar 在页边 5% 内确定性清除 DOI/孤立页码，并仅清除跨页重复短页眉页脚；原始 `pages/`
   不会被覆盖，sidecar 会参与 refine checkpoint 指纹。
 - `refine/footnote_prepare.py`：只编排按页面 layout sidecar 生成脚注候选、结构排除和双 OCR
-  比较，不负责页面扫描细节、视觉证据或报告持久化。视觉 OCR 先用
+  比较，不负责页面扫描细节、区域策略、视觉证据或报告持久化；这些职责分别由
+  `footnote_page_scan.py`、`footnote_continuation_regions.py`、`footnote_regions.py` 和
+  `footnote_report.py` 承担。视觉 OCR 先用
   宽松的页底召回地板收集候选，再结合页面自身的内容尾部、相对块间距和独立语义证据决定是否本地接受；
   全书固定的 `bbox[3]` 不再是自动判定条件。标签只能作为辅助证据，不能单独绕过几何条件。它排除
   页眉、页脚、纯页码和引用标签，把连续数字开头块（例如
@@ -154,6 +156,8 @@ PDF 精修的核心领域模块如下：
   sidecar 路径；不决定候选，也不绕过 `pdf_evidence.py` 的 freshness 闸门。
 - `refine/footnote_page_scan.py`：封装单页 primary/secondary OCR 扫描、连续区域展开、续文
   证据、漏检审计、候选差异和 page report；只返回事实与有限的 review 标记，不写最终脚注角色。
+- `refine/footnote_continuation_regions.py`：只负责连续数字区域的几何识别、相邻块回溯和
+  续文候选扩展；不评估跨页语义、不写 Markdown，也不决定最终脚注角色。
 - `refine/footnote_report.py`：汇总跨页窗口、视觉页面/区域证据、统计和哈希快照，并原子写入
   `footnote_candidates.json`；不重新扫描 sidecar 或推断脚注语义。
 - `refine/footnote_contracts.py`：集中维护决定角色和可移动角色集合，供准备、校验和应用阶段
@@ -162,6 +166,10 @@ PDF 精修的核心领域模块如下：
   保留 `citation`、`bibliography` 和普通正文原位。次 OCR 独有脚注必须带显式文本、来源单元
   和 `primary_disposition`；主 OCR 重复块只有在明确列出 `primary_block(s)` 时才会删除，重复
   编号引用无法唯一定位时阻断而不猜测。
+- `refine/footnote_matching.py`：集中处理 sidecar block 到 Markdown 源文的安全定位、文本变体和
+  非重叠编辑区间；不读取工作流状态，也不执行脚注物化。
+- `refine/footnote_status.py`：集中计算脚注归一化 checkpoint 的哈希和 freshness 状态；不依赖
+  apply/prepare 编排，供命令层和 readiness 诊断复用。
 
 `pipeline_policy.py` 是 PDF pipeline 的策略边界。`PipelinePolicy.from_config()` 将缺省
 配置视为传统翻译流程，将 `pipeline: epub_conversion` 和兼容别名
@@ -485,7 +493,7 @@ span 的起始 x 坐标拆分左右栏，再按“左栏自上而下、右栏自
 维护约定：
 
 - `page_box` 和 `blocks[].bbox` 使用 PyMuPDF/PDF page points；原生稿不能套用 OCR 的
-  `0..1000` 坐标启发式。`footnote_prepare._normalise_bbox()` 先按 page box 转成 `0..1`
+  `0..1000` 坐标启发式。`layout_evidence.normalized_bbox()` 先按 page box 转成 `0..1`
   比例。`bottom_ratio: 0.50` 和 `bottom_intersection_ratio: 0.08` 只是候选召回地板，不能
   单独决定脚注；页面自身的内容尾部和相对块间距会产生自适应版面证据，独立的脚注标签、同页
   上标引用或原生字号/标记证据才可支持本地接受。正文流异常、证据冲突或只有连续数字的区域
@@ -553,8 +561,8 @@ secondary-only 的 moved decision 必须包含：
   分片的稀疏上下文，并集中执行交接文件名和路径安全校验；不重新识别页面候选。
 - `refine/footnote_validation.py`：校验 Subagent 决策的 schema、候选地址、区域审计、当前
   sidecar/共识哈希和续文来源，归一化后才允许 `footnote-apply` 消费；不修改原始 Markdown。
-- `refine/footnote_continuation.py`：识别连续数字区域、评估跨页续文的版面/语义证据并汇总
-  可审计信号；通过惰性候选构造回调复用候选逻辑，不直接决定脚注角色。
+- `refine/footnote_continuation.py`：评估跨页续文的版面/语义证据并汇总可审计信号；通过
+  惰性候选构造回调复用候选逻辑，不直接决定脚注角色。
 - `refine/footnote_signals.py`：集中维护脚注/引用/页眉页脚标签、编号边界和上标解析，
   供候选识别与续文证据层复用。
 - `refine/footnote_layout.py`：只提供 sidecar 的归一化版面事实、页尾相对布局、区域 bbox、
@@ -581,10 +589,11 @@ PDF 结构阶段采用“共享证据、分离语义”的边界：
 |---|---|---|
 | `pdf_evidence.py` | 页面来源、OCR 证据模式、共识检查点 freshness | 脚注/插图候选的语义判断 |
 | `layout_evidence.py` | sidecar JSON、block 文本、bbox 和坐标系归一化 | 修改 Markdown、决定是否移动内容 |
-| `footnote_prepare.py` | 脚注阶段编排和兼容入口 | 页面扫描、区域策略、报告写入、Subagent 交接、决定校验、插图分类、页面物理合并 |
+| `footnote_prepare.py` | 脚注阶段编排 | 页面扫描、区域策略、报告写入、Subagent 交接、决定校验、插图分类、页面物理合并 |
 | `footnote_options.py` | 配置默认值、模式和选项解析 | 页面扫描、候选判定、Subagent 决定、Markdown 修改 |
 | `footnote_consensus.py` | 共识复核页和次 OCR sidecar 路径解析 | freshness 校验、候选判定、Subagent 决定 |
 | `footnote_page_scan.py` | 单页 primary/secondary 证据扫描和 page report | 最终脚注角色、报告写入、Markdown 修改 |
+| `footnote_continuation_regions.py` | 连续数字区域、几何回溯和候选扩展 | 跨页语义评分、最终脚注角色、Markdown 修改 |
 | `footnote_report.py` | 跨页窗口、视觉证据、统计和候选报告持久化 | sidecar 扫描、候选语义、脚注角色决定 |
 | `footnote_contracts.py` | 决定角色和可移动角色集合 | 候选识别、视觉渲染、Markdown 修改 |
 | `footnote_layout.py` | 归一化 bbox、页尾布局、区域事实和漏检统计 | 脚注语义、视觉渲染、Subagent 决定、Markdown 修改 |
@@ -595,10 +604,12 @@ PDF 结构阶段采用“共享证据、分离语义”的边界：
 | `footnote_visual.py` | 整页/区域视觉证据和审计 manifest | 候选识别、脚注角色决定、Markdown 修改 |
 | `footnote_handoff.py` | 脚注 manifest、Prompt 和稀疏 unit context | 候选识别、决定校验、插图分类 |
 | `footnote_validation.py` | 决策合同、哈希 freshness 和角色归一化 | 候选识别、Markdown 修改、插图分类 |
-| `footnote_continuation.py` | 连续数字区域和跨页续文证据 | 最终脚注角色、Markdown 修改、插图分类 |
+| `footnote_continuation.py` | 跨页续文版面/语义证据和汇总 | 连续区域发现、最终脚注角色、Markdown 修改、插图分类 |
 | `footnote_signals.py` | 共用标签、编号和上标识别信号 | 页面候选编排、Subagent 决策、Markdown 修改 |
 | `illustration_prepare.py` | 整页插图候选、图片复核窗口和页面角色 handoff | 脚注归并、章节末尾注释 |
 | `footnote_apply.py` / `page_merger.py` | 消费已验证决定并生成派生源稿 | 再次猜测 Subagent 决定 |
+| `footnote_matching.py` | block 文本变体、唯一源文定位和非重叠编辑区间 | 扫描 sidecar、决定脚注角色、修改工作流状态 |
+| `footnote_status.py` | 归一化 checkpoint 的哈希和 freshness 诊断 | 候选扫描、脚注物化、修改 Markdown |
 
 新增 PDF 结构信号时，先判断它是共享的几何/证据事实还是某个领域的语义规则。前者进入
 共享模块并补一组跨阶段测试，后者只进入对应的 prepare/apply 模块。命令 handler 只读取

@@ -24,9 +24,11 @@ from .footnote_candidates import (
 from .footnote_continuation import (
     _annotate_cross_page_continuations as annotate_cross_page_continuations,
     _build_footnote_page_context as build_footnote_page_context,
-    _expand_continuous_region_candidates as expand_continuous_region_candidates,
     _has_footnote_evidence as has_footnote_evidence,
     _suppress_soft_continuation_candidates as suppress_soft_continuation_candidates,
+)
+from .footnote_continuation_regions import (
+    _expand_continuous_region_candidates as expand_continuous_region_candidates,
 )
 from .footnote_layout import (
     bottom_detection_stats,

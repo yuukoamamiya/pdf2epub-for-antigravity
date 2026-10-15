@@ -440,19 +440,6 @@ def candidate_for_native_block(
     return candidate
 
 
-# Private aliases preserve compatibility for existing library callers while
-# the public names make the ownership of each candidate operation explicit.
-_candidate_for_block = candidate_for_block
-_candidate_block_indexes = candidate_block_indexes
-_window_for_page = window_for_page
-_candidate_signature = candidate_signature
-_aggregate_secondary_only_candidates = aggregate_secondary_only_candidates
-_candidates_match = candidates_match
-_marker_before_block = marker_before_block
-_candidate_for_native_block = candidate_for_native_block
-_native_marker_before_block = marker_before_block
-
-
 __all__ = [
     "aggregate_secondary_only_candidates",
     "candidate_block_indexes",

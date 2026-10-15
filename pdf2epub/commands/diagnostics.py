@@ -269,7 +269,7 @@ def _pdf_stages(
     )
 
     try:
-        from pdf2epub.refine.footnote_apply import footnote_normalization_is_current
+        from pdf2epub.refine.footnote_status import footnote_normalization_is_current
 
         footnotes_current = footnote_normalization_is_current(output_dir, config=config)
     except (OSError, TypeError, ValueError):
