@@ -130,7 +130,9 @@ def _validate_special_role_markers(
         for line in source_text.splitlines():
             if candidate_for_line(line):
                 furniture_numbers.extend(_special_role_numeric_markers(line))
-        matcher = difflib.SequenceMatcher(None, source_markers, target_markers)
+        matcher = difflib.SequenceMatcher(
+            None, source_markers, target_markers, autojunk=False
+        )
         mismatch = False
         for tag, i1, i2, j1, j2 in matcher.get_opcodes():
             if tag == "equal":
@@ -483,7 +485,7 @@ def detect_polish_page_furniture(
     )
 
     findings: list[Dict[str, Any]] = []
-    special_role = role in {"bibliography", "index"}
+    special_role = role in {"bibliography", "index", "toc"}
     for line_number, (line, candidate) in enumerate(
         zip(lines, candidate_records), 1
     ):

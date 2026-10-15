@@ -55,6 +55,19 @@ def test_ornamented_header_with_sentence_punctuation_is_not_auto_furniture():
     assert candidate_for_line("• • • This is a sentence. • • •") is None
 
 
+def test_chinese_numbered_running_headers_are_furniture_candidates():
+    for line in (
+        "第一部分 体系—历史",
+        "第二章 黑格尔时代的艺术与美学思潮",
+        "第12卷 相关研究",
+        "第三章黑格尔时代的艺术与美学思潮",
+    ):
+        candidate = candidate_for_line(line)
+        assert candidate is not None
+        assert candidate["kind"] == "running_header"
+        assert candidate["confidence"] == "high"
+
+
 def test_prepare_page_furniture_repair_snapshots_and_scopes_files(tmp_path: Path):
     translated = tmp_path / "translated"
     reference = tmp_path / "polished_markdown" / "validated"

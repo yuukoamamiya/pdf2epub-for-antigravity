@@ -93,6 +93,7 @@ def prepare_footnote_candidates(
         "excluded_page_furniture_count": 0,
         "excluded_numeric_page_count": 0,
         "suspected_missed_count": 0,
+        "suppressed_native_citation_count": 0,
     }
     structure_excluded_pages: list[dict[str, Any]] = []
     state = FootnoteScanState()

@@ -367,6 +367,56 @@ def test_native_font_ladder_excludes_body_size_numeric_false_positives(
     assert [item["page"] for item in report["pages"]] == [1, 2]
 
 
+def test_native_font_ladder_suppresses_unanchored_citation_years_and_body_flow(
+    tmp_path: Path,
+):
+    for page, key in ((1, "2005"), (2, "2019")):
+        _write_native_sidecar(
+            tmp_path,
+            page,
+            [
+                _native_block("Body text", 0, y0=90, font_size=10),
+                _native_block(f"{key} Citation text", 1, y0=680, font_size=8),
+            ],
+            body_font_size=10,
+        )
+        (tmp_path / "pages" / f"page_{page:03d}.md").write_text(
+            f"Body text\n\n{key} Citation text\n",
+            encoding="utf-8",
+        )
+
+    _write_native_sidecar(
+        tmp_path,
+        3,
+        [
+            _native_block("Body before", 0, y0=90, font_size=10),
+            _native_block("123 Embedded citation", 1, y0=620, font_size=8),
+            _native_block("Body continues", 2, y0=720, font_size=10),
+        ],
+        body_font_size=10,
+    )
+    (tmp_path / "pages" / "page_003.md").write_text(
+        "Body before\n\n123 Embedded citation\n\nBody continues\n",
+        encoding="utf-8",
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    assert report["native_font_profile"]["enabled"] is True
+    assert report["review_required"] is False
+    assert report["review_candidate_count"] == 0
+    assert report["bottom_detection"]["suppressed_native_citation_count"] == 3
+    suppressed = [
+        item
+        for page in report["pages"]
+        for item in page.get("suppressed_native_citations", [])
+    ]
+    assert {item["reason"] for item in suppressed} == {
+        "unanchored_native_citation_year",
+        "unanchored_native_numeric_block_in_body_flow",
+    }
+
+
 def test_native_continuous_numeric_region_without_body_markers_stays_in_review(
     tmp_path: Path,
 ):

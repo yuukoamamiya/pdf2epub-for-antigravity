@@ -16,6 +16,11 @@ from .footnote_signals import leading_footnote_key
 from .layout_evidence import normalized_bbox, text_from_block
 
 
+_YEAR_MIN = 1500
+_YEAR_MAX = 2100
+_FOOTNOTE_LABEL_HINTS = ("footnote", "脚注", "注释", "注")
+
+
 def _as_positive_float(value: Any) -> float | None:
     try:
         number = float(value)
@@ -84,7 +89,10 @@ def native_font_profile(
         "note_font_size_counts": {
             str(size): count for size, count in sorted(note_sizes.items())
         },
-        "rule": "native_body_font_size_or_larger_is_body_only_when_note_ladder_is_present",
+        "rule": (
+            "native_body_font_size_or_larger_is_body_only_when_note_ladder_is_present;"
+            " unanchored_note_font_citations_use_a_narrow_guard"
+        ),
     }
 
 
@@ -98,8 +106,7 @@ def native_body_font_excluded_blocks(
     if not profile.get("enabled"):
         return set()
     dominant = _as_positive_float(profile.get("body_font_size"))
-    page_body = _as_positive_float(sidecar.get("body_font_size"))
-    if dominant is None or page_body is None or abs(page_body - dominant) > 0.01:
+    if dominant is None:
         return set()
     excluded: set[int] = set()
     blocks = sidecar.get("blocks", [])
@@ -117,7 +124,7 @@ def native_body_font_excluded_blocks(
         has_numeric_key = leading_footnote_key(text_from_block(block)) is not None
         if (
             font_size is not None
-            and font_size >= page_body
+            and font_size >= dominant
             and has_numeric_key
             and bbox
             and float(bbox[3]) >= float(bottom_ratio) - 0.16
@@ -126,4 +133,50 @@ def native_body_font_excluded_blocks(
     return excluded
 
 
-__all__ = ["native_body_font_excluded_blocks", "native_font_profile"]
+def native_citation_guard_reason(
+    candidate: Mapping[str, Any],
+    profile: Mapping[str, Any],
+) -> str | None:
+    """Return a safe false-positive filter reason for a native candidate.
+
+    A native sidecar can expose citation years and page/volume numbers as
+    independent bottom blocks.  They are not footnote definitions merely
+    because they use the book's note font.  Suppress only the narrow cases
+    with no same-page superscript or explicit footnote label and retain all
+    other numeric candidates for review.
+    """
+    if not profile.get("enabled"):
+        return None
+    if candidate.get("same_page_superscript"):
+        return None
+    label = str(candidate.get("label") or "").casefold()
+    if any(hint in label for hint in _FOOTNOTE_LABEL_HINTS):
+        return None
+    try:
+        font_size = float(candidate.get("font_size"))
+    except (TypeError, ValueError):
+        return None
+    note_sizes = [
+        size
+        for raw in profile.get("note_font_sizes", [])
+        for size in [_as_positive_float(raw)]
+        if size is not None
+    ]
+    if not note_sizes or not any(abs(font_size - size) <= 0.02 for size in note_sizes):
+        return None
+    key = str(candidate.get("key") or "").strip()
+    if key.isdigit() and len(key) == 4 and _YEAR_MIN <= int(key) <= _YEAR_MAX:
+        return "unanchored_native_citation_year"
+    if candidate.get("body_flow_warning") in {
+        "ordinary_text_below_numeric_block",
+        "numbered_block_spans_body_flow",
+    }:
+        return "unanchored_native_numeric_block_in_body_flow"
+    return None
+
+
+__all__ = [
+    "native_body_font_excluded_blocks",
+    "native_citation_guard_reason",
+    "native_font_profile",
+]

@@ -14,7 +14,7 @@ from .utils.unit_id import generate_unit_id
 
 
 PDF_SPECIAL_UNIT_ROLES = frozenset(
-    {"bibliography", "index", "notes", "author_notes", "catalog", "ad"}
+    {"bibliography", "index", "notes", "author_notes", "catalog", "ad", "toc"}
 )
 
 

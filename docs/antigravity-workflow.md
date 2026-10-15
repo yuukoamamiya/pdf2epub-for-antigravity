@@ -583,7 +583,9 @@ refinement unit 和正文定位；任何一层失败都必须修正决定后重�
    因而同一页的多条脚注各自拥有稳定的 `page`/`block` 地址。`body_font_size`、block
    `font_size`、`font_names` 和上标 flag/位置只作为复核证据；只有当前书稿反复显示稳定的
    正文/脚注字号阶梯时，本地才启用 `native_font_profile`，把与主导正文同大或更大的页底数字
-   block 排除为正文。没有形成阶梯时，字号不能单独排除候选。
+   block 排除为正文。对于已经形成阶梯的原生稿，注脚字号但没有同页上标/脚注标签的出版年份，
+   以及明确处在正文流中的数字块，会记录为 `suppressed_native_citations` 并从视觉队列排除；
+   其他小字号数字仍保留复核。没有形成阶梯时，字号不能单独排除候选。
 4. Subagent 只读取 manifest 列出的 `footnote_contexts/*.json`、区域 manifest 和 sidecar/图片窗口，
    逐个异常区域写入 `footnote_decisions.json`。本地已标记 `confidence: high` 的候选不需要重复决定；
    它必须区分 `footnote_start`、
@@ -717,6 +719,9 @@ polish handoff 会附带源语言 TOC 标签保护清单。唯一出现且匹配
 才进入该页眉警告，避免把合法书目条目当作页边装饰。纯图片或无可见标题的单元使用
 `binding_mode: container_only`，由 EPUB 构建阶段生成包装器标题，Markdown worker 不得
 自行补写标题。
+`toc` 与 `bibliography`、`index` 一样是受保护结构角色；目录中的点线引导页码不应被当作普通正文
+页眉页脚。页眉候选还覆盖 `第一部分`、`第二章`、`第12卷` 等中文编号样式，以及通用的装饰符号页眉。
+特殊角色的数字标记审计使用 `autojunk=False`，避免长书目或索引中的高频年份、页码被序列匹配器丢弃。
 
 `notes`/尾注单元还保留一个窄范围的结构标题白名单：形如 `## Chapter 1`、`## 第2章`
 或 `## Notes to Chapter 3` 的二至六级 Markdown 标题不会仅因末尾数字被识别为

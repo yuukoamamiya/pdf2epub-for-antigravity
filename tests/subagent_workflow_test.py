@@ -502,6 +502,14 @@ def test_markdown_validation_ignores_ornamented_index_running_header(
     assert report["all_passed"] is True
 
 
+def test_toc_is_a_protected_special_role_for_pdf_and_translation_validation():
+    from pdf2epub.document_roles import TRANSLATION_SPECIAL_ROLES
+    from pdf2epub.pdf_unit_roles import PDF_SPECIAL_UNIT_ROLES
+
+    assert "toc" in TRANSLATION_SPECIAL_ROLES
+    assert "toc" in PDF_SPECIAL_UNIT_ROLES
+
+
 def test_markdown_validation_preserves_exact_footnote_marker_syntax(
     tmp_path: Path,
 ):
@@ -858,6 +866,24 @@ def test_markdown_validation_rejects_index_page_mapping_change(tmp_path: Path):
 
     assert report["all_passed"] is False
     assert "index numeric marker mismatch" in report["invalid"][0]["reason"]
+
+
+def test_special_role_marker_audit_handles_repeated_years_after_header_removal():
+    from pdf2epub.markdown_validation import _validate_special_role_markers
+
+    source = "1 Chapter\n\n" + "\n".join(
+        f"Reference {index} 2020" for index in range(300)
+    )
+    target = "\n".join(f"参考文献 {index} 2020" for index in range(300))
+
+    errors = _validate_special_role_markers(
+        source,
+        target,
+        "bibliography",
+        allow_page_furniture_deletion=True,
+    )
+
+    assert errors == []
 
 
 def test_markdown_validation_includes_structural_diff_summary(tmp_path: Path):

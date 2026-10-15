@@ -34,7 +34,9 @@ _PREFIXED_PAGE_LABEL_RE = re.compile(
     re.IGNORECASE,
 )
 _NUMBERED_RUNNING_HEADER_RE = re.compile(
-    r"^(?:[ivxlcdm]{1,8}|\d{1,2})\s+[A-Za-zÄÖÜäöüß\s–-]+(?:\s*\(\d{4}[–-]\d{4}\))?$",
+    r"^(?:(?:[ivxlcdm]{1,8}|\d{1,2})\s+[A-Za-zÄÖÜäöüß\s–-]+|"
+    r"第[一二三四五六七八九十百千万零〇两\d]+(?:部分|[章卷])"
+    r"(?:\s+|[:：])?[^。！？；.!?;]+)(?:\s*\(\d{4}[–-]\d{4}\))?$",
     re.IGNORECASE,
 )
 _PUBLISHER_METADATA_RE = re.compile(

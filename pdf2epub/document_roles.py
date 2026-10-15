@@ -24,6 +24,7 @@ TRANSLATION_SPECIAL_ROLES = frozenset(
         "author_notes",
         "catalog",
         "ad",
+        "toc",
     }
 )
 

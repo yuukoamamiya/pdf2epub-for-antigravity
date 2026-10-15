@@ -35,7 +35,10 @@ from .footnote_layout import (
     page_layout_profile,
     suspected_missed_block_indexes,
 )
-from .footnote_font_evidence import native_body_font_excluded_blocks
+from .footnote_font_evidence import (
+    native_body_font_excluded_blocks,
+    native_citation_guard_reason,
+)
 from .footnote_options import FootnotePrepareOptions
 from .footnote_regions import build_page_footnote_regions
 from .footnote_structure import (
@@ -150,6 +153,7 @@ def _scan_primary_candidates(
     dict[str, Any],
     dict[str, Any],
     int,
+    list[dict[str, Any]],
 ]:
     """Build primary candidates, continuation context, and audit misses."""
     candidates: list[dict[str, Any]] = []
@@ -164,6 +168,7 @@ def _scan_primary_candidates(
         else set()
     )
     excluded_block_indexes = set(structure_excluded_blocks) | native_font_excluded
+    suppressed_native_citations: list[dict[str, Any]] = []
     for block_index, block in enumerate(blocks):
         if not isinstance(block, Mapping) or block_index in excluded_block_indexes:
             continue
@@ -180,6 +185,24 @@ def _scan_primary_candidates(
                 native_max_font_ratio=options.native_max_font_ratio,
                 layout_profile=layout_profile,
             )
+            if candidate is not None:
+                guard_reason = native_citation_guard_reason(
+                    candidate,
+                    native_font_profile,
+                )
+                if guard_reason:
+                    excluded_block_indexes.add(block_index)
+                    suppressed_native_citations.append(
+                        {
+                            "page": page_number,
+                            "block": block_index,
+                            "key": candidate.get("key"),
+                            "font_size": candidate.get("font_size"),
+                            "font_names": candidate.get("font_names"),
+                            "reason": guard_reason,
+                        }
+                    )
+                    continue
         else:
             local_acceptance_disabled = not options.auto_accept
             candidate = candidate_for_block(
@@ -232,6 +255,9 @@ def _scan_primary_candidates(
         bottom_ratio=options.bottom_ratio,
         excluded_block_indexes=excluded_block_indexes,
     )
+    bottom_stats["suppressed_native_citation_count"] = len(
+        suppressed_native_citations
+    )
     audit_candidates = [
         candidate
         for missed_index in suspected_missed_block_indexes(
@@ -262,6 +288,7 @@ def _scan_primary_candidates(
         continuation_evidence,
         bottom_stats,
         len(suppressed),
+        suppressed_native_citations,
     )
 
 
@@ -380,6 +407,7 @@ def scan_footnote_page(
                 "excluded_page_furniture_count": 0,
                 "excluded_numeric_page_count": 0,
                 "suspected_missed_count": 0,
+                "suppressed_native_citation_count": 0,
             },
         )
 
@@ -412,6 +440,7 @@ def scan_footnote_page(
         continuation_evidence,
         bottom_stats,
         soft_count,
+        suppressed_native_citations,
     ) = (
         _scan_primary_candidates(
             page_number,
@@ -512,8 +541,13 @@ def scan_footnote_page(
         region.get("disposition") == "visual_audit_required"
         for region in footnote_regions
     )
-    should_emit_page = bool(candidates) or bool(audit_candidates) or (
-        evidence_mode == "two_ocr" and bool(secondary_candidates)
+    should_emit_page = (
+        bool(candidates)
+        or bool(audit_candidates)
+        or bool(suppressed_native_citations)
+        or (
+            evidence_mode == "two_ocr" and bool(secondary_candidates)
+        )
     )
     page_report = None
     if should_emit_page:
@@ -533,6 +567,7 @@ def scan_footnote_page(
             "candidates": candidates,
             "suppressed_continuation_candidates": suppressed,
             "audit_candidates": audit_candidates,
+            "suppressed_native_citations": suppressed_native_citations,
             "secondary_candidates": secondary_candidates,
             "secondary_only_candidates": (
                 secondary_only_candidates if evidence_mode == "two_ocr" else []
