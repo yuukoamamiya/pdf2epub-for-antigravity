@@ -8,7 +8,6 @@ import pytest
 from pdf2epub.refine.footnote_prepare import (
     prepare_footnote_candidates,
     prepare_footnote_subagent,
-    validate_footnote_decisions,
 )
 from pdf2epub.refine.footnote_apply import (
     _block_text_variants,
@@ -17,6 +16,13 @@ from pdf2epub.refine.footnote_apply import (
     apply_footnote_normalization,
     footnote_normalization_status,
 )
+from pdf2epub.refine.footnote_validation import validate_footnote_decisions
+
+
+def test_legacy_footnote_validation_import_uses_extracted_module():
+    from pdf2epub.refine.footnote_prepare import validate_footnote_decisions as legacy
+
+    assert legacy is validate_footnote_decisions
 
 
 def test_footnote_signature_does_not_match_number_inside_larger_number():

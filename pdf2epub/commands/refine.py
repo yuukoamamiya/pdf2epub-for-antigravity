@@ -234,7 +234,7 @@ def footnote_prepare_command(args):
     The local step reads OCR layout sidecars and never rewrites Markdown.  A
     workspace Subagent is needed only for ambiguous block assignments.
     """
-    from pdf2epub.refine.footnote_prepare import prepare_footnote_subagent
+    from pdf2epub.refine.footnote_handoff import prepare_footnote_subagent
 
     context = load_book_context(args, "footnote-prepare")
     if context is None:
@@ -286,7 +286,7 @@ def footnote_prepare_command(args):
 
 def footnote_validate_command(args):
     """Validate the Subagent's compact footnote layout decisions."""
-    from pdf2epub.refine.footnote_prepare import validate_footnote_decisions
+    from pdf2epub.refine.footnote_validation import validate_footnote_decisions
 
     context = load_book_context(args, "footnote-validate")
     if context is None:

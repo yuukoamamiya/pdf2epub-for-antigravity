@@ -20,11 +20,8 @@ from typing import Any, Mapping, Optional
 
 from ..workflow_contracts import atomic_write_json, atomic_write_text, sha256_file
 from .pdf_evidence import pdf_evidence_mode, require_current_consensus
-from .footnote_prepare import (
-    FOOTNOTE_MODES,
-    FOOTNOTE_STRUCTURE_EXEMPT_TYPES,
-    resolve_footnote_options,
-)
+from .footnote_options import FOOTNOTE_MODES, resolve_footnote_options
+from .footnote_structure import FOOTNOTE_STRUCTURE_EXEMPT_TYPES
 
 
 FOOTNOTE_NORMALIZATION_SCHEMA_VERSION = 1
