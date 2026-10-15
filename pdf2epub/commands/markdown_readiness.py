@@ -182,7 +182,7 @@ def run_readiness_check(
     source_files = list(source_dir.glob("*.md")) if source_dir.is_dir() else []
     source_ready = bool(source_files)
     if source_stage == "polished":
-        polish_input_dir, _ = _resolve_pdf_polish_source(output_dir)
+        polish_input_dir, _ = _resolve_pdf_polish_source(output_dir, config)
         source_ready = source_ready and _polished_stage_is_current(
             output_dir, source_dir, polish_input_dir
         )
@@ -340,7 +340,7 @@ def run_readiness_check(
     if stage == "package" and policy.requires_polish:
         polish_report_path = output_dir / "polish_validation.json"
         polish_dir = output_dir / "polished_markdown" / "validated"
-        polish_input_dir, _ = _resolve_pdf_polish_source(output_dir)
+        polish_input_dir, _ = _resolve_pdf_polish_source(output_dir, config)
         polish_ready = validation_receipt_is_current(
             polish_report_path,
             polish_input_dir,

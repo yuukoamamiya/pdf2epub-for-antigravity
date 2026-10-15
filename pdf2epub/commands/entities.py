@@ -47,7 +47,7 @@ def extract_entities_command(args):
     if list(epub_units.glob("*.md")) and is_epub:
         source_dir, source_stage = epub_units, "epub-compressed"
     elif source_stage != "polished" or not _polished_stage_is_current(
-        output_dir, source_dir, _resolve_pdf_polish_source(output_dir)[0]
+        output_dir, source_dir, _resolve_pdf_polish_source(output_dir, config)[0]
     ):
         logger.error(
             "PDF entity extraction requires a current validated polished source "

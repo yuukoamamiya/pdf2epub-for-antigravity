@@ -78,7 +78,8 @@ uv sync --extra ocr-vision
 
 Chandra 是当前主 OCR。原生文字 PDF 会保留版面信息；
 扫描或混合 PDF 使用视觉 OCR。两种来源都不会把普通上标、序数或行内数字引用自动判成脚注，
-脚注归属仍由 Subagent 复核。
+清晰且证据充分的脚注区域可由本地规则直接处理，边界不清、跨页续文或 OCR 证据冲突的区域
+才交由 Subagent 复核。
 
 原生文字 PDF 即使是稳定双栏，也不会仅因栏布局而强制 OCR；提取器会利用 PDF 文本 span 的
 坐标按栏重排，并在页面 sidecar 中记录 `layout_mode: multi_column`。只有扫描图、隐藏 OCR

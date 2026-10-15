@@ -153,6 +153,8 @@ TOC 中标记为
   `catalog` 或 `ad` 的单元也不会进入页面脚注候选。
 - `refine/footnote_options.py`：集中维护脚注模式、默认阈值和 CLI/config 覆盖解析；候选、
   校验和 materialize 阶段共享同一个不可变选项对象，避免各阶段各自解释配置。
+- `refine/endnote_normalization.py`：只处理 `type: notes` 单元中的集中尾注定义及普通单元
+  上标引用的确定性归一化，并提供构建前的残留检查；不参与页面脚注候选识别。
 - `refine/footnote_consensus.py`：只读取当前双 OCR 共识中的视觉复核页并解析匹配的次 OCR
   sidecar 路径；不决定候选，也不绕过 `pdf_evidence.py` 的 freshness 闸门。
 - `refine/footnote_page_scan.py`：封装单页 primary/secondary OCR 扫描、连续区域展开、续文
@@ -226,6 +228,8 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
   单元中的标准尾注章节标题提供窄范围页眉误报豁免。该模块把角色判断委托给
   `document_roles.py`，把页眉页脚候选判断委托给 `page_furniture_rules.py`，避免校验模块
   反向依赖具体修复工作流。
+- `footnote_normalization.py`：提供 polish 阶段的尾注引用/定义迁移校验；它只校验
+  Subagent 输出，不负责识别页面脚注或修改源稿。
 - `commands/markdown_context.py`：只读加载 TOC、续文和章节分组上下文；准备、校验和
   worker 装箱共享同一份 PDF 单元投影，`commands.markdown` 不再承载这组状态读取细节。
 - `document_roles.py`：集中维护特殊翻译角色、参考文献/前置内容识别、目标语言密度豁免和

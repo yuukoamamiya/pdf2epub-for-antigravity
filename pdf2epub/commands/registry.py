@@ -3,6 +3,11 @@
 from importlib import import_module
 from typing import Any, Callable
 
+from pdf2epub.refine.footnote_options import (
+    DEFAULT_BOTTOM_INTERSECTION_RATIO,
+    DEFAULT_BOTTOM_RATIO,
+)
+
 
 def _lazy_handler(module_name: str, attribute: str) -> Callable[[Any], Any]:
     """Resolve a command handler only after argparse has selected it."""
@@ -283,7 +288,10 @@ def register_command_parsers(subparsers) -> None:
         "--bottom-ratio",
         type=float,
         default=None,
-        help="Normalized lower-edge threshold for the bottom band (default: 0.64)",
+        help=(
+            "Normalized lower-edge threshold for the bottom band "
+            f"(default: {DEFAULT_BOTTOM_RATIO:g})"
+        ),
     )
     footnote_prepare_parser.add_argument(
         "--bottom-intersection-ratio",
@@ -291,7 +299,7 @@ def register_command_parsers(subparsers) -> None:
         default=None,
         help=(
             "Minimum fraction of a block's height intersecting the bottom band "
-            "(default: 0.25)"
+            f"(default: {DEFAULT_BOTTOM_INTERSECTION_RATIO:g})"
         ),
     )
     footnote_prepare_parser.add_argument(

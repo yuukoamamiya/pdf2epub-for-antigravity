@@ -109,7 +109,7 @@ def build_epub_command(args):
 
     # V2 architecture stores Subagent results in validated/ subdirectories.
     source_dir, source_stage = _resolve_pdf_markdown_source(output_dir, config)
-    polish_input_dir, _ = _resolve_pdf_polish_source(output_dir)
+    polish_input_dir, _ = _resolve_pdf_polish_source(output_dir, config)
     if args.translated:
         markdown_dir = output_dir / "translated" / "validated"
         logger.info("Building EPUB from translated markdown...")

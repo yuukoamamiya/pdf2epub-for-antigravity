@@ -173,6 +173,10 @@ def test_polish_prefers_current_footnote_normalized_source(tmp_path: Path):
     )
 
     assert _resolve_pdf_polish_source(tmp_path) == (normalized_dir, "footnote_normalized")
+    assert _resolve_pdf_polish_source(
+        tmp_path, {"footnotes": {"mode": "disabled"}}
+    ) == (source_dir, "ocr")
+
 
 def test_pdf_source_stage_auto_falls_back_to_ocr_without_native_probe(tmp_path: Path):
     polished_dir = tmp_path / "polished_markdown" / "validated"
