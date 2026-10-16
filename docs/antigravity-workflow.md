@@ -64,6 +64,9 @@ subagent:
     global_toc_tokens: 1200
     pack_adjacent_chapters: true
     max_chapters_per_worker: 3
+    # Conservative default; up to 6 independent hand-offs may be enabled when
+    # the IDE/model quota permits it.
+    max_concurrency: 3
     # Packed adjacent chapters may use this combined source-token budget;
     # default is twice max_source_tokens.
     max_packed_source_tokens: 24000
@@ -83,6 +86,9 @@ PDF/EPUB 的 `translate` manifest 会在 `worker_handoffs/` 按 TOC 顺序为相
 只读取自己 handoff 的 `assigned_files`；超过 30,000 字节的单元自动独立成批，但不能与
 其他章节合并。普通单章节 worker 的术语上下文只注入一次；相邻章节合并 worker 使用按
 文件分区的直接上下文；大章节拆分时使用 `shared_entries` 和当前分片的 `local_entries`。
+Markdown worker 的提示词还明确禁止修改 `pdf2epub/`、`tests/`、`docs/`、`glossaries/` 和项目
+配置。准备阶段会对这些受保护文件记录哈希；校验阶段发现 Worker 改动其中任何文件时，
+本轮会进入 `safety_blocked`，不会生成可恢复的内容 checkpoint，必须先由主 Agent 处理代码变更。
 `translate-toc` 是正文 worker 启动前的独立任务。Subagent 只写
 `toc_translation_result.json`；`translate-toc-validate` 从 `toc_tree.json` 本地合并生成
 `toc_tree_translated.json`，正文 worker 不写入这两个文件。
@@ -123,6 +129,7 @@ PDF 和 EPUB 的正文翻译有两个不能混淆的范围：`chapter_groups` �
 | `max_source_tokens` | 一个 worker 的源 token 预算 |
 | `max_packed_source_tokens` | 相邻完整章节合并 worker 的源 token 总预算；默认是 `max_source_tokens` 的两倍 |
 | `single_file_max_bytes` | 单个文件超过该值时必须独立成批，默认 `30000` |
+| `max_concurrency` | 独立 hand-off 的并发提示上限；默认 `3`，硬上限为 `6`，仍受大文件降速规则约束 |
 
 装箱具有以下硬边界：
 
@@ -522,6 +529,9 @@ OCR layout sidecar；高置信度原生文字 PDF 在 `ocr-pages` 阶段生成�
 页眉、页脚、纯页码和引用标签会被排除。随后本地按页面内 block 分布、垂直间距、左右对齐、连续数字
 和未编号邻块推断页面级脚注区域：证据不足、边界不清、续文、正文/脚注重叠、OCR 证据冲突、正文流
 延伸到页尾和几何漏检都会形成区域级视觉审计任务。
+`copyright`、`metadata`、`frontmatter`、`cover`、`author_notes` 等已由 TOC 标注的前置或附属单元，
+会先按边界从脚注候选中排除；共享页面缺少可靠边界时采用整块保守排除。普通正文中紧跟句末/冒号的
+编号列表若仍有明显页底余量，也会从视觉队列中排除，但真正贴近物理页尾的数字区仍保留原有复核路径。
 连续数字开头块（例如 `18, 19, 20, 21`）默认会向上回溯相邻的同一区域；如果数字块中已经出现
 明确的 `Footnote` 标签，则普通 `Text` 块默认不会再被机械回溯，只有同样带脚注标签的相邻块才可进入
 该区域；但为覆盖“正文 → 上一脚注续文 → 新脚注”的跨页布局而保留的普通 `Text` 回溯块，若没有跨页证据

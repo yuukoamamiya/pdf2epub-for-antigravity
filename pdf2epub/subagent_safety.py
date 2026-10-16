@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
+from pathlib import Path
+from typing import Any, Mapping
 from typing import Optional
 
 _REFUSAL_PATTERNS = (
@@ -130,4 +133,87 @@ def detect_refusal(source_text: str, translated_text: str) -> Optional[str]:
         return f"{target_match[0]} detected at non-empty line {index + 1}"
     return None
 
-__all__ = ["detect_refusal"]
+
+def _repository_root(output_dir: Path) -> Optional[Path]:
+    """Find the project root without assuming a particular output location."""
+    candidate = Path(output_dir).resolve()
+    for path in (candidate, *candidate.parents):
+        if (path / "pyproject.toml").is_file() and (path / "pdf2epub").is_dir():
+            return path
+    return None
+
+
+def protected_workspace_snapshot(output_dir: Path) -> dict[str, Any]:
+    """Hash files a content worker is never authorized to modify.
+
+    The snapshot is intentionally limited to source/configuration artifacts;
+    generated output, caches, and runtime secrets are outside this guard.
+    """
+    root = _repository_root(Path(output_dir))
+    if root is None:
+        return {"available": False, "files": {}}
+
+    paths: set[Path] = set()
+    for directory, suffixes in (
+        (root / "pdf2epub", {".py"}),
+        (root / "tests", {".py"}),
+        (root / "docs", {".md"}),
+        (root / "glossaries", {".yaml", ".yml", ".json"}),
+    ):
+        if not directory.is_dir():
+            continue
+        paths.update(
+            path
+            for path in directory.rglob("*")
+            if path.is_file() and path.suffix.lower() in suffixes
+        )
+    paths.update(
+        path
+        for path in (
+            root / "AGENTS.md",
+            root / "pyproject.toml",
+            root / "uv.lock",
+        )
+        if path.is_file()
+    )
+    paths.update(
+        path
+        for path in root.glob("config*.yaml")
+        if path.is_file()
+    )
+
+    files: dict[str, str] = {}
+    for path in sorted(paths):
+        try:
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError:
+            continue
+        files[path.relative_to(root).as_posix()] = digest
+    return {"available": True, "files": files}
+
+
+def protected_workspace_changes(
+    output_dir: Path, snapshot: Mapping[str, Any]
+) -> list[str]:
+    """Return protected paths changed since a hand-off was prepared."""
+    if not isinstance(snapshot, Mapping) or snapshot.get("available") is not True:
+        return []
+    expected = snapshot.get("files")
+    if not isinstance(expected, Mapping):
+        return []
+    current = protected_workspace_snapshot(output_dir).get("files", {})
+    if not isinstance(current, Mapping):
+        return ["<protected workspace snapshot unavailable>"]
+    names = set(str(name) for name in expected) | set(str(name) for name in current)
+    return sorted(
+        name
+        for name in names
+        if str(expected.get(name, "")) != str(current.get(name, ""))
+    )
+
+
+__all__ = [
+    "detect_refusal",
+    "protected_workspace_changes",
+    "protected_workspace_snapshot",
+]

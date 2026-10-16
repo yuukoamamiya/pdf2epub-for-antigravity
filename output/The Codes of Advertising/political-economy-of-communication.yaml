@@ -1,0 +1,113 @@
+# Scope: communication political economy and its directly related media/advertising vocabulary.
+# Terms without stable, independently verifiable Chinese usage were intentionally excluded.
+# All retained targets are preferred translations; promote to fixed only after editorial review.
+# Per-entry web verification: political-economy-of-communication-verification.md
+schema_version: 1
+metadata:
+  name: political-economy-of-communication
+  domain: Political economy of communication
+  source_language: English
+  target_language: Chinese
+  version: '2026-10-16'
+entries:
+- id: audience-commodity
+  source: audience commodity
+  target: 受众商品
+  category: Political Economy of Communication
+  note: 达拉斯·斯麦思传播政治经济学的核心概念：广告支持型媒介将被组织和测量的受众注意力、观看时间及其相关特征作为商品出售给广告主。
+  policy: preferred
+- id: audience-labour
+  source: audience labour
+  variants:
+  - audience labor
+  target: 受众劳动
+  category: Political Economy of Communication
+  note: 传播政治经济学中对受众媒介使用活动的称呼，强调受众的观看、参与和注意力如何被纳入媒介商品化过程。
+  policy: preferred
+- id: audience-power
+  source: audience-power
+  variants:
+  - audience power
+  target: 受众力
+  category: Political Economy of Communication
+  note: 杰哈利与利万特关于受众作为媒介生产要素的理论术语，指受众被商业媒介组织、动员并投入观看活动的能力。
+  policy: preferred
+- id: watching-power
+  source: watching-power
+  variants:
+  - watching power
+  target: 观看力
+  category: Political Economy of Communication
+  note: 指受众进行观看、从而为商业媒介提供可售观看时间的能力；是“受众商品”理论中与观看活动相关的核心术语。
+  policy: preferred
+- id: necessary-watching-time
+  source: necessary watching time
+  target: 必要观看时间
+  category: Political Economy of Communication
+  note: 杰哈利与利万特理论中的观看时间部分：用于补偿媒介节目生产成本的观看时间。
+  policy: preferred
+- id: surplus-watching-time
+  source: surplus watching time
+  target: 剩余观看时间
+  category: Political Economy of Communication
+  note: 超出必要观看时间、主要通过观看广告而为商业媒介带来额外价值的观看时间。
+  policy: preferred
+- id: watching-as-working
+  source: watching as working
+  variants:
+  - watching as labour
+  - watching as labor
+  target: 观看即工作
+  category: Political Economy of Communication
+  note: 杰哈利与利万特关于商业电视观看活动的核心命题；中文学术译名采用《观看即工作：受众意识的价值增殖》的正式题名。
+  policy: preferred
+- id: commercial-media
+  source: commercial media
+  target: 商业媒体
+  category: Political Economy of Communication
+  note: 以广告、受众商品或其他商业收入为主要运行基础的媒介组织和媒介系统。
+  policy: preferred
+- id: broadcasting
+  source: broadcasting
+  target: 广播
+  category: Media Industry / Political Economy of Communication
+  note: 面向广泛大众进行点对面传播的广播形态；在本书语境中与 narrowcasting（窄播）相对。
+  policy: preferred
+- id: narrowcasting
+  source: narrowcasting
+  target: 窄播
+  category: Media Industry / Political Economy of Communication
+  note: 面向特定、细分受众进行的定向传播形态；在媒介经营中通常与受众细分和广告市场定位相联系。
+  policy: preferred
+- id: ratings
+  source: ratings
+  target: 收视率
+  category: Media Economics / Audience Measurement
+  note: 电视媒介语境下特定时段或节目收看人数占总体推及人口的比例，是广告定价和媒介竞争的重要指标。
+  policy: preferred
+- id: psychographics
+  source: psychographics
+  target: 心理统计学
+  category: Audience Research / Advertising
+  note: 依据受众的生活方式、价值观、兴趣、态度和个性等心理变量进行的受众分析或细分。
+  policy: preferred
+- id: demographics
+  source: demographics
+  target: 人口统计学
+  category: Audience Research / Advertising
+  note: 依据年龄、性别、收入、教育程度等人口统计变量描述或细分受众。
+  policy: preferred
+- id: market-segmentation
+  source: market segmentation
+  target: 市场细分
+  category: Media Economics / Advertising
+  note: 依据消费者或受众的需求、特征和行为，将整体市场划分为若干细分群体的营销与媒介经营方法。
+  policy: preferred
+- id: codes-of-advertising
+  source: codes of advertising
+  variants:
+  - The Codes of Advertising
+  target: 广告符码
+  category: Advertising / Political Economy of Communication
+  note: 苏特·杰哈利著作 The Codes of Advertising 的正式中文书名，也是本书讨论广告如何组织商品意义与受众关系的核心概念。
+  policy: preferred

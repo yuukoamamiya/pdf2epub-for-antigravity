@@ -8,6 +8,7 @@ import pytest
 from pdf2epub.refine.footnote_prepare import (
     prepare_footnote_candidates,
 )
+from pdf2epub.refine.footnote_candidates import candidate_for_block
 from pdf2epub.refine.footnote_handoff import prepare_footnote_subagent
 from pdf2epub.refine.footnote_apply import (
     _locate_block,
@@ -1457,6 +1458,80 @@ def test_typed_notes_unit_excludes_page_footnote_candidates(tmp_path: Path):
     assert report["pages"] == []
     assert report["structure_excluded_pages"][0]["roles"] == ["notes"]
     assert report["review_required"] is False
+
+
+@pytest.mark.parametrize("entry_type", ["copyright", "metadata", "frontmatter"])
+def test_typed_front_matter_unit_excludes_page_footnote_candidates(
+    tmp_path: Path, entry_type: str
+):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [_block("302.23 Cataloging data", 0, label="Text", y0=820)],
+    )
+    progress_dir = tmp_path / "ocr_markdown"
+    progress_dir.mkdir()
+    (progress_dir / "tree_progress.json").write_text(
+        json.dumps(
+            {
+                "units": [
+                    {
+                        "unit_id": "front_matter",
+                        "file": "front_matter.md",
+                        "page_range": [1, 1],
+                        "type": entry_type,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    assert report["pages"] == []
+    assert report["structure_excluded_pages"][0]["roles"] == [entry_type]
+    assert report["review_required"] is False
+
+
+def test_inline_ordered_list_above_page_tail_is_not_a_footnote_region(
+    tmp_path: Path,
+):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [
+            _block("Taylor identified three principles:", 0, y0=450),
+            _block("1. First principle", 1, y0=560),
+            _block("2. Second principle", 2, y0=620),
+            _block("The body continues below the list.", 3, y0=850),
+        ],
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    assert report["pages"] == []
+    assert report["review_required"] is False
+    assert report["bottom_detection"]["suspected_missed_count"] == 0
+
+
+def test_decorative_acknowledgement_marker_is_not_a_footnote_candidate():
+    sidecar = {
+        "page_box": [0, 0, 1000, 1000],
+        "blocks": [_block("*", 0, y0=820)],
+    }
+
+    assert (
+        candidate_for_block(
+            1,
+            0,
+            sidecar["blocks"][0],
+            sidecar,
+            bottom_ratio=0.5,
+            region_evidence=True,
+        )
+        is None
+    )
 
 
 def test_typed_toc_unit_excludes_page_footnote_candidates(tmp_path: Path):

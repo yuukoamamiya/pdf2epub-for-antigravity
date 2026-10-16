@@ -292,6 +292,10 @@ Subagent 实际读写哪些文件。两者不能互相替代。
 屏障；这保证恢复时不会把两个原本不相邻的章节拼到一起。这个过程只合并 worker 的文件
 清单和上下文，不把源 Markdown/HTML 物理拼接。
 
+并发配置的默认值保持保守；`max_concurrency` 只决定交接提示和本地 worker 分组的上限，
+不会绕过模型或 IDE 的额度。运行时硬上限为 6；存在大文件时仍会按文件规模自动降低有效并发。
+索引、参考文献和需要内部拆分的章节继续保持语义隔离，不因提高并发而跨章节合批。
+
 `write_worker_handoffs()` 随后把父级 manifest 投影为每个 worker 的最小 manifest：
 
 1. `assigned_files`、对应的 file stats、单元/TOC 上下文哈希和必要的章节元数据被保留；

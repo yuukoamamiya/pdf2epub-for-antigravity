@@ -52,6 +52,14 @@ _ORNAMENTED_HEADER_RE = re.compile(
     r"(?P<title>.+?)\s+(?P=ornament)\s*(?P=ornament)\s*(?P=ornament)$",
     re.IGNORECASE,
 )
+_ADDRESS_LINE_RE = re.compile(
+    r"^\d{1,5}\s+.+\b(?:street|st\.?|road|rd\.?|avenue|ave\.?|"
+    r"lane|ln\.?|boulevard|blvd\.?|drive|dr\.?|way|place|pl\.?|"
+    r"court|ct\.?|square|sq\.?|parkway|pkwy\.?)$",
+    re.IGNORECASE,
+)
+_ISBN_EAN_DIGITS_RE = re.compile(r"^97[89]\d{10}$")
+_DIAGRAM_MARKS_RE = re.compile(r"^[I|/\\_\-–—·•.\s]+$", re.IGNORECASE)
 _MAX_COMBINED_LINE_LENGTH = 96
 
 
@@ -88,8 +96,17 @@ def candidate_for_line(line: str) -> Optional[dict[str, Any]]:
     if len(stripped) > _MAX_COMBINED_LINE_LENGTH:
         return None
 
-    raw_stripped = line.strip()
     title_line = re.sub(r"^#{1,6}\s+", "", stripped).strip()
+    compact_digits = re.sub(r"[\s-]", "", title_line)
+    if _ISBN_EAN_DIGITS_RE.fullmatch(compact_digits):
+        return None
+    if _ADDRESS_LINE_RE.fullmatch(title_line):
+        return None
+    if (
+        _DIAGRAM_MARKS_RE.fullmatch(title_line)
+        and any(mark in title_line for mark in ("/", "\\", "_", "-", "–", "—"))
+    ):
+        return None
     if _NUMBERED_RUNNING_HEADER_RE.fullmatch(title_line) and not re.search(
         r"[。！？；.!?;]", title_line
     ):
@@ -103,7 +120,7 @@ def candidate_for_line(line: str) -> Optional[dict[str, Any]]:
         label = match.group("label")
         if _DATE_SUFFIX_RE.search(title) and label.isdigit() and len(label) == 4:
             return None
-        if title and not title.isdigit() and not re.search(r"[。！？；.!?;,:]", title):
+        if title and not title.isdigit() and not re.search(r"[。！？；.!?;,:，：]", title):
             return {
                 "kind": "running_title_plus_page_label",
                 "text": stripped,

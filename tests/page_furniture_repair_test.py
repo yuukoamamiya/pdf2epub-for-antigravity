@@ -55,6 +55,16 @@ def test_ornamented_header_with_sentence_punctuation_is_not_auto_furniture():
     assert candidate_for_line("• • • This is a sentence. • • •") is None
 
 
+def test_identifier_address_and_diagram_lines_are_not_page_furniture():
+    for line in (
+        "9 780415 903530",
+        "29 West 35th Street",
+        "11 New Fetter Lane",
+        "I / / / I / / / / / / I",
+    ):
+        assert candidate_for_line(line) is None
+
+
 def test_chinese_numbered_running_headers_are_furniture_candidates():
     for line in (
         "第一部分 体系—历史",
