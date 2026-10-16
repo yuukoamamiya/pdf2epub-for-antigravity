@@ -415,8 +415,13 @@ class FootnoteManager:
 
                     for line_idx in find_replaced_heading_lines(lines, entry.get('title', '')):
                         line = lines[line_idx - 1]
-                        raw_keys = set(re.findall(r'\[\^(\w+)\](?!:)', line))
-                        title_keys = set(re.findall(r'\[\^(\w+)\](?!:)', entry.get('title', '')))
+                        raw_keys = set(re.findall(r'\[\^([\w-]+)\](?!:)', line))
+                        title_keys = set(
+                            re.findall(
+                                r'\[\^([\w-]+)\](?!:)',
+                                entry.get('title', ''),
+                            )
+                        )
                         for key in raw_keys - title_keys:
                             suppressed_positions.add((first_part.stem, line_idx, key))
 

@@ -792,15 +792,14 @@ def build_epub_structure(
             if file_path:
                 result['file_path'] = file_path
                 result['part_files'] = find_part_files(file_path, part_order)
-            elif entry.get('children'):
-                # A structural-only parent still needs a distinct navigation
-                # target. Otherwise the parent points at its first child and
-                # appears to contain that child's body.
-                result['virtual_file_name'] = f"{unit_id}.html"
-            elif 'children' not in entry and inherited_file is None:
+            elif not entry.get('children') and inherited_file is None:
                 # Only warn if this is a leaf node (no children)
                 # Container nodes (with children) don't need their own markdown
                 logger.warning(f"No markdown file found for {unit_id}: {entry['title']}")
+            # Structural-only parents are represented by their first emitted
+            # child unit. Refinement keeps a parent's heading/preamble with
+            # that child, so the TOC generators resolve the parent to the
+            # first real descendant file instead of creating a title-only page.
 
         # Process children recursively
         if 'children' in entry:

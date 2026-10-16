@@ -18,7 +18,13 @@ from .utils.html_safety import sanitize_html_fragment
 # Configure logger
 logger = configure_logging()
 
-FOOTNOTE_SYNTAX_RE = re.compile(r'\[\^(\w+)\](?!:)|^\[\^(\w+)\]:', re.MULTILINE)
+# Footnote normalization may suffix repeated local keys (for example
+# ``[^1-2]``). Keep the key grammar in sync with the scanner and splitter.
+FOOTNOTE_KEY_PATTERN = r"[\w-]+"
+FOOTNOTE_SYNTAX_RE = re.compile(
+    rf'\[\^({FOOTNOTE_KEY_PATTERN})\](?!:)|^\[\^({FOOTNOTE_KEY_PATTERN})\]:',
+    re.MULTILINE,
+)
 ID_ATTRIBUTE_RE = re.compile(r'(\bid=")([^"]*)(")')
 FRAGMENT_HREF_RE = re.compile(r'(\bhref="[^"]*#)([^"]+)(")')
 OL_TAG_RE = re.compile(r"<ol(?P<attrs>[^>]*)>")
@@ -569,12 +575,16 @@ def preprocess_footnotes_local(markdown_content: str, footnote_manager, source_c
 
     for line_num, line in enumerate(lines, 1):
         # Check for footnote definition [^key]:
-        def_match = re.match(r'^\[\^(\w+)\]:\s*(.*)', line)
+        def_match = re.match(
+            rf'^\[\^({FOOTNOTE_KEY_PATTERN})\]:\s*(.*)', line
+        )
         if (
             not def_match
             and footnote_manager.is_no_colon_definition_chapter(source_chapter)
         ):
-            def_match = re.match(r'^\[\^(\w+)\]\s+(.+)', line)
+            def_match = re.match(
+                rf'^\[\^({FOOTNOTE_KEY_PATTERN})\]\s+(.+)', line
+            )
         if def_match:
             fn_key = def_match.group(1)
             fn_text = def_match.group(2)
@@ -601,7 +611,11 @@ def preprocess_footnotes_local(markdown_content: str, footnote_manager, source_c
                 ) or match.group(0)
 
             # Replace footnote references
-            line = re.sub(r'\[\^(\w+)\](?!:)', replace_ref, line)
+            line = re.sub(
+                rf'\[\^({FOOTNOTE_KEY_PATTERN})\](?!:)',
+                replace_ref,
+                line,
+            )
 
             # Replace backticks with proper apostrophes/quotes
             # This prevents markdown from interpreting them as code blocks
@@ -634,13 +648,17 @@ def preprocess_footnotes_global(markdown_content: str, footnote_manager, source_
     is_definition_chapter = footnote_manager.is_definition_chapter(source_chapter)
 
     for line_num, line in enumerate(lines, 1):
-        def_match = re.match(r'^\[\^(\w+)\]:\s*(.*)', line)
+        def_match = re.match(
+            rf'^\[\^({FOOTNOTE_KEY_PATTERN})\]:\s*(.*)', line
+        )
         if (
             not def_match
             and is_definition_chapter
             and footnote_manager.is_no_colon_definition_chapter(source_chapter)
         ):
-            def_match = re.match(r'^\[\^(\w+)\]\s+(.+)', line)
+            def_match = re.match(
+                rf'^\[\^({FOOTNOTE_KEY_PATTERN})\]\s+(.+)', line
+            )
         if def_match and is_definition_chapter:
             fn_key = def_match.group(1)
             fn_text = def_match.group(2)
@@ -666,7 +684,11 @@ def preprocess_footnotes_global(markdown_content: str, footnote_manager, source_
                 occurrence_in_file=reference_occurrence_in_file[fn_key],
             ) or match.group(0)
 
-        line = re.sub(r'\[\^(\w+)\](?!:)', replace_ref, line)
+        line = re.sub(
+            rf'\[\^({FOOTNOTE_KEY_PATTERN})\](?!:)',
+            replace_ref,
+            line,
+        )
         processed_lines.append(line)
 
     return '\n'.join(processed_lines)

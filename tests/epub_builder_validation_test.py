@@ -362,7 +362,7 @@ def test_process_chapter_content_removes_structural_ancestor_heading() -> None:
     assert processed.count("Child body") == 1
 
 
-def test_build_epub_structure_gives_structural_parent_a_virtual_file(
+def test_build_epub_structure_points_structural_parent_at_first_child(
     tmp_path: Path,
 ) -> None:
     markdown_dir = tmp_path / "markdown"
@@ -389,12 +389,12 @@ def test_build_epub_structure_gives_structural_parent_a_virtual_file(
         markdown_dir,
     )
 
-    assert structure[0]["virtual_file_name"] == "chapter_1.html"
+    assert "virtual_file_name" not in structure[0]
     assert structure[0]["children"][0]["file_path"].name == "chapter_1.1.md"
     toc_path = tmp_path / "toc.html"
     assert generate_hierarchical_toc_html(structure, "Book", toc_path)
     toc = toc_path.read_text(encoding="utf-8")
-    assert 'href="chapter_1.html">Parent</a>' in toc
+    assert 'href="chapter_1.1.html">Parent</a>' in toc
     assert 'href="chapter_1.1.html#toc-1-1">Child</a>' in toc
 
 

@@ -60,7 +60,7 @@ _POLISH_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+\S")
 _POLISH_LIST_RE = re.compile(r"^\s*(?:[-+*]|\d+[.)])\s+\S")
 _POLISH_FOOTNOTE_DEFINITION_RE = re.compile(r"^\s*\[\^[^\]]+\]:")
 _POLISH_IMAGE_RE = re.compile(r"^\s*!\[[^\]]*\]\([^)]*\)\s*$")
-_POLISH_HORIZONTAL_RULE_RE = re.compile(r"^\s*(?:\*\s*){3,}$|^\s*(?:-\s*){3,}$|^\s*(?:_\s*){3,}$")
+_POLISH_HORIZONTAL_RULE_RE = re.compile(r"^\s*(?:\*\s*){3,}$|^\s*(?:-\s*){3,}$|^\s*(?:_\s*){3,}$", re.MULTILINE)
 
 
 def _polish_markdown_blocks(text: str) -> list[list[str]]:
@@ -735,6 +735,7 @@ def polish_content_integrity_check(
         value = re.sub(r"\[\^\s*(\d+)\s*\]", r"[^\1]", value)
         value = re.sub(r"<[^>]+>", " ", value)
         value = re.sub(r"^\s*#{1,6}\s+", "", value, flags=re.MULTILINE)
+        value = _POLISH_HORIZONTAL_RULE_RE.sub("", value)
         value = value.replace("**", "").replace("__", "")
         value = value.replace("*", "").replace("_", "")
         value = re.sub(r"\s+", " ", value).strip()
@@ -765,6 +766,7 @@ def polish_content_integrity_check(
             value = re.sub(r"<sup>\s*\d+\s*</sup>", " ", value, flags=re.IGNORECASE)
             value = re.sub(r"\[\^\s*\d+\s*\]", " ", value)
             value = re.sub(r"<[^>]+>", " ", value)
+            value = _POLISH_HORIZONTAL_RULE_RE.sub("", value)
             value = re.sub(r"\s+", " ", value).strip()
             word_count = len(re.findall(r"\w+", value, flags=re.UNICODE))
             if len(value) >= 24 or word_count >= 8:
@@ -772,7 +774,7 @@ def polish_content_integrity_check(
             current.clear()
 
         for line in clean_lines(text):
-            if heading_pattern.match(line):
+            if heading_pattern.match(line) or _POLISH_HORIZONTAL_RULE_RE.match(line):
                 flush()
             elif line.strip():
                 current.append(line)

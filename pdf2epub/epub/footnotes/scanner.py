@@ -10,6 +10,9 @@ from loguru import logger
 from .models import FootnoteDefinition, FootnoteReference, FootnoteStyle
 
 
+FOOTNOTE_KEY_PATTERN = r"[\w-]+"
+
+
 class FootnoteScanner:
     """
     Scans markdown files for footnote definitions and references.
@@ -57,10 +60,16 @@ class FootnoteScanner:
 
             for line_num, line in enumerate(lines, 1):
                 # Check for footnote definitions [^key]:
-                def_matches = re.findall(r'^\[\^(\w+)\]:', line)
+                def_matches = re.findall(
+                    rf'^\[\^({FOOTNOTE_KEY_PATTERN})\]:',
+                    line,
+                )
                 no_colon_def_match = None
                 if not def_matches and chapter_name in no_colon_definition_chapters:
-                    no_colon_def_match = re.match(r'^\[\^(\w+)\]\s+(.+)', line)
+                    no_colon_def_match = re.match(
+                        rf'^\[\^({FOOTNOTE_KEY_PATTERN})\]\s+(.+)',
+                        line,
+                    )
                     if no_colon_def_match:
                         def_matches = [no_colon_def_match.group(1)]
                 for key in def_matches:
@@ -68,7 +77,10 @@ class FootnoteScanner:
                     if key not in self.definitions:
                         self.definitions[key] = []
                     # Extract the content after the definition marker
-                    content_match = re.match(r'^\[\^(\w+)\]:\s*(.*)', line)
+                    content_match = re.match(
+                        rf'^\[\^({FOOTNOTE_KEY_PATTERN})\]:\s*(.*)',
+                        line,
+                    )
                     if content_match:
                         content = content_match.group(2)
                     elif no_colon_def_match:
@@ -83,7 +95,10 @@ class FootnoteScanner:
                     continue
 
                 # Check for footnote references [^key] (not followed by colon)
-                ref_matches = re.findall(r'\[\^(\w+)\](?!:)', line)
+                ref_matches = re.findall(
+                    rf'\[\^({FOOTNOTE_KEY_PATTERN})\](?!:)',
+                    line,
+                )
                 for key in ref_matches:
                     # Handle special page-note format like [^197n67]
                     # Convert to just the note number (67) for matching with definitions

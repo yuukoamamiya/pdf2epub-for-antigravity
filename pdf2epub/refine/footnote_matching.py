@@ -26,12 +26,12 @@ _AUTO_LINK_RE = re.compile(
     r"<(?P<url>(?:https?://|mailto:)[^>\n]+)>", re.IGNORECASE
 )
 _SUPERSCRIPT_DIGITS = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789")
-_CIRCLED_DIGITS_MAP = {
-    "1": "①", "2": "②", "3": "③", "4": "④", "5": "⑤",
-    "6": "⑥", "7": "⑦", "8": "⑧", "9": "⑨", "10": "⑩",
-    "11": "⑪", "12": "⑫", "13": "⑬", "14": "⑭", "15": "⑮",
-    "16": "⑯", "17": "⑰", "18": "⑱", "19": "⑲", "20": "⑳",
-}
+_CIRCLED_CHARS = (
+    "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
+    "㉑㉒㉓㉔㉕㉖㉗㉘㉙㉚㉛㉜㉝㉞㉟"
+    "㊱㊲㊳㊴㊵㊶㊷㊸㊹㊺㊻㊼㊽㊾㊿"
+)
+_CIRCLED_DIGITS_MAP = {str(i): char for i, char in enumerate(_CIRCLED_CHARS, 1)}
 
 
 def plain_block_text(block: Mapping[str, Any]) -> str:
@@ -369,11 +369,37 @@ def block_text_variants(
     raw_md_path = Path(output_dir) / "pages" / f"page_{page:03d}.md"
     if raw_md_path.is_file():
         try:
-            for line in reversed(raw_md_path.read_text(encoding="utf-8").splitlines()):
+            def _extract_delimited_key(text: str) -> Optional[str]:
+                text = text.strip()
+                m_c = re.match(r"^(?:\[\^|<sup[^>]*>)?([①-⑳])", text)
+                if m_c:
+                    return str(_CIRCLED_CHARS.index(m_c.group(1)) + 1)
+                m_d = re.match(r"^(?:\[\^|<sup[^>]*>)?(\d+)(?:\]\s*:?|[.)、，:：\s]|\^|<|$)", text)
+                if m_d:
+                    return m_d.group(1)
+                return None
+
+            raw_key = _extract_delimited_key(raw_text)
+            raw_body = re.sub(r"^[①-⑳0-9\[\^\]\(\)（）.\s:：-]+", "", raw_text).strip()
+            clean_raw = re.sub(r"\\", "", re.sub(r"[*_~`$]", "", raw_body[:20])).strip()
+
+            for line in raw_md_path.read_text(encoding="utf-8").splitlines():
                 line = line.strip()
-                if line and re.match(r"^(?:\[\^\w+\]|\d+\b|<sup\b)", line):
-                    if line not in variants:
-                        variants.append(line)
+                if not line:
+                    continue
+                line_key = _extract_delimited_key(line)
+                if raw_key and line_key and raw_key != line_key:
+                    continue
+                if not line_key and not re.match(r"^(?:\[\^\w+\]|\d+\b|<sup\b)", line):
+                    continue
+
+                if clean_raw:
+                    clean_line = re.sub(r"\\", "", re.sub(r"[*_~`$]", "", line))
+                    if clean_raw[:12] not in clean_line:
+                        continue
+
+                if line not in variants:
+                    variants.append(line)
         except (OSError, UnicodeDecodeError):
             pass
     return variants
@@ -429,6 +455,11 @@ def marker_spans(source: str, key: str) -> list[tuple[int, int, str]]:
     def is_inside_html_sup(index: int) -> bool:
         return any(start <= index < end for start, end in html_sup_ranges)
 
+    def is_inside_definition_prefix(index: int) -> bool:
+        line_start = source.rfind("\n", 0, index) + 1
+        m = re.match(r"^\[\^[^\]\n]+\]\s*:\s*", source[line_start:])
+        return bool(m and index < line_start + len(m.group(0)))
+
     for match in re.finditer(
         _HTML_SUP_RE_TEMPLATE.format(key=escaped),
         source,
@@ -436,12 +467,12 @@ def marker_spans(source: str, key: str) -> list[tuple[int, int, str]]:
     ):
         append_span(match.start(), match.end(), "sup")
     for match in _MARKDOWN_REF_RE.finditer(source):
-        if match.group("key") == str(key):
+        if match.group("key") == str(key) and not is_inside_definition_prefix(match.start()):
             append_span(match.start(), match.end(), "markdown")
     superscript = str(key).translate(_SUPERSCRIPT_DIGITS)
     if superscript != str(key):
         for match in re.finditer(re.escape(superscript), source):
-            if not is_inside_html_sup(match.start()):
+            if not is_inside_html_sup(match.start()) and not is_inside_definition_prefix(match.start()):
                 append_span(match.start(), match.end(), "unicode_sup")
     if str(key) in _CIRCLED_DIGITS_MAP:
         circled = _CIRCLED_DIGITS_MAP[str(key)]
@@ -455,7 +486,7 @@ def marker_spans(source: str, key: str) -> list[tuple[int, int, str]]:
             idx = match.start()
             if idx == 0 or source[idx - 1] == "\n":
                 continue
-            if is_inside_html_sup(idx):
+            if is_inside_html_sup(idx) or is_inside_definition_prefix(idx):
                 continue
             append_span(match.start(), match.end(), "unicode_circled")
     return sorted(spans)
@@ -499,9 +530,23 @@ def strip_note_key(text: str, key: str | None) -> str:
     if not key:
         return value
     escaped = re.escape(str(key))
+    patterns = [
+        rf"\[\^{escaped}\]",
+        rf"<sup\b[^>]*>\s*{escaped}\s*</sup>",
+        escaped,
+    ]
+    if str(key) in _CIRCLED_DIGITS_MAP:
+        circled = re.escape(_CIRCLED_DIGITS_MAP[str(key)])
+        patterns.extend([
+            rf"<sup\b[^>]*>\s*{circled}\s*</sup>",
+            circled,
+        ])
+    superscript = str(key).translate(_SUPERSCRIPT_DIGITS)
+    if superscript != str(key):
+        patterns.append(re.escape(superscript))
+    joined = "|".join(patterns)
     value = re.sub(
-        rf"^\s*(?:\[\^{escaped}\]|<sup\b[^>]*>\s*{escaped}\s*</sup>|{escaped})\s*"
-        rf"(?:[.)、，:：-]\s*)?",
+        rf"^\s*(?:{joined})\s*(?:[.)、，:：-]\s*)?",
         "",
         value,
         count=1,

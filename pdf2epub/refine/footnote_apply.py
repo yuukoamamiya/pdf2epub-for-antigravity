@@ -91,6 +91,10 @@ def _candidate_decisions(
         for candidate in page_report.get("candidates", []) or []:
             if not isinstance(candidate, Mapping) or candidate.get("confidence") != "high":
                 continue
+            cand_bbox = candidate.get("bbox")
+            cand_label = str(candidate.get("label") or "").strip().lower()
+            if cand_label != "footnote" and cand_bbox and float(cand_bbox[1]) < 0.45:
+                continue
             try:
                 address = (
                     int(candidate["page"]),
@@ -130,6 +134,9 @@ def _locate_block(
     records: list[dict[str, Any]],
     page: int,
     block_texts: list[str],
+    *,
+    claimed_spans: Optional[set[tuple[str, int, int]]] = None,
+    pages_dir: Optional[Path] = None,
 ) -> tuple[dict[str, Any], tuple[int, int]]:
     expected = _records_for_page(records, page)
     if not expected:
@@ -140,11 +147,43 @@ def _locate_block(
         for record in expected:
             for span in _find_exact_signature_spans(source_texts[record["name"]], block_text):
                 identity = (record["name"], span[0], span[1])
+                if claimed_spans and identity in claimed_spans:
+                    continue
                 if identity not in seen:
                     seen.add(identity)
                     matches.append((record, span))
         if matches:
             break
+    if len(matches) > 1:
+        if pages_dir is not None:
+            page_md = Path(pages_dir) / f"page_{page:03d}.md"
+            if page_md.is_file():
+                try:
+                    other_lines = [
+                        l.strip()
+                        for l in page_md.read_text(encoding="utf-8").splitlines()
+                        if len(l.strip()) > 15
+                        and not l.startswith("#")
+                        and not l.startswith(("①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"))
+                    ]
+                except (OSError, UnicodeDecodeError):
+                    other_lines = []
+                if other_lines:
+                    file_scores: dict[str, int] = {}
+                    for r, _span in matches:
+                        fn = r["name"]
+                        st = source_texts[fn]
+                        file_scores[fn] = sum(1 for l in other_lines[:5] if l[:20] in st)
+                    max_s = max(file_scores.values()) if file_scores else 0
+                    if max_s > 0:
+                        matches = [m for m in matches if file_scores[m[0]["name"]] == max_s]
+                    if len(matches) > 1 and all(m[0]["name"] == matches[0][0]["name"] for m in matches):
+                        target_text = source_texts[matches[0][0]["name"]]
+                        page_positions = [target_text.find(l[:20]) for l in other_lines if target_text.find(l[:20]) != -1]
+                        if page_positions:
+                            avg_pos = sum(page_positions) / len(page_positions)
+                            matches.sort(key=lambda m: abs(m[1][0] - avg_pos))
+                            matches = [matches[0]]
     if len(matches) != 1:
         if not matches:
             raise ValueError(f"could not locate OCR block text on page {page}")
@@ -297,6 +336,7 @@ def apply_footnote_normalization(
     active_by_chapter_key: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     errors: list[str] = []
     scheduled_secondary_primary_removals: set[tuple[int, int]] = set()
+    claimed_primary_spans: set[tuple[str, int, int]] = set()
 
     for decision in decisions:
         role = str(decision.get("role") or "").strip()
@@ -330,7 +370,15 @@ def apply_footnote_normalization(
                 block_texts = _block_text_variants(output_dir, page, block)
                 if not block_texts:
                     raise ValueError("OCR block is empty")
-                record, span = _locate_block(source_texts, records, page, block_texts)
+                record, span = _locate_block(
+                    source_texts,
+                    records,
+                    page,
+                    block_texts,
+                    claimed_spans=claimed_primary_spans,
+                    pages_dir=output_dir / "pages",
+                )
+                claimed_primary_spans.add((record["name"], span[0], span[1]))
             except ValueError as exc:
                 errors.append(f"{page}:{block_index}: {exc}")
                 continue
@@ -397,6 +445,11 @@ def apply_footnote_normalization(
                             records,
                             page,
                             primary_block_texts,
+                            claimed_spans=claimed_primary_spans,
+                            pages_dir=output_dir / "pages",
+                        )
+                        claimed_primary_spans.add(
+                            (primary_record["name"], primary_span[0], primary_span[1])
                         )
                     except ValueError as exc:
                         errors.append(
@@ -513,13 +566,17 @@ def apply_footnote_normalization(
     for chapter_records in records_by_chapter.values():
         chapter_records.sort(key=lambda item: (item["unit_order"], item["part_index"]))
 
-    for note in (note for notes in notes_by_chapter.values() for note in notes):
+    all_notes = [note for notes in list(notes_by_chapter.values()) for note in list(notes)]
+    for note in all_notes:
         note_record = record_by_name[note["source_file"]]
         source = source_texts[note["source_file"]]
         start = note["start_span"][0]
+        claimed_spans = {
+            (s, e) for s, e, _ in edits_by_file.get(note["source_file"], [])
+        }
         marker_candidates = [
             item for item in _marker_spans(source, note["key"])
-            if item[1] <= start
+            if item[1] <= start and (item[0], item[1]) not in claimed_spans
         ]
         target_file = note["source_file"]
 
@@ -530,7 +587,6 @@ def apply_footnote_normalization(
                 rec for rec in records_by_chapter.get(note["chapter_id"], [])
                 if (rec["unit_order"], rec["part_index"]) < (note_record["unit_order"], note_record["part_index"])
             ]
-            cross_part_candidates: list[tuple[str, tuple[int, int, str]]] = []
             for earlier_record in reversed(sibling_records):
                 earlier_source = source_texts[earlier_record["name"]]
                 earlier_spans = _marker_spans(earlier_source, note["key"])
@@ -544,19 +600,63 @@ def apply_footnote_normalization(
                     if (span[0], span[1]) not in claimed_spans
                 ]
                 if earlier_spans:
-                    cross_part_candidates.extend(
-                        (earlier_record["name"], span) for span in earlier_spans
+                    target_file = earlier_record["name"]
+                    marker_candidates = [earlier_spans[-1]]
+                    source = source_texts[target_file]
+                    break
+
+            if not marker_candidates:
+                # If a section begins mid-page, page footnotes belonging to the
+                # previous section's trailing body text may be placed at the bottom
+                # of the shared page. Check immediately preceding chapter covering this page.
+                preceding_records = [
+                    rec for rec in records
+                    if rec["end_page"] >= note["source_page"] and rec["unit_order"] < note_record["unit_order"]
+                ]
+                if preceding_records:
+                    preceding_records.sort(
+                        key=lambda r: (r["unit_order"], r["part_index"]),
+                        reverse=True,
                     )
-            if len(cross_part_candidates) == 1:
-                target_file, selected = cross_part_candidates[0]
-                marker_candidates = [selected]
-                source = source_texts[target_file]
-            elif len(cross_part_candidates) > 1:
-                errors.append(
-                    f"{note['source_page']}:{note['source_file']}: ambiguous body "
-                    f"footnote marker for key {note['key']} across logical chapter parts"
-                )
-                continue
+                    for prec_record in preceding_records:
+                        prec_source = source_texts[prec_record["name"]]
+                        prec_spans = _marker_spans(prec_source, note["key"])
+                        claimed_spans = {
+                            (start, end)
+                            for start, end, _ in edits_by_file.get(prec_record["name"], [])
+                        }
+                        prec_spans = [
+                            span
+                            for span in prec_spans
+                            if (span[0], span[1]) not in claimed_spans
+                        ]
+                        if prec_spans:
+                            target_file = prec_record["name"]
+                            marker_candidates = [prec_spans[-1]]
+                            source = source_texts[target_file]
+                            old_chapter_id = note["chapter_id"]
+                            new_chapter_id = prec_record["chapter_id"]
+                            if old_chapter_id != new_chapter_id:
+                                if note in notes_by_chapter[old_chapter_id]:
+                                    notes_by_chapter[old_chapter_id].remove(note)
+                                new_occurrence = len(active_by_chapter_key[(new_chapter_id, note["key"])]) + 1
+                                note["output_key"] = (
+                                    note["key"]
+                                    if new_occurrence == 1
+                                    else f"{note['key']}-{new_occurrence}"
+                                )
+                                note["chapter_id"] = new_chapter_id
+                                active_by_chapter_key[(new_chapter_id, note["key"])].append(note)
+                                notes_by_chapter[new_chapter_id].append(note)
+                                for res_item in resolved:
+                                    if (
+                                        res_item.get("file") == note["source_file"]
+                                        and res_item.get("page") == note["source_page"]
+                                        and res_item.get("key") == note["key"]
+                                    ):
+                                        res_item["chapter_id"] = new_chapter_id
+                                        res_item["output_key"] = note["output_key"]
+                            break
 
         if note.get("source") == "secondary":
             marker_context = str(note.get("marker_context") or "").strip()

@@ -132,6 +132,28 @@ def test_local_notes_cross_refined_siblings_form_a_valid_graph(tmp_path: Path) -
     assert report["backref_hrefs"] == 2
 
 
+def test_hyphenated_footnote_keys_render_as_links(tmp_path: Path) -> None:
+    first = tmp_path / "chapter_1.part1.md"
+    second = tmp_path / "chapter_1.part2.md"
+    first.write_text("Body with a repeated-note key [^1-2].\n", encoding="utf-8")
+    second.write_text("[^1-2]: Definition for the repeated note.\n", encoding="utf-8")
+    structure = [
+        _entry(
+            "chapter_1",
+            children=[_entry("chapter_1.1", first), _entry("chapter_1.2", second)],
+        )
+    ]
+
+    manager = FootnoteManager(tmp_path, epub_structure=structure)
+    html_files = _render(structure, manager)
+    report = validate_footnote_graph(html_files)
+
+    assert "[^1-2]" not in html_files["chapter_1.1.html"]
+    assert 'href="chapter_1.2.html#fn-1-2-1"' in html_files["chapter_1.1.html"]
+    assert report["forward_hrefs"] == 1
+    assert report["backref_hrefs"] == 0
+
+
 def test_unbalanced_local_occurrences_degrade_to_visible_unlinked_refs(
     tmp_path: Path,
 ) -> None:

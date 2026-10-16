@@ -22,8 +22,10 @@ from .footnote_options import (
     DEFAULT_NATIVE_MAX_FONT_RATIO,
 )
 from .footnote_signals import (
+    _CIRCLED_DIGITS_MAP,
     _CITATION_LABEL_RE,
     _FOOTNOTE_LABEL_RE,
+    _INT_TO_CIRCLED_MAP,
     _NATIVE_NUMERIC_ONLY_RE,
     _NATIVE_SUP_MARKER_RE,
     _NUMERIC_ONLY_RE,
@@ -335,6 +337,8 @@ def marker_before_block(
     unicode_key = key.translate(str.maketrans("0123456789", "⁰¹²³⁴⁵⁶⁷⁸⁹"))
     if unicode_key != key:
         marker_keys.add(unicode_key)
+    if key in _INT_TO_CIRCLED_MAP:
+        marker_keys.add(_INT_TO_CIRCLED_MAP[key])
 
     chunks = re.split(r"\n{2,}", page_markdown.strip())
     if 0 <= block_index < len(chunks):
@@ -353,8 +357,11 @@ def marker_before_block(
 
     for match in _NATIVE_SUP_MARKER_RE.finditer(page_markdown[:block_start]):
         marker_key = match.group("key")
-        if marker_key is not None and marker_key == key:
-            return True
+        if marker_key is not None:
+            if marker_key in _CIRCLED_DIGITS_MAP:
+                marker_key = _CIRCLED_DIGITS_MAP[marker_key]
+            if marker_key == key:
+                return True
         if match.group("unicode") in marker_keys:
             return True
     return False
