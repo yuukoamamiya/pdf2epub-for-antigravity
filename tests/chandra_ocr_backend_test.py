@@ -72,6 +72,34 @@ def test_layout_to_markdown_preserves_footnote_semantics_and_image_boundaries():
     assert "Printed caption" in markdown
 
 
+@pytest.mark.parametrize("divider", ["<hr/>", "<p>---</p>"])
+def test_layout_to_markdown_drops_body_footnote_divider(divider):
+    html = f"""
+<div data-label="Text"><p>Body<sup class="footnote-ref">1</sup>.</p>{divider}</div>
+<div data-label="Footnote"><p><sup class="footnote-def">1</sup> Note.</p></div>
+""".strip()
+
+    markdown = layout_to_markdown(html, include_headers_footers=False)
+
+    assert "Body[^1]." in markdown
+    assert "[^1]: Note." in markdown
+    assert "---" not in markdown
+
+
+def test_layout_to_markdown_keeps_body_horizontal_rule_with_following_prose():
+    html = """
+<div data-label="Text"><p>Before.</p><hr/><p>After.</p></div>
+<div data-label="Footnote"><p><sup class="footnote-def">1</sup> Note.</p></div>
+""".strip()
+
+    markdown = layout_to_markdown(html, include_headers_footers=False)
+
+    assert "Before." in markdown
+    assert "---" in markdown
+    assert "After." in markdown
+    assert "[^1]: Note." in markdown
+
+
 def test_chandra_prompt_preserves_separate_footnote_blocks():
     assert "Keep a visually separated bottom-of-page note" in OCR_LAYOUT_PROMPT
     assert "A continuation may have no leading number" in OCR_LAYOUT_PROMPT

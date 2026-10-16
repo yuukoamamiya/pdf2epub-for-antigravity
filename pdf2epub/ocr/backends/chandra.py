@@ -24,7 +24,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import pymupdf as fitz
 import six
-from bs4 import BeautifulSoup, Tag
+from bs4 import BeautifulSoup, NavigableString, Tag
 from markdownify import MarkdownConverter, re_whitespace
 from openai import OpenAI
 from PIL import Image
@@ -300,6 +300,94 @@ class _ChandraMarkdownConverter(MarkdownConverter):
 
 
 _MARKDOWN_FOOTNOTE_KEY_RE = re.compile(r"^\w+$")
+_MARKDOWN_HORIZONTAL_RULE_RE = re.compile(
+    r"^(?:\*\s*){3,}$|^(?:-\s*){3,}$|^(?:_\s*){3,}$"
+)
+
+
+def _last_visible_node(element: Tag) -> Tag | NavigableString | None:
+    """Return the last visible descendant in document order.
+
+    Chandra may represent a divider as a real ``<hr>`` or as a text-only
+    block containing ``---``.  Looking through transparent wrappers such as
+    ``<p>`` lets the Markdown materializer handle both forms without
+    changing the stored layout HTML.
+    """
+    for child in reversed(element.contents):
+        if isinstance(child, NavigableString):
+            if str(child).strip():
+                return child
+            continue
+        if not isinstance(child, Tag):
+            continue
+        if child.name == "br":
+            continue
+        if child.name == "hr":
+            return child
+        nested = _last_visible_node(child)
+        if nested is not None:
+            return nested
+        # Empty elements with visible layout semantics (for example an image)
+        # still count as content, so a divider before one is not terminal.
+        if child.name in {"img", "input", "table", "math"}:
+            return child
+    return None
+
+
+def _remove_terminal_footnote_divider(container: Tag) -> bool:
+    """Remove a divider only when it terminates the block before a footnote.
+
+    A horizontal rule in the middle of a body block is meaningful Markdown and
+    must survive.  A terminal rule directly before a Footnote block is the
+    page's body/footnote separator; it is layout furniture once the footnote
+    is moved to the logical chapter end.
+    """
+    trailing = _last_visible_node(container)
+    if trailing is None:
+        return False
+    if isinstance(trailing, Tag) and trailing.name == "hr":
+        trailing.decompose()
+        return True
+    if not isinstance(trailing, NavigableString):
+        return False
+    if not _MARKDOWN_HORIZONTAL_RULE_RE.fullmatch(str(trailing).strip()):
+        return False
+    parent = trailing.parent
+    if not isinstance(parent, Tag):
+        return False
+    visible_text = parent.get_text(" ", strip=True)
+    if not _MARKDOWN_HORIZONTAL_RULE_RE.fullmatch(visible_text):
+        return False
+    parent.decompose()
+    return True
+
+
+def _remove_footnote_dividers(soup: BeautifulSoup) -> None:
+    """Drop only the layout divider immediately before the first note block."""
+    contents = list(soup.contents)
+    for index, node in enumerate(contents):
+        if not isinstance(node, Tag) or node.get("data-label") != "Footnote":
+            continue
+        previous_index = index - 1
+        while previous_index >= 0:
+            previous = contents[previous_index]
+            if isinstance(previous, NavigableString) and not str(previous).strip():
+                previous_index -= 1
+                continue
+            break
+        if previous_index < 0:
+            continue
+        previous = contents[previous_index]
+        if not isinstance(previous, Tag):
+            continue
+        if previous.get("data-label") == "Footnote":
+            # Do not remove separators that might intentionally distinguish
+            # two footnote definitions from one another.
+            continue
+        if previous.name == "hr":
+            previous.decompose()
+            continue
+        _remove_terminal_footnote_divider(previous)
 
 
 def _superscript_key(element: Tag) -> Optional[str]:
@@ -411,6 +499,7 @@ def layout_to_markdown(html: str, *, include_headers_footers: bool) -> str:
             elif label in {"Image", "Figure"}:
                 for text_node in div.find_all(string=True):
                     text_node.extract()
+    _remove_footnote_dividers(soup)
     converter = _ChandraMarkdownConverter(
         heading_style="ATX",
         bullets="-",
