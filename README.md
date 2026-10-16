@@ -37,6 +37,18 @@ Antigravity 工作区 Subagent 完成，本地程序负责文件整理、校验�
 | `ocr.secondary.enabled: false` | 单 OCR。直接使用主 OCR，忽略旧的双 OCR 共识文件。 |
 | `ocr.secondary.enabled: true` | 使用配置的第二套 OCR 做差异筛查，差异交给 Subagent 复核。 |
 
+PDF 的页面来源还可以单独指定：
+
+```yaml
+pdf_text:
+  mode: auto  # auto / native / ocr
+```
+
+`auto` 是默认值，按探测结果在原生文本和视觉 OCR 之间选择；`ocr` 会强制所有 PDF（包括有
+可提取文字层的 PDF）走视觉 OCR，适合怀疑隐藏 OCR 层、换行或脚注版面不可靠的原生 PDF；
+`native` 只允许高置信度原生文字 PDF，不满足条件时直接阻断，不会静默改走 OCR。切换该模式
+后，旧的 `pdf_text_probe.json` 不会被复用。
+
 当前默认主 OCR 是 Chandra。脚注阶段先使用 OCR sidecar 的 `bbox[3]`、页底相交比例、数字开头、
 块间距和连续编号推断页面级脚注区域；`Footnote` 标签不能单独绕过几何条件，纯数字页码会排除。
 原生文字 PDF 若反复显示稳定的正文/脚注字号阶梯，还会把与注脚字号一致、却没有同页上标或脚注标签的
@@ -80,14 +92,15 @@ uv sync --extra ocr-vision
 检查点，旧的脚注决定和插图绑定不会被静默复用。两套 OCR 一致只代表通过筛查，不代表一定
 正确；整页插图、脚注归属和引用/参考文献区分仍由 Subagent 复核。
 
-Chandra 是当前主 OCR。原生文字 PDF 会保留版面信息；
-扫描或混合 PDF 使用视觉 OCR。两种来源都不会把普通上标、序数或行内数字引用自动判成脚注，
+Chandra 是当前主 OCR。默认情况下原生文字 PDF 会保留版面信息；设置 `pdf_text.mode: ocr`
+后也会改用视觉 OCR。扫描或混合 PDF 使用视觉 OCR。两种来源都不会把普通上标、序数或行内数字引用自动判成脚注，
 清晰且证据充分的脚注区域可由本地规则直接处理，边界不清、跨页续文或 OCR 证据冲突的区域
 才交由 Subagent 复核。
 
-原生文字 PDF 即使是稳定双栏，也不会仅因栏布局而强制 OCR；提取器会利用 PDF 文本 span 的
+在 `pdf_text.mode: auto` 下，原生文字 PDF 即使是稳定双栏，也不会仅因栏布局而强制 OCR；提取器会利用 PDF 文本 span 的
 坐标按栏重排，并在页面 sidecar 中记录 `layout_mode: multi_column`。只有扫描图、隐藏 OCR
-文字层或其他未通过原生文字置信度门禁的 PDF 才进入视觉 OCR。
+文字层或其他未通过原生文字置信度门禁的 PDF 才会自动进入视觉 OCR；需要统一使用视觉 OCR
+时请显式设置 `pdf_text.mode: ocr`。
 
 ## 当前输出和公式策略
 

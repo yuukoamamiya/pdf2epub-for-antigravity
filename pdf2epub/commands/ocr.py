@@ -37,16 +37,42 @@ def _load_probe(output_dir: Path) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def _load_current_probe(output_dir: Path, pdf_path: Path) -> dict:
+def _load_current_probe(
+    output_dir: Path,
+    pdf_path: Path,
+    *,
+    text_mode: str = "auto",
+) -> dict:
     """Reuse a probe only when it attests to the exact current PDF."""
     probe_path = Path(output_dir) / "pdf_text_probe.json"
     if not probe_path.is_file():
         return {}
     probe = _load_probe(output_dir)
-    from pdf2epub.pdf_text_probe import PDF_TEXT_PROBE_SCHEMA_VERSION
+    from pdf2epub.pdf_text_probe import (
+        PDF_TEXT_PROBE_SCHEMA_VERSION,
+        normalize_pdf_text_mode,
+    )
+
+    try:
+        requested_mode = normalize_pdf_text_mode(text_mode)
+    except ValueError:
+        return {}
 
     if probe.get("schema_version") != PDF_TEXT_PROBE_SCHEMA_VERSION:
         return {}
+    cached_mode = probe.get("requested_text_mode")
+    # Schema 1 probes created before the policy field are legacy ``auto``
+    # probes.  They remain reusable only for the default mode; switching to a
+    # forced policy must always trigger a fresh probe and checkpoint.
+    if cached_mode is None:
+        if requested_mode != "auto":
+            return {}
+    else:
+        try:
+            if normalize_pdf_text_mode(cached_mode) != requested_mode:
+                return {}
+        except ValueError:
+            return {}
     if not isinstance(probe.get("source_sha256"), str):
         return {}
     try:
@@ -170,24 +196,42 @@ def ocr_pages_command(args):
     from pdf2epub.pdf_text_probe import (
         extract_native_text_pages,
         probe_pdf_text_layer,
+        resolve_pdf_text_mode,
     )
     from pdf2epub.workflow_contracts import atomic_write_text
 
-    probe = _load_current_probe(output_dir, pdf_path)
+    try:
+        text_mode = resolve_pdf_text_mode(config)
+    except ValueError as exc:
+        logger.error(f"Invalid PDF text mode: {exc}")
+        return 1
+
+    probe = _load_current_probe(output_dir, pdf_path, text_mode=text_mode)
     if probe:
         logger.info("Reusing current PDF text probe; source PDF hash is unchanged")
     else:
         try:
             probe = probe_pdf_text_layer(
                 pdf_path,
+                text_mode=text_mode,
                 progress_callback=lambda current, total: logger.info(
                     f"PDF text probe: page {current}/{total}"
                 ),
             )
             atomic_write_json(output_dir / "pdf_text_probe.json", probe)
         except Exception as exc:
+            if text_mode == "native":
+                logger.error(f"Native PDF text probe failed; refusing visual OCR fallback: {exc}")
+                return 1
             logger.warning(f"PDF text probe failed; continuing with visual OCR: {exc}")
             probe = {"recommendation": "ocr_required", "classification": "probe_failed"}
+
+    if probe.get("recommendation") == "native_required":
+        logger.error(
+            "pdf_text.mode=native requires a high-confidence native PDF text layer; "
+            "the input was classified as non-native"
+        )
+        return 1
 
     if probe.get("recommendation") == "use_text_layer":
         output_dir.mkdir(parents=True, exist_ok=True)

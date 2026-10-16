@@ -12,7 +12,7 @@ import json
 import re
 from pathlib import Path
 from statistics import median
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, Mapping
 
 import pymupdf
 
@@ -28,6 +28,31 @@ _MULTI_COLUMN_MIN_SIDE_RATIO = 0.20
 _MULTI_COLUMN_MIN_Y_OVERLAP_RATIO = 0.45
 _MULTI_COLUMN_MAX_MEDIAN_WIDTH_RATIO = 0.55
 PDF_TEXT_PROBE_SCHEMA_VERSION = 1
+PDF_TEXT_MODES = frozenset({"auto", "native", "ocr"})
+
+
+def normalize_pdf_text_mode(value: Any) -> str:
+    """Normalize and validate the PDF text-source policy name."""
+    mode = str(value or "auto").strip().lower()
+    if mode not in PDF_TEXT_MODES:
+        allowed = ", ".join(sorted(PDF_TEXT_MODES))
+        raise ValueError(f"pdf_text.mode must be one of: {allowed}")
+    return mode
+
+
+def resolve_pdf_text_mode(config: Mapping[str, Any] | None) -> str:
+    """Return the configured PDF text-source policy.
+
+    ``auto`` preserves the conservative probe decision. ``ocr`` forces the
+    visual page-OCR path even when a PDF has an extractable text layer;
+    ``native`` is an explicit opt-in and fails closed for non-native PDFs.
+    """
+    raw = config.get("pdf_text") if isinstance(config, Mapping) else None
+    if raw is None:
+        return "auto"
+    if not isinstance(raw, Mapping):
+        raise ValueError("pdf_text must be a mapping with mode: auto, native, or ocr")
+    return normalize_pdf_text_mode(raw.get("mode"))
 
 
 def _image_coverage(page: Any) -> float:
@@ -150,6 +175,7 @@ def _detect_multi_column_layout(page: Any) -> Dict[str, Any] | None:
 def probe_pdf_text_layer(
     pdf_path: Path,
     *,
+    text_mode: str = "auto",
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> Dict[str, Any]:
     """Classify a PDF conservatively as native text or OCR-required.
@@ -158,6 +184,7 @@ def probe_pdf_text_layer(
     time, while false positives can silently replace a trustworthy visual OCR
     result with a bad hidden OCR layer.
     """
+    text_mode = normalize_pdf_text_mode(text_mode)
     pdf_path = Path(pdf_path).resolve()
     if not pdf_path.is_file():
         raise FileNotFoundError(pdf_path)
@@ -223,13 +250,27 @@ def probe_pdf_text_layer(
     )
     if native_text_candidate:
         classification = "native_text"
-        recommendation = "use_text_layer"
+        detected_recommendation = "use_text_layer"
     elif text_page_ratio >= 0.50:
         classification = "searchable_ocr_or_mixed"
-        recommendation = "ocr_required"
+        detected_recommendation = "ocr_required"
     else:
         classification = "scanned_or_low_text"
+        detected_recommendation = "ocr_required"
+
+    if text_mode == "ocr":
         recommendation = "ocr_required"
+        selection = "forced_ocr"
+    elif text_mode == "native":
+        recommendation = (
+            "use_text_layer"
+            if detected_recommendation == "use_text_layer"
+            else "native_required"
+        )
+        selection = "forced_native"
+    else:
+        recommendation = detected_recommendation
+        selection = "auto_detected"
 
     return {
         "schema_version": PDF_TEXT_PROBE_SCHEMA_VERSION,
@@ -251,6 +292,9 @@ def probe_pdf_text_layer(
         "layout_mode": "multi_column" if multi_column_pages else "single_column",
         "reading_order": "column_major" if multi_column_pages else "geometric",
         "classification": classification,
+        "detected_recommendation": detected_recommendation,
+        "requested_text_mode": text_mode,
+        "selection": selection,
         "recommendation": recommendation,
     }
 

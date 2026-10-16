@@ -386,8 +386,9 @@ heading contract 始终优先；标题绑定只容忍安全的展示格式差异
 
 ### 3.1.1 OCR 证据模式和结构闸门
 
-`ocr.secondary.enabled` 是视觉 OCR 结构判断的单一开关，不应在脚注或插图模块中再添加平行
-开关。`refine/pdf_evidence.py` 是脚注和插图共同使用的证据选择边界；原生文字 PDF 先由
+`pdf_text.mode` 决定 PDF 页面源；`ocr.secondary.enabled` 是视觉 OCR 结构判断的单一开关，
+不应在脚注或插图模块中再添加平行开关。`refine/pdf_evidence.py` 是脚注和插图共同使用的
+证据选择边界；原生文字 PDF 先由
 `pdf_text_probe` 分类，使用独立的 native layout 证据；它不属于
 双 OCR，也不因配置残留而运行第二套 OCR：
 
@@ -470,11 +471,16 @@ pages/page_001.ocr.json    # OCR 或 native-text layout sidecar
 
 #### 3.1.2.1 原生文字 PDF sidecar 合同
 
-高置信度原生 PDF 由 `pdf_text_probe` 选择直接文本提取。探测器同时检查文本行的横向
+在 `pdf_text.mode: auto` 下，高置信度原生 PDF 由 `pdf_text_probe` 选择直接文本提取；
+`pdf_text.mode: ocr` 会覆盖该选择并强制使用视觉 OCR，`pdf_text.mode: native` 则在探测
+不到高置信度原生文字时失败。探测器同时检查文本行的横向
 分布；如果发现两个具有明显 gutter、足够行数和纵向重叠的稳定栏，原生提取器会依据文本
 span 的起始 x 坐标拆分左右栏，再按“左栏自上而下、右栏自上而下”输出，而不是把整本 PDF
-退回视觉 OCR。报告仍为 `classification: native_text` 与 `recommendation: use_text_layer`，
-并记录 `layout_mode: multi_column`、`reading_order: column_major`。
+退回视觉 OCR。自动原生选择时报告为 `classification: native_text` 与
+`recommendation: use_text_layer`；强制 OCR 时则保留 `detected_recommendation: use_text_layer`
+并将 `recommendation` 写为 `ocr_required`。报告同时记录 `layout_mode: multi_column`、
+`reading_order: column_major`，以及
+`requested_text_mode`、`detected_recommendation` 和 `selection`，用于恢复时拒绝复用不匹配的缓存。
 
 单栏和多栏原生 PDF 的 `extract_native_text_pages()` 都生成与 OCR 页相同的 `pages/page_NNN.md`，但同时生成带源坐标的
 `pages/page_NNN.ocr.json`。该 sidecar 是脚注和整页插图的版面证据，不是另一套 OCR 结果，

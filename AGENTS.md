@@ -67,6 +67,17 @@ ocr:
     enabled: false
 ```
 
+PDF 文字来源可以显式配置：
+
+```yaml
+pdf_text:
+  mode: auto  # auto / native / ocr
+```
+
+`auto` 按保守探测结果选择原生文本或视觉 OCR；`ocr` 强制所有 PDF 使用视觉 OCR，适合怀疑
+隐藏 OCR 层、换行或脚注版面不可靠的原生 PDF；`native` 要求高置信度原生文字，探测不通过时
+直接失败，不静默降级。该模式写入 `pdf_text_probe.json`，切换模式后旧探测缓存不得复用。
+
 需要双 OCR 时配置一个不同于主 OCR 的已注册后端，并将 `ocr.secondary.enabled` 改为 `true`。
 次 OCR 的文本和 sidecar 只作为复核证据，不覆盖主 OCR。关闭第二套 OCR 后，旧的双 OCR 共识
 不得复用。
@@ -251,7 +262,8 @@ PDF 的单 OCR/双 OCR；它不能把原生文字 PDF 变成双 OCR：
 稳定双栏或多栏的高置信度原生文字 PDF 仍走 `native_text`，由本地提取器按 PDF 文本 span
 的横向坐标拆分并以栏为单位输出阅读顺序；`pdf_text_probe.json` 会记录
 `layout_mode: multi_column` 和 `reading_order: column_major`。多栏本身不是强制 OCR 的理由，
-但图片型、隐藏 OCR 层和混合稿仍按上述保守判定进入视觉 OCR。
+但图片型、隐藏 OCR 层和混合稿仍按上述保守判定进入视觉 OCR。设置 `pdf_text.mode: ocr`
+后，无论探测是否为 `native_text` 都改走视觉 OCR；设置 `native` 后，非原生输入会阻断。
 
 - `pdf_text_probe.json` 的 `classification` 为 `native_text`；
 - `pages/ocr_progress.json` 的 `mode` 和 `backend` 为 `native_text`；

@@ -238,6 +238,17 @@ html-validate --file <同名文件>.md
 `ocr.secondary.backend`。配置关闭第二套 OCR 时，流程直接跳过 `ocr-correct` 和
 `ocr-correct-validate`，CLI help 也会明确这一前置条件。
 
+PDF 的文字来源由独立的 `pdf_text.mode` 控制：
+
+```yaml
+pdf_text:
+  mode: auto  # auto / native / ocr
+```
+
+`auto` 按 `pdf_text_probe` 的保守结果选择页面源；`ocr` 即使面对高置信度原生文字 PDF 也强制
+调用配置的视觉 OCR 后端；`native` 要求探测结果为高置信度原生文字，否则 `ocr-pages` 失败并
+禁止静默降级。该模式会写入 `pdf_text_probe.json`，模式切换时旧探测缓存失效。
+
 `translation_report.json` 会保留导航更新结果和打包阻断状态。导航格式缺失和导航更新异常
 必须区分处理：前者在仅有 EPUB 2 或 EPUB 3 导航时属于正常记录，后者必须先人工检查再决定
 是否使用 `--allow-navigation-warnings`。放行 warning 不会替代 `html-validate` 或
@@ -249,7 +260,7 @@ html-validate --file <同名文件>.md
 
 ### PDF 源类型分支
 
-`ocr-pages` 先写 `pdf_text_probe.json`，再按保守分类选择页面源：
+`ocr-pages` 先写 `pdf_text_probe.json`，再按请求的 `pdf_text.mode` 和保守分类选择页面源：
 
 ```text
 ocr-pages
@@ -258,10 +269,11 @@ ocr-pages
   → visual OCR: pages/*.md + OCR layout sidecars
 ```
 
-高置信度原生 PDF 都走原生分支，包括稳定双栏或多栏版面。多栏页由提取器根据 PDF 文本
-span 的横向坐标拆分，并以栏为单位生成 `column_major` 阅读顺序；报告保留
-`classification: native_text`、`recommendation: use_text_layer`，并记录
-`layout_mode: multi_column`。可搜索但实际内容来自整页图像的 PDF、隐藏 OCR 层和混合稿仍必须
+`pdf_text.mode: auto` 时，高置信度原生 PDF 都走原生分支，包括稳定双栏或多栏版面；
+`pdf_text.mode: ocr` 时，即使分类为 `native_text` 也走视觉 OCR。多栏页由提取器根据 PDF 文本
+span 的横向坐标拆分，并以栏为单位生成 `column_major` 阅读顺序；自动原生选择时报告保留
+`classification: native_text`、`recommendation: use_text_layer`，强制 OCR 时则保留
+`detected_recommendation: use_text_layer` 并将 `recommendation` 写为 `ocr_required`。可搜索但实际内容来自整页图像的 PDF、隐藏 OCR 层和混合稿仍必须
 走视觉 OCR；不能仅凭复制文字或目录中已有 Markdown 判断。
 
 原生分支的 sidecar 是版面证据，不是 OCR 结果。单栏和多栏原生 PDF 都生成这类 sidecar；每页 sidecar 应包含

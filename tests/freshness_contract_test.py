@@ -183,6 +183,13 @@ def test_unknown_ocr_backend_is_rejected_before_workflow_start():
         validate_ocr_config({"ocr": {"backend": "mistral"}})
 
 
+def test_pdf_text_mode_is_validated_with_ocr_configuration():
+    validate_ocr_config({"pdf_text": {"mode": "native"}})
+    validate_ocr_config({"pdf_text": {"mode": "ocr"}})
+    with pytest.raises(ValueError, match="pdf_text.mode"):
+        validate_ocr_config({"pdf_text": {"mode": "fallback"}})
+
+
 def test_unknown_secondary_backend_is_rejected_before_workflow_start():
     with pytest.raises(ValueError, match="ocr.secondary.backend"):
         validate_ocr_config(

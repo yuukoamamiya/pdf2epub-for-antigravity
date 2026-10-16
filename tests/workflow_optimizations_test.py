@@ -3,12 +3,17 @@ import json
 from pathlib import Path
 
 import pymupdf
+import pytest
 
 from pdf2epub.markdown_handoff import prepare_markdown_subagent
 from pdf2epub.commands.markdown_context import _load_pdf_continuation_toc_titles
 from pdf2epub.commands.ocr import _load_current_probe
 from pdf2epub.pipeline_policy import PipelinePolicy, SUPPORTED_PIPELINE_NAMES
-from pdf2epub.pdf_text_probe import extract_native_text_pages, probe_pdf_text_layer
+from pdf2epub.pdf_text_probe import (
+    extract_native_text_pages,
+    probe_pdf_text_layer,
+    resolve_pdf_text_mode,
+)
 from pdf2epub.subagent_runtime import (
     MAX_BATCH_FILES,
     _chapter_worker_groups,
@@ -104,6 +109,38 @@ def test_pdf_probe_reports_page_progress_without_changing_classification(tmp_pat
     assert progress[-1] == (4, 4)
 
 
+def test_pdf_probe_can_force_visual_ocr_for_native_text(tmp_path: Path):
+    source = tmp_path / "native.pdf"
+    _make_native_pdf(source)
+
+    report = probe_pdf_text_layer(source, text_mode="ocr")
+
+    assert report["classification"] == "native_text"
+    assert report["detected_recommendation"] == "use_text_layer"
+    assert report["requested_text_mode"] == "ocr"
+    assert report["selection"] == "forced_ocr"
+    assert report["recommendation"] == "ocr_required"
+
+
+def test_pdf_probe_native_mode_fails_closed_for_non_native_pdf(tmp_path: Path):
+    source = tmp_path / "searchable-ocr.pdf"
+    _make_native_pdf(source, full_page_image=True)
+
+    report = probe_pdf_text_layer(source, text_mode="native")
+
+    assert report["classification"] == "searchable_ocr_or_mixed"
+    assert report["detected_recommendation"] == "ocr_required"
+    assert report["selection"] == "forced_native"
+    assert report["recommendation"] == "native_required"
+
+
+def test_pdf_text_mode_defaults_and_validates():
+    assert resolve_pdf_text_mode({}) == "auto"
+    assert resolve_pdf_text_mode({"pdf_text": {"mode": "OCR"}}) == "ocr"
+    with pytest.raises(ValueError, match="pdf_text.mode"):
+        resolve_pdf_text_mode({"pdf_text": {"mode": "guess"}})
+
+
 def test_pdf_probe_cache_requires_matching_source_hash(tmp_path: Path):
     source = tmp_path / "source.pdf"
     source.write_bytes(b"source")
@@ -123,8 +160,23 @@ def test_pdf_probe_cache_requires_matching_source_hash(tmp_path: Path):
     )
 
     assert _load_current_probe(output_dir, source)["recommendation"] == "ocr_required"
+    (output_dir / "pdf_text_probe.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+                "page_count": 1,
+                "classification": "native_text",
+                "recommendation": "ocr_required",
+                "requested_text_mode": "ocr",
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert _load_current_probe(output_dir, source, text_mode="auto") == {}
+    assert _load_current_probe(output_dir, source, text_mode="ocr")["recommendation"] == "ocr_required"
     source.write_bytes(b"changed")
-    assert _load_current_probe(output_dir, source) == {}
+    assert _load_current_probe(output_dir, source, text_mode="ocr") == {}
 
 
 def test_pdf_probe_keeps_two_column_native_text_on_native_path(tmp_path: Path):
