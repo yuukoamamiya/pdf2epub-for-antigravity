@@ -14,9 +14,9 @@
 
 - 默认 PDF 主 OCR 是 Chandra；可选第二套 OCR 使用配置的其他已注册后端。
 - `ocr.secondary.enabled` 是单 OCR/双 OCR 的唯一开关，同时约束 OCR 纠错、脚注候选和整页插图候选。
-- 原生文本提取是 legacy opt-in：只有显式 `pdf_text.mode: native` 且探测到高置信度矢量
-  文字时才使用 `native_text` 页面源和 PDF page-point layout sidecar；它跳过视觉 OCR/共识，
-  但仍必须经过 `refine-local`、脚注门禁和 polish。`auto` 和 `ocr` 都走视觉 OCR。
+- 原生文本输入路径已删除：所有新 PDF 运行都使用视觉 OCR，不存在 `pdf_text.mode` 或
+  其他页面来源开关。旧版本留下的 `source_kind: native_text` page-point layout sidecar
+  只作为旧产物兼容读取，不再由新运行产生。
 - Chandra 写入完整的 layout sidecar；次 OCR 只写入独立的逐页文本和 layout sidecar，不静默
   覆盖主 OCR。
 - EPUB 公式使用 Unicode 优先、MathML 回退方案；当前没有 SVG 公式渲染器，也不要求
@@ -246,19 +246,11 @@ html-validate --file <同名文件>.md
 `ocr.secondary.backend`。配置关闭第二套 OCR 时，流程直接跳过 `ocr-correct` 和
 `ocr-correct-validate`，CLI help 也会明确这一前置条件。
 
-PDF 的文字来源由独立的 `pdf_text.mode` 控制：
-
-```yaml
-pdf_text:
-  mode: auto  # auto / native / ocr
-```
-
-`auto` 是默认值，**始终使用视觉 OCR**；`pdf_text_probe` 的保守结果只作为
-`classification`/`detected_recommendation` 写入报告供审计。`ocr` 同样强制调用配置的视觉 OCR
-后端。原生文本路径是 legacy opt-in：`native` 要求探测结果为高置信度原生文字，否则
-`ocr-pages` 失败并禁止静默降级；旧的原生运行如需复用已有产物必须显式设置 `mode: native`。
-该模式会写入 `pdf_text_probe.json`；probe schema 为 2，schema 1 的旧 probe（包括旧 `auto`
-原生选择）不会被复用。
+PDF 不再有页面来源配置；所有新运行都使用视觉 OCR。`pdf_text_probe` 只把
+`classification`/`detected_recommendation` 写入报告供审计，`recommendation` 始终是
+`ocr_required`。probe schema 为 3，旧 schema 不会被复用。配置中残留 `pdf_text` 字段时，
+配置加载和 `doctor` 会明确报错。旧版本生成的 `source_kind: native_text` sidecar 和
+`use_text_layer` probe 只用于读取/恢复旧输出，新运行不再产生它们。
 
 `translation_report.json` 会保留导航更新结果和打包阻断状态。导航格式缺失和导航更新异常
 必须区分处理：前者在仅有 EPUB 2 或 EPUB 3 导航时属于正常记录，后者必须先人工检查再决定
@@ -271,32 +263,25 @@ pdf_text:
 
 ### PDF 源类型分支
 
-`ocr-pages` 先写 `pdf_text_probe.json`，再按请求的 `pdf_text.mode` 选择页面源：
+`ocr-pages` 先写 `pdf_text_probe.json`，然后始终进入视觉 OCR：
 
 ```text
 ocr-pages
-  → pdf_text_probe.json
-  → legacy native_text (mode=native): pages/*.md + pages/*.ocr.json + pages/ocr_progress.json(mode=native_text)
-  → auto/ocr visual OCR: pages/*.md + OCR layout sidecars
+  → pdf_text_probe.json（只做分类审计；recommendation 始终为 ocr_required）
+  → pages/*.md + OCR layout sidecars
 ```
 
-`pdf_text.mode: auto` 和 `ocr` 都走视觉 OCR，即使分类为 `native_text` 也一样；探测结果保留为
-`detected_recommendation: use_text_layer`，但 `recommendation` 写为 `ocr_required`。只有显式
-`pdf_text.mode: native` 才可能选择原生分支（`recommendation: use_text_layer`、
-`selection: forced_native_legacy`），并在探测不到高置信度原生文字时失败。多栏页由提取器根据
-PDF 文本 span 的横向坐标拆分，并以栏为单位生成 `column_major` 阅读顺序；该行为只在显式
-native 下生效。只有原生文本层实际被选中时 `native_legacy` 才为 `true`。可搜索但实际
-内容来自整页图像的 PDF、隐藏 OCR 层和混合稿仍必须走视觉 OCR；不能仅凭复制文字或目录中
-已有 Markdown 判断。
+即使 PDF 分类为 `native_text`，`detected_recommendation` 也只是审计信息；新运行不使用
+原生文本输入。可搜索但实际内容来自整页图像的 PDF、隐藏 OCR 层和混合稿同样走视觉 OCR；
+不能仅凭复制文字或目录中已有 Markdown 判断。
 
-原生分支的 sidecar 是版面证据，不是 OCR 结果。单栏和多栏原生 PDF 都生成这类 sidecar；每页 sidecar 应包含
-`backend: native_text`、`source_kind: native_text`、`coordinate_system: page_points`、
-`page_box`、`layout_mode`、`reading_order`、`body_font_size` 和有序 `blocks[]`。block 至少保留 `bbox`、`text`、
-`font_size`、`font_names` 和 `source_block`。这里的坐标是 PDF page points，不能使用视觉
-OCR 的 `0..1000` 坐标解释。
+旧版本的原生运行会留下 `backend: native_text`、`source_kind: native_text`、
+`coordinate_system: page_points` 的 sidecar，其中包含 `page_box`、`layout_mode`、
+`reading_order`、`body_font_size` 和有序 `blocks[]`。这些文件只用于旧输出恢复；新运行绝不
+生成它们。这里的坐标是 PDF page points，不能使用视觉 OCR 的 `0..1000` 坐标解释。
 
-原生分支不运行视觉 OCR、`ocr-correct`、`ocr-correct-validate` 或
-`ocr_consensus.json`。即使 `ocr.secondary.enabled: true` 残留在配置中，原生脚注仍走
+旧原生运行不运行视觉 OCR、`ocr-correct`、`ocr-correct-validate` 或
+`ocr_consensus.json`。即使 `ocr.secondary.enabled: true` 残留在配置中，旧原生脚注仍走
 native layout；候选报告中的 `ocr_evidence_mode: single_ocr` 只是下游兼容字段，不代表
 调用了 OCR 或可以读取旧的双 OCR 检查点。
 
@@ -318,7 +303,7 @@ ocr-pages
 
 ```text
 uv run pdf2epub -c config.yaml refine-prepare
-# 原生 PDF 若生成 toc_fast_path_prompt.md：工作区 Subagent 先做选定页面视觉确认
+# 旧原生 PDF 若生成 toc_fast_path_prompt.md：工作区 Subagent 先做选定页面视觉确认
 # 否则/回退时：工作区 Subagent 阅读 refine_subagent_prompt.md 并写 toc_tree.json
 uv run pdf2epub -c config.yaml illustration-prepare
 # 如果 manifest 为 pending_review：工作区 Subagent 写 illustration_decisions.json
@@ -335,16 +320,16 @@ uv run pdf2epub -c config.yaml footnote-apply
 `footnote-prepare` 必须后于 `refine-local`，因为脚注归并范围取自实际生成的
 `tree_progress.json` 单元，而不是抽象的顶层 TOC。
 
-### 原生 PDF 的 TOC 选择性视觉确认
+### 旧原生 PDF 的 TOC 选择性视觉确认
 
-高置信度原生文字 PDF 且存在可用 PDF 书签时，`refine-prepare` 会先运行一个保守的快速路径预检。
+旧原生文字运行且存在可用 PDF 书签时，`refine-prepare` 会先运行一个保守的快速路径预检。
 本地只做证据筛选，不生成最终 `toc_tree.json`。预检没有书签页匹配异常时进入
 `selective_review`，选择印刷目录页、每个书签起始页、起始页前一页以及封面/版权页；只有少量
 匹配异常时进入 `targeted_review`，只选择印刷目录页、异常书签起始页及其前页和元数据页。异常
 超过阈值、审阅页过多或缺少目录证据时才直接要求完整审查。选定页面及其哈希写入
 `toc_fast_path_manifest.json`，视觉任务写入 `toc_fast_path_prompt.md`。
 
-原生 PDF 还会生成 `toc_line_evidence.json`，其中只保存书签起始页的 block、bbox、字体、页首/页中
+旧原生 PDF 还会生成 `toc_line_evidence.json`，其中只保存书签起始页的 block、bbox、字体、页首/页中
 提示和原始 Markdown 行范围。它是给视觉任务定位证据的只读索引，不是本地结构判断，也不能替代
 页面图。快速路径校验会同时检查该索引和它引用的原生 sidecar 是否过期。
 
@@ -363,8 +348,8 @@ uv run pdf2epub -c config.yaml refine-prepare --full-review
 ```
 
 `refine-local` 会重新核对快速路径的书签哈希、PDF 哈希、审阅页哈希、原生证据哈希、树结构和边界行号；
-任何过期、缺失或不一致都会阻断并要求完整审查。没有书签、没有可识别印刷目录页、不是原生
-文字 PDF 或预检标题不匹配时，快速路径自动失效，仍使用原有全页 TOC Subagent 流程。
+任何过期、缺失或不一致都会阻断并要求完整审查。没有书签、没有可识别印刷目录页、不是旧
+旧原生文字运行或预检标题不匹配时，快速路径自动失效，仍使用原有全页 TOC Subagent 流程。
 
 OCR 完成不是“有几个 `page_*.md` 文件”就算通过。`ocr_progress.json` 会记录源 PDF
 哈希、真实物理页数、已处理页、失败页、缺失页和空结果页；失败、缺页或未确认的空结果
@@ -406,7 +391,7 @@ manifest 状态为 `auto_resolved`，本地会生成带候选报告哈希的
 `ocr-correct-validate`，它会检查 UTF-8、输出完整性、逐页审阅记录、行数不减少、Markdown
 结构标记和原始页哈希，并将通过的结果暂存到 `ocr_corrected_pages/validated/`。原始 `pages/`
 永不覆盖；纠错结果缺失、过期或未通过校验时，`refine-prepare` 和 `refine-local` 会阻断。
-第二套 OCR 关闭时直接使用主 OCR 的 `pages/`，不生成“已纠错”检查点；高置信度原生文字 PDF
+第二套 OCR 关闭时直接使用主 OCR 的 `pages/`，不生成“已纠错”检查点；旧原生文字运行
 同样不适用该阶段。
 
 可选的双 OCR 配置可以在 `ocr-pages` 阶段启用一个不同于主 OCR 的已注册后端；同一个开关
@@ -495,7 +480,7 @@ input_pdf: "input/your_book.pdf"
 pipeline: epub_conversion
 ```
 
-`refine-prepare` 会在 `output/<title>/` 生成 `refine_subagent_prompt.md` 和 `refine_subagent_manifest.json`。视觉 OCR PDF 中，Subagent 阅读经过校验的 `ocr_corrected_pages/validated/page_*.md`；原生文字 PDF 仍读取 `pages/page_*.md`。它只负责写入 `toc_tree.json`。随后 `refine-local`：
+`refine-prepare` 会在 `output/<title>/` 生成 `refine_subagent_prompt.md` 和 `refine_subagent_manifest.json`。视觉 OCR PDF 中，Subagent 阅读经过校验的 `ocr_corrected_pages/validated/page_*.md`；旧原生文字运行仍读取 `pages/page_*.md`。它只负责写入 `toc_tree.json`。随后 `refine-local`：
 
 - 校验页码范围、层级、父子包含关系和兄弟节点重叠；
 - 用本地 tokenizer 估算单元大小；
@@ -549,7 +534,7 @@ pipeline: epub_conversion
 结果。
 
 对于所有 PDF，在 `refine-local` 后、`polish` 前运行 `footnote-prepare`。扫描 PDF 使用
-OCR layout sidecar；高置信度原生文字 PDF 在 `ocr-pages` 阶段生成带 PDF 坐标、文本块和字体
+OCR layout sidecar；旧原生文字运行在旧版本的 `ocr-pages` 阶段生成带 PDF 坐标、文本块和字体
 元数据的 native layout sidecar。两种来源在本地使用不同的候选筛选器，但都按页面内实际顺序
 生成稀疏的 `footnote_contexts/`，并共享 Subagent 决策、校验和 `footnote-apply`。视觉 OCR 只
 使用弱几何证据：block 的 `bbox[3]` 进入候选底部区域（默认召回下限
@@ -578,7 +563,7 @@ OCR layout sidecar；高置信度原生文字 PDF 在 `ocr-pages` 阶段生成�
 单个脚注可能跨页，多个脚注时也只有物理上最后一个脚注有自然
 续接位置。视觉审核任务要求
 先打开整页 PNG 判断整体边界，再用区域裁剪图放大文字细节，不能只看裁剪图。
-原生文字的
+旧原生文字的
 页底编号候选不会仅因底部位置自动判为脚注；默认只有同页对应上标引用、小字号双重匹配且区域
 与页面相对内容尾部对齐的候选本地接受，其余候选交 Subagent 复核。扫描/OCR PDF 中只有明确标签、
 数字开头、页面相对尾部证据和区域没有异常且启用 `auto_accept` 时才会本地接受；明确的无编号续文、连续区间中的
@@ -587,13 +572,13 @@ Subagent；双 OCR 模式下，主/次候选存在性或 layout 证据不同的�
 一起交给 Subagent；正文共识的行粒度差异不会单独禁用脚注本地规则。次 OCR 独有的连续物理
 行会聚合成一个 `secondary_only_candidates` 窗口。Subagent 写
 `footnote_decisions.json` 中的 `region_audits` 和每个 review block 的决定，随后用
-`footnote-validate` 校验；兼容恢复仍接受 flat `decisions`。原生文字 PDF 不运行视觉 OCR
+`footnote-validate` 校验；兼容恢复仍接受 flat `decisions`。旧原生文字运行不运行视觉 OCR
 共识，即使配置残留次 OCR 开关，也只使用原生版面证据。
 
 脚注和整页插图的证据选择由同一套本地边界负责：`refine/pdf_evidence.py` 统一判断
 `native_text`、`single_ocr` 和 `two_ocr`，`refine/layout_evidence.py` 统一读取 sidecar、
 清理 block 文本并归一化坐标。两个阶段可以拥有不同的候选器和 Subagent 角色，但不得各自
-实现一套 OCR 模式判断或 bbox 归一化；这样原生 PDF 不会在某个阶段意外读入旧的双 OCR 报告。
+实现一套 OCR 模式判断或 bbox 归一化；这样旧原生运行不会在某个阶段意外读入旧的双 OCR 报告。
 脚注配置的默认值、校验和 CLI 覆盖统一由 `resolve_footnote_options()` 处理；`auto` 模式
 再由 `resolve_effective_footnote_mode()` 从当前 TOC 的 `footnote_mode` 解析 effective
 mode，命令 handler 不再复制这些默认值或自行读取 TOC。
@@ -643,9 +628,9 @@ mode，命令 handler 不再复制这些默认值或自行读取 TOC。
 `marker_context`。`footnote-validate` 会检查字段形式，`footnote-apply` 还会检查 sidecar、
 refinement unit 和正文定位；任何一层失败都必须修正决定后重跑，不得手工改写归一化文件。
 
-### 原生文字 PDF 的脚注 handoff
+### 旧原生文字 PDF 的脚注 handoff
 
-原生候选器的职责是缩小复核范围，不是替 Subagent 读懂脚注。默认采用保守的本地接受规则，
+旧原生候选器的职责是缩小复核范围，不是替 Subagent 读懂脚注。默认采用保守的本地接受规则，
 只放过版面证据同时满足的候选；其余候选仍进入 Subagent。它按以下顺序工作：
 
 1. 读取 `pages/page_NNN.ocr.json`，按 `page_box` 将 PDF page points 的 block bbox 归一化到
@@ -660,11 +645,11 @@ refinement unit 和正文定位；任何一层失败都必须修正决定后重�
    内容连续性。正文假设明显胜出，或块内有正文 `<sup>…</sup>` 引用时，普通 `Text` 块只保留为上下文；
    脚注假设胜出或无法区分时仍进入视觉审核。区域首块已有 `Footnote` 标签时，也不会仅因上方相邻正文触发
    边界不确定审核。
-   原生 PDF 没有可靠的 OCR 语义标签，因此只有
+   旧原生 PDF 没有可靠的 OCR 语义标签，因此只有
    同页更早位置存在对应 `<sup>N</sup>` 引用、且字号比例不超过默认 `0.88` 的候选标为
    `confidence: high`；同时还必须通过页面相对内容尾部的区域门禁，其余保留下来的候选标为
    `review_required`。
-3. 原生提取器依据 PDF 文本 block 内的行顺序，在新的页底数字开头处拆分 layout block，
+3. 旧原生提取器依据 PDF 文本 block 内的行顺序，在新的页底数字开头处拆分 layout block，
    因而同一页的多条脚注各自拥有稳定的 `page`/`block` 地址。`body_font_size`、block
    `font_size`、`font_names` 和上标 flag/位置只作为复核证据；只有当前书稿反复显示稳定的
    正文/脚注字号阶梯时，本地才启用 `native_font_profile`，把与主导正文同大或更大的页底数字
@@ -760,14 +745,14 @@ effective mode 为 `endnotes_only` 时只关闭页面脚注候选，不关闭这
 阶段的 freshness manifest，并尽量附 `region_visual_file` 裁剪图；若没有可用源 PDF，则报告明确
 标记视觉证据不可用。新版决定可用 `region_audits` 表示区域结论，旧版 flat `decisions` 仍可恢复。
 
-原生脚注的典型失败包括 `No page layout sidecars found`、`source_kind` 或
+旧原生脚注的典型失败包括 `No page layout sidecars found`、`source_kind` 或
 `coordinate_system` 不一致、sidecar hash 过期、决定引用不存在/重复的 page/block，及脚注
-块在章稿中无法唯一命中。它们都应回到源阶段恢复，而不是手工改决定 JSON。旧运行没有
-sidecar 时，恢复顺序为：
+块在章稿中无法唯一命中。它们都应回到源阶段恢复，而不是手工改决定 JSON。新版本不再生成
+native sidecar；旧运行若缺少 sidecar，只能使用旧版本恢复，或把该页集视为没有原生版面
+证据。恢复顺序为：
 
 ```text
-ocr-pages --resume
-→ refine-local --resume
+refine-local --resume
 → footnote-prepare
 → [Subagent 写 footnote_decisions.json]
 → footnote-validate
@@ -837,8 +822,8 @@ extract-entities-validate → check-ready → translate → translate-validate
 `polish` 在启用第二套 OCR 时只处理前置 OCR 纠错之后的换行、段落边界和块级结构；已通过
 `ocr-correct-validate` 的字符、词语和符号视为权威，不再进行 OCR 字符、拼写或措辞改写。
 若仍疑似有 OCR 错误，应退回 `ocr-correct`。关闭第二套 OCR 时跳过 `ocr-correct`，主 OCR
-结果直接进入 polish；polish 仍只处理结构，不应静默改写 OCR 字符。对高置信度原生矢量文本 PDF，polish 用于识别视觉换行与真实
-段落边界；原生文字稿也不得进行无依据的拼写或字形改写。`polish-validate` 还会对源稿和
+结果直接进入 polish；polish 仍只处理结构，不应静默改写 OCR 字符。对旧原生矢量文本运行，polish 用于识别视觉换行与真实
+段落边界；旧原生文字稿也不得进行无依据的拼写或字形改写。`polish-validate` 还会对源稿和
 润色稿做忽略换行、Markdown 外层标记及已确认页边装饰的内容保真比较；正文 token 或数字
 标记大量丢失，或结构性空父标题下的子章节正文被重复复制时会阻断，而不是把不完整或
 重复的润色稿交给后续翻译。普通正文段落内部不得为了视觉排版新增换行；EPUB 渲染默认把

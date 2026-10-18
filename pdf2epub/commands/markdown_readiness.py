@@ -101,6 +101,8 @@ def run_readiness_check(
             probe = value
     except (OSError, UnicodeError, json.JSONDecodeError):
         pass
+    # Legacy artifact compatibility: old native-text runs do not need the
+    # visual OCR correction checkpoint.
     native_text = (
         probe.get("classification") == "native_text"
         and probe.get("recommendation") == "use_text_layer"

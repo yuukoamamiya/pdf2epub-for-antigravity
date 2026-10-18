@@ -473,6 +473,8 @@ def select_refinement_pages(
             probe = value
     except (OSError, UnicodeError, json.JSONDecodeError):
         pass
+    # Legacy artifact compatibility: old native-text runs kept their page
+    # layout in ``pages/`` and never produced a visual correction checkpoint.
     if (
         probe.get("classification") == "native_text"
         and probe.get("recommendation") == "use_text_layer"

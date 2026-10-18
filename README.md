@@ -1,8 +1,9 @@
 # pdf2epub
 
-一个面向 Antigravity 的图书整理与翻译工作流。它把扫描 PDF、原生文字 PDF、EPUB、MOBI
-和 AZW3 处理成结构可靠、可校验、可继续执行的 EPUB；需要翻译或判断版面结构的部分由
-Antigravity 工作区 Subagent 完成，本地程序负责文件整理、校验和打包。
+一个面向 Antigravity 的图书整理与翻译工作流。它把扫描或可搜索 PDF、EPUB、MOBI 和
+AZW3 处理成结构可靠、可校验、可继续执行的 EPUB；需要翻译或判断版面结构的部分由
+Antigravity 工作区 Subagent 完成，本地程序负责文件整理、校验和打包。所有 PDF 新运行
+一律使用视觉 OCR。
 
 这是一个“文件交接 + 本地门禁”的工具，不是聊天窗口里的即时翻译器：Subagent 直接写入
 工作区文件，Python 只负责确定性处理和验证。完整操作规程见 [AGENTS.md](AGENTS.md)。
@@ -39,28 +40,16 @@ Antigravity 工作区 Subagent 完成，本地程序负责文件整理、校验�
 | `ocr.secondary.enabled: false` | 单 OCR。直接使用主 OCR，忽略旧的双 OCR 共识文件。 |
 | `ocr.secondary.enabled: true` | 使用配置的第二套 OCR 做差异筛查，差异交给 Subagent 复核。 |
 
-PDF 的页面来源还可以单独指定：
-
-```yaml
-pdf_text:
-  mode: auto  # auto / native / ocr
-```
-
-`auto` 是默认值，**始终走视觉 OCR**；探测结果只写入 `pdf_text_probe.json` 的
-`classification`/`detected_recommendation` 供审计。`ocr` 同样强制所有 PDF 走视觉 OCR。
-原生文本提取已降级为 legacy：只有显式设置 `native` 才会使用原生文本层，且要求高置信度
-原生文字 PDF，不满足条件时直接阻断，不会静默改走 OCR。旧的原生运行若想复用已有
-`pages/page_*.ocr.json`，必须显式设置 `mode: native`。切换模式或 probe schema 版本后，
-旧的 `pdf_text_probe.json` 不会被复用。
-
-```yaml
-pdf_text:
-  mode: native  # legacy opt-in：仅高置信度原生文字 PDF
-```
+所有 PDF 新运行都使用视觉 OCR，不存在页面来源模式开关。`pdf_text` 配置已删除；配置中
+残留该字段时，配置校验和 `doctor` 会明确报错，不会静默忽略。`pdf_text_probe.json` 现在
+只做分类审计：`classification`/`detected_recommendation` 记录 PDF 的文字层特征，
+`recommendation` 始终是 `ocr_required`。旧版本生成的 `source_kind: native_text`
+sidecar 和 `use_text_layer` probe 仅作为旧产物兼容读取，用于恢复旧输出，不再由新运行
+产生。
 
 当前默认主 OCR 是 Chandra。脚注阶段先使用 OCR sidecar 的 `bbox[3]`、页底相交比例、数字开头、
 块间距和连续编号推断页面级脚注区域；`Footnote` 标签不能单独绕过几何条件，纯数字页码会排除。
-原生文字 PDF 若反复显示稳定的正文/脚注字号阶梯，还会把与注脚字号一致、却没有同页上标或脚注标签的
+旧的原生文字运行若反复显示稳定的正文/脚注字号阶梯，还会把与注脚字号一致、却没有同页上标或脚注标签的
 出版年份及明显嵌在正文流中的数字块记为 `suppressed_native_citations`，不派发视觉复核；其他数字候选仍保留
 给 Subagent 判断，避免把字号差异当成脚注语义。
 清晰、连续的区域由本地直接处理，只有边界不清、续文、OCR 证据冲突或疑似漏检才生成区域级视觉
@@ -101,14 +90,14 @@ uv sync --extra ocr-vision
 检查点，旧的脚注决定和插图绑定不会被静默复用。两套 OCR 一致只代表通过筛查，不代表一定
 正确；整页插图、脚注归属和引用/参考文献区分仍由 Subagent 复核。
 
-Chandra 是当前主 OCR。默认的 `pdf_text.mode: auto` 和显式的 `ocr` 都会使用视觉 OCR，
-扫描或混合 PDF 也使用视觉 OCR。视觉 OCR 不会把普通上标、序数或行内数字引用自动判成脚注，
+Chandra 是当前主 OCR，扫描、可搜索和混合 PDF 都使用视觉 OCR。视觉 OCR 不会把普通上标、
+序数或行内数字引用自动判成脚注，
 清晰且证据充分的脚注区域可由本地规则直接处理，边界不清、跨页续文或 OCR 证据冲突的区域
 才交由 Subagent 复核。
 
-只有显式设置 `pdf_text.mode: native` 时才走 legacy 原生文本路径。即使是稳定双栏，原生
-提取器也会利用 PDF 文本 span 的坐标按栏重排，并在页面 sidecar 中记录
-`layout_mode: multi_column`；但该路径不再由 `auto` 自动选择，需要复用时必须显式 opt-in。
+旧的原生文本路径已经删除，不再有配置入口。旧运行留下的 `source_kind: native_text`
+页面 sidecar 仍可被 refine、脚注和插图阶段只读读取，以便恢复旧输出；新运行不会生成这类
+页面，也不会因为目录中存在旧 sidecar 而改变 OCR 路径。
 
 ## 当前输出和公式策略
 
@@ -127,7 +116,7 @@ Chandra 是当前主 OCR。默认的 `pdf_text.mode: auto` 和显式的 `ocr` �
 
 | 输入 | 适合的流程 | 是否翻译 | 主要入口 |
 | --- | --- | --- | --- |
-| 扫描 PDF / 原生文字 PDF | PDF 精修 | 可选 | `ocr-pages` → `refine-*` → `polish` → `build-epub` |
+| 扫描或可搜索 PDF | PDF 精修 | 可选 | `ocr-pages` → `refine-*` → `polish` → `build-epub` |
 | PDF，只想转成 EPUB | `pipeline: epub_conversion` | 否 | `ocr-pages` → `refine-*` → `polish` → `build-epub` |
 | EPUB / MOBI / AZW3 | 高保真 HTML | 是 | `html-prepare` → `html-validate` → `build-html-epub` |
 | 轻小说 EPUB | 小说文本流程 | 是 | `translate-novel` → `translate-novel-validate` → `build-novel-epub` |
@@ -192,7 +181,7 @@ EPUB 流程不使用 PDF OCR，也不经过 PDF 的 polish 阶段。
 
 | 输入 | 主要命令 | 产物 |
 |---|---|---|
-| 扫描/原生 PDF | `ocr-pages`、`refine-*`、`polish`、`translate`、`build-epub` | 翻译 EPUB 或原语言 EPUB |
+| 扫描或可搜索 PDF | `ocr-pages`、`refine-*`、`polish`、`translate`、`build-epub` | 翻译 EPUB 或原语言 EPUB |
 | EPUB/MOBI/AZW3 | `html-prepare`、`html-validate`、`build-html-epub` | 保留结构的 EPUB |
 | 轻小说 EPUB | `translate-novel`、`translate-novel-validate`、`build-novel-epub` | 轻小说 EPUB |
 | arXiv/TeX | `translate-arxiv`、`translate-arxiv-validate` | 通过编译校验的 TeX 产物 |
@@ -249,7 +238,7 @@ bash scripts/build_all_epubs.sh config.yaml
 `translate-toc` 的工作区 Subagent 只写扁平的 `toc_translation_result.json`；本地
 `translate-toc-validate` 会从源 `toc_tree.json` 合并生成 `toc_tree_translated.json`。
 
-高置信度原生文字 PDF 的 `refine-prepare` 会额外检查 PDF 书签和前置目录页；若书签预检只有
+旧的原生文字运行在 `refine-prepare` 时仍可只读使用已有的原生 sidecar，检查 PDF 书签和前置目录页；若书签预检只有
 少量异常，会生成定向审查任务，只包含目录页、异常书签起始页及其前页；没有异常时则生成高置信度
 选择性审查任务，包含目录页、书签起始页及其前页。两种任务都会生成
 `toc_fast_path_prompt.md`、`toc_fast_path_manifest.json`、审阅图和只读的

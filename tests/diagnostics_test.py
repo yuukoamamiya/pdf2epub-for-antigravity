@@ -74,6 +74,22 @@ def test_conversion_status_skips_translation_stages(tmp_path: Path, monkeypatch)
     assert stages["translate"]["status"] == "skipped"
 
 
+def test_doctor_blocks_removed_pdf_text_configuration(tmp_path: Path, monkeypatch):
+    config_path = _config(tmp_path)
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8") + "pdf_text:\n  mode: native\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    report = build_doctor(config_path)
+    checks = {item["name"]: item for item in report["checks"]}
+
+    assert report["ok"] is False
+    assert checks["ocr.configuration"]["status"] == "blocked"
+    assert "pdf_text is no longer supported" in checks["ocr.configuration"]["detail"]
+
+
 def test_doctor_blocks_retired_mistral_backend(tmp_path: Path, monkeypatch):
     config_path = _config(tmp_path, backend="mistral")
     monkeypatch.chdir(tmp_path)

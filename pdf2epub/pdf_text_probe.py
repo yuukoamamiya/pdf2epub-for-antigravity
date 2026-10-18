@@ -1,62 +1,33 @@
-"""Probe PDF text layers without trusting them by default.
+"""Classify PDF text layers for audit purposes.
 
 Searchable PDFs are not necessarily born-digital.  A scanned PDF can contain
 an OCR text layer which is less reliable than a fresh visual OCR pass.  The
-probe therefore still classifies every PDF conservatively, but native text
-extraction is now a legacy opt-in: ``auto`` always uses visual OCR and only an
-explicit ``pdf_text.mode: native`` selects the direct text layer for a
-high-confidence vector-text candidate.
+probe therefore classifies every PDF conservatively, but it never selects the
+direct text layer: every new run uses visual OCR.  ``classification`` and
+``detected_recommendation`` are audit metadata only, and ``recommendation`` is
+always ``ocr_required``.  Only legacy artifacts written by older versions may
+still carry a ``use_text_layer`` recommendation.
 """
 
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 from statistics import median
-from typing import Any, Callable, Dict, Mapping
+from typing import Any, Callable, Dict
 
 import pymupdf
 
-from .workflow_contracts import atomic_write_json, atomic_write_text, sha256_file
-from .ocr_progress import OCR_PROGRESS_SCHEMA_VERSION
+from .workflow_contracts import sha256_file
 
 
 _REPLACEMENT_RE = re.compile("\\ufffd")
-_NATIVE_NOTE_START_RE = re.compile(r"^\s*\d{1,3}(?=\s|[.)、，:：])")
 _MULTI_COLUMN_MIN_LINES = 24
 _MULTI_COLUMN_MIN_GAP_RATIO = 0.15
 _MULTI_COLUMN_MIN_SIDE_RATIO = 0.20
 _MULTI_COLUMN_MIN_Y_OVERLAP_RATIO = 0.45
 _MULTI_COLUMN_MAX_MEDIAN_WIDTH_RATIO = 0.55
-PDF_TEXT_PROBE_SCHEMA_VERSION = 2
-PDF_TEXT_MODES = frozenset({"auto", "native", "ocr"})
-
-
-def normalize_pdf_text_mode(value: Any) -> str:
-    """Normalize and validate the PDF text-source policy name."""
-    mode = str(value or "auto").strip().lower()
-    if mode not in PDF_TEXT_MODES:
-        allowed = ", ".join(sorted(PDF_TEXT_MODES))
-        raise ValueError(f"pdf_text.mode must be one of: {allowed}")
-    return mode
-
-
-def resolve_pdf_text_mode(config: Mapping[str, Any] | None) -> str:
-    """Return the configured PDF text-source policy.
-
-    ``auto`` always uses the visual page-OCR path; the probe still records the
-    conservative ``classification``/``detected_recommendation`` for audits.
-    ``ocr`` forces visual OCR as well.  ``native`` is the explicit legacy
-    opt-in that selects the direct text layer and fails closed for non-native
-    PDFs.
-    """
-    raw = config.get("pdf_text") if isinstance(config, Mapping) else None
-    if raw is None:
-        return "auto"
-    if not isinstance(raw, Mapping):
-        raise ValueError("pdf_text must be a mapping with mode: auto, native, or ocr")
-    return normalize_pdf_text_mode(raw.get("mode"))
+PDF_TEXT_PROBE_SCHEMA_VERSION = 3
 
 
 def _image_coverage(page: Any) -> float:
@@ -94,7 +65,7 @@ def _detect_multi_column_layout(page: Any) -> Dict[str, Any] | None:
     detector intentionally looks only at geometry and is conservative.  It
     requires two sizeable x-origin bands, substantial vertical overlap, and
     narrow enough line widths to leave a real column gutter.  The result is
-    used to repair native reading order; it is not a reason to invoke OCR.
+    audit metadata only; it never changes the visual OCR page source.
     """
     try:
         page_width = float(page.rect.width)
@@ -179,19 +150,17 @@ def _detect_multi_column_layout(page: Any) -> Dict[str, Any] | None:
 def probe_pdf_text_layer(
     pdf_path: Path,
     *,
-    text_mode: str = "auto",
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> Dict[str, Any]:
-    """Classify a PDF conservatively and select the configured page source.
+    """Classify a PDF conservatively for audit purposes.
 
     The classification is intentionally asymmetric: false negatives cost OCR
-    time, while false positives can silently replace a trustworthy visual OCR
-    result with a bad hidden OCR layer.  ``classification`` and
-    ``detected_recommendation`` always report that conservative decision.
-    ``auto`` and ``ocr`` then force visual OCR; only an explicit ``native``
-    request may select the legacy direct text layer.
+    time, while false positives could silently replace a trustworthy visual
+    OCR result with a bad hidden OCR layer.  ``classification`` and
+    ``detected_recommendation`` report that conservative decision, but
+    ``recommendation`` is always ``ocr_required``: every new run uses visual
+    OCR.
     """
-    text_mode = normalize_pdf_text_mode(text_mode)
     pdf_path = Path(pdf_path).resolve()
     if not pdf_path.is_file():
         raise FileNotFoundError(pdf_path)
@@ -265,24 +234,6 @@ def probe_pdf_text_layer(
         classification = "scanned_or_low_text"
         detected_recommendation = "ocr_required"
 
-    if text_mode == "ocr":
-        recommendation = "ocr_required"
-        selection = "forced_ocr"
-    elif text_mode == "native":
-        recommendation = (
-            "use_text_layer"
-            if detected_recommendation == "use_text_layer"
-            else "native_required"
-        )
-        selection = "forced_native_legacy"
-    else:
-        # ``auto`` no longer trusts the text layer.  The conservative
-        # detection stays in the report for audit and explicit legacy reuse.
-        recommendation = "ocr_required"
-        selection = "auto_ocr_native_legacy"
-
-    native_legacy = recommendation == "use_text_layer"
-
     return {
         "schema_version": PDF_TEXT_PROBE_SCHEMA_VERSION,
         "pdf_path": pdf_path.name,
@@ -304,10 +255,7 @@ def probe_pdf_text_layer(
         "reading_order": "column_major" if multi_column_pages else "geometric",
         "classification": classification,
         "detected_recommendation": detected_recommendation,
-        "requested_text_mode": text_mode,
-        "selection": selection,
-        "recommendation": recommendation,
-        "native_legacy": native_legacy,
+        "recommendation": "ocr_required",
     }
 
 
@@ -322,464 +270,3 @@ def _bbox_list(value: Any) -> list[float] | None:
     if x1 <= x0 or y1 <= y0:
         return None
     return [x0, y0, x1, y1]
-
-
-def _span_font_size(span: Dict[str, Any]) -> float | None:
-    try:
-        value = float(span.get("size"))
-    except (TypeError, ValueError):
-        return None
-    return value if value > 0 else None
-
-
-def _native_span_is_superscript(
-    span: Dict[str, Any],
-    *,
-    line_bbox: list[float] | None,
-    page_font_size: float,
-) -> bool:
-    """Recognize likely native footnote/reference markers.
-
-    PyMuPDF exposes the PDF superscript flag for many publishers, but not all
-    of them.  The conservative fallback only wraps short numeric/symbol spans
-    that are materially smaller than the page's body text.  A later footnote
-    decision still has to connect the marker to a reviewed definition, so
-    ordinary small text is not moved merely because it was wrapped in ``sup``.
-    """
-    text = str(span.get("text") or "").strip()
-    if not text:
-        return False
-    try:
-        flags = int(span.get("flags", 0) or 0)
-    except (TypeError, ValueError):
-        flags = 0
-    if flags & 1:  # PyMuPDF's superscript font flag.
-        return True
-    if not re.fullmatch(r"(?:\d{1,4}|[*†‡§]+)", text):
-        return False
-    size = _span_font_size(span)
-    if size is None or page_font_size <= 0 or size > page_font_size * 0.84:
-        return False
-    if line_bbox is None:
-        return True
-    span_bbox = _bbox_list(span.get("bbox"))
-    if span_bbox is None:
-        return True
-    line_height = max(1.0, line_bbox[3] - line_bbox[1])
-    return span_bbox[1] <= line_bbox[1] + line_height * 0.45
-
-
-def _region_for_bbox(bbox: list[float] | None, split_x: float) -> int:
-    """Classify a box as left, right, or full-width relative to a gutter."""
-    if bbox is None:
-        return -1
-    if bbox[2] <= split_x:
-        return 0
-    if bbox[0] >= split_x:
-        return 1
-    return -1
-
-
-def _union_bboxes(bboxes: list[list[float]]) -> list[float] | None:
-    """Return the smallest rectangle containing the supplied boxes."""
-    if not bboxes:
-        return None
-    return [
-        min(bbox[0] for bbox in bboxes),
-        min(bbox[1] for bbox in bboxes),
-        max(bbox[2] for bbox in bboxes),
-        max(bbox[3] for bbox in bboxes),
-    ]
-
-
-def _split_line_for_columns(
-    line: Dict[str, Any],
-    split_x: float,
-    page_width: float,
-) -> list[tuple[int, Dict[str, Any]]]:
-    """Split a line containing spans from both columns into column lines.
-
-    PDF producers frequently emit one text block for a whole page, and some
-    even emit the left and right text at the same y coordinate as one PDF line.
-    Looking only at block or line boxes would therefore leave the original
-    interleaving intact.  Span boxes are the finest reliable geometry exposed
-    by PyMuPDF for this purpose.
-    """
-    spans = [span for span in line.get("spans", []) if isinstance(span, dict)]
-    if not spans:
-        return []
-
-    buckets: dict[int, list[Dict[str, Any]]] = {}
-    for span in spans:
-        span_bbox = _bbox_list(span.get("bbox"))
-        if span_bbox is None:
-            region = -1
-        elif span_bbox[2] - span_bbox[0] >= page_width * 0.65:
-            # A page-wide heading or rule is not body text from the left
-            # column merely because its x0 happens to be left of the gutter.
-            region = -1
-        else:
-            # Text spans can legitimately cross the mathematical gutter: the
-            # gutter is between column origins, not necessarily between every
-            # glyph box.  For text, the starting x coordinate is the stable
-            # column signal; the full-box test above handles true wide lines.
-            region = 0 if span_bbox[0] < split_x else 1
-        buckets.setdefault(region, []).append(span)
-
-    results: list[tuple[int, Dict[str, Any]]] = []
-    for region, region_spans in buckets.items():
-        clone = dict(line)
-        clone["spans"] = region_spans
-        span_bboxes = [
-            span_bbox
-            for span in region_spans
-            if (span_bbox := _bbox_list(span.get("bbox"))) is not None
-        ]
-        if span_bboxes:
-            clone["bbox"] = _union_bboxes(span_bboxes)
-        results.append((region, clone))
-    return results
-
-
-def _ordered_native_blocks(
-    page: Any,
-    raw_blocks: list[Dict[str, Any]],
-) -> tuple[list[Dict[str, Any]], str]:
-    """Return native blocks in a stable visual reading order.
-
-    Single-column pages retain PyMuPDF's normal geometric ordering.  On a
-    strong two-column page, text spans are split at the measured gutter and
-    emitted column-major.  Full-width headers and images remain between the
-    columns only when their geometry places them there; this avoids treating a
-    page-wide title as left-column body text.
-    """
-    layout = _detect_multi_column_layout(page)
-    if layout is None:
-        return page.get_text("dict", sort=True).get("blocks", []), "single_column"
-
-    split_x = float(layout["column_split_x"])
-    expanded: list[Dict[str, Any]] = []
-    for source_index, block in enumerate(raw_blocks):
-        if not isinstance(block, dict):
-            continue
-        block_type = block.get("type")
-        if block_type != 0:
-            item = dict(block)
-            item["_native_column"] = _region_for_bbox(
-                _bbox_list(block.get("bbox")), split_x
-            )
-            item["_native_source_block"] = source_index
-            expanded.append(item)
-            continue
-
-        buckets: dict[int, list[Dict[str, Any]]] = {}
-        for line in block.get("lines", []):
-            if not isinstance(line, dict):
-                continue
-            for region, split_line in _split_line_for_columns(
-                line, split_x, float(page.rect.width)
-            ):
-                buckets.setdefault(region, []).append(split_line)
-        for region, lines in buckets.items():
-            item = dict(block)
-            item["lines"] = sorted(
-                lines,
-                key=lambda value: (
-                    (_bbox_list(value.get("bbox")) or [0.0, 0.0])[1],
-                    (_bbox_list(value.get("bbox")) or [0.0, 0.0])[0],
-                ),
-            )
-            item["bbox"] = _union_bboxes(
-                [
-                    line_bbox
-                    for line in item["lines"]
-                    if (line_bbox := _bbox_list(line.get("bbox"))) is not None
-                ]
-            ) or _bbox_list(block.get("bbox"))
-            item["_native_column"] = region
-            item["_native_source_block"] = source_index
-            expanded.append(item)
-
-    body_boxes = [
-        _bbox_list(item.get("bbox"))
-        for item in expanded
-        if item.get("_native_column") in (0, 1)
-    ]
-    body_boxes = [bbox for bbox in body_boxes if bbox is not None]
-    body_top = min((bbox[1] for bbox in body_boxes), default=0.0)
-    body_bottom = max((bbox[3] for bbox in body_boxes), default=float(page.rect.height))
-
-    def sort_key(item: Dict[str, Any]) -> tuple[int, float, float, int]:
-        bbox = _bbox_list(item.get("bbox")) or [0.0, 0.0, 0.0, 0.0]
-        column = item.get("_native_column")
-        if column == 0:
-            rank = 1
-        elif column == 1:
-            rank = 2
-        elif bbox[3] <= body_top:
-            rank = 0
-        elif bbox[1] >= body_bottom:
-            rank = 3
-        else:
-            rank = 2
-        return rank, bbox[1], bbox[0], int(item.get("_native_source_block", 0))
-
-    return sorted(expanded, key=sort_key), "multi_column"
-
-
-def _native_page_artifacts(
-    page: Any,
-    images_dir: Path,
-    page_number: int,
-) -> tuple[str, int, list[dict[str, Any]], list[float], float, str]:
-    """Extract Markdown plus compact, source-native layout evidence."""
-    unsorted_blocks = page.get_text("dict", sort=False).get("blocks", [])
-    raw_blocks, layout_mode = _ordered_native_blocks(page, unsorted_blocks)
-    all_sizes = [
-        size
-        for block in raw_blocks
-        if block.get("type") == 0
-        for line in block.get("lines", [])
-        for span in line.get("spans", [])
-        if (size := _span_font_size(span)) is not None
-    ]
-    page_font_size = float(median(all_sizes)) if all_sizes else 0.0
-    page_height = float(page.rect.height)
-    bottom_boundary = float(page.rect.y0) + page_height * 0.64
-    markdown_blocks: list[str] = []
-    layout_blocks: list[dict[str, Any]] = []
-    image_count = 0
-
-    for block_index, block in enumerate(raw_blocks):
-        block_type = block.get("type")
-        bbox = _bbox_list(block.get("bbox"))
-        if block_type == 0:
-            line_records: list[dict[str, Any]] = []
-            for line in block.get("lines", []):
-                line_bbox = _bbox_list(line.get("bbox"))
-                raw_parts: list[str] = []
-                markdown_parts: list[str] = []
-                line_sizes: list[float] = []
-                line_font_names: set[str] = set()
-                line_flags = 0
-                for span in line.get("spans", []):
-                    raw_text = str(span.get("text", ""))
-                    raw_parts.append(raw_text)
-                    span_text = raw_text
-                    if _native_span_is_superscript(
-                        span,
-                        line_bbox=line_bbox,
-                        page_font_size=page_font_size,
-                    ):
-                        span_text = f"<sup>{raw_text}</sup>"
-                    markdown_parts.append(span_text)
-                    size = _span_font_size(span)
-                    if size is not None:
-                        line_sizes.append(size)
-                    font = str(span.get("font") or "").strip()
-                    if font:
-                        line_font_names.add(font)
-                    try:
-                        line_flags |= int(span.get("flags", 0) or 0)
-                    except (TypeError, ValueError):
-                        pass
-                raw_text = "".join(raw_parts)
-                if raw_text.strip():
-                    line_size = float(median(line_sizes)) if line_sizes else None
-                    line_records.append(
-                        {
-                            "raw_text": raw_text.rstrip(),
-                            "markdown_text": "".join(markdown_parts).rstrip(),
-                            "bbox": line_bbox or bbox,
-                            "font_size": line_size,
-                            "font_names": line_font_names,
-                            "flags": line_flags,
-                            "note_start": bool(
-                                line_bbox
-                                and line_bbox[1] >= bottom_boundary
-                                and line_size is not None
-                                and page_font_size > 0
-                                and line_size <= page_font_size * 0.92
-                                and _NATIVE_NOTE_START_RE.match(raw_text)
-                                and not re.fullmatch(r"\s*\d{1,3}\s*", raw_text)
-                            ),
-                        }
-                    )
-            if not line_records:
-                continue
-            groups: list[list[dict[str, Any]]] = []
-            current_group: list[dict[str, Any]] = []
-            for line_record in line_records:
-                if line_record["note_start"] and current_group:
-                    groups.append(current_group)
-                    current_group = []
-                current_group.append(line_record)
-            if current_group:
-                groups.append(current_group)
-
-            for group in groups:
-                raw_lines = [str(item["raw_text"]) for item in group]
-                markdown_lines = [str(item["markdown_text"]) for item in group]
-                group_bboxes = [item["bbox"] for item in group if item.get("bbox")]
-                group_bbox = None
-                if group_bboxes:
-                    group_bbox = [
-                        min(item[0] for item in group_bboxes),
-                        min(item[1] for item in group_bboxes),
-                        max(item[2] for item in group_bboxes),
-                        max(item[3] for item in group_bboxes),
-                    ]
-                group_sizes = [
-                    float(item["font_size"])
-                    for item in group
-                    if item.get("font_size") is not None
-                ]
-                group_fonts = {
-                    font
-                    for item in group
-                    for font in item.get("font_names", set())
-                }
-                group_flags = 0
-                for item in group:
-                    group_flags |= int(item.get("flags", 0) or 0)
-                block_text = "\n".join(raw_lines)
-                layout_blocks.append(
-                    {
-                        "order": len(layout_blocks),
-                        "label": "Text",
-                        "bbox": group_bbox or bbox,
-                        "text": block_text,
-                        "markdown_text": "\n".join(markdown_lines),
-                        "html": block_text,
-                        "line_count": len(group),
-                        "source_block": int(
-                            block.get("_native_source_block", block_index)
-                        ),
-                        "column": block.get("_native_column"),
-                        "font_size": round(float(median(group_sizes)), 3)
-                        if group_sizes
-                        else None,
-                        "font_names": sorted(group_fonts),
-                        "flags": group_flags,
-                    }
-                )
-                markdown_blocks.append("\n".join(markdown_lines))
-        elif block_type == 1 and block.get("image"):
-            image_count += 1
-            ext = str(block.get("ext") or "png").lower()
-            if not re.fullmatch(r"[a-z0-9]+", ext):
-                ext = "png"
-            image_path = images_dir / f"native_page_{page_number:03d}_{block_index + 1:02d}.{ext}"
-            image_path.write_bytes(block["image"])
-            layout_blocks.append(
-                {
-                    "order": len(layout_blocks),
-                    "label": "Image",
-                    "bbox": bbox,
-                    "text": "",
-                    "column": block.get("_native_column"),
-                    "asset": f"images/{image_path.name}",
-                }
-            )
-            markdown_blocks.append(f"![Image](../images/{image_path.name})")
-
-    page_box = [
-        float(page.rect.x0),
-        float(page.rect.y0),
-        float(page.rect.x1),
-        float(page.rect.y1),
-    ]
-    return (
-        "\n\n".join(markdown_blocks).strip() + "\n",
-        image_count,
-        layout_blocks,
-        page_box,
-        page_font_size,
-        layout_mode,
-    )
-
-
-def _native_page_markdown(page: Any, images_dir: Path, page_number: int) -> tuple[str, int]:
-    """Convert a native PDF page into ordered Markdown blocks."""
-    markdown, image_count, _layout_blocks, _page_box, _page_font_size, _layout_mode = _native_page_artifacts(
-        page, images_dir, page_number
-    )
-    return markdown, image_count
-
-
-def extract_native_text_pages(
-    pdf_path: Path,
-    output_dir: Path,
-    probe: Dict[str, Any],
-) -> None:
-    """Write page Markdown and progress artifacts for a native-text PDF."""
-    output_dir = Path(output_dir)
-    pages_dir = output_dir / "pages"
-    images_dir = output_dir / "images"
-    pages_dir.mkdir(parents=True, exist_ok=True)
-    images_dir.mkdir(parents=True, exist_ok=True)
-
-    page_stats: Dict[str, Dict[str, Any]] = {}
-    pages_processed = []
-    with pymupdf.open(pdf_path) as document:
-        for page_number, page in enumerate(document, 1):
-            markdown, image_count, layout_blocks, page_box, page_font_size, layout_mode = _native_page_artifacts(
-                page, images_dir, page_number
-            )
-            page_path = pages_dir / f"page_{page_number:03d}.md"
-            sidecar_path = pages_dir / f"page_{page_number:03d}.ocr.json"
-            atomic_write_json(
-                sidecar_path,
-                {
-                        "schema_version": 1,
-                        "page_number": page_number,
-                        "backend": "native_text",
-                        "source_kind": "native_text",
-                        "coordinate_system": "page_points",
-                        "page_box": page_box,
-                        "layout_mode": layout_mode,
-                        "reading_order": (
-                            "column_major"
-                            if layout_mode == "multi_column"
-                            else "geometric"
-                        ),
-                        "body_font_size": round(page_font_size, 3)
-                        if page_font_size > 0
-                        else None,
-                        "formats": {"markdown": page_path.name},
-                        "blocks": layout_blocks,
-                        "assets": [
-                            block["asset"]
-                            for block in layout_blocks
-                            if block.get("asset")
-                        ],
-                },
-            )
-            atomic_write_text(page_path, markdown)
-            pages_processed.append(page_number)
-            page_stats[str(page_number)] = {
-                "tokens": max(1, len(markdown) // 4),
-                "file": page_path.relative_to(output_dir).as_posix(),
-                "char_count": len(markdown),
-                "source": "native_text",
-                "image_count": image_count,
-                "artifact_file": sidecar_path.relative_to(output_dir).as_posix(),
-            }
-
-    atomic_write_json(
-        pages_dir / "ocr_progress.json",
-        {
-                "schema_version": OCR_PROGRESS_SCHEMA_VERSION,
-                "mode": "native_text",
-                "backend": "native_text",
-                "source_sha256": probe["source_sha256"],
-                "total_pages": len(pages_processed),
-                "pages_processed": pages_processed,
-                "failed_pages": [],
-                "empty_pages": [],
-                "allowed_empty_pages": [],
-                "missing_pages": [],
-                "global_image_counter": sum(item["image_count"] for item in page_stats.values()),
-        },
-    )
-    atomic_write_json(pages_dir / "page_stats.json", page_stats)

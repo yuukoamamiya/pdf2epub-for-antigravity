@@ -1,8 +1,9 @@
 """Shared evidence selection for PDF layout review stages.
 
 Footnote and illustration review both consume the same page sidecars.  This
-module owns the source/evidence decision so a native-text PDF cannot
-accidentally enter the two-OCR path in one stage but not the other.
+module owns the source/evidence decision so a legacy native-text run cannot
+accidentally enter the two-OCR path in one stage but not the other.  New runs
+never produce native pages; the native branch exists only for old artifacts.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from ..ocr_consensus import consensus_is_current, ocr_evidence_mode
 
 
 def is_native_text_source(output_dir: Path) -> bool:
-    """Return whether the current page set came from native PDF text."""
+    """Return whether the page set is a legacy native PDF text extraction."""
     try:
         progress = json.loads(
             (Path(output_dir) / "pages" / "ocr_progress.json").read_text(
@@ -33,10 +34,11 @@ def pdf_evidence_mode(
 ) -> str:
     """Resolve the layout evidence mode shared by PDF review stages.
 
-    Native text has its own page-point layout evidence and therefore bypasses
-    visual OCR consensus, even when the configuration enables a secondary OCR
-    backend.  ``single_ocr`` is retained as the checkpoint value for this
-    source kind because downstream contracts already use that vocabulary.
+    Legacy native text has its own page-point layout evidence and therefore
+    bypasses visual OCR consensus, even when the configuration enables a
+    secondary OCR backend.  ``single_ocr`` is retained as the checkpoint value
+    for this legacy source kind because downstream contracts already use that
+    vocabulary.
     """
     if is_native_text_source(output_dir):
         return "single_ocr"

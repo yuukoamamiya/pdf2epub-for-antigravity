@@ -55,6 +55,8 @@ def prepare_refine_subagent(
     if probe_path.is_file():
         try:
             probe = json.loads(probe_path.read_text(encoding="utf-8"))
+            # Legacy artifact compatibility: old native runs already wrote
+            # page layout into ``pages/``.
             if probe.get("recommendation") == "use_text_layer":
                 page_source_kind = "native_text"
         except (OSError, json.JSONDecodeError):

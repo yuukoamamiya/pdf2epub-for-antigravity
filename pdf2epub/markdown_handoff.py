@@ -555,6 +555,8 @@ def prepare_markdown_subagent(
             probe = json.loads(probe_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError, AttributeError):
             probe = {}
+        # Legacy artifact compatibility: only old native-text runs carry this
+        # probe shape and already-extracted native layout.
         if (
             probe.get("classification") == "native_text"
             and probe.get("recommendation") == "use_text_layer"

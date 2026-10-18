@@ -19,7 +19,6 @@ from typing import Any, Dict, Mapping, Optional
 
 from pdf2epub.workflow_contracts import atomic_write_json, atomic_write_text, sha256_file
 from pdf2epub.ocr.backends import supported_backends
-from pdf2epub.pdf_text_probe import resolve_pdf_text_mode
 
 
 OCR_CONSENSUS_SCHEMA_VERSION = 4
@@ -126,9 +125,14 @@ def ocr_evidence_mode(config: Mapping[str, Any] | None) -> str:
 
 def validate_ocr_config(config: Mapping[str, Any]) -> None:
     """Validate OCR backend and optional secondary OCR configuration."""
-    # Validate the PDF source policy alongside OCR settings because it selects
-    # whether the page source is native extraction or visual OCR.
-    resolve_pdf_text_mode(config)
+    # ``pdf_text`` used to select native extraction versus visual OCR.  That
+    # input path is gone, so a stale block must fail loudly instead of being
+    # silently ignored.
+    if isinstance(config, Mapping) and "pdf_text" in config:
+        raise ValueError(
+            "pdf_text is no longer supported; the PDF text-source mode was "
+            "removed and every PDF now uses visual OCR"
+        )
     ocr = _ocr_config(config)
     primary_backend = str(ocr.get("backend") or "chandra").strip().lower()
     supported = set(supported_backends())

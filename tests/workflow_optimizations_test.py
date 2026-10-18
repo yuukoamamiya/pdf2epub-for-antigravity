@@ -12,9 +12,7 @@ from pdf2epub.commands.ocr import _load_current_probe
 from pdf2epub.pipeline_policy import PipelinePolicy, SUPPORTED_PIPELINE_NAMES
 from pdf2epub.pdf_text_probe import (
     PDF_TEXT_PROBE_SCHEMA_VERSION,
-    extract_native_text_pages,
     probe_pdf_text_layer,
-    resolve_pdf_text_mode,
 )
 from pdf2epub.subagent_runtime import (
     MAX_BATCH_FILES,
@@ -103,24 +101,12 @@ def test_pdf_probe_only_accepts_clean_vector_text(tmp_path: Path):
     assert native_report["classification"] == "native_text"
     assert native_report["detected_recommendation"] == "use_text_layer"
     assert native_report["recommendation"] == "ocr_required"
-    assert native_report["selection"] == "auto_ocr_native_legacy"
-    assert native_report["native_legacy"] is False
+    assert "selection" not in native_report
+    assert "requested_text_mode" not in native_report
+    assert "native_legacy" not in native_report
     assert searchable_report["classification"] == "searchable_ocr_or_mixed"
     assert searchable_report["recommendation"] == "ocr_required"
     assert native_report["multi_column_page_ratio"] == 0.0
-
-
-def test_pdf_probe_explicit_native_selects_legacy_text_layer(tmp_path: Path):
-    source = tmp_path / "native.pdf"
-    _make_native_pdf(source)
-
-    report = probe_pdf_text_layer(source, text_mode="native")
-
-    assert report["classification"] == "native_text"
-    assert report["detected_recommendation"] == "use_text_layer"
-    assert report["recommendation"] == "use_text_layer"
-    assert report["selection"] == "forced_native_legacy"
-    assert report["native_legacy"] is True
 
 
 def test_pdf_probe_reports_page_progress_without_changing_classification(tmp_path: Path):
@@ -138,39 +124,6 @@ def test_pdf_probe_reports_page_progress_without_changing_classification(tmp_pat
     assert progress[-1] == (4, 4)
 
 
-def test_pdf_probe_can_force_visual_ocr_for_native_text(tmp_path: Path):
-    source = tmp_path / "native.pdf"
-    _make_native_pdf(source)
-
-    report = probe_pdf_text_layer(source, text_mode="ocr")
-
-    assert report["classification"] == "native_text"
-    assert report["detected_recommendation"] == "use_text_layer"
-    assert report["requested_text_mode"] == "ocr"
-    assert report["selection"] == "forced_ocr"
-    assert report["recommendation"] == "ocr_required"
-
-
-def test_pdf_probe_native_mode_fails_closed_for_non_native_pdf(tmp_path: Path):
-    source = tmp_path / "searchable-ocr.pdf"
-    _make_native_pdf(source, full_page_image=True)
-
-    report = probe_pdf_text_layer(source, text_mode="native")
-
-    assert report["classification"] == "searchable_ocr_or_mixed"
-    assert report["detected_recommendation"] == "ocr_required"
-    assert report["selection"] == "forced_native_legacy"
-    assert report["recommendation"] == "native_required"
-    assert report["native_legacy"] is False
-
-
-def test_pdf_text_mode_defaults_and_validates():
-    assert resolve_pdf_text_mode({}) == "auto"
-    assert resolve_pdf_text_mode({"pdf_text": {"mode": "OCR"}}) == "ocr"
-    with pytest.raises(ValueError, match="pdf_text.mode"):
-        resolve_pdf_text_mode({"pdf_text": {"mode": "guess"}})
-
-
 def test_pdf_probe_cache_rejects_legacy_schema_and_matching_source_hash(tmp_path: Path):
     source = tmp_path / "source.pdf"
     source.write_bytes(b"source")
@@ -185,7 +138,6 @@ def test_pdf_probe_cache_rejects_legacy_schema_and_matching_source_hash(tmp_path
                 "page_count": 1,
                 "classification": "native_text",
                 "recommendation": "use_text_layer",
-                "requested_text_mode": "auto",
             }
         ),
         encoding="utf-8",
@@ -200,61 +152,28 @@ def test_pdf_probe_cache_rejects_legacy_schema_and_matching_source_hash(tmp_path
                 "page_count": 1,
                 "classification": "native_text",
                 "recommendation": "ocr_required",
-                "requested_text_mode": "auto",
             }
         ),
         encoding="utf-8",
     )
     assert _load_current_probe(output_dir, source)["recommendation"] == "ocr_required"
-    (output_dir / "pdf_text_probe.json").write_text(
-        json.dumps(
-            {
-                "schema_version": PDF_TEXT_PROBE_SCHEMA_VERSION,
-                "source_sha256": source_hash,
-                "page_count": 1,
-                "classification": "native_text",
-                "recommendation": "ocr_required",
-                "requested_text_mode": "ocr",
-            }
-        ),
-        encoding="utf-8",
-    )
-    assert _load_current_probe(output_dir, source, text_mode="auto") == {}
-    assert _load_current_probe(output_dir, source, text_mode="ocr")["recommendation"] == "ocr_required"
     source.write_bytes(b"changed")
-    assert _load_current_probe(output_dir, source, text_mode="ocr") == {}
+    assert _load_current_probe(output_dir, source) == {}
 
 
-def test_pdf_probe_two_column_defaults_to_ocr_and_native_opt_in_keeps_columns(tmp_path: Path):
+def test_pdf_probe_reports_two_column_audit_metadata(tmp_path: Path):
     two_column = tmp_path / "two-column.pdf"
     _make_two_column_pdf(two_column)
 
-    auto_report = probe_pdf_text_layer(two_column)
-    report = probe_pdf_text_layer(two_column, text_mode="native")
+    report = probe_pdf_text_layer(two_column)
 
-    assert auto_report["classification"] == "native_text"
-    assert auto_report["detected_recommendation"] == "use_text_layer"
-    assert auto_report["recommendation"] == "ocr_required"
-    assert auto_report["selection"] == "auto_ocr_native_legacy"
-    assert auto_report["layout_mode"] == "multi_column"
     assert report["classification"] == "native_text"
-    assert report["recommendation"] == "use_text_layer"
-    assert report["selection"] == "forced_native_legacy"
+    assert report["detected_recommendation"] == "use_text_layer"
+    assert report["recommendation"] == "ocr_required"
     assert report["layout_mode"] == "multi_column"
     assert report["reading_order"] == "column_major"
     assert report["multi_column_pages"]
     assert report["multi_column_page_ratio"] == 1.0
-
-    output_dir = tmp_path / "book"
-    extract_native_text_pages(two_column, output_dir, report)
-    text = (output_dir / "pages" / "page_001.md").read_text(encoding="utf-8")
-    assert text.index("Left column line 29") < text.index("Right column line 0")
-    assert text.index("Right column line 0") < text.index("Right column line 29")
-    sidecar = json.loads(
-        (output_dir / "pages" / "page_001.ocr.json").read_text(encoding="utf-8")
-    )
-    assert sidecar["layout_mode"] == "multi_column"
-    assert sidecar["reading_order"] == "column_major"
 
 
 def test_epub_conversion_pipeline_is_language_neutral():
@@ -311,30 +230,6 @@ def test_pipeline_policy_exposes_one_supported_pipeline_registry():
     assert PipelinePolicy.from_config({"pipeline": "translation"}).kind == "translation"
     assert PipelinePolicy.from_config({"pipeline": "epub_conversion"}).kind == "epub_conversion"
     assert PipelinePolicy.from_config({"pipeline": "ocr_to_epub"}).kind == "epub_conversion"
-
-
-def test_native_text_extraction_writes_page_contract(tmp_path: Path):
-    source = tmp_path / "native.pdf"
-    _make_native_pdf(source)
-    probe = probe_pdf_text_layer(source, text_mode="native")
-    extract_native_text_pages(source, tmp_path / "book", probe)
-
-    progress = json.loads(
-        (tmp_path / "book" / "pages" / "ocr_progress.json").read_text(encoding="utf-8")
-    )
-    assert progress["mode"] == "native_text"
-    assert progress["pages_processed"] == [1, 2, 3, 4]
-    assert (tmp_path / "book" / "pages" / "page_001.md").read_text(encoding="utf-8").strip()
-    sidecar = json.loads(
-        (tmp_path / "book" / "pages" / "page_001.ocr.json").read_text(encoding="utf-8")
-    )
-    assert sidecar["source_kind"] == "native_text"
-    assert sidecar["coordinate_system"] == "page_points"
-    assert sidecar["page_box"][2] > 0
-    assert sidecar["blocks"]
-    assert json.loads(
-        (tmp_path / "book" / "pages" / "page_stats.json").read_text(encoding="utf-8")
-    )["1"]["artifact_file"] == "pages/page_001.ocr.json"
 
 
 def test_native_polish_prompt_requires_paragraph_reconstruction(tmp_path: Path):

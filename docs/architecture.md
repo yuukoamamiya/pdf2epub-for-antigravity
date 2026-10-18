@@ -86,7 +86,7 @@ Subagent 合同层
 - `ocr/backends/chandra.py`：调用 Chandra 原生 layout OCR，保留 block、bbox、图片资产和
   语义脚注；图片 alt 只作为证据元数据，不进入正文 Markdown。
 - `ocr_backends.py`：保留历史 VLLM chunk adapter；默认页面流程不依赖它。
-- `refine/pdf_evidence.py`：统一决定当前页面集合使用 `native_text` 版面证据、`single_ocr`
+- `refine/pdf_evidence.py`：统一决定当前页面集合使用旧 `native_text` 版面证据、`single_ocr`
   还是 `two_ocr` 共识，并集中校验共识检查点；脚注和插图阶段不得各自重新解释这个选择。
 - `refine/layout_evidence.py`：统一加载 layout sidecar、清理 block 文本和归一化 bbox；它只
   处理几何/文本证据，不包含脚注或插图的语义判断。
@@ -117,11 +117,11 @@ PDF 精修的核心领域模块如下：
   `toc_title_normalization.json`，证据不足时保留原题名。
 - `refine/toc_heading_recovery.py`：从只读的 `pages/page_NNN.html` 或 sidecar `raw_html`
   中提取 `Page-Header`/`Page-Footer` 块，并在规范化后与 TOC 标题精确匹配；只用于恢复视觉
-  OCR 误删的真实标题，不做模糊相似度匹配。`native_text` sidecar、缺少证据、标题已存在和
+  OCR 误删的真实标题，不做模糊相似度匹配。旧 `native_text` sidecar、缺少证据、标题已存在和
   歧义匹配都写入 skipped。恢复映射供 `PageMerger` 在内存中注入，原始页面文件不变。
 - `refine/page_merger.py`：消费已验证的整页插图绑定，恢复“前页半句 → 插图页 → 后页续句”，
   并把图片及说明放回连续正文之后；普通页面边界也会在前后均为未结束的正文块时保守拼接，
-  不把完整句子、标题、列表、脚注、图片或表格误合并。原生文字 PDF 还会根据 page-point
+  不把完整句子、标题、列表、脚注、图片或表格误合并。旧原生文字运行还会根据 page-point
   sidecar 在页边 5% 内确定性清除 DOI/孤立页码，并仅清除跨页重复短页眉页脚；原始 `pages/`
   不会被覆盖，sidecar 会参与 refine checkpoint 指纹。
 - `refine/footnote_prepare.py`：只编排按页面 layout sidecar 生成脚注候选、结构排除和双 OCR
@@ -140,7 +140,7 @@ PDF 精修的核心领域模块如下：
  block、只有连续数字而没有独立证据、正文流延伸到页尾、OCR 证据冲突或几何漏检则生成
  `footnote_visual_audit_manifest.json`，并附页面图和可用的
   区域裁剪图，交给视觉 Subagent。`suspected_missed_count` 对应的可疑漏检会进入
-  `audit_candidates`，不再只是静态统计。原生文字 PDF 仍使用 PDF 坐标、文本块和字体元数据。
+  `audit_candidates`，不再只是静态统计。旧原生文字运行仍使用 PDF 坐标、文本块和字体元数据。
   跨页候选还会写入 `continuation_evidence`，记录上一页最后一个物理脚注、当前页候选前的最近正文块、
   bbox/字号/字体对齐、块间距和句子边界连续性；上一页其他脚注只保留为审计背景，不作为续文匹配目标。候选
   会在“延续上一页脚注”与“当前页正文”两个假设之间做无外部模型的保守词汇连续性比较；正文块内保留的
@@ -369,13 +369,11 @@ Subagent 实际读写哪些文件。两者不能互相替代。
 
 ```text
 ocr-pages
-  → pdf_text_probe.json
-  → pages/ (auto/ocr always use visual OCR; native text extraction is a
-            legacy opt-in via pdf_text.mode=native for high-confidence
-            vector PDFs)
+  → pdf_text_probe.json（只做分类审计；recommendation 始终为 ocr_required）
+  → pages/（所有新运行都使用视觉 OCR；旧 native sidecar 仅只读兼容）
 ocr-pages 可选：主 OCR + 配置的次 OCR（文本/版面共识）→ ocr_consensus.json
 （仅当 ocr.secondary.enabled=true）ocr-correct + 工作区 Subagent + ocr-correct-validate
-（只复核差异页、共同漏检风险页和确定性抽样页；一致页其余页面自动接受；原生文字跳过）
+（只复核差异页、共同漏检风险页和确定性抽样页；一致页其余页面自动接受；旧原生运行跳过）
   → ocr_corrected_pages/validated/
 （ocr.secondary.enabled=false 时直接使用 pages/，不运行 OCR 纠错）
 refine-prepare + 工作区 Subagent
@@ -436,24 +434,25 @@ heading contract 始终优先；标题绑定只容忍安全的展示格式差异
 
 ### 3.1.1 OCR 证据模式和结构闸门
 
-`pdf_text.mode` 决定 PDF 页面源；`ocr.secondary.enabled` 是视觉 OCR 结构判断的单一开关，
-不应在脚注或插图模块中再添加平行开关。`auto` 和 `ocr` 都走视觉 OCR；原生文本是 legacy
-opt-in，只有显式 `pdf_text.mode: native` 且 `pdf_text_probe` 判定为高置信度原生文字时才
-使用。`refine/pdf_evidence.py` 是脚注和插图共同使用的证据选择边界；原生文字 PDF 使用独立的
-native layout 证据；它不属于双 OCR，也不因配置残留而运行第二套 OCR：
+所有新 PDF 运行都使用视觉 OCR，不存在 `pdf_text.mode` 或其他页面来源开关；
+`ocr.secondary.enabled` 是视觉 OCR 结构判断的单一开关，不应在脚注或插图模块中再添加
+平行开关。`pdf_text_probe` 只写分类审计信息，`recommendation` 始终是 `ocr_required`。
+`refine/pdf_evidence.py` 是脚注和插图共同使用的证据选择边界；旧原生运行使用独立的
+native layout 证据（legacy artifact only），它不属于双 OCR，也不因配置残留而运行第二套
+OCR：
 
 | 页面来源 | 配置 | 主/次证据 | 结构阶段行为 |
 |---|---|---|---|
-| `native_text`（legacy，单栏或多栏） | 显式 `pdf_text.mode: native`，忽略 `ocr.secondary.enabled` | PDF 原生文本块/坐标/字体；报告兼容字段为 `single_ocr`；多栏页额外记录 `column_major` 阅读顺序 | 不运行视觉 OCR、`ocr-correct` 或 OCR 共识；同页上标+小字号的高置信度候选本地接受，其余候选交 Subagent。 |
-| 视觉 OCR | `false` | 只有 `pages/` 主 OCR | 忽略旧共识产物；明确的高置信度 OCR 脚注可本地接受，疑难候选交给 Subagent。 |
-| 视觉 OCR | `true` | 当前 `ocr_secondary/` + `ocr_consensus.json` | 共识报告和次 OCR sidecar 参与脚注/插图候选比较；差异页必须复核。 |
+| 视觉 OCR | `ocr.secondary.enabled: false` | 只有 `pages/` 主 OCR | 忽略旧共识产物；明确的高置信度 OCR 脚注可本地接受，疑难候选交给 Subagent。 |
+| 视觉 OCR | `ocr.secondary.enabled: true` | 当前 `ocr_secondary/` + `ocr_consensus.json` | 共识报告和次 OCR sidecar 参与脚注/插图候选比较；差异页必须复核。 |
+| `native_text`（legacy artifact） | 无新配置入口 | PDF 原生文本块/坐标/字体；报告兼容字段为 `single_ocr`；多栏页额外记录 `column_major` 阅读顺序 | 仅用于读取旧运行：不运行视觉 OCR、`ocr-correct` 或 OCR 共识；同页上标+小字号的高置信度候选本地接受，其余候选交 Subagent。 |
 
 准备阶段把 `source_kind` 和 `ocr_evidence_mode` 写入候选报告和 manifest。脚注和插图都从
 同一个 `pdf_evidence_mode()` 获取该值，并通过 `require_current_consensus()` 检查双 OCR
 检查点；它们不直接依赖彼此的 prepare 模块。对视觉 OCR，
-校验/应用阶段比较当前配置、候选报告、主/次 sidecar 哈希和共识检查点；对原生文字稿，
+校验/应用阶段比较当前配置、候选报告、主/次 sidecar 哈希和共识检查点；对旧原生文字稿，
 比较原生 sidecar 哈希，并明确排除次 OCR 文件。任何一项变化都阻断旧结果。这样单 OCR
-运行不会误读上一次双 OCR 的 `ocr_consensus.json`，原生文字运行也不会因为目录中存在旧
+运行不会误读上一次双 OCR 的 `ocr_consensus.json`，旧原生运行也不会因为目录中存在旧
 共识文件而切换证据路径。
 
 整页插图只在 `illustration_bindings.json` 中出现 `full_page_insert` 时影响 `PageMerger`；
@@ -477,8 +476,8 @@ TOC 语义角色决定，两者不会互相吞并。
 
 ### 3.1.2 页面 layout sidecar 和共识比较
 
-每个页面至少有以下文件；原生文字 PDF 的 sidecar 使用相同文件名合同，但其 `backend` 和
-`source_kind` 为 `native_text`，坐标单位为 PDF page points：
+每个页面至少有以下文件；旧原生文字运行的 sidecar 使用相同文件名合同，但其 `backend` 和
+`source_kind` 为 `native_text`，坐标单位为 PDF page points。新运行不再生成这类 sidecar：
 
 ```text
 pages/page_001.md          # 主 OCR 的工作流文本
@@ -521,23 +520,19 @@ pages/page_001.ocr.json    # OCR 或 native-text layout sidecar
 `ocr-correct` 的 Subagent。任何后端都不能在共识阶段自动取代主 OCR。共同漏检由固定抽样和
 页面密度异常信号补充发现。
 
-#### 3.1.2.1 原生文字 PDF sidecar 合同
+#### 3.1.2.1 旧原生文字 sidecar 的只读兼容
 
-原生文本提取是 legacy opt-in：只有 `pdf_text.mode: native` 才可能选择直接文本提取，并在
-探测不到高置信度原生文字时失败；默认的 `pdf_text.mode: auto` 和 `ocr` 都强制使用视觉 OCR。
-探测结果始终保留为 `classification`/`detected_recommendation`，但 `auto` 的
-`recommendation` 为 `ocr_required`、`selection` 为 `auto_ocr_native_legacy`；显式 native 选中
-文本层时才写 `recommendation: use_text_layer`、`selection: forced_native_legacy` 和
-`native_legacy: true`。探测器同时检查文本行的横向分布；如果发现两个具有明显 gutter、足够
-行数和纵向重叠的稳定栏，原生提取器会依据文本 span 的起始 x 坐标拆分左右栏，再按“左栏自上
-而下、右栏自上而下”输出，而不是把整本 PDF 退回视觉 OCR。报告同时记录
-`layout_mode: multi_column`、`reading_order: column_major`，以及 `requested_text_mode`、
-`detected_recommendation` 和 `selection`，用于恢复时拒绝复用不匹配的缓存。probe schema 为
-2；schema 1 的旧 probe 不再复用，旧 `auto` 原生选择必须显式改回 `mode: native`。
+原生文本输入路径已经删除，`pdf_text.mode`、`extract_native_text_pages()` 和
+`use_text_layer` 的新运行分支都不再存在。`pdf_text_probe` 只做分类审计：
+`classification`/`detected_recommendation` 保留文字层特征，`recommendation` 始终是
+`ocr_required`。probe schema 为 3，旧 schema 不会复用。旧版本生成的
+`source_kind: native_text` sidecar 仍可被 refine、脚注和插图阶段只读读取，用于恢复旧输出；
+新运行绝不会生成这类页面。
 
-单栏和多栏原生 PDF 的 `extract_native_text_pages()` 都生成与 OCR 页相同的 `pages/page_NNN.md`，但同时生成带源坐标的
-`pages/page_NNN.ocr.json`。该 sidecar 是脚注和整页插图的版面证据，不是另一套 OCR 结果，
-也不是让本地脚本直接替代 Subagent 判断的标签。
+旧 sidecar 的字段合同保持不变：`pages/page_NNN.md` 与带源坐标的
+`pages/page_NNN.ocr.json` 并存，后者是脚注和整页插图的版面证据，不是另一套 OCR 结果，
+也不是让本地脚本直接替代 Subagent 判断的标签。探测器仍会记录旧 PDF 的多栏审计信息
+（`layout_mode`、`reading_order`、`multi_column_pages`），但这些字段不再改变页面来源。
 
 最小结构如下（字段值为示意）：
 
@@ -591,7 +586,7 @@ pages/page_001.ocr.json    # OCR 或 native-text layout sidecar
   证据，不能把普通上标或引用单独升级成脚注。
 - `footnotes.auto_accept: true` 会让清晰的页面脚注区域走本地路径，只把异常区域交给视觉
   Subagent；设为 `false` 或使用 CLI 的 `--review-all` 才会把所有候选区域纳入视觉复核。
-  `footnotes.native_max_font_ratio`（默认 `0.88`）仍只调节原生 PDF 的字号门槛。
+  `footnotes.native_max_font_ratio`（默认 `0.88`）仍只调节旧原生 PDF sidecar 的字号门槛。
 
 候选报告还会写入 `bottom_detection`：页底 block 总数、页底数字 block 总数、进入候选的数字
 block 数、被排除的页眉/页脚与纯数字页码数，以及 `suspected_missed_count`。达到审计条件的漏检
@@ -646,7 +641,7 @@ secondary-only 的 moved decision 必须包含：
   供候选识别与续文证据层复用。
 - `refine/footnote_layout.py`：只提供 sidecar 的归一化版面事实、页尾相对布局、区域 bbox、
   漏检召回统计和紧凑 block 投影；不判断脚注语义，也不写工作流产物。
-- `refine/footnote_candidates.py`：构造 OCR/native-text 候选、有限 review window、次 OCR 物理行
+- `refine/footnote_candidates.py`：构造 OCR/旧 native-text 候选、有限 review window、次 OCR 物理行
   聚合和主次候选匹配；只返回候选事实，不做区域级接受或最终角色决定。
 - `refine/footnote_regions.py`：把候选事实聚合为页面区域，集中执行区域边界、独立证据和本地
   接受策略；不构造候选、不渲染图像、不校验 Subagent 决定。
@@ -657,7 +652,7 @@ secondary-only 的 moved decision 必须包含：
   manifest；不改变候选、决定或 Markdown。
 
 来源差异只停留在“如何生成候选”和“需要多少 Subagent 复核”：OCR layout 可以在明确
-标签和几何证据下产生高置信度候选，native layout 则只自动接受同页上标与字号双重匹配的
+标签和几何证据下产生高置信度候选，旧 native layout 则只自动接受同页上标与字号双重匹配的
 候选，其余候选保留给 Subagent。
 
 ### 3.1.4 PDF 阶段的复用边界
@@ -676,7 +671,7 @@ PDF 结构阶段采用“共享证据、分离语义”的边界：
 | `footnote_report.py` | 跨页窗口、视觉证据、统计和候选报告持久化 | sidecar 扫描、候选语义、脚注角色决定 |
 | `footnote_contracts.py` | 决定角色和可移动角色集合 | 候选识别、视觉渲染、Markdown 修改 |
 | `footnote_layout.py` | 归一化 bbox、页尾布局、区域事实和漏检统计 | 脚注语义、视觉渲染、Subagent 决定、Markdown 修改 |
-| `footnote_candidates.py` | OCR/native 候选、review window 和双 OCR 候选匹配 | 区域接受、Subagent 决定、Markdown 修改 |
+| `footnote_candidates.py` | OCR/旧 native 候选、review window 和双 OCR 候选匹配 | 区域接受、Subagent 决定、Markdown 修改 |
 | `footnote_regions.py` | 页面区域分组、边界判断和本地接受证据 | 候选构造、视觉渲染、Subagent 决定、Markdown 修改 |
 | `footnote_structure.py` | refinement unit/TOC 角色和 sidecar 排除映射 | 候选语义、视觉渲染、Subagent 决定、Markdown 修改 |
 | `footnote_windows.py` | 相邻页面 review window 的有序构造 | 续文角色判断、候选修改、Markdown 修改 |
@@ -791,7 +786,7 @@ Format workflow services  → shared utilities/domain services
 避免策略层、命令层和实际 OCR 执行层对同一开关产生不同解释。
 
 脚注候选报告至少绑定主 OCR sidecar 哈希、`source_kind`、证据模式和（双 OCR 时）次 OCR
-sidecar 哈希；原生文字稿还必须保留 `coordinate_system: page_points` 的 sidecar。脚注决定
+sidecar 哈希；旧原生文字运行还必须保留 `coordinate_system: page_points` 的 sidecar。脚注决定
 只能引用当前候选报告中的 page/block 地址。插图绑定还绑定候选报告哈希、源页哈希、sidecar
 哈希和证据模式。`refine-local`、`footnote-apply` 和插图加载阶段都会重新检查这些绑定；
 配置从单 OCR 切换到双 OCR，或反向切换时，必须重新准备对应阶段。

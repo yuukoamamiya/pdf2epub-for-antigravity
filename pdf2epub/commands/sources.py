@@ -1,10 +1,7 @@
 """Shared source-stage selection for PDF command workflows."""
 
-import hashlib
-import json
 from pathlib import Path
 
-from pdf2epub.ocr_progress import assess_progress
 from pdf2epub.refine.footnote_status import footnote_normalization_is_current
 from pdf2epub.validation_receipts import validation_receipt_is_current
 
@@ -26,10 +23,9 @@ def _resolve_pdf_polish_source(output_dir: Path, config: dict | None = None):
 def _resolve_pdf_markdown_source(output_dir: Path, config: dict):
     """Choose the Markdown stage shared by PDF workflows.
 
-    Polished Markdown is the source for every PDF workflow. A high-confidence
-    native-text PDF only bypasses visual OCR; its extracted layout still goes
-    through the Subagent polish gate so visual line wraps can be distinguished
-    from semantic paragraph breaks.
+    Polished Markdown is the source for every new PDF workflow.  Legacy
+    native-text runs still carry raw page layout that must pass the Subagent
+    polish gate before translation.
     """
     translation = config.get("translation", {}) or {}
     requested_stage = str(translation.get("source_stage", "auto")).strip().lower()
@@ -60,38 +56,6 @@ def _resolve_pdf_markdown_source(output_dir: Path, config: dict):
     return ocr_dir, "ocr"
 
 
-def _native_text_stage_is_current(output_dir: Path, pages_dir: Path) -> bool:
-    """Return whether native text extraction produced the current page set."""
-    probe_path = output_dir / "pdf_text_probe.json"
-    progress_path = pages_dir / "ocr_progress.json"
-    if not probe_path.is_file() or not progress_path.is_file():
-        return False
-    try:
-        probe = json.loads(probe_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return False
-    if (
-        probe.get("recommendation") != "use_text_layer"
-        or probe.get("classification") != "native_text"
-    ):
-        return False
-    original_pdf = output_dir / "input_original.pdf"
-    if original_pdf.is_file() and probe.get("source_sha256"):
-        try:
-            current_hash = hashlib.sha256(original_pdf.read_bytes()).hexdigest()
-        except OSError:
-            return False
-        if current_hash != probe.get("source_sha256"):
-            return False
-    report = assess_progress(
-        pages_dir,
-        expected_total_pages=probe.get("page_count"),
-        expected_source_sha256=probe.get("source_sha256"),
-        require_sidecars=False,
-    )
-    return report["progress"].get("mode") == "native_text" and report["ready"]
-
-
 def _polished_stage_is_current(
     output_dir: Path,
     polished_dir: Path,
@@ -112,7 +76,6 @@ def _polished_stage_is_current(
 
 
 __all__ = [
-    "_native_text_stage_is_current",
     "_resolve_pdf_polish_source",
     "_polished_stage_is_current",
     "_resolve_pdf_markdown_source",

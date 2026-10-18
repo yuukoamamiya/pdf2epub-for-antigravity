@@ -22,7 +22,6 @@ from pdf2epub.utils.common import resolve_book_input_path
 from pdf2epub.workflow_contracts import (
     MARKDOWN_VALIDATION_SCHEMA_VERSION,
     atomic_write_json,
-    atomic_write_text,
     sha256_file,
 )
 
@@ -40,41 +39,16 @@ def _load_probe(output_dir: Path) -> dict:
 def _load_current_probe(
     output_dir: Path,
     pdf_path: Path,
-    *,
-    text_mode: str = "auto",
 ) -> dict:
     """Reuse a probe only when it attests to the exact current PDF."""
     probe_path = Path(output_dir) / "pdf_text_probe.json"
     if not probe_path.is_file():
         return {}
     probe = _load_probe(output_dir)
-    from pdf2epub.pdf_text_probe import (
-        PDF_TEXT_PROBE_SCHEMA_VERSION,
-        normalize_pdf_text_mode,
-    )
-
-    try:
-        requested_mode = normalize_pdf_text_mode(text_mode)
-    except ValueError:
-        return {}
+    from pdf2epub.pdf_text_probe import PDF_TEXT_PROBE_SCHEMA_VERSION
 
     if probe.get("schema_version") != PDF_TEXT_PROBE_SCHEMA_VERSION:
         return {}
-    cached_mode = probe.get("requested_text_mode")
-    # A probe without the policy field is treated as the default ``auto``
-    # request.  Switching to a forced policy must always trigger a fresh probe
-    # and checkpoint.  Older schema-1 probes never reach this point because
-    # the schema check above rejects them, so legacy auto selections cannot be
-    # reused after the native path became an explicit opt-in.
-    if cached_mode is None:
-        if requested_mode != "auto":
-            return {}
-    else:
-        try:
-            if normalize_pdf_text_mode(cached_mode) != requested_mode:
-                return {}
-        except ValueError:
-            return {}
     if not isinstance(probe.get("source_sha256"), str):
         return {}
     try:
@@ -193,75 +167,30 @@ def ocr_pages_command(args):
         return 1
 
     # A searchable PDF is not automatically trustworthy: scanned books often
-    # carry a hidden OCR text layer.  Only a conservative native-text probe may
-    # bypass visual OCR; searchable-OCR and mixed PDFs stay on Chandra.
-    from pdf2epub.pdf_text_probe import (
-        extract_native_text_pages,
-        probe_pdf_text_layer,
-        resolve_pdf_text_mode,
-    )
-    from pdf2epub.workflow_contracts import atomic_write_text
+    # carry a hidden OCR text layer.  The probe is audit-only; every new run
+    # uses visual OCR.
+    from pdf2epub.pdf_text_probe import probe_pdf_text_layer
 
-    try:
-        text_mode = resolve_pdf_text_mode(config)
-    except ValueError as exc:
-        logger.error(f"Invalid PDF text mode: {exc}")
-        return 1
-
-    probe = _load_current_probe(output_dir, pdf_path, text_mode=text_mode)
+    probe = _load_current_probe(output_dir, pdf_path)
     if probe:
         logger.info("Reusing current PDF text probe; source PDF hash is unchanged")
     else:
         try:
             probe = probe_pdf_text_layer(
                 pdf_path,
-                text_mode=text_mode,
                 progress_callback=lambda current, total: logger.info(
                     f"PDF text probe: page {current}/{total}"
                 ),
             )
             atomic_write_json(output_dir / "pdf_text_probe.json", probe)
         except Exception as exc:
-            if text_mode == "native":
-                logger.error(f"Native PDF text probe failed; refusing visual OCR fallback: {exc}")
-                return 1
             logger.warning(f"PDF text probe failed; continuing with visual OCR: {exc}")
             probe = {"recommendation": "ocr_required", "classification": "probe_failed"}
 
-    if probe.get("recommendation") == "native_required":
-        logger.error(
-            "pdf_text.mode=native requires a high-confidence native PDF text layer; "
-            "the input was classified as non-native"
+    if probe.get("classification") == "native_text":
+        logger.info(
+            "The PDF has a high-confidence text layer, but visual OCR is still used for every new run."
         )
-        return 1
-
-    if probe.get("recommendation") == "use_text_layer":
-        output_dir.mkdir(parents=True, exist_ok=True)
-        original_copy = output_dir / "input_original.pdf"
-        processed_copy = output_dir / "input.pdf"
-        from pdf2epub.workflow_contracts import sha256_file
-
-        if original_copy.exists() and sha256_file(original_copy) != sha256_file(pdf_path):
-            logger.error(
-                "The configured input PDF differs from output/input_original.pdf; "
-                "use a new output title or archive the old run before starting a new book"
-            )
-            return 1
-        if not original_copy.exists():
-            shutil.copy2(pdf_path, original_copy)
-        if not processed_copy.exists():
-            shutil.copy2(pdf_path, processed_copy)
-        try:
-            extract_native_text_pages(pdf_path, output_dir, probe)
-        except Exception as exc:
-            logger.error(f"Native PDF text extraction failed; refusing silent fallback: {exc}")
-            return 1
-        logger.success(
-            "Detected a high-confidence native-text PDF; skipped visual OCR and wrote page text."
-        )
-        logger.info(f"Output: {output_dir / 'pages'}")
-        logger.info("Next step: pdf2epub refine-prepare")
-        return 0
 
     # Preprocess PDF: copy to output dir + add page stamps + compress
     from pdf2epub.utils.pdf_utils import preprocess_pdf
@@ -395,6 +324,8 @@ def ocr_correct_command(args):
         return 1
     output_dir = context.output_dir
     probe = _load_probe(output_dir)
+    # Legacy artifact compatibility: older native-text runs wrote this probe
+    # shape.  New runs never receive a ``use_text_layer`` recommendation.
     if (
         probe.get("classification") == "native_text"
         and probe.get("recommendation") == "use_text_layer"
@@ -521,6 +452,7 @@ def ocr_correct_validate_command(args):
         return 1
     output_dir = context.output_dir
     probe = _load_probe(output_dir)
+    # Legacy artifact compatibility: only old native-text runs have this shape.
     if (
         probe.get("classification") == "native_text"
         and probe.get("recommendation") == "use_text_layer"

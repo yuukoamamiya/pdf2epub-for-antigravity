@@ -208,6 +208,8 @@ def _pdf_stages(
     stages.append(_status_record("ocr-pages", "ocr-pages --resume", ocr_status, ocr_detail))
 
     probe = _read_json(output_dir / "pdf_text_probe.json")
+    # Legacy artifact compatibility: old native-text runs skip visual OCR
+    # correction.  New probes always recommend ``ocr_required``.
     native_text = (
         probe.get("classification") == "native_text"
         and probe.get("recommendation") == "use_text_layer"
