@@ -370,8 +370,9 @@ Subagent 实际读写哪些文件。两者不能互相替代。
 ```text
 ocr-pages
   → pdf_text_probe.json
-  → pages/ (native text extraction only for high-confidence vector PDFs;
-            searchable OCR and scanned PDFs still use visual OCR)
+  → pages/ (auto/ocr always use visual OCR; native text extraction is a
+            legacy opt-in via pdf_text.mode=native for high-confidence
+            vector PDFs)
 ocr-pages 可选：主 OCR + 配置的次 OCR（文本/版面共识）→ ocr_consensus.json
 （仅当 ocr.secondary.enabled=true）ocr-correct + 工作区 Subagent + ocr-correct-validate
 （只复核差异页、共同漏检风险页和确定性抽样页；一致页其余页面自动接受；原生文字跳过）
@@ -436,14 +437,14 @@ heading contract 始终优先；标题绑定只容忍安全的展示格式差异
 ### 3.1.1 OCR 证据模式和结构闸门
 
 `pdf_text.mode` 决定 PDF 页面源；`ocr.secondary.enabled` 是视觉 OCR 结构判断的单一开关，
-不应在脚注或插图模块中再添加平行开关。`refine/pdf_evidence.py` 是脚注和插图共同使用的
-证据选择边界；原生文字 PDF 先由
-`pdf_text_probe` 分类，使用独立的 native layout 证据；它不属于
-双 OCR，也不因配置残留而运行第二套 OCR：
+不应在脚注或插图模块中再添加平行开关。`auto` 和 `ocr` 都走视觉 OCR；原生文本是 legacy
+opt-in，只有显式 `pdf_text.mode: native` 且 `pdf_text_probe` 判定为高置信度原生文字时才
+使用。`refine/pdf_evidence.py` 是脚注和插图共同使用的证据选择边界；原生文字 PDF 使用独立的
+native layout 证据；它不属于双 OCR，也不因配置残留而运行第二套 OCR：
 
 | 页面来源 | 配置 | 主/次证据 | 结构阶段行为 |
 |---|---|---|---|
-| `native_text`（单栏或多栏） | 忽略 `ocr.secondary.enabled` | PDF 原生文本块/坐标/字体；报告兼容字段为 `single_ocr`；多栏页额外记录 `column_major` 阅读顺序 | 不运行视觉 OCR、`ocr-correct` 或 OCR 共识；同页上标+小字号的高置信度候选本地接受，其余候选交 Subagent。 |
+| `native_text`（legacy，单栏或多栏） | 显式 `pdf_text.mode: native`，忽略 `ocr.secondary.enabled` | PDF 原生文本块/坐标/字体；报告兼容字段为 `single_ocr`；多栏页额外记录 `column_major` 阅读顺序 | 不运行视觉 OCR、`ocr-correct` 或 OCR 共识；同页上标+小字号的高置信度候选本地接受，其余候选交 Subagent。 |
 | 视觉 OCR | `false` | 只有 `pages/` 主 OCR | 忽略旧共识产物；明确的高置信度 OCR 脚注可本地接受，疑难候选交给 Subagent。 |
 | 视觉 OCR | `true` | 当前 `ocr_secondary/` + `ocr_consensus.json` | 共识报告和次 OCR sidecar 参与脚注/插图候选比较；差异页必须复核。 |
 
@@ -522,16 +523,17 @@ pages/page_001.ocr.json    # OCR 或 native-text layout sidecar
 
 #### 3.1.2.1 原生文字 PDF sidecar 合同
 
-在 `pdf_text.mode: auto` 下，高置信度原生 PDF 由 `pdf_text_probe` 选择直接文本提取；
-`pdf_text.mode: ocr` 会覆盖该选择并强制使用视觉 OCR，`pdf_text.mode: native` 则在探测
-不到高置信度原生文字时失败。探测器同时检查文本行的横向
-分布；如果发现两个具有明显 gutter、足够行数和纵向重叠的稳定栏，原生提取器会依据文本
-span 的起始 x 坐标拆分左右栏，再按“左栏自上而下、右栏自上而下”输出，而不是把整本 PDF
-退回视觉 OCR。自动原生选择时报告为 `classification: native_text` 与
-`recommendation: use_text_layer`；强制 OCR 时则保留 `detected_recommendation: use_text_layer`
-并将 `recommendation` 写为 `ocr_required`。报告同时记录 `layout_mode: multi_column`、
-`reading_order: column_major`，以及
-`requested_text_mode`、`detected_recommendation` 和 `selection`，用于恢复时拒绝复用不匹配的缓存。
+原生文本提取是 legacy opt-in：只有 `pdf_text.mode: native` 才可能选择直接文本提取，并在
+探测不到高置信度原生文字时失败；默认的 `pdf_text.mode: auto` 和 `ocr` 都强制使用视觉 OCR。
+探测结果始终保留为 `classification`/`detected_recommendation`，但 `auto` 的
+`recommendation` 为 `ocr_required`、`selection` 为 `auto_ocr_native_legacy`；显式 native 选中
+文本层时才写 `recommendation: use_text_layer`、`selection: forced_native_legacy` 和
+`native_legacy: true`。探测器同时检查文本行的横向分布；如果发现两个具有明显 gutter、足够
+行数和纵向重叠的稳定栏，原生提取器会依据文本 span 的起始 x 坐标拆分左右栏，再按“左栏自上
+而下、右栏自上而下”输出，而不是把整本 PDF 退回视觉 OCR。报告同时记录
+`layout_mode: multi_column`、`reading_order: column_major`，以及 `requested_text_mode`、
+`detected_recommendation` 和 `selection`，用于恢复时拒绝复用不匹配的缓存。probe schema 为
+2；schema 1 的旧 probe 不再复用，旧 `auto` 原生选择必须显式改回 `mode: native`。
 
 单栏和多栏原生 PDF 的 `extract_native_text_pages()` 都生成与 OCR 页相同的 `pages/page_NNN.md`，但同时生成带源坐标的
 `pages/page_NNN.ocr.json`。该 sidecar 是脚注和整页插图的版面证据，不是另一套 OCR 结果，

@@ -1,9 +1,11 @@
 """Probe PDF text layers without trusting them by default.
 
 Searchable PDFs are not necessarily born-digital.  A scanned PDF can contain
-an OCR text layer which is less reliable than a fresh visual OCR pass.  This
-module therefore only selects direct text extraction for conservative,
-vector-text candidates; every other PDF remains on the configured OCR path.
+an OCR text layer which is less reliable than a fresh visual OCR pass.  The
+probe therefore still classifies every PDF conservatively, but native text
+extraction is now a legacy opt-in: ``auto`` always uses visual OCR and only an
+explicit ``pdf_text.mode: native`` selects the direct text layer for a
+high-confidence vector-text candidate.
 """
 
 from __future__ import annotations
@@ -27,7 +29,7 @@ _MULTI_COLUMN_MIN_GAP_RATIO = 0.15
 _MULTI_COLUMN_MIN_SIDE_RATIO = 0.20
 _MULTI_COLUMN_MIN_Y_OVERLAP_RATIO = 0.45
 _MULTI_COLUMN_MAX_MEDIAN_WIDTH_RATIO = 0.55
-PDF_TEXT_PROBE_SCHEMA_VERSION = 1
+PDF_TEXT_PROBE_SCHEMA_VERSION = 2
 PDF_TEXT_MODES = frozenset({"auto", "native", "ocr"})
 
 
@@ -43,9 +45,11 @@ def normalize_pdf_text_mode(value: Any) -> str:
 def resolve_pdf_text_mode(config: Mapping[str, Any] | None) -> str:
     """Return the configured PDF text-source policy.
 
-    ``auto`` preserves the conservative probe decision. ``ocr`` forces the
-    visual page-OCR path even when a PDF has an extractable text layer;
-    ``native`` is an explicit opt-in and fails closed for non-native PDFs.
+    ``auto`` always uses the visual page-OCR path; the probe still records the
+    conservative ``classification``/``detected_recommendation`` for audits.
+    ``ocr`` forces visual OCR as well.  ``native`` is the explicit legacy
+    opt-in that selects the direct text layer and fails closed for non-native
+    PDFs.
     """
     raw = config.get("pdf_text") if isinstance(config, Mapping) else None
     if raw is None:
@@ -178,11 +182,14 @@ def probe_pdf_text_layer(
     text_mode: str = "auto",
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> Dict[str, Any]:
-    """Classify a PDF conservatively as native text or OCR-required.
+    """Classify a PDF conservatively and select the configured page source.
 
     The classification is intentionally asymmetric: false negatives cost OCR
     time, while false positives can silently replace a trustworthy visual OCR
-    result with a bad hidden OCR layer.
+    result with a bad hidden OCR layer.  ``classification`` and
+    ``detected_recommendation`` always report that conservative decision.
+    ``auto`` and ``ocr`` then force visual OCR; only an explicit ``native``
+    request may select the legacy direct text layer.
     """
     text_mode = normalize_pdf_text_mode(text_mode)
     pdf_path = Path(pdf_path).resolve()
@@ -267,10 +274,14 @@ def probe_pdf_text_layer(
             if detected_recommendation == "use_text_layer"
             else "native_required"
         )
-        selection = "forced_native"
+        selection = "forced_native_legacy"
     else:
-        recommendation = detected_recommendation
-        selection = "auto_detected"
+        # ``auto`` no longer trusts the text layer.  The conservative
+        # detection stays in the report for audit and explicit legacy reuse.
+        recommendation = "ocr_required"
+        selection = "auto_ocr_native_legacy"
+
+    native_legacy = recommendation == "use_text_layer"
 
     return {
         "schema_version": PDF_TEXT_PROBE_SCHEMA_VERSION,
@@ -296,6 +307,7 @@ def probe_pdf_text_layer(
         "requested_text_mode": text_mode,
         "selection": selection,
         "recommendation": recommendation,
+        "native_legacy": native_legacy,
     }
 
 

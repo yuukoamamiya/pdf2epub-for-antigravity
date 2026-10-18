@@ -61,9 +61,11 @@ def _load_current_probe(
     if probe.get("schema_version") != PDF_TEXT_PROBE_SCHEMA_VERSION:
         return {}
     cached_mode = probe.get("requested_text_mode")
-    # Schema 1 probes created before the policy field are legacy ``auto``
-    # probes.  They remain reusable only for the default mode; switching to a
-    # forced policy must always trigger a fresh probe and checkpoint.
+    # A probe without the policy field is treated as the default ``auto``
+    # request.  Switching to a forced policy must always trigger a fresh probe
+    # and checkpoint.  Older schema-1 probes never reach this point because
+    # the schema check above rejects them, so legacy auto selections cannot be
+    # reused after the native path became an explicit opt-in.
     if cached_mode is None:
         if requested_mode != "auto":
             return {}

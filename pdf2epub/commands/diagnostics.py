@@ -208,7 +208,10 @@ def _pdf_stages(
     stages.append(_status_record("ocr-pages", "ocr-pages --resume", ocr_status, ocr_detail))
 
     probe = _read_json(output_dir / "pdf_text_probe.json")
-    native_text = probe.get("classification") == "native_text"
+    native_text = (
+        probe.get("classification") == "native_text"
+        and probe.get("recommendation") == "use_text_layer"
+    )
     if native_text or not policy.requires_ocr_correction:
         stages.append(
             _status_record(

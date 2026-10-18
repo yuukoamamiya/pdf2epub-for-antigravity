@@ -11,6 +11,7 @@ from pdf2epub.commands.markdown_context import _load_pdf_continuation_toc_titles
 from pdf2epub.commands.ocr import _load_current_probe
 from pdf2epub.pipeline_policy import PipelinePolicy, SUPPORTED_PIPELINE_NAMES
 from pdf2epub.pdf_text_probe import (
+    PDF_TEXT_PROBE_SCHEMA_VERSION,
     extract_native_text_pages,
     probe_pdf_text_layer,
     resolve_pdf_text_mode,
@@ -100,10 +101,26 @@ def test_pdf_probe_only_accepts_clean_vector_text(tmp_path: Path):
     searchable_report = probe_pdf_text_layer(searchable_ocr)
 
     assert native_report["classification"] == "native_text"
-    assert native_report["recommendation"] == "use_text_layer"
+    assert native_report["detected_recommendation"] == "use_text_layer"
+    assert native_report["recommendation"] == "ocr_required"
+    assert native_report["selection"] == "auto_ocr_native_legacy"
+    assert native_report["native_legacy"] is False
     assert searchable_report["classification"] == "searchable_ocr_or_mixed"
     assert searchable_report["recommendation"] == "ocr_required"
     assert native_report["multi_column_page_ratio"] == 0.0
+
+
+def test_pdf_probe_explicit_native_selects_legacy_text_layer(tmp_path: Path):
+    source = tmp_path / "native.pdf"
+    _make_native_pdf(source)
+
+    report = probe_pdf_text_layer(source, text_mode="native")
+
+    assert report["classification"] == "native_text"
+    assert report["detected_recommendation"] == "use_text_layer"
+    assert report["recommendation"] == "use_text_layer"
+    assert report["selection"] == "forced_native_legacy"
+    assert report["native_legacy"] is True
 
 
 def test_pdf_probe_reports_page_progress_without_changing_classification(tmp_path: Path):
@@ -142,8 +159,9 @@ def test_pdf_probe_native_mode_fails_closed_for_non_native_pdf(tmp_path: Path):
 
     assert report["classification"] == "searchable_ocr_or_mixed"
     assert report["detected_recommendation"] == "ocr_required"
-    assert report["selection"] == "forced_native"
+    assert report["selection"] == "forced_native_legacy"
     assert report["recommendation"] == "native_required"
+    assert report["native_legacy"] is False
 
 
 def test_pdf_text_mode_defaults_and_validates():
@@ -153,30 +171,46 @@ def test_pdf_text_mode_defaults_and_validates():
         resolve_pdf_text_mode({"pdf_text": {"mode": "guess"}})
 
 
-def test_pdf_probe_cache_requires_matching_source_hash(tmp_path: Path):
+def test_pdf_probe_cache_rejects_legacy_schema_and_matching_source_hash(tmp_path: Path):
     source = tmp_path / "source.pdf"
     source.write_bytes(b"source")
     output_dir = tmp_path / "output"
     output_dir.mkdir()
+    source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
     (output_dir / "pdf_text_probe.json").write_text(
         json.dumps(
             {
-                "schema_version": 1,
-                "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+                "schema_version": PDF_TEXT_PROBE_SCHEMA_VERSION - 1,
+                "source_sha256": source_hash,
                 "page_count": 1,
-                "classification": "scanned_or_low_text",
-                "recommendation": "ocr_required",
+                "classification": "native_text",
+                "recommendation": "use_text_layer",
+                "requested_text_mode": "auto",
             }
         ),
         encoding="utf-8",
     )
 
+    assert _load_current_probe(output_dir, source) == {}
+    (output_dir / "pdf_text_probe.json").write_text(
+        json.dumps(
+            {
+                "schema_version": PDF_TEXT_PROBE_SCHEMA_VERSION,
+                "source_sha256": source_hash,
+                "page_count": 1,
+                "classification": "native_text",
+                "recommendation": "ocr_required",
+                "requested_text_mode": "auto",
+            }
+        ),
+        encoding="utf-8",
+    )
     assert _load_current_probe(output_dir, source)["recommendation"] == "ocr_required"
     (output_dir / "pdf_text_probe.json").write_text(
         json.dumps(
             {
-                "schema_version": 1,
-                "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+                "schema_version": PDF_TEXT_PROBE_SCHEMA_VERSION,
+                "source_sha256": source_hash,
                 "page_count": 1,
                 "classification": "native_text",
                 "recommendation": "ocr_required",
@@ -191,14 +225,21 @@ def test_pdf_probe_cache_requires_matching_source_hash(tmp_path: Path):
     assert _load_current_probe(output_dir, source, text_mode="ocr") == {}
 
 
-def test_pdf_probe_keeps_two_column_native_text_on_native_path(tmp_path: Path):
+def test_pdf_probe_two_column_defaults_to_ocr_and_native_opt_in_keeps_columns(tmp_path: Path):
     two_column = tmp_path / "two-column.pdf"
     _make_two_column_pdf(two_column)
 
-    report = probe_pdf_text_layer(two_column)
+    auto_report = probe_pdf_text_layer(two_column)
+    report = probe_pdf_text_layer(two_column, text_mode="native")
 
+    assert auto_report["classification"] == "native_text"
+    assert auto_report["detected_recommendation"] == "use_text_layer"
+    assert auto_report["recommendation"] == "ocr_required"
+    assert auto_report["selection"] == "auto_ocr_native_legacy"
+    assert auto_report["layout_mode"] == "multi_column"
     assert report["classification"] == "native_text"
     assert report["recommendation"] == "use_text_layer"
+    assert report["selection"] == "forced_native_legacy"
     assert report["layout_mode"] == "multi_column"
     assert report["reading_order"] == "column_major"
     assert report["multi_column_pages"]
@@ -275,7 +316,7 @@ def test_pipeline_policy_exposes_one_supported_pipeline_registry():
 def test_native_text_extraction_writes_page_contract(tmp_path: Path):
     source = tmp_path / "native.pdf"
     _make_native_pdf(source)
-    probe = probe_pdf_text_layer(source)
+    probe = probe_pdf_text_layer(source, text_mode="native")
     extract_native_text_pages(source, tmp_path / "book", probe)
 
     progress = json.loads(

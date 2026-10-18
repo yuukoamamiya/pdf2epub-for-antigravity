@@ -105,6 +105,45 @@ def test_doctor_blocks_retired_paddle_secondary_backend(tmp_path: Path, monkeypa
     assert checks["dependency.paddle"]["status"] == "blocked"
 
 
+def test_status_only_skips_ocr_correct_for_explicit_native_legacy(tmp_path: Path, monkeypatch):
+    config_path = _config(tmp_path)
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace(
+            "    enabled: false", "    enabled: true\n    backend: vision"
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    output_dir = tmp_path / "output" / "Diagnostics Book"
+    output_dir.mkdir(parents=True)
+
+    (output_dir / "pdf_text_probe.json").write_text(
+        json.dumps(
+            {
+                "classification": "native_text",
+                "recommendation": "ocr_required",
+            }
+        ),
+        encoding="utf-8",
+    )
+    report = build_status(config_path)
+    stages = {item["name"]: item for item in report["stages"]}
+    assert stages["ocr-correct"]["status"] != "skipped"
+
+    (output_dir / "pdf_text_probe.json").write_text(
+        json.dumps(
+            {
+                "classification": "native_text",
+                "recommendation": "use_text_layer",
+            }
+        ),
+        encoding="utf-8",
+    )
+    report = build_status(config_path)
+    stages = {item["name"]: item for item in report["stages"]}
+    assert stages["ocr-correct"]["status"] == "skipped"
+
+
 def test_status_detects_stale_ocr_source_hash(tmp_path: Path, monkeypatch):
     config_path = _config(tmp_path)
     monkeypatch.chdir(tmp_path)

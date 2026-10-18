@@ -46,10 +46,17 @@ pdf_text:
   mode: auto  # auto / native / ocr
 ```
 
-`auto` 是默认值，按探测结果在原生文本和视觉 OCR 之间选择；`ocr` 会强制所有 PDF（包括有
-可提取文字层的 PDF）走视觉 OCR，适合怀疑隐藏 OCR 层、换行或脚注版面不可靠的原生 PDF；
-`native` 只允许高置信度原生文字 PDF，不满足条件时直接阻断，不会静默改走 OCR。切换该模式
-后，旧的 `pdf_text_probe.json` 不会被复用。
+`auto` 是默认值，**始终走视觉 OCR**；探测结果只写入 `pdf_text_probe.json` 的
+`classification`/`detected_recommendation` 供审计。`ocr` 同样强制所有 PDF 走视觉 OCR。
+原生文本提取已降级为 legacy：只有显式设置 `native` 才会使用原生文本层，且要求高置信度
+原生文字 PDF，不满足条件时直接阻断，不会静默改走 OCR。旧的原生运行若想复用已有
+`pages/page_*.ocr.json`，必须显式设置 `mode: native`。切换模式或 probe schema 版本后，
+旧的 `pdf_text_probe.json` 不会被复用。
+
+```yaml
+pdf_text:
+  mode: native  # legacy opt-in：仅高置信度原生文字 PDF
+```
 
 当前默认主 OCR 是 Chandra。脚注阶段先使用 OCR sidecar 的 `bbox[3]`、页底相交比例、数字开头、
 块间距和连续编号推断页面级脚注区域；`Footnote` 标签不能单独绕过几何条件，纯数字页码会排除。
@@ -94,15 +101,14 @@ uv sync --extra ocr-vision
 检查点，旧的脚注决定和插图绑定不会被静默复用。两套 OCR 一致只代表通过筛查，不代表一定
 正确；整页插图、脚注归属和引用/参考文献区分仍由 Subagent 复核。
 
-Chandra 是当前主 OCR。默认情况下原生文字 PDF 会保留版面信息；设置 `pdf_text.mode: ocr`
-后也会改用视觉 OCR。扫描或混合 PDF 使用视觉 OCR。两种来源都不会把普通上标、序数或行内数字引用自动判成脚注，
+Chandra 是当前主 OCR。默认的 `pdf_text.mode: auto` 和显式的 `ocr` 都会使用视觉 OCR，
+扫描或混合 PDF 也使用视觉 OCR。视觉 OCR 不会把普通上标、序数或行内数字引用自动判成脚注，
 清晰且证据充分的脚注区域可由本地规则直接处理，边界不清、跨页续文或 OCR 证据冲突的区域
 才交由 Subagent 复核。
 
-在 `pdf_text.mode: auto` 下，原生文字 PDF 即使是稳定双栏，也不会仅因栏布局而强制 OCR；提取器会利用 PDF 文本 span 的
-坐标按栏重排，并在页面 sidecar 中记录 `layout_mode: multi_column`。只有扫描图、隐藏 OCR
-文字层或其他未通过原生文字置信度门禁的 PDF 才会自动进入视觉 OCR；需要统一使用视觉 OCR
-时请显式设置 `pdf_text.mode: ocr`。
+只有显式设置 `pdf_text.mode: native` 时才走 legacy 原生文本路径。即使是稳定双栏，原生
+提取器也会利用 PDF 文本 span 的坐标按栏重排，并在页面 sidecar 中记录
+`layout_mode: multi_column`；但该路径不再由 `auto` 自动选择，需要复用时必须显式 opt-in。
 
 ## 当前输出和公式策略
 
