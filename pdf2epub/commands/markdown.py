@@ -472,9 +472,11 @@ def _validate_pdf_markdown_task(args, task: str):
         "book_level_gates_forced": force_full_final,
     }
     if task == "translate":
-        # File mode is intentionally cheap: the Subagent can close the loop
-        # on one unit without making a book-level TOC/context decision.
+        # File mode stays scoped: the Subagent can close the loop on one unit
+        # without making a book-level TOC/context decision, while still
+        # checking that unit's own visible TOC heading bindings.
         if getattr(args, "file", None):
+            _apply_local_toc_heading_binding(output_dir, report, str(selected_file))
             _persist_file_validation_checkpoint(output_dir, report, task)
         else:
             entity_report = _validate_translation_entities(output_dir, config)
@@ -694,6 +696,49 @@ def _sync_subagent_manifest_progress(
             elif assigned & pending:
                 item["status"] = "pending"
     atomic_write_json(manifest_path, manifest)
+
+
+def _apply_local_toc_heading_binding(
+    output_dir: Path,
+    report: dict,
+    selected_file: str,
+) -> dict:
+    """Apply the scoped TOC heading gate to a single-file validation report."""
+    from pdf2epub.toc_translation_workflow import validate_toc_heading_bindings
+
+    heading_report = validate_toc_heading_bindings(
+        output_dir, only_files=[selected_file]
+    )
+    report["toc_heading_bindings_local"] = heading_report
+    if heading_report.get("valid", True):
+        return heading_report
+    report["all_passed"] = False
+    valid_files = report.get("valid_files")
+    if isinstance(valid_files, list) and selected_file in valid_files:
+        valid_files.remove(selected_file)
+    reason = "; ".join(str(error) for error in heading_report.get("errors", [])) or (
+        "local TOC heading binding failed"
+    )
+    retry_required = report.setdefault("retry_required", [])
+    retry_required.append(
+        {
+            "file": selected_file,
+            "kind": "toc_heading_binding",
+            "action": "retry_subagent",
+            "reason": reason,
+        }
+    )
+    report["retry_required_files"] = sorted(
+        {
+            str(item["file"])
+            for item in retry_required
+            if isinstance(item, dict) and item.get("file")
+        }
+    )
+    validated_path = Path(output_dir) / "translated" / "validated" / selected_file
+    validated_path.unlink(missing_ok=True)
+    logger.error(f"TOC heading binding failed for {selected_file}: {reason}")
+    return heading_report
 
 
 def _persist_file_validation_checkpoint(output_dir: Path, report: dict, task: str) -> None:

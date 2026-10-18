@@ -809,7 +809,10 @@ ocr-pages --resume
   hash 过期、page/block 地址无法唯一命中或缺少正文命中，都是源阶段/定位失败，应阻断并
   重建候选；不能用手工改 JSON 或 `--allow-review-warnings` 绕过。
 
-单文件校验只提供 checkpoint，不能替代全量校验。源稿、实体表、TOC 或术语上下文变化
+单文件校验会先执行该文件绑定的可见 TOC heading 局部检查，报告写入
+`toc_heading_bindings_local`；绑定失败时该文件从 `valid_files` 移除，对应的
+`translated/validated/` 副本被删除，并写入 `retry_required`。单文件结果仍只提供
+checkpoint，不能替代全量校验。源稿、实体表、TOC 或术语上下文变化
 只应使受影响的 checkpoint 重新进入 `pending`；旧 manifest 没有单元级上下文哈希时，
 为安全起见按整批重新处理。父 manifest 是完整审计/恢复索引，worker handoff 则是只含
 当前 assignment 的最小运行投影。

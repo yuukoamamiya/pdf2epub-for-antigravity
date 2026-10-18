@@ -857,7 +857,10 @@ translate-toc → translate-toc-validate
 translate-validate --file chapter_5.3.2.md
 ```
 
-单文件结果会写入 `translate_file_validation.json`，供 `--resume` 使用；它不等同于全书校验。
+单文件模式会同时检查该文件绑定的可见 TOC 标题：结果写入
+`report["toc_heading_bindings_local"]`，绑定失败时从 `valid_files` 移除该文件、删除
+`translated/validated/` 中的副本并写入 `retry_required`。单文件结果会写入
+`translate_file_validation.json`，供 `--resume` 使用；它不等同于全书校验。
 未完工时运行不带 `--file` 的校验会输出 `[完成/总数]` 和 pending 清单，并暂缓 TOC heading
 binding；所有目标文件存在后才运行该门禁。需要显式提前做不完整终审时使用
 `translate-validate --final`，打包前仍须完成不带 `--file` 的最终校验。

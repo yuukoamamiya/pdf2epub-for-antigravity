@@ -7,7 +7,7 @@ import json
 import re
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 
 from .subagent_runtime import estimate_tokens, resolve_subagent_model
@@ -803,7 +803,11 @@ def _normalize_toc_heading_for_binding(value: str) -> str:
     return normalized
 
 
-def validate_toc_heading_bindings(output_dir: Path) -> Dict[str, Any]:
+def validate_toc_heading_bindings(
+    output_dir: Path,
+    *,
+    only_files: Optional[Iterable[str]] = None,
+) -> Dict[str, Any]:
     """Check translated TOC labels with conservative presentation tolerance."""
     output_dir = Path(output_dir)
     manifest_path = output_dir / "translate_subagent_manifest.json"
@@ -814,17 +818,31 @@ def validate_toc_heading_bindings(output_dir: Path) -> Dict[str, Any]:
     except (OSError, json.JSONDecodeError) as exc:
         return {"valid": False, "errors": [f"invalid translation manifest: {exc}"]}
     contexts = manifest.get("toc_heading_contexts", {})
-    if not contexts:
+    requested: Optional[List[str]] = None
+    if only_files is not None:
+        requested = list(dict.fromkeys(str(name) for name in only_files))
+    if not contexts and requested is None:
         # Older completed runs predate the exact-heading contract. They remain
         # readable, but new runs always carry this gate in their manifest.
         return {"valid": True, "skipped": True, "errors": []}
+    if requested is None and not isinstance(contexts, Mapping):
+        contexts = {}
     target_dir = output_dir / "translated" / "validated"
     errors = []
     checked = []
     skipped = []
     normalized_matches: List[Dict[str, str]] = []
-    for name, context in contexts.items():
+    names = requested if requested is not None else list(contexts)
+    for name in names:
         target = target_dir / str(name)
+        if requested is not None and not target.is_file():
+            errors.append(f"{name}: translated target file is missing")
+            continue
+        context = contexts.get(name) if isinstance(contexts, Mapping) else None
+        if context is None:
+            if requested is not None:
+                skipped.append({"file": name, "reason": "no_heading_context"})
+            continue
         candidate_files = [target]
         for group in manifest.get("chapter_groups", {}).values():
             if str(name) in group:
@@ -908,13 +926,17 @@ def validate_toc_heading_bindings(output_dir: Path) -> Dict[str, Any]:
                 )
             if match_mode is None:
                 errors.append(f"{name}: exact {label} not found: {value!r}")
-    return {
+    report = {
         "valid": not errors,
         "errors": errors,
         "checked": checked,
         "skipped": skipped,
         "normalized_matches": normalized_matches,
     }
+    if requested is not None:
+        report["scope"] = "files"
+        report["files_checked"] = requested
+    return report
 
 __all__ = [
     "integrate_toc_translation_task",

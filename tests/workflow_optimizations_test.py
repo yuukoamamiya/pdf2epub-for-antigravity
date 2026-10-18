@@ -6,6 +6,7 @@ import pymupdf
 import pytest
 
 from pdf2epub.markdown_handoff import prepare_markdown_subagent
+from pdf2epub.commands.markdown import _apply_local_toc_heading_binding
 from pdf2epub.commands.markdown_context import _load_pdf_continuation_toc_titles
 from pdf2epub.commands.ocr import _load_current_probe
 from pdf2epub.pipeline_policy import PipelinePolicy, SUPPORTED_PIPELINE_NAMES
@@ -1583,6 +1584,170 @@ def test_toc_heading_binding_allows_whitespace_and_outer_quote_variants(tmp_path
     assert report["valid"] is True
     assert len(report["normalized_matches"]) == 2
     assert {item["match"] for item in report["checked"]} == {"normalized"}
+
+
+def test_toc_heading_bindings_only_files_scope_ignores_other_units(
+    tmp_path: Path,
+):
+    output = tmp_path / "output"
+    output.mkdir()
+    _write_heading_manifest(
+        output,
+        {
+            "a.md": {"toc_title": "第一章", "binding_mode": "visible"},
+        },
+    )
+    validated = output / "translated" / "validated"
+    validated.mkdir(parents=True)
+    (validated / "a.md").write_text("# Wrong heading\n", encoding="utf-8")
+
+    report = validate_toc_heading_bindings(output, only_files=["a.md"])
+
+    assert report["scope"] == "files"
+    assert report["files_checked"] == ["a.md"]
+    assert report["valid"] is False
+    assert report["errors"]
+    assert all("a.md" in error for error in report["errors"])
+    assert all("b.md" not in error for error in report["errors"])
+    assert {item["file"] for item in report["checked"]} == {"a.md"}
+
+
+def test_toc_heading_bindings_only_files_requires_target(tmp_path: Path):
+    output = tmp_path / "output"
+    output.mkdir()
+    _write_heading_manifest(
+        output,
+        {"a.md": {"toc_title": "第一章", "binding_mode": "visible"}},
+    )
+
+    report = validate_toc_heading_bindings(output, only_files=["a.md"])
+
+    assert report["valid"] is False
+    assert any(
+        "a.md" in error and "missing" in error for error in report["errors"]
+    )
+
+
+def test_toc_heading_bindings_only_files_skips_missing_context(
+    tmp_path: Path,
+):
+    output = tmp_path / "output"
+    output.mkdir()
+    _write_heading_manifest(
+        output,
+        {"b.md": {"toc_title": "第二章", "binding_mode": "visible"}},
+    )
+    validated = output / "translated" / "validated"
+    validated.mkdir(parents=True)
+    (validated / "a.md").write_text("# Body\n", encoding="utf-8")
+
+    report = validate_toc_heading_bindings(output, only_files=["a.md"])
+
+    assert report["valid"] is True
+    assert report["skipped"] == [
+        {"file": "a.md", "reason": "no_heading_context"}
+    ]
+
+
+def _write_single_file_heading_fixture(
+    output: Path,
+    target_text: str,
+) -> Path:
+    output.mkdir(parents=True)
+    (output / "toc_tree_translated.json").write_text(
+        json.dumps(
+            {"chapters": [{"title": "第一章", "children": []}]},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    progress_dir = output / "ocr_markdown"
+    progress_dir.mkdir()
+    (progress_dir / "tree_progress.json").write_text(
+        json.dumps(
+            {
+                "units": [
+                    {
+                        "index_path": [1],
+                        "file": "chapter_1.part1.md",
+                        "part_files": ["chapter_1.part1.md"],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    _write_heading_manifest(
+        output,
+        {
+            "chapter_1.part1.md": {
+                "toc_title": "第一章",
+                "binding_mode": "visible",
+                "children": [],
+            }
+        },
+    )
+    target = output / "translated" / "validated" / "chapter_1.part1.md"
+    target.parent.mkdir(parents=True)
+    target.write_text(target_text, encoding="utf-8")
+    return target
+
+
+def test_single_file_heading_binding_failure_updates_report(tmp_path: Path):
+    output = tmp_path / "output"
+    target = _write_single_file_heading_fixture(
+        output, "# Chapter One\n\nBody\n"
+    )
+    report = {
+        "all_passed": True,
+        "valid_files": ["chapter_1.part1.md"],
+        "retry_required": [],
+        "retry_required_files": [],
+    }
+
+    heading_report = _apply_local_toc_heading_binding(
+        output, report, "chapter_1.part1.md"
+    )
+
+    assert heading_report["valid"] is False
+    assert report["toc_heading_bindings_local"] is heading_report
+    assert report["all_passed"] is False
+    assert report["valid_files"] == []
+    assert report["retry_required"] == [
+        {
+            "file": "chapter_1.part1.md",
+            "kind": "toc_heading_binding",
+            "action": "retry_subagent",
+            "reason": heading_report["errors"][0],
+        }
+    ]
+    assert report["retry_required_files"] == ["chapter_1.part1.md"]
+    assert not target.exists()
+
+
+def test_single_file_heading_binding_success_retains_validated_copy(
+    tmp_path: Path,
+):
+    output = tmp_path / "output"
+    target = _write_single_file_heading_fixture(
+        output, "# 第一章\n\nBody\n"
+    )
+    report = {
+        "all_passed": True,
+        "valid_files": ["chapter_1.part1.md"],
+        "retry_required": [],
+        "retry_required_files": [],
+    }
+
+    heading_report = _apply_local_toc_heading_binding(
+        output, report, "chapter_1.part1.md"
+    )
+
+    assert heading_report["valid"] is True
+    assert report["all_passed"] is True
+    assert report["valid_files"] == ["chapter_1.part1.md"]
+    assert report["retry_required"] == []
+    assert target.exists()
 
 
 def test_batching_caps_configured_worker_file_count():

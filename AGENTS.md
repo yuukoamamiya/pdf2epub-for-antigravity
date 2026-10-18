@@ -589,7 +589,9 @@ uv run pdf2epub -c config.yaml check-ready --stage translate --skip-entities
    uv run pdf2epub -c config.yaml translate-validate --file <文件名>.md
    ```
 
-   单文件结果只作为 checkpoint，不能替代最终全量校验。
+   单文件校验会检查本文件绑定的可见 TOC 标题（`toc_heading_bindings_local`）；绑定失败时
+   该文件会移出 `valid_files`、删除对应的 `translated/validated/` 副本并进入
+   `retry_required`。单文件结果仍只作为 checkpoint，不能替代最终全量校验。
 7. 所有单元完成后运行 `translate-validate`。翻译未完工时，全量命令会先输出完成度和
    pending 清单，并暂缓 TOC heading binding；只有所有目标文件存在时才运行该终审门，或显式
    使用 `translate-validate --final` 强制检查不完整输出。`retry_required` 中的明确错误直接重新交给
