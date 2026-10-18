@@ -10,7 +10,13 @@ import json
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
-from ..workflow_contracts import atomic_write_json, atomic_write_text
+from ..workflow_contracts import atomic_write_json, atomic_write_text, sha256_file
+from .endnote_review import (
+    AMBIGUITIES_FILENAME,
+    DECISIONS_FILENAME,
+    collect_endnote_definition_ambiguities,
+    write_endnote_definition_ambiguities,
+)
 from .footnote_contracts import FOOTNOTE_PREPARE_SCHEMA_VERSION
 from .footnote_structure import load_refined_units as _load_refined_units
 from .footnote_prepare import prepare_footnote_candidates
@@ -98,6 +104,20 @@ def prepare_footnote_subagent(
         native_max_font_ratio=native_max_font_ratio,
     )
     unit_context_files = _write_unit_contexts(output_dir, report)
+    if report["footnote_mode"] == "disabled":
+        ambiguities = {
+            "schema_version": 1,
+            "items": [],
+            "source_sha256": {},
+        }
+    else:
+        ambiguities = collect_endnote_definition_ambiguities(output_dir)
+    ambiguity_path = write_endnote_definition_ambiguities(output_dir, ambiguities)
+    ambiguity_items = ambiguities.get("items", [])
+    ambiguity_count = len(ambiguity_items) if isinstance(ambiguity_items, list) else 0
+    report["endnote_ambiguity_count"] = ambiguity_count
+    report["endnote_definition_ambiguities_sha256"] = sha256_file(ambiguity_path)
+    atomic_write_json(output_dir / "footnote_candidates.json", report)
     manifest = {
         "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
         "task": "footnote-prepare",
@@ -132,7 +152,15 @@ def prepare_footnote_subagent(
         "consensus_visual_review_pages": report["consensus_visual_review_pages"],
         "unit_context_files": unit_context_files,
         "decision_file": "footnote_decisions.json",
-        "status": "pending_review" if report["review_required"] else "no_subagent_review_required",
+        "endnote_ambiguity_count": ambiguity_count,
+        "endnote_ambiguities": AMBIGUITIES_FILENAME,
+        "endnote_decision_file": DECISIONS_FILENAME,
+        "endnote_definition_file": AMBIGUITIES_FILENAME,
+        "status": (
+            "pending_review"
+            if report["review_required"] or ambiguity_count
+            else "no_subagent_review_required"
+        ),
     }
     manifest_path = output_dir / "footnote_subagent_manifest.json"
     atomic_write_json(manifest_path, manifest)
@@ -206,6 +234,39 @@ def prepare_footnote_subagent(
         "will refuse to guess between repeated markers.\n\n"
         "Do not reread or rewrite the whole book.\n"
     )
+    if ambiguity_count:
+        prompt += (
+            "\n\n## Ambiguous centralized endnote definitions\n\n"
+            f"The local endnote pass found {ambiguity_count} numbered definition "
+            f"line(s) whose preceding boundary is unclear. Read `{AMBIGUITIES_FILENAME}` "
+            "and decide only those items; do not send every Notes line to review.\n\n"
+            "For each item, classify `line_text` with the surrounding context:\n"
+            "- `definition`: the `N.`/`N)`/`N：` marker starts a real endnote definition.\n"
+            "- `continuation`: the number is a page number, citation locator, or other "
+            "printed number inside the preceding note/sentence, so this line belongs to "
+            "the previous note and must not create a new definition.\n\n"
+            "Use the previous/next lines and the scope key when present. A previous line "
+            "ending in `:` or `,` is the typical ambiguous case. Do not modify the body "
+            "Markdown. Write only valid JSON to "
+            f"`{DECISIONS_FILENAME}` with this shape:\n\n"
+            "```json\n"
+            "{\n"
+            '  "schema_version": 1,\n'
+            '  "decisions": [\n'
+            "    {\n"
+            '      "file": "chapter_10.part1.md",\n'
+            '      "line": 774,\n'
+            '      "role": "continuation",\n'
+            '      "confidence": "high",\n'
+            '      "reason": "The number is a page locator; the sentence continues."\n'
+            "    }\n"
+            "  ]\n"
+            "}\n"
+            "```\n\n"
+            "Every manifest item needs exactly one decision. `review_required` is not "
+            "an answer here; the local apply stage fails closed until each item is "
+            "`definition` or `continuation`.\n"
+        )
     prompt_path = output_dir / "footnote_subagent_prompt.md"
     atomic_write_text(prompt_path, prompt)
     return {

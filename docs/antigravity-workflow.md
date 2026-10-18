@@ -660,8 +660,11 @@ refinement unit 和正文定位；任何一层失败都必须修正决定后重�
    逐个异常区域写入 `footnote_decisions.json`。本地已标记 `confidence: high` 的候选不需要重复决定；
    它必须区分 `footnote_start`、
    `footnote_continuation`、`footnote_definition`、`citation`、`bibliography`、`body` 和
-   `review_required`；数字开头本身不是决定理由。跨页续文仍按视觉顺序处理，不能默认贴到
-   下一页开头。
+    `review_required`；数字开头本身不是决定理由。跨页续文仍按视觉顺序处理，不能默认贴到
+    下一页开头。如果 manifest 的 `endnote_ambiguity_count` 大于 0，还要读取
+    `endnote_definition_ambiguities.json`，为每条歧义写
+    `endnote_definition_decisions.json` 的 `definition`/`continuation` 决定；这一步独立于
+    `footnotes.mode`，`endnotes_only` 下同样必须完成。
 
 `footnote-prepare` 完成后维护者应按下表解释产物：
 
@@ -669,9 +672,12 @@ refinement unit 和正文定位；任何一层失败都必须修正决定后重�
 |---|---|---|
 | `footnote_candidates.json` | 候选窗口、来源类型、证据模式、sidecar 哈希和 review pages | Subagent 决定 |
 | `footnote_visual_audit_manifest.json` | 异常区域、bbox、原因、页面图/裁剪图和 review block | 视觉区域审计 |
-| `footnote_subagent_manifest.json` | 当前复核页、单位上下文和 pending 状态 | 决定校验 |
+| `footnote_subagent_manifest.json` | 当前复核页、单位上下文、尾注歧义数量和 pending 状态 | 决定校验 |
 | `footnote_decisions.json` | Subagent 对候选 block 的角色决定 | sidecar 或候选事实 |
-| `footnote_decision_validation.json` | 决定地址、角色、键、覆盖率和哈希门禁 | apply 结果 |
+| `endnote_definition_ambiguities.json` | 需要判断边界的 numbered punctuation 尾注定义行 | 本地自动删除或改写 |
+| `endnote_definition_decisions.json` | 每条歧义的 `definition`/`continuation` 决定 | 候选事实 |
+| `endnote_definition_validation.json` | 逐条覆盖、角色、文件和行号校验 | apply 结果 |
+| `footnote_decision_validation.json` | 决定地址、角色、键、覆盖率和哈希门禁（含 `endnote_definitions`） | apply 结果 |
 | `footnote_normalization.json` | apply 后的定位、归并和输出检查点 | 上游候选报告 |
 
 ### 集中尾注归一化
@@ -716,6 +722,42 @@ Notes，并作为 `orphan_scoped_definitions` 报告。scope 目录不写入 `ou
 `footnote_normalization.json` 的 `endnotes` 报告字段（`scope_mode`、`scopes`、
 `scoped_keys`、`double_numbered_definition_count`、`duplicate_definition_occurrences`、
 `orphan_scoped_definitions`）。
+
+集中尾注的定义边界采用混合识别。文件开头、前一行空行、前一行以句末标点结束，或前一行
+是 Markdown 标题的 `N.`/`N)`/`N：` 行由本地直接接受；`N text` 日期续行继续使用
+`previous_line_blank` 规则，Markdown/HTML 定义和 scope 识别不进入该队列。前一行非空且
+不是句末标点（例如以 `:`、`,`、`;`、`-` 或普通单词结尾）的 numbered punctuation 行写入
+`endnote_definition_ambiguities.json`，每项包含 `file`、`line`、`key`、
+`previous_line`、`line_text`、`next_line` 和可用的 `scope_key`。只有这些行交给
+Subagent；它必须为每条写入 `endnote_definition_decisions.json` 的一个
+`definition`/`continuation` 决定。完整决定形状：
+
+```json
+{
+  "schema_version": 1,
+  "decisions": [
+    {
+      "file": "chapter_10.part1.md",
+      "line": 774,
+      "role": "continuation",
+      "confidence": "high",
+      "reason": "The number is a page locator; the sentence continues."
+    }
+  ]
+}
+```
+
+`footnote_subagent_manifest.json` 记录 `endnote_ambiguity_count`、
+`endnote_ambiguities`、`endnote_decision_file` 和 `endnote_definition_file`；页面复核或
+尾注歧义任一存在时 `status` 为 `pending_review`。`footnote-validate` 要求每条歧义恰好
+一个决定，缺失、多余、重复、未知角色或 `review_required` 都阻断，并把结果写入
+`footnote_decision_validation.json` 的 `endnote_definitions` 字段和
+`endnote_definition_validation.json`。`footnote-apply` 只有在该字段有效时才把 decisions
+传给 `normalize_endnotes()`；歧义无决定时在错误中给出 `file:line` 并 fail closed。
+存在歧义时，`footnote_normalization.json` 记录
+`endnote_definition_ambiguities_sha256` 和 `endnote_definition_decisions_sha256`；
+`footnote_status` 对已记录的文件做 freshness 检查，缺失或变化时 stale，并提示重跑
+`footnote-prepare → footnote-validate → footnote-apply`。没有歧义时不要求这两个哈希。
 
 EPUB 构建时，`pdf2epub/epub/footnotes/keys.py` 的 `display_footnote_key()` 负责把
 `fnc-<scope>-<number>` 和 `...-oN` 显示为原始数字；链接、ID 和扫描器仍使用真实 key。

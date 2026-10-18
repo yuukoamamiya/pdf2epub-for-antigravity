@@ -13,11 +13,15 @@ chapter before keys are rewritten to globally unique ``fnc-...`` keys.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from collections import Counter, defaultdict
 from typing import Any, Mapping, Optional
 
 from ..footnote_normalization import endnote_definition_keys
+from .endnote_review import NUMBERED_PUNCT_DEF_RE as _NUMBERED_PUNCT_DEF_RE
+from .endnote_review import is_ambiguous_definition_line
 from .endnote_scopes import scope_for_line, scope_report
 
 
@@ -30,9 +34,6 @@ _HTML_DEF_RE = re.compile(
     rf"^[ \t]*<sup\b[^>]*>[ \t]*(?P<key>\d+)[ \t]*</sup>"
     rf"[ \t]*(?:[.:：。）)]\s*)?(?P<content>\S.*)$",
     re.IGNORECASE,
-)
-_NUMBERED_PUNCT_DEF_RE = re.compile(
-    r"^[ \t]{0,3}(?P<key>\d+)[ \t]*[.)。：：][ \t]+(?P<content>\S.*)$"
 )
 _NUMBERED_SPACE_DEF_RE = re.compile(
     r"^[ \t]{0,3}(?P<key>\d+)[ \t]+(?P<content>\S.*)$"
@@ -94,6 +95,85 @@ def _definition_line(
     return None
 
 
+def _normalized_decision_file(value: Any) -> str:
+    return str(value or "").replace("\\", "/")
+
+
+def _definition_decision_map(
+    definition_decisions: Any,
+) -> dict[tuple[str, int], str]:
+    """Normalize reviewed decisions to ``(file, line) -> role``."""
+    result: dict[tuple[str, int], str] = {}
+    if definition_decisions is None:
+        return result
+    values: Any = definition_decisions
+    if isinstance(values, Mapping) and isinstance(values.get("decisions"), list):
+        values = values["decisions"]
+    if isinstance(values, Mapping):
+        for raw_key, role in values.items():
+            if isinstance(raw_key, tuple) and len(raw_key) == 2:
+                try:
+                    identity = (
+                        _normalized_decision_file(raw_key[0]),
+                        int(raw_key[1]),
+                    )
+                except (TypeError, ValueError):
+                    continue
+                result[identity] = str(role).strip().lower()
+        return result
+    if isinstance(values, (list, tuple)):
+        for item in values:
+            if not isinstance(item, Mapping):
+                continue
+            try:
+                identity = (
+                    _normalized_decision_file(item["file"]),
+                    int(item["line"]),
+                )
+            except (KeyError, TypeError, ValueError):
+                continue
+            result[identity] = str(item.get("role") or "").strip().lower()
+    return result
+
+
+def _decision_digest(decisions: Mapping[tuple[str, int], str]) -> Optional[str]:
+    if not decisions:
+        return None
+    canonical = [
+        {"file": file, "line": line, "role": role}
+        for (file, line), role in sorted(decisions.items())
+    ]
+    payload = json.dumps(canonical, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _definition_decision_errors(
+    *,
+    name: str,
+    line_number: int,
+    line: str,
+    previous_line: Optional[str],
+    decisions: Mapping[tuple[str, int], str],
+) -> tuple[bool, Optional[str]]:
+    """Return ``(skip, error)`` for one candidate definition line.
+
+    Only numbered punctuation definitions with an unclear preceding boundary
+    consult the reviewed decisions.  Everything else keeps the historical
+    deterministic behavior.
+    """
+    if not is_ambiguous_definition_line(line, previous_line, line_number):
+        return False, None
+    decision = decisions.get((_normalized_decision_file(name), line_number))
+    if decision == "continuation":
+        return True, None
+    if decision == "definition":
+        return False, None
+    return True, (
+        f"ambiguous endnote definition at {name}:{line_number} has no reviewed "
+        "definition/continuation decision"
+    )
+
+
 def _raw_body_keys(texts: Mapping[str, str], note_files: set[str]) -> set[str]:
     keys: set[str] = set()
     for name, text in texts.items():
@@ -149,6 +229,7 @@ def _empty_report(status: str, note_files: set[str]) -> dict[str, Any]:
         "double_numbered_definition_count": 0,
         "duplicate_definition_occurrences": [],
         "orphan_scoped_definitions": [],
+        "endnote_definition_decisions_sha256": None,
         "errors": [],
     }
 
@@ -313,22 +394,38 @@ def _normalize_scoped(
     scopes: Mapping[str, Any],
     *,
     body_keys: set[str],
+    definition_decisions: Optional[Mapping[tuple[str, int], str]] = None,
 ) -> tuple[dict[str, str], dict[str, Any]]:
     file_order = _note_file_order(scopes, note_files, source_texts)
     file_order_index = {name: index for index, name in enumerate(file_order)}
     scope_refs = _scope_ref_map(scopes)
+    decisions = dict(definition_decisions or {})
 
     occurrences: list[dict[str, Any]] = []
+    definition_errors: list[str] = []
     for name in file_order:
         lines = source_texts[name].splitlines()
         for line_number, line in enumerate(lines, 1):
             previous_line_blank = line_number == 1 or not lines[line_number - 2].strip()
+            previous_line = lines[line_number - 2] if line_number > 1 else None
             parsed = _definition_line(
                 line,
                 body_keys=body_keys,
                 previous_line_blank=previous_line_blank,
             )
             if parsed is None:
+                continue
+            skip, error = _definition_decision_errors(
+                name=name,
+                line_number=line_number,
+                line=line,
+                previous_line=previous_line,
+                decisions=decisions,
+            )
+            if error:
+                definition_errors.append(error)
+                continue
+            if skip:
                 continue
             raw_key, content, kind = parsed
             scope_key = scope_for_line(scopes, name, line_number)
@@ -352,11 +449,15 @@ def _normalize_scoped(
                 }
             )
 
+    if definition_errors:
+        raise EndnoteNormalizationError("; ".join(definition_errors))
+
     if not occurrences:
         report = _empty_report("no_definitions", note_files)
         report["scope_mode"] = "global"
         report["scope_count"] = len(scopes.get("scopes", {}))
         report["scopes"] = _scope_summary(scopes, occurrences)
+        report["endnote_definition_decisions_sha256"] = _decision_digest(decisions)
         return dict(source_texts), report
 
     scoped_keys = _scoped_keys(occurrences)
@@ -551,6 +652,7 @@ def _normalize_scoped(
         ),
         "duplicate_definition_occurrences": duplicate_occurrences,
         "orphan_scoped_definitions": orphan_scoped,
+        "endnote_definition_decisions_sha256": _decision_digest(decisions),
         "errors": [],
     }
 
@@ -558,8 +660,11 @@ def _normalize_scoped(
 def _normalize_legacy(
     source_texts: Mapping[str, str],
     note_files: set[str],
+    *,
+    definition_decisions: Optional[Mapping[tuple[str, int], str]] = None,
 ) -> tuple[dict[str, str], dict[str, Any]]:
     body_keys = _raw_body_keys(source_texts, note_files)
+    decisions = dict(definition_decisions or {})
     definitions: dict[str, tuple[str, str, str]] = {}
     definition_edits: dict[str, dict[int, str]] = {}
     errors: list[str] = []
@@ -569,12 +674,25 @@ def _normalize_legacy(
         lines = source_texts[name].splitlines()
         for line_number, line in enumerate(lines, 1):
             previous_line_blank = line_number == 1 or not lines[line_number - 2].strip()
+            previous_line = lines[line_number - 2] if line_number > 1 else None
             parsed = _definition_line(
                 line,
                 body_keys=body_keys,
                 previous_line_blank=previous_line_blank,
             )
             if parsed is None:
+                continue
+            skip, error = _definition_decision_errors(
+                name=name,
+                line_number=line_number,
+                line=line,
+                previous_line=previous_line,
+                decisions=decisions,
+            )
+            if error:
+                errors.append(error)
+                continue
+            if skip:
                 continue
             key, content, kind = parsed
             if key in definitions:
@@ -594,7 +712,9 @@ def _normalize_legacy(
         raise EndnoteNormalizationError("; ".join(errors))
 
     if not definitions:
-        return dict(source_texts), _empty_report("no_definitions", note_files)
+        report = _empty_report("no_definitions", note_files)
+        report["endnote_definition_decisions_sha256"] = _decision_digest(decisions)
+        return dict(source_texts), report
 
     definition_keys = set(definitions)
     transformed = dict(source_texts)
@@ -631,6 +751,7 @@ def _normalize_legacy(
             "converted_reference_count": converted_reference_count,
             "reference_counts": dict(sorted(reference_counts.items())),
             "orphan_definition_keys": orphan_definition_keys,
+            "endnote_definition_decisions_sha256": _decision_digest(decisions),
         }
     )
     return transformed, report
@@ -641,12 +762,15 @@ def normalize_endnotes(
     file_roles: Mapping[str, str],
     *,
     scopes: Optional[Mapping[str, Any]] = None,
+    definition_decisions: Any = None,
 ) -> tuple[dict[str, str], dict[str, Any]]:
     """Normalize definitions from ``notes`` files and matching body markers.
 
     Without a scope directory the historical global behavior is preserved.
     With scopes, only printed keys that restart across chapters are rewritten;
-    all other keys keep their original numeric form.
+    all other keys keep their original numeric form.  Numbered punctuation
+    definitions with an unclear preceding boundary require a reviewed
+    ``definition``/``continuation`` decision and otherwise fail closed.
     """
     note_files = {
         str(name)
@@ -655,14 +779,20 @@ def normalize_endnotes(
     }
     if not note_files:
         return dict(source_texts), _empty_report("not_applicable", note_files)
+    decisions = _definition_decision_map(definition_decisions)
     if scopes is None:
-        return _normalize_legacy(source_texts, note_files)
+        return _normalize_legacy(
+            source_texts,
+            note_files,
+            definition_decisions=decisions,
+        )
     body_keys = _raw_body_keys(source_texts, note_files)
     return _normalize_scoped(
         source_texts,
         note_files,
         scopes,
         body_keys=body_keys,
+        definition_decisions=decisions,
     )
 
 

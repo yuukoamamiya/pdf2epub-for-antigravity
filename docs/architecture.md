@@ -175,11 +175,19 @@ TOC 中标记为
   标题，也可以是独立短行（1..120 字符、前后为空行/文件边界、非编号定义且不以句末标点
   结尾），两者都通过剥离 `Chapter N:`/`N:`/前导 `N.` 后的标题变体匹配回正文 scope。
   `Notes to Chapter N` 等页眉和未匹配标题保持当前 scope；歧义标题只记录，不猜测。
+- `refine/endnote_review.py`：只收集前一行为非空、非句末标点且非 Markdown 标题的
+  numbered punctuation 定义行（`N.`、`N)`、`N：` 等），写
+  `endnote_definition_ambiguities.json`，并校验 Subagent 在
+  `endnote_definition_decisions.json` 中为每条歧义给出的 `definition`/`continuation`
+  决定。`N text` 日期续行、Markdown/HTML 定义和 scope 识别不进入该队列；缺失、重复、
+  多余或 `review_required` 决定都视为未解决并阻断。
 - `refine/endnote_normalization.py`：只处理 `type: notes` 单元中的集中尾注定义及普通单元
   上标引用的确定性归一化，并提供构建前的残留检查；不参与页面脚注候选识别。存在重复
   打印编号时，它消费 `endnote_scopes.py` 的目录，只把需要去重的 key 改写为
   `fnc-<scope>-<number>`（第 N 个定义再加 `-oN`），并支持“外层页计数器 + 内层真实
-  注释号”的双层编号判定。无 scope 目录或无重复 key 时保持原有全局行为。
+  注释号”的双层编号判定。无 scope 目录或无重复 key 时保持原有全局行为。明确的 numbered
+  punctuation 定义仍由本地接受；边界歧义行必须带已校验的 `definition`/`continuation`
+  决定，`continuation` 不创建定义，未决定时在错误中给出 `file:line` 并 fail closed。
 - `refine/footnote_consensus.py`：只读取当前双 OCR 共识中的视觉复核页并解析匹配的次 OCR
   sidecar 路径；不决定候选，也不绕过 `pdf_evidence.py` 的 freshness 闸门。
 - `refine/footnote_page_scan.py`：封装单页 primary/secondary OCR 扫描、连续区域展开、续文
@@ -209,6 +217,20 @@ TOC 中标记为
 定义数或重复 key 落在未匹配区域时 fail closed。EPUB 侧由
 `pdf2epub/epub/footnotes/keys.py` 的 `display_footnote_key()` 统一把内部 key 还原为读者
 看到的原始数字；scanner、链接和锚点仍使用真实 key。
+
+集中尾注定义边界的手递合同位于 `endnote_review.py`：
+`footnote_subagent_manifest.json` 增加 `endnote_ambiguity_count`、`endnote_ambiguities`、
+`endnote_decision_file` 和 `endnote_definition_file`；`status` 在页面复核或尾注歧义任一
+存在时为 `pending_review`。Subagent 只读 `endnote_definition_ambiguities.json` 并写
+`endnote_definition_decisions.json`（`schema_version: 1`，每条含 `file`、`line`、
+`role`、可选 `confidence`/`reason`）。`footnote-validate` 把校验结果并入
+`footnote_decision_validation.json` 的 `endnote_definitions` 字段，同时写
+`endnote_definition_validation.json`；`footnote-apply` 只有在
+`endnote_definitions.valid` 为真且决定文件存在时才把 decisions 传给
+`normalize_endnotes()`。`footnote_normalization.json` 在存在歧义时记录
+`endnote_definition_ambiguities_sha256` 和 `endnote_definition_decisions_sha256`；
+`footnote_status` 对这两个已记录的文件做哈希检查，缺失或变化时 stale，并提示重跑
+`footnote-prepare → footnote-validate → footnote-apply`。没有歧义时不要求这两个哈希。
 
 `pipeline_policy.py` 是 PDF pipeline 的策略边界。`PipelinePolicy.from_config()` 将缺省
 配置视为传统翻译流程，将 `pipeline: epub_conversion` 和兼容别名

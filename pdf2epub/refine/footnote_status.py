@@ -220,6 +220,27 @@ def footnote_normalization_status(
             "decision_validation_stale",
             "footnote_decision_validation.json changed after footnote-apply",
         )
+    for field, filename, code in (
+        (
+            "endnote_definition_ambiguities_sha256",
+            "endnote_definition_ambiguities.json",
+            "endnote_definition_ambiguities_stale",
+        ),
+        (
+            "endnote_definition_decisions_sha256",
+            "endnote_definition_decisions.json",
+            "endnote_definition_decisions_stale",
+        ),
+    ):
+        expected = report.get(field)
+        if not expected:
+            continue
+        path = output_dir / filename
+        if not path.is_file() or expected != sha256_file(path):
+            fail(
+                code,
+                f"{filename} is missing or changed after endnote definition review",
+            )
     tree_progress_path = output_dir / "ocr_markdown" / "tree_progress.json"
     expected_tree_progress_hash = report.get("tree_progress_sha256")
     if expected_tree_progress_hash and (
@@ -260,6 +281,8 @@ def footnote_normalization_status(
                 "candidate_report_stale",
                 "toc_tree_stale",
                 "configured_footnote_mode_mismatch",
+                "endnote_definition_ambiguities_stale",
+                "endnote_definition_decisions_stale",
             }
             for item in failures
         ):

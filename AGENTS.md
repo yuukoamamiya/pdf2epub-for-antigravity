@@ -483,9 +483,20 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
    `duplicate_definition_occurrences` 和 `orphan_scoped_definitions`。EPUB 中的引用和定义
    仍显示原始数字，内部 `fnc-` key 只用于链接和锚点。
 
+   集中尾注的定义边界采用混合识别：文件开头、前一行空行、前一行以句末标点结束，
+   或前一行是 Markdown 标题的 `N.`/`N)`/`N：` 行由本地直接接受。前一行以 `:`、`,`、
+   `;`、`-` 或普通单词结尾的 numbered punctuation 行写入
+   `endnote_definition_ambiguities.json`，只把这些少量歧义行交给 Subagent 判断
+   `definition` / `continuation`；`N text` 日期续行仍走既有 `previous_line_blank` 规则，
+   Markdown/HTML 定义和 scope 识别不受影响。未对歧义行作出决定时 `footnote-apply`
+   fail closed，并在错误中给出 `file:line`，不得把页码或多行引文静默当成新定义。
+
    若 manifest 状态为 `pending_review`，打开工作区 Subagent，读取
    `footnote_subagent_prompt.md`，只处理 manifest 中的候选窗口，并写入
-   `footnote_decisions.json`。随后执行：
+   `footnote_decisions.json`。当 manifest 的 `endnote_ambiguity_count` 大于 0 时，
+   还要读取 `endnote_definition_ambiguities.json`，为每条歧义写入
+   `endnote_definition_decisions.json`（`role` 只能是 `definition` 或
+   `continuation`；`review_required` 视为未解决）。随后执行：
 
    ```text
    uv run pdf2epub -c config.yaml footnote-validate
@@ -559,13 +570,15 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
    - `footnote_visual_audit_manifest.json`：异常区域、区域 bbox、审计原因、页面图/裁剪图和
      review block 清单；有 `pending_review` 任务时不能跳过视觉 Subagent；
    - `footnote_subagent_manifest.json`：`status`、`review_candidate_count` 和
-     `visual_audit_task_count`、`unit_context_files` 和审计 manifest；`pending_review` 时不能跳过 Subagent；
+     `visual_audit_task_count`、`unit_context_files`、`endnote_ambiguity_count` 和审计
+     manifest；`pending_review` 时不能跳过 Subagent；
    - `footnote_decision_validation.json`：必须是 `valid: true` 且 `status: validated`，
      或明确的 `no_subagent_review_required`；`retry_required` 和 `human_review_required`
-     都阻断；
+     都阻断；有尾注歧义时还要检查 `endnote_definitions.valid` 和
+     `endnote_definition_validation.json`；
    - `footnote_normalization.json`：必须存在且 `valid: true`、`status: validated`，其源稿、
-     候选报告和决定校验哈希必须通过当前性检查；不能只凭 `footnote_normalized/` 中有文件
-     判断完成。
+     候选报告、决定校验和尾注歧义/决定哈希必须通过当前性检查；不能只凭
+     `footnote_normalized/` 中有文件判断完成。
 9. 所有 PDF 都必须执行 `polish`，打开工作区 Subagent 读取
    `polish_subagent_prompt.md`，并按 `polish_worker_handoffs/` 中各 manifest 的
    `assigned_files` 写入 `polished_markdown/`，然后运行 `polish-validate`。

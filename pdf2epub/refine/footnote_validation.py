@@ -13,6 +13,10 @@ from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from ..workflow_contracts import atomic_write_json, sha256_file
+from .endnote_review import (
+    load_endnote_definition_ambiguities,
+    validate_endnote_definition_decisions,
+)
 from .footnote_contracts import (
     DECISION_ROLES as _DECISION_ROLES,
     MOVED_ROLES as _MOVED_ROLES,
@@ -52,6 +56,41 @@ def _candidate_index(
     return index
 
 
+def _endnote_definition_result(output_dir: Path) -> dict[str, Any]:
+    """Validate the optional centralized-endnote boundary decisions."""
+    try:
+        manifest = load_endnote_definition_ambiguities(output_dir)
+    except ValueError as exc:
+        return {
+            "valid": False,
+            "status": "retry_required",
+            "errors": [str(exc)],
+            "decisions": [],
+        }
+    if manifest is None:
+        manifest = {"schema_version": 1, "items": []}
+    return validate_endnote_definition_decisions(output_dir, manifest)
+
+
+def _attach_endnote_result(
+    result: dict[str, Any],
+    endnote_result: Mapping[str, Any],
+) -> dict[str, Any]:
+    result["endnote_definitions"] = dict(endnote_result)
+    if endnote_result.get("valid") is not True:
+        result["valid"] = False
+        if result.get("status") in {"validated", "no_subagent_review_required"}:
+            result["status"] = str(
+                endnote_result.get("status") or "retry_required"
+            )
+        errors = result.setdefault("errors", [])
+        for error in endnote_result.get("errors", []) or []:
+            message = f"endnote definitions: {error}"
+            if message not in errors:
+                errors.append(message)
+    return result
+
+
 def validate_footnote_decisions(
     output_dir: Path,
     *,
@@ -70,12 +109,16 @@ def validate_footnote_decisions(
         report = json.loads(report_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         result = {"valid": False, "status": "retry_required", "errors": [f"invalid candidate report: {exc}"]}
+        _attach_endnote_result(result, _endnote_definition_result(output_dir))
         atomic_write_json(output_dir / "footnote_decision_validation.json", result)
         return result
     if not isinstance(report, dict):
         result = {"valid": False, "status": "retry_required", "errors": ["candidate report must be an object"]}
+        _attach_endnote_result(result, _endnote_definition_result(output_dir))
         atomic_write_json(output_dir / "footnote_decision_validation.json", result)
         return result
+
+    endnote_result = _endnote_definition_result(output_dir)
 
     source_kind = str(report.get("source_kind") or "ocr")
     evidence_mode = str(report.get("ocr_evidence_mode") or "single_ocr")
@@ -157,6 +200,7 @@ def validate_footnote_decisions(
             "errors": errors,
             "decisions": [],
         }
+        _attach_endnote_result(result, endnote_result)
         atomic_write_json(output_dir / "footnote_decision_validation.json", result)
         return result
 
@@ -203,6 +247,7 @@ def validate_footnote_decisions(
             "errors": [],
             "decisions": [],
         }
+        _attach_endnote_result(result, endnote_result)
         atomic_write_json(output_dir / "footnote_decision_validation.json", result)
         report["decisions"] = []
         report["decisions_status"] = "validated"
@@ -214,6 +259,7 @@ def validate_footnote_decisions(
         decisions_data = json.loads(decision_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         result = {"valid": False, "status": "retry_required", "errors": [f"invalid decision file: {exc}"]}
+        _attach_endnote_result(result, endnote_result)
         atomic_write_json(output_dir / "footnote_decision_validation.json", result)
         return result
     decisions = decisions_data.get("decisions") if isinstance(decisions_data, dict) else None
@@ -483,6 +529,7 @@ def validate_footnote_decisions(
         "region_audits": sorted(region_audit_ids),
         "decisions": normalized,
     }
+    _attach_endnote_result(result, endnote_result)
     atomic_write_json(output_dir / "footnote_decision_validation.json", result)
     if result["valid"]:
         report["decisions"] = normalized

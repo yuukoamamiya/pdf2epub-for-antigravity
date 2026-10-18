@@ -38,6 +38,12 @@ from .footnote_status import (
     unit_records as _unit_records,
 )
 from .endnote_normalization import normalize_endnotes
+from .endnote_review import (
+    AMBIGUITIES_FILENAME,
+    DECISIONS_FILENAME,
+    load_endnote_definition_ambiguities,
+    load_endnote_definition_decisions,
+)
 from .endnote_scopes import build_endnote_scope_directory
 
 
@@ -306,6 +312,55 @@ def apply_footnote_normalization(
                 "after the Subagent review",
             ],
         )
+
+    endnote_definition_decisions: Optional[list[dict[str, Any]]] = None
+    endnote_ambiguities_sha256: Optional[str] = None
+    endnote_decisions_sha256: Optional[str] = None
+    try:
+        ambiguity_manifest = load_endnote_definition_ambiguities(output_dir)
+    except ValueError as exc:
+        return _write_failure(output_dir, [str(exc)])
+    ambiguity_items = (
+        ambiguity_manifest.get("items", [])
+        if isinstance(ambiguity_manifest, Mapping)
+        else []
+    )
+    if isinstance(ambiguity_items, list) and ambiguity_items:
+        endnote_validation = validation.get("endnote_definitions")
+        if (
+            not isinstance(endnote_validation, Mapping)
+            or endnote_validation.get("valid") is not True
+        ):
+            return _write_failure(
+                output_dir,
+                [
+                    "centralized endnote definition decisions are not validated; "
+                    "run footnote-validate after reviewing "
+                    f"{AMBIGUITIES_FILENAME}",
+                ],
+            )
+        try:
+            decisions_data = load_endnote_definition_decisions(output_dir)
+        except ValueError as exc:
+            return _write_failure(output_dir, [str(exc)])
+        if decisions_data is None:
+            return _write_failure(
+                output_dir,
+                [f"{DECISIONS_FILENAME} is missing; run footnote-validate"],
+            )
+        raw_decisions = decisions_data.get("decisions")
+        if not isinstance(raw_decisions, list):
+            return _write_failure(
+                output_dir,
+                [f"{DECISIONS_FILENAME} must contain a decisions array"],
+            )
+        endnote_definition_decisions = [
+            dict(item) for item in raw_decisions if isinstance(item, Mapping)
+        ]
+        endnote_ambiguities_sha256 = sha256_file(
+            output_dir / AMBIGUITIES_FILENAME
+        )
+        endnote_decisions_sha256 = sha256_file(output_dir / DECISIONS_FILENAME)
 
     source_dir = output_dir / "ocr_markdown"
     target_dir = output_dir / "footnote_normalized"
@@ -772,6 +827,7 @@ def apply_footnote_normalization(
                 transformed,
                 {record["name"]: record["type"] for record in records},
                 scopes=scope_directory,
+                definition_decisions=endnote_definition_decisions,
             )
         except (OSError, UnicodeError, ValueError) as exc:
             detail = f"could not normalize centralized endnotes: {exc}"
@@ -817,6 +873,8 @@ def apply_footnote_normalization(
         "decision_validation_sha256": sha256_file(
             output_dir / "footnote_decision_validation.json"
         ),
+        "endnote_definition_ambiguities_sha256": endnote_ambiguities_sha256,
+        "endnote_definition_decisions_sha256": endnote_decisions_sha256,
         "moved_count": len(resolved),
         "preserved_roles": dict(preserved_roles),
         "notes": [
