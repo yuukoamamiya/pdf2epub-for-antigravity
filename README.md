@@ -233,8 +233,18 @@ ocr-pages --resume
 → extract-entities → extract-entities-validate
 → translate-toc → translate-toc-validate
 → check-ready --stage translate → translate → translate-validate
-→ build-epub --translated
+→ bash scripts/build_all_epubs.sh config.yaml
 ```
+
+翻译流程必须同时构建两个 EPUB 版本，推荐一次运行：
+
+```text
+bash scripts/build_all_epubs.sh config.yaml
+```
+
+该脚本等价于依次执行 `build-epub` 和 `build-epub --translated`。前者生成使用正式书名的
+原稿英文 EPUB；后者生成英文 `_en.epub` 和使用译名的译文 EPUB。只运行第一个会缺少译文版。
+`pipeline: epub_conversion` 不得使用 `--translated`，也不要使用本脚本。
 
 `translate-toc` 的工作区 Subagent 只写扁平的 `toc_translation_result.json`；本地
 `translate-toc-validate` 会从源 `toc_tree.json` 合并生成 `toc_tree_translated.json`。
@@ -274,8 +284,14 @@ typed `notes` 单元仍含原始编号尾注或正文仍含对应未链接上标
 最终文件通常位于：
 
 ```text
-output/<配置书名>/<安全化书名>.epub
+output/<配置书名>/<安全化书名>.epub          # 原稿，使用正式书名
+output/<配置书名>/<安全化书名>_en.epub       # 英文版
+output/<配置书名>/<安全化译名>.epub          # 译文，使用译名
 ```
+
+翻译流程运行 `bash scripts/build_all_epubs.sh config.yaml` 后会得到以上版本：第一条
+`build-epub` 生成正式书名的原稿英文 EPUB；第二条 `build-epub --translated` 生成译文
+EPUB 和英文 `_en.epub`。两个命令都需要执行，否则会缺少其中一个版本。
 
 PDF 的 `build-epub` 默认使用书名生成 EPUB 文件名：Windows 禁止的半角字符、控制字符
 和路径分隔符会替换为 `_`，首尾空格/句点会去除，保留设备名会加前缀，文件名最长为

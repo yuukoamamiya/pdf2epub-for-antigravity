@@ -650,11 +650,24 @@ uv run pdf2epub -c config.yaml check-ready --stage translate --skip-entities
    Subagent；首次 `review_required` 也重新派发。若报告出现 `human_review_required`，必须暂停
    并询问人工，不能继续自动重试。只有完成复核后才可显式使用
    `translate-validate --allow-review-warnings` 放行。
-10. 执行打包：
+10. 执行打包。翻译流程必须同时构建两个版本，两个命令都必须执行。推荐一次运行：
 
    ```text
+   bash scripts/build_all_epubs.sh config.yaml
+   ```
+
+   等价于依次执行：
+
+   ```text
+   uv run pdf2epub -c config.yaml build-epub
    uv run pdf2epub -c config.yaml build-epub --translated
    ```
+
+   第一条生成使用正式书名的原稿英文 EPUB；第二条生成英文 `_en.epub` 和使用译名的译文
+   EPUB。`--translated` 已经会额外生成英文 `_en.epub`，但第一条不可省略，否则会缺少
+   正式书名的原稿英文版。只运行 `build-epub` 不带 `--translated` 会缺少译文 EPUB，不得
+   视为完成打包。`pipeline: epub_conversion` 不得使用本脚本，也不得使用 `--translated`，
+   只运行一次 `build-epub`。
 
    默认拒绝不完整译文；`--allow-partial` 仅用于明确的预览。翻译流程中若
    `translate_validation.json` 对当前 polished source 和 `translated/validated/` 仍有效，
