@@ -392,6 +392,10 @@ translate + 按 TOC 顺序装箱的 worker_handoffs + 工作区 Subagent
 translate-validate → translate_validation.json（retry_required 自动返工；持续 review 升级人工）
 build-epub --translated → 最终译文 EPUB
 
+翻译流程中，若 `translate_validation.json` 对当前 `polished_markdown/validated/` 和
+`translated/validated/` 仍为 current，而 `build-epub` 未带 `--translated`，命令只打印警告
+并继续构建原稿 EPUB；默认行为不变，译文版仍必须显式传 `--translated`。
+
 PDF `build-epub` 的默认输出文件名由 `utils.common.sanitize_filename()` 从当前书名生成：
 Windows 禁止字符和控制字符替换为 `_`，首尾空格/句点会去除，保留设备名会加前缀，长度
 限制为 200 个字符；Unicode 和全角标点保持不变。`output_epub` 显式路径是例外，会按用户

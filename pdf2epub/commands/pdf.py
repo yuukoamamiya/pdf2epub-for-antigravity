@@ -81,6 +81,48 @@ def _validate_translated_pdf(
     return 1
 
 
+def _warn_if_translated_checkpoint_is_ignored(
+    policy: PipelinePolicy,
+    args,
+    output_dir: Path,
+    source_dir: Path,
+    config_path: Path | None = None,
+) -> bool:
+    """Warn when a current translation checkpoint exists but is not packaged.
+
+    This is a best-effort guard against silently building the original-language
+    EPUB after a completed translation. It never changes the build target or
+    the default ``--translated`` behavior.
+    """
+    if not policy.requires_translation or getattr(args, "translated", False):
+        return False
+    target_dir = output_dir / "translated" / "validated"
+    try:
+        is_current = validation_receipt_is_current(
+            output_dir / "translate_validation.json",
+            source_dir,
+            target_dir,
+            task="translate",
+            output_dir=output_dir,
+            config_path=config_path,
+            require_build_inputs=config_path is not None,
+        )
+    except (OSError, TypeError, ValueError):
+        return False
+    if not is_current:
+        return False
+    logger.warning(
+        "检测到当前有效的译文 checkpoint，但本次 build-epub 未带 --translated："
+        "将只构建原稿 EPUB。如需译文版，请运行 build-epub --translated。"
+    )
+    logger.warning(
+        "A current translation checkpoint exists, but --translated was not "
+        "passed; only the original-language EPUB will be built. Re-run with "
+        "build-epub --translated to package the translation."
+    )
+    return True
+
+
 def build_epub_command(args):
     """Handle the build-epub subcommand (toc_tree.json driven)."""
     import asyncio
@@ -134,6 +176,13 @@ def build_epub_command(args):
             logger.error(f"Source Markdown not found: {source_dir}")
             return 1
     else:
+        _warn_if_translated_checkpoint_is_ignored(
+            policy,
+            args,
+            output_dir,
+            source_dir,
+            config_path=context.config_path,
+        )
         markdown_dir = source_dir
         logger.info(f"Building EPUB from {source_stage} markdown...")
 

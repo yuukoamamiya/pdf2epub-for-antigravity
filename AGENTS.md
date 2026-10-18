@@ -637,7 +637,10 @@ uv run pdf2epub -c config.yaml check-ready --stage translate --skip-entities
    uv run pdf2epub -c config.yaml build-epub --translated
    ```
 
-   默认拒绝不完整译文；`--allow-partial` 仅用于明确的预览。
+   默认拒绝不完整译文；`--allow-partial` 仅用于明确的预览。翻译流程中若
+   `translate_validation.json` 对当前 polished source 和 `translated/validated/` 仍有效，
+   但本次未带 `--translated`，命令会打印醒目警告说明只构建原稿 EPUB。该警告不改变默认
+   构建目标，也不替代显式 `--translated`。
 
 若已有译文只需要修复页眉、页脚或印刷页码，不要直接用脚本改写 `translated/`，也不必
 因此重译全书。可使用一次性的 `repair-page-furniture`：本地命令会快照现有译文，生成
