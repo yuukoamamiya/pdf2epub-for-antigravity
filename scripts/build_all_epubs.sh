@@ -23,6 +23,9 @@ if [ ! -f "$CONFIG" ]; then
 fi
 
 CONFIG="$(cd "$(dirname "$CONFIG")" && pwd)/$(basename "$CONFIG")"
+if command -v cygpath >/dev/null 2>&1; then
+  CONFIG="$(cygpath -w "$CONFIG")"
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
