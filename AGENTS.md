@@ -1,12 +1,29 @@
 # pdf2epub Agent 操作手册
 
-本文件面向实际操作仓库的主 Agent 和工作区 Subagent，是执行任务时的唯一规范源。Agent
-应先读本文件，再根据任务类型执行对应流程；不要把 README 或维护文档中的示例当成更高
-优先级的操作规则。
+本文件面向实际操作仓库的主 Agent 和工作区 Subagent，是**书稿流程任务**的执行规范源。
+Agent 应先判断任务类型，再按对应文档执行；不要把 README 或维护文档中的示例当成更高
+优先级的操作规则。仓库维护任务的边界见第 0.0 节和 `docs/maintenance.md`。
 
 `README.md` 面向使用者，只介绍能力、安装和快速开始；`docs/architecture.md` 与
 `docs/antigravity-workflow.md` 面向维护者，记录模块边界、产物合同和实现细节。修改流程、
 配置、产物或后端时，三层文档都要同步检查，但本文件的执行规则优先。
+
+## 0.0 书稿流程任务与仓库维护任务的分界
+
+本文件同时服务两类任务，执行前必须先判断类型：
+
+- **书稿流程任务**：翻译、润色、OCR 结构判断、TOC 判断、术语提取、元数据翻译、脚注/
+  插图决定，以及写入 `translated/`、`polished_markdown/`、`translated_compressed/` 等
+  译文目录。这类任务必须遵守本文件全部规则，特别是第 0 节的 Subagent 总闸。
+- **仓库维护任务**：修改源码、测试、文档、CI、工具、配置模板，或修复 bug、重构模块。
+  这类任务**不受 Subagent 总闸约束**，编码 Agent 可以直接读取和修改 `pdf2epub/`、
+  `tests/`、`docs/` 等文件；不需要为了改代码打开 Antigravity 工作区 Subagent，也不要
+  因为 Codex/OpenCode 的默认习惯创建 `codex/*` 或临时分支。完整规则见
+  `docs/maintenance.md`，短入口见根目录 `opencode.md` / `codex.md`。
+
+两类任务共同遵守：不读取或翻译 `output/` 中的书稿正文；不修改 `config*.yaml`、`input/`、
+`output/`、`.secrets/`（除非用户明确要求）；Git 只维护 `main`，不自动建分支、不自动提交
+或推送。无法判断任务类型时，先做只读检查并向用户确认。
 
 ## 0.1 Agent 快速上手
 

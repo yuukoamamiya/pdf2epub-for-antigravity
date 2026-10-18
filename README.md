@@ -10,7 +10,9 @@ Antigravity 工作区 Subagent 完成，本地程序负责文件整理、校验�
 文档按读者分工：
 
 - `README.md`：给使用者看的能力介绍、安装和快速开始；
-- `AGENTS.md`：给 Agent 看的可执行操作手册；
+- `AGENTS.md`：给书稿流程 Agent 看的可执行操作手册；
+- `docs/maintenance.md`：给编码 Agent 看的维护规则，明确与书稿流程的边界
+  （根目录 `opencode.md` / `codex.md` 是短入口）；
 - `docs/`：给维护者看的架构、交接合同、产物格式和恢复细节。
 
 ## 能做什么
