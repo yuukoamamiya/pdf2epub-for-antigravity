@@ -309,8 +309,14 @@ def test_prepare_validate_and_apply_wire_endnote_ambiguity_decisions(tmp_path: P
     assert manifest["endnote_ambiguities"] == AMBIGUITIES_FILENAME
     assert manifest["endnote_decision_file"] == DECISIONS_FILENAME
     assert manifest["status"] == "pending_review"
+    assert manifest["page_review_required"] is False
+    assert manifest["decision_file"] is None
+    assert "Ambiguous centralized endnote definitions" in prompt
     assert DECISIONS_FILENAME in prompt
     assert AMBIGUITIES_FILENAME in prompt
+    assert "region_audits" not in prompt
+    assert "footnote_start" not in prompt
+    assert "footnote_decisions.json" not in prompt
 
     result = validate_footnote_decisions(tmp_path, config=config)
     assert result["valid"] is False
@@ -364,7 +370,60 @@ def test_prepare_prompt_does_not_endnote_review_when_no_ambiguity(tmp_path: Path
 
     assert manifest["endnote_ambiguity_count"] == 0
     assert manifest["status"] == "no_subagent_review_required"
+    assert manifest["page_review_required"] is False
+    assert manifest["decision_file"] is None
     assert "Ambiguous centralized endnote definitions" not in prompt
+    assert DECISIONS_FILENAME not in prompt
+
+
+def _add_page_review_block(tmp_path: Path) -> None:
+    sidecar = tmp_path / "pages" / "page_001.ocr.json"
+    payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    payload["blocks"].append(
+        {
+            "order": 1,
+            "label": "Text",
+            "bbox": [80, 820, 920, 870],
+            "html": "36 Review this page footnote",
+        }
+    )
+    sidecar.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_page_review_and_endnote_ambiguity_prompt_contains_both(tmp_path: Path):
+    config = _write_endnote_apply_fixture(tmp_path)
+    config["footnotes"]["mode"] = "footnotes"
+    _add_page_review_block(tmp_path)
+
+    paths = prepare_footnote_subagent(tmp_path, book_title="Mixed test", config=config)
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    prompt = paths["prompt"].read_text(encoding="utf-8")
+
+    assert manifest["status"] == "pending_review"
+    assert manifest["page_review_required"] is True
+    assert manifest["decision_file"] == "footnote_decisions.json"
+    assert "region_audits" in prompt
+    assert "footnote_decisions.json" in prompt
+    assert "Ambiguous centralized endnote definitions" in prompt
+    assert DECISIONS_FILENAME in prompt
+    assert "Do not create a decision file" not in prompt
+
+
+def test_disabled_mode_skips_endnote_collection_and_decision_files(tmp_path: Path):
+    config = _write_endnote_apply_fixture(tmp_path)
+    config["footnotes"]["mode"] = "disabled"
+
+    paths = prepare_footnote_subagent(tmp_path, book_title="Disabled test", config=config)
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    prompt = paths["prompt"].read_text(encoding="utf-8")
+
+    assert manifest["endnote_ambiguity_count"] == 0
+    assert manifest["status"] == "no_subagent_review_required"
+    assert manifest["page_review_required"] is False
+    assert manifest["decision_file"] is None
+    assert "disabled" in prompt.lower()
+    assert DECISIONS_FILENAME not in prompt
+    assert "footnote_decisions.json" not in prompt
 
 
 _REAL_BOOK = Path(__file__).resolve().parents[1] / "output" / "Digital Capitalism"

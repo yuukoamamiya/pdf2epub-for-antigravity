@@ -79,6 +79,73 @@ def _write_unit_contexts(
     return unit_context_files
 
 
+def _endnote_ambiguity_section(ambiguity_count: int) -> str:
+    """Return the focused centralized-endnote review instructions."""
+    return f"""
+## Ambiguous centralized endnote definitions
+
+The local endnote pass found {ambiguity_count} numbered definition line(s) whose
+preceding boundary is unclear. Read `{AMBIGUITIES_FILENAME}` and decide only those
+items; do not send every Notes line to review.
+
+For each item, classify `line_text` with the surrounding context:
+- `definition`: the `N.`/`N)`/`N：` marker starts a real endnote definition.
+- `continuation`: the number is a page number, citation locator, or other printed
+  number inside the preceding note/sentence, so this line belongs to the previous
+  note and must not create a new definition.
+
+Use the previous/next lines and the scope key when present. A previous line ending
+in `:` or `,` is the typical ambiguous case. Do not modify the body Markdown.
+Write only valid JSON to `{DECISIONS_FILENAME}` with this shape:
+
+```json
+{{
+  "schema_version": 1,
+  "decisions": [
+    {{
+      "file": "chapter_10.part1.md",
+      "line": 774,
+      "role": "continuation",
+      "confidence": "high",
+      "reason": "The number is a page locator; the sentence continues."
+    }}
+  ]
+}}
+```
+
+Every manifest item needs exactly one decision. `review_required` is not an answer
+here; the local apply stage fails closed until each item is `definition` or
+`continuation`.
+"""
+
+
+def _focused_endnote_prompt(book_title: str, ambiguity_count: int) -> str:
+    """Build a compact prompt used when only endnote boundaries need review."""
+    return f"""# Centralized endnote definition review
+
+Book: {book_title}
+
+Page-footnote review is not applicable for this footnotes.mode. Only the
+centralized endnote ambiguity review below is required; no page-footnote decision
+file is needed. Do not reread or rewrite the whole book.
+{_endnote_ambiguity_section(ambiguity_count)}"""
+
+
+def _no_review_prompt(book_title: str, report: Mapping[str, Any]) -> str:
+    """Build the minimal prompt used when no Subagent decision is required."""
+    if report.get("footnote_mode") == "disabled":
+        detail = (
+            "Footnote and centralized endnote processing is disabled by "
+            "footnotes.mode. No Subagent review or decision file is required."
+        )
+    else:
+        detail = (
+            "No page-footnote review or centralized endnote ambiguity review is "
+            "required. No Subagent decision file is needed."
+        )
+    return f"# Footnote review\n\nBook: {book_title}\n\n{detail}\n"
+
+
 def prepare_footnote_subagent(
     output_dir: Path,
     *,
@@ -118,6 +185,9 @@ def prepare_footnote_subagent(
     report["endnote_ambiguity_count"] = ambiguity_count
     report["endnote_definition_ambiguities_sha256"] = sha256_file(ambiguity_path)
     atomic_write_json(output_dir / "footnote_candidates.json", report)
+    page_review_required = (
+        bool(report["review_required"]) and report["footnote_mode"] != "disabled"
+    )
     manifest = {
         "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
         "task": "footnote-prepare",
@@ -151,14 +221,17 @@ def prepare_footnote_subagent(
         "cross_page_window_count": len(report["cross_page_windows"]),
         "consensus_visual_review_pages": report["consensus_visual_review_pages"],
         "unit_context_files": unit_context_files,
-        "decision_file": "footnote_decisions.json",
+        "decision_file": (
+            "footnote_decisions.json" if page_review_required else None
+        ),
+        "page_review_required": page_review_required,
         "endnote_ambiguity_count": ambiguity_count,
         "endnote_ambiguities": AMBIGUITIES_FILENAME,
         "endnote_decision_file": DECISIONS_FILENAME,
         "endnote_definition_file": AMBIGUITIES_FILENAME,
         "status": (
             "pending_review"
-            if report["review_required"] or ambiguity_count
+            if page_review_required or ambiguity_count
             else "no_subagent_review_required"
         ),
     }
@@ -201,11 +274,7 @@ def prepare_footnote_subagent(
         page_lines.append(line)
     page_text = "\n".join(page_lines) or "- 无需 Subagent 复核；仅保留本地高置信度候选。"
     source_guidance = (
-        "Footnote extraction is disabled by the configured footnotes.mode. "
-        "Do not create a decision file or classify any page content as a page footnote. "
-        "The local apply stage will preserve the endnote/source Markdown unchanged."
-        if report["footnote_mode"] != "footnotes"
-        else (
+        (
             "For native-text pages, use the recorded coordinates and font metadata as layout evidence. "
             "Candidates marked confidence=high have already passed the conservative local rule: an earlier "
             "same-page superscript reference matches the key and the note text is materially smaller than "
@@ -214,7 +283,19 @@ def prepare_footnote_subagent(
             if report["source_kind"] == "native_text"
             else "If a page is marked as an OCR-consensus visual review, treat the local label as untrusted even when it says `Footnote`; compare the primary and secondary sidecars and the page image before deciding."
         )
+        if report["footnote_mode"] == "footnotes"
+        else (
+            "Page-footnote extraction is not part of this footnotes.mode. "
+            "Review only page items explicitly listed here and do not classify "
+            "ordinary Notes content as a page footnote."
+        )
     )
+    if ambiguity_count:
+        source_guidance += (
+            " Page-footnote review follows the page instructions; centralized "
+            "endnote ambiguities use the final section and write "
+            f"`{DECISIONS_FILENAME}`."
+        )
     prompt = f"""# Footnote review\n\nBook: {book_title}\n\nRead `footnote_subagent_manifest.json`, `footnote_candidates.json`, and `footnote_visual_audit_manifest.json`. The local script first inferred page-level bottom-note regions. Review only the regions listed as `visual_audit_required` and their blocks marked `confidence: review`; blocks marked `confidence: high` are already accepted by the deterministic local rule and do not need a decision. Do not reread or rewrite the whole book. {source_guidance}\n\nCandidate page sidecars and visual evidence:\n{page_text}\n\nFor every listed review page, open the full-page `visual` PNG first. It is authoritative for the overall body/footnote boundary, page furniture, reading order, and cross-page context. When a `crop` PNG is present, open it as a zoomed supplement for small text and block-level details; never use the crop alone to decide whether a region belongs to the page footer or body. If the full-page image is unavailable, use the crop and sidecar coordinates.\n\nA region audit is one visual decision for the area, but the output must still contain one block decision for every listed review/audit block so the deterministic apply stage can address exact sidecar coordinates. Treat the page image as authoritative for region boundaries, continuations, headers, footers, and OCR omissions.\n\nUse these meanings strictly:\n- `footnote_start`: the beginning of a real page footnote; it will be moved to the end of its logical chapter.\n- `footnote_continuation`: text continuing a real footnote from an earlier page; it will be joined to that footnote.\n- `footnote_definition`: a complete footnote definition already presented as a note block.\n- `citation`: an in-text citation, quoted source, parenthetical/numeric reference, or other scholarly reference; it must stay in the body and must never be moved.\n- `bibliography`: a reference-list/bibliography entry; it must stay in place and must never be moved.\n- `body`: ordinary prose or an uncertain block that is not a footnote.\n\nWrite one `region_audits` entry for every audit region, with its exact `region_id`, a `disposition` of `footnote_region`, `body_region`, or `review_required`, and nested block decisions. A `review_required` region or block is unresolved and will block the workflow. Also keep a flat `decisions` array for compatibility; it may repeat the nested decisions, but do not emit duplicates. For each review/audit block assign exactly one role and keep its page, source, and block number. `source` defaults to `primary`; use `source: "secondary"` only for a candidate listed under `secondary_only_candidates`. For `footnote_start` and `footnote_definition`, copy the visible numeric key when present. For `footnote_continuation`, provide the key of the footnote it continues. A numeric marker alone is not enough to call something a footnote: if it is a citation or reference, use `citation` or `bibliography`.\n\nWrite only valid JSON to `footnote_decisions.json` with this shape:\n\n```json\n{{\n  "schema_version": {FOOTNOTE_PREPARE_SCHEMA_VERSION},\n  "region_audits": [\n    {{\n      "region_id": "page-125-region-01",\n      "disposition": "footnote_region",\n      "decisions": [\n        {{\n          "page": 125,\n          "source": "primary",\n          "block": 8,\n          "role": "footnote_continuation",\n          "key": "36",\n          "confidence": "high"\n        }}\n      ]\n    }}\n  ],\n  "decisions": []\n}}\n```\n\nIf a block or region is genuinely ambiguous, use `role` or `disposition: "review_required"` and explain it in `reason`; do not guess.\n"""
     prompt = prompt.replace(
         "Candidate page sidecars and visual evidence:",
@@ -234,39 +315,15 @@ def prepare_footnote_subagent(
         "will refuse to guess between repeated markers.\n\n"
         "Do not reread or rewrite the whole book.\n"
     )
-    if ambiguity_count:
-        prompt += (
-            "\n\n## Ambiguous centralized endnote definitions\n\n"
-            f"The local endnote pass found {ambiguity_count} numbered definition "
-            f"line(s) whose preceding boundary is unclear. Read `{AMBIGUITIES_FILENAME}` "
-            "and decide only those items; do not send every Notes line to review.\n\n"
-            "For each item, classify `line_text` with the surrounding context:\n"
-            "- `definition`: the `N.`/`N)`/`N：` marker starts a real endnote definition.\n"
-            "- `continuation`: the number is a page number, citation locator, or other "
-            "printed number inside the preceding note/sentence, so this line belongs to "
-            "the previous note and must not create a new definition.\n\n"
-            "Use the previous/next lines and the scope key when present. A previous line "
-            "ending in `:` or `,` is the typical ambiguous case. Do not modify the body "
-            "Markdown. Write only valid JSON to "
-            f"`{DECISIONS_FILENAME}` with this shape:\n\n"
-            "```json\n"
-            "{\n"
-            '  "schema_version": 1,\n'
-            '  "decisions": [\n'
-            "    {\n"
-            '      "file": "chapter_10.part1.md",\n'
-            '      "line": 774,\n'
-            '      "role": "continuation",\n'
-            '      "confidence": "high",\n'
-            '      "reason": "The number is a page locator; the sentence continues."\n'
-            "    }\n"
-            "  ]\n"
-            "}\n"
-            "```\n\n"
-            "Every manifest item needs exactly one decision. `review_required` is not "
-            "an answer here; the local apply stage fails closed until each item is "
-            "`definition` or `continuation`.\n"
-        )
+    if report["footnote_mode"] == "disabled":
+        prompt = _no_review_prompt(book_title, report)
+    elif page_review_required:
+        if ambiguity_count:
+            prompt += _endnote_ambiguity_section(ambiguity_count)
+    elif ambiguity_count:
+        prompt = _focused_endnote_prompt(book_title, ambiguity_count)
+    else:
+        prompt = _no_review_prompt(book_title, report)
     prompt_path = output_dir / "footnote_subagent_prompt.md"
     atomic_write_text(prompt_path, prompt)
     return {
