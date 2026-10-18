@@ -4,6 +4,7 @@ Source-stage selection and EPUB packaging are local operations. Translation and
 source validation remain delegated to their existing command contracts.
 """
 
+import traceback
 from pathlib import Path
 
 from loguru import logger
@@ -123,21 +124,57 @@ def _warn_if_translated_checkpoint_is_ignored(
     return True
 
 
+def _load_build_epub():
+    """Import the EPUB builder lazily so command parsing stays lightweight."""
+    from ..build_epub import build_epub
+
+    return build_epub
+
+
+def _run_epub_build_stages(stages, build_fn=None):
+    """Build each requested EPUB stage, collecting failures.
+
+    ``stages`` is an ordered sequence of ``(label, BuildEpubConfig)`` pairs.
+    Every stage is attempted even when an earlier one fails, so a failed
+    English build cannot hide whether the translated EPUB is usable. Returns
+    ``True`` only when all requested stages succeeded.
+    """
+    if build_fn is None:
+        build_fn = _load_build_epub()
+    all_succeeded = True
+    for label, build_config in stages:
+        try:
+            epub_path = build_fn(build_config)
+        except Exception as exc:
+            all_succeeded = False
+            logger.error(
+                f"[{label} Build Failed] {label} EPUB build failed: {exc}"
+            )
+            traceback.print_exc()
+            continue
+        logger.success(f"{label} EPUB created: {epub_path}")
+    return all_succeeded
+
+
 def build_epub_command(args):
     """Handle the build-epub subcommand (toc_tree.json driven)."""
-    import asyncio
-    from pathlib import Path
-    from ..build_epub import build_epub, BuildEpubConfig
+    from ..build_epub import BuildEpubConfig
 
     context = load_book_context(args, "build-epub")
     if context is None:
         return 1
     config = context.config
     policy = PipelinePolicy.from_config(config)
-    if args.translated and not policy.requires_translation:
+
+    only_translated = bool(getattr(args, "only_translated", False))
+    translated_mode = bool(args.translated or only_translated)
+    build_english = bool(args.translated and not only_translated)
+    build_translated = translated_mode
+
+    if translated_mode and not policy.requires_translation:
         logger.error(
             "pipeline: epub_conversion builds the original-language EPUB; "
-            "--translated is not available."
+            "--translated/--only-translated is not available."
         )
         return 1
     book_title = context.book_title
@@ -152,7 +189,7 @@ def build_epub_command(args):
     # V2 architecture stores Subagent results in validated/ subdirectories.
     source_dir, source_stage = _resolve_pdf_markdown_source(output_dir, config)
     polish_input_dir, _ = _resolve_pdf_polish_source(output_dir, config)
-    if args.translated:
+    if translated_mode:
         markdown_dir = output_dir / "translated" / "validated"
         logger.info("Building EPUB from translated markdown...")
         if source_stage != "polished":
@@ -199,10 +236,10 @@ def build_epub_command(args):
             target_dir=markdown_dir,
             config_path=context.config_path,
         )
-        if args.translated
+        if translated_mode
         else 0
     )
-    if not args.translated:
+    if not translated_mode:
         validation_result = _validate_pdf_source_stage(
             args,
             source_stage,
@@ -244,7 +281,8 @@ def build_epub_command(args):
         else (policy.target_language or "Chinese")
     )
 
-    if args.translated:
+    stages = []
+    if build_english:
         source_language = policy.source_language or "English"
         safe_title = sanitize_filename(book_title)
         english_epub = output_dir / f"{safe_title}_en.epub"
@@ -260,14 +298,7 @@ def build_epub_command(args):
             config=config,
             output_epub=english_epub,
         )
-        try:
-            english_path = build_epub(english_config)
-            logger.success(f"English EPUB created: {english_path}")
-        except Exception as e:
-            logger.error(f"English EPUB build failed: {e}")
-            import traceback
-            traceback.print_exc()
-            return 1
+        stages.append(("English", english_config))
 
     # Create config
     build_config = BuildEpubConfig(
@@ -277,18 +308,11 @@ def build_epub_command(args):
         toc_tree_path=toc_tree_path,
         images_dir=images_dir,
         cover_image=cover_image,
-        translated=args.translated,
+        translated=build_translated,
         target_language=target_language,
-        config=config
+        config=config,
     )
 
-    try:
-        # Build EPUB
-        epub_path = build_epub(build_config)
-        logger.success(f"EPUB created: {epub_path}")
-        return 0
-    except Exception as e:
-        logger.error(f"EPUB build failed: {e}")
-        import traceback
-        traceback.print_exc()
-        return 1
+    stages.append(("Translated" if build_translated else "Original", build_config))
+
+    return 0 if _run_epub_build_stages(stages) else 1

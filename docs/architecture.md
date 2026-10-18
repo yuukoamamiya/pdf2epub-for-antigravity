@@ -423,11 +423,20 @@ translate + 按 TOC 顺序装箱的 worker_handoffs + 工作区 Subagent
   （相邻短章节可合并；超大章节只在章节内部拆分；Prompt 另含预算化的全书 TOC 方向性轮廓）
   → translated/
 translate-validate → translate_validation.json（retry_required 自动返工；持续 review 升级人工）
-build-epub --translated → 最终译文 EPUB
+build-epub --translated → 英文 _en.epub + 最终译文 EPUB
+
+`build-epub --translated` 是双语构建：先尝试英文 `_en.epub`，再构建译文；英文构建失败时
+记录 `[English Build Failed]` 并继续尝试译文，译文失败记录 `[Translated Build Failed]`，
+原稿模式失败记录 `[Original Build Failed]`。任一请求的构建失败时命令返回非 0，已成功
+的产物保留。只构建译文版可使用 `build-epub --only-translated`（别名 `--target-only`），
+它不触发英文 `_en.epub`；与 `--translated` 同时出现时以 `--only-translated` 为准，但仍
+要求当前有效的 polish 和 translate checkpoint。`pipeline: epub_conversion` 拒绝这两个
+译文构建开关。
 
 翻译流程中，若 `translate_validation.json` 对当前 `polished_markdown/validated/` 和
 `translated/validated/` 仍为 current，而 `build-epub` 未带 `--translated`，命令只打印警告
-并继续构建原稿 EPUB；默认行为不变，译文版仍必须显式传 `--translated`。
+并继续构建原稿 EPUB；默认行为不变，译文版仍必须显式传 `--translated` 或
+`--only-translated`。
 
 PDF `build-epub` 的默认输出文件名由 `utils.common.sanitize_filename()` 从当前书名生成：
 Windows 禁止字符和控制字符替换为 `_`，首尾空格/句点会去除，保留设备名会加前缀，长度

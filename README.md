@@ -232,8 +232,13 @@ bash scripts/build_all_epubs.sh config.yaml
 ```
 
 该脚本等价于依次执行 `build-epub` 和 `build-epub --translated`。前者生成使用正式书名的
-原稿英文 EPUB；后者生成英文 `_en.epub` 和使用译名的译文 EPUB。只运行第一个会缺少译文版。
-`pipeline: epub_conversion` 不得使用 `--translated`，也不要使用本脚本。
+原稿英文 EPUB；后者生成英文 `_en.epub` 和使用译名的译文 EPUB。`--translated` 仍是默认的
+双语构建：英文 `_en.epub` 失败时会记录 `[English Build Failed]` 并继续尝试译文版；任一
+请求的构建失败时最终返回非 0，已成功的产物保留。若只需要译文版，可使用
+`build-epub --only-translated`（别名 `--target-only`），它不会触发英文 `_en.epub`；
+与 `--translated` 同时出现时以 `--only-translated` 为准，但仍要求当前有效的 polish 和
+translate checkpoint。只运行第一个命令会缺少译文版。
+`pipeline: epub_conversion` 不得使用 `--translated` 或 `--only-translated`，也不要使用本脚本。
 
 `translate-toc` 的工作区 Subagent 只写扁平的 `toc_translation_result.json`；本地
 `translate-toc-validate` 会从源 `toc_tree.json` 合并生成 `toc_tree_translated.json`。
@@ -280,7 +285,8 @@ output/<配置书名>/<安全化译名>.epub          # 译文，使用译名
 
 翻译流程运行 `bash scripts/build_all_epubs.sh config.yaml` 后会得到以上版本：第一条
 `build-epub` 生成正式书名的原稿英文 EPUB；第二条 `build-epub --translated` 生成译文
-EPUB 和英文 `_en.epub`。两个命令都需要执行，否则会缺少其中一个版本。
+EPUB 和英文 `_en.epub`。两个命令都需要执行，否则会缺少其中一个版本。只构建译文版时可
+使用 `build-epub --only-translated`（别名 `--target-only`），它不会生成英文 `_en.epub`。
 
 PDF 的 `build-epub` 默认使用书名生成 EPUB 文件名：Windows 禁止的半角字符、控制字符
 和路径分隔符会替换为 `_`，首尾空格/句点会去除，保留设备名会加前缀，文件名最长为

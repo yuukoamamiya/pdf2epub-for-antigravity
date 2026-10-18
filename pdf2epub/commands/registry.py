@@ -612,7 +612,17 @@ def register_command_parsers(subparsers) -> None:
     build_epub_parser.add_argument(
         "--translated",
         action="store_true",
-        help="Build EPUB from translated markdown instead of polished"
+        help="Build English _en.epub plus the translated EPUB from translated markdown"
+    )
+    build_epub_parser.add_argument(
+        "--only-translated",
+        "--target-only",
+        dest="only_translated",
+        action="store_true",
+        help=(
+            "Build only the translated EPUB; skip the English _en.epub. "
+            "Takes precedence over --translated."
+        ),
     )
     build_epub_parser.add_argument(
         "--cover",

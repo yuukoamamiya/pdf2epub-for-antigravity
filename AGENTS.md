@@ -664,10 +664,14 @@ uv run pdf2epub -c config.yaml check-ready --stage translate --skip-entities
    ```
 
    第一条生成使用正式书名的原稿英文 EPUB；第二条生成英文 `_en.epub` 和使用译名的译文
-   EPUB。`--translated` 已经会额外生成英文 `_en.epub`，但第一条不可省略，否则会缺少
-   正式书名的原稿英文版。只运行 `build-epub` 不带 `--translated` 会缺少译文 EPUB，不得
-   视为完成打包。`pipeline: epub_conversion` 不得使用本脚本，也不得使用 `--translated`，
-   只运行一次 `build-epub`。
+   EPUB。`--translated` 仍是默认的双语构建：先尝试英文 `_en.epub`，再构建译文；英文版
+   失败时不会中止，仍会继续尝试译文版。只构建译文版时可显式使用
+   `build-epub --only-translated`（别名 `--target-only`），它不触发英文 `_en.epub`；
+   与 `--translated` 同时出现时以 `--only-translated` 为准，但仍要求当前有效的 polish 和
+   translate checkpoint。任一请求的构建失败时命令最终返回非 0，已成功的产物保留。
+   第一条不可省略，否则会缺少正式书名的原稿英文版。只运行 `build-epub` 不带
+   `--translated` 会缺少译文 EPUB，不得视为完成打包。`pipeline: epub_conversion` 不得
+   使用本脚本，也不得使用 `--translated` 或 `--only-translated`，只运行一次 `build-epub`。
 
    默认拒绝不完整译文；`--allow-partial` 仅用于明确的预览。翻译流程中若
    `translate_validation.json` 对当前 polished source 和 `translated/validated/` 仍有效，
