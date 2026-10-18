@@ -157,6 +157,71 @@ def test_start_line_inserts_heading_before_requested_line(tmp_path):
     assert content.index("## Recovered Heading") < content.index("Body line.")
 
 
+def test_skips_recovered_heading_when_start_line_outside_fragment(tmp_path):
+    pages_dir = tmp_path / "pages"
+    _write_page(pages_dir, 1, "Intro line.\nBody line.\nTail line.")
+    node = TOCNode(
+        title="Fragment Heading",
+        level=2,
+        start_page=1,
+        end_page=1,
+        boundary_info={"start_line": 2},
+    )
+    merger = PageMerger()
+    merger.set_toc_heading_recoveries(
+        {
+            1: [
+                {
+                    "page": 1,
+                    "title": "Before Fragment",
+                    "level": 2,
+                    "start_line": 1,
+                },
+                {
+                    "page": 1,
+                    "title": "After Fragment",
+                    "level": 2,
+                    "start_line": 99,
+                },
+            ]
+        }
+    )
+
+    content = merger.merge_node_content(node, pages_dir)
+
+    assert "## Before Fragment" not in content
+    assert "## After Fragment" not in content
+    assert "Body line." in content
+    assert "Tail line." in content
+
+
+def test_does_not_duplicate_heading_already_in_fragment(tmp_path):
+    pages_dir = tmp_path / "pages"
+    _write_page(pages_dir, 1, "## 8 Mobilized\n\nBody line.")
+    node = TOCNode(title="8. Mobilized", level=2, start_page=1, end_page=1)
+    merger = PageMerger()
+    merger.set_toc_heading_recoveries(
+        {
+            1: [
+                {
+                    "page": 1,
+                    "title": "8. Mobilized",
+                    "level": 2,
+                    "start_line": None,
+                }
+            ]
+        }
+    )
+
+    content = merger.merge_node_content(node, pages_dir)
+
+    heading_lines = [
+        line for line in content.splitlines() if line.lstrip().startswith("#")
+    ]
+    assert len(heading_lines) == 1
+    assert "Body line." in content
+
+
 def test_reads_body_from_corrected_pages_and_evidence_from_pages(tmp_path):
     corrected_dir = tmp_path / "ocr_corrected_pages" / "validated"
     evidence_dir = tmp_path / "pages"

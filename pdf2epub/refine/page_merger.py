@@ -12,6 +12,7 @@ from typing import Iterable, List, Optional, Set, Tuple
 from loguru import logger
 
 from .toc_tree import TOCNode
+from .toc_heading_recovery import title_present_in_lines
 from ..utils.ocr_artifacts import (
     clean_ocr_page_artifacts,
     native_repeated_edge_furniture_index,
@@ -61,32 +62,45 @@ class PageMerger:
         if not insertions:
             return lines
 
-        positioned: list[tuple[int, int, dict]] = []
+        positioned: list[tuple[int, int, str, dict]] = []
         for order, item in enumerate(insertions):
             title = str(item.get("title") or "").strip()
             if not title:
                 continue
-            offset = 0
+            if title_present_in_lines(lines, title):
+                continue
             start_line = item.get("start_line")
-            if (
-                isinstance(start_line, int)
-                and fragment_start_line <= start_line <= fragment_end_line
-            ):
+            if isinstance(start_line, int):
+                if not (fragment_start_line <= start_line <= fragment_end_line):
+                    logger.debug(
+                        "Skipping recovered heading %r on page %s: start_line %s "
+                        "outside fragment %s..%s",
+                        title,
+                        page_num,
+                        start_line,
+                        fragment_start_line,
+                        fragment_end_line,
+                    )
+                    continue
                 offset = start_line - fragment_start_line
-            positioned.append((offset, order, item))
+            else:
+                offset = 0
+            positioned.append((offset, order, title, item))
 
-        for offset, _order, item in sorted(
+        for offset, _order, title, item in sorted(
             positioned,
             key=lambda entry: (entry[0], entry[1]),
             reverse=True,
         ):
+            if title_present_in_lines(lines, title):
+                continue
             level = item.get("level")
             try:
                 level = int(level)
             except (TypeError, ValueError):
                 level = 1
             level = max(1, min(6, level))
-            block = ["", f"{'#' * level} {str(item['title']).strip()}", ""]
+            block = ["", f"{'#' * level} {title}", ""]
             index = max(0, min(offset, len(lines)))
             lines[index:index] = block
         return lines

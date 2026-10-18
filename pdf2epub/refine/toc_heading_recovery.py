@@ -56,7 +56,7 @@ def _titles_match(left: str, right: str) -> bool:
     return bool(_title_variants(left) & _title_variants(right))
 
 
-def _title_present_in_page(lines: Iterable[str], title: str) -> bool:
+def title_present_in_lines(lines: Iterable[str], title: str) -> bool:
     title_variants = _title_variants(title)
     if not title_variants:
         return False
@@ -199,7 +199,7 @@ def collect_toc_heading_recoveries(
             )
             continue
 
-        if _title_present_in_page(page_lines, title):
+        if title_present_in_lines(page_lines, title):
             skipped.append(
                 {
                     "page": start_page,
@@ -393,5 +393,6 @@ def toc_heading_recovery_fingerprint(recoveries: Dict[int, List[dict]]) -> str:
 
 __all__ = [
     "collect_toc_heading_recoveries",
+    "title_present_in_lines",
     "toc_heading_recovery_fingerprint",
 ]
