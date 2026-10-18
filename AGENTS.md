@@ -451,9 +451,10 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
    `endnotes_only` 支持集中 Notes 中每章从 1 重新编号的“按章作用域尾注”。`footnote-apply`
    会从 `toc_tree.json` 和 `ocr_markdown/tree_progress.json` 构建只读 scope 目录，按
    Markdown 标题把正文引用和 Notes 定义配到具体章；scope key 形如 `u4c1`，内部 key 为
-   `fnc-<scope>-<number>`，同一 scope 的第 N 个重复定义为 `...-oN`。只有跨章重复的 key
-   会改写，其他 key 保持原数字；scope 目录只进入 `footnote_normalization.json` 的报告字段，
-   不写入 output。Notes 的“外层页计数器 + 内层真实注释号”只在当前 scope 的正文引用集合
+   `fnc-<scope>-<number>`，同一 scope 的第 N 个重复定义为 `...-oN`。跨 scope 重复或
+   同一 scope 内重复定义的 key 会改写；其他 key 保持原数字。scope 目录只进入
+   `footnote_normalization.json` 的报告字段，不写入 output。Notes 的“外层页计数器 +
+   内层真实注释号”只在当前 scope 的正文引用集合
    包含内层数字且内层不小于外层时采用内层，否则保留外层，避免把 `3. 2005 was...` 误判为
    第 2005 条。重复 key 没有章标题、引用所在 scope 没有定义、定义 scope 没有正文 span
    或引用数超过定义数时必须 fail closed，并提示修复 TOC/章标题（可先检查

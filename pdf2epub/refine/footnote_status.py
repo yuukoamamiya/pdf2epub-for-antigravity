@@ -214,13 +214,34 @@ def footnote_normalization_status(
             "tree_progress_stale",
             "tree_progress.json changed after footnote normalization",
         )
+    endnotes = report.get("endnotes")
+    if (
+        isinstance(endnotes, Mapping)
+        and str(endnotes.get("scope_mode") or "").strip().lower()
+        == "per_chapter"
+    ):
+        toc_tree_path = output_dir / "toc_tree.json"
+        expected_toc_hash = report.get("toc_tree_sha256")
+        if (
+            not expected_toc_hash
+            or not toc_tree_path.is_file()
+            or expected_toc_hash != sha256_file(toc_tree_path)
+        ):
+            fail(
+                "toc_tree_stale",
+                "toc_tree.json is missing or changed after scoped endnote "
+                "normalization",
+            )
 
     current = not failures
     if current:
         detail = "current validated footnote normalization matches all inputs"
     else:
         detail = failures[0]["detail"]
-        if any(item["code"] == "candidate_report_stale" for item in failures):
+        if any(
+            item["code"] in {"candidate_report_stale", "toc_tree_stale"}
+            for item in failures
+        ):
             detail += "; rerun footnote-prepare, footnote-validate, and footnote-apply"
         elif any(item["code"] == "decision_validation_stale" for item in failures):
             detail += "; rerun footnote-validate and footnote-apply"

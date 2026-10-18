@@ -192,7 +192,8 @@ TOC 中标记为
 `footnote_normalized/` 前加载 `toc_tree.json` 和 `ocr_markdown/tree_progress.json`；
 缺少 TOC 或 scope 构建失败时，如果 Notes 仍有重复 key，归一化必须失败并提示，不能静默退回
 `footnotes.mode: disabled`。scope 触发条件为同一数字 key 在至少两个 scope 有定义，或同一
-`(scope, key)` 有多个定义；只有这些 key 改写为 `fnc-<scope>-<number>` / `...-oN`。定义多于
+`(scope, key)` 有多个定义。跨 scope 重复或同一 scope 内重复定义的 key 会改写为
+`fnc-<scope>-<number>` / `...-oN`；其他 key 保持原数字。定义多于
 引用时多出的定义保留为 orphan；引用所在 scope 无定义、定义 scope 无正文 span、引用数超过
 定义数或重复 key 落在未匹配区域时 fail closed。EPUB 侧由
 `pdf2epub/epub/footnotes/keys.py` 的 `display_footnote_key()` 统一把内部 key 还原为读者

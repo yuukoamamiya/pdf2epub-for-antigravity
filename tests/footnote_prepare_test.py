@@ -202,6 +202,84 @@ def test_footnote_status_reports_candidate_hash_as_root_cause(tmp_path: Path):
     assert "footnote-prepare" in status["detail"]
 
 
+def test_footnote_status_requires_current_toc_for_scoped_endnotes(tmp_path: Path):
+    source_dir = tmp_path / "ocr_markdown"
+    target_dir = tmp_path / "footnote_normalized"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    source = source_dir / "unit.md"
+    target = target_dir / "unit.md"
+    source.write_text("body\n", encoding="utf-8")
+    target.write_text("body\n", encoding="utf-8")
+    candidates = tmp_path / "footnote_candidates.json"
+    decisions = tmp_path / "footnote_decision_validation.json"
+    candidates.write_text("{}", encoding="utf-8")
+    decisions.write_text(
+        json.dumps({"valid": True, "ocr_evidence_mode": "single_ocr"}),
+        encoding="utf-8",
+    )
+    toc_tree = tmp_path / "toc_tree.json"
+
+    def write_checkpoint(endnotes: dict, toc_hash=None) -> None:
+        (tmp_path / "footnote_normalization.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 2,
+                    "valid": True,
+                    "status": "validated",
+                    "ocr_evidence_mode": "single_ocr",
+                    "source_sha256": {
+                        "unit.md": hashlib.sha256(source.read_bytes()).hexdigest()
+                    },
+                    "target_sha256": {
+                        "unit.md": hashlib.sha256(target.read_bytes()).hexdigest()
+                    },
+                    "candidate_report_sha256": hashlib.sha256(
+                        candidates.read_bytes()
+                    ).hexdigest(),
+                    "decision_validation_sha256": hashlib.sha256(
+                        decisions.read_bytes()
+                    ).hexdigest(),
+                    "endnotes": endnotes,
+                    **({"toc_tree_sha256": toc_hash} if toc_hash else {}),
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    toc_tree.write_text('{"chapters": []}', encoding="utf-8")
+    write_checkpoint(
+        {"scope_mode": "per_chapter"},
+        hashlib.sha256(toc_tree.read_bytes()).hexdigest(),
+    )
+    status = footnote_normalization_status(tmp_path)
+    assert status["current"] is True
+
+    write_checkpoint({"scope_mode": "per_chapter"})
+    status = footnote_normalization_status(tmp_path)
+    assert status["current"] is False
+    assert status["failures"][0]["code"] == "toc_tree_stale"
+
+    write_checkpoint(
+        {"scope_mode": "per_chapter"},
+        hashlib.sha256(toc_tree.read_bytes()).hexdigest(),
+    )
+    toc_tree.write_text('{"chapters": [{"title": "Changed"}]}', encoding="utf-8")
+    status = footnote_normalization_status(tmp_path)
+    assert status["current"] is False
+    assert status["failures"][0]["code"] == "toc_tree_stale"
+    assert "footnote-prepare" in status["detail"]
+
+    toc_tree.unlink()
+    status = footnote_normalization_status(tmp_path)
+    assert status["current"] is False
+    assert status["failures"][0]["code"] == "toc_tree_stale"
+
+    write_checkpoint({"scope_mode": "global"})
+    status = footnote_normalization_status(tmp_path)
+    assert status["current"] is True
+
+
 def _write_native_sidecar(
     output_dir: Path,
     page: int,

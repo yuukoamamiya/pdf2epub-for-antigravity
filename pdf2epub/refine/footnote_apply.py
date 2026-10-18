@@ -323,6 +323,13 @@ def apply_footnote_normalization(
         "converted_reference_count": 0,
         "reference_counts": {},
         "orphan_definition_keys": [],
+        "scope_mode": "global",
+        "scope_count": 0,
+        "scopes": [],
+        "scoped_keys": [],
+        "double_numbered_definition_count": 0,
+        "duplicate_definition_occurrences": [],
+        "orphan_scoped_definitions": [],
         "errors": [],
     }
 
@@ -810,6 +817,11 @@ def apply_footnote_normalization(
         "endnotes": endnote_report,
         "tree_progress_sha256": sha256_file(
             output_dir / "ocr_markdown" / "tree_progress.json"
+        ),
+        "toc_tree_sha256": (
+            sha256_file(output_dir / "toc_tree.json")
+            if (output_dir / "toc_tree.json").is_file()
+            else None
         ),
     }
     atomic_write_json(output_dir / "footnote_normalization.json", result)
