@@ -18,11 +18,13 @@ _UNICODE_SUP_RE = re.compile(r"(?P<value>[⁰¹²³⁴⁵⁶⁷⁸⁹]+)")
 _UNICODE_DIGITS = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789")
 _MARKDOWN_REF_RE = re.compile(r"\[\^(?P<key>[A-Za-z0-9_-]+)\](?!:)")
 _MARKDOWN_DEF_RE = re.compile(r"^\s*\[\^(?P<key>[A-Za-z0-9_-]+)\]:\s*", re.MULTILINE)
-_LEGACY_DEF_RE = re.compile(r"^\s*(?P<key>\d+)\.\s+", re.MULTILINE)
+_LEGACY_DEF_RE = re.compile(
+    r"^\s*(?:[-*+][ \t]+)?(?P<key>\d+)\.\s+", re.MULTILINE
+)
 _RAW_NOTE_DEF_RE = re.compile(
     r"^[ \t]{0,3}(?:"
     r"<sup\b[^>]*>[ \t]*(?P<html_key>\d+)[ \t]*</sup>"
-    r"|(?P<number_key>\d+)[ \t]*(?:[.)。：：]|(?=\s))"
+    r"|(?:[-*+][ \t]+)?(?P<number_key>\d+)[ \t]*(?:[.)。：：]|(?=\s))"
     r")[ \t]+",
     re.IGNORECASE | re.MULTILINE,
 )

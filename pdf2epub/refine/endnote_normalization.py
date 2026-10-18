@@ -52,7 +52,7 @@ _RAW_NOTE_DEF_RE = re.compile(
     rf"^[ \t]{0,3}(?:"
     rf"<sup\b[^>]*>[ \t]*(?P<html_key>\d+)[ \t]*</sup>"
     rf"[ \t]*(?:[.:：。）)])?"
-    rf"|(?P<number_key>\d+)[ \t]*(?:[.)。：：]|(?=\s))"
+    rf"|(?:[-*+][ \t]+)?(?P<number_key>\d+)[ \t]*(?:[.)。：：]|(?=\s))"
     rf")[ \t]+",
     re.IGNORECASE | re.MULTILINE,
 )

@@ -483,8 +483,12 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
    `duplicate_definition_occurrences` 和 `orphan_scoped_definitions`。EPUB 中的引用和定义
    仍显示原始数字，内部 `fnc-` key 只用于链接和锚点。
 
+   Notes 定义还支持 OCR 产生的可选无序列表标记 `- N.`、`* N.`、`+ N.`；它们与
+   `N.`/`N)`/`N：` 等价，由 `footnote-apply` 的本地 normalization 直接改写为
+   `[^N]: ...`，不进入 polish 或 translate Subagent。
+
    集中尾注的定义边界采用混合识别：文件开头、前一行空行、前一行以句末标点结束，
-   或前一行是 Markdown 标题的 `N.`/`N)`/`N：` 行由本地直接接受。前一行以 `:`、`,`、
+   或前一行是 Markdown 标题的 `N.`/`N)`/`N：`（含可选 `-`/`*`/`+` 标记）行由本地直接接受。前一行以 `:`、`,`、
    `;`、`-` 或普通单词结尾的 numbered punctuation 行写入
    `endnote_definition_ambiguities.json`，只把这些少量歧义行交给 Subagent 判断
    `definition` / `continuation`；`N text` 日期续行仍走既有 `previous_line_blank` 规则，

@@ -2,12 +2,40 @@ import pytest
 
 from pdf2epub.build_epub import validate_centralized_endnotes_for_build
 from pdf2epub.epub.footnotes import FootnoteManager, validate_footnote_graph
-from pdf2epub.footnote_normalization import validate_polish_footnote_normalization
+from pdf2epub.footnote_normalization import (
+    endnote_definition_keys,
+    validate_polish_footnote_normalization,
+)
 from pdf2epub.markdown_to_html import convert_markdown_to_html
 from pdf2epub.refine.endnote_normalization import (
     EndnoteNormalizationError,
     normalize_endnotes,
+    validate_normalized_endnotes,
 )
+
+
+def test_list_marked_notes_definition_is_normalized_locally() -> None:
+    source = {
+        "chapter_1.md": "Body <sup>145</sup>.\n",
+        "chapter_12.md": "- 145. Katz, Personal Influence, 16.\n",
+    }
+    roles = {"chapter_1.md": "", "chapter_12.md": "notes"}
+
+    normalized, report = normalize_endnotes(source, roles)
+
+    assert normalized["chapter_12.md"] == (
+        "[^145]: Katz, Personal Influence, 16.\n"
+    )
+    assert "- 145." not in normalized["chapter_12.md"]
+    assert report["converted_reference_count"] == 1
+    assert validate_normalized_endnotes(normalized, roles) == {
+        "valid": True,
+        "definition_keys": ["145"],
+        "errors": [],
+    }
+    assert endnote_definition_keys(
+        source["chapter_12.md"], file_role="notes"
+    ) == ["145"]
 
 
 def test_typed_notes_normalize_numbered_html_and_unicode_references() -> None:

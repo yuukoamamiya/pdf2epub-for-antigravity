@@ -723,8 +723,13 @@ Notes，并作为 `orphan_scoped_definitions` 报告。scope 目录不写入 `ou
 `scoped_keys`、`double_numbered_definition_count`、`duplicate_definition_occurrences`、
 `orphan_scoped_definitions`）。
 
+OCR 把 Notes 定义识别成无序列表时，行首可选的 `-`/`*`/`+` 标记与 `N.`/`N)`/`N：`
+等价；`footnote-apply` 的本地 normalization 会把 `- N. text`、`* N. text`、
+`+ N. text` 直接改写为 `[^N]: text`，不交给 polish 或 translate Subagent。
+
 集中尾注的定义边界采用混合识别。文件开头、前一行空行、前一行以句末标点结束，或前一行
-是 Markdown 标题的 `N.`/`N)`/`N：` 行由本地直接接受；`N text` 日期续行继续使用
+是 Markdown 标题的 `N.`/`N)`/`N：`（含可选 `-`/`*`/`+` 标记）行由本地直接接受；
+`N text` 日期续行继续使用
 `previous_line_blank` 规则，Markdown/HTML 定义和 scope 识别不进入该队列。前一行非空且
 不是句末标点（例如以 `:`、`,`、`;`、`-` 或普通单词结尾）的 numbered punctuation 行写入
 `endnote_definition_ambiguities.json`，每项包含 `file`、`line`、`key`、

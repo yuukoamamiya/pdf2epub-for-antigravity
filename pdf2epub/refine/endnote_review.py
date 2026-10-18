@@ -29,7 +29,7 @@ DECISIONS_FILENAME = "endnote_definition_decisions.json"
 VALIDATION_FILENAME = "endnote_definition_validation.json"
 
 NUMBERED_PUNCT_DEF_RE = re.compile(
-    r"^[ \t]{0,3}(?P<key>\d+)[ \t]*[.)。：：][ \t]+(?P<content>\S.*)$"
+    r"^[ \t]{0,3}(?:[-*+][ \t]+)?(?P<key>\d+)[ \t]*[.)。：：][ \t]+(?P<content>\S.*)$"
 )
 _TERMINAL_PUNCTUATION = frozenset(". ! ? 。 ！ ？ ” ’ \" '".split())
 _MARKDOWN_HEADING_RE = re.compile(r"^#{1,6}\s+\S")

@@ -176,7 +176,8 @@ TOC 中标记为
   结尾），两者都通过剥离 `Chapter N:`/`N:`/前导 `N.` 后的标题变体匹配回正文 scope。
   `Notes to Chapter N` 等页眉和未匹配标题保持当前 scope；歧义标题只记录，不猜测。
 - `refine/endnote_review.py`：只收集前一行为非空、非句末标点且非 Markdown 标题的
-  numbered punctuation 定义行（`N.`、`N)`、`N：` 等），写
+  numbered punctuation 定义行（`N.`、`N)`、`N：` 等，可带 OCR 产生的可选
+  `-`/`*`/`+` 列表标记），写
   `endnote_definition_ambiguities.json`，并校验 Subagent 在
   `endnote_definition_decisions.json` 中为每条歧义给出的 `definition`/`continuation`
   决定。`N text` 日期续行、Markdown/HTML 定义和 scope 识别不进入该队列；缺失、重复、
@@ -485,8 +486,10 @@ OCR：
 
 集中尾注走独立的确定性归一化路径：`tree_progress.json`/TOC 中 `type: notes` 的文件是
 尾注定义源，不要求 Markdown 内再次出现 `# Notes` 标题。`footnote-apply` 在生成
-`footnote_normalized/` 时识别 `N. text`、`N text`、`<sup>N</sup> text` 和已有
-`[^N]: text`，并只把与这些定义匹配的普通单元上标转为 `[^N]`。原始 OCR 单元不覆盖。
+`footnote_normalized/` 时识别 `N. text`、`- N. text`/`* N. text`/`+ N. text`、
+`N text`、`<sup>N</sup> text` 和已有 `[^N]: text`，并只把与这些定义匹配的普通单元上标
+转为 `[^N]`。带列表标记的定义在本地 normalization 中直接改写为 `[^N]: text`，不交给
+polish 或 translate Subagent。原始 OCR 单元不覆盖。
 可按章重启的重复编号由 `endnote_scopes.py` 配对后改写为 `fnc-<scope>-<number>`；无法
 唯一配对（缺少章标题、scope 没有正文 span、引用/定义数量不符）时阻断归一化。
 `footnote_normalization.json` 的 `endnotes` 子报告记录最终定义键、转换引用数、scope 统计、
