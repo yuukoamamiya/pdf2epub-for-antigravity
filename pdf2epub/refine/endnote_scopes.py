@@ -17,14 +17,21 @@ from .footnote_structure import FOOTNOTE_STRUCTURE_EXEMPT_TYPES
 
 _HEADING_RE = re.compile(r"^(?P<marks>#{1,6})\s+(?P<title>\S.*?)\s*$")
 _CHAPTER_LABEL_RE = re.compile(
-    r"^(?:chapter|chapitre|kapitel)\s+(?P<number>\d+)\s*[:.\-–—]\s*",
+    r"^(?:chapter|chapitre|kapitel)\s+(?P<number>\d+)(?:\s*[:.\-–—]\s*|\s*$)",
     re.IGNORECASE,
 )
 _PART_LABEL_RE = re.compile(
-    r"^(?:part|teil|partie)\s+(?P<number>\d+)\s*[:.\-–—]\s*",
+    r"^(?:part|teil|partie)\s+(?P<number>\d+)(?:\s*[:.\-–—]\s*|\s*$)",
     re.IGNORECASE,
 )
 _LEADING_NUMBER_RE = re.compile(r"^(?P<number>\d+)\s*[.)：:]\s*")
+_LEADING_SPACED_NUMBER_RE = re.compile(
+    r"^(?P<number>\d{1,3})\s+(?=\S)"
+)
+_PLAIN_HEADING_MAX_LENGTH = 120
+_PLAIN_HEADING_FORBIDDEN_PREFIXES = ("#", "-", "*", ">", "|", "!", "<")
+_PLAIN_HEADING_NUMBER_PREFIX_RE = re.compile(r"^\d+[.)、]")
+_PLAIN_HEADING_TERMINAL_RE = re.compile(r"[.,;!?。，；！？]\s*$")
 _MARKDOWN_TOP_RE = re.compile(r"^[*_`]+|[*_`]+$")
 _TITLE_OUTER_MARK_PAIRS = {
     ("《", "》"),
@@ -90,6 +97,11 @@ def scope_title_variants(value: Any) -> tuple[str, ...]:
     if leading:
         add(raw[leading.end() :])
         add(leading.group("number"))
+
+    spaced = _LEADING_SPACED_NUMBER_RE.match(raw)
+    if spaced:
+        add(raw[spaced.end() :])
+        add(spaced.group("number"))
 
     if ":" in raw:
         before, after = raw.split(":", 1)
@@ -266,6 +278,30 @@ def _build_body_spans(
     return body_spans, body_files, ambiguous
 
 
+def _is_plain_text_heading(lines: list[str], index: int) -> bool:
+    """Return True for a conservative standalone Notes chapter heading.
+
+    Native-text PDFs often keep chapter headings in Notes as plain text.  Only
+    a short standalone line surrounded by blank lines qualifies; numbered note
+    definitions, page furniture, and sentences that end with punctuation are
+    rejected so the matcher never has to guess.
+    """
+    line = lines[index].strip()
+    if not line or len(line) > _PLAIN_HEADING_MAX_LENGTH:
+        return False
+    if line.startswith(_PLAIN_HEADING_FORBIDDEN_PREFIXES):
+        return False
+    if _PLAIN_HEADING_NUMBER_PREFIX_RE.match(line):
+        return False
+    if _PLAIN_HEADING_TERMINAL_RE.search(line):
+        return False
+    if index > 0 and lines[index - 1].strip():
+        return False
+    if index + 1 < len(lines) and lines[index + 1].strip():
+        return False
+    return True
+
+
 def _build_notes_spans(
     units: list[Mapping[str, Any]],
     scopes: dict[str, dict[str, Any]],
@@ -300,8 +336,17 @@ def _build_notes_spans(
             span_scope = current
             for line_number, line in enumerate(lines, 1):
                 heading = _HEADING_RE.match(line)
-                if heading:
-                    matches = _match_scopes(heading.group("title"), candidates)
+                if heading is not None:
+                    heading_title: Optional[str] = heading.group("title")
+                    plain_text = False
+                elif _is_plain_text_heading(lines, line_number - 1):
+                    heading_title = line.strip()
+                    plain_text = True
+                else:
+                    heading_title = None
+                    plain_text = False
+                if heading_title is not None:
+                    matches = _match_scopes(heading_title, candidates)
                     if len(matches) == 1:
                         current = str(matches[0]["scope_key"])
                     elif len(matches) > 1:
@@ -315,7 +360,7 @@ def _build_notes_spans(
                                 ],
                             }
                         )
-                    else:
+                    elif not plain_text:
                         unmatched.append(
                             {
                                 "file": name,

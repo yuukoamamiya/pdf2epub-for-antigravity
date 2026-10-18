@@ -692,8 +692,12 @@ Markdown 脚注语法会被保留，页脚脚注仍按上一节的页面候选�
 - 正文只按 `^#{1,6}\s` 标题行切分 span；第一个 part 从 unit scope 开始，后续 part 继承
   上一个 part 的最后一个 scope。匹配多个 scope 的标题只记录 ambiguity，匹配不到的普通
   小节标题不改变当前 scope。
-- Notes 文件按同一套标题变体匹配回正文 scope；跨 part 继承上一个 Notes 标题的 scope，
-  未匹配的标题（如 Abbreviations）写入报告，其定义保留 `scope_key=None`。
+- Notes 文件按同一套标题变体匹配回正文 scope。标题既可以是 Markdown 标题，也可以是
+  保守识别的独立纯文本标题：strip 后 1..120 字符、前后为空行或文件边界、不以 Markdown/
+  HTML 标记或 `N.`/`N)`/`N、` 定义开头、不以句末标点结尾。唯一匹配才切换；多个匹配只记录
+  ambiguity 并保持当前 scope；`Notes to Chapter N`、`Abbreviations` 等未匹配标题也保持
+  当前 scope（未匹配的 Markdown 标题仍写入报告）。跨 part 继承上一个 Notes 标题的 scope，
+  未切换 scope 的定义保留原 scope（文件开头为 `scope_key=None`）。
 - 正文 span 内收集 `<sup>N</sup>`、Unicode 上标和已有 `[^N]` 引用；同文件存在
   `[^N]:` 定义时该引用按页脚注处理，不进入尾注证据。
 

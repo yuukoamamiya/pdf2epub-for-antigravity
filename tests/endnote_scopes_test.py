@@ -8,7 +8,10 @@ from pdf2epub.refine.endnote_normalization import (
     normalize_endnotes,
     validate_normalized_endnotes,
 )
-from pdf2epub.refine.endnote_scopes import build_endnote_scope_directory
+from pdf2epub.refine.endnote_scopes import (
+    build_endnote_scope_directory,
+    scope_for_line,
+)
 
 
 def _simple_book(
@@ -335,6 +338,247 @@ def test_reference_in_scope_without_definition_fails_closed() -> None:
             {"chapter_1.md": "", "chapter_2.md": "", "chapter_3.md": "notes"},
             scopes=directory,
         )
+
+
+def _digital_capitalism_book(
+    notes: str,
+) -> tuple[dict, dict, dict]:
+    toc = {
+        "chapters": [
+            {
+                "title": "Introduction: The Enchanted Network",
+                "start_page": 1,
+                "end_page": 10,
+            },
+            {
+                "title": "1 The Neoliberal Networking Drive",
+                "start_page": 11,
+                "end_page": 20,
+            },
+            {
+                "title": "2 Going Global: The Neoliberal Project",
+                "start_page": 21,
+                "end_page": 30,
+            },
+            {
+                "title": "Notes",
+                "start_page": 31,
+                "end_page": 35,
+                "type": "notes",
+            },
+        ]
+    }
+    progress = {
+        "units": [
+            {
+                "unit_id": "chapter_1",
+                "index_path": [1],
+                "title": "Introduction: The Enchanted Network",
+                "page_range": [1, 10],
+                "file": "chapter_1.md",
+            },
+            {
+                "unit_id": "chapter_2",
+                "index_path": [2],
+                "title": "1 The Neoliberal Networking Drive",
+                "page_range": [11, 20],
+                "file": "chapter_2.md",
+            },
+            {
+                "unit_id": "chapter_3",
+                "index_path": [3],
+                "title": "2 Going Global: The Neoliberal Project",
+                "page_range": [21, 30],
+                "file": "chapter_3.md",
+            },
+            {
+                "unit_id": "chapter_4",
+                "index_path": [4],
+                "title": "Notes",
+                "page_range": [31, 35],
+                "file": "chapter_4.md",
+                "type": "notes",
+            },
+        ]
+    }
+    texts = {
+        "chapter_1.md": (
+            "## Introduction: The Enchanted Network\n"
+            "Body <sup>1</sup>.\n"
+        ),
+        "chapter_2.md": (
+            "## 1 The Neoliberal Networking Drive\n"
+            "Body <sup>1</sup>.\n"
+        ),
+        "chapter_3.md": (
+            "## 2 Going Global: The Neoliberal Project\n"
+            "Body <sup>1</sup>.\n"
+        ),
+        "chapter_4.md": notes,
+    }
+    return toc, progress, texts
+
+
+def test_plain_text_notes_headings_map_to_body_scopes() -> None:
+    toc, progress, texts = _digital_capitalism_book(
+        "Notes\n"
+        "\n"
+        "Introduction\n"
+        "\n"
+        "1. Intro note.\n"
+        "\n"
+        "Chapter 1\n"
+        "\n"
+        "1. First note.\n"
+        "\n"
+        "Notes to Chapter 1\n"
+        "\n"
+        "2. First two.\n"
+        "\n"
+        "Chapter 2\n"
+        "\n"
+        "1. Second note.\n"
+    )
+
+    directory = build_endnote_scope_directory(toc, progress, texts)
+
+    assert directory["notes_spans"]["chapter_4.md"] == [
+        {"start_line": 1, "end_line": 3, "scope_key": None},
+        {"start_line": 3, "end_line": 7, "scope_key": "u1"},
+        {"start_line": 7, "end_line": 15, "scope_key": "u2"},
+        {"start_line": 15, "end_line": 18, "scope_key": "u3"},
+    ]
+    assert directory["scopes"]["u1"]["notes_files"] == ["chapter_4.md"]
+    assert directory["scopes"]["u2"]["notes_files"] == ["chapter_4.md"]
+    assert directory["scopes"]["u3"]["notes_files"] == ["chapter_4.md"]
+    assert directory["ambiguous_headings"] == []
+    assert directory["unmatched_notes_headings"] == []
+
+
+def test_plain_text_heading_inside_paragraph_is_not_a_boundary() -> None:
+    toc, progress, texts = _digital_capitalism_book(
+        "Notes\n"
+        "\n"
+        "Introduction\n"
+        "\n"
+        "1. Intro note.\n"
+        "\n"
+        "This sentence mentions\n"
+        "Chapter 1\n"
+        "in the middle of the paragraph.\n"
+        "\n"
+        "Chapter 2\n"
+        "\n"
+        "1. Second note.\n"
+    )
+
+    directory = build_endnote_scope_directory(toc, progress, texts)
+
+    assert directory["notes_spans"]["chapter_4.md"] == [
+        {"start_line": 1, "end_line": 3, "scope_key": None},
+        {"start_line": 3, "end_line": 11, "scope_key": "u1"},
+        {"start_line": 11, "end_line": 14, "scope_key": "u3"},
+    ]
+    assert scope_for_line(directory, "chapter_4.md", 8) == "u1"
+    assert directory["ambiguous_headings"] == []
+
+
+def test_plain_text_heading_matching_two_scopes_is_ambiguous() -> None:
+    toc = {
+        "chapters": [
+            {"title": "1 Alpha", "start_page": 1, "end_page": 5},
+            {"title": "1 Beta", "start_page": 6, "end_page": 10},
+            {
+                "title": "Notes",
+                "start_page": 11,
+                "end_page": 12,
+                "type": "notes",
+            },
+        ]
+    }
+    progress = {
+        "units": [
+            {
+                "unit_id": "chapter_1",
+                "index_path": [1],
+                "title": "1 Alpha",
+                "page_range": [1, 5],
+                "file": "chapter_1.md",
+            },
+            {
+                "unit_id": "chapter_2",
+                "index_path": [2],
+                "title": "1 Beta",
+                "page_range": [6, 10],
+                "file": "chapter_2.md",
+            },
+            {
+                "unit_id": "chapter_3",
+                "index_path": [3],
+                "title": "Notes",
+                "page_range": [11, 12],
+                "file": "chapter_3.md",
+                "type": "notes",
+            },
+        ]
+    }
+    texts = {
+        "chapter_1.md": "## 1 Alpha\nA<sup>1</sup>.\n",
+        "chapter_2.md": "## 1 Beta\nB<sup>1</sup>.\n",
+        "chapter_3.md": (
+            "Notes\n"
+            "\n"
+            "Chapter 1\n"
+            "\n"
+            "1. Ambiguous note.\n"
+        ),
+    }
+
+    directory = build_endnote_scope_directory(toc, progress, texts)
+
+    assert directory["notes_spans"]["chapter_3.md"] == [
+        {"start_line": 1, "end_line": 6, "scope_key": None},
+    ]
+    assert directory["ambiguous_headings"] == [
+        {
+            "file": "chapter_3.md",
+            "line": 3,
+            "heading": "Chapter 1",
+            "candidates": ["u1", "u2"],
+        }
+    ]
+
+
+def test_markdown_notes_headings_still_match_body_scopes() -> None:
+    toc, progress, texts = _simple_book(
+        body=(
+            "# Part 1: Roots\n"
+            "## 1. First Chapter\n"
+            "A<sup>1</sup>.\n"
+            "## 2. Second Chapter\n"
+            "B<sup>1</sup>.\n"
+        ),
+        notes=(
+            "# Notes\n"
+            "## Chapter 1: First Chapter\n"
+            "1. One.\n"
+            "## Chapter 2: Second Chapter\n"
+            "1. Two.\n"
+        ),
+        children=[
+            {"title": "1. First Chapter", "start_page": 2, "end_page": 5},
+            {"title": "2. Second Chapter", "start_page": 6, "end_page": 10},
+        ],
+    )
+
+    directory = build_endnote_scope_directory(toc, progress, texts)
+
+    assert directory["notes_spans"]["chapter_3.md"] == [
+        {"start_line": 1, "end_line": 2, "scope_key": None},
+        {"start_line": 2, "end_line": 4, "scope_key": "u2c1"},
+        {"start_line": 4, "end_line": 6, "scope_key": "u2c2"},
+    ]
+    assert directory["ambiguous_headings"] == []
 
 
 def test_validate_rejects_raw_numeric_reference_for_scoped_definition() -> None:

@@ -162,8 +162,10 @@ TOC 中标记为
   校验和 materialize 阶段共享同一个不可变选项对象，避免各阶段各自解释配置。
 - `refine/endnote_scopes.py`：从 `toc_tree.json`、`ocr_markdown/tree_progress.json` 和
   当前 Markdown 构建只读的按章 scope 目录。顶层单元使用 `u<unit_order>`，后代使用
-  `u4c1`、`u4c1c2`；正文只按 Markdown 标题行切分 span，Notes 标题通过剥离
-  `Chapter N:`/前导 `N.` 后的标题变体匹配回正文 scope。歧义标题只记录，不猜测。
+  `u4c1`、`u4c1c2`；正文只按 Markdown 标题行切分 span。Notes 标题可以是 Markdown
+  标题，也可以是独立短行（1..120 字符、前后为空行/文件边界、非编号定义且不以句末标点
+  结尾），两者都通过剥离 `Chapter N:`/`N:`/前导 `N.` 后的标题变体匹配回正文 scope。
+  `Notes to Chapter N` 等页眉和未匹配标题保持当前 scope；歧义标题只记录，不猜测。
 - `refine/endnote_normalization.py`：只处理 `type: notes` 单元中的集中尾注定义及普通单元
   上标引用的确定性归一化，并提供构建前的残留检查；不参与页面脚注候选识别。存在重复
   打印编号时，它消费 `endnote_scopes.py` 的目录，只把需要去重的 key 改写为
