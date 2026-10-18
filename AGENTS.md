@@ -344,7 +344,9 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
 要求对应的第一个匹配标题逐字使用 TOC 文本，但不强制其成为物理首行。
   `toc_heading_contexts.binding_mode: container_only` 表示源单元没有可见 TOC 标签（例如
   纯图片封面或边界片段）；此时 EPUB 构建器负责章节容器标题，Subagent 不得在 Markdown
-  中凭空新增标题或纯段落标签。续文分片仍保持原样，不生成“续”标题。
+  中凭空新增标题或纯段落标签。续文分片仍保持原样，不生成“续”标题。大章节拆分时每个 part
+  收到独立的 scoped context：子标题只下发到其源标题首次出现的 part，父标题只在可见的 part
+  标记 `visible`；所有 part 都找不到源标题的子标题只挂到第一个 part 并标记 `container_only`。
 
 ## 2. PDF 翻译流程（扫描/混合稿与原生文字稿）
 

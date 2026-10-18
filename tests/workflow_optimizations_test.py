@@ -1246,7 +1246,52 @@ def test_validation_blocks_protected_workspace_mutation(tmp_path: Path):
     assert paths["manifest"].is_file()
 
 
-def test_toc_heading_contexts_and_validation_use_first_unit_part(tmp_path: Path):
+def _write_split_heading_fixture(
+    tmp_path: Path,
+    source_toc: dict,
+    translated_toc: dict,
+    part_texts: dict,
+) -> tuple[Path, Path]:
+    output = tmp_path / "output"
+    source = tmp_path / "source"
+    output.mkdir()
+    source.mkdir()
+    (output / "toc_tree.json").write_text(
+        json.dumps(source_toc, ensure_ascii=False), encoding="utf-8"
+    )
+    (output / "toc_tree_translated.json").write_text(
+        json.dumps(translated_toc, ensure_ascii=False), encoding="utf-8"
+    )
+    for name, text in part_texts.items():
+        (source / name).write_text(text, encoding="utf-8")
+    filenames = list(part_texts)
+    progress_dir = output / "ocr_markdown"
+    progress_dir.mkdir()
+    (progress_dir / "tree_progress.json").write_text(
+        json.dumps(
+            {
+                "units": [
+                    {
+                        "index_path": [1],
+                        "file": filenames[0],
+                        "part_files": filenames,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    return output, source
+
+
+def _write_heading_manifest(output: Path, contexts: dict) -> None:
+    (output / "translate_subagent_manifest.json").write_text(
+        json.dumps({"toc_heading_contexts": contexts}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def test_toc_heading_contexts_without_source_dir_use_first_unit_part(tmp_path: Path):
     output = tmp_path / "output"
     output.mkdir()
     (output / "toc_tree_translated.json").write_text(
@@ -1296,7 +1341,165 @@ def test_toc_heading_contexts_and_validation_use_first_unit_part(tmp_path: Path)
 
     contexts = build_toc_heading_contexts(output)
     assert set(contexts) == {"chapter_1.part1.md"}
+    assert contexts["chapter_1.part1.md"]["binding_mode"] == "visible"
+    assert contexts["chapter_1.part1.md"]["children"] == [
+        {"title": "Exact child", "anchor": "toc-1-1", "binding_mode": "visible"}
+    ]
     assert validate_toc_heading_bindings(output)["valid"] is True
+
+
+def test_toc_heading_contexts_split_children_by_physical_part(tmp_path: Path):
+    output, source = _write_split_heading_fixture(
+        tmp_path,
+        {
+            "chapters": [
+                {
+                    "title": "Chapter",
+                    "children": [
+                        {"title": "Child A", "anchor": "toc-1-1"},
+                        {"title": "Child B", "anchor": "toc-1-2"},
+                    ],
+                }
+            ]
+        },
+        {
+            "chapters": [
+                {
+                    "title": "第一章",
+                    "children": [
+                        {"title": "子标题 A", "anchor": "toc-1-1"},
+                        {"title": "子标题 B", "anchor": "toc-1-2"},
+                    ],
+                }
+            ]
+        },
+        {
+            "chapter_1.part1.md": "# Chapter\n\nChild A\n",
+            "chapter_1.part2.md": "Child A\nChild B\n",
+        },
+    )
+
+    contexts = build_toc_heading_contexts(output, source_dir=source)
+
+    assert set(contexts) == {"chapter_1.part1.md", "chapter_1.part2.md"}
+    assert contexts["chapter_1.part1.md"]["toc_title"] == "第一章"
+    assert contexts["chapter_1.part1.md"]["binding_mode"] == "visible"
+    assert contexts["chapter_1.part1.md"]["children"] == [
+        {"title": "子标题 A", "anchor": "toc-1-1", "binding_mode": "visible"}
+    ]
+    assert contexts["chapter_1.part2.md"]["toc_title"] == "第一章"
+    assert contexts["chapter_1.part2.md"]["binding_mode"] == "container_only"
+    assert contexts["chapter_1.part2.md"]["children"] == [
+        {"title": "子标题 B", "anchor": "toc-1-2", "binding_mode": "visible"}
+    ]
+
+
+def test_toc_heading_contexts_missing_child_stays_container_only(
+    tmp_path: Path,
+):
+    output, source = _write_split_heading_fixture(
+        tmp_path,
+        {
+            "chapters": [
+                {
+                    "title": "Chapter",
+                    "children": [
+                        {"title": "Child A", "anchor": "toc-1-1"},
+                        {"title": "Missing child", "anchor": "toc-1-2"},
+                    ],
+                }
+            ]
+        },
+        {
+            "chapters": [
+                {
+                    "title": "第一章",
+                    "children": [
+                        {"title": "子标题 A", "anchor": "toc-1-1"},
+                        {"title": "缺失子标题", "anchor": "toc-1-2"},
+                    ],
+                }
+            ]
+        },
+        {
+            "chapter_1.part1.md": "# Chapter\n\nChild A\n",
+            "chapter_1.part2.md": "Continuation without TOC labels.\n",
+        },
+    )
+
+    contexts = build_toc_heading_contexts(output, source_dir=source)
+
+    assert contexts["chapter_1.part1.md"]["children"] == [
+        {"title": "子标题 A", "anchor": "toc-1-1", "binding_mode": "visible"},
+        {"title": "缺失子标题", "anchor": "toc-1-2", "binding_mode": "container_only"},
+    ]
+    assert contexts["chapter_1.part2.md"]["children"] == []
+
+    _write_heading_manifest(output, contexts)
+    validated = output / "translated" / "validated"
+    validated.mkdir(parents=True)
+    (validated / "chapter_1.part1.md").write_text(
+        "# 第一章\n\n子标题 A\n", encoding="utf-8"
+    )
+    (validated / "chapter_1.part2.md").write_text(
+        "Continuation without TOC labels.\n", encoding="utf-8"
+    )
+    report = validate_toc_heading_bindings(output)
+
+    assert report["valid"] is True
+    assert any(
+        item["title"] == "缺失子标题" for item in report["skipped"]
+    )
+
+
+def test_toc_heading_binding_checks_child_in_its_mapped_part(tmp_path: Path):
+    output, source = _write_split_heading_fixture(
+        tmp_path,
+        {
+            "chapters": [
+                {
+                    "title": "Chapter",
+                    "children": [
+                        {"title": "Child A", "anchor": "toc-1-1"},
+                        {"title": "Child B", "anchor": "toc-1-2"},
+                    ],
+                }
+            ]
+        },
+        {
+            "chapters": [
+                {
+                    "title": "第一章",
+                    "children": [
+                        {"title": "子标题 A", "anchor": "toc-1-1"},
+                        {"title": "子标题 B", "anchor": "toc-1-2"},
+                    ],
+                }
+            ]
+        },
+        {
+            "chapter_1.part1.md": "# Chapter\n\nChild A\n",
+            "chapter_1.part2.md": "Child B\n",
+        },
+    )
+
+    contexts = build_toc_heading_contexts(output, source_dir=source)
+    _write_heading_manifest(output, contexts)
+    validated = output / "translated" / "validated"
+    validated.mkdir(parents=True)
+    (validated / "chapter_1.part1.md").write_text(
+        "# 第一章\n\n子标题 A\n", encoding="utf-8"
+    )
+    part2 = validated / "chapter_1.part2.md"
+    part2.write_text("子标题 B\n", encoding="utf-8")
+
+    assert validate_toc_heading_bindings(output)["valid"] is True
+
+    part2.write_text("Continuation without the heading.\n", encoding="utf-8")
+    report = validate_toc_heading_bindings(output)
+
+    assert report["valid"] is False
+    assert any("子标题 B" in error for error in report["errors"])
 
 
 def test_image_only_unit_uses_package_only_toc_container(tmp_path: Path):

@@ -258,6 +258,10 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
   恢复路径。
 - TOC 标题绑定区分 `visible` 与 `container_only`：无可见源标签的纯图片/边界单元不要求
   worker 伪造 Markdown 标题，章节容器标题由 EPUB 构建器生成；可见子标题仍使用严格绑定。
+  大章节拆成多个物理 part 时，`build_toc_heading_contexts` 为每个 part 生成独立 context：
+  父标题只在源标题实际出现的 part 标记 `visible`，其余 part 标记 `container_only`；
+  每个子标题按其源标题首次出现的 part 归属，源标题在所有 part 都缺失时只挂到第一个
+  part 并标记 `container_only`，避免 scoped worker 收到其他分片的标题或凭空新增标题。
 
 Subagent 合同已按职责拆分到上述具体模块，不再提供聚合式兼容门面。调用方应直接导入
 所属模块；移动公共函数时必须同步更新调用方、文档和契约测试。

@@ -556,67 +556,120 @@ def build_toc_heading_contexts(
         if not node:
             continue
         source_node = source_nodes.get(index_path, {})
-        names = unit.get("part_files") or [unit.get("file")]
-        source_text_parts = []
-        if source_dir is not None and names:
-            for name in names:
-                if name:
-                    source_file = Path(source_dir) / str(name)
+        names = [
+            str(name)
+            for name in (unit.get("part_files") or [unit.get("file")])
+            if name
+        ]
+        if not names:
+            continue
+        source_title = str(source_node.get("title") or "").strip()
+        source_children = source_node.get("children", [])
+
+        def build_child_context(child_index: int, child: Mapping[str, Any]) -> Dict[str, str]:
+            return {
+                "title": str(child.get("title") or "").strip(),
+                "anchor": str(child.get("anchor") or f"toc-{index_path[0]}-{child_index}"),
+                "binding_mode": "visible",
+            }
+
+        def source_child_title(child_index: int) -> str:
+            if child_index - 1 >= len(source_children):
+                return ""
+            child_source = source_children[child_index - 1]
+            if not isinstance(child_source, dict):
+                return ""
+            return str(child_source.get("title") or "").strip()
+
+        if source_dir is None or len(names) == 1:
+            source_text_parts = []
+            if source_dir is not None:
+                for name in names:
+                    source_file = Path(source_dir) / name
                     try:
                         source_text_parts.append(source_file.read_text(encoding="utf-8"))
                     except (OSError, UnicodeError):
                         pass
-        source_text = "\n".join(source_text_parts)
+            source_text = "\n".join(source_text_parts)
 
-        source_children = source_node.get("children", [])
-        children = []
+            children = []
+            for child_index, child in enumerate(node.get("children", []), 1):
+                if not isinstance(child, dict):
+                    continue
+                child_source_title = source_child_title(child_index)
+                child_context = build_child_context(child_index, child)
+                child_context["binding_mode"] = (
+                    "visible"
+                    if source_dir is None
+                    or not child_source_title
+                    or _source_contains_label(source_text, child_source_title)
+                    else "container_only"
+                )
+                children.append(child_context)
+            context = {
+                "toc_title": str(node.get("title") or "").strip(),
+                "children": [child for child in children if child["title"]],
+            }
+            # The EPUB builder supplies the parent TOC title as a package-level
+            # container when the source unit has no visible title (cover/image-only
+            # units and boundary fragments are common examples).  Requiring the
+            # Subagent to invent that title would violate the immutable Markdown
+            # heading contract.  Older callers without a source directory retain
+            # the conservative visible-title contract.
+            context["binding_mode"] = (
+                "visible"
+                if source_dir is None
+                or not source_node
+                or _source_contains_label(source_text, source_title)
+                else "container_only"
+            )
+            contexts[names[0]] = context
+            continue
+
+        # A split chapter has one physical part per continuation file.  Each
+        # part receives its own heading context so a scoped worker never needs
+        # to invent headings that belong to a different part.  A child is
+        # bound to the first part whose source text visibly contains its label;
+        # labels missing everywhere stay container-only on the first part, and
+        # the parent is visible only in the parts where its source title occurs.
+        part_texts: Dict[str, str] = {}
+        for name in names:
+            source_file = Path(source_dir) / name
+            try:
+                part_texts[name] = source_file.read_text(encoding="utf-8")
+            except (OSError, UnicodeError):
+                part_texts[name] = ""
+        part_children: Dict[str, List[Dict[str, str]]] = {name: [] for name in names}
         for child_index, child in enumerate(node.get("children", []), 1):
             if not isinstance(child, dict):
                 continue
-            child_source = (
-                source_children[child_index - 1]
-                if child_index - 1 < len(source_children)
-                and isinstance(source_children[child_index - 1], dict)
-                else {}
-            )
-            child_source_title = str(child_source.get("title") or "").strip()
-            child_binding = (
-                "visible"
-                if source_dir is None
-                or not child_source_title
-                or _source_contains_label(source_text, child_source_title)
-                else "container_only"
-            )
-            children.append(
-                {
-                    "title": str(child.get("title") or "").strip(),
-                    "anchor": str(child.get("anchor") or f"toc-{index_path[0]}-{child_index}"),
-                    "binding_mode": child_binding,
-                }
-            )
-        context = {
-            "toc_title": str(node.get("title") or "").strip(),
-            "children": [child for child in children if child["title"]],
-        }
-        # The EPUB builder supplies the parent TOC title as a package-level
-        # container when the source unit has no visible title (cover/image-only
-        # units and boundary fragments are common examples).  Requiring the
-        # Subagent to invent that title would violate the immutable Markdown
-        # heading contract.  Older callers without a source directory retain
-        # the conservative visible-title contract.
-        source_title = str(source_node.get("title") or "").strip()
-        context["binding_mode"] = (
-            "visible"
-            if source_dir is None
-            or not source_node
-            or _source_contains_label(source_text, source_title)
-            else "container_only"
-        )
-        # Stable child anchors are added to the first physical part only.
-        # Mapping the contract to that same file avoids requiring a repeated
-        # chapter title in later continuation parts.
-        if names and names[0]:
-            contexts[str(names[0])] = context
+            child_context = build_child_context(child_index, child)
+            if not child_context["title"]:
+                continue
+            child_source_title = source_child_title(child_index)
+            target_name = None
+            if child_source_title:
+                for name in names:
+                    if _source_contains_label(part_texts[name], child_source_title):
+                        target_name = name
+                        break
+            if target_name is None:
+                child_context["binding_mode"] = "container_only"
+                target_name = names[0]
+            part_children[target_name].append(child_context)
+
+        translated_title = str(node.get("title") or "").strip()
+        for name in names:
+            contexts[name] = {
+                "toc_title": translated_title,
+                "binding_mode": (
+                    "visible"
+                    if source_title
+                    and _source_contains_label(part_texts[name], source_title)
+                    else "container_only"
+                ),
+                "children": part_children[name],
+            }
     return contexts
 
 

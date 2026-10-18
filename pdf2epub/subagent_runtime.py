@@ -1260,7 +1260,10 @@ def write_worker_handoffs(
                 for child in context.get("children", []) or []:
                     if isinstance(child, Mapping):
                         child_title = str(child.get("title") or "").strip()
-                        if child_title:
+                        child_binding = str(
+                            child.get("binding_mode") or "visible"
+                        ).strip()
+                        if child_title and child_binding != "container_only":
                             expected_titles.append(child_title)
                 if expected_titles:
                     heading_lines.append(
