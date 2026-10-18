@@ -262,6 +262,9 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
   父标题只在源标题实际出现的 part 标记 `visible`，其余 part 标记 `container_only`；
   每个子标题按其源标题首次出现的 part 归属，源标题在所有 part 都缺失时只挂到第一个
   part 并标记 `container_only`，避免 scoped worker 收到其他分片的标题或凭空新增标题。
+  当 `container_only` 或缺失的子标题在生成的 Markdown 中找不到可见标题时，EPUB 构建器
+  保留 TOC 层级，但导航回退到父单元文件或首个含文件的后代，不生成指向不存在锚点的
+  fragment 链接。
 
 Subagent 合同已按职责拆分到上述具体模块，不再提供聚合式兼容门面。调用方应直接导入
 所属模块；移动公共函数时必须同步更新调用方、文档和契约测试。

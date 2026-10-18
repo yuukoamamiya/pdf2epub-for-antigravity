@@ -1195,13 +1195,12 @@ def generate_hierarchical_toc_ncx(
             # unit begins part-way through that page.  The builder adds the
             # stable unit anchor to the actual heading below; keep the
             # navigation link pointed at that heading rather than the file
-            # start.
+            # start.  Anchors that were never placed keep the file-level
+            # target so navigation never points at a missing fragment.
             anchor = str(entry.get('anchor') or '').lstrip('#')
             located_file = anchor_locations.get(anchor) if anchor else None
             if located_file:
                 href = f"text/{located_file}#{anchor}"
-            elif anchor:
-                href = f"{href.split('#', 1)[0]}#{anchor}"
         else:
             # No file, link to first child with file, or parent's file
             href = find_first_child_href(entry, parent_href)
@@ -1210,10 +1209,6 @@ def generate_hierarchical_toc_ncx(
                 located_file = anchor_locations.get(anchor)
                 if located_file:
                     href = f"text/{located_file}#{anchor}"
-                elif not entry.get('children'):
-                    base_href = href.split('#', 1)[0]
-                    if base_href != "text/toc.html":
-                        href = f"{base_href}#{entry['anchor']}"
 
         nav_id = f"navpoint-{nav_counter[0]}"
         nav_counter[0] += 1
@@ -1337,12 +1332,12 @@ def generate_hierarchical_toc_html(
                 href = parent_href  # Use parent's file
             # See the NCX generator above: file-level targets are refined to
             # the current unit's heading whenever a stable anchor exists.
+            # Unknown anchors keep the file-level target instead of emitting
+            # a fragment that the generated HTML does not contain.
             anchor = str(entry.get('anchor') or '').lstrip('#')
             located_file = anchor_locations.get(anchor) if anchor else None
             if located_file:
                 href = f"{located_file}#{anchor}"
-            elif anchor:
-                href = f"{href.split('#', 1)[0]}#{anchor}"
         else:
             # No file - link to first child with file, or parent's file
             href = find_first_child_href_html(entry, parent_href)
@@ -1351,10 +1346,6 @@ def generate_hierarchical_toc_html(
                 located_file = anchor_locations.get(anchor)
                 if located_file:
                     href = f"{located_file}#{anchor}"
-                elif not entry.get('children'):
-                    base_href = href.split('#', 1)[0]
-                    if base_href != "toc.html":
-                        href = f"{base_href}#{entry['anchor']}"
 
         result += f"{indent}<li>\n"
         result += f"{indent}    <a href=\"{href}\">{title}</a>\n"

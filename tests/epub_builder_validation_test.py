@@ -233,7 +233,9 @@ def test_flatten_toc_tree_uses_in_place_translated_title_fields() -> None:
     assert structure[0]["children"][0]["title"] == "子标题"
 
 
-def test_toc_uses_stable_fragment_for_child_without_own_file(tmp_path: Path) -> None:
+def test_toc_falls_back_to_parent_file_for_unresolved_child_anchor(
+    tmp_path: Path,
+) -> None:
     parent_file = tmp_path / "chapter_1.md"
     parent_file.write_text("# Parent\n\n## Child\n", encoding="utf-8")
     structure = build_epub_structure(
@@ -255,7 +257,8 @@ def test_toc_uses_stable_fragment_for_child_without_own_file(tmp_path: Path) -> 
     toc_path = tmp_path / "toc.html"
     assert generate_hierarchical_toc_html(structure, "Book", toc_path)
     toc = toc_path.read_text(encoding="utf-8")
-    assert 'href="chapter_1.html#toc-1-1"' in toc
+    assert 'href="chapter_1.html"' in toc
+    assert 'href="chapter_1.html#toc-1-1"' not in toc
 
 
 def test_subchapter_anchor_supports_deep_headings_and_nested_markup() -> None:
@@ -338,6 +341,92 @@ def test_subchapter_anchor_searches_later_rendered_part_and_updates_navigation(
     )
 
 
+def test_navigation_falls_back_to_parent_file_for_missing_child_anchor(
+    tmp_path: Path,
+) -> None:
+    structure = [{
+        "title": "Chapter",
+        "level": 1,
+        "unit_id": "chapter_1",
+        "file_path": tmp_path / "chapter_1.md",
+        "part_files": [
+            tmp_path / "chapter_1.part1.md",
+            tmp_path / "chapter_1.part2.md",
+        ],
+        "anchor": "toc-1",
+        "children": [{
+            "title": "Missing child",
+            "level": 2,
+            "anchor": "missing-child",
+        }],
+    }]
+    toc_path = tmp_path / "toc.html"
+    ncx_path = tmp_path / "toc.ncx"
+    assert generate_hierarchical_toc_html(
+        structure,
+        "Book",
+        toc_path,
+        anchor_locations={},
+    )
+    assert generate_hierarchical_toc_ncx(
+        structure,
+        "Book",
+        ncx_path,
+        anchor_locations={},
+    )
+    toc = toc_path.read_text(encoding="utf-8")
+    ncx = ncx_path.read_text(encoding="utf-8")
+    assert 'href="chapter_1_part1.html"' in toc
+    assert 'src="text/chapter_1_part1.html"' in ncx
+    assert "#missing-child" not in toc
+    assert "#missing-child" not in ncx
+
+
+def test_nested_entries_fall_back_to_first_descendant_file(
+    tmp_path: Path,
+) -> None:
+    structure = [{
+        "title": "Container",
+        "level": 1,
+        "anchor": "missing-container",
+        "children": [{
+            "title": "Missing parent",
+            "level": 2,
+            "anchor": "missing-parent",
+            "children": [{
+                "title": "Leaf",
+                "level": 3,
+                "unit_id": "chapter_2",
+                "file_path": tmp_path / "chapter_2.md",
+                "part_files": [tmp_path / "chapter_2.md"],
+                "anchor": "missing-leaf",
+            }],
+        }],
+    }]
+    toc_path = tmp_path / "toc.html"
+    ncx_path = tmp_path / "toc.ncx"
+    assert generate_hierarchical_toc_html(
+        structure,
+        "Book",
+        toc_path,
+        anchor_locations={},
+    )
+    assert generate_hierarchical_toc_ncx(
+        structure,
+        "Book",
+        ncx_path,
+        anchor_locations={},
+    )
+    toc = toc_path.read_text(encoding="utf-8")
+    ncx = ncx_path.read_text(encoding="utf-8")
+    assert '<a href="chapter_2.html">Container</a>' in toc
+    assert '<a href="chapter_2.html">Missing parent</a>' in toc
+    assert 'src="text/chapter_2.html"' in ncx
+    for anchor in ("missing-container", "missing-parent", "missing-leaf"):
+        assert f"#{anchor}" not in toc
+        assert f"#{anchor}" not in ncx
+
+
 def test_process_chapter_content_keeps_related_subsection_heading() -> None:
     processed = process_chapter_content(
         "第一部分附录",
@@ -392,7 +481,12 @@ def test_build_epub_structure_points_structural_parent_at_first_child(
     assert "virtual_file_name" not in structure[0]
     assert structure[0]["children"][0]["file_path"].name == "chapter_1.1.md"
     toc_path = tmp_path / "toc.html"
-    assert generate_hierarchical_toc_html(structure, "Book", toc_path)
+    assert generate_hierarchical_toc_html(
+        structure,
+        "Book",
+        toc_path,
+        anchor_locations={"toc-1-1": "chapter_1.1.html"},
+    )
     toc = toc_path.read_text(encoding="utf-8")
     assert 'href="chapter_1.1.html">Parent</a>' in toc
     assert 'href="chapter_1.1.html#toc-1-1">Child</a>' in toc
@@ -411,8 +505,18 @@ def test_toc_file_target_uses_unit_fragment(tmp_path: Path) -> None:
 
     toc_path = tmp_path / "toc.html"
     ncx_path = tmp_path / "toc.ncx"
-    assert generate_hierarchical_toc_html(structure, "Book", toc_path)
-    assert generate_hierarchical_toc_ncx(structure, "Book", ncx_path)
+    assert generate_hierarchical_toc_html(
+        structure,
+        "Book",
+        toc_path,
+        anchor_locations={"toc-1": "chapter_1.html"},
+    )
+    assert generate_hierarchical_toc_ncx(
+        structure,
+        "Book",
+        ncx_path,
+        anchor_locations={"toc-1": "chapter_1.html"},
+    )
     assert 'href="chapter_1.html#toc-1">Parent</a>' in toc_path.read_text(
         encoding="utf-8"
     )

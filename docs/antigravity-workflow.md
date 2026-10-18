@@ -804,6 +804,9 @@ PDF 正文 Prompt 还会读取已验证的
 可见的子标题，父标题也只在该 part 可见时标记 `visible`；子标题按阅读顺序第一次出现的
 part 归属。源标题在所有 part 都缺失的子标题只挂到第一个 part 并标记 `container_only`，
 对应 worker 不得新增该标题，校验也会跳过它。
+当 `container_only` 或缺失的子标题在构建阶段找不到可见 Markdown 标题时，EPUB 构建器
+保留 TOC 层级，但导航回退到父单元文件或首个含文件的后代，不生成指向不存在锚点的
+fragment 链接。
 
 跨语言的学派资料（例如德文术语表用于英文思想史书籍）必须单独配置在
 `translation.reference_glossaries`。候选报告会把它们标记为
