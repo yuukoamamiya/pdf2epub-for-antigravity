@@ -8,7 +8,7 @@ metadata:
   domain: Political economy of communication
   source_language: English
   target_language: Chinese
-  version: '2026-10-16'
+  version: '2026-10-18'
 entries:
 - id: audience-commodity
   source: audience commodity
@@ -110,4 +110,144 @@ entries:
   target: 广告符码
   category: Advertising / Political Economy of Communication
   note: 苏特·杰哈利著作 The Codes of Advertising 的正式中文书名，也是本书讨论广告如何组织商品意义与受众关系的核心概念。
+  policy: preferred
+- id: informationalized-capitalism
+  source: informationalized capitalism
+  variants:
+  - informational capitalism
+  target: 信息化资本主义
+  category: Political Economy of Communication
+  note: 丹·席勒的核心理论范畴：资本主义市场逻辑与商品化机制全面渗透并重塑信息、通信网络与知识生产的历史性发展阶段。
+  policy: preferred
+- id: information-commodification
+  source: information commodification
+  variants:
+  - commodification of information
+  target: 信息商品化
+  category: Political Economy of Communication
+  note: 资本通过法律、技术与制度屏障，把社会共享的知识、符号、数据和文化创造转化为专有营利商品的演进过程。
+  policy: preferred
+- id: information-society
+  source: information society
+  target: 信息社会
+  category: Social Theory / Political Economy of Communication
+  note: 以信息和知识为核心资源的后工业阶段论述；传播政治经济学通常强调其与资本主义商品化逻辑的连续性而非断裂。
+  policy: preferred
+- id: digital-capitalism
+  source: digital capitalism
+  target: 数字资本主义
+  category: Political Economy of Communication
+  note: 丹·席勒使用的范畴：计算机网络并非脱离现实的中立空间，而是全球资本扩张与市场网络重构的前沿。
+  policy: preferred
+- id: culture-industry
+  source: culture industry
+  target: 文化工业
+  category: Critical Theory / Media Studies
+  note: 阿多诺与霍克海默提出的批判概念，指高度标准化、商业化与集中化的文化生产机制。
+  policy: preferred
+- id: intellectual-property
+  source: intellectual property
+  variants:
+  - intellectual property rights
+  - IPR
+  target: 知识产权
+  category: Law / Political Economy of Communication
+  note: 包括专利、版权与商标在内的专有权利体系，是把公共知识与非物质产品圈围为私有商品的关键制度工具。
+  policy: preferred
+- id: media-convergence
+  source: media convergence
+  target: 媒介融合
+  category: Communication Technology / Media Policy
+  note: 数字化条件下电信、计算机网络与大众传媒在技术平台、产业所有权和内容分发上的整合。
+  policy: preferred
+- id: digital-divide
+  source: digital divide
+  target: 数字鸿沟
+  category: Information Policy / Political Economy of Communication
+  note: 不同社会群体、阶级、性别和地区在获取与使用信息通信技术及网络资源方面的结构性不平等。
+  policy: preferred
+- id: cultural-imperialism
+  source: cultural imperialism
+  target: 文化帝国主义
+  category: Critical Communication Studies
+  note: 赫伯特·席勒等学者提出的批判概念，指核心资本主义国家借助媒介垄断向外围国家输出商业消费主义与文化依赖。
+  policy: preferred
+- id: public-service-broadcasting
+  source: public-service broadcasting
+  variants:
+  - public service broadcasting
+  target: 公共服务广播
+  category: Media Policy / Political Economy of Communication
+  note: 以公共利益、公民文化和民主讨论为宗旨，独立于商业广告与政党私利的公共媒介制度。
+  policy: preferred
+- id: product-placement
+  source: product placement
+  target: 植入式广告
+  category: Advertising / Media Economics
+  note: 把特定品牌、商品或服务嵌入电影、电视剧或游戏叙事中的隐性广告形式。
+  policy: preferred
+- id: deregulation
+  source: deregulation
+  target: 放松管制
+  category: Media Policy / Political Economy of Communication
+  note: 新自由主义政策取向：削减国家对电信、媒体等关键公共事业的准入、定价与公用事业义务限制。
+  policy: preferred
+- id: free-flow-of-information
+  source: free flow of information
+  variants:
+  - free flow of information doctrine
+  target: 信息自由流动
+  category: International Communication / Political Economy of Communication
+  note: 二战后美国推动的国际传播主张，常被批评为跨国媒介和通讯社的全球扩张提供合法性。
+  policy: preferred
+- id: monopoly-capital
+  source: monopoly capital
+  target: 垄断资本
+  category: Marxist Political Economy / Media Studies
+  note: 巴兰与斯威齐的范畴：现代资本主义由少数巨型寡头企业支配市场与剩余吸收的结构性特征。
+  policy: preferred
+- id: telecommunications-policy
+  source: telecommunications policy
+  target: 电信政策
+  category: Telecommunications / Public Policy
+  note: 国家关于电信网络建设、频谱划分、市场准入、反垄断与互联互通的制度安排和法律规则。
+  policy: preferred
+- id: private-line
+  source: private line
+  variants:
+  - private-wire
+  target: 专用线路
+  category: Telecommunications / Political Economy of Communication
+  note: 企业或特定机构租用、专供内部封闭通信使用的点对点专线。
+  policy: preferred
+- id: transnationalization
+  source: transnationalization
+  variants:
+  - transnationalisation
+  target: 跨国化
+  category: Global Political Economy / Media Studies
+  note: 媒介与文化资本跨越民族国家边界，通过跨国并购、合资和全球分销网络扩展资本循环的过程。
+  policy: preferred
+- id: public-good
+  source: public good
+  variants:
+  - public goods
+  target: 公共品
+  category: Economics / Information Policy
+  note: 具有非排他性和非竞争性消费特征的产品或服务；信息常被讨论为具有公共品特征，但资本通过法律制造稀缺性以实现商品化。
+  policy: preferred
+- id: information-work
+  source: information work
+  variants:
+  - information labor
+  - information labour
+  target: 信息劳动
+  category: Sociology of Work / Political Economy of Communication
+  note: 以产生、处理、编码、传输和解释符号、数据及思想为内容的劳动形态。
+  policy: preferred
+- id: cultural-diversity
+  source: cultural diversity
+  target: 文化多样性
+  category: Cultural Policy / International Communication
+  note: 各民族与社群文化表现形式的总和；常作为反抗跨国文化垄断与全球同质化的政策依据。
   policy: preferred
