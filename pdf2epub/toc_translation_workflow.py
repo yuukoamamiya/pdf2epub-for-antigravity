@@ -480,13 +480,17 @@ def _source_contains_label(text: str, label: str) -> bool:
     expected = _normalize_toc_heading_for_binding(label)
     if not expected:
         return False
+    expected_stripped = _normalize_toc_heading_for_binding(
+        re.sub(r"^\d+[\.\s、]+", "", label)
+    )
     for line in str(text or "").splitlines():
         value = line.strip()
         if not value or value.startswith("```"):
             continue
         value = re.sub(r"^#{1,6}\s+", "", value)
         value = re.sub(r"[*_`]+", "", value).strip()
-        if _normalize_toc_heading_for_binding(value) == expected:
+        norm = _normalize_toc_heading_for_binding(value)
+        if norm == expected or (expected_stripped and norm == expected_stripped):
             return True
     return False
 
@@ -551,35 +555,55 @@ def build_toc_heading_contexts(
         node = nodes.get(index_path)
         if not node:
             continue
+        source_node = source_nodes.get(index_path, {})
+        names = unit.get("part_files") or [unit.get("file")]
+        source_text_parts = []
+        if source_dir is not None and names:
+            for name in names:
+                if name:
+                    source_file = Path(source_dir) / str(name)
+                    try:
+                        source_text_parts.append(source_file.read_text(encoding="utf-8"))
+                    except (OSError, UnicodeError):
+                        pass
+        source_text = "\n".join(source_text_parts)
+
+        source_children = source_node.get("children", [])
         children = []
         for child_index, child in enumerate(node.get("children", []), 1):
             if not isinstance(child, dict):
                 continue
+            child_source = (
+                source_children[child_index - 1]
+                if child_index - 1 < len(source_children)
+                and isinstance(source_children[child_index - 1], dict)
+                else {}
+            )
+            child_source_title = str(child_source.get("title") or "").strip()
+            child_binding = (
+                "visible"
+                if source_dir is None
+                or not child_source_title
+                or _source_contains_label(source_text, child_source_title)
+                else "container_only"
+            )
             children.append(
                 {
                     "title": str(child.get("title") or "").strip(),
                     "anchor": str(child.get("anchor") or f"toc-{index_path[0]}-{child_index}"),
+                    "binding_mode": child_binding,
                 }
             )
         context = {
             "toc_title": str(node.get("title") or "").strip(),
             "children": [child for child in children if child["title"]],
         }
-        names = unit.get("part_files") or [unit.get("file")]
         # The EPUB builder supplies the parent TOC title as a package-level
         # container when the source unit has no visible title (cover/image-only
         # units and boundary fragments are common examples).  Requiring the
         # Subagent to invent that title would violate the immutable Markdown
         # heading contract.  Older callers without a source directory retain
         # the conservative visible-title contract.
-        source_text = ""
-        if source_dir is not None and names and names[0]:
-            source_file = Path(source_dir) / str(names[0])
-            try:
-                source_text = source_file.read_text(encoding="utf-8")
-            except (OSError, UnicodeError):
-                source_text = ""
-        source_node = source_nodes.get(index_path, {})
         source_title = str(source_node.get("title") or "").strip()
         context["binding_mode"] = (
             "visible"
@@ -748,25 +772,33 @@ def validate_toc_heading_bindings(output_dir: Path) -> Dict[str, Any]:
     normalized_matches: List[Dict[str, str]] = []
     for name, context in contexts.items():
         target = target_dir / str(name)
-        if not target.is_file():
-            errors.append(f"translated heading source is missing: {name}")
-            continue
-        try:
-            lines = target.read_text(encoding="utf-8").splitlines()
-        except (OSError, UnicodeError) as exc:
-            errors.append(f"could not read translated heading source {name}: {exc}")
-            continue
+        candidate_files = [target]
+        for group in manifest.get("chapter_groups", {}).values():
+            if str(name) in group:
+                candidate_files = [
+                    target_dir / str(f)
+                    for f in group
+                    if (target_dir / str(f)).is_file()
+                ]
+                break
 
         candidates = set()
         normalized_candidates = set()
-        for line in lines:
-            value = line.strip()
-            if not value or value.startswith("```"):
+        for cand_file in candidate_files:
+            try:
+                lines = cand_file.read_text(encoding="utf-8").splitlines()
+            except (OSError, UnicodeError) as exc:
+                errors.append(f"could not read translated heading source {cand_file.name}: {exc}")
                 continue
-            value = re.sub(r"^#{1,6}\s+", "", value)
-            value = re.sub(r"[*_`]+", "", value).strip()
-            candidates.add(value)
-            normalized_candidates.add(_normalize_toc_heading_for_binding(value))
+            for line in lines:
+                value = line.strip()
+                if not value or value.startswith("```"):
+                    continue
+                value = re.sub(r"^#{1,6}\s+", "", value)
+                value = re.sub(r"[*_`]+", "", value).strip()
+                candidates.add(value)
+                normalized_candidates.add(_normalize_toc_heading_for_binding(value))
+
         expected = []
         title = str(context.get("toc_title") or "").strip()
         binding_mode = str(context.get("binding_mode") or "visible").strip()
@@ -782,12 +814,32 @@ def validate_toc_heading_bindings(output_dir: Path) -> Dict[str, Any]:
                 }
             )
         for child in context.get("children", []):
-            if isinstance(child, dict) and str(child.get("title") or "").strip():
-                expected.append((f"TOC child {child.get('anchor', '')}".strip(), str(child["title"]).strip()))
+            if not isinstance(child, dict) or not str(child.get("title") or "").strip():
+                continue
+            child_title = str(child.get("title") or "").strip()
+            child_binding = str(child.get("binding_mode") or "visible").strip()
+            child_anchor = str(child.get("anchor") or "").strip()
+            label = f"TOC child {child_anchor}".strip()
+            if child_binding == "container_only":
+                skipped.append(
+                    {
+                        "file": name,
+                        "label": label,
+                        "title": child_title,
+                        "reason": "package-level container title; source has no visible label",
+                    }
+                )
+                continue
+            expected.append((label, child_title))
+
         for label, value in expected:
             normalized_value = _normalize_toc_heading_for_binding(value)
+            value_stripped = re.sub(r"^\d+[\.\s、]+", "", value).strip()
+            norm_stripped = _normalize_toc_heading_for_binding(value_stripped)
             match_mode = "exact" if value in candidates else None
             if match_mode is None and normalized_value in normalized_candidates:
+                match_mode = "normalized"
+            elif match_mode is None and norm_stripped and norm_stripped in normalized_candidates:
                 match_mode = "normalized"
             checked.append(
                 {
