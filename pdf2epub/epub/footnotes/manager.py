@@ -10,6 +10,7 @@ from typing import Dict, List, Optional, Set
 from loguru import logger
 
 from .content_index import ContentAddressIndex
+from .keys import display_footnote_key
 from .models import FootnoteStyle, FootnoteDefinition
 from .scanner import FootnoteScanner
 from .mapper import FootnoteMapper
@@ -373,7 +374,7 @@ class FootnoteManager:
         html_target = self.get_html_filename(target_chapter)
         return (
             f'<sup id="{fnref_id}"><a class="footnote-ref" '
-            f'href="{html_target}#{fn_id}">[{original_key}]</a></sup>'
+            f'href="{html_target}#{fn_id}">[{display_footnote_key(original_key)}]</a></sup>'
         )
 
     def _boundary_backref_html(self, binding: dict) -> str:
@@ -765,14 +766,15 @@ class FootnoteManager:
         safe_content = re.sub(r"<[^<>]*>", escape_unknown_tag, content)
         return (
             f'<div class="footnote-def" id="{fn_id}">\n'
-            f'<p><strong>[{key}]:</strong> {safe_content}{backref_html}</p>\n'
+            f'<p><strong>[{display_footnote_key(key)}]:</strong> {safe_content}{backref_html}</p>\n'
             f'</div>'
         )
 
     def _backref_html(self, backref_link: str, key: str) -> str:
+        display_key = display_footnote_key(key)
         return (
             f' <a class="footnote-backref" href="{backref_link}" '
-            f'title="Jump back to footnote {key} in the text">↩</a>'
+            f'title="Jump back to footnote {display_key} in the text">↩</a>'
         )
 
     def _fnref_id(
@@ -823,7 +825,10 @@ class FootnoteManager:
                 "matched safely within its structural scope"
             )
             fnref_id = self._fnref_id(source_chapter, original_key, occurrence_in_file)
-            return f'<sup id="{fnref_id}">[{original_key}]</sup>'
+            return (
+                f'<sup id="{fnref_id}">'
+                f'[{display_footnote_key(original_key)}]</sup>'
+            )
 
         if self.style == FootnoteStyle.LOCAL:
             base_chapter = self.get_local_group_id(source_chapter)
@@ -858,14 +863,14 @@ class FootnoteManager:
                         fn_id = self._footnote_definition_id(key, occurrence_num)
                         return (
                             f'<sup id="{fnref_id}"><a class="footnote-ref" '
-                            f'href="{source_html}#{fn_id}">[{key}]</a></sup>'
+                            f'href="{source_html}#{fn_id}">[{display_footnote_key(key)}]</a></sup>'
                         )
 
                     fn_id = self._footnote_definition_id(key, occurrence_num)
                     html_target = self.get_html_filename(target_chapter)
                     return (
                         f'<sup id="{fnref_id}">'
-                        f'<a class="footnote-ref" href="{html_target}#{fn_id}">[{key}]</a>'
+                        f'<a class="footnote-ref" href="{html_target}#{fn_id}">[{display_footnote_key(key)}]</a>'
                         f'</sup>'
                     )
                 if occurrence_num:
@@ -886,7 +891,7 @@ class FootnoteManager:
                 None if target_occurrence == 1 else target_occurrence,
             )
             source_html = self.get_html_filename(source_chapter)
-            return f'<sup id="{fnref_id}"><a class="footnote-ref" href="{source_html}#{fn_id}">[{key}]</a></sup>'
+            return f'<sup id="{fnref_id}"><a class="footnote-ref" href="{source_html}#{fn_id}">[{display_footnote_key(key)}]</a></sup>'
 
         # Global footnotes use the deterministic occurrence mapping built from
         # the scanned source files. Semantic/model matching is intentionally
@@ -913,7 +918,7 @@ class FootnoteManager:
             target_chapter = definition.chapter
 
             # Use original_key for display text, but key for linking
-            display_key = original_key
+            display_key = display_footnote_key(original_key)
 
             if target_chapter == source_chapter:
                 # Same file reference

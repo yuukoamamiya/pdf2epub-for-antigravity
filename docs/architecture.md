@@ -160,8 +160,15 @@ TOC 中标记为
   `catalog` 或 `ad` 的单元也不会进入页面脚注候选。
 - `refine/footnote_options.py`：集中维护脚注模式、默认阈值和 CLI/config 覆盖解析；候选、
   校验和 materialize 阶段共享同一个不可变选项对象，避免各阶段各自解释配置。
+- `refine/endnote_scopes.py`：从 `toc_tree.json`、`ocr_markdown/tree_progress.json` 和
+  当前 Markdown 构建只读的按章 scope 目录。顶层单元使用 `u<unit_order>`，后代使用
+  `u4c1`、`u4c1c2`；正文只按 Markdown 标题行切分 span，Notes 标题通过剥离
+  `Chapter N:`/前导 `N.` 后的标题变体匹配回正文 scope。歧义标题只记录，不猜测。
 - `refine/endnote_normalization.py`：只处理 `type: notes` 单元中的集中尾注定义及普通单元
-  上标引用的确定性归一化，并提供构建前的残留检查；不参与页面脚注候选识别。
+  上标引用的确定性归一化，并提供构建前的残留检查；不参与页面脚注候选识别。存在重复
+  打印编号时，它消费 `endnote_scopes.py` 的目录，只把需要去重的 key 改写为
+  `fnc-<scope>-<number>`（第 N 个定义再加 `-oN`），并支持“外层页计数器 + 内层真实
+  注释号”的双层编号判定。无 scope 目录或无重复 key 时保持原有全局行为。
 - `refine/footnote_consensus.py`：只读取当前双 OCR 共识中的视觉复核页并解析匹配的次 OCR
   sidecar 路径；不决定候选，也不绕过 `pdf_evidence.py` 的 freshness 闸门。
 - `refine/footnote_page_scan.py`：封装单页 primary/secondary OCR 扫描、连续区域展开、续文
@@ -180,6 +187,16 @@ TOC 中标记为
   非重叠编辑区间；不读取工作流状态，也不执行脚注物化。
 - `refine/footnote_status.py`：集中计算脚注归一化 checkpoint 的哈希和 freshness 状态；不依赖
   apply/prepare 编排，供命令层和 readiness 诊断复用。
+
+按章尾注 scope 只是派生报告，不写入 `output/`。`footnote_apply.py` 在生成
+`footnote_normalized/` 前加载 `toc_tree.json` 和 `ocr_markdown/tree_progress.json`；
+缺少 TOC 或 scope 构建失败时，如果 Notes 仍有重复 key，归一化必须失败并提示，不能静默退回
+`footnotes.mode: disabled`。scope 触发条件为同一数字 key 在至少两个 scope 有定义，或同一
+`(scope, key)` 有多个定义；只有这些 key 改写为 `fnc-<scope>-<number>` / `...-oN`。定义多于
+引用时多出的定义保留为 orphan；引用所在 scope 无定义、定义 scope 无正文 span、引用数超过
+定义数或重复 key 落在未匹配区域时 fail closed。EPUB 侧由
+`pdf2epub/epub/footnotes/keys.py` 的 `display_footnote_key()` 统一把内部 key 还原为读者
+看到的原始数字；scanner、链接和锚点仍使用真实 key。
 
 `pipeline_policy.py` 是 PDF pipeline 的策略边界。`PipelinePolicy.from_config()` 将缺省
 配置视为传统翻译流程，将 `pipeline: epub_conversion` 和兼容别名
@@ -431,9 +448,11 @@ heading contract 始终优先；标题绑定只容忍安全的展示格式差异
 集中尾注走独立的确定性归一化路径：`tree_progress.json`/TOC 中 `type: notes` 的文件是
 尾注定义源，不要求 Markdown 内再次出现 `# Notes` 标题。`footnote-apply` 在生成
 `footnote_normalized/` 时识别 `N. text`、`N text`、`<sup>N</sup> text` 和已有
-`[^N]: text`，并只把与这些定义匹配的普通单元上标转为 `[^N]`。原始 OCR 单元不覆盖；
-重复尾注编号会阻断归一化。`footnote_normalization.json` 的 `endnotes` 子报告记录定义键、
-转换引用数和孤立定义，供后续审计。
+`[^N]: text`，并只把与这些定义匹配的普通单元上标转为 `[^N]`。原始 OCR 单元不覆盖。
+可按章重启的重复编号由 `endnote_scopes.py` 配对后改写为 `fnc-<scope>-<number>`；无法
+唯一配对（缺少章标题、scope 没有正文 span、引用/定义数量不符）时阻断归一化。
+`footnote_normalization.json` 的 `endnotes` 子报告记录最终定义键、转换引用数、scope 统计、
+双层编号识别数、重复定义和孤立定义，供后续审计。
 
 Polish 校验依据文件角色而不是正文标题检查尾注；EPUB 构建还会拒绝 Notes 单元中残留的
 原始编号定义或正文中残留的对应上标。这样页脚脚注仍由页面版面证据决定，集中尾注则由

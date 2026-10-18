@@ -684,11 +684,47 @@ refinement unit 和正文定位；任何一层失败都必须修正决定后重�
 `<sup>N</sup>` 或 Unicode 数字上标转换为 `[^N]`；尾注定义转换为 `[^N]: text`。已有
 Markdown 脚注语法会被保留，页脚脚注仍按上一节的页面候选和 Subagent 决定处理。
 
+当同一打印编号在多个章重新开始时，`refine/endnote_scopes.py` 从 `toc_tree.json`、
+`ocr_markdown/tree_progress.json` 和当前 Markdown 构建只读 scope 目录：
+
+- 顶层 unit 使用 `u<unit_order>`，后代使用 `u4c1`、`u4c1c2`；scope 保存源标题和保守的
+  `title_variants`（剥离 `Chapter N:`、`Part N:`、前导 `N.` 和冒号后的副标题）。
+- 正文只按 `^#{1,6}\s` 标题行切分 span；第一个 part 从 unit scope 开始，后续 part 继承
+  上一个 part 的最后一个 scope。匹配多个 scope 的标题只记录 ambiguity，匹配不到的普通
+  小节标题不改变当前 scope。
+- Notes 文件按同一套标题变体匹配回正文 scope；跨 part 继承上一个 Notes 标题的 scope，
+  未匹配的标题（如 Abbreviations）写入报告，其定义保留 `scope_key=None`。
+- 正文 span 内收集 `<sup>N</sup>`、Unicode 上标和已有 `[^N]` 引用；同文件存在
+  `[^N]:` 定义时该引用按页脚注处理，不进入尾注证据。
+
+触发 `per_chapter` 模式的条件是同一数字 key 在至少两个 scope 有定义，或同一
+`(scope, key)` 有多个定义。只有需要去重的 key 改写为 `fnc-<scope>-<number>`；同一 scope
+的第 N≥2 个定义使用 `fnc-<scope>-<number>-oN`。定义和引用分别按文件/行顺序、阅读顺序
+配对：第 1 个引用指向基础 key，第 2 个引用指向 `-o2`。非重复 key 保持原数字，未触发
+scoping 的书籍仍走原有全局路径。
+
+Notes 中可能出现“外层页计数器 + 内层真实注释号”（例如 `1. 16. ...`）。只有内层数字出现在
+当前 scope 的正文引用集合中，且内层不小于外层时，才采用内层作为 key 并剥离内层编号；
+`3. 2005 was...` 因 2005 不在引用集合中而保持 key `3`。该判定只在 scope 目录可用时启用。
+
+以下情况必须 fail closed，并提示修复 `toc_tree.json`/章标题（可先检查
+`toc_heading_recovery.json`）后重跑 `footnote-prepare → footnote-validate →
+footnote-apply`：重复 key 落在 `scope_key=None`；定义所在 scope 没有正文 span；引用所在
+scope 没有对应定义；某个 scope 的引用数超过定义数。定义数多于引用数时，多出的定义仍写入
+Notes，并作为 `orphan_scoped_definitions` 报告。scope 目录不写入 `output/`，只进入
+`footnote_normalization.json` 的 `endnotes` 报告字段（`scope_mode`、`scopes`、
+`scoped_keys`、`double_numbered_definition_count`、`duplicate_definition_occurrences`、
+`orphan_scoped_definitions`）。
+
+EPUB 构建时，`pdf2epub/epub/footnotes/keys.py` 的 `display_footnote_key()` 负责把
+`fnc-<scope>-<number>` 和 `...-oN` 显示为原始数字；链接、ID 和扫描器仍使用真实 key。
+因此读者看到 `[1]`，而锚点和跨章往返使用内部唯一 key。
+
 `footnotes.mode: endnotes_only` 只关闭页面脚注候选，不关闭这条 typed Notes 归一化路径；
 只有 `footnotes.mode: disabled` 才会原样保留；该模式同时跳过这条 Polish 尾注归一化校验和
 构建门禁。其他模式下，`polish-validate` 会按 `file_roles` 检查 Notes 文件及所有普通单元的
 对应标记，EPUB 构建前还会再次阻断残留的原始定义或未链接上标。
-重复尾注编号、结构角色变化或归一化报告版本过期时，必须重新运行
+无法唯一配对的重复尾注编号、结构角色变化或归一化报告版本过期时，必须重新运行
 `footnote-prepare → footnote-validate → footnote-apply`，不能手工修改派生产物。
 
 `footnote_candidates.json` 的 `bottom_detection` 还会报告页底 block、页底数字 block、已进入

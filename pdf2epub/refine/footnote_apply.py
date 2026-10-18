@@ -35,6 +35,7 @@ from .footnote_status import (
     unit_records as _unit_records,
 )
 from .endnote_normalization import normalize_endnotes
+from .endnote_scopes import build_endnote_scope_directory
 
 
 _MOVED_ROLES = frozenset(
@@ -731,13 +732,33 @@ def apply_footnote_normalization(
             )
 
     if report_footnote_mode != "disabled":
+        scope_directory: Optional[dict[str, Any]] = None
+        scope_error: Optional[str] = None
+        try:
+            toc_tree = _load_json(output_dir / "toc_tree.json", "toc_tree.json")
+            progress = _load_json(
+                output_dir / "ocr_markdown" / "tree_progress.json",
+                "ocr_markdown/tree_progress.json",
+            )
+            scope_directory = build_endnote_scope_directory(
+                toc_tree, progress, transformed
+            )
+        except (OSError, UnicodeError, ValueError, TypeError) as exc:
+            scope_error = str(exc)
         try:
             transformed, endnote_report = normalize_endnotes(
                 transformed,
                 {record["name"]: record["type"] for record in records},
+                scopes=scope_directory,
             )
         except (OSError, UnicodeError, ValueError) as exc:
-            return _write_failure(output_dir, [f"could not normalize centralized endnotes: {exc}"])
+            detail = f"could not normalize centralized endnotes: {exc}"
+            if scope_directory is None and scope_error:
+                detail += (
+                    "; per-chapter endnote scopes are unavailable: "
+                    f"{scope_error}"
+                )
+            return _write_failure(output_dir, [detail])
 
     try:
         target_dir.mkdir(parents=True, exist_ok=True)
