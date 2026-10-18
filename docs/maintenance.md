@@ -79,6 +79,7 @@ git branch -vv
 - 用户没有明确说“推送”时，不要 push。
 - 推送时默认只推 `fork`，不要推 `origin`（上游 `ShenSheiBot/pdf2epub`），除非用户明确要求。
 - 不要 force push，不要改写已推送历史，不要 amend 已推送提交。
+- GitHub 代理和推送命令见 4.7。
 
 ### 2.3 不要 `git add .`
 
@@ -94,15 +95,10 @@ git diff --check
 
 - `config.yaml`、`config_*.yaml`（用户本地配置）；
 - `input/`、`output/`（书稿和运行产物）；
-- `.secrets/`、`*.env`、凭据文件；
 - `logs/`、`.work/`、`scratch/`、`.venv*/`；
 - 一次性验证脚本、临时报告、真实书稿快照。
 
-推送前确认忽略规则仍然命中：
-
-```text
-git check-ignore -v .secrets config.yaml output
-```
+推送前按第 6 节运行 DeepSec 扫描。
 
 ### 2.4 不要修改用户配置和书稿目录
 
@@ -258,7 +254,21 @@ git commit -m "<符合仓库风格的说明>"
 - `test(ocr): ...`
 - `docs: ...`
 
-不要 `git add .`，不要把 `config.yaml`、`output/`、`.secrets/` 带进提交。
+不要 `git add .`，不要把 `config.yaml`、`output/` 等本地文件带进提交。
+
+### 4.7 推送到 GitHub
+
+推送前先完成第 6 节的 DeepSec 扫描。本机直连 GitHub 可能失败（连接 reset），推送时给单次
+命令加 v2rayN 的本地 HTTP 代理，不要修改全局 git 配置：
+
+```text
+git -c http.proxy=http://127.0.0.1:10809 -c https.proxy=http://127.0.0.1:10809 push fork main
+```
+
+- HTTP 代理：`http://127.0.0.1:10809`
+- SOCKS5 代理：`socks5://127.0.0.1:10808`
+- 代理未启动时先启动 v2rayN，或告知用户处理。
+- 默认推 `fork`；只有用户明确要求时才推 `origin`（上游）。
 
 ---
 
@@ -309,20 +319,32 @@ git commit -m "<符合仓库风格的说明>"
 
 ---
 
-## 6. 安全与数据边界
+## 6. 上传前安全扫描（DeepSec）
 
-- 不硬编码密钥、token、内部项目 ID 或伪造请求头。
-- 不读取、打印、提交 `.secrets/`。
-- 不把真实书稿正文粘贴到聊天或提交到仓库。
-- 测试不得访问真实 OCR/翻译 API；用 mock 或纯本地 fixture。
-- 需要网络时先确认是否真的必要；项目测试应默认离线可跑。
+推送 GitHub 前，对本次改动范围运行 DeepSec：
+
+```text
+deepsec shield scan <改动文件或目录> --format json
+```
+
+读取仓库根目录的 `deepsec-report.json`，按 `severity`（critical/high/medium/low）逐条修复
+`findings`，修完重跑，确认 findings 清零后再推送。
+
+DeepSec 已覆盖硬编码密钥、供应链/幻觉包、注入、XSS、路径穿越、不安全配置等安全限制，
+本文件不再重复列举。需要更深的语义分析时可加 `--layer l3`（需配置 LLM Key）；日常提交
+使用默认的 L1+L2 即可，L1/L2 完全离线。
+
+数据边界：
+
+- 测试默认离线，不访问真实 OCR/翻译 API；用 mock 或纯本地 fixture。
 - 不删除用户的 `input/`、`output/`、`.work/` 或已有 checkpoint。
+- 需要网络时先确认是否真的必要。
 
 ---
 
 ## 7. 冲突与升级
 
-- 安全、Git、书稿流程的正确性规则以 `AGENTS.md` 为准。
+- Git 和书稿流程的正确性规则以 `AGENTS.md` 为准；安全扫描按第 6 节执行。
 - “谁可以改代码”的边界以本文件为准：维护任务不受 Subagent 总闸约束。
 - 如果两者看起来冲突，先做只读检查；仍无法判断时询问用户，不要自行扩大解释。
 - 如果维护改动会影响书稿流程的行为，必须在回复中说明影响范围，并提示需要重跑哪些阶段。

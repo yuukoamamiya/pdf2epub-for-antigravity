@@ -8,8 +8,10 @@
   术语、元数据翻译、脚注/插图决定。
 - 在 `main` 上工作。不要创建 `codex/*`、`feature/*` 等临时分支；用户没要求就不要 commit
   或 push。
-- 不要 `git add .`；不要提交 `config*.yaml`、`input/`、`output/`、`.secrets/`、日志和临时
-  脚本。
+- 不要 `git add .`；不要提交 `config*.yaml`、`input/`、`output/`、日志和临时脚本。
 - 不要为了跑测试修改用户配置，也不要在真实 `output/` 上运行 OCR、翻译或打包流水线。
 - 测试用 `uv run pytest -q`，提交前跑 `git diff --check`。
+- 推送 GitHub 前跑 `deepsec shield scan <改动路径> --format json`，修复 findings 后再推。
+- GitHub 推送使用本机代理：
+  `git -c http.proxy=http://127.0.0.1:10809 -c https.proxy=http://127.0.0.1:10809 push fork main`
 - 如果任务实际是处理书稿内容：停止维护流程，按 `AGENTS.md` 使用工作区 Subagent。
