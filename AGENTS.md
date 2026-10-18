@@ -338,7 +338,8 @@ PDF 纯转换模式使用 `pipeline: epub_conversion`（兼容别名
 `mode: ocr_to_epub`），循环为：
 `ocr-pages →（若启用第二套 OCR：ocr-correct → ocr-correct-validate）→ refine-prepare → illustration-prepare →（有候选时交给 Subagent）→ illustration-validate → illustration-apply → refine-local → footnote-prepare →（有待复核时交给 Subagent）→ footnote-validate → footnote-apply → polish → polish-validate → build-epub`。
 该模式不读取语言设置，不执行实体提取、翻译 TOC 或正文翻译；但 polish 仍是所有 PDF
-必须通过的结构质量门禁。构建时不得使用 `build-epub --translated`。
+必须通过的结构质量门禁。构建时不得使用 `build-epub --translated` 或
+`build-epub --only-translated`。
 
 统一的 pipeline 能力和门禁定义位于 `pdf2epub/pipeline_policy.py`。命令模块不得重新
 实现 `pipeline`/`mode` 的特殊判断；需要新增流程能力时先更新该策略对象，再更新对应
@@ -650,7 +651,8 @@ uv run pdf2epub -c config.yaml check-ready --stage translate --skip-entities
    Subagent；首次 `review_required` 也重新派发。若报告出现 `human_review_required`，必须暂停
    并询问人工，不能继续自动重试。只有完成复核后才可显式使用
    `translate-validate --allow-review-warnings` 放行。
-10. 执行打包。翻译流程必须同时构建两个版本，两个命令都必须执行。推荐一次运行：
+10. 执行打包。翻译流程必须同时构建两个产物：使用正式书名的原稿英文 EPUB 和使用译名的
+   译文 EPUB。推荐一次运行：
 
    ```text
    bash scripts/build_all_epubs.sh config.yaml
@@ -660,23 +662,25 @@ uv run pdf2epub -c config.yaml check-ready --stage translate --skip-entities
 
    ```text
    uv run pdf2epub -c config.yaml build-epub
-   uv run pdf2epub -c config.yaml build-epub --translated
+   uv run pdf2epub -c config.yaml build-epub --only-translated
    ```
 
-   第一条生成使用正式书名的原稿英文 EPUB；第二条生成英文 `_en.epub` 和使用译名的译文
-   EPUB。`--translated` 仍是默认的双语构建：先尝试英文 `_en.epub`，再构建译文；英文版
-   失败时不会中止，仍会继续尝试译文版。只构建译文版时可显式使用
-   `build-epub --only-translated`（别名 `--target-only`），它不触发英文 `_en.epub`；
-   与 `--translated` 同时出现时以 `--only-translated` 为准，但仍要求当前有效的 polish 和
-   translate checkpoint。任一请求的构建失败时命令最终返回非 0，已成功的产物保留。
-   第一条不可省略，否则会缺少正式书名的原稿英文版。只运行 `build-epub` 不带
-   `--translated` 会缺少译文 EPUB，不得视为完成打包。`pipeline: epub_conversion` 不得
-   使用本脚本，也不得使用 `--translated` 或 `--only-translated`，只运行一次 `build-epub`。
+   第一条生成使用正式书名的原稿英文 EPUB；第二条只生成使用译名的译文 EPUB，不生成
+   英文 `_en.epub`。需要英文 `_en.epub` 时可改用 `build-epub --translated`，它是可选
+   的三产物模式：正式书名的原稿英文 EPUB、英文 `_en.epub` 和使用译名的译文 EPUB；
+   英文版失败时不会中止，仍会继续尝试译文版。`--only-translated`（别名
+   `--target-only`）不触发英文 `_en.epub`，与 `--translated` 同时出现时以
+   `--only-translated` 为准，但仍要求当前有效的 polish 和 translate checkpoint。任一
+   请求的构建失败时命令最终返回非 0，已成功的产物保留。第一条命令不可省略，否则会缺少
+   正式书名的原稿英文版。只运行 `build-epub` 不带 `--translated` 或
+   `--only-translated` 会缺少译文 EPUB，不得视为完成打包。
+   `pipeline: epub_conversion` 不得使用本脚本，也不得使用 `--translated` 或
+   `--only-translated`，只运行一次 `build-epub`。
 
    默认拒绝不完整译文；`--allow-partial` 仅用于明确的预览。翻译流程中若
    `translate_validation.json` 对当前 polished source 和 `translated/validated/` 仍有效，
-   但本次未带 `--translated`，命令会打印醒目警告说明只构建原稿 EPUB。该警告不改变默认
-   构建目标，也不替代显式 `--translated`。
+   但本次未带 `--translated` 或 `--only-translated`，命令会打印醒目警告说明只构建原稿
+   EPUB。该警告不改变默认构建目标，也不替代显式目标选项。
 
 若已有译文只需要修复页眉、页脚或印刷页码，不要直接用脚本改写 `translated/`，也不必
 因此重译全书。可使用一次性的 `repair-page-furniture`：本地命令会快照现有译文，生成

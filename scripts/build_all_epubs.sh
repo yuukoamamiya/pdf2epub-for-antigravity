@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # build_all_epubs.sh — Build every EPUB variant for a translated PDF project.
 #
-# Applies to pipeline: translation. Both builds are mandatory:
-#   1. build-epub              -> original-language EPUB under the formal book title
-#   2. build-epub --translated -> English _en.epub plus translated EPUB
-#                                 (translated EPUB uses the translated title)
-# --translated already emits the English _en.epub, but the first command is still
-# required because it produces the original-language EPUB under the formal title.
+# Applies to pipeline: translation. Both builds are mandatory and produce two
+# artifacts:
+#   1. build-epub                   -> original-language EPUB under the formal book title
+#   2. build-epub --only-translated -> translated EPUB under the translated title
+# No English _en.epub is generated. To also produce the English _en.epub, use
+# `build-epub --translated` instead of `--only-translated` (three artifacts:
+# formal-title original, English _en.epub, and translated EPUB).
 # Do not use this script for pipeline: epub_conversion; that mode rejects
-# --translated and only needs a single build-epub.
+# --translated and --only-translated and only needs a single build-epub.
 #
 # Usage: bash scripts/build_all_epubs.sh [config.yaml]
 
@@ -34,5 +35,5 @@ cd "$REPO_ROOT"
 echo "[build_all_epubs] Building original-language EPUB from $CONFIG ..."
 uv run pdf2epub -c "$CONFIG" build-epub
 
-echo "[build_all_epubs] Building translated EPUB and English _en.epub from $CONFIG ..."
-uv run pdf2epub -c "$CONFIG" build-epub --translated
+echo "[build_all_epubs] Building translated EPUB from $CONFIG ..."
+uv run pdf2epub -c "$CONFIG" build-epub --only-translated

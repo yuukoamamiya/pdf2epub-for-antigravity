@@ -706,6 +706,7 @@ def detect_polish_page_furniture(
 def polish_content_integrity_check(
     source_text: str,
     target_text: str,
+    file_role: str | None = None,
 ) -> Dict[str, Any]:
     """Detect substantial source-content loss during full-text polishing.
 
@@ -714,7 +715,13 @@ def polish_content_integrity_check(
     substantial amount of visible prose, numbers, or punctuation. This check
     is deliberately a blocking signal so an accidental truncated Subagent
     output cannot become the next source stage.
+
+    Note-definition prefixes are only normalized for ``notes`` units. Ordinary
+    body text keeps strict list-number comparison so a dropped ``- 1.`` prefix
+    still counts as content loss.
     """
+
+    notes_role = str(file_role or "").strip().lower() == "notes"
 
     def tokens(text: str) -> list[str]:
         visible_lines: list[str] = []
@@ -745,7 +752,13 @@ def polish_content_integrity_check(
         value = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", value)
         value = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", value)
         value = re.sub(r"<sup>\s*(\d+)\s*</sup>", r"[^\1]", value, flags=re.IGNORECASE)
-        value = re.sub(r"^\s*[-*]?\s*(\d+)\.\s*", r"[^\1]: ", value, flags=re.MULTILINE)
+        if notes_role:
+            value = re.sub(
+                r"^\s*(?:[-*+]\s*)?(\d+)\.\s*",
+                r"[^\1]: ",
+                value,
+                flags=re.MULTILINE,
+            )
         value = re.sub(r"\[\^\s*(\d+)\s*\](?::)?", r"[^\1]", value)
         value = re.sub(r"<[^>]+>", " ", value)
         value = re.sub(r"^\s*#{1,6}\s+", "", value, flags=re.MULTILINE)
@@ -778,7 +791,10 @@ def polish_content_integrity_check(
             value = re.sub(r"([A-Za-zÄÖÜäöüß]+)[-‐‑‒–—][ \t]*\n[ \t]*([A-Za-zÄÖÜäöüß]+)", r"\1\2", value)
             value = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", value)
             value = re.sub(r"<sup>\s*\d+\s*</sup>", " ", value, flags=re.IGNORECASE)
-            value = re.sub(r"^\s*[-*]?\s*\d+\.\s*", " ", value, flags=re.MULTILINE)
+            if notes_role:
+                value = re.sub(
+                    r"^\s*(?:[-*+]\s*)?\d+\.\s*", " ", value, flags=re.MULTILINE
+                )
             value = re.sub(r"\[\^\s*\d+\s*\](?::)?", " ", value)
             value = re.sub(r"<[^>]+>", " ", value)
             value = _POLISH_HORIZONTAL_RULE_RE.sub("", value)

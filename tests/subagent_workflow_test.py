@@ -719,6 +719,54 @@ def test_polish_does_not_flag_structural_notes_headings(
     assert report["polish_page_furniture_warnings"] == []
 
 
+def test_polish_content_integrity_applies_note_tolerance_only_to_notes_role(
+    tmp_path: Path,
+):
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
+
+    note_text = "Katz, Personal Influence, 16."
+    source_text = "\n\n".join(f"- {number}. {note_text}" for number in range(1, 11))
+    target_text = "\n\n".join(
+        f"[^{number}]: {note_text}" for number in range(1, 11)
+    )
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "notes.md").write_text(source_text, encoding="utf-8")
+    (target_dir / "notes.md").write_text(target_text, encoding="utf-8")
+
+    notes_run = tmp_path / "notes_run"
+    notes_run.mkdir()
+    notes_report = validate_markdown_subagent(
+        notes_run,
+        "polish",
+        source_dir,
+        target_dir,
+        file_roles={"notes.md": "notes"},
+    )
+
+    assert notes_report["all_passed"] is True, notes_report["invalid"]
+
+    (source_dir / "body.md").write_text(source_text, encoding="utf-8")
+    (target_dir / "body.md").write_text(target_text, encoding="utf-8")
+    body_run = tmp_path / "body_run"
+    body_run.mkdir()
+    body_report = validate_markdown_subagent(
+        body_run,
+        "polish",
+        source_dir,
+        target_dir,
+        selected_files=["body.md"],
+    )
+
+    assert body_report["all_passed"] is False
+    assert any(
+        "content integrity loss" in item["reason"]
+        for item in body_report["invalid"]
+    )
+
+
 def test_polish_still_flags_notes_running_header_with_page_label(tmp_path: Path):
     from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 

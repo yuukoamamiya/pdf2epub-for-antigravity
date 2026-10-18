@@ -22,11 +22,59 @@ def _normalized_book(note_count: int = NOTE_COUNT) -> str:
 
 
 def test_polish_integrity_allows_massively_normalized_list_endnotes():
-    report = polish_content_integrity_check(_source_book(), _normalized_book())
+    report = polish_content_integrity_check(
+        _source_book(), _normalized_book(), file_role="notes"
+    )
 
     assert report["valid"] is True, report["errors"]
     assert report["missing_numeric_markers"] == []
     assert report["duplicated_prose_blocks"] == []
+
+
+def test_polish_integrity_list_note_tolerance_is_scoped_to_notes_role():
+    source = "\n\n".join(f"+ {number}. {NOTE_TEXT}" for number in range(1, 11))
+    target = "\n\n".join(
+        f"[^{number}]: {NOTE_TEXT}" for number in range(1, 11)
+    )
+
+    strict = polish_content_integrity_check(source, target)
+    notes = polish_content_integrity_check(source, target, file_role="notes")
+
+    assert notes["valid"] is True, notes["errors"]
+    assert strict["valid"] is False
+    assert any("content integrity loss" in error for error in strict["errors"])
+
+
+def test_polish_integrity_rejects_dropped_body_list_prefix_outside_notes():
+    source = (
+        "Introductory sentence with enough words to keep the body stable.\n\n"
+        "- 1. First ordinary list item with substantive text.\n"
+    )
+    target = (
+        "Introductory sentence with enough words to keep the body stable.\n\n"
+        "First ordinary list item with substantive text.\n"
+    )
+
+    report = polish_content_integrity_check(source, target)
+
+    assert report["valid"] is False
+    assert "1" in report["missing_numeric_markers"]
+
+
+def test_polish_integrity_rejects_dropped_body_list_number_outside_notes():
+    source = (
+        "Introductory sentence with enough words to keep the body stable.\n\n"
+        "- 1. First ordinary list item with substantive text.\n"
+    )
+    target = (
+        "Introductory sentence with enough words to keep the body stable.\n\n"
+        "- First ordinary list item with substantive text.\n"
+    )
+
+    report = polish_content_integrity_check(source, target)
+
+    assert report["valid"] is False
+    assert "1" in report["missing_numeric_markers"]
 
 
 def test_polish_integrity_still_rejects_removed_body_prose():
@@ -43,7 +91,7 @@ def test_polish_integrity_still_rejects_removed_body_prose():
         "[^1]: Katz, Personal Influence, 16.\n"
     )
 
-    report = polish_content_integrity_check(source, target)
+    report = polish_content_integrity_check(source, target, file_role="notes")
 
     assert report["valid"] is False
     assert any("content integrity loss" in error for error in report["errors"])
@@ -63,7 +111,7 @@ def test_polish_integrity_still_rejects_duplicated_body_prose():
         "[^1]: Katz, Personal Influence, 16.\n"
     )
 
-    report = polish_content_integrity_check(source, target)
+    report = polish_content_integrity_check(source, target, file_role="notes")
 
     assert report["valid"] is False
     assert report["duplicated_prose_blocks"]

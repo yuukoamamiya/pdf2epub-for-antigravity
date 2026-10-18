@@ -531,7 +531,9 @@ def validate_markdown_subagent(
                 valid_files.remove(source.name)
 
         if task == "polish":
-            integrity = polish_content_integrity_check(source_text, target_text)
+            integrity = polish_content_integrity_check(
+                source_text, target_text, file_role=role
+            )
             polish_content_integrity[source.name] = integrity
             if not integrity["valid"]:
                 invalid.extend(
