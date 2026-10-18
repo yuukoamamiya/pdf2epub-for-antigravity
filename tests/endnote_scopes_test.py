@@ -581,6 +581,43 @@ def test_markdown_notes_headings_still_match_body_scopes() -> None:
     assert directory["ambiguous_headings"] == []
 
 
+def test_wrapped_date_line_is_not_a_scoped_definition() -> None:
+    toc, progress, texts = _simple_book(
+        body=(
+            "# Part 1: Roots\n"
+            "## 1. First Chapter\n"
+            "A<sup>1</sup> B<sup>30</sup>.\n"
+        ),
+        notes=(
+            "# Notes\n"
+            "## Chapter 1: First Chapter\n"
+            "1. First note text.\n"
+            "30 January 2005, continuation line.\n"
+            "\n"
+            "30 Second note starts after a blank line.\n"
+        ),
+        children=[
+            {"title": "1. First Chapter", "start_page": 2, "end_page": 10}
+        ],
+    )
+    directory = build_endnote_scope_directory(toc, progress, texts)
+
+    normalized, report = normalize_endnotes(
+        texts,
+        {"chapter_1.md": "", "chapter_2.md": "", "chapter_3.md": "notes"},
+        scopes=directory,
+    )
+
+    assert (
+        "[^30]: Second note starts after a blank line."
+        in normalized["chapter_3.md"]
+    )
+    assert "30 January 2005, continuation line." in normalized["chapter_3.md"]
+    assert report["definition_keys"] == ["1", "30"]
+    assert report["scoped_keys"] == []
+    assert report["duplicate_definition_occurrences"] == []
+
+
 def test_validate_rejects_raw_numeric_reference_for_scoped_definition() -> None:
     report = validate_normalized_endnotes(
         {

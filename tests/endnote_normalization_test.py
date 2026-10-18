@@ -13,7 +13,7 @@ from pdf2epub.refine.endnote_normalization import (
 def test_typed_notes_normalize_numbered_html_and_unicode_references() -> None:
     source = {
         "chapter_1.md": "Body <sup class=\"note\">1</sup> and ², but x<sup>99</sup> stays.\n",
-        "chapter_12.md": "1. First endnote.\n2 Second endnote.\n",
+        "chapter_12.md": "1. First endnote.\n\n2 Second endnote.\n",
     }
 
     normalized, report = normalize_endnotes(
@@ -25,10 +25,35 @@ def test_typed_notes_normalize_numbered_html_and_unicode_references() -> None:
         "Body [^1] and [^2], but x<sup>99</sup> stays.\n"
     )
     assert normalized["chapter_12.md"] == (
-        "[^1]: First endnote.\n[^2]: Second endnote.\n"
+        "[^1]: First endnote.\n\n[^2]: Second endnote.\n"
     )
     assert report["converted_reference_count"] == 2
     assert report["orphan_definition_keys"] == []
+
+
+def test_wrapped_date_line_is_not_a_new_endnote_definition() -> None:
+    source = {
+        "chapter_1.md": "Body <sup>1</sup> and <sup>30</sup>.\n",
+        "chapter_12.md": (
+            "1. First note text.\n"
+            "30 January 2005, continuation line.\n"
+            "\n"
+            "30 Second note starts after a blank line.\n"
+        ),
+    }
+
+    normalized, report = normalize_endnotes(
+        source,
+        {"chapter_1.md": "", "chapter_12.md": "notes"},
+    )
+
+    assert (
+        "[^30]: Second note starts after a blank line."
+        in normalized["chapter_12.md"]
+    )
+    assert "30 January 2005, continuation line." in normalized["chapter_12.md"]
+    assert report["definition_keys"] == ["1", "30"]
+    assert report["duplicate_definition_occurrences"] == []
 
 
 def test_typed_notes_can_be_validated_without_a_notes_heading() -> None:

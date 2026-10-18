@@ -64,7 +64,12 @@ class EndnoteNormalizationError(ValueError):
     """Raised when centralized endnotes cannot be normalized safely."""
 
 
-def _definition_line(line: str, *, body_keys: set[str]) -> tuple[str, str, str] | None:
+def _definition_line(
+    line: str,
+    *,
+    body_keys: set[str],
+    previous_line_blank: bool = True,
+) -> tuple[str, str, str] | None:
     """Return ``(key, content, kind)`` for one endnote definition line."""
     match = _MARKDOWN_DEF_RE.match(line)
     if match:
@@ -79,12 +84,13 @@ def _definition_line(line: str, *, body_keys: set[str]) -> tuple[str, str, str] 
         return match.group("key"), match.group("content").strip(), "numbered"
 
     # ``N text`` is intentionally narrower than the other forms.  It is only
-    # accepted when the same key is visibly referenced by an ordinary unit;
-    # otherwise a numbered prose line in a Notes section could be retyped as a
-    # footnote merely because it starts with a number.
-    match = _NUMBERED_SPACE_DEF_RE.match(line)
-    if match and match.group("key") in body_keys:
-        return match.group("key"), match.group("content").strip(), "numbered_space"
+    # accepted when the same key is visibly referenced by an ordinary unit and
+    # the line starts a new paragraph; otherwise a wrapped date or citation
+    # continuation could be retyped as a footnote.
+    if previous_line_blank:
+        match = _NUMBERED_SPACE_DEF_RE.match(line)
+        if match and match.group("key") in body_keys:
+            return match.group("key"), match.group("content").strip(), "numbered_space"
     return None
 
 
@@ -314,8 +320,14 @@ def _normalize_scoped(
 
     occurrences: list[dict[str, Any]] = []
     for name in file_order:
-        for line_number, line in enumerate(source_texts[name].splitlines(), 1):
-            parsed = _definition_line(line, body_keys=body_keys)
+        lines = source_texts[name].splitlines()
+        for line_number, line in enumerate(lines, 1):
+            previous_line_blank = line_number == 1 or not lines[line_number - 2].strip()
+            parsed = _definition_line(
+                line,
+                body_keys=body_keys,
+                previous_line_blank=previous_line_blank,
+            )
             if parsed is None:
                 continue
             raw_key, content, kind = parsed
@@ -554,8 +566,14 @@ def _normalize_legacy(
 
     for name in sorted(note_files):
         edits: dict[int, str] = {}
-        for line_number, line in enumerate(source_texts[name].splitlines(), 1):
-            parsed = _definition_line(line, body_keys=body_keys)
+        lines = source_texts[name].splitlines()
+        for line_number, line in enumerate(lines, 1):
+            previous_line_blank = line_number == 1 or not lines[line_number - 2].strip()
+            parsed = _definition_line(
+                line,
+                body_keys=body_keys,
+                previous_line_blank=previous_line_blank,
+            )
             if parsed is None:
                 continue
             key, content, kind = parsed
