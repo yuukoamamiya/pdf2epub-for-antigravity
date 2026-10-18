@@ -8,6 +8,7 @@ coordinator.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
@@ -20,6 +21,7 @@ from .footnote_options import (
     DEFAULT_NATIVE_MAX_FONT_RATIO,
     FOOTNOTE_MODES,
     FootnotePrepareOptions,
+    resolve_effective_footnote_mode,
     resolve_footnote_options,
 )
 from .footnote_page_scan import FootnoteScanState, scan_footnote_page
@@ -58,6 +60,9 @@ def prepare_footnote_candidates(
         auto_accept=auto_accept,
         native_max_font_ratio=native_max_font_ratio,
     )
+    mode_resolution = resolve_effective_footnote_mode(output_dir, config, mode=mode)
+    if options.mode == "auto":
+        options = replace(options, mode=mode_resolution["effective"])
     pages_dir = output_dir / "pages"
     sidecars = sorted(pages_dir.glob("page_*.ocr.json"))
     if not sidecars:
@@ -142,7 +147,9 @@ def prepare_footnote_candidates(
         output_dir,
         source_kind=source_kind,
         evidence_mode=evidence_mode,
-        footnote_mode=options.mode,
+        footnote_mode=mode_resolution["effective"],
+        configured_footnote_mode=mode_resolution["configured"],
+        footnote_mode_source=mode_resolution["source"],
         bottom_ratio=options.bottom_ratio,
         bottom_intersection_ratio=options.bottom_intersection_ratio,
         context_blocks=options.context_blocks,
@@ -168,5 +175,6 @@ __all__ = [
     "FOOTNOTE_PREPARE_SCHEMA_VERSION",
     "FOOTNOTE_STRUCTURE_EXEMPT_TYPES",
     "prepare_footnote_candidates",
+    "resolve_effective_footnote_mode",
     "resolve_footnote_options",
 ]

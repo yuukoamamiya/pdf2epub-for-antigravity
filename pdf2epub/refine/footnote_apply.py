@@ -16,7 +16,10 @@ from typing import Any, Mapping, Optional
 
 from ..workflow_contracts import atomic_write_json, atomic_write_text, sha256_file
 from .pdf_evidence import pdf_evidence_mode, require_current_consensus
-from .footnote_options import FOOTNOTE_MODES, resolve_footnote_options
+from .footnote_options import (
+    EFFECTIVE_FOOTNOTE_MODES,
+    resolve_effective_footnote_mode,
+)
 from .footnote_structure import FOOTNOTE_STRUCTURE_EXEMPT_TYPES
 from .footnote_matching import (
     apply_edits as _apply_edits,
@@ -230,7 +233,7 @@ def apply_footnote_normalization(
     report_footnote_mode = str(
         report.get("footnote_mode") or "footnotes"
     ).strip().lower()
-    if report_footnote_mode not in FOOTNOTE_MODES:
+    if report_footnote_mode not in EFFECTIVE_FOOTNOTE_MODES:
         return _write_failure(
             output_dir,
             [f"unsupported footnote mode in candidate report: {report_footnote_mode}"],
@@ -267,18 +270,30 @@ def apply_footnote_normalization(
                         "two-OCR footnote checkpoint is stale; rerun ocr-pages and footnote-prepare",
                     ],
                 )
-        try:
-            configured_footnote_mode = resolve_footnote_options(config).mode
-        except ValueError as exc:
-            return _write_failure(output_dir, [str(exc)])
-        if report_footnote_mode != configured_footnote_mode:
-            return _write_failure(
-                output_dir,
-                [
-                    "footnote checkpoints were prepared with a different "
-                    "footnotes.mode; rerun footnote-prepare and footnote-validate",
-                ],
-            )
+    try:
+        resolution = resolve_effective_footnote_mode(output_dir, config)
+    except ValueError as exc:
+        return _write_failure(output_dir, [str(exc)])
+    if report_footnote_mode != resolution["effective"]:
+        return _write_failure(
+            output_dir,
+            [
+                "footnote checkpoints were prepared with a different "
+                "footnotes.mode; rerun footnote-prepare and footnote-validate",
+            ],
+        )
+    recorded_configured = report.get("configured_footnote_mode")
+    if (
+        isinstance(recorded_configured, str)
+        and recorded_configured.strip().lower() != resolution["configured"]
+    ):
+        return _write_failure(
+            output_dir,
+            [
+                "footnote checkpoints were prepared with a different configured "
+                "footnotes.mode; rerun footnote-prepare and footnote-validate",
+            ],
+        )
 
     if validation.get("valid") is not True or validation.get("status") not in {
         "validated",
@@ -790,6 +805,8 @@ def apply_footnote_normalization(
         "source_kind": report.get("source_kind", "ocr"),
         "ocr_evidence_mode": report_mode,
         "footnote_mode": report_footnote_mode,
+        "configured_footnote_mode": report.get("configured_footnote_mode"),
+        "footnote_mode_source": report.get("footnote_mode_source"),
         "status": "validated",
         "valid": True,
         "source_dir": "ocr_markdown",

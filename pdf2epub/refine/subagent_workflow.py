@@ -14,6 +14,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 from pdf2epub.subagent_runtime import resolve_subagent_model
 from pdf2epub.workflow_contracts import atomic_write_json, atomic_write_text, relative_posix_path
+from .footnote_options import TOC_FOOTNOTE_MODES
 from .pagination import build_pagination_map
 from .pdf_outline import extract_pdf_outline
 from .toc_fast_path import prepare_toc_fast_path
@@ -146,6 +147,7 @@ Required output shape:
   "author": "Exact author name from the title or copyright page",
   "publisher": "Exact publisher name when visible",
   "metadata_source_pages": [1],
+  "footnote_mode": "footnotes",
   "chapters": [
     {{
       "title": "Chapter title",
@@ -196,8 +198,20 @@ Rules:
   Omit `type` for ordinary prose chapters and sections. These are AI-assigned
   content roles used by later translation and footnote rules; this is not a token-size or splitting setting.
   Do not invent a role when the evidence is unclear.
-- You may include `boundary_info` or other book metadata, but do not change
-  the required field names.
+- Decide the book's note layout and write it as the top-level `footnote_mode`:
+  - Use `"endnotes_only"` when the book prints its notes centrally after the
+    body (for example a Notes/Endnotes section), especially when each chapter
+    restarts numbering or notes are organized by chapter.
+  - Use `"footnotes"` when notes are printed mainly at the bottom of pages.
+  - When the book contains both page footnotes and centralized endnotes, or
+    when the evidence is unclear, still use `"footnotes"`: it supports both
+    page-level extraction and centralized-endnote normalization. Record the
+    evidence for the mixed or unclear case in `notes`.
+  - Never use `disabled` to avoid the decision, and do not omit the field for
+    a book that clearly has notes. Do not write `auto`; it only means the local
+    stage could not find a decision and will fall back conservatively.
+- You may include `boundary_info`, `notes`, or other book metadata, but do not
+  change the required field names.
 - The local step will estimate tokens using `{max_tokens}` as the unit limit;
   it will not call any model or provider.
 """,
@@ -242,6 +256,15 @@ def validate_toc_tree_data(
     chapters = data.get("chapters")
     if not isinstance(chapters, list) or not chapters:
         return ["toc_tree.json must contain a non-empty chapters array"]
+    if "footnote_mode" in data:
+        footnote_mode = data.get("footnote_mode")
+        if (
+            not isinstance(footnote_mode, str)
+            or footnote_mode.strip().lower()
+            not in (TOC_FOOTNOTE_MODES | {"auto"})
+        ):
+            allowed = ", ".join(sorted(TOC_FOOTNOTE_MODES | {"auto"}))
+            errors.append(f"footnote_mode must be one of: {allowed}")
 
     def visit(nodes: Any, parent: Optional[Dict[str, Any]], path: str) -> None:
         if not isinstance(nodes, list):

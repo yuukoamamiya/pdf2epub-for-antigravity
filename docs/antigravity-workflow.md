@@ -508,6 +508,11 @@ pipeline: epub_conversion
   自动生成 `chapter_N.partM.md` 分片，默认目标为 12,000 tokens；
 - 不创建 LLM client、不发送 PDF、不消耗 API 配额。
 
+`toc_tree.json` 顶层允许可选的 `footnote_mode`（`footnotes` / `endnotes_only` / `auto`），
+它与 `chapters` 的页码范围、层级和边界校验相互独立。`validate_toc_tree_data()` 会拒绝
+`disabled` 或其他非法值。Subagent 应按全书证据给出 `footnotes` 或 `endnotes_only`，不要
+用 `auto` 代替判断；旧 TOC 没有该字段时仍可通过校验，并按安全默认 `footnotes` 处理。
+
 结构 Subagent 必须区分“换页”和“页内换章”：不能因为章节标题出现在某页中部，
 就把上一章节的 `end_page` 提前到上一页。若父章节与首个子章节共享起始页，必须同时
 提供父节点和首个子节点的 `boundary_info.start_line`；本地校验会拒绝缺少这两个锚点的
@@ -583,8 +588,9 @@ Subagent；双 OCR 模式下，主/次候选存在性或 layout 证据不同的�
 `native_text`、`single_ocr` 和 `two_ocr`，`refine/layout_evidence.py` 统一读取 sidecar、
 清理 block 文本并归一化坐标。两个阶段可以拥有不同的候选器和 Subagent 角色，但不得各自
 实现一套 OCR 模式判断或 bbox 归一化；这样原生 PDF 不会在某个阶段意外读入旧的双 OCR 报告。
-脚注配置的默认值、校验和 CLI 覆盖统一由 `resolve_footnote_options()` 处理，命令 handler
-不再复制这些默认值。
+脚注配置的默认值、校验和 CLI 覆盖统一由 `resolve_footnote_options()` 处理；`auto` 模式
+再由 `resolve_effective_footnote_mode()` 从当前 TOC 的 `footnote_mode` 解析 effective
+mode，命令 handler 不再复制这些默认值或自行读取 TOC。
 这里必须区分脚注和引用：正文中的作者—年份/编号引用、引文来源以及
 `bibliography`/`reference` 条目使用 `citation` 或 `bibliography` 角色，脚本不会搬移它们。
 如果 TOC 单元属于集中尾注、作者说明、出版社目录或广告，分别使用
@@ -724,8 +730,19 @@ EPUB 构建时，`pdf2epub/epub/footnotes/keys.py` 的 `display_footnote_key()` 
 `fnc-<scope>-<number>` 和 `...-oN` 显示为原始数字；链接、ID 和扫描器仍使用真实 key。
 因此读者看到 `[1]`，而锚点和跨章往返使用内部唯一 key。
 
-`footnotes.mode: endnotes_only` 只关闭页面脚注候选，不关闭这条 typed Notes 归一化路径；
-只有 `footnotes.mode: disabled` 才会原样保留；该模式同时跳过这条 Polish 尾注归一化校验和
+`footnotes.mode` 默认是 `auto`。refine TOC Subagent 必须在 `toc_tree.json` 顶层写入
+`footnote_mode`：集中 Notes/Endnotes 且每章重新编号或按章组织时用 `endnotes_only`；
+注释主要印在页底时用 `footnotes`；两者都有或证据不清时也用 `footnotes`，因为它同时覆盖
+页面脚注与集中尾注路径。Subagent 不得用 `disabled` 规避判断；`auto` 只表示未作决定，
+本地会回退到 `footnotes`。`resolve_effective_footnote_mode()` 先读
+`ocr_markdown/tree_progress.json` 的 `book_metadata.footnote_mode`，再读
+`toc_tree.json`；显式配置始终覆盖 TOC。`footnote_candidates.json` 记录 effective
+`footnote_mode`、`configured_footnote_mode` 和 `footnote_mode_source`；validate/apply/
+status 都按当前 effective mode 比较，TOC 决定变化使 effective mode 改变时 checkpoint
+视为 stale，必须重跑 `footnote-prepare → footnote-validate → footnote-apply`。
+
+effective mode 为 `endnotes_only` 时只关闭页面脚注候选，不关闭这条 typed Notes 归一化路径；
+只有 effective mode 为 `disabled` 才会原样保留；该模式同时跳过这条 Polish 尾注归一化校验和
 构建门禁。其他模式下，`polish-validate` 会按 `file_roles` 检查 Notes 文件及所有普通单元的
 对应标记，EPUB 构建前还会再次阻断残留的原始定义或未链接上标。
 无法唯一配对的重复尾注编号、结构角色变化或归一化报告版本过期时，必须重新运行
@@ -759,8 +776,9 @@ Subagent 输出。
 
 ```yaml
 footnotes:
-  # 集中尾注书使用 endnotes_only；无任何脚注/尾注处理时使用 disabled。
-  mode: footnotes
+  # 默认 auto：TOC Subagent 在 toc_tree.json 写 footnote_mode。
+  # 也可显式固定 footnotes/endnotes_only；无任何脚注/尾注处理时使用 disabled。
+  mode: auto
   auto_accept: true
   # 仅为候选召回地板，不是自动接受阈值。
   bottom_ratio: 0.50

@@ -17,7 +17,10 @@ from .footnote_contracts import (
     DECISION_ROLES as _DECISION_ROLES,
     MOVED_ROLES as _MOVED_ROLES,
 )
-from .footnote_options import FOOTNOTE_MODES, resolve_footnote_options
+from .footnote_options import (
+    EFFECTIVE_FOOTNOTE_MODES,
+    resolve_effective_footnote_mode,
+)
 from .footnote_report import FOOTNOTE_PREPARE_SCHEMA_VERSION
 from .pdf_evidence import pdf_evidence_mode, require_current_consensus
 
@@ -77,12 +80,14 @@ def validate_footnote_decisions(
     source_kind = str(report.get("source_kind") or "ocr")
     evidence_mode = str(report.get("ocr_evidence_mode") or "single_ocr")
     footnote_mode = str(report.get("footnote_mode") or "footnotes").strip().lower()
+    configured_footnote_mode: Optional[str] = None
+    footnote_mode_source: Optional[str] = None
     errors: list[str] = []
     if source_kind not in {"ocr", "native_text"}:
         errors.append("candidate report has an unsupported page source kind")
     if evidence_mode not in {"single_ocr", "two_ocr"}:
         errors.append("candidate report has an unsupported OCR evidence mode")
-    if footnote_mode not in FOOTNOTE_MODES:
+    if footnote_mode not in EFFECTIVE_FOOTNOTE_MODES:
         errors.append("candidate report has an unsupported footnote mode")
     if config is not None:
         configured_mode = pdf_evidence_mode(output_dir, config)
@@ -95,16 +100,28 @@ def validate_footnote_decisions(
                 require_current_consensus(output_dir, config, stage="footnote")
             except ValueError as exc:
                 errors.append(str(exc))
-        try:
-            configured_footnote_mode = resolve_footnote_options(config).mode
-            if footnote_mode != configured_footnote_mode:
-                errors.append(
-                    "candidate report was prepared with footnotes.mode="
-                    f"{footnote_mode}, but configuration requires "
-                    f"{configured_footnote_mode}"
-                )
-        except ValueError as exc:
-            errors.append(str(exc))
+    try:
+        resolution = resolve_effective_footnote_mode(output_dir, config)
+        configured_footnote_mode = resolution["configured"]
+        footnote_mode_source = resolution["source"]
+        if footnote_mode != resolution["effective"]:
+            errors.append(
+                "candidate report was prepared with footnotes.mode="
+                f"{footnote_mode}, but the current configuration/TOC requires "
+                f"{resolution['effective']} (source: {resolution['source']})"
+            )
+        recorded_configured = report.get("configured_footnote_mode")
+        if (
+            isinstance(recorded_configured, str)
+            and recorded_configured.strip().lower() != configured_footnote_mode
+        ):
+            errors.append(
+                "candidate report was prepared with configured footnotes.mode="
+                f"{recorded_configured}, but configuration now resolves "
+                f"{configured_footnote_mode}"
+            )
+    except ValueError as exc:
+        errors.append(str(exc))
 
     def _hashes_current(field: str) -> bool:
         expected_hashes = report.get(field, {})
@@ -133,6 +150,8 @@ def validate_footnote_decisions(
             "source_kind": source_kind,
             "ocr_evidence_mode": evidence_mode,
             "footnote_mode": footnote_mode,
+            "configured_footnote_mode": configured_footnote_mode,
+            "footnote_mode_source": footnote_mode_source,
             "valid": False,
             "status": "retry_required",
             "errors": errors,
@@ -177,6 +196,8 @@ def validate_footnote_decisions(
             "source_kind": source_kind,
             "ocr_evidence_mode": evidence_mode,
             "footnote_mode": footnote_mode,
+            "configured_footnote_mode": configured_footnote_mode,
+            "footnote_mode_source": footnote_mode_source,
             "valid": True,
             "status": "no_subagent_review_required",
             "errors": [],
@@ -453,6 +474,8 @@ def validate_footnote_decisions(
         "source_kind": source_kind,
         "ocr_evidence_mode": evidence_mode,
         "footnote_mode": footnote_mode,
+        "configured_footnote_mode": configured_footnote_mode,
+        "footnote_mode_source": footnote_mode_source,
         "valid": not errors and not human_review_required,
         "status": status,
         "errors": errors,

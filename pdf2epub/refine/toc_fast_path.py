@@ -433,6 +433,13 @@ structure exactly. Add the confirmed `boundary_info`, exact metadata, and a
 content `type` only when the selected pages make it clear (`toc`, `notes`,
 `bibliography`, `index`, or another supported special role). Do not silently
 repair or restructure the bookmark tree in the fast path.
+
+If the reviewed pages clearly establish the book's note layout, also add a
+top-level `footnote_mode`: use `"endnotes_only"` for centralized notes that are
+organized or renumbered per chapter, and `"footnotes"` for page-bottom notes or
+mixed evidence. If the selected pages do not establish it, omit the field; the
+local stage then falls back to page-footnote handling. Do not write
+`disabled` or rely on `auto` as a decision.
 """,
         encoding="utf-8",
     )

@@ -459,8 +459,11 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
    uv run pdf2epub -c config.yaml footnote-prepare
    ```
 
-   集中尾注书应在配置中设置 `footnotes.mode: endnotes_only`；明确没有页面脚注或尾注处理时
-   可设置 `footnotes.mode: disabled`。默认 `footnotes.mode: footnotes`。TOC 中标记为
+   默认 `footnotes.mode: auto`：refine 阶段的 TOC Subagent 在 `toc_tree.json` 顶层写入
+   `footnote_mode`（`footnotes` 或 `endnotes_only`），本地按 effective mode 执行。集中尾注书
+   由 Subagent 判断为 `endnotes_only`；只有用户明确不做任何脚注/尾注处理时才设置
+   `footnotes.mode: disabled`，Subagent 不得用 `disabled` 规避判断。也可在配置中显式固定
+   `footnotes` / `endnotes_only` / `disabled`，显式值始终覆盖 TOC 判断。TOC 中标记为
    `toc`、`notes`、`bibliography`、`index`、`author_notes`、`catalog` 或 `ad` 的单元不会把其内容
    当作页面脚注；若这类单元与正文共用一页，优先依据 `boundary_info.start_line`/
    `end_line` 做块级过滤，缺少边界证据时采用保守的整页排除。

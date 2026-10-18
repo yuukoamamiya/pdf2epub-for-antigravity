@@ -153,13 +153,22 @@ PDF 精修的核心领域模块如下：
   `footnotes.auto_accept` 是两种来源共用的区域级本地接受策略；双 OCR 模式比较主/次候选差异，
   并把次 OCR 的连续物理行合并成一个 secondary-only 复核窗口。`resolve_footnote_options()` 集中
   处理配置默认值和 CLI 覆盖。它不直接改写 Markdown，也不把引用推断成脚注。
-`footnotes.mode` 可设为 `footnotes`、`endnotes_only` 或 `disabled`；
+`footnotes.mode` 可设为 `auto`、`footnotes`、`endnotes_only` 或 `disabled`，默认 `auto`。
+显式值直接生效；`auto` 由 `resolve_effective_footnote_mode()` 读取
+`ocr_markdown/tree_progress.json` 的 `book_metadata.footnote_mode`，再回退到
+`toc_tree.json` 顶层 `footnote_mode`，都没有有效值时才回退 `footnotes`。
 `endnotes_only` 跳过页面脚注提取，但仍归一化 typed Notes；`disabled` 才原样生成后续阶段使用的源稿。
+`footnote_candidates.json` 同时记录 effective `footnote_mode`、配置态
+`configured_footnote_mode` 和 `footnote_mode_source`（`config`/`toc`/`default`）。
+候选、决定校验、materialize 和 status 阶段都用当前 effective mode 比较 checkpoint；
+TOC 的 `footnote_mode` 变化导致 effective mode 改变时视为 stale，必须重跑
+`footnote-prepare → footnote-validate → footnote-apply`。
 TOC 中标记为
   `toc`、`notes`、`bibliography`、`index`、`author_notes`、
   `catalog` 或 `ad` 的单元也不会进入页面脚注候选。
-- `refine/footnote_options.py`：集中维护脚注模式、默认阈值和 CLI/config 覆盖解析；候选、
-  校验和 materialize 阶段共享同一个不可变选项对象，避免各阶段各自解释配置。
+- `refine/footnote_options.py`：集中维护脚注模式、默认阈值、CLI/config 覆盖解析和
+  `auto` → effective mode 的只读解析；候选、校验和 materialize 阶段共享同一个不可变
+  选项对象，避免各阶段各自解释配置。该模块只读取 TOC/进度元数据，不扫描页面。
 - `refine/endnote_scopes.py`：从 `toc_tree.json`、`ocr_markdown/tree_progress.json` 和
   当前 Markdown 构建只读的按章 scope 目录。顶层单元使用 `u<unit_order>`，后代使用
   `u4c1`、`u4c1c2`；正文只按 Markdown 标题行切分 span。Notes 标题可以是 Markdown

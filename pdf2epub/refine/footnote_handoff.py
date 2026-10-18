@@ -105,6 +105,8 @@ def prepare_footnote_subagent(
         "source_kind": report["source_kind"],
         "ocr_evidence_mode": report["ocr_evidence_mode"],
         "footnote_mode": report["footnote_mode"],
+        "configured_footnote_mode": report.get("configured_footnote_mode"),
+        "footnote_mode_source": report.get("footnote_mode_source"),
         "candidate_report": "footnote_candidates.json",
         "review_pages": report["review_pages"],
         "high_confidence_candidate_count": report["high_confidence_candidate_count"],

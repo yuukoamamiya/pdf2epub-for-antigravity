@@ -8,7 +8,10 @@ from typing import Any, Mapping, Optional
 
 from ..workflow_contracts import sha256_file
 from .footnote_matching import _load_json
-from .footnote_options import FOOTNOTE_MODES, resolve_footnote_options
+from .footnote_options import (
+    EFFECTIVE_FOOTNOTE_MODES,
+    resolve_effective_footnote_mode,
+)
 from .pdf_evidence import pdf_evidence_mode, require_current_consensus
 
 
@@ -137,7 +140,7 @@ def footnote_normalization_status(
     validation_footnote_mode = str(
         validation.get("footnote_mode") or report_footnote_mode
     ).strip().lower()
-    if report_footnote_mode not in FOOTNOTE_MODES:
+    if report_footnote_mode not in EFFECTIVE_FOOTNOTE_MODES:
         fail(
             "unsupported_footnote_mode",
             f"footnote normalization uses unsupported mode {report_footnote_mode}",
@@ -159,16 +162,29 @@ def footnote_normalization_status(
                 require_current_consensus(output_dir, config, stage="footnote")
             except ValueError as exc:
                 fail("ocr_consensus_stale", str(exc))
-        try:
-            configured_footnote_mode = resolve_footnote_options(config).mode
-            if report_footnote_mode != configured_footnote_mode:
-                fail(
-                    "configured_footnote_mode_mismatch",
-                    f"checkpoint uses footnotes.mode={report_footnote_mode}, "
-                    f"current configuration requires {configured_footnote_mode}",
-                )
-        except ValueError as exc:
-            fail("invalid_footnote_mode", str(exc))
+    try:
+        resolution = resolve_effective_footnote_mode(output_dir, config)
+    except ValueError as exc:
+        fail("invalid_footnote_mode", str(exc))
+    else:
+        if report_footnote_mode != resolution["effective"]:
+            fail(
+                "configured_footnote_mode_mismatch",
+                f"checkpoint uses footnotes.mode={report_footnote_mode}, "
+                "but the current configuration/TOC requires "
+                f"{resolution['effective']} (source: {resolution['source']})",
+            )
+        recorded_configured = report.get("configured_footnote_mode")
+        if (
+            isinstance(recorded_configured, str)
+            and recorded_configured.strip().lower() != resolution["configured"]
+        ):
+            fail(
+                "configured_footnote_mode_mismatch",
+                "checkpoint was prepared with configured footnotes.mode="
+                f"{recorded_configured}, but configuration now resolves "
+                f"{resolution['configured']}",
+            )
     source_dir = output_dir / "ocr_markdown"
     target_dir = output_dir / "footnote_normalized"
     source_names = set(markdown_inventory(source_dir))
@@ -239,7 +255,12 @@ def footnote_normalization_status(
     else:
         detail = failures[0]["detail"]
         if any(
-            item["code"] in {"candidate_report_stale", "toc_tree_stale"}
+            item["code"]
+            in {
+                "candidate_report_stale",
+                "toc_tree_stale",
+                "configured_footnote_mode_mismatch",
+            }
             for item in failures
         ):
             detail += "; rerun footnote-prepare, footnote-validate, and footnote-apply"

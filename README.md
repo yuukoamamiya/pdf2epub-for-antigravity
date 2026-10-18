@@ -253,11 +253,15 @@ ocr-pages --resume
 `*_subagent_prompt.md` 或 manifest 出现后，都要先交给工作区 Subagent，再运行后续校验；
 不要跳过中间门禁。
 
-集中尾注书可在配置中设置 `footnotes.mode: endnotes_only`；该模式会跳过页面脚注检测，
-但仍会依据 TOC 中 `type: notes` 的单元，把正文上标和编号尾注归一化为 `[^N]` / `[^N]:`。
-完全没有脚注/尾注处理时才设置 `footnotes.mode: disabled`。明确标记为 `toc`、`notes`、
-`bibliography`、`index`、`author_notes`、`catalog` 或 `ad` 的 TOC 单元不会被页面脚注检测误搬移。
-构建 EPUB 前若 typed `notes` 单元仍含原始编号尾注或正文仍含对应未链接上标，构建会阻断。
+默认 `footnotes.mode: auto`：refine 阶段的 TOC Subagent 会读取全书结构，在 `toc_tree.json`
+顶层写入 `footnote_mode`。集中 Notes/Endnotes 且按章组织或重新编号时选 `endnotes_only`；
+注释主要印在页面底部时选 `footnotes`；两者都有或证据不清时也选 `footnotes`，因为它同时
+支持页面脚注和集中尾注归一化。`endnotes_only` 会跳过页面脚注检测，但仍会依据 TOC 中
+`type: notes` 的单元，把正文上标和编号尾注归一化为 `[^N]` / `[^N]:`。也可显式设置
+`footnotes.mode: footnotes` / `endnotes_only` 覆盖 TOC 判断；只有明确不做任何脚注/尾注处理时
+才设置 `footnotes.mode: disabled`。明确标记为 `toc`、`notes`、`bibliography`、`index`、
+`author_notes`、`catalog` 或 `ad` 的 TOC 单元不会被页面脚注检测误搬移。构建 EPUB 前若
+typed `notes` 单元仍含原始编号尾注或正文仍含对应未链接上标，构建会阻断。
 
 ## 结果在哪里
 
