@@ -160,6 +160,11 @@ def _detect_repeat_token(
     """Detect the suffix repetition failure seen by Chandra on RTX 4090."""
     for sequence_length in range(1, min(window_size // 2, len(text)) + 1):
         candidate = text[-sequence_length:]
+        cleaned = re.sub(r"<[^>]*>", "", candidate)
+        cleaned = re.sub(r"^[^<]*>", "", cleaned)
+        cleaned = re.sub(r"<[^>]*$", "", cleaned).strip()
+        if not cleaned:
+            continue
         allowed = int(base_max_repeats * (1 + scaling_factor / sequence_length))
         repeats = 0
         position = len(text) - sequence_length
