@@ -9,6 +9,7 @@ from pdf2epub.ocr.artifacts import OCRPageResult
 from pdf2epub.ocr.backends.chandra import (
     ChandraClient,
     OCR_LAYOUT_PROMPT,
+    _detect_repeat_token,
     layout_to_markdown,
     materialize_layout,
 )
@@ -104,6 +105,26 @@ def test_chandra_prompt_preserves_separate_footnote_blocks():
     assert "Keep a visually separated bottom-of-page note" in OCR_LAYOUT_PROMPT
     assert "A continuation may have no leading number" in OCR_LAYOUT_PROMPT
     assert "page footer" in OCR_LAYOUT_PROMPT
+
+
+def test_repeat_token_ignores_repeated_empty_table_rows():
+    raw = "<tr><td></td><td></td></tr>\n" * 300
+
+    assert _detect_repeat_token(raw) is False
+
+
+def test_repeat_token_still_detects_repeated_text():
+    assert _detect_repeat_token("hello world " * 200) is True
+
+
+def test_repeat_token_detects_text_wrapped_in_tags():
+    assert _detect_repeat_token("<div>spam </div>" * 300) is True
+
+
+def test_repeat_token_detects_text_after_empty_tag_flood():
+    raw = "<tr><td></td></tr>\n" * 300 + "<div>spam </div>" * 200
+
+    assert _detect_repeat_token(raw) is True
 
 
 def test_save_page_artifacts_writes_all_views_and_raw_layout(tmp_path):
