@@ -23,7 +23,9 @@ DEFAULT_BATCH_MAX_FILES = 5
 MAX_BATCH_FILES = 8
 DEFAULT_BATCH_MAX_SOURCE_TOKENS = 12_000
 DEFAULT_BATCH_MAX_CONCURRENCY = 3
-MAX_ACTIVE_SUBAGENTS = 3
+# The default remains conservative, but configurations may opt into more
+# parallel independent hand-offs when the IDE/model quota permits it.
+MAX_ACTIVE_SUBAGENTS = 6
 DEFAULT_SINGLE_FILE_MAX_BYTES = 30_000
 DEFAULT_BATCH_MAX_NONEMPTY_LINES = 350
 DEFAULT_LARGE_FILE_TOKEN_THRESHOLD = 12_000
@@ -398,7 +400,7 @@ def _worker_groups(
         {"worker_id": f"worker_{index:03d}", "batches": [], "estimated_tokens": 0}
         for index in range(1, worker_count + 1)
     ]
-    # Largest-processing-time first keeps the three worker loads close while
+    # Largest-processing-time first keeps the worker loads close while
     # retaining each existing safety batch as an indivisible scheduling unit.
     ordered = sorted(
         queue,
@@ -1237,6 +1239,13 @@ def write_worker_handoffs(
                 "This worker only polishes Markdown units; do not create or modify "
                 "toc_tree.json or any translation artifact."
             )
+        task_boundary_instruction += (
+            " Never open, edit, create, delete, or rename repository source, tests, "
+            "documentation, glossary files, or project configuration. In particular, "
+            "do not modify paths under pdf2epub/ or tests/, nor docs/, glossaries/, "
+            "AGENTS.md, pyproject.toml, uv.lock, or config*.yaml. If a code or rule "
+            "defect blocks the task, report its path and reason to the main Agent."
+        )
         heading_anchor_instruction = ""
         if task == "translate" and scoped_heading_contexts:
             heading_lines = []

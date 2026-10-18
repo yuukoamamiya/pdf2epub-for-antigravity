@@ -27,6 +27,10 @@ FOOTNOTE_STRUCTURE_EXEMPT_TYPES = frozenset(
         "author_notes",
         "catalog",
         "ad",
+        "metadata",
+        "frontmatter",
+        "copyright",
+        "cover",
     }
 )
 

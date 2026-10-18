@@ -14,6 +14,7 @@ from typing import Any, Iterable, Mapping, Optional
 from .footnote_layout import (
     body_flow_warning as _body_flow_warning,
     bottom_geometry as _bottom_geometry,
+    inline_ordered_list_warning as _inline_ordered_list_warning,
     page_layout_profile as _page_layout_profile,
 )
 from .footnote_options import (
@@ -35,6 +36,13 @@ from .footnote_signals import (
 from .layout_evidence import (
     normalized_bbox as _normalise_bbox,
     text_from_block as _text_from_block,
+)
+
+
+_DECORATIVE_ACKNOWLEDGEMENT_RE = re.compile(
+    r"^\s*[*†‡]\s*(?:acknowledg(?:e)?ments?|thanks|thank\s+you|"
+    r"author['’]?s\s+note|致谢|鸣谢|感谢)?\s*$",
+    re.IGNORECASE,
 )
 
 
@@ -80,6 +88,19 @@ def candidate_for_block(
         and content_bottom is not None
         and float(bbox[3]) >= float(content_bottom) - tail_tolerance
     )
+
+    # Lists that follow a nearby prose sentence and still sit above the page
+    # tail are body content, not page notes.  Keep explicitly labelled notes
+    # reviewable even when their text happens to look like a list item.
+    if not label_is_footnote and _inline_ordered_list_warning(
+        sidecar,
+        block_index,
+        bbox,
+        layout_profile=layout_profile,
+    ):
+        return None
+    if not label_is_footnote and _DECORATIVE_ACKNOWLEDGEMENT_RE.fullmatch(text):
+        return None
 
     # Labels are supporting evidence only. Citations, furniture and printed
     # page numbers must not become candidates from a label alone.

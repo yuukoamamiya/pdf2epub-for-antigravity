@@ -34,7 +34,7 @@ from .markdown_validation import (
     _validate_footnote_markers,
 )
 from .subagent_runtime import _markdown_files
-from .subagent_safety import detect_refusal
+from .subagent_safety import detect_refusal, protected_workspace_changes
 from .utils.ocr_artifacts import clean_ocr_page_artifacts
 from .workflow_contracts import (
     MARKDOWN_VALIDATION_SCHEMA_VERSION,
@@ -157,6 +157,7 @@ def validate_markdown_subagent(
     previous_review_files: set[str] = set()
     previous_review_keys: set[tuple[str, str]] = set()
     previous_manifest_path = output_dir / f"{task}_subagent_manifest.json"
+    protected_workspace_blocked: list[str] = []
     if previous_manifest_path.is_file():
         try:
             loaded_manifest = json.loads(
@@ -178,6 +179,18 @@ def validate_markdown_subagent(
                                     )
         except (OSError, json.JSONDecodeError, UnicodeError):
             previous_review_files = set()
+    if previous_manifest_path.is_file():
+        try:
+            manifest_for_guard = json.loads(
+                previous_manifest_path.read_text(encoding="utf-8")
+            )
+            if isinstance(manifest_for_guard, Mapping):
+                protected_workspace_blocked = protected_workspace_changes(
+                    output_dir,
+                    manifest_for_guard.get("protected_workspace", {}),
+                )
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            protected_workspace_blocked = []
     all_sources = _markdown_files(source_dir)
     selected = None
     if selected_files is not None:
@@ -197,6 +210,14 @@ def validate_markdown_subagent(
     invalid: List[Dict[str, str]] = []
     safety_blocked: List[str] = []
     valid_files: List[str] = []
+    if protected_workspace_blocked:
+        safety_blocked.append(
+            "protected workspace changed during Subagent hand-off: "
+            + ", ".join(protected_workspace_blocked)
+        )
+        # Do not create a resumable content checkpoint after an unauthorized
+        # repository mutation, even if the Markdown itself looks valid.
+        valid_files.clear()
     source_sha256: Dict[str, str] = {}
     target_sha256: Dict[str, str] = {}
     normalized_files: List[str] = []
@@ -491,7 +512,7 @@ def validate_markdown_subagent(
                 source_text,
                 target_text,
                 role,
-                allow_page_furniture_deletion=True,
+                allow_page_furniture_deletion=task != "translate",
             )
             for role_error in role_errors:
                 invalid.append({"file": source.name, "reason": role_error})
@@ -661,7 +682,7 @@ def validate_markdown_subagent(
             invalid_names.update(review_required_files)
         for name in invalid_names:
             (validated_dir / name).unlink(missing_ok=True)
-    if create_validated_copy and not missing and not invalid and (
+    if create_validated_copy and not missing and not invalid and not safety_blocked and (
         allow_review_warnings or not review_required
     ):
         validated_dir.mkdir(parents=True, exist_ok=True)
@@ -676,6 +697,7 @@ def validate_markdown_subagent(
         "missing": missing,
         "invalid": invalid,
         "safety_blocked": safety_blocked,
+        "protected_workspace_blocked": protected_workspace_blocked,
         "target_language_blocked": target_language_blocked,
         "target_language_audits": target_language_audits,
         "bilingual_warnings": bilingual_warnings,
@@ -715,6 +737,7 @@ def validate_markdown_subagent(
             bool(sources)
             and not missing
             and not invalid
+            and not safety_blocked
             and not extras
             and (allow_review_warnings or not review_required)
         ),

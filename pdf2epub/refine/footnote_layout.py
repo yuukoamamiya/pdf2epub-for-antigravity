@@ -8,6 +8,7 @@ reuse the same normalized layout evidence without creating a semantic cycle.
 
 from __future__ import annotations
 
+import re
 from statistics import median
 from typing import Any, Iterable, Mapping, Optional
 
@@ -28,6 +29,7 @@ DEFAULT_REGION_MAX_GAP = 0.035
 DEFAULT_RECALL_AUDIT_EDGE_MARGIN = 0.04
 DEFAULT_LAYOUT_GAP_FACTOR = 2.0
 DEFAULT_LAYOUT_TAIL_FACTOR = 1.5
+_INLINE_LIST_CONTEXT_END_RE = re.compile(r"(?:[:：]|[.!?。！？])\s*$")
 
 
 def is_ordinary_body_block(block: Mapping[str, Any]) -> bool:
@@ -258,6 +260,81 @@ def body_flow_warning(
     return None
 
 
+def inline_ordered_list_warning(
+    sidecar: Mapping[str, Any],
+    block_index: int,
+    bbox: Optional[Iterable[float]],
+    *,
+    layout_profile: Optional[Mapping[str, Any]] = None,
+) -> Optional[str]:
+    """Recognize an ordered list embedded in ordinary body flow.
+
+    A numbered list is only suppressed when it has a nearby preceding prose
+    block ending in sentence punctuation, is followed by adjacent numbered
+    blocks, and still has a meaningful bottom margin. A real page-footnote
+    region near the physical page tail therefore remains available for the
+    existing layout and visual checks.
+    """
+    if not bbox:
+        return None
+    blocks = sidecar.get("blocks", [])
+    if not isinstance(blocks, list) or block_index <= 0 or block_index >= len(blocks):
+        return None
+    current = blocks[block_index]
+    if not isinstance(current, Mapping):
+        return None
+    if _leading_footnote_key(_text_from_block(current)) is None:
+        return None
+    try:
+        current_box = [float(value) for value in bbox]
+    except (TypeError, ValueError):
+        return None
+    if len(current_box) != 4:
+        return None
+
+    profile = (
+        dict(layout_profile)
+        if isinstance(layout_profile, Mapping)
+        else page_layout_profile(sidecar)
+    )
+    content_bottom = profile.get("content_bottom")
+    if content_bottom is None:
+        return None
+    tail_tolerance = float(profile.get("tail_tolerance") or 0.0)
+    median_height = float(profile.get("median_block_height") or 0.0)
+    bottom_margin = max(tail_tolerance, median_height, 1e-6)
+    if current_box[3] >= float(content_bottom) - bottom_margin:
+        return None
+
+    # Walk over an already-numbered run so the first list item can provide the
+    # context for all later items in the same list.
+    run_start = block_index
+    while run_start > 0:
+        previous = blocks[run_start - 1]
+        if not isinstance(previous, Mapping):
+            break
+        if _leading_footnote_key(_text_from_block(previous)) is None:
+            break
+        run_start -= 1
+    if run_start <= 0:
+        return None
+    context = blocks[run_start - 1]
+    if not isinstance(context, Mapping) or not is_ordinary_body_block(context):
+        return None
+    context_text = _text_from_block(context).rstrip()
+    if not _INLINE_LIST_CONTEXT_END_RE.search(context_text):
+        return None
+    context_box = _normalise_bbox(context, sidecar)
+    first_list_box = _normalise_bbox(blocks[run_start], sidecar)
+    if not context_box or not first_list_box:
+        return None
+    gap = float(first_list_box[1]) - float(context_box[3])
+    max_gap = max(DEFAULT_REGION_MAX_GAP, median_height * 1.5)
+    if gap < -DEFAULT_REGION_MAX_GAP or gap > max_gap:
+        return None
+    return "inline_ordered_list"
+
+
 def bottom_geometry(
     bbox: Optional[Iterable[float]],
     *,
@@ -310,6 +387,7 @@ def bottom_detection_stats(
         "suspected_missed_count": 0,
     }
     excluded_block_indexes = set(excluded_block_indexes or set())
+    layout_profile = page_layout_profile(sidecar)
     for index, block in enumerate(sidecar.get("blocks", [])):
         if index in excluded_block_indexes or not isinstance(block, Mapping):
             continue
@@ -321,6 +399,16 @@ def bottom_detection_stats(
         key = _leading_footnote_key(text)
         label = str(block.get("label") or "").strip()
         is_furniture = bool(_FURNITURE_LABEL_RE.search(label))
+        if (
+            not _FOOTNOTE_LABEL_RE.search(label)
+            and inline_ordered_list_warning(
+                sidecar,
+                index,
+                bbox,
+                layout_profile=layout_profile,
+            )
+        ):
+            continue
         if is_furniture:
             stats["excluded_page_furniture_count"] += 1
         if _NUMERIC_ONLY_RE.fullmatch(text):
@@ -352,6 +440,7 @@ def suspected_missed_block_indexes(
     """Return bottom numeric blocks that need visual recall auditing."""
     missed: list[int] = []
     excluded_block_indexes = set(excluded_block_indexes or set())
+    layout_profile = page_layout_profile(sidecar)
     for index, block in enumerate(sidecar.get("blocks", [])):
         if (
             index in candidate_indexes
@@ -368,6 +457,16 @@ def suspected_missed_block_indexes(
         if _NUMERIC_ONLY_RE.fullmatch(text):
             continue
         if _FURNITURE_LABEL_RE.search(label) or _CITATION_LABEL_RE.search(label):
+            continue
+        if (
+            not _FOOTNOTE_LABEL_RE.search(label)
+            and inline_ordered_list_warning(
+                sidecar,
+                index,
+                bbox,
+                layout_profile=layout_profile,
+            )
+        ):
             continue
         geometry = bottom_geometry(
             bbox,
@@ -458,6 +557,7 @@ _layout_records = layout_records
 _page_layout_profile = page_layout_profile
 _region_layout_evidence = region_layout_evidence
 _body_flow_warning = body_flow_warning
+_inline_ordered_list_warning = inline_ordered_list_warning
 _bottom_geometry = bottom_geometry
 _bottom_detection_stats = bottom_detection_stats
 _suspected_missed_block_indexes = suspected_missed_block_indexes
@@ -469,6 +569,7 @@ __all__ = [
     "bottom_detection_stats",
     "bottom_geometry",
     "body_flow_warning",
+    "inline_ordered_list_warning",
     "is_ordinary_body_block",
     "layout_records",
     "page_layout_profile",

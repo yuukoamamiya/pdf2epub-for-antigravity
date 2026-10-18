@@ -613,6 +613,19 @@ def detect_polish_page_furniture(
     polishing Subagent, so this function never edits text; the caller decides
     whether an unresolved candidate blocks the hand-off.
     """
+    # Short front-matter units often contain identifiers and address lines that
+    # look like a numbered running header.  Their structure is already owned
+    # by the TOC/refinement stage, so this paragraph-level heuristic should not
+    # create a second, unrelated review gate for them.
+    if str(role or "").strip().lower() in {
+        "author_notes",
+        "metadata",
+        "frontmatter",
+        "copyright",
+        "cover",
+    }:
+        return []
+
     def repeat_key(candidate: Dict[str, Any]) -> str:
         """Normalize a candidate for repeated-header detection.
 

@@ -78,6 +78,17 @@ def test_effective_concurrency_throttles_large_pending_units():
     assert (multiple_large, multiple_reason) == (1, "extreme_or_multiple_large_units")
 
 
+def test_effective_concurrency_honors_configured_ceiling_up_to_six():
+    batching = _batching_config(
+        {"subagent": {"batching": {"max_concurrency": 6}}}
+    )
+
+    assert batching["max_concurrency"] == 6
+    assert effective_max_concurrency(
+        {"small.md": {"estimated_tokens": 100}}, batching["max_concurrency"]
+    ) == (6, "no_large_units")
+
+
 def test_pdf_probe_only_accepts_clean_vector_text(tmp_path: Path):
     native = tmp_path / "native.pdf"
     searchable_ocr = tmp_path / "searchable-ocr.pdf"
@@ -1191,6 +1202,48 @@ def test_polish_worker_handoffs_are_task_scoped(tmp_path: Path):
         (tmp_path / item["manifest"]).name.startswith("polish_subagent_manifest_")
         for item in handoffs
     )
+    prompt = (tmp_path / handoffs[0]["prompt"]).read_text(encoding="utf-8")
+    assert "never modify paths under `pdf2epub/`" in prompt
+    assert "report the path and reason to the main Agent" in prompt
+
+
+def test_validation_blocks_protected_workspace_mutation(tmp_path: Path):
+    repo = tmp_path
+    (repo / "pdf2epub").mkdir()
+    (repo / "tests").mkdir()
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname = 'test'\n", encoding="utf-8"
+    )
+    protected = repo / "pdf2epub" / "rule.py"
+    protected.write_text("RULE = 1\n", encoding="utf-8")
+
+    output_dir = repo / "output"
+    source_dir = output_dir / "source"
+    target_dir = output_dir / "target"
+    source_dir.mkdir(parents=True)
+    target_dir.mkdir()
+    (source_dir / "unit.md").write_text("Body.\n", encoding="utf-8")
+    paths = prepare_markdown_subagent(
+        output_dir,
+        "polish",
+        source_dir,
+        target_dir,
+        "English",
+        "English",
+    )
+    (target_dir / "unit.md").write_text("Body.\n", encoding="utf-8")
+    protected.write_text("RULE = 2\n", encoding="utf-8")
+
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
+
+    report = validate_markdown_subagent(
+        output_dir, "polish", source_dir, target_dir
+    )
+
+    assert report["all_passed"] is False
+    assert report["protected_workspace_blocked"] == ["pdf2epub/rule.py"]
+    assert not (target_dir / "validated" / "unit.md").exists()
+    assert paths["manifest"].is_file()
 
 
 def test_toc_heading_contexts_and_validation_use_first_unit_part(tmp_path: Path):

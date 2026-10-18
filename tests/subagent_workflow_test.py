@@ -665,6 +665,31 @@ def test_polish_does_not_flag_index_entries_with_page_labels(tmp_path: Path):
     assert report["polish_page_furniture_warnings"] == []
 
 
+def test_polish_skips_page_furniture_heuristic_for_front_matter_roles(tmp_path: Path):
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    text = (
+        "9 780415 903530\n\n"
+        "29 West 35th Street\n\n"
+        "11 New Fetter Lane\n"
+    )
+    (source_dir / "copyright.md").write_text(text, encoding="utf-8")
+    (target_dir / "copyright.md").write_text(text, encoding="utf-8")
+
+    report = validate_markdown_subagent(
+        tmp_path,
+        "polish",
+        source_dir,
+        target_dir,
+        file_roles={"copyright.md": "copyright"},
+    )
+
+    assert report["all_passed"] is True
+    assert report["polish_page_furniture_warnings"] == []
+
+
 @pytest.mark.parametrize(
     "heading",
     ["## Chapter 1", "## 第2章", "## Notes to Chapter 3"],
