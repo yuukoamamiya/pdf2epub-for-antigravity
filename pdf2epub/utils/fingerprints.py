@@ -35,4 +35,35 @@ def pages_fingerprint(pages_dir: Path) -> Optional[str]:
     return digest.hexdigest()
 
 
-__all__ = ["pages_fingerprint"]
+def evidence_pages_fingerprint(pages_dir: Path) -> Optional[str]:
+    """Hash page Markdown, layout sidecars, and retained HTML evidence.
+
+    TOC heading recovery reads the unfiltered ``page_*.html`` artifacts in
+    addition to Markdown and sidecars, so its checkpoint must attest to all
+    three.  ``page_*.html`` also covers ``page_*.raw.html``.
+    """
+    pages_dir = Path(pages_dir)
+    if not pages_dir.is_dir():
+        return None
+
+    pages = sorted(
+        [
+            *pages_dir.glob("page_*.md"),
+            *pages_dir.glob("page_*.ocr.json"),
+            *pages_dir.glob("page_*.html"),
+        ]
+    )
+    if not pages:
+        return None
+
+    digest = hashlib.sha256()
+    try:
+        for page in pages:
+            digest.update(page.name.encode("utf-8"))
+            digest.update(hashlib.sha256(page.read_bytes()).digest())
+    except OSError:
+        return None
+    return digest.hexdigest()
+
+
+__all__ = ["evidence_pages_fingerprint", "pages_fingerprint"]

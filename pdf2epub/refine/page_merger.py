@@ -30,6 +30,66 @@ class PageMerger:
 
     def __init__(self) -> None:
         self._native_furniture_cache: dict[Path, dict[str, int]] = {}
+        self._toc_heading_recoveries: dict[int, list[dict]] = {}
+
+    def set_toc_heading_recoveries(
+        self,
+        recoveries: Optional[dict[int, list[dict]]],
+    ) -> None:
+        """Set per-page TOC headings recovered from page evidence."""
+        normalized: dict[int, list[dict]] = {}
+        for page, items in (recoveries or {}).items():
+            try:
+                page_number = int(page)
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(items, (list, tuple)):
+                continue
+            normalized[page_number] = [
+                dict(item) for item in items if isinstance(item, dict)
+            ]
+        self._toc_heading_recoveries = normalized
+
+    def _inject_toc_heading_recoveries(
+        self,
+        page_num: int,
+        lines: list[str],
+        fragment_start_line: int,
+        fragment_end_line: int,
+    ) -> list[str]:
+        insertions = self._toc_heading_recoveries.get(page_num)
+        if not insertions:
+            return lines
+
+        positioned: list[tuple[int, int, dict]] = []
+        for order, item in enumerate(insertions):
+            title = str(item.get("title") or "").strip()
+            if not title:
+                continue
+            offset = 0
+            start_line = item.get("start_line")
+            if (
+                isinstance(start_line, int)
+                and fragment_start_line <= start_line <= fragment_end_line
+            ):
+                offset = start_line - fragment_start_line
+            positioned.append((offset, order, item))
+
+        for offset, _order, item in sorted(
+            positioned,
+            key=lambda entry: (entry[0], entry[1]),
+            reverse=True,
+        ):
+            level = item.get("level")
+            try:
+                level = int(level)
+            except (TypeError, ValueError):
+                level = 1
+            level = max(1, min(6, level))
+            block = ["", f"{'#' * level} {str(item['title']).strip()}", ""]
+            index = max(0, min(offset, len(lines)))
+            lines[index:index] = block
+        return lines
 
     def _native_furniture_index(self, pages_dir: Path) -> dict[str, int]:
         pages_dir = Path(pages_dir).resolve()
@@ -120,6 +180,8 @@ class PageMerger:
                         logger.debug(f"Cutting before next section at line {next_start_line}")
 
             lines = lines[start_index:end_index] if end_index >= start_index else []
+            fragment_start_line = start_index + 1
+            fragment_end_line = end_index
 
             page_content = '\n'.join(lines)
             page_content = clean_ocr_page_artifacts(page_content)
@@ -142,6 +204,12 @@ class PageMerger:
             if current_header is not None and current_header == previous_header:
                 logger.debug(f"Removed repeated running header on page {page_num}")
             previous_header = current_header
+            lines = self._inject_toc_heading_recoveries(
+                page_num,
+                lines,
+                fragment_start_line,
+                fragment_end_line,
+            )
             page_content = '\n'.join(lines)
             if page_content.strip():
                 content_parts.append((page_num, page_content))
@@ -213,6 +281,8 @@ class PageMerger:
                     end_index = min(end_index, next_start_line - 1)
 
             lines = lines[start_index:end_index] if end_index >= start_index else []
+            fragment_start_line = start_index + 1
+            fragment_end_line = end_index
 
             page_content = '\n'.join(lines)
             page_content = clean_ocr_page_artifacts(page_content)
@@ -235,6 +305,12 @@ class PageMerger:
             if current_header is not None and current_header == previous_header:
                 logger.debug(f"Removed repeated running header on page {page_num}")
             previous_header = current_header
+            lines = self._inject_toc_heading_recoveries(
+                page_num,
+                lines,
+                fragment_start_line,
+                fragment_end_line,
+            )
             page_content = '\n'.join(lines)
             if page_content.strip():
                 content_parts.append((page_num, page_content))

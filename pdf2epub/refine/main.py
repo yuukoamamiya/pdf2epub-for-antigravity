@@ -15,6 +15,10 @@ from ..utils.fingerprints import pages_fingerprint
 from ..workflow_contracts import atomic_write_json
 from .toc_tree import TOCNode, dict_list_to_toc_tree
 from .page_merger import PageMerger
+from .toc_heading_recovery import (
+    collect_toc_heading_recoveries,
+    toc_heading_recovery_fingerprint,
+)
 from .subagent_workflow import page_numbers, validate_toc_tree_data
 from .pagination import build_pagination_map
 from .toc_sanitization import sanitize_toc_titles
@@ -293,6 +297,30 @@ class RefinedBreakdown:
         """Shared deterministic token estimation, splitting, and page merge."""
         ocr_markdown_dir = output_dir / "ocr_markdown"
         tree_progress_file = ocr_markdown_dir / "tree_progress.json"
+
+        # Chandra can discard a real heading as page furniture.  Reconstruct
+        # only exact TOC matches from the retained page HTML/sidecar evidence;
+        # the page source itself stays read-only.
+        recoveries, recovery_report = collect_toc_heading_recoveries(
+            toc_tree,
+            page_markdown_dir=pages_dir,
+            evidence_dir=output_dir / "pages",
+        )
+        self.page_merger.set_toc_heading_recoveries(recoveries)
+        recovery_report["toc_sha256"] = (source_fingerprint or {}).get("toc_sha256")
+        recovery_report_path = output_dir / "toc_heading_recovery.json"
+        try:
+            atomic_write_json(recovery_report_path, recovery_report)
+        except OSError as exc:
+            raise RuntimeError(
+                f"Could not write TOC heading recovery report "
+                f"{recovery_report_path}: {exc}"
+            ) from exc
+        if source_fingerprint is not None:
+            source_fingerprint = dict(source_fingerprint)
+            source_fingerprint["toc_heading_recovery_sha256"] = (
+                toc_heading_recovery_fingerprint(recoveries)
+            )
 
         if resume and tree_progress_file.exists():
             progress_data = json.loads(tree_progress_file.read_text(encoding="utf-8"))

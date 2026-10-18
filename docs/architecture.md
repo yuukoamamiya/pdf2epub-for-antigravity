@@ -115,6 +115,10 @@ PDF 精修的核心领域模块如下：
 - `refine/toc_sanitization.py`：只在当前物理起始页同时提供匹配的印刷页码和去掉该数字后的
   正文标题时清洗 TOC 末尾页码；所有候选、证据和源/目标哈希写入
   `toc_title_normalization.json`，证据不足时保留原题名。
+- `refine/toc_heading_recovery.py`：从只读的 `pages/page_NNN.html` 或 sidecar `raw_html`
+  中提取 `Page-Header`/`Page-Footer` 块，并在规范化后与 TOC 标题精确匹配；只用于恢复视觉
+  OCR 误删的真实标题，不做模糊相似度匹配。`native_text` sidecar、缺少证据、标题已存在和
+  歧义匹配都写入 skipped。恢复映射供 `PageMerger` 在内存中注入，原始页面文件不变。
 - `refine/page_merger.py`：消费已验证的整页插图绑定，恢复“前页半句 → 插图页 → 后页续句”，
   并把图片及说明放回连续正文之后；普通页面边界也会在前后均为未结束的正文块时保守拼接，
   不把完整句子、标题、列表、脚注、图片或表格误合并。原生文字 PDF 还会根据 page-point
@@ -351,6 +355,7 @@ illustration-prepare + 工作区 Subagent（只复核疑似整页插图页）
   → illustration_bindings.json
 refine-local
   → pagination_map.json + toc_title_normalization.json
+  → toc_heading_recovery.json（被误删 TOC 标题的确定性恢复报告）
   → ocr_markdown/ + tree_progress.json
 footnote-prepare +（必要时）工作区 Subagent
   → footnote_candidates.json → footnote-validate → footnote-apply
@@ -753,6 +758,28 @@ sidecar 哈希；原生文字稿还必须保留 `coordinate_system: page_points`
 只能引用当前候选报告中的 page/block 地址。插图绑定还绑定候选报告哈希、源页哈希、sidecar
 哈希和证据模式。`refine-local`、`footnote-apply` 和插图加载阶段都会重新检查这些绑定；
 配置从单 OCR 切换到双 OCR，或反向切换时，必须重新准备对应阶段。
+
+### 5.0 TOC 标题恢复合同
+
+视觉 OCR 关闭 `include_headers_footers` 时会从 `page_NNN.md` 删除被标为
+`Page-Header`/`Page-Footer` 的块。`refine-local` 在生成 `ocr_markdown/` 前从证据目录
+（固定为 `output/<title>/pages/`）的 `page_NNN.html` 或 sidecar `raw_html` 重建页眉/页脚
+文本，并按 TOC 顺序尝试恢复：
+
+- 正文字段来自当前 refine 选择的页面目录（可能是
+  `ocr_corrected_pages/validated/`）；证据 HTML/sidecar 始终来自 `pages/`，两者不能混用。
+- 同页多个页眉/页脚块按 DOM 顺序以空格合并后再比较；匹配只做字母数字 casefold 和
+  `Chapter N:`/前导编号的确定性剥离，不做模糊相似度。
+- 标题已存在、缺少页面证据、`source_kind: native_text`、无匹配、歧义和重复恢复都记入
+  `toc_heading_recovery.json` 的 `skipped`，不阻断流程；只有精确匹配的标题才在内存中注入，
+  `pages/` 不被改写。
+- 报告至少包含 `schema_version`、`status`（`validated`/`no_recovery`）、`recovered`、
+  `skipped`、`toc_sha256`、`page_markdown_fingerprint`、`evidence_pages_fingerprint`。
+- `evidence_pages_fingerprint` 哈希 `page_*.md`、`page_*.ocr.json` 和 `page_*.html`；
+  `tree_progress.json` 的 fingerprint 还包含恢复映射的稳定哈希
+  `toc_heading_recovery_sha256`。缺少该键的旧 checkpoint 直接重新生成。
+- 切换正文页面来源、OCR 证据模式或 HTML/sidecar 后，旧报告和旧 `tree_progress.json`
+  checkpoint 不得复用。
 
 ### 5.1 原生文字脚注的恢复合同
 

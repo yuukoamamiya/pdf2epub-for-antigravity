@@ -426,6 +426,13 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
    的双重证据保守清洗 TOC 末尾页码；所有修改、未修改候选和源/目标哈希写入
    `toc_title_normalization.json`，证据不足时保持原题名。`tree_progress.json` 会锁定规范化后的
    TOC/OCR 指纹；输入变化后必须重新生成受影响单元。
+   视觉 OCR 若把真实 TOC 标题误标为 `Page-Header`/`Page-Footer`，`refine-local` 会从当前
+   `pages/page_NNN.html` 或 sidecar 的 `raw_html` 中按 DOM 顺序合并页眉/页脚块，只在规范化
+   后与 TOC 标题精确匹配时于内存中恢复标题；同页同标题只恢复一次，证据不足、已存在或存在
+   歧义时写入 skipped 而不猜测。恢复结果写入 `toc_heading_recovery.json`，原始 `pages/`
+   保持只读。`tree_progress.json` 的指纹包含恢复映射哈希和证据目录指纹；切换正文页面来源
+   （如 `ocr_corrected_pages/validated/`）、证据模式或 HTML/sidecar 后不得复用旧恢复报告或
+   旧 checkpoint。
    对原生文字 PDF，`refine-local` 还会读取当前页的 PDF 坐标 sidecar，在不改写原始
    `pages/` 的前提下确定性移除页边 5% 内的 DOI/孤立页码，以及跨页重复的短页眉页脚；
    唯一正文或书目 DOI 不因单次出现而删除。

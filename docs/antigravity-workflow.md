@@ -494,6 +494,9 @@ pipeline: epub_conversion
 - 校验页码范围、层级、父子包含关系和兄弟节点重叠；
 - 用本地 tokenizer 估算单元大小；
 - 用 `PageMerger` 合并页面并生成 `ocr_markdown/`；
+- 从证据目录 `pages/` 的 `page_NNN.html` 或 sidecar `raw_html` 恢复被视觉 OCR 误删的
+  TOC 标题，把精确匹配结果在内存中注入页面合并，并写入 `toc_heading_recovery.json`；
+  原始页面文件和当前正文来源（可能是 `ocr_corrected_pages/validated/`）保持不变；
 - 从当前 `pages/` 生成 `pagination_map.json`；对于 TOC 标题末尾的阿拉伯数字，只有在
   节点物理起始页同时出现相同印刷页码和去掉该数字后的正文标题时才自动清洗。原始/规范化
   哈希、修改项、保留候选和证据写入 `toc_title_normalization.json`，证据不足不会改写标题；
@@ -512,6 +515,22 @@ pipeline: epub_conversion
 段落和块级结构，不会通过删除半句来“修复”错误的章节切分。页面合并器只会在前后均为
 普通正文、前页句子明显未结束且后页不是标题、列表、脚注、图片或表格时自动拼接跨页续句；
 其他页面边界保留为空段落，交给 polish 复核。
+
+### TOC 标题恢复报告
+
+`toc_heading_recovery.json` 是 `refine-local` 的确定性报告，不是 Subagent 决定文件：
+
+- `recovered` 只包含页眉/页脚合并文本与 TOC 标题精确匹配的条目，记录 `page`、`title`、
+  `level`、`block_text`、`evidence`（HTML 文件和块索引）以及可用的 `start_line`；
+- `skipped` 记录 `title_already_present`、`no_page_evidence`、`no_header_blocks`、
+  `no_heading_match`、`native_sidecar`、`invalid_sidecar`、`ambiguity` 等原因；这些情况
+  一律不猜测、不阻断；
+- `status` 为 `validated`（至少恢复一项）或 `no_recovery`；
+- `page_markdown_fingerprint` 绑定当前正文页目录，`evidence_pages_fingerprint` 绑定证据
+  目录的 `page_*.md`、`page_*.ocr.json` 和 `page_*.html`；`toc_sha256` 绑定当前 TOC；
+- 恢复映射的稳定哈希写入 `tree_progress.json` 的 `toc_heading_recovery_sha256`。旧
+  checkpoint 缺少该键、恢复映射变化或证据目录变化时，`refine-local --resume` 必须重新
+  生成单元。切换 `ocr_corrected_pages/validated/`、`pages/` 或其他页面来源后不得复用旧报告。
 
 `refine-local` 完成物理切分后会运行边界注脚扫描器，将安全匹配的跨文件 Markdown 脚注引用/定义记录
 到 `footnote_boundary_bindings.json`；EPUB 构建时由 `FootnoteManager` 消费。原始 PDF 书签
