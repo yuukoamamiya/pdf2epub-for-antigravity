@@ -197,6 +197,12 @@ Rules:
   for an index. Use `type: "author_notes"` for an author biography or similar
   author/publisher note, `type: "catalog"` for a publisher catalog or
   advertisement section, and `type: "ad"` for a standalone advertisement.
+  Use `type: "copyright"` for a copyright page or CIP (Cataloging-in-Publication)
+  page and `type: "frontmatter"` for other clearly identifiable front-matter
+  pages such as a dedication, epigraph, or preface that is not ordinary chapter
+  prose. Use `type: "cover"` only for an actual cover unit and
+  `type: "metadata"` only when a unit consists of bibliographic metadata;
+  do not use these roles without clear evidence.
   Omit `type` for ordinary prose chapters and sections. These are AI-assigned
   content roles used by later translation and footnote rules; this is not a token-size or splitting setting.
   Do not invent a role when the evidence is unclear.

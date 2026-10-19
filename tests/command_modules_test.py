@@ -253,6 +253,54 @@ def test_pdf_markdown_context_helpers_propagate_roles_and_hierarchy(tmp_path: Pa
     assert contexts["chapter_1.1.part1.md"] == "Part I → References"
 
 
+def test_pdf_file_roles_read_copyright_and_frontmatter_from_tree_progress(
+    tmp_path: Path,
+):
+    ocr_dir = tmp_path / "ocr_markdown"
+    ocr_dir.mkdir()
+    (ocr_dir / "tree_progress.json").write_text(
+        json.dumps(
+            {
+                "units": [
+                    {"file": "chapter_1.md", "type": "copyright"},
+                    {"file": "chapter_2.md", "type": "frontmatter"},
+                    {"file": "chapter_3.md", "type": "Chapter"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert load_pdf_file_roles(tmp_path) == {
+        "chapter_1.md": "copyright",
+        "chapter_2.md": "frontmatter",
+    }
+
+
+def test_pdf_file_roles_read_copyright_from_toc_fallback(tmp_path: Path):
+    ocr_dir = tmp_path / "ocr_markdown"
+    ocr_dir.mkdir()
+    (ocr_dir / "tree_progress.json").write_text(
+        json.dumps({"units": [{"file": "chapter_1.md"}]}), encoding="utf-8"
+    )
+    (tmp_path / "toc_tree.json").write_text(
+        json.dumps(
+            {
+                "chapters": [
+                    {"title": "Copyright", "type": "copyright"},
+                    {"title": "Preface", "type": "frontmatter"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    roles = load_pdf_file_roles(tmp_path)
+
+    assert roles["chapter_1.md"] == "copyright"
+    assert roles["chapter_2.md"] == "frontmatter"
+
+
 def test_pdf_source_stage_rejects_unknown_mode(tmp_path: Path):
     with pytest.raises(ValueError, match="source_stage"):
         _resolve_pdf_markdown_source(

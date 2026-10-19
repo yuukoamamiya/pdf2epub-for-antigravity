@@ -165,7 +165,8 @@ TOC 的 `footnote_mode` 变化导致 effective mode 改变时视为 stale，必�
 `footnote-prepare → footnote-validate → footnote-apply`。
 TOC 中标记为
   `toc`、`notes`、`bibliography`、`index`、`author_notes`、
-  `catalog` 或 `ad` 的单元也不会进入页面脚注候选。
+  `catalog`、`ad`、`copyright`、`frontmatter`、`metadata` 或 `cover` 的单元也不会进入
+  页面脚注候选。
 - `refine/footnote_options.py`：集中维护脚注模式、默认阈值、CLI/config 覆盖解析和
   `auto` → effective mode 的只读解析；候选、校验和 materialize 阶段共享同一个不可变
   选项对象，避免各阶段各自解释配置。该模块只读取 TOC/进度元数据，不扫描页面。
@@ -300,7 +301,11 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
   交给 Subagent 复核的提示，绝不在规则层删除正文。`page_furniture_repair.py` 只负责编排、
   快照和校验，并直接依赖规则模块的正式接口。
 - `pdf_unit_roles.py`：从当前 `tree_progress.json` 或兼容的 `toc_tree.json` 投影 PDF 单元角色。
-  `commands.markdown` 和页眉页脚修复命令共享该只读投影，不再互相导入私有 helper。
+  投影覆盖 `toc`、`notes`、`bibliography`、`index`、`author_notes`、`catalog`、`ad` 以及
+  `copyright`、`frontmatter`、`metadata`、`cover`；refine 写入的 `type` 会经该模块进入
+  translate/polish 的 `file_roles`，其中版权页/CIP 和前置页在 polish 中作为 isolated batch
+  使用专属短行/标识符规则。`commands.markdown` 和页眉页脚修复命令共享该只读投影，不再互相
+  导入私有 helper。
 - Markdown→XHTML 默认遵循标准 Markdown 的软换行语义：单换行不会生成 `<br />`，只有
   空行或显式硬换行标记创建段落/硬换行；需要旧式单换行渲染时只能显式启用兼容参数。
 - `subagent_runtime.py`：提供模型配置解析、token 估算、批次规划及按章节/批次隔离的 handoff；

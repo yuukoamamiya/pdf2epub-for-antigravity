@@ -597,7 +597,11 @@ mode，命令 handler 不再复制这些默认值或自行读取 TOC。
 `bibliography`/`reference` 条目使用 `citation` 或 `bibliography` 角色，脚本不会搬移它们。
 如果 TOC 单元属于集中尾注、作者说明、出版社目录或广告，分别使用
 `type: "notes"`、`type: "author_notes"`、
-`type: "toc"`、`type: "catalog"` 或 `type: "ad"`；这些单元的页底数字不会被当作随页脚注。
+`type: "toc"`、`type: "catalog"` 或 `type: "ad"`；版权页/CIP 页使用
+`type: "copyright"`，其他明确的前置页使用 `type: "frontmatter"`，只有证据明确时才使用
+`type: "cover"` 或 `type: "metadata"`。这些单元的页底数字不会被当作随页脚注；角色会经
+`pdf_unit_roles.py` 投影到 translate/polish，版权页和前置页在 polish 中必须保持短行、
+ISBN/CIP 等标识符的独立性，不得当作页边装饰删除。
 脚注候选必须保留“正文 → 上一脚注续文 → 新脚注”的页内顺序，不能把跨页续文默认移动到
 下一页开头。校验通过后运行 `footnote-apply`：本地脚本会把确认的脚注块从页面流中移除，
 合并跨页续文，并按实际生成的 TOC 单元（完整 `unit_id`；其 `.partM` 分片共享作用域）追加为 `[^N]: ...` 章末注，生成独立的

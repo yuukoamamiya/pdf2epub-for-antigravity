@@ -1638,6 +1638,43 @@ def test_prepare_markdown_subagent_records_special_file_roles(tmp_path: Path):
     assert "preserve author names" in prompt
 
 
+def test_polish_isolates_copyright_units_and_scopes_cip_rules(tmp_path: Path):
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    (source_dir / "chapter_1.md").write_text("Ordinary prose.\n", encoding="utf-8")
+    (source_dir / "copyright.md").write_text(
+        "ISBN 978-0-00-000000-0\n\nAll rights reserved.\n", encoding="utf-8"
+    )
+
+    paths = prepare_markdown_subagent(
+        tmp_path,
+        "polish",
+        source_dir,
+        target_dir,
+        "English",
+        "Chinese",
+        file_roles={"copyright.md": "copyright"},
+    )
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    copyright_batches = [
+        batch for batch in manifest["batch_queue"] if "copyright.md" in batch["files"]
+    ]
+    assert len(copyright_batches) == 1
+    assert copyright_batches[0]["files"] == ["copyright.md"]
+    assert copyright_batches[0]["isolated"] is True
+
+    handoffs = write_worker_handoffs(tmp_path, paths["manifest"], paths["prompt"])
+    copyright_handoff = next(
+        item for item in handoffs if "copyright.md" in item["files"]
+    )
+    assert copyright_handoff["prompt"].startswith("polish_worker_handoffs/")
+    scoped_prompt = (tmp_path / copyright_handoff["prompt"]).read_text(encoding="utf-8")
+    assert "`copyright.md` (`copyright`)" in scoped_prompt
+    assert "ISBN/CIP identifiers" in scoped_prompt
+    assert "do not merge short lines" in scoped_prompt
+
+
 def test_epub_entity_extraction_excludes_deterministic_appendices(tmp_path: Path):
     source_dir = tmp_path / "compressed_units"
     source_dir.mkdir()
@@ -2321,7 +2358,13 @@ def test_prepare_refine_subagent_writes_manifest_and_prompt(tmp_path: Path):
     assert "configured-flash" in paths["prompt"].read_text(encoding="utf-8")
     assert "toc_tree.json" in paths["prompt"].read_text(encoding="utf-8")
     assert 'type: "bibliography"' in paths["prompt"].read_text(encoding="utf-8")
-    assert "not a token-size or splitting setting" in paths["prompt"].read_text(encoding="utf-8")
+    prompt = paths["prompt"].read_text(encoding="utf-8")
+    assert 'type: "copyright"' in prompt
+    assert 'type: "frontmatter"' in prompt
+    assert 'type: "cover"' in prompt
+    assert 'type: "metadata"' in prompt
+    assert "CIP" in prompt
+    assert "not a token-size or splitting setting" in prompt
     assert (tmp_path / "pagination_map.json").exists()
     assert "pagination_map.json" in paths["prompt"].read_text(encoding="utf-8")
     assert (tmp_path / "outline_toc_draft.json").exists()

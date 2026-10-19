@@ -410,7 +410,10 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
    `output/<title>/refine_subagent_prompt.md`，视觉 OCR 使用经过校验的
    `ocr_corrected_pages/validated/`，旧原生运行使用 `pages/`，写入 `toc_tree.json`。
    Subagent 应从书名页/版权页提取作者和出版社，并按内容标注 `notes`、`bibliography`、
-   `index`；普通正文节点不写 `type`。
+   `index`；版权页/CIP 页标注 `type: "copyright"`，其他明确的前置页（如献词、题词、
+   前言）标注 `type: "frontmatter"`，仅在证据明确时才使用 `type: "cover"` 或
+   `type: "metadata"`。这些角色会贯通到 translate/polish 的特殊单元隔离；普通正文节点
+   不写 `type`，也不得为了规避普通正文规则而滥用这些角色。
 6. 在 `refine-local` 前处理整页插图候选：
 
    ```text
@@ -466,7 +469,8 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
    由 Subagent 判断为 `endnotes_only`；只有用户明确不做任何脚注/尾注处理时才设置
    `footnotes.mode: disabled`，Subagent 不得用 `disabled` 规避判断。也可在配置中显式固定
    `footnotes` / `endnotes_only` / `disabled`，显式值始终覆盖 TOC 判断。TOC 中标记为
-   `toc`、`notes`、`bibliography`、`index`、`author_notes`、`catalog` 或 `ad` 的单元不会把其内容
+   `toc`、`notes`、`bibliography`、`index`、`author_notes`、`catalog`、`ad`、
+   `copyright`、`frontmatter`、`metadata` 或 `cover` 的单元不会把其内容
    当作页面脚注；若这类单元与正文共用一页，优先依据 `boundary_info.start_line`/
    `end_line` 做块级过滤，缺少边界证据时采用保守的整页排除。
 
