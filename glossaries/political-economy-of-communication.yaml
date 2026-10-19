@@ -8,7 +8,7 @@ metadata:
   domain: Political economy of communication
   source_language: English
   target_language: Chinese
-  version: '2026-10-18'
+  version: '2026-10-19'
 entries:
 - id: audience-commodity
   source: audience commodity
@@ -250,4 +250,75 @@ entries:
   target: 文化多样性
   category: Cultural Policy / International Communication
   note: 各民族与社群文化表现形式的总和；常作为反抗跨国文化垄断与全球同质化的政策依据。
+  policy: preferred
+- id: communicative-capitalism
+  source: communicative capitalism
+  target: 传播资本主义
+  category: Political Economy of Communication
+  note: 指网络交互、意见表达和传播活动本身被商品化并纳入资本循环的理论范畴；中文文献亦见“交往资本主义”，本表采用“传播资本主义”。
+  policy: preferred
+- id: free-labor
+  source: free labor
+  variants:
+  - free labour
+  target: 无偿劳动
+  category: Digital Labour / Political Economy of Communication
+  note: 用户、玩家和网络受众在自愿或享受状态下提供的无偿内容、数据与注意力生产；中文文献亦见“免费劳动”，本表采用“无偿劳动”。
+  policy: preferred
+- id: information-exceptionalism
+  source: information exceptionalism
+  target: 信息例外主义
+  category: Information Political Economy
+  note: 认为信息因零边际成本等特性而脱离一般资本积累规律的理论假定；亦译“信息例外论”。
+  policy: preferred
+- id: digital-labour
+  source: digital labour
+  variants:
+  - digital labor
+  target: 数字劳动
+  category: Political Economy of Communication / Digital Labour
+  note: 在数字媒体、平台和信息通信技术环境下生产或加工信息与数据的劳动，包含受薪与无偿形态。
+  policy: preferred
+- id: copyleft
+  source: copyleft
+  target: copyleft
+  category: Information Politics / Law
+  note: 利用版权法反向保障使用者自由、要求衍生作品按同许可分发的机制；中文文献常译“著佐权”“版权左”，本表按编辑决定保留原词。
+  policy: preferred
+- id: public-domain
+  source: public domain
+  target: 公有领域
+  category: Information Politics / Law
+  note: 不受专有版权或专利保护、任何人可自由使用的知识空间，是信息公地与知识产权边界的关键概念。
+  policy: preferred
+- id: digital-commons
+  source: digital commons
+  variants:
+  - digital common
+  target: 数字公地
+  category: Information Politics
+  note: 数字网络空间中由社群协同创造、维护并向所有人开放的信息、知识、软件与文化资源池。
+  policy: preferred
+- id: political-economy-of-communication
+  source: political economy of communication
+  target: 传播政治经济学
+  category: Communication Studies
+  note: 从生产、流通、所有权集中和阶级权力结构出发批判性考察媒介、电信与信息系统的学术范式。
+  policy: preferred
+- id: playbour
+  source: playbour
+  variants:
+  - playbor
+  - play-bour
+  target: 玩工
+  category: Digital Labour
+  note: 指游戏或游玩与劳动边界模糊、玩家的创造性游玩被平台无偿抽取价值的现象；亦见“游玩劳动”等译法，本表采用“玩工”。
+  policy: preferred
+- id: californian-ideology
+  source: Californian ideology
+  variants:
+  - the Californian ideology
+  target: 加州意识形态
+  category: Critical Theory / Media Studies
+  note: 硅谷将反主流文化自由想象与新自由主义市场崇拜混合的技术乌托邦意识形态；亦见“加利福尼亚意识形态”。
   policy: preferred
