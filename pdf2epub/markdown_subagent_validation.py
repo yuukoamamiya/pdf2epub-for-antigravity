@@ -203,8 +203,12 @@ def validate_markdown_subagent(
     else:
         sources = all_sources
     partial = selected is not None
-    discarded_temp_files = _discard_abandoned_temp_targets(
-        target_dir, [source.name for source in sources]
+    discarded_temp_files = (
+        _discard_abandoned_temp_targets(
+            target_dir, [source.name for source in sources]
+        )
+        if create_validated_copy
+        else []
     )
     missing: List[str] = []
     invalid: List[Dict[str, str]] = []
@@ -808,14 +812,19 @@ def validate_markdown_subagent(
         if create_validated_copy:
             atomic_write_json(report_path, ledger)
     else:
-        atomic_write_json(report_path, report)
+        if create_validated_copy:
+            atomic_write_json(report_path, report)
     invalid_target_names = {
         str(item.get("file"))
         for item in invalid
         if isinstance(item, Mapping) and item.get("file")
     }
-    quarantined_files = _quarantine_invalid_targets(
-        output_dir, task, target_dir, invalid_target_names
+    quarantined_files = (
+        _quarantine_invalid_targets(
+            output_dir, task, target_dir, invalid_target_names
+        )
+        if create_validated_copy
+        else {}
     )
     report["discarded_temp_files"] = discarded_temp_files
     report["quarantined_files"] = quarantined_files
@@ -827,7 +836,8 @@ def validate_markdown_subagent(
         if create_validated_copy:
             atomic_write_json(report_path, ledger)
     else:
-        atomic_write_json(report_path, report)
+        if create_validated_copy:
+            atomic_write_json(report_path, report)
     return report
 
 __all__ = ["validate_markdown_subagent"]

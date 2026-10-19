@@ -236,6 +236,74 @@ def test_markdown_validation_read_only_keeps_existing_validated_copy(tmp_path: P
     assert not (tmp_path / "polish_file_validation.json").exists()
 
 
+def test_check_only_validation_keeps_invalid_target_and_temp_files(tmp_path: Path):
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    source_text = (
+        "This is a long source paragraph with enough words to exceed the "
+        "content loss threshold and trigger validation.\n"
+    )
+    invalid_text = "Short.\n"
+    (source_dir / "unit.md").write_text(source_text, encoding="utf-8")
+    (target_dir / "unit.md").write_text(invalid_text, encoding="utf-8")
+    (target_dir / ".unit.md.tmp").write_text("in progress", encoding="utf-8")
+
+    report = validate_markdown_subagent(
+        tmp_path,
+        "polish",
+        source_dir,
+        target_dir,
+        selected_files=["unit.md"],
+        create_validated_copy=False,
+    )
+
+    assert report["all_passed"] is False
+    assert report["invalid"]
+    assert report["quarantined_files"] == {}
+    assert report["discarded_temp_files"] == []
+    assert (target_dir / "unit.md").read_text(encoding="utf-8") == invalid_text
+    assert (target_dir / ".unit.md.tmp").read_text(encoding="utf-8") == "in progress"
+    assert not (tmp_path / "scratch" / "polish" / "invalid_outputs").exists()
+    assert not (tmp_path / "polish_file_validation.json").exists()
+
+
+def test_formal_validation_still_quarantines_invalid_target(tmp_path: Path):
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "unit.md").write_text(
+        "This is a long source paragraph with enough words to exceed the "
+        "content loss threshold and trigger validation.\n",
+        encoding="utf-8",
+    )
+    (target_dir / "unit.md").write_text("Short.\n", encoding="utf-8")
+    (target_dir / ".unit.md.tmp").write_text("in progress", encoding="utf-8")
+
+    report = validate_markdown_subagent(
+        tmp_path,
+        "polish",
+        source_dir,
+        target_dir,
+        selected_files=["unit.md"],
+    )
+
+    assert report["all_passed"] is False
+    assert not (target_dir / "unit.md").exists()
+    assert not (target_dir / ".unit.md.tmp").exists()
+    assert report["quarantined_files"]["unit.md"] == (
+        "scratch/polish/invalid_outputs/unit.md"
+    )
+    assert (tmp_path / "scratch" / "polish" / "invalid_outputs" / "unit.md").is_file()
+    assert (tmp_path / "polish_file_validation.json").is_file()
+
+
 def test_markdown_validation_requires_review_for_bilingual_warning(tmp_path: Path):
     from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
