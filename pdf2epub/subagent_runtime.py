@@ -20,6 +20,7 @@ from .document_roles import infer_translation_file_role
 DEFAULT_TRANSLATION_MODEL = "gemini-3.1-pro-preview"
 DEFAULT_SUBAGENT_MODEL = "gemini-3.6-flash"
 DEFAULT_BATCH_MAX_FILES = 5
+DEFAULT_POLISH_BATCH_MAX_FILES = 4
 MAX_BATCH_FILES = 8
 DEFAULT_BATCH_MAX_SOURCE_TOKENS = 12_000
 DEFAULT_BATCH_MAX_CONCURRENCY = 3
@@ -45,6 +46,23 @@ _TRANSLATION_TASKS = {
     "metadata-translation",
 }
 
+# Polish keeps ordinary chapters packable, but these units have entry- or
+# line-level contracts that must not share a worker with ordinary prose.
+POLISH_ISOLATED_ROLES = frozenset(
+    {
+        "index",
+        "bibliography",
+        "notes",
+        "author_notes",
+        "toc",
+        "catalog",
+        "ad",
+        "copyright",
+        "frontmatter",
+        "metadata",
+        "cover",
+    }
+)
 
 
 def resolve_subagent_model(
@@ -132,6 +150,17 @@ def _batching_config(config: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
     max_source_tokens = _positive_int(
         batching.get("max_source_tokens"), DEFAULT_BATCH_MAX_SOURCE_TOKENS
     )
+    max_files = min(
+        MAX_BATCH_FILES,
+        _positive_int(batching.get("max_files"), DEFAULT_BATCH_MAX_FILES),
+    )
+    polish_max_files = min(
+        MAX_BATCH_FILES,
+        _positive_int(
+            configured("polish_max_files"),
+            min(max_files, DEFAULT_POLISH_BATCH_MAX_FILES),
+        ),
+    )
     max_packed_source_tokens = max(
         max_source_tokens,
         _positive_int(
@@ -140,10 +169,8 @@ def _batching_config(config: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
         ),
     )
     return {
-        "max_files": min(
-            MAX_BATCH_FILES,
-            _positive_int(batching.get("max_files"), DEFAULT_BATCH_MAX_FILES),
-        ),
+        "max_files": max_files,
+        "polish_max_files": polish_max_files,
         "max_source_tokens": max_source_tokens,
         "max_packed_source_tokens": max_packed_source_tokens,
         "max_concurrency": min(
@@ -223,6 +250,7 @@ def _recommended_batches(
     max_source_tokens: int,
     single_file_max_bytes: int = DEFAULT_SINGLE_FILE_MAX_BYTES,
     max_nonempty_lines: int = DEFAULT_BATCH_MAX_NONEMPTY_LINES,
+    isolated_files: Optional[set[str]] = None,
 ) -> List[List[str]]:
     """Create advisory, file-safe batches without splitting source lines."""
     batches: List[List[str]] = []
@@ -236,6 +264,15 @@ def _recommended_batches(
             or tokens > max_source_tokens
             or stats.get("nonempty_line_count", 0) > max_nonempty_lines
         )
+        force_isolated = bool(isolated_files and name in isolated_files)
+        if force_isolated:
+            if current:
+                batches.append(current)
+                current = []
+                current_tokens = 0
+                current_nonempty_lines = 0
+            batches.append([name])
+            continue
         if isolated and current:
             batches.append(current)
             current = []
@@ -269,17 +306,23 @@ def _recommended_batches(
 def _batch_queue(
     batches: List[List[str]],
     file_stats: Mapping[str, Mapping[str, int]],
+    isolated_files: Optional[set[str]] = None,
 ) -> List[Dict[str, Any]]:
     """Materialize an IDE-friendly pending queue without starting models."""
-    return [
-        {
+    queue: List[Dict[str, Any]] = []
+    for index, batch in enumerate(batches, 1):
+        entry: Dict[str, Any] = {
             "batch_id": f"batch_{index:03d}",
             "files": batch,
-            "estimated_tokens": sum(file_stats[name]["estimated_tokens"] for name in batch),
+            "estimated_tokens": sum(
+                file_stats[name]["estimated_tokens"] for name in batch
+            ),
             "status": "pending",
         }
-        for index, batch in enumerate(batches, 1)
-    ]
+        if isolated_files and any(name in isolated_files for name in batch):
+            entry["isolated"] = True
+        queue.append(entry)
+    return queue
 
 def write_batch_handoffs(
     output_dir: Path,
@@ -388,13 +431,11 @@ def write_batch_handoffs(
     return handoffs
 
 
-def _worker_groups(
+def _balanced_worker_groups(
     queue: List[Dict[str, Any]],
     max_workers: int,
 ) -> List[Dict[str, Any]]:
     """Pack safe batches into weighted worker groups using LPT balancing."""
-    if not queue:
-        return []
     worker_count = min(MAX_ACTIVE_SUBAGENTS, max(1, int(max_workers)), len(queue))
     groups = [
         {"worker_id": f"worker_{index:03d}", "batches": [], "estimated_tokens": 0}
@@ -411,7 +452,44 @@ def _worker_groups(
         group = min(groups, key=lambda item: item["estimated_tokens"])
         group["batches"].append(batch)
         group["estimated_tokens"] += int(batch.get("estimated_tokens", 0))
-    for group in groups:
+    return groups
+
+
+def _worker_groups(
+    queue: List[Dict[str, Any]],
+    max_workers: int,
+) -> List[Dict[str, Any]]:
+    """Pack batches into workers while forcing special units to stay alone.
+
+    Ordinary batches remain eligible for LPT packing up to the configured
+    concurrency.  A batch marked ``isolated`` gets its own worker so an index,
+    bibliography, notes, or front-matter unit never shares a Subagent with
+    ordinary chapters.  Worker ids remain stable ``worker_NNN`` values.
+    """
+    if not queue:
+        return []
+    isolated_batches = [
+        batch for batch in queue if bool(batch.get("isolated"))
+    ]
+    if not isolated_batches:
+        groups = _balanced_worker_groups(queue, max_workers)
+    else:
+        ordinary_batches = [
+            batch for batch in queue if not bool(batch.get("isolated"))
+        ]
+        groups = [
+            {
+                "batches": [batch],
+                "estimated_tokens": int(batch.get("estimated_tokens", 0)),
+            }
+            for batch in isolated_batches
+        ]
+        if ordinary_batches:
+            groups.extend(
+                _balanced_worker_groups(ordinary_batches, max_workers)
+            )
+    for index, group in enumerate(groups, 1):
+        group["worker_id"] = f"worker_{index:03d}"
         group["batches"].sort(key=lambda item: str(item.get("batch_id", "")))
         group["files"] = [
             name
@@ -881,6 +959,84 @@ def _chapter_worker_groups(manifest: Mapping[str, Any]) -> List[Dict[str, Any]]:
     return groups
 
 
+POLISH_ROLE_EMPHASIS = {
+    "index": (
+        "Index entries must remain 1:1 with the source. Never merge wrapped "
+        "subentries; preserve hierarchy, page numbers, ranges, and "
+        "cross-reference targets."
+    ),
+    "bibliography": (
+        "Keep each bibliography entry separate; do not merge wrapped entries. "
+        "Preserve authors, titles, years, editions, DOI/URL/ISBN, and page numbers."
+    ),
+    "notes": (
+        "Keep note definitions and markers intact; do not turn notes into "
+        "ordinary prose or merge entries."
+    ),
+    "author_notes": (
+        "Keep note definitions and markers intact; do not turn notes into "
+        "ordinary prose or merge entries."
+    ),
+    "copyright": (
+        "Preserve short lines, addresses, ISBN/CIP identifiers, "
+        "edition/printing number lines (e.g. 10 9 8 7 ...), and other "
+        "identifiers; do not merge short lines into paragraphs and do not "
+        "remove them as page furniture. Translate only prose labels/sentences."
+    ),
+    "frontmatter": (
+        "Preserve short lines, addresses, ISBN/CIP identifiers, "
+        "edition/printing number lines (e.g. 10 9 8 7 ...), and other "
+        "identifiers; do not merge short lines into paragraphs and do not "
+        "remove them as page furniture. Translate only prose labels/sentences."
+    ),
+    "metadata": (
+        "Preserve short lines, addresses, ISBN/CIP identifiers, "
+        "edition/printing number lines (e.g. 10 9 8 7 ...), and other "
+        "identifiers; do not merge short lines into paragraphs and do not "
+        "remove them as page furniture. Translate only prose labels/sentences."
+    ),
+    "cover": (
+        "Preserve short lines, addresses, ISBN/CIP identifiers, "
+        "edition/printing number lines (e.g. 10 9 8 7 ...), and other "
+        "identifiers; do not merge short lines into paragraphs and do not "
+        "remove them as page furniture. Translate only prose labels/sentences."
+    ),
+}
+
+_POLISH_GENERIC_SPECIAL_RULE = (
+    "Preserve this unit's entry structure, line boundaries, and identifiers; "
+    "do not merge entries or short lines into ordinary prose, and do not remove "
+    "them as page furniture."
+)
+
+
+def _polish_special_role_instruction(
+    manifest: Mapping[str, Any],
+    files: Iterable[str],
+) -> str:
+    """Highlight the entry contracts of the special units in one worker."""
+    roles = manifest.get("file_roles")
+    if not isinstance(roles, Mapping):
+        return ""
+    lines: List[str] = []
+    for name in files:
+        role = str(roles.get(name) or "").strip().lower()
+        if role not in POLISH_ISOLATED_ROLES:
+            continue
+        rule = POLISH_ROLE_EMPHASIS.get(role, _POLISH_GENERIC_SPECIAL_RULE)
+        lines.append(f"- `{name}` (`{role}`): {rule}")
+    if not lines:
+        return ""
+    return (
+        "\n\n## Special-unit polish rules (high priority)\n\n"
+        "These rules apply only to the special units assigned to this worker; "
+        "do not apply them to ordinary chapters or to files outside this "
+        "handoff.\n\n"
+        + "\n".join(lines)
+        + "\n"
+    )
+
+
 def write_worker_handoffs(
     output_dir: Path,
     manifest_path: Path,
@@ -1305,9 +1461,15 @@ def write_worker_handoffs(
             {} if chapter_mode else scoped.get("unit_context_files", {}),
             scoped_heading_contexts if chapter_mode else None,
         )
+        special_role_instruction = (
+            _polish_special_role_instruction(manifest, files)
+            if task == "polish"
+            else ""
+        )
         atomic_write_text(
             scoped_prompt_path,
             scoped_prompt
+            + special_role_instruction
             + (
                 f"\n\n## Assigned chapter task: {worker_id}\n\n"
                 if chapter_mode
@@ -1453,7 +1615,9 @@ def write_worker_handoffs(
 __all__ = [
     "DEFAULT_BATCH_MAX_CONCURRENCY",
     "DEFAULT_BATCH_MAX_FILES",
+    "DEFAULT_POLISH_BATCH_MAX_FILES",
     "MAX_BATCH_FILES",
+    "POLISH_ISOLATED_ROLES",
     "DEFAULT_BATCH_MAX_SOURCE_TOKENS",
     "DEFAULT_SINGLE_FILE_MAX_BYTES",
     "MAX_ACTIVE_SUBAGENTS",

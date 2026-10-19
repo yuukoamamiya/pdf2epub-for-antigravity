@@ -85,7 +85,13 @@ subagent:
 PDF/EPUB 的 `translate` manifest 会在 `worker_handoffs/` 按 TOC 顺序为相邻短章节装箱，生成隔离的最小 manifest 和提示词；父级 manifest 保留完整审计索引，worker 只接收自己的文件、批次、上下文哈希和必要的章节元数据，不重复携带全书文件统计、章节映射或审计快照路径；
 `polish` 使用独立的 `polish_worker_handoffs/`，避免不同阶段的任务被误认。每个 Subagent
 只读取自己 handoff 的 `assigned_files`；超过 30,000 字节的单元自动独立成批，但不能与
-其他章节合并。普通单章节 worker 的术语上下文只注入一次；相邻章节合并 worker 使用按
+其他章节合并。polish 的普通章节仍可适度打包，文件预算使用独立的
+`subagent.batching.polish_max_files`（默认 `min(max_files, 4)`）；`index`、
+`bibliography`、`notes`、`author_notes`、`toc`、`catalog`、`ad`、`copyright`、
+`frontmatter`、`metadata` 和 `cover` 会标记为 isolated batch，并各自占用独立 worker，
+不与普通章节或其他特殊角色混排。隔离 worker 的 prompt 只针对其 assigned files 高亮
+index 条目 1:1、书目逐条、notes 标记和 CIP/版权页短行标识符规则。普通单章节 worker 的
+术语上下文只注入一次；相邻章节合并 worker 使用按
 文件分区的直接上下文；大章节拆分时使用 `shared_entries` 和当前分片的 `local_entries`。
 Markdown worker 的提示词还明确禁止修改 `pdf2epub/`、`tests/`、`docs/`、`glossaries/` 和项目
 配置。准备阶段会对这些受保护文件记录哈希；校验阶段发现 Worker 改动其中任何文件时，
@@ -127,6 +133,7 @@ PDF 和 EPUB 的正文翻译有两个不能混淆的范围：`chapter_groups` �
 | `max_tiny_chapters_per_worker` | 连续 tiny 章节的更高上限，默认 `6`；只在批次全由 tiny 章节组成时生效 |
 | `tiny_chapter_max_tokens` | 判定 tiny 章节的单章 token 上限，默认 `2000` |
 | `max_files` | 一个 worker 的源文件数量上限，硬上限为 `8` |
+| `polish_max_files` | polish 普通章节的文件数量上限，默认 `min(max_files, 4)`，硬上限为 `8`；特殊角色始终独立 worker |
 | `max_source_tokens` | 一个 worker 的源 token 预算 |
 | `max_packed_source_tokens` | 相邻完整章节合并 worker 的源 token 总预算；默认是 `max_source_tokens` 的两倍 |
 | `single_file_max_bytes` | 单个文件超过该值时必须独立成批，默认 `30000` |
@@ -146,6 +153,10 @@ PDF 和 EPUB 的正文翻译有两个不能混淆的范围：`chapter_groups` �
    重新拼成一个 worker。
 5. 若当前批次和新增章节都属于 tiny，章节数可放宽到 `max_tiny_chapters_per_worker`；
    新增普通章节、超大章节或拆分章节时不适用该放宽。
+6. polish 中 `index`、`bibliography`、`notes`、`author_notes`、`toc`、`catalog`、
+   `ad`、`copyright`、`frontmatter`、`metadata` 和 `cover` 是 isolated batch；
+   每个此类 batch 生成一个只含该特殊单元的 worker，普通 batch 不能与之合并。
+   scoped prompt 只对当前 worker 命中的角色追加规则，不向其他 worker 广播。
 
 父级 `translate_subagent_manifest.json` 保留完整的 `chapter_groups`、`pending_files`、
 `batch_queue` 和审计信息。真正交给 Subagent 的 scoped manifest 只保留当前 worker 的

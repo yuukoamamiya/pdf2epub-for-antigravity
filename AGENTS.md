@@ -178,6 +178,12 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
   `max_files` 默认值为 5，配置值的有效上限为 8；普通单章节的文件数、字节数和 token
   数任一达到限制都必须拆批。相邻章节合并 worker 可单独使用
   `max_packed_source_tokens`，但不会放宽单文件字节上限或单章节拆分规则。
+  `polish` 的普通章节仍可适度打包，但使用独立的
+  `subagent.batching.polish_max_files`（默认 `min(max_files, 4)`，有效上限为 8）。
+  `index`、`bibliography`、`notes`、`author_notes`、`toc`、`catalog`、`ad`、
+  `copyright`、`frontmatter`、`metadata` 和 `cover` 等特殊角色会强制隔离为独立
+  batch 和 worker，不与普通章节或其他特殊角色混排；对应 worker 的 prompt 会高亮
+  条目 1:1、短行和标识符保留规则。
   `max_nonempty_lines` 默认值为 350；EPUB 的密集单元超过该值时在准备阶段生成有序的
   `.partN.md`，每个 part 单独交给 worker，最终构建前再按原 mapping 合并。`index` 和
   `bibliography` 即使未超行数预算也不得与相邻章节合并。

@@ -16,7 +16,9 @@ from pdf2epub.pdf_text_probe import (
 )
 from pdf2epub.subagent_runtime import (
     MAX_BATCH_FILES,
+    _batch_queue,
     _chapter_worker_groups,
+    _recommended_batches,
     effective_max_concurrency,
     write_worker_handoffs,
 )
@@ -1697,6 +1699,157 @@ def test_batching_caps_configured_worker_file_count():
     assert batching["max_packed_source_tokens"] == 24_000
     assert batching["max_tiny_chapters_per_worker"] == 6
     assert batching["tiny_chapter_max_tokens"] == 2000
+
+
+def test_batching_config_uses_smaller_default_polish_file_budget():
+    default = _batching_config(None)
+    assert default["max_files"] == 5
+    assert default["polish_max_files"] == 4
+
+    configured = _batching_config(
+        {"subagent": {"batching": {"max_files": 6, "polish_max_files": 2}}}
+    )
+    assert configured["max_files"] == 6
+    assert configured["polish_max_files"] == 2
+
+    refine_configured = _batching_config(
+        {"refine": {"batching": {"polish_max_files": 3}}}
+    )
+    assert refine_configured["polish_max_files"] == 3
+
+    capped = _batching_config(
+        {"subagent": {"batching": {"polish_max_files": MAX_BATCH_FILES + 20}}}
+    )
+    assert capped["polish_max_files"] == MAX_BATCH_FILES
+
+    bounded_by_max_files = _batching_config(
+        {"subagent": {"batching": {"max_files": 2}}}
+    )
+    assert bounded_by_max_files["max_files"] == 2
+    assert bounded_by_max_files["polish_max_files"] == 2
+
+
+def test_recommended_batches_isolate_special_role_files():
+    files = ["chapter_1.md", "index.md", "chapter_2.md"]
+    stats = {
+        name: {
+            "estimated_tokens": 10,
+            "size_bytes": 10,
+            "nonempty_line_count": 1,
+        }
+        for name in files
+    }
+
+    batches = _recommended_batches(
+        stats,
+        5,
+        1_000,
+        isolated_files={"index.md"},
+    )
+    assert batches == [["chapter_1.md"], ["index.md"], ["chapter_2.md"]]
+
+    queue = _batch_queue(batches, stats, isolated_files={"index.md"})
+    assert [entry["files"] for entry in queue] == [
+        ["chapter_1.md"],
+        ["index.md"],
+        ["chapter_2.md"],
+    ]
+    assert [bool(entry.get("isolated")) for entry in queue] == [
+        False,
+        True,
+        False,
+    ]
+
+
+def test_polish_handoffs_keep_special_units_in_dedicated_workers(tmp_path: Path):
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    for name in (
+        "chapter_1.md",
+        "chapter_2.md",
+        "chapter_3.md",
+        "index.md",
+        "bibliography.md",
+        "notes.md",
+        "copyright.md",
+    ):
+        (source_dir / name).write_text(f"source of {name}\n", encoding="utf-8")
+
+    paths = prepare_markdown_subagent(
+        tmp_path,
+        "polish",
+        source_dir,
+        target_dir,
+        "English",
+        "Chinese",
+        config={
+            "subagent": {
+                "batching": {
+                    "max_files": 5,
+                    "polish_max_files": 4,
+                    "max_concurrency": 2,
+                }
+            }
+        },
+        file_roles={
+            "index.md": "index",
+            "bibliography.md": "bibliography",
+            "notes.md": "notes",
+            "copyright.md": "copyright",
+        },
+    )
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    assert manifest["batching"]["polish_max_files"] == 4
+    assert manifest["batching"]["max_files"] == 5
+    isolated_files = {
+        name
+        for batch in manifest["batch_queue"]
+        if batch.get("isolated")
+        for name in batch["files"]
+    }
+    assert isolated_files == {
+        "index.md",
+        "bibliography.md",
+        "notes.md",
+        "copyright.md",
+    }
+
+    handoffs = write_worker_handoffs(tmp_path, paths["manifest"], paths["prompt"])
+    assert len({handoff["worker_id"] for handoff in handoffs}) == len(handoffs)
+    by_file = {
+        name: handoff for handoff in handoffs for name in handoff["files"]
+    }
+    assert by_file["index.md"]["files"] == ["index.md"]
+    assert by_file["bibliography.md"]["files"] == ["bibliography.md"]
+    assert by_file["notes.md"]["files"] == ["notes.md"]
+    assert by_file["copyright.md"]["files"] == ["copyright.md"]
+    assert by_file["chapter_1.md"]["files"] == [
+        "chapter_1.md",
+        "chapter_2.md",
+        "chapter_3.md",
+    ]
+
+    def handoff_prompt(name: str) -> str:
+        return (tmp_path / by_file[name]["prompt"]).read_text(encoding="utf-8")
+
+    assert "Index entries must remain 1:1 with the source." in handoff_prompt(
+        "index.md"
+    )
+    assert "Never merge wrapped subentries" in handoff_prompt("index.md")
+    assert "Keep each bibliography entry separate" in handoff_prompt(
+        "bibliography.md"
+    )
+    assert "Keep note definitions and markers intact" in handoff_prompt(
+        "notes.md"
+    )
+    copyright_prompt = handoff_prompt("copyright.md")
+    assert "ISBN/CIP identifiers" in copyright_prompt
+    assert "10 9 8 7" in copyright_prompt
+    chapter_prompt = handoff_prompt("chapter_1.md")
+    assert "Index entries must remain 1:1 with the source." not in chapter_prompt
+    assert "Keep each bibliography entry separate" not in chapter_prompt
 
 
 def test_tiny_batching_settings_fall_back_to_refine_section():

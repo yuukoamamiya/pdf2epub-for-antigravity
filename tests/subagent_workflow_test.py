@@ -503,6 +503,37 @@ def test_markdown_validation_ignores_ornamented_index_running_header(
     assert report["all_passed"] is True
 
 
+def test_polish_validation_rejects_merged_index_entries(tmp_path: Path):
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "index.md").write_text(
+        "alphabetical subject entry, 12\n\nbehavioral subject entry, 18-19\n",
+        encoding="utf-8",
+    )
+    (target_dir / "index.md").write_text(
+        "alphabetical subject entry, 12; behavioral subject entry, 18-19\n",
+        encoding="utf-8",
+    )
+
+    report = validate_markdown_subagent(
+        tmp_path,
+        "polish",
+        source_dir,
+        target_dir,
+        file_roles={"index.md": "index"},
+    )
+
+    assert report["all_passed"] is False
+    assert any(
+        "index entry count mismatch" in item["reason"]
+        for item in report["invalid"]
+    )
+
+
 def test_toc_is_a_protected_special_role_for_pdf_and_translation_validation():
     from pdf2epub.document_roles import TRANSLATION_SPECIAL_ROLES
     from pdf2epub.pdf_unit_roles import PDF_SPECIAL_UNIT_ROLES

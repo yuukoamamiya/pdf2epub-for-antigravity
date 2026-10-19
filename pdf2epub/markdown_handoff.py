@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 from .subagent_runtime import (
+    POLISH_ISOLATED_ROLES,
     _batch_queue,
     _batching_config,
     _markdown_files,
@@ -17,6 +18,7 @@ from .subagent_runtime import (
     estimate_tokens,
     resolve_subagent_model,
 )
+from .document_roles import TRANSLATION_SPECIAL_ROLES
 from .workflow_contracts import (
     MARKDOWN_VALIDATION_SCHEMA_VERSION,
     atomic_write_json,
@@ -86,6 +88,23 @@ def prepare_markdown_subagent(
             "nonempty_line_count": len([line for line in text.splitlines() if line.strip()]),
             "estimated_tokens": estimate_tokens(text),
         }
+    normalized_roles = {
+        str(name): str(role).strip().lower()
+        for name, role in (file_roles or {}).items()
+        if str(role).strip().lower() in TRANSLATION_SPECIAL_ROLES
+    }
+    polish_isolated_files = (
+        {
+            name
+            for name, role in normalized_roles.items()
+            if role in POLISH_ISOLATED_ROLES
+        }
+        if task == "polish"
+        else None
+    )
+    task_max_files = (
+        batching["polish_max_files"] if task == "polish" else batching["max_files"]
+    )
     continuation_metadata = {
         str(name): dict(value)
         for name, value in (continuation_files or {}).items()
@@ -107,10 +126,11 @@ def prepare_markdown_subagent(
             }
     recommended_batches = _recommended_batches(
         file_stats,
-        batching["max_files"],
+        task_max_files,
         batching["max_source_tokens"],
         batching["single_file_max_bytes"],
         batching["max_nonempty_lines"],
+        isolated_files=polish_isolated_files,
     )
     oversized_files = [
         name
@@ -335,10 +355,11 @@ def prepare_markdown_subagent(
     )
     pending_batches = _recommended_batches(
         pending_stats,
-        batching["max_files"],
+        task_max_files,
         batching["max_source_tokens"],
         batching["single_file_max_bytes"],
         batching["max_nonempty_lines"],
+        isolated_files=polish_isolated_files,
     )
     manifest = {
         "schema_version": 1,
@@ -358,7 +379,11 @@ def prepare_markdown_subagent(
         "batching": batching,
         "recommended_batches": recommended_batches,
         "pending_batches": pending_batches,
-        "batch_queue": _batch_queue(pending_batches, pending_stats),
+        "batch_queue": _batch_queue(
+            pending_batches,
+            pending_stats,
+            isolated_files=polish_isolated_files,
+        ),
         "oversized_files": oversized_files,
         "completed_files": completed_files,
         "pending_files": pending_files,
@@ -422,20 +447,6 @@ def prepare_markdown_subagent(
             ) from exc
         review_output_path.mkdir(parents=True, exist_ok=True)
         manifest["review_output_dir"] = review_output_relative.as_posix()
-    normalized_roles = {
-        str(name): str(role).strip().lower()
-        for name, role in (file_roles or {}).items()
-        if str(role).strip().lower()
-        in {
-            "bibliography",
-            "index",
-            "metadata",
-            "frontmatter",
-            "copyright",
-            "cover",
-            "notes",
-        }
-    }
     if normalized_roles:
         manifest["file_roles"] = normalized_roles
     if normalized_context:
@@ -595,6 +606,15 @@ def prepare_markdown_subagent(
             "For every footnote unit in a translation: preserve each source marker byte-for-byte in Markdown form such as `[^53]` or `[^53]:`; never replace it with `<sup>53</sup>`, `[注53]`, or another notation, and never drop a marker.",
         ]
     heading_guard = ""
+    polish_batch_note = (
+        "- In polish, index, bibliography, notes, TOC/catalog/ad, and "
+        "copyright/front-matter/metadata/cover units are isolated into "
+        "dedicated workers; they must not share a worker with ordinary "
+        "chapters. Ordinary chapters may still be packed up to the polish "
+        f"file budget of {task_max_files}.\n"
+        if task == "polish"
+        else ""
+    )
     if task == "translate":
         heading_guard = """
 
@@ -624,7 +644,7 @@ Batching guidance:
 
 - Prefer the `pending_batches` / `batch_queue` in the manifest. The older
   `recommended_batches` field includes the complete source inventory.
-- Keep each ordinary single-chapter batch at or below {batching['max_files']} files and approximately
+- Keep each ordinary single-chapter batch at or below {task_max_files} files and approximately
   {batching['max_source_tokens']} source tokens; keep oversized files in their
   own Subagent task and split them only at complete source-line boundaries.
 - Any file larger than {batching['single_file_max_bytes']} bytes is isolated in
@@ -635,7 +655,7 @@ Batching guidance:
 - Index and bibliography units are isolated from adjacent chapters; an index
   above the line budget is split into ordered parts so those parts can be
   processed independently and merged only for final validation/building.
-- Keep at most {manifest['effective_max_concurrency']} Subagent tasks active at once
+{polish_batch_note}- Keep at most {manifest['effective_max_concurrency']} Subagent tasks active at once
   for this hand-off (configured ceiling: {batching['max_concurrency']}; reason:
   {manifest['concurrency_reason']}).
 - When `chapter_groups` is present, adjacent top-level chapter groups may be

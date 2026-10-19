@@ -262,7 +262,8 @@ bash scripts/build_all_epubs.sh config.yaml
 `illustration-apply`、`footnote-validate` 和 `footnote-apply` 是确定性检查点，即使没有候选或
 没有待复核项也必须运行；它们会生成空的或已绑定的、可供后续阶段消费的产物。任何
 `*_subagent_prompt.md` 或 manifest 出现后，都要先交给工作区 Subagent，再运行后续校验；
-不要跳过中间门禁。
+不要跳过中间门禁。polish 的普通章节按 `subagent.batching.polish_max_files`（默认 4）打包；
+index、bibliography、notes 和版权/前置页等特殊单元始终使用独立 worker，不与普通章节混排。
 
 默认 `footnotes.mode: auto`：refine 阶段的 TOC Subagent 会读取全书结构，在 `toc_tree.json`
 顶层写入 `footnote_mode`。集中 Notes/Endnotes 且按章组织或重新编号时选 `endnotes_only`；

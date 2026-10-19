@@ -359,6 +359,16 @@ Subagent 实际读写哪些文件。两者不能互相替代。
 不会绕过模型或 IDE 的额度。运行时硬上限为 6；存在大文件时仍会按文件规模自动降低有效并发。
 索引、参考文献和需要内部拆分的章节继续保持语义隔离，不因提高并发而跨章节合批。
 
+`polish` 复用同一个装箱器，但普通章节的文件预算取 `polish_max_files`（默认
+`min(max_files, 4)`，硬上限 8）。准备阶段从 `file_roles` 识别 `index`、
+`bibliography`、`notes`、`author_notes`、`toc`、`catalog`、`ad`、`copyright`、
+`frontmatter`、`metadata` 和 `cover` 等特殊角色，把它们标记为 `isolated` batch。
+`_worker_groups()` 先为每个 isolated batch 建立只含该批次的独立 worker，再把其余普通
+batch 交给 LPT 分组；普通 batch 不会进入隔离 worker。`max_concurrency` 仍是同时运行
+上限，不限制 handoff 总数，因此特殊角色可能产生更多 handoff。`write_worker_handoffs()`
+只为当前 worker 的 `assigned_files` 追加对应 special-unit 规则，不把其他角色的规则
+广播给所有 worker。
+
 `write_worker_handoffs()` 随后把父级 manifest 投影为每个 worker 的最小 manifest：
 
 1. `assigned_files`、对应的 file stats、单元/TOC 上下文哈希和必要的章节元数据被保留；
