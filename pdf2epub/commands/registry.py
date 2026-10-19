@@ -388,6 +388,11 @@ def register_command_parsers(subparsers) -> None:
         ),
     )
     polish_validate_parser.add_argument(
+        "--check-only",
+        action="store_true",
+        help="Run single-file validation without writing checkpoints or validated copies",
+    )
+    polish_validate_parser.add_argument(
         "--allow-review-warnings",
         action="store_true",
         help=(

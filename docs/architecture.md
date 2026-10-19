@@ -429,6 +429,13 @@ footnote-prepare +（必要时）工作区 Subagent
 polish + 工作区 Subagent + polish-validate（所有 PDF 必需；review_required 默认阻断，持续则人工；另做内容保真检查）
   → polished_markdown/validated/
 
+`polish` worker 写完每个 assigned file 后运行
+`polish-validate --file <file> --check-only` 做只读自检。该模式只校验：不写
+`polish_file_validation.json`，不创建或清理 `polished_markdown/validated/`，也不移动或删除
+已暂存文件，因此多个 worker 可并发执行而不会争写共享 checkpoint。Worker 全部结束后，主
+Agent 仍运行正式 `polish-validate --file`（或全量 `polish-validate`）写入权威 checkpoint；
+worker 自检通过不代表 checkpoint 已建立。后续打包和翻译门禁只认主 Agent 的权威校验记录。
+
 翻译分支：
 extract-entities + 工作区 Subagent + extract-entities-validate
   → translation_entities.json

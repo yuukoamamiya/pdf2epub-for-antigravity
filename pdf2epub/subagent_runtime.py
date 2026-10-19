@@ -602,6 +602,7 @@ def _worker_manifest_projection(
         "visual_review_dir",
         "review_output_dir",
         "secondary_source_dir",
+        "config_path",
     ):
         if key in manifest:
             projected[key] = manifest[key]
@@ -1466,10 +1467,38 @@ def write_worker_handoffs(
             if task == "polish"
             else ""
         )
+        self_validation_instruction = ""
+        if task == "polish":
+            config_label = str(manifest.get("config_path") or "").strip()
+            config_argument = config_label or "<the same config used for this hand-off>"
+            validation_commands = [
+                (
+                    f"uv run pdf2epub -c {config_argument} polish-validate "
+                    f"--file {filename} --check-only"
+                )
+                for filename in files
+            ]
+            self_validation_instruction = (
+                "\n\n## Self-validation (required)\n\n"
+                "After writing each assigned file, run:\n\n"
+                "```text\n"
+                f"uv run pdf2epub -c {config_argument} polish-validate "
+                "--file <assigned_file> --check-only\n"
+                "```\n\n"
+                "Concrete commands for this worker:\n\n"
+                "```text\n"
+                + "\n".join(validation_commands)
+                + "\n```\n\n"
+                "Only declare the file complete when the command exits 0 and reports "
+                "no invalid files. If the command fails, fix the file in place and "
+                "rerun. This read-only check does not replace the main Agent's "
+                "authoritative checkpoint.\n"
+            )
         atomic_write_text(
             scoped_prompt_path,
             scoped_prompt
             + special_role_instruction
+            + self_validation_instruction
             + (
                 f"\n\n## Assigned chapter task: {worker_id}\n\n"
                 if chapter_mode

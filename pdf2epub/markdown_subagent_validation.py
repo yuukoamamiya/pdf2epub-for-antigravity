@@ -270,14 +270,16 @@ def validate_markdown_subagent(
     validated_dir = target_dir / "validated"
     # Never leave a previous successful hand-off usable after a later failed
     # validation.  The validated directory is a generated staging area.
-    if validated_dir.exists() and not partial:
+    # Read-only checks must not touch it because other workers may be running
+    # concurrently against the same shared staging directory.
+    if create_validated_copy and validated_dir.exists() and not partial:
         shutil.rmtree(validated_dir)
 
     for source in sources:
         target = target_dir / source.name
         if not target.exists():
             missing.append(source.name)
-            if partial:
+            if partial and create_validated_copy:
                 (validated_dir / source.name).unlink(missing_ok=True)
             continue
         try:
@@ -682,8 +684,9 @@ def validate_markdown_subagent(
         invalid_names = {item["file"] for item in invalid if item.get("file")}
         if not allow_review_warnings:
             invalid_names.update(review_required_files)
-        for name in invalid_names:
-            (validated_dir / name).unlink(missing_ok=True)
+        if create_validated_copy:
+            for name in invalid_names:
+                (validated_dir / name).unlink(missing_ok=True)
     if create_validated_copy and not missing and not invalid and not safety_blocked and (
         allow_review_warnings or not review_required
     ):
@@ -802,7 +805,8 @@ def validate_markdown_subagent(
             "scope": "file-checkpoints",
             "files": records,
         }
-        atomic_write_json(report_path, ledger)
+        if create_validated_copy:
+            atomic_write_json(report_path, ledger)
     else:
         atomic_write_json(report_path, report)
     invalid_target_names = {
@@ -820,7 +824,8 @@ def validate_markdown_subagent(
     if partial:
         ledger["discarded_temp_files"] = discarded_temp_files
         ledger["quarantined_files"] = quarantined_files
-        atomic_write_json(report_path, ledger)
+        if create_validated_copy:
+            atomic_write_json(report_path, ledger)
     else:
         atomic_write_json(report_path, report)
     return report

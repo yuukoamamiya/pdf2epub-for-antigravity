@@ -302,6 +302,8 @@ def test_worker_handoffs_balance_pending_batches_and_keep_files_disjoint(tmp_pat
     scoped = json.loads((tmp_path / handoffs[0]["manifest"]).read_text(encoding="utf-8"))
     assert scoped["assignment_sha256"] == handoffs[0]["assignment_sha256"]
     assert scoped["dispatch_lease_file"] == "translate_dispatch_leases.json"
+    scoped_prompt = (tmp_path / handoffs[0]["prompt"]).read_text(encoding="utf-8")
+    assert "--check-only" not in scoped_prompt
 
 
 def test_worker_handoff_regeneration_preserves_exact_active_assignment(tmp_path: Path):
@@ -1132,9 +1134,12 @@ def test_polish_worker_handoffs_are_task_scoped(tmp_path: Path):
         "Original",
         "Original",
         config={"subagent": {"batching": {"max_files": 2, "max_concurrency": 3}}},
+        config_path="config.yaml",
     )
     handoffs = write_worker_handoffs(tmp_path, paths["manifest"], paths["prompt"])
 
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    assert manifest["config_path"] == "config.yaml"
     assert len(handoffs) == 3
     assert all(item["manifest"].startswith("polish_worker_handoffs/") for item in handoffs)
     assert all(
@@ -1144,6 +1149,14 @@ def test_polish_worker_handoffs_are_task_scoped(tmp_path: Path):
     prompt = (tmp_path / handoffs[0]["prompt"]).read_text(encoding="utf-8")
     assert "never modify paths under `pdf2epub/`" in prompt
     assert "report the path and reason to the main Agent" in prompt
+    assert "## Self-validation (required)" in prompt
+    assert "polish-validate --file" in prompt
+    assert "--check-only" in prompt
+    assert "uv run pdf2epub -c config.yaml polish-validate" in prompt
+    for name in handoffs[0]["files"]:
+        assert f"--file {name} --check-only" in prompt
+    scoped = json.loads((tmp_path / handoffs[0]["manifest"]).read_text(encoding="utf-8"))
+    assert scoped["config_path"] == "config.yaml"
 
 
 def test_validation_blocks_protected_workspace_mutation(tmp_path: Path):

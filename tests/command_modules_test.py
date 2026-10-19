@@ -106,6 +106,76 @@ def test_polish_validate_parser_accepts_single_file_checkpoint():
     assert args.file == "chapter_8.5.md"
 
 
+def test_polish_validate_parser_accepts_check_only():
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers(dest="command")
+    register_command_parsers(subparsers)
+
+    args = parser.parse_args(
+        ["polish-validate", "--file", "chapter_8.5.md", "--check-only"]
+    )
+
+    assert args.file == "chapter_8.5.md"
+    assert args.check_only is True
+
+
+def test_polish_validate_check_only_requires_file():
+    from pdf2epub.commands import markdown as markdown_commands
+
+    args = SimpleNamespace(check_only=True, file=None)
+
+    assert markdown_commands.polish_validate_command(args) == 1
+
+
+def test_polish_validate_check_only_writes_no_checkpoint_or_validated_copy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from pdf2epub.commands import markdown as markdown_commands
+
+    output_dir = tmp_path / "output"
+    source_dir = output_dir / "ocr_markdown"
+    target_dir = output_dir / "polished_markdown"
+    source_dir.mkdir(parents=True)
+    target_dir.mkdir(parents=True)
+    text = "A short but complete paragraph for read-only polish validation.\n"
+    (source_dir / "unit.md").write_text(text, encoding="utf-8")
+    (target_dir / "unit.md").write_text(text, encoding="utf-8")
+    context = SimpleNamespace(
+        config={"footnotes": {"mode": "disabled"}},
+        book_title="Book",
+        output_dir=output_dir,
+        config_path=tmp_path / "config.yaml",
+    )
+    monkeypatch.setattr(
+        markdown_commands, "load_book_context", lambda args, stage: context
+    )
+    monkeypatch.setattr(
+        markdown_commands,
+        "_resolve_pdf_polish_source",
+        lambda output, config: (source_dir, "ocr"),
+    )
+    monkeypatch.setattr(markdown_commands, "load_pdf_file_roles", lambda output: {})
+    monkeypatch.setattr(markdown_commands, "_load_pdf_toc_titles", lambda output: [])
+    monkeypatch.setattr(
+        markdown_commands, "_load_pdf_continuation_toc_titles", lambda output: {}
+    )
+    args = SimpleNamespace(
+        check_only=True,
+        file="unit.md",
+        allow_review_warnings=False,
+    )
+
+    assert markdown_commands._validate_pdf_markdown_task(args, "polish") == 0
+    checkpoint = output_dir / "polish_file_validation.json"
+    assert not checkpoint.exists()
+    assert not (target_dir / "validated" / "unit.md").exists()
+
+    sentinel = {"schema_version": 99, "task": "polish", "files": {"unit.md": "old"}}
+    checkpoint.write_text(json.dumps(sentinel), encoding="utf-8")
+    assert markdown_commands._validate_pdf_markdown_task(args, "polish") == 0
+    assert json.loads(checkpoint.read_text(encoding="utf-8")) == sentinel
+
+
 def test_pdf_source_stage_selects_only_current_polished_output(tmp_path: Path):
     ocr_dir = tmp_path / "ocr_markdown"
     polished_dir = tmp_path / "polished_markdown" / "validated"

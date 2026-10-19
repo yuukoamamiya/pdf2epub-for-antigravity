@@ -93,6 +93,16 @@ PDF/EPUB 的 `translate` manifest 会在 `worker_handoffs/` 按 TOC 顺序为相
 index 条目 1:1、书目逐条、notes 标记和 CIP/版权页短行标识符规则。普通单章节 worker 的
 术语上下文只注入一次；相邻章节合并 worker 使用按
 文件分区的直接上下文；大章节拆分时使用 `shared_entries` 和当前分片的 `local_entries`。
+
+polish worker 的 scoped prompt 会在 assigned task 前给出只读自检命令：
+`uv run pdf2epub -c <config_path> polish-validate --file <assigned_file> --check-only`。
+manifest 记录当前 hand-off 的 `config_path`（POSIX `/` 分隔）；若旧 manifest 没有该字段，
+prompt 使用“本次 hand-off 使用的同一配置”措辞，不编造路径。`--check-only` 必须与
+`--file` 同时使用，只运行单文件校验，不写 `polish_file_validation.json`，不创建或清理
+`polished_markdown/validated/`，也不移动或删除已暂存文件。这样每个 worker 可以独立闭环，
+又不会并发争写共享 checkpoint。worker 全部结束后，主 Agent 仍运行正式
+`polish-validate --file`（或全量 `polish-validate`）写入权威 checkpoint；只有该权威记录
+才可作为后续打包和翻译门禁。
 Markdown worker 的提示词还明确禁止修改 `pdf2epub/`、`tests/`、`docs/`、`glossaries/` 和项目
 配置。准备阶段会对这些受保护文件记录哈希；校验阶段发现 Worker 改动其中任何文件时，
 本轮会进入 `safety_blocked`，不会生成可恢复的内容 checkpoint，必须先由主 Agent 处理代码变更。

@@ -208,6 +208,34 @@ def test_strip_outer_markdown_fences_only_removes_wrapping_fence():
     assert unchanged == "正文\n```\n内部\n"
 
 
+def test_markdown_validation_read_only_keeps_existing_validated_copy(tmp_path: Path):
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    validated_dir = target_dir / "validated"
+    source_dir.mkdir()
+    validated_dir.mkdir(parents=True)
+    text = "A short paragraph that remains unchanged.\n"
+    (source_dir / "unit.md").write_text(text, encoding="utf-8")
+    (target_dir / "unit.md").write_text(text, encoding="utf-8")
+    (validated_dir / "old.md").write_text("kept", encoding="utf-8")
+
+    report = validate_markdown_subagent(
+        tmp_path,
+        "polish",
+        source_dir,
+        target_dir,
+        selected_files=["unit.md"],
+        create_validated_copy=False,
+    )
+
+    assert report["all_passed"] is True
+    assert (validated_dir / "old.md").read_text(encoding="utf-8") == "kept"
+    assert not (validated_dir / "unit.md").exists()
+    assert not (tmp_path / "polish_file_validation.json").exists()
+
+
 def test_markdown_validation_requires_review_for_bilingual_warning(tmp_path: Path):
     from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 

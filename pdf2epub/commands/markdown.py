@@ -270,6 +270,7 @@ def _prepare_pdf_markdown_task(args, task: str):
             protected_toc_titles=(
                 _load_pdf_toc_titles(output_dir) if task == "polish" else None
             ),
+            config_path=context.config_path,
         )
         from pdf2epub.subagent_runtime import write_worker_handoffs
 
@@ -392,6 +393,10 @@ def _validate_translation_entities(output_dir: Path, config: dict) -> dict:
 def _validate_pdf_markdown_task(args, task: str):
     from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
+    check_only = bool(getattr(args, "check_only", False))
+    if check_only and not getattr(args, "file", None):
+        logger.error("--check-only requires --file")
+        return 1
     context = load_book_context(args, f"{task}-validate")
     if context is None:
         return 1
@@ -441,6 +446,7 @@ def _validate_pdf_markdown_task(args, task: str):
             r"!\[[^\]]*\]\([^)]+\)",
             *( () if task == "polish" else (r"\[\^[^\]]+\]",) ),
         ),
+        create_validated_copy=not check_only,
         file_roles=load_pdf_file_roles(output_dir) if task in {"translate", "polish"} else None,
         tolerate_duplicate_headings=task == "polish",
         validate_footnote_normalization=footnote_validation_enabled,
@@ -525,7 +531,8 @@ def _validate_pdf_markdown_task(args, task: str):
                 config_path=context.config_path,
             )
     elif getattr(args, "file", None):
-        _persist_file_validation_checkpoint(output_dir, report, task)
+        if not check_only:
+            _persist_file_validation_checkpoint(output_dir, report, task)
     else:
         # ``validate_markdown_subagent`` writes the full polish report itself.
         # Rewrite it here with the package-input attestation after all local
@@ -638,7 +645,13 @@ def _validate_pdf_markdown_task(args, task: str):
             "the reviewed files."
         )
     if report["all_passed"]:
-        logger.success(f"{task} Subagent output validated: {report['validated_dir']}")
+        if check_only:
+            logger.success(
+                f"{task} read-only check passed for {selected_file}; "
+                "no checkpoint or validated copy was written"
+            )
+        else:
+            logger.success(f"{task} Subagent output validated: {report['validated_dir']}")
         return 0
     return 1
 

@@ -55,6 +55,7 @@ def prepare_markdown_subagent(
     review_output_dir: Optional[Path] = None,
     continuation_files: Optional[Mapping[str, Mapping[str, Any]]] = None,
     protected_toc_titles: Optional[Iterable[str]] = None,
+    config_path: Optional[str | Path] = None,
 ) -> Dict[str, Path]:
     """Write a manifest and prompt for a markdown Subagent task."""
     source_dir = Path(source_dir)
@@ -398,6 +399,8 @@ def prepare_markdown_subagent(
         "concurrency_reason": concurrency_reason,
         "protected_workspace": protected_workspace_snapshot(output_dir),
     }
+    if config_path is not None:
+        manifest["config_path"] = Path(config_path).expanduser().as_posix()
     previous_worker_handoffs = previous_manifest.get("worker_handoffs", [])
     if resume and isinstance(previous_worker_handoffs, list) and previous_worker_handoffs:
         # ``write_worker_handoffs`` uses this audit-only carry-over to preserve
@@ -592,6 +595,13 @@ def prepare_markdown_subagent(
         *polish_boundary_rules,
         *native_layout_rules,
         *polish_structure_rules,
+        *(
+            [
+                "After writing each assigned file, run the read-only `polish-validate --file <file> --check-only` command from the scoped worker prompt; fix the file in place and rerun until it passes. This check does not replace the main Agent's authoritative checkpoint."
+            ]
+            if task == "polish"
+            else []
+        ),
         *extra_rules,
     ]
     role_rules = []

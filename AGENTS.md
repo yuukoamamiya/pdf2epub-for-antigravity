@@ -597,6 +597,11 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
 9. 所有 PDF 都必须执行 `polish`，打开工作区 Subagent 读取
    `polish_subagent_prompt.md`，并按 `polish_worker_handoffs/` 中各 manifest 的
    `assigned_files` 写入 `polished_markdown/`，然后运行 `polish-validate`。
+   每个 Worker 写完一个 assigned file 后，必须先运行只读自检
+   `uv run pdf2epub -c <config> polish-validate --file <file> --check-only`；该命令只校验，
+   不写 checkpoint、不创建或清理 `validated/`，因此多个 Worker 可安全并发。自检不通过时
+   Worker 必须在原地修复并重跑。自检通过不等于完成：Worker 全部结束后，主 Agent 仍须运行
+   正式的 `polish-validate --file`（或全量 `polish-validate`）写入权威 checkpoint。
    若启用第二套 OCR，对 OCR/混合型 PDF，前置 `ocr-correct` 通过校验后的字符、词语和符号视为权威；
    该步骤只处理残留换行、段落边界和块级结构，不再纠正 OCR 字符、拼写或措辞。普通正文段落内部不得为了视觉排版新增换行；若仍疑似有 OCR 错误，应退回
    `ocr-correct`，不得在 polish 中改写。若只启用一套 OCR，则没有 page-level 视觉纠错闸门，polish 仍只处理
