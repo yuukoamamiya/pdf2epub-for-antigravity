@@ -285,7 +285,10 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
   并在通过后复制到 `validated/`。
 - `markdown_validation.py`：提供纯函数式的 Markdown 风险检测、目标语言审计、规范化辅助
   函数和 polish 内容保真检查；它会阻断结构性空父标题导致的重复正文，并对 `notes`
-  单元中的标准尾注章节标题提供窄范围页眉误报豁免。该模块把角色判断委托给
+  单元中的标准尾注章节标题提供窄范围页眉误报豁免。已登记的 TOC Part/Chapter
+  **Markdown 标题行**也会从 `running_title_plus_page_label` 候选中豁免，纯文本重复页眉
+  仍按候选检测；`bilingual_warnings` 只在 translate 阶段运行，polish 不因源语言未变化
+  触发双语警告。该模块把角色判断委托给
   `document_roles.py`，把页眉页脚候选判断委托给 `page_furniture_rules.py`，避免校验模块
   反向依赖具体修复工作流。
 - `footnote_normalization.py`：提供 polish 阶段的尾注引用/定义迁移校验；它只校验

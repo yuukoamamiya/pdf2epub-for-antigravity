@@ -615,7 +615,12 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
    润色不得把普通粗体、罗马数字、编号或序数上标升级成 Markdown 标题；已确认的
    `<sup>N</sup>` 注脚才可规范化为 `[^N]`。
   当前 TOC 标签会作为 polish 的保护证据；唯一出现且与 TOC 标签相同的源行被删除时，
-  必须进入 `review_required`，不能仅因该行位于页首就自动视为页眉。
+  必须进入 `review_required`，不能仅因该行位于页首就自动视为页眉。已登记的 TOC
+  Part/Chapter **Markdown 标题行**在页边装饰检测中豁免，例如 `# PART I`、`## PART II`
+  不会因尾部罗马数字被误判为 `running_title_plus_page_label`；TOC 标题带副标题时，冒号前
+  的短标签也可作为豁免前缀。纯文本 `PART I` 等重复页眉仍按页边装饰候选检测，不因匹配
+  TOC 标题而豁免。`bilingual_warnings`/未翻译长英文段落门禁只在 `translate-validate`
+  生效，polish 阶段输入输出同为源语言，不触发该警告。
 
 ### 2.2 术语提取和翻译
 

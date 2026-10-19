@@ -1,4 +1,7 @@
-from pdf2epub.markdown_validation import polish_content_integrity_check
+from pdf2epub.markdown_validation import (
+    detect_polish_page_furniture,
+    polish_content_integrity_check,
+)
 
 
 NOTE_COUNT = 150
@@ -116,3 +119,52 @@ def test_polish_integrity_still_rejects_duplicated_body_prose():
     assert report["valid"] is False
     assert report["duplicated_prose_blocks"]
     assert any("duplication" in error for error in report["errors"])
+
+
+def test_registered_part_headings_are_exempt_from_page_furniture_gate():
+    text = "Body text.\n\n# PART I\n\n## PART II\n\n## PART III\n"
+
+    exempt = detect_polish_page_furniture(
+        text,
+        protected_toc_titles=["PART I", "PART II", "PART III"],
+    )
+    unprotected = detect_polish_page_furniture(text)
+
+    assert exempt == []
+    assert {item["kind"] for item in unprotected} == {
+        "running_title_plus_page_label"
+    }
+
+
+def test_registered_part_heading_matches_toc_title_with_subtitle():
+    text = "Body text.\n\n# PART I\n"
+
+    exempt = detect_polish_page_furniture(
+        text,
+        protected_toc_titles=["PART I: The Roots of Informationalized Capitalism"],
+    )
+
+    assert exempt == []
+
+
+def test_plain_text_part_heading_is_not_exempted_by_toc_title():
+    text = "Body text.\n\nPART I\n"
+
+    findings = detect_polish_page_furniture(
+        text,
+        protected_toc_titles=["PART I"],
+    )
+
+    assert [item["kind"] for item in findings] == [
+        "running_title_plus_page_label"
+    ]
+
+
+def test_markdown_part_heading_is_not_exempted_when_unregistered():
+    text = "Body text.\n\n# PART I\n"
+
+    findings = detect_polish_page_furniture(text)
+
+    assert [item["kind"] for item in findings] == [
+        "running_title_plus_page_label"
+    ]

@@ -304,6 +304,30 @@ def test_formal_validation_still_quarantines_invalid_target(tmp_path: Path):
     assert (tmp_path / "polish_file_validation.json").is_file()
 
 
+def test_polish_does_not_emit_bilingual_warning_for_unchanged_english(
+    tmp_path: Path,
+):
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    line = (
+        "This is a deliberately long English paragraph that must remain "
+        "unchanged during the source-language polish stage."
+    )
+    (source_dir / "unit.md").write_text(f"{line}\n{line}\n", encoding="utf-8")
+    (target_dir / "unit.md").write_text(f"{line}\n{line}\n", encoding="utf-8")
+
+    report = validate_markdown_subagent(
+        tmp_path, "polish", source_dir, target_dir
+    )
+
+    assert report["all_passed"] is True, report["errors"]
+    assert report["bilingual_warnings"] == []
+
+
 def test_markdown_validation_requires_review_for_bilingual_warning(tmp_path: Path):
     from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 

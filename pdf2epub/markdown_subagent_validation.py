@@ -415,7 +415,11 @@ def validate_markdown_subagent(
             )
             safety_blocked.append(source.name)
             continue
-        warning = detect_bilingual_output(source_text, target_text)
+        warning = (
+            detect_bilingual_output(source_text, target_text)
+            if task == "translate"
+            else None
+        )
         language_audit = target_language_audits.get(source.name, {})
         if (
             warning
@@ -548,7 +552,11 @@ def validate_markdown_subagent(
                 )
                 if source.name in valid_files:
                     valid_files.remove(source.name)
-            for finding in detect_polish_page_furniture(target_text, role=role):
+            for finding in detect_polish_page_furniture(
+                target_text,
+                role=role,
+                protected_toc_titles=normalized_protected_toc_titles,
+            ):
                 item = {"file": source.name, **finding}
                 polish_page_furniture_warnings.append(item)
                 review_required.append(

@@ -907,8 +907,12 @@ PDF 翻译、实体提取和打包都必须以当前且通过 `polish-validate` 
 
 polish handoff 会附带源语言 TOC 标签保护清单。唯一出现且匹配 TOC 的源行被删除时，
 校验会生成 `polish_unique_toc_label_removed` 的 `review_required`；重复页眉只有在
-版面和重复性证据充分时才可移除。续片只在文件开头删除其 TOC 所属顶层祖先标签时
-使用窄范围例外，并把例外记录在校验报告；续片自己的标题以及其他分支的标题仍然阻断。
+版面和重复性证据充分时才可移除。已登记的 TOC Part/Chapter **Markdown 标题行**直接从
+页边装饰候选中豁免，`# PART I` 等不会因尾部罗马数字被当成页码；TOC 带副标题时允许匹配
+冒号前的短标签。纯文本 `PART I` 等重复页眉仍进入候选检测，不因匹配 TOC 标题而豁免。
+`bilingual_warnings` 只在 translate 阶段运行，polish 不触发未翻译长英文段落警告。
+续片只在文件开头删除其 TOC 所属顶层祖先标签时使用窄范围例外，并把例外记录在校验报告；
+续片自己的标题以及其他分支的标题仍然阻断。
 `bibliography`/`index` 单元中的短标题、页码和无标点条目只有在同类页眉信号重复出现时
 才进入该页眉警告，避免把合法书目条目当作页边装饰。纯图片或无可见标题的单元使用
 `binding_mode: container_only`，由 EPUB 构建阶段生成包装器标题，Markdown worker 不得

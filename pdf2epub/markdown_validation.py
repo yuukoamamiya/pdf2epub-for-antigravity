@@ -6,7 +6,7 @@ import difflib
 import math
 import re
 from collections import Counter
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Optional
 
 from .document_roles import (
     DENSITY_EXEMPT_ROLES,
@@ -605,13 +605,21 @@ def target_language_ratio_check(
 
 
 def detect_polish_page_furniture(
-    text: str, role: Optional[str] = None
+    text: str,
+    role: Optional[str] = None,
+    *,
+    protected_toc_titles: Optional[Iterable[str]] = None,
 ) -> list[Dict[str, Any]]:
     """Report high-confidence page-furniture candidates left after polishing.
 
     The candidates are review signals.  Layout judgment belongs to the
     polishing Subagent, so this function never edits text; the caller decides
     whether an unresolved candidate blocks the hand-off.
+
+    Registered TOC labels are exempt from the generic ``title + Roman numeral``
+    heuristic only when they appear as Markdown headings: ``# PART I`` is a
+    legitimate book-part heading, while a plain-text ``PART I`` may still be a
+    repeated running header and remains a candidate.
     """
     # Short front-matter units often contain identifiers and address lines that
     # look like a numbered running header.  Their structure is already owned
@@ -645,6 +653,17 @@ def detect_polish_page_furniture(
             )
         return re.sub(r"\s+", " ", value).strip().casefold()
 
+    def normalize_toc_label(value: str) -> str:
+        normalized = re.sub(r"^\s*#{1,6}\s+", "", str(value or "").strip())
+        normalized = re.sub(r"[*_`]+", "", normalized).strip()
+        return re.sub(r"\s+", " ", normalized).casefold()
+
+    protected_labels = {
+        normalize_toc_label(title)
+        for title in (protected_toc_titles or ())
+        if normalize_toc_label(title)
+    }
+
     lines = text.splitlines()
     candidate_records = [
         candidate_for_line(line)
@@ -665,6 +684,17 @@ def detect_polish_page_furniture(
     ):
         if not candidate or candidate.get("confidence") != "high":
             continue
+        if (
+            candidate.get("kind") == "running_title_plus_page_label"
+            and protected_labels
+            and re.match(r"^\s*#{1,6}\s+", line)
+        ):
+            line_label = normalize_toc_label(line)
+            if line_label in protected_labels or any(
+                title.startswith(f"{line_label}:")
+                for title in protected_labels
+            ):
+                continue
         # Endnotes commonly repeat structural headings such as ``## Chapter
         # 1``.  The generic candidate detector sees the trailing number and
         # calls them running-title-plus-page-label lines.  Exempt only this
