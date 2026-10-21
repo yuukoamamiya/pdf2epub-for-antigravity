@@ -141,6 +141,43 @@ def polish_structure_audit(
     source_blocks = _polish_markdown_blocks(source_text)
     target_blocks = _polish_markdown_blocks(target_text)
 
+    heading_pattern = re.compile(r"^\s{0,3}(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
+
+    def heading_tokens(text: str) -> list[str]:
+        value = re.sub(r"<[^>]+>", " ", str(text or ""))
+        value = re.sub(r"[`*_~]", "", value)
+        value = re.sub(r"^\s*\d{1,4}\s+", "", value)
+        return re.findall(r"\w+", value.casefold(), flags=re.UNICODE)
+
+    source_headings = [
+        (len(match.group(1)), heading_tokens(match.group(2)), match.group(2))
+        for match in heading_pattern.finditer(source_text)
+    ]
+    target_headings = [
+        (len(match.group(1)), heading_tokens(match.group(2)), match.group(2))
+        for match in heading_pattern.finditer(target_text)
+    ]
+    heading_append_findings: list[dict[str, str]] = []
+    for index, (source_heading, target_heading) in enumerate(
+        zip(source_headings, target_headings), 1
+    ):
+        source_level, source_words, source_label = source_heading
+        target_level, target_words, target_label = target_heading
+        if (
+            source_level != target_level
+            or len(source_words) < 2
+            or len(target_words) - len(source_words) < 4
+            or target_words[: len(source_words)] != source_words
+        ):
+            continue
+        heading_append_findings.append(
+            {
+                "heading_index": str(index),
+                "source_heading": source_label[:160],
+                "target_heading": target_label[:240],
+            }
+        )
+
     def metrics(blocks: list[list[str]]) -> Dict[str, Any]:
         candidate_blocks = 0
         single_line_blocks = 0
@@ -190,6 +227,7 @@ def polish_structure_audit(
         "role": effective_role,
         "source": source_metrics,
         **target_metrics,
+        "heading_content_appends": heading_append_findings,
     }
     if not result["applicable"]:
         result["status"] = "exempt"
@@ -202,9 +240,16 @@ def polish_structure_audit(
     candidate_count = int(target_metrics["candidate_block_count"])
     single_ratio = float(target_metrics["single_line_ratio"])
     short_ratio = float(target_metrics["short_block_ratio"])
-    if candidate_count >= 8 and single_ratio >= 0.60 and short_ratio >= 0.60:
+    if heading_append_findings:
         result["status"] = "review"
         result["reason"] = (
+            "polish heading structure: body prose may have been appended to "
+            f"{len(heading_append_findings)} heading(s); keep headings as "
+            "heading-only blocks and restore trailing prose to its paragraph"
+        )
+    if candidate_count >= 8 and single_ratio >= 0.60 and short_ratio >= 0.60:
+        result["status"] = "review"
+        fragmentation_reason = (
             "polish paragraph fragmentation: target contains "
             f"{target_metrics['single_line_block_count']}/{candidate_count} "
             "ordinary candidate blocks as short single-line blocks "
@@ -213,6 +258,10 @@ def polish_structure_audit(
             "but preserve verse/dialogue/epigraph lines inside one block with "
             "explicit <br /> breaks"
         )
+        if result.get("reason"):
+            result["reason"] += "; " + fragmentation_reason
+        else:
+            result["reason"] = fragmentation_reason
     return result
 
 

@@ -90,6 +90,7 @@ Footnote layout rules:
 - Keep each new numbered note as a separate block; do not merge it into the preceding body paragraph or a page footer.
 - A continuation may have no leading number, but it must remain a Footnote block in the page's visual order.
 - Use Text for ordinary numbered prose, citations, bibliography entries, and printed page numbers.
+- Label short running titles in the top margin as Page-Header, even when they contain only a section title; do not merge them into a body-text block.
 
 {PROMPT_ENDING}
 """.strip()

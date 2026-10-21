@@ -552,6 +552,7 @@ def prepare_markdown_subagent(
             "Treat a single newline caused by PDF visual layout as a soft line wrap. In ordinary prose, join visual lines with spaces and use a blank line only for a real semantic paragraph boundary; never make every extracted visual line its own Markdown paragraph.",
             "For poetry, verse, drama/dialogue, epigraphs, or line-by-line quotations, preserve intentional line boundaries instead of merging them into prose, but keep the complete item in one Markdown block and use explicit `<br />` between lines. Do not emit a chain of ordinary one-line paragraphs for an intentional line structure.",
             "Keep lists, tables, formulas, code, captions, footnotes, TOC entries, bibliography entries, and index entries in their own appropriate block/entry structure; do not apply ordinary-prose paragraph joining across those boundaries.",
+            "Keep every Markdown heading as a heading-only block. Never attach following body prose to a heading or move a sentence fragment into the heading; preserve that text in the surrounding prose paragraph.",
             "Before writing each file, perform a structural audit: check that ordinary prose is not still split into many short single-line blocks, that each intentional verse/dialogue block has explicit hard breaks, and that no genuine block boundary was accidentally merged.",
         ]
         if config is None or secondary_ocr_enabled(config):

@@ -1,6 +1,7 @@
 from pdf2epub.markdown_validation import (
     detect_polish_page_furniture,
     polish_content_integrity_check,
+    polish_structure_audit,
 )
 
 
@@ -119,6 +120,25 @@ def test_polish_integrity_still_rejects_duplicated_body_prose():
     assert report["valid"] is False
     assert report["duplicated_prose_blocks"]
     assert any("duplication" in error for error in report["errors"])
+
+
+def test_polish_structure_audit_flags_body_text_appended_to_heading():
+    source = (
+        "A sufficiently long body paragraph explains the previous idea.\n\n"
+        "## 10 *The Doctrine of Circulation*\n\n"
+        "The following paragraph begins here.\n"
+    )
+    target = (
+        "A sufficiently long body paragraph explains the previous idea.\n\n"
+        "## *The Doctrine of Circulation* [price] in response to prevailing social demand.\n\n"
+        "The following paragraph begins here.\n"
+    )
+
+    audit = polish_structure_audit(source, target)
+
+    assert audit["status"] == "review"
+    assert audit["heading_content_appends"]
+    assert "body prose may have been appended" in audit["reason"]
 
 
 def test_registered_part_headings_are_exempt_from_page_furniture_gate():

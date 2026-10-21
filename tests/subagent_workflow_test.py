@@ -1479,6 +1479,7 @@ def test_polish_prompt_explains_line_structure_audit_and_exceptions(tmp_path: Pa
     assert "drama/dialogue" in prompt
     assert "explicit `<br />`" in prompt
     assert "structural audit" in prompt
+    assert "Never attach following body prose to a heading" in prompt
 
 
 def test_polish_footnote_normalization_accepts_verified_legacy_notes():

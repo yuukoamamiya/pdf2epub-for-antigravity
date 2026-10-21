@@ -114,6 +114,87 @@ def test_page_merger_removes_repeated_h2_header_and_keeps_blank_page_cleaned(tmp
     assert "graphical elements" not in result.lower()
 
 
+def test_page_merger_removes_repeated_top_section_header_using_layout_evidence(
+    tmp_path: Path,
+):
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    for page_number, printed_page, body in (
+        (1, 10, "enables commodities to regulate their supply [price] in response."),
+        (2, 12, "once if it involves debtor-creditor relationships."),
+    ):
+        (pages / f"page_{page_number:03d}.md").write_text(
+            f"## {printed_page} *The Doctrine of Circulation*\n\n{body}",
+            encoding="utf-8",
+        )
+        (pages / f"page_{page_number:03d}.ocr.json").write_text(
+            json.dumps(
+                {
+                    "page_number": page_number,
+                    "backend": "chandra",
+                    "page_box": [0, 0, 1123, 1588],
+                    "blocks": [
+                        {
+                            "order": 0,
+                            "label": "Section-Header",
+                            "bbox": [125, 104, 497, 128],
+                            "html": (
+                                f"<h2>{printed_page} "
+                                "<i>The Doctrine of Circulation</i></h2>"
+                            ),
+                        },
+                        {
+                            "order": 1,
+                            "label": "Text",
+                            "bbox": [127, 149, 873, 188],
+                            "html": f"<p>{body}</p>",
+                        },
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    result = PageMerger().merge_node_content(TOCNode("Section", 1, 1, 2), pages)
+
+    assert "The Doctrine of Circulation" not in result
+    assert "enables commodities to regulate their supply [price]" in result
+    assert "debtor-creditor relationships" in result
+
+
+def test_page_merger_keeps_nonrepeated_section_heading_and_ignores_body_position(
+    tmp_path: Path,
+):
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    for page_number, y0 in ((1, 104), (2, 331)):
+        (pages / f"page_{page_number:03d}.md").write_text(
+            "## 10 *The Doctrine of Circulation*\n\nBody text.",
+            encoding="utf-8",
+        )
+        (pages / f"page_{page_number:03d}.ocr.json").write_text(
+            json.dumps(
+                {
+                    "page_number": page_number,
+                    "backend": "chandra",
+                    "page_box": [0, 0, 1123, 1588],
+                    "blocks": [
+                        {
+                            "label": "Section-Header",
+                            "bbox": [125, y0, 497, y0 + 24],
+                            "html": "<h2>10 <i>The Doctrine of Circulation</i></h2>",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    result = PageMerger().merge_node_content(TOCNode("Section", 1, 1, 2), pages)
+
+    assert result.count("The Doctrine of Circulation") == 2
+
+
 def test_page_merger_applies_native_sidecar_furniture_cleanup(tmp_path: Path):
     pages = tmp_path / "pages"
     pages.mkdir()
@@ -216,6 +297,28 @@ def test_page_merger_joins_an_unfinished_prose_block_across_pages(tmp_path: Path
 
     assert result == (
         "The concept begins at the end of the page and continues on the next page."
+    )
+
+
+def test_page_merger_joins_numbered_paragraph_continuing_across_pages(
+    tmp_path: Path,
+):
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    (pages / "page_001.md").write_text(
+        "18. This numbered paragraph ends with a continuation,",
+        encoding="utf-8",
+    )
+    (pages / "page_002.md").write_text(
+        "which continues on the next page.", encoding="utf-8"
+    )
+
+    node = TOCNode("Section", 1, 1, 2)
+    result = PageMerger().merge_node_content(node, pages)
+
+    assert result == (
+        "18. This numbered paragraph ends with a continuation, "
+        "which continues on the next page."
     )
 
 

@@ -6,6 +6,7 @@ to precisely cut content at section boundaries.
 """
 
 import json
+import html
 from pathlib import Path
 import re
 from typing import Iterable, List, Optional, Set, Tuple
@@ -13,6 +14,7 @@ from loguru import logger
 
 from .toc_tree import TOCNode
 from .toc_heading_recovery import title_present_in_lines
+from .layout_evidence import normalized_bbox, text_from_block
 from ..utils.ocr_artifacts import (
     clean_ocr_page_artifacts,
     native_repeated_edge_furniture_index,
@@ -20,6 +22,39 @@ from ..utils.ocr_artifacts import (
     remove_repeated_page_header,
     remove_native_page_furniture,
 )
+
+
+def _plain_layout_text(value: str) -> str:
+    value = html.unescape(re.sub(r"<[^>]+>", " ", str(value or "")))
+    value = re.sub(r"[`*_~]", "", value)
+    value = re.sub(r"^\s*#{1,6}\s+", "", value)
+    value = re.sub(r"\s+", " ", value).strip()
+    return re.sub(r"^\d{1,4}\s+", "", value).strip()
+
+
+def _running_header_signature(value: str) -> str:
+    plain = _plain_layout_text(value).casefold()
+    return re.sub(r"[^\w\u3400-\u9fff]+", " ", plain, flags=re.UNICODE).strip()
+
+
+def _remove_running_header_prefix(line: str, header_text: str) -> tuple[bool, str]:
+    """Remove a sidecar-confirmed header prefix, preserving any body suffix."""
+    plain_header = _plain_layout_text(header_text)
+    plain_line = html.unescape(re.sub(r"<[^>]+>", " ", str(line or "")))
+    plain_line = re.sub(r"^\s*#{1,6}\s+", "", plain_line)
+    plain_line = re.sub(r"[`*_~]", "", plain_line)
+    plain_line = re.sub(r"^\s*\d{1,4}\s+", "", plain_line).lstrip()
+    if not plain_header:
+        return False, line
+
+    header_folded = plain_header.casefold()
+    line_folded = plain_line.casefold()
+    if not line_folded.startswith(header_folded):
+        return False, line
+    if len(plain_line) > len(plain_header) and not plain_line[len(plain_header)].isspace():
+        return False, line
+    remainder = plain_line[len(plain_header):].lstrip()
+    return True, remainder
 
 
 class PageMerger:
@@ -31,7 +66,119 @@ class PageMerger:
 
     def __init__(self) -> None:
         self._native_furniture_cache: dict[Path, dict[str, int]] = {}
+        self._visual_running_header_cache: dict[Path, dict[int, list[str]]] = {}
+        self._visual_sidecar_pages_cache: dict[Path, set[int]] = {}
         self._toc_heading_recoveries: dict[int, list[dict]] = {}
+
+    @staticmethod
+    def _evidence_pages_dir(pages_dir: Path) -> Path:
+        pages_dir = Path(pages_dir).resolve()
+        if any(pages_dir.glob("page_*.ocr.json")):
+            return pages_dir
+        for parent in pages_dir.parents:
+            candidate = parent / "pages"
+            if any(candidate.glob("page_*.ocr.json")):
+                return candidate
+        return pages_dir
+
+    def _visual_running_headers(self, pages_dir: Path) -> dict[int, list[str]]:
+        """Index repeated top-margin Section-Header blocks from OCR sidecars.
+
+        The OCR model may label a running title as a section heading and prefix
+        it with the printed page number. Only a short, geometrically topmost
+        Section-Header repeated on multiple physical pages is eligible.
+        """
+        evidence_dir = self._evidence_pages_dir(pages_dir)
+        cached = self._visual_running_header_cache.get(evidence_dir)
+        if cached is not None:
+            return cached
+
+        by_page: dict[int, list[tuple[str, str]]] = {}
+        pages_by_signature: dict[str, set[int]] = {}
+        visual_sidecar_pages: set[int] = set()
+        for path in sorted(evidence_dir.glob("page_*.ocr.json")):
+            try:
+                sidecar = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                continue
+            if not isinstance(sidecar, dict) or str(
+                sidecar.get("source_kind") or ""
+            ).strip().lower() == "native_text":
+                continue
+            try:
+                page_number = int(sidecar.get("page_number"))
+            except (TypeError, ValueError):
+                match = re.search(r"page_(\d+)\.ocr\.json$", path.name)
+                if not match:
+                    continue
+                page_number = int(match.group(1))
+            visual_sidecar_pages.add(page_number)
+
+            for block in sidecar.get("blocks", []) or []:
+                if not isinstance(block, dict) or str(
+                    block.get("label") or ""
+                ).strip().casefold() != "section-header":
+                    continue
+                bbox = normalized_bbox(block, sidecar)
+                if bbox is None:
+                    continue
+                _x0, y0, _x1, y1 = bbox
+                if y0 > 0.15 or y1 - y0 > 0.06:
+                    continue
+                text = text_from_block(block)
+                signature = _running_header_signature(text)
+                if len(signature) < 5 or len(signature) > 120:
+                    continue
+                by_page.setdefault(page_number, []).append((signature, text))
+                pages_by_signature.setdefault(signature, set()).add(page_number)
+
+        repeated = {
+            signature
+            for signature, page_numbers in pages_by_signature.items()
+            if len(page_numbers) >= 2
+        }
+        indexed = {
+            page_number: [
+                text
+                for signature, text in blocks
+                if signature in repeated
+            ]
+            for page_number, blocks in by_page.items()
+        }
+        self._visual_running_header_cache[evidence_dir] = indexed
+        self._visual_sidecar_pages_cache[evidence_dir] = visual_sidecar_pages
+        return indexed
+
+    def _has_visual_sidecar(self, pages_dir: Path, page_number: int) -> bool:
+        self._visual_running_headers(pages_dir)
+        evidence_dir = self._evidence_pages_dir(pages_dir)
+        return page_number in self._visual_sidecar_pages_cache.get(evidence_dir, set())
+
+    def _remove_visual_running_headers(
+        self, lines: list[str], pages_dir: Path, page_number: int
+    ) -> list[str]:
+        candidates = self._visual_running_headers(pages_dir).get(page_number, [])
+        if not candidates:
+            return lines
+        result = list(lines)
+        for header_text in candidates:
+            for index, line in enumerate(result):
+                matched, remainder = _remove_running_header_prefix(
+                    line, header_text
+                )
+                if not matched:
+                    continue
+                if remainder:
+                    result[index] = remainder
+                else:
+                    del result[index]
+                logger.debug(
+                    "Removed repeated OCR running header on page %s: %s",
+                    page_number,
+                    header_text,
+                )
+                break
+        return result
 
     def set_toc_heading_recoveries(
         self,
@@ -214,9 +361,17 @@ class PageMerger:
                     item["kind"],
                 )
             lines = page_content.split('\n')
-            lines, current_header = remove_repeated_page_header(lines, previous_header)
-            if current_header is not None and current_header == previous_header:
-                logger.debug(f"Removed repeated running header on page {page_num}")
+            lines = self._remove_visual_running_headers(
+                lines, pages_dir, page_num
+            )
+            if self._has_visual_sidecar(pages_dir, page_num):
+                current_header = None
+            else:
+                lines, current_header = remove_repeated_page_header(
+                    lines, previous_header
+                )
+                if current_header is not None and current_header == previous_header:
+                    logger.debug(f"Removed repeated running header on page {page_num}")
             previous_header = current_header
             lines = self._inject_toc_heading_recoveries(
                 page_num,
@@ -315,9 +470,17 @@ class PageMerger:
                     item["kind"],
                 )
             lines = page_content.split('\n')
-            lines, current_header = remove_repeated_page_header(lines, previous_header)
-            if current_header is not None and current_header == previous_header:
-                logger.debug(f"Removed repeated running header on page {page_num}")
+            lines = self._remove_visual_running_headers(
+                lines, pages_dir, page_num
+            )
+            if self._has_visual_sidecar(pages_dir, page_num):
+                current_header = None
+            else:
+                lines, current_header = remove_repeated_page_header(
+                    lines, previous_header
+                )
+                if current_header is not None and current_header == previous_header:
+                    logger.debug(f"Removed repeated running header on page {page_num}")
             previous_header = current_header
             lines = self._inject_toc_heading_recoveries(
                 page_num,
@@ -352,8 +515,10 @@ def _last_significant_character(value: str) -> str:
     return value[-1:] if value else ""
 
 
-def _looks_like_new_block(value: str) -> bool:
+def _looks_like_new_block(value: str, *, numbered_is_block: bool = True) -> bool:
     stripped = str(value or "").lstrip()
+    if not numbered_is_block:
+        stripped = re.sub(r"^\d+[.)]\s+", "", stripped)
     return not stripped or bool(_NEXT_BLOCK_RE.match(stripped)) or stripped.startswith("[^")
 
 
@@ -367,7 +532,7 @@ def _can_join_across_page(previous: str, following: str) -> bool:
         (line.strip() for line in reversed(previous.splitlines()) if line.strip()),
         "",
     )
-    if _looks_like_new_block(previous_last_line):
+    if _looks_like_new_block(previous_last_line, numbered_is_block=False):
         return False
     last = _last_significant_character(previous_last_line)
     return bool(last) and last not in _SENTENCE_END
