@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from lxml import etree
 
 from pdf2epub.epub.converter import ContentConverter
 from pdf2epub.markdown_to_html import convert_markdown_to_html
@@ -89,6 +90,26 @@ def test_raw_html_math_is_converted_to_mathml() -> None:
     assert "<mi>Γ</mi>" in html
     assert "I_A(A)" not in html
     assert "\\Gamma_x^1" not in html
+
+
+def test_simple_latin_math_uses_font_safe_ordinary_letters() -> None:
+    html = convert_markdown_to_html("$C$, $M$, $C'$, $C-M-C'$, and $M-C-M'$", standalone=False)
+
+    assert "<i>C</i>" in html
+    assert "<i>M</i>" in html
+    assert "<i>C'</i>" in html
+    assert "<i>C-M-C'</i>" in html
+    assert "<i>M-C-M'</i>" in html
+    assert "𝑪" not in html
+    assert "𝑴" not in html
+
+
+def test_sanitized_markdown_fragments_remain_well_formed_xhtml() -> None:
+    html = convert_markdown_to_html("![cover](cover.png)  \nnext line", standalone=False)
+
+    etree.fromstring(f'<body xmlns="http://www.w3.org/1999/xhtml">{html}</body>')
+    assert "<img " in html and "/>" in html
+    assert "<br" in html and "/>" in html
 
 
 def test_url_query_values_are_not_rewritten_as_html_attributes() -> None:

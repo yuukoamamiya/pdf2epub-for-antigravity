@@ -444,6 +444,7 @@ def _validate_pdf_markdown_task(args, task: str):
         structural_patterns=(
             r"^#{1,6}\s",
             r"!\[[^\]]*\]\([^)]+\)",
+            *( (r"^\d+\\\.\s",) if task == "translate" else () ),
             *( () if task == "polish" else (r"\[\^[^\]]+\]",) ),
         ),
         create_validated_copy=not check_only,

@@ -119,7 +119,11 @@ def sanitize_html_fragment(markup: str) -> str:
     _sanitize_tree(root, allowed_tags=_ALLOWED_TAGS, drop_tags=_DROP_TAGS)
 
     return "".join(
-        lxml_html.tostring(child, encoding="unicode", method="html")
+        # The fragment is embedded in XHTML 1.1 documents. HTML serialization
+        # turns void tags into <img>/<br>, which makes the resulting EPUB
+        # documents malformed XML even though the original Markdown renderer
+        # emitted self-closing XHTML elements.
+        lxml_html.tostring(child, encoding="unicode", method="xml")
         for child in root
     )
 

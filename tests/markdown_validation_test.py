@@ -3,6 +3,7 @@ from pdf2epub.markdown_validation import (
     polish_content_integrity_check,
     polish_structure_audit,
 )
+from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
 
 NOTE_COUNT = 150
@@ -120,6 +121,44 @@ def test_polish_integrity_still_rejects_duplicated_body_prose():
     assert report["valid"] is False
     assert report["duplicated_prose_blocks"]
     assert any("duplication" in error for error in report["errors"])
+
+
+def test_translation_preserves_escaped_numbered_prose_markers(tmp_path):
+    source = tmp_path / "source"
+    target = tmp_path / "translated"
+    source.mkdir()
+    target.mkdir()
+    text = (
+        "17\\. A numbered prose paragraph explains a specific argument in the book.\n"
+    )
+    (source / "chapter_1.md").write_text(text, encoding="utf-8")
+
+    (target / "chapter_1.md").write_text(
+        "17\\. 这是一段对书中具体论证进行说明的编号正文。\n", encoding="utf-8"
+    )
+    valid = validate_markdown_subagent(
+        tmp_path,
+        "translate",
+        source,
+        target,
+        structural_patterns=(r"^\d+\\\.\s",),
+        create_validated_copy=False,
+    )
+    assert valid["all_passed"] is True
+
+    (target / "chapter_1.md").write_text(
+        "17. 这是一段对书中具体论证进行说明的编号正文。\n", encoding="utf-8"
+    )
+    invalid = validate_markdown_subagent(
+        tmp_path,
+        "translate",
+        source,
+        target,
+        structural_patterns=(r"^\d+\\\.\s",),
+        create_validated_copy=False,
+    )
+    assert invalid["all_passed"] is False
+    assert any("escaped numbered-prose markers" in item["reason"] for item in invalid["invalid"])
 
 
 def test_polish_structure_audit_flags_body_text_appended_to_heading():

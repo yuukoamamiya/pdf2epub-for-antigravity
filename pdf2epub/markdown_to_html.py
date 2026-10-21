@@ -11,6 +11,7 @@ from typing import Optional
 from loguru import logger
 from .utils.logging_config import configure_logging
 from .utils.html_safety import sanitize_html_fragment
+from .footnote_markdown import collect_footnote_definition_blocks
 
 # We'll use markdown library - need to add to pyproject.toml: 
 # poetry add markdown
@@ -101,6 +102,16 @@ blockquote {
 ul, ol {
     margin: 1em 0;
     padding-left: 2em;
+}
+.footnote-def {
+    margin: 0.8em 0 0;
+    font-size: 0.9em;
+    line-height: 1.55;
+}
+.footnote-def p {
+    margin: 0 0 0.65em;
+    text-indent: 0;
+    text-align: left;
 }
 ol.epub-continued-list {
     list-style: none;
@@ -479,6 +490,14 @@ def preprocess_markdown(markdown_content: str, footnote_manager=None, source_cha
         content = match.group(1)  # Get content between $ and $
         original_content = content  # Keep original for fallback
 
+        # Plain Latin variables in economic circulation formulas do not need
+        # mathematical italic Unicode code points, which are missing in many
+        # ebook fonts. Keep the original letters and use ordinary italic text.
+        math_variable = r"[A-Za-z](?:(?:['′])|(?:\^\{?\\prime\}?))?"
+        if re.fullmatch(rf"\s*{math_variable}(?:\s*[-=+]\s*{math_variable})*\s*", content):
+            safe_expression = re.sub(r"\^\{?\\prime\}?", "′", content.strip())
+            return stash_math(f'<i>{html_module.escape(safe_expression)}</i>')
+
         # === Preprocessing for patterns unicodeitplus doesn't handle well ===
 
         # 1. \qquad → double space (unicodeitplus leaves it unchanged)
@@ -573,21 +592,20 @@ def preprocess_footnotes_local(markdown_content: str, footnote_manager, source_c
     definition_occurrence_in_file = {}
     reference_occurrence_in_file = {}
 
-    for line_num, line in enumerate(lines, 1):
+    definitions, consumed = collect_footnote_definition_blocks(
+        lines,
+        allow_no_colon=footnote_manager.is_no_colon_definition_chapter(source_chapter),
+    )
+    parsed_lines = [
+        (index + 1, line, definitions.get(index))
+        for index, line in enumerate(lines)
+        if index not in consumed
+    ]
+    for line_num, line, definition in parsed_lines:
         # Check for footnote definition [^key]:
-        def_match = re.match(
-            rf'^\[\^({FOOTNOTE_KEY_PATTERN})\]:\s*(.*)', line
-        )
-        if (
-            not def_match
-            and footnote_manager.is_no_colon_definition_chapter(source_chapter)
-        ):
-            def_match = re.match(
-                rf'^\[\^({FOOTNOTE_KEY_PATTERN})\]\s+(.+)', line
-            )
+        def_match = definition
         if def_match:
-            fn_key = def_match.group(1)
-            fn_text = def_match.group(2)
+            fn_key, fn_text = def_match
             definition_occurrence_in_file[fn_key] = definition_occurrence_in_file.get(fn_key, 0) + 1
             processed_lines.append(
                 footnote_manager.get_definition_html(
@@ -647,21 +665,22 @@ def preprocess_footnotes_global(markdown_content: str, footnote_manager, source_
     definition_occurrence_in_file = {}
     is_definition_chapter = footnote_manager.is_definition_chapter(source_chapter)
 
-    for line_num, line in enumerate(lines, 1):
-        def_match = re.match(
-            rf'^\[\^({FOOTNOTE_KEY_PATTERN})\]:\s*(.*)', line
-        )
-        if (
-            not def_match
-            and is_definition_chapter
+    definitions, consumed = collect_footnote_definition_blocks(
+        lines,
+        allow_no_colon=(
+            is_definition_chapter
             and footnote_manager.is_no_colon_definition_chapter(source_chapter)
-        ):
-            def_match = re.match(
-                rf'^\[\^({FOOTNOTE_KEY_PATTERN})\]\s+(.+)', line
-            )
+        ),
+    )
+    parsed_lines = [
+        (index + 1, line, definitions.get(index))
+        for index, line in enumerate(lines)
+        if index not in consumed
+    ]
+    for line_num, line, definition in parsed_lines:
+        def_match = definition
         if def_match and is_definition_chapter:
-            fn_key = def_match.group(1)
-            fn_text = def_match.group(2)
+            fn_key, fn_text = def_match
             definition_occurrence_in_file[fn_key] = definition_occurrence_in_file.get(fn_key, 0) + 1
             processed_lines.append(
                 footnote_manager.get_definition_html(

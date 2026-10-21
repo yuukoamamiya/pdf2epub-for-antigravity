@@ -381,6 +381,20 @@ def validate_markdown_subagent(
                 reference_heading_fixes.extend(
                     {"file": source.name, **fix} for fix in fixes
                 )
+        if task == "translate":
+            escaped_number_re = re.compile(r"^(\d+)\\\.\s", re.MULTILINE)
+            source_numbered_prose = escaped_number_re.findall(source_text)
+            target_numbered_prose = escaped_number_re.findall(target_text)
+            if source_numbered_prose != target_numbered_prose:
+                invalid.append(
+                    {
+                        "file": source.name,
+                        "reason": (
+                            "escaped numbered-prose markers changed or were lost: "
+                            f"expected {source_numbered_prose}, found {target_numbered_prose}"
+                        ),
+                    }
+                )
         diff_summary[source.name] = translation_diff_summary(source_text, target_text)
         if not target_text.strip() and bool(source_text.strip()):
             invalid.append({"file": source.name, "reason": "target is empty"})

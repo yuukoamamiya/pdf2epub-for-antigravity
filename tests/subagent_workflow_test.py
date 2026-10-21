@@ -1480,6 +1480,8 @@ def test_polish_prompt_explains_line_structure_audit_and_exceptions(tmp_path: Pa
     assert "explicit `<br />`" in prompt
     assert "structural audit" in prompt
     assert "Never attach following body prose to a heading" in prompt
+    assert "indent every continuation line, continuation paragraph, table, formula, or quotation block" in prompt
+    assert "Preserve blank lines between note paragraphs" in prompt
 
 
 def test_polish_footnote_normalization_accepts_verified_legacy_notes():
@@ -2198,6 +2200,7 @@ def test_translate_skip_entities_is_recorded_in_prompt_and_manifest(
     assert manifest["skipped_context_files"] == ["translation_entities"]
     assert len(manifest["worker_handoffs"]) == 1
     assert "Exact translated TOC heading contract" in prompt
+    assert "keep each continuation attached to the same source footnote definition" in prompt
     assert "do not invent or expect a translation_entities.json context file" in prompt
     assert "Read translation_entities.json before translating" not in prompt
 
@@ -2926,6 +2929,35 @@ def test_refine_local_does_not_reuse_checkpoint_after_toc_changes(tmp_path: Path
     }), encoding="utf-8")
     second = refiner.process_from_toc(tmp_path / "input.pdf", tmp_path, "Book", resume=True)
     assert second[0]["title"] == "Renamed"
+
+
+def test_refine_local_invalidates_legacy_page_merger_fingerprint(tmp_path: Path):
+    pages_dir = tmp_path / "pages"
+    pages_dir.mkdir()
+    (pages_dir / "page_001.md").write_text("Content", encoding="utf-8")
+    (tmp_path / "toc_tree.json").write_text(
+        json.dumps(
+            {
+                "chapters": [
+                    {"title": "First", "level": 1, "start_page": 1, "end_page": 1}
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    refiner = RefinedBreakdown(config={}, max_tokens=8000)
+    refiner.process_from_toc(tmp_path / "input.pdf", tmp_path, "Book", resume=False)
+
+    progress_path = tmp_path / "ocr_markdown" / "tree_progress.json"
+    progress = json.loads(progress_path.read_text(encoding="utf-8"))
+    progress["fingerprint"].pop("page_merger_policy")
+    progress_path.write_text(json.dumps(progress), encoding="utf-8")
+    unit_path = tmp_path / "ocr_markdown" / "chapter_1.md"
+    unit_path.write_text("Legacy stale output", encoding="utf-8")
+
+    refiner.process_from_toc(tmp_path / "input.pdf", tmp_path, "Book", resume=True)
+
+    assert unit_path.read_text(encoding="utf-8") == "Content"
 
 
 def test_toc_validation_requires_in_place_translated_fields(tmp_path: Path):

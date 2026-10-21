@@ -23,13 +23,98 @@ from ..utils.ocr_artifacts import (
     remove_native_page_furniture,
 )
 
+_ROMAN_PAGE_LABEL = r"(?=[ivxlcdm])m{0,3}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3})"
+_PAGE_LABEL = rf"(?:\d{{1,4}}|{_ROMAN_PAGE_LABEL})"
+_PAGE_LABEL_RE = re.compile(rf"^(?:{_PAGE_LABEL})$", re.IGNORECASE)
+_PAGE_LABEL_PREFIX_RE = re.compile(rf"^\s*{_PAGE_LABEL}\s+", re.IGNORECASE)
+_PAGE_LABEL_SUFFIX_RE = re.compile(rf"\s+{_PAGE_LABEL}\s*$", re.IGNORECASE)
+_STRUCTURAL_NUMBERED_TITLE_RE = re.compile(
+    rf"^(?:chapter|part|section|book|volume|vol\.?)\s+(?:\d{{1,4}}|{_ROMAN_PAGE_LABEL})(?:$|\s|[.:)—-])",
+    re.IGNORECASE,
+)
+_STRUCTURAL_NUMBERED_IDENTIFIER_RE = re.compile(
+    rf"^(?:chapter|part|section|book|volume|vol\.?)\s+(?:\d{{1,4}}|{_ROMAN_PAGE_LABEL})$",
+    re.IGNORECASE,
+)
+_PAGE_LABEL_PREFIX_CAPTURE_RE = re.compile(
+    rf"^\s*({_PAGE_LABEL})(?=\s|$)\s*", re.IGNORECASE
+)
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_HTML_ENTITY_RE = re.compile(r"&(?:#\d+|#x[\da-f]+|[a-z][\da-z]+);", re.IGNORECASE)
+_INLINE_MARKUP_CLOSER_RE = re.compile(
+    r"^(?:(?:[*_~`])|(?:</(?:em|strong|b|i|span)\s*>))+", re.IGNORECASE
+)
+
+
+def _unformatted_layout_text(value: str) -> str:
+    value = html.unescape(_HTML_TAG_RE.sub(" ", str(value or "")))
+    value = re.sub(r"[`*_~]", "", value)
+    value = re.sub(r"^\s*#{1,6}\s+", "", value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def _header_page_label(value: str, *, suffix: bool = False) -> str | None:
+    plain = _unformatted_layout_text(value)
+    if suffix:
+        match = _PAGE_LABEL_SUFFIX_RE.search(plain)
+        if not match or _STRUCTURAL_NUMBERED_IDENTIFIER_RE.fullmatch(plain):
+            return None
+        return match.group().strip()
+    match = _PAGE_LABEL_PREFIX_CAPTURE_RE.match(plain)
+    return match.group(1) if match else None
+
+
+def _visible_text_with_offsets(value: str) -> tuple[str, list[int]]:
+    """Return formatting-free text and raw end offsets for its characters."""
+    visible: list[tuple[str, int]] = []
+    index = 0
+    while index < len(value):
+        tag = _HTML_TAG_RE.match(value, index)
+        if tag:
+            index = tag.end()
+            continue
+        entity = _HTML_ENTITY_RE.match(value, index)
+        if entity:
+            decoded = html.unescape(entity.group())
+            visible.extend((char, entity.end()) for char in decoded)
+            index = entity.end()
+            continue
+        char = value[index]
+        if char not in "`*_~":
+            visible.append((char, index + 1))
+        index += 1
+
+    collapsed: list[str] = []
+    offsets: list[int] = []
+    for char, end in visible:
+        folded = char.casefold()
+        if char.isspace():
+            if not collapsed:
+                continue
+            if collapsed[-1] == " ":
+                offsets[-1] = end
+            else:
+                collapsed.append(" ")
+                offsets.append(end)
+            continue
+        collapsed.extend(folded)
+        offsets.extend([end] * len(folded))
+    while collapsed and collapsed[-1] == " ":
+        collapsed.pop()
+        offsets.pop()
+    return "".join(collapsed), offsets
+
 
 def _plain_layout_text(value: str) -> str:
     value = html.unescape(re.sub(r"<[^>]+>", " ", str(value or "")))
     value = re.sub(r"[`*_~]", "", value)
     value = re.sub(r"^\s*#{1,6}\s+", "", value)
     value = re.sub(r"\s+", " ", value).strip()
-    return re.sub(r"^\d{1,4}\s+", "", value).strip()
+    value = _PAGE_LABEL_PREFIX_RE.sub("", value, count=1)
+    suffix = _PAGE_LABEL_SUFFIX_RE.search(value)
+    if suffix and not _STRUCTURAL_NUMBERED_IDENTIFIER_RE.fullmatch(value):
+        value = value[: suffix.start()].rstrip()
+    return value.strip()
 
 
 def _running_header_signature(value: str) -> str:
@@ -38,22 +123,44 @@ def _running_header_signature(value: str) -> str:
 
 
 def _remove_running_header_prefix(line: str, header_text: str) -> tuple[bool, str]:
-    """Remove a sidecar-confirmed header prefix, preserving any body suffix."""
+    """Remove a sidecar-confirmed header prefix, preserving body markup/text."""
     plain_header = _plain_layout_text(header_text)
-    plain_line = html.unescape(re.sub(r"<[^>]+>", " ", str(line or "")))
-    plain_line = re.sub(r"^\s*#{1,6}\s+", "", plain_line)
-    plain_line = re.sub(r"[`*_~]", "", plain_line)
-    plain_line = re.sub(r"^\s*\d{1,4}\s+", "", plain_line).lstrip()
     if not plain_header:
         return False, line
 
+    raw_line = str(line or "")
+    raw_line = re.sub(r"^\s*#{1,6}\s+", "", raw_line, count=1)
+    header_prefix_label = _header_page_label(header_text)
+    line_prefix_match = _PAGE_LABEL_PREFIX_CAPTURE_RE.match(
+        _unformatted_layout_text(raw_line)
+    )
+    if (
+        header_prefix_label
+        and line_prefix_match
+        and line_prefix_match.group(1).casefold() == header_prefix_label.casefold()
+    ):
+        raw_prefix = _PAGE_LABEL_PREFIX_CAPTURE_RE.match(raw_line)
+        if raw_prefix:
+            raw_line = raw_line[raw_prefix.end():]
+    line_folded, offsets = _visible_text_with_offsets(raw_line)
     header_folded = plain_header.casefold()
-    line_folded = plain_line.casefold()
     if not line_folded.startswith(header_folded):
         return False, line
-    if len(plain_line) > len(plain_header) and not plain_line[len(plain_header)].isspace():
+    if len(line_folded) > len(header_folded) and not line_folded[len(header_folded)].isspace():
         return False, line
-    remainder = plain_line[len(plain_header):].lstrip()
+    if not header_folded or len(offsets) < len(header_folded):
+        return False, line
+    raw_end = offsets[len(header_folded) - 1]
+    remainder = raw_line[raw_end:]
+    remainder = _INLINE_MARKUP_CLOSER_RE.sub("", remainder, count=1).lstrip()
+    header_suffix_label = _header_page_label(header_text, suffix=True)
+    suffix_match = _PAGE_LABEL_PREFIX_CAPTURE_RE.match(remainder)
+    if (
+        header_suffix_label
+        and suffix_match
+        and suffix_match.group(1).casefold() == header_suffix_label.casefold()
+    ):
+        remainder = remainder[suffix_match.end():].lstrip()
     return True, remainder
 
 
@@ -93,7 +200,7 @@ class PageMerger:
         if cached is not None:
             return cached
 
-        by_page: dict[int, list[tuple[str, str]]] = {}
+        by_page: dict[int, list[tuple[str, str, str]]] = {}
         pages_by_signature: dict[str, set[int]] = {}
         visual_sidecar_pages: set[int] = set()
         for path in sorted(evidence_dir.glob("page_*.ocr.json")):
@@ -115,9 +222,10 @@ class PageMerger:
             visual_sidecar_pages.add(page_number)
 
             for block in sidecar.get("blocks", []) or []:
-                if not isinstance(block, dict) or str(
-                    block.get("label") or ""
-                ).strip().casefold() != "section-header":
+                if not isinstance(block, dict):
+                    continue
+                label = str(block.get("label") or "").strip().casefold()
+                if label not in {"section-header", "page-header"}:
                     continue
                 bbox = normalized_bbox(block, sidecar)
                 if bbox is None:
@@ -129,7 +237,9 @@ class PageMerger:
                 signature = _running_header_signature(text)
                 if len(signature) < 5 or len(signature) > 120:
                     continue
-                by_page.setdefault(page_number, []).append((signature, text))
+                if _STRUCTURAL_NUMBERED_TITLE_RE.match(_plain_layout_text(text)):
+                    continue
+                by_page.setdefault(page_number, []).append((signature, text, label))
                 pages_by_signature.setdefault(signature, set()).add(page_number)
 
         repeated = {
@@ -140,8 +250,8 @@ class PageMerger:
         indexed = {
             page_number: [
                 text
-                for signature, text in blocks
-                if signature in repeated
+                for signature, text, label in blocks
+                if signature in repeated and label == "section-header"
             ]
             for page_number, blocks in by_page.items()
         }

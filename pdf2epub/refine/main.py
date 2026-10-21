@@ -35,6 +35,7 @@ tokenizer = tiktoken.get_encoding("cl100k_base")
 
 
 REFINE_CHECKPOINT_SCHEMA = 7
+PAGE_MERGER_POLICY_VERSION = "repeated-edge-header-folio-normalization-v2"
 DEFAULT_OVERSIZED_SPLIT_THRESHOLD = 15_000
 DEFAULT_OVERSIZED_SPLIT_TARGET = 12_000
 DEFAULT_OVERSIZED_SPLIT_TYPES = ("all",)
@@ -265,6 +266,7 @@ class RefinedBreakdown:
         book_metadata = {key: value for key, value in toc_data.items() if key != "chapters"}
         source_fingerprint = {
             "schema": REFINE_CHECKPOINT_SCHEMA,
+            "page_merger_policy": PAGE_MERGER_POLICY_VERSION,
             "toc_sha256": hashlib.sha256(toc_tree_file.read_bytes()).hexdigest(),
             "pages_sha256": pages_fingerprint(pages_dir),
             "illustration_bindings_sha256": (

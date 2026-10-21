@@ -122,10 +122,10 @@ PDF 精修的核心领域模块如下：
 - `refine/page_merger.py`：消费已验证的整页插图绑定，恢复“前页半句 → 插图页 → 后页续句”，
   并把图片及说明放回连续正文之后；普通页面边界也会在前后均为未结束的正文块时保守拼接，
   不把完整句子、标题、列表、脚注、图片或表格误合并。视觉 OCR sidecar 中跨至少两页、位于
-  页顶的短 `Section-Header` 会按共享坐标归一化和去除印刷页码后的重复文本作为页眉清除；
+  页顶的短 `Section-Header` 会按共享坐标归一化和去除有效阿拉伯/罗马页码前后缀后的重复文本作为页眉清除；`Chapter 1`、`Part II`、`Section 3` 等结构编号标题的尾号不作为页码清除。重复签名可由几何合格的 `Page-Header` 或 `Section-Header` 跨页共同确认，但此清理只删除重复的 `Section-Header`。单次出现或几何证据不足的标题保留；
   旧原生文字运行还会根据 page-point sidecar 在页边 5% 内确定性清除 DOI/孤立页码，并仅清除
   跨页重复短页眉页脚；原始 `pages/`
-  不会被覆盖，sidecar 会参与 refine checkpoint 指纹。
+  不会被覆盖，sidecar 与页眉归一化策略版本都会参与 refine checkpoint 指纹，使合并规则更新后旧的 `ocr_markdown/` 通过 `refine-local --resume` 重建。
 - `refine/footnote_prepare.py`：只编排按页面 layout sidecar 生成脚注候选、结构排除和双 OCR
   比较，不负责页面扫描细节、区域策略、视觉证据或报告持久化；这些职责分别由
   `footnote_page_scan.py`、`footnote_continuation_regions.py`、`footnote_regions.py` 和
@@ -313,6 +313,13 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
   导入私有 helper。
 - Markdown→XHTML 默认遵循标准 Markdown 的软换行语义：单换行不会生成 `<br />`，只有
   空行或显式硬换行标记创建段落/硬换行；需要旧式单换行渲染时只能显式启用兼容参数。
+- `footnote_markdown.py` 为 footnote scanner 与 XHTML renderer 提供同一个定义块解析器：只将
+  四空格或 Tab 缩进视为续块，保留内部换行、缩进和空行供 Markdown 解析块级内容。`manager.py`
+  将脚注定义渲染在稳定的 `.footnote-def` 锚点内，构建后的引用/回链 ID 不变。
+- `utils/html_safety.py` 对 XHTML 内容片段使用 XML 序列化，确保安全过滤后 `<img>`、`<br>` 等
+  void 元素仍是自闭合形式；输出的章节文档可由严格 XML parser 读取。
+- 连续的长编号论述由 polish handoff 要求保留为转义数字标记（如 `17\.`）的普通段落；真实枚举
+  仍保留列表结构。translate handoff 和本地校验共同保证已转义标记不退化为有序列表。
 - `subagent_runtime.py`：提供模型配置解析、token 估算、批次规划及按章节/批次隔离的 handoff；
   worker 文件数的有效上限为 8。
 - `subagent_safety.py`：集中处理拒答、免责声明和翻译占位套话检测，避免各工作流使用不同规则。

@@ -592,8 +592,16 @@ def prepare_markdown_subagent(
         "Execution boundary: do not open, edit, create, delete, or rename repository source, tests, documentation, glossary files, or project configuration. In particular, never modify paths under `pdf2epub/` or `tests/`, nor `docs/`, `glossaries/`, `AGENTS.md`, `pyproject.toml`, `uv.lock`, or any `config*.yaml`. If validation exposes a code or rule defect, report the path and reason to the main Agent; fix only the assigned output files.",
         "If the model refuses a unit or inserts a safety disclaimer, do not write that refusal as the translation; leave the target absent and report the blocked unit.",
         "A parent heading may be structural-only: when it is immediately followed by a child heading with no intervening prose, keep the parent heading once and do not copy any descendant paragraph under the empty parent. Every source prose block must appear exactly once in the output, under its original nearest heading.",
+        "For Markdown footnotes, keep the definition's first line as `[^n]: ...`; indent every continuation line, continuation paragraph, table, formula, or quotation block by one additional level (four spaces or one tab). Preserve blank lines between note paragraphs and any deeper nested indentation. In translation, keep each continuation attached to the same source footnote definition; do not move content between notes or into body text.",
         "When the scoped manifest marks a file as a continuation unit, preserve the source opening exactly and never add a Markdown heading at the beginning of that file. Do not invent labels such as '(continued)' or '参考文献（续）'.",
         *polish_boundary_rules,
+        *(
+            [
+                "Numbered prose paragraphs are not lists: when consecutive long entries each contain a complete prose paragraph, preserve each as a separate paragraph with its original number (escape the list marker, for example `17\\.`). Keep actual short enumerations and step-by-step lists as Markdown lists; use context and sentence structure, never paragraph length alone, to distinguish them.",
+            ]
+            if task == "polish"
+            else []
+        ),
         *native_layout_rules,
         *polish_structure_rules,
         *(
@@ -635,6 +643,7 @@ def prepare_markdown_subagent(
 2. If a source heading begins with a specific number of `#` characters, the translated heading must begin with exactly the same number; never upgrade or downgrade its level.
 3. Output one translated heading line only. Never keep the original-language heading on a separate line or produce bilingual/parallel headings.
 4. The number and level of Markdown headings must remain one-to-one with the source. Do not output both the original heading and its translation.
+5. If an ordinary prose paragraph begins with an escaped numbered marker such as `17\\.`, preserve that exact escaped number marker in the translated paragraph. It is a paragraph label, not a Markdown list; do not turn it back into `17.`.
 """
     prompt_path = output_dir / f"{task}_subagent_prompt.md"
     prompt_path_content = f"""# {task} Subagent task

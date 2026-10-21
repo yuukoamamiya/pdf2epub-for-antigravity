@@ -323,5 +323,8 @@ def test_refined_breakdown_writes_report_and_checkpoint_fingerprint(tmp_path):
         (tmp_path / "ocr_markdown" / "tree_progress.json").read_text(encoding="utf-8")
     )
     assert "toc_heading_recovery_sha256" in progress["fingerprint"]
+    assert progress["fingerprint"]["page_merger_policy"] == (
+        "repeated-edge-header-folio-normalization-v2"
+    )
     content = (tmp_path / "ocr_markdown" / "chapter_1.md").read_text(encoding="utf-8")
     assert "## 8. Mobilized" in content

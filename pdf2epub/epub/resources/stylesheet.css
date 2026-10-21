@@ -667,6 +667,18 @@ sup a {
     position: relative;
 }
 
+.footnote-def {
+    margin: 0.8em 0 0;
+    font-size: 0.9em;
+    line-height: 1.55;
+}
+
+.footnote-def p {
+    margin: 0 0 0.65em;
+    text-indent: 0;
+    text-align: left;
+}
+
 /* Decorative separator before footnotes */
 .footnote::before, 
 .footnotes::before {

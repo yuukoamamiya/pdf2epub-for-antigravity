@@ -91,7 +91,11 @@ _ALLOWED_MATHML = {
     "semantics",
 }
 
-_ALLOWED_DEFINITION_HTML = _ALLOWED_INLINE_HTML | _ALLOWED_MATHML
+_ALLOWED_DEFINITION_HTML = _ALLOWED_INLINE_HTML | _ALLOWED_MATHML | {
+    "blockquote", "br", "code", "div", "h1", "h2", "h3", "h4", "h5",
+    "h6", "hr", "li", "ol", "p", "pre", "table", "tbody", "td",
+    "tfoot", "th", "thead", "tr", "ul",
+}
 
 
 class FootnoteManager:
@@ -763,12 +767,21 @@ class FootnoteManager:
                 return token
             return html.escape(token, quote=False)
 
-        safe_content = re.sub(r"<[^<>]*>", escape_unknown_tag, content)
-        return (
-            f'<div class="footnote-def" id="{fn_id}">\n'
-            f'<p><strong>[{display_footnote_key(key)}]:</strong> {safe_content}{backref_html}</p>\n'
-            f'</div>'
+        import markdown
+
+        definition_markdown = f"**[{display_footnote_key(key)}]:** {content}"
+        rendered = markdown.markdown(
+            definition_markdown,
+            extensions=["markdown.extensions.tables", "markdown.extensions.fenced_code"],
+            output_format="xhtml",
         )
+        rendered = re.sub(r"<[^<>]*>", escape_unknown_tag, rendered)
+        if "</p>" in rendered:
+            before, after = rendered.rsplit("</p>", 1)
+            rendered = before + backref_html + "</p>" + after
+        else:
+            rendered += backref_html
+        return f'<div class="footnote-def" id="{fn_id}">{rendered}</div>'
 
     def _backref_html(self, backref_link: str, key: str) -> str:
         display_key = display_footnote_key(key)

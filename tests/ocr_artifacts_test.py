@@ -7,7 +7,11 @@ from pdf2epub.utils.ocr_artifacts import (
     remove_printed_page_number_lines,
     remove_native_page_furniture,
 )
-from pdf2epub.refine.page_merger import PageMerger
+from pdf2epub.refine.page_merger import (
+    PageMerger,
+    _plain_layout_text,
+    _remove_running_header_prefix,
+)
 from pdf2epub.refine.toc_tree import TOCNode
 
 
@@ -193,6 +197,168 @@ def test_page_merger_keeps_nonrepeated_section_heading_and_ignores_body_position
     result = PageMerger().merge_node_content(TOCNode("Section", 1, 1, 2), pages)
 
     assert result.count("The Doctrine of Circulation") == 2
+
+
+def test_running_header_normalization_supports_roman_and_arabic_folios():
+    assert _plain_layout_text("XXVI Introduction") == "Introduction"
+    assert _plain_layout_text("Introduction XXVIII") == "Introduction"
+    assert _plain_layout_text("Introduction 12") == "Introduction"
+    assert _plain_layout_text("Introduction IV. Results") == "Introduction IV. Results"
+    for title in (
+        "Chapter 1",
+        "Chapter 2",
+        "Chapter I",
+        "Chapter II",
+        "Part I",
+        "Part II",
+        "Section 1",
+        "Section 2",
+    ):
+        assert _plain_layout_text(title) == title
+
+    assert _remove_running_header_prefix(
+        "## XXVIII Introduction", "XXVIII Introduction"
+    ) == (
+        True,
+        "",
+    )
+    assert _remove_running_header_prefix(
+        "Introduction XXIX", "Introduction XXIX"
+    ) == (
+        True,
+        "",
+    )
+    assert _remove_running_header_prefix(
+        "Introduction 12", "Introduction 12"
+    ) == (
+        True,
+        "",
+    )
+    assert _remove_running_header_prefix(
+        "## Introduction XXVIII 正文 *em*", "Introduction XXVIII"
+    ) == (True, "正文 *em*")
+    assert _remove_running_header_prefix(
+        "Introduction 12 body 12", "Introduction 12"
+    ) == (True, "body 12")
+    assert _remove_running_header_prefix(
+        "Introduction 12 body 12", "Introduction"
+    ) == (True, "12 body 12")
+
+
+def test_running_header_removal_preserves_formatted_body_suffix():
+    assert _remove_running_header_prefix(
+        "## XXVIII **Introduction** continues with *bold* prose 12",
+        "XXVIII Introduction",
+    ) == (True, "continues with *bold* prose 12")
+
+
+def test_distinct_structural_numbered_headings_are_not_repeated_furniture(
+    tmp_path: Path,
+):
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    for page_number, heading in ((1, "Chapter 1"), (2, "Chapter 2")):
+        (pages / f"page_{page_number:03d}.md").write_text(
+            f"## {heading}\n\nBody on page {page_number}.", encoding="utf-8"
+        )
+        (pages / f"page_{page_number:03d}.ocr.json").write_text(
+            json.dumps(
+                {
+                    "page_number": page_number,
+                    "backend": "chandra",
+                    "page_box": [0, 0, 1123, 1588],
+                    "blocks": [
+                        {
+                            "label": "Section-Header",
+                            "bbox": [125, 104, 497, 128],
+                            "html": f"<h2>{heading}</h2>",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    result = PageMerger().merge_node_content(TOCNode("Section", 1, 1, 2), pages)
+
+    assert "Chapter 1" in result
+    assert "Chapter 2" in result
+
+
+def test_repeated_chapter_number_heading_is_not_page_furniture(tmp_path: Path):
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    for page_number in (1, 2):
+        (pages / f"page_{page_number:03d}.md").write_text(
+            f"## Chapter 1\n\nBody on page {page_number}.", encoding="utf-8"
+        )
+        (pages / f"page_{page_number:03d}.ocr.json").write_text(
+            json.dumps(
+                {
+                    "page_number": page_number,
+                    "backend": "chandra",
+                    "page_box": [0, 0, 1123, 1588],
+                    "blocks": [
+                        {
+                            "label": "Section-Header",
+                            "bbox": [125, 104, 497, 128],
+                            "html": "<h2>Chapter 1</h2>",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    result = PageMerger().merge_node_content(TOCNode("Section", 1, 1, 2), pages)
+
+    assert result.count("Chapter 1") == 2
+
+
+def test_page_header_can_confirm_mislabelled_repeated_section_header(
+    tmp_path: Path,
+):
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    page_box = [0, 0, 1123, 1588]
+    for page_number, text, label in (
+        (1, "XXVI Introduction", "Section-Header"),
+        (2, "XXVIII Introduction", "Page-Header"),
+    ):
+        (pages / f"page_{page_number:03d}.md").write_text(
+            f"## {text}\n\nBody on page {page_number}.", encoding="utf-8"
+        )
+        (pages / f"page_{page_number:03d}.ocr.json").write_text(
+            json.dumps(
+                {
+                    "page_number": page_number,
+                    "backend": "chandra",
+                    "page_box": page_box,
+                    "blocks": [
+                        {
+                            "order": 0,
+                            "label": label,
+                            "bbox": [125, 104, 497, 128],
+                            "html": f"<h2>{text}</h2>",
+                        },
+                        {
+                            "order": 1,
+                            "label": "Text",
+                            "bbox": [127, 149, 873, 188],
+                            "html": f"<p>Body on page {page_number}.</p>",
+                        },
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    result = PageMerger().merge_node_content(TOCNode("Introduction", 1, 1, 2), pages)
+
+    assert "XXVI Introduction" not in result
+    assert result.count("XXVIII Introduction") == 1
+    assert "Body on page 1." in result
+    assert "Body on page 2." in result
 
 
 def test_page_merger_applies_native_sidecar_furniture_cleanup(tmp_path: Path):

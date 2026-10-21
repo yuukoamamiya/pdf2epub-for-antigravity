@@ -5,6 +5,7 @@ Footnote scanning and analysis functionality.
 import re
 from pathlib import Path
 from typing import Dict, List, Optional, Set
+from ...footnote_markdown import collect_footnote_definition_blocks
 from loguru import logger
 
 from .models import FootnoteDefinition, FootnoteReference, FootnoteStyle
@@ -58,40 +59,26 @@ class FootnoteScanner:
             with open(file_path, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
 
-            for line_num, line in enumerate(lines, 1):
+            definitions, consumed = collect_footnote_definition_blocks(
+                lines,
+                allow_no_colon=chapter_name in no_colon_definition_chapters,
+            )
+            for line_index, line in enumerate(lines):
+                line_num = line_index + 1
                 # Check for footnote definitions [^key]:
-                def_matches = re.findall(
-                    rf'^\[\^({FOOTNOTE_KEY_PATTERN})\]:',
-                    line,
-                )
-                no_colon_def_match = None
-                if not def_matches and chapter_name in no_colon_definition_chapters:
-                    no_colon_def_match = re.match(
-                        rf'^\[\^({FOOTNOTE_KEY_PATTERN})\]\s+(.+)',
-                        line,
-                    )
-                    if no_colon_def_match:
-                        def_matches = [no_colon_def_match.group(1)]
+                definition = definitions.get(line_index)
+                def_matches = [definition[0]] if definition else []
                 for key in def_matches:
                     defined_keys.add(key)
                     if key not in self.definitions:
                         self.definitions[key] = []
                     # Extract the content after the definition marker
-                    content_match = re.match(
-                        rf'^\[\^({FOOTNOTE_KEY_PATTERN})\]:\s*(.*)',
-                        line,
-                    )
-                    if content_match:
-                        content = content_match.group(2)
-                    elif no_colon_def_match:
-                        content = no_colon_def_match.group(2)
-                    else:
-                        content = ""
+                    content = definition[1]
                     self.definitions[key].append(
                         FootnoteDefinition(key, content, chapter_name, line_num)
                     )
 
-                if def_matches:
+                if def_matches or line_index in consumed:
                     continue
 
                 # Check for footnote references [^key] (not followed by colon)

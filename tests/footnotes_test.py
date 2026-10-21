@@ -1,4 +1,5 @@
 from pathlib import Path
+from lxml import etree
 
 import pytest
 
@@ -298,6 +299,92 @@ def test_definition_text_markers_are_not_scanned_as_body_references(
     assert "&lt;Book&gt;" in html_files["chapter_1.html"]
     assert report["forward_hrefs"] == 1
     assert report["backref_hrefs"] == 1
+
+
+def test_indented_multiblock_footnote_continuations_stay_in_definition(
+    tmp_path: Path,
+) -> None:
+    chapter = tmp_path / "chapter_1.md"
+    chapter.write_text(
+        "Body [^1].\n\n"
+        "[^1]: First note paragraph.\n\n"
+        "    Second note paragraph\n"
+        "    continues here.\n\n"
+        "    Third note paragraph.\n"
+        "\n"
+        "    \tNested mixed-indent block.\n"
+        "Following body paragraph.\n",
+        encoding="utf-8",
+    )
+    structure = [_entry("chapter_1", chapter)]
+    manager = FootnoteManager(tmp_path, epub_structure=structure)
+    rendered = convert_markdown_to_html(
+        chapter.read_text(encoding="utf-8"),
+        standalone=False,
+        footnote_manager=manager,
+        source_chapter=chapter.stem,
+    )
+
+    dom = etree.fromstring(f'<body xmlns="http://www.w3.org/1999/xhtml">{rendered}</body>')
+    note = dom.xpath('//*[contains(concat(" ", normalize-space(@class), " "), " footnote-def ")]')[0]
+    assert 'class="footnote-def"' in rendered
+    assert "Second note paragraph" in rendered
+    assert "Second note paragraph continues here." in " ".join(rendered.split())
+    assert "Third note paragraph." in rendered
+    mixed_indent = dom.xpath(
+        '//*[local-name()="pre"]//*[local-name()="code"][contains(., "Nested mixed-indent block.")]'
+    )[0]
+    assert mixed_indent.xpath('ancestor-or-self::*[@id="fn-1"]')
+    following = dom.xpath('//*[local-name()="p"][contains(., "Following body paragraph.")]')[0]
+    assert "Following body paragraph." in rendered
+    assert rendered.index("Second note paragraph") < rendered.index("Following body paragraph.")
+    assert "<strong>[1]:</strong> First note paragraph." in rendered
+    note_text = " ".join("".join(note.itertext()).split())
+    assert "Second note paragraph continues here." in note_text
+    assert "Third note paragraph." in note_text
+    assert "Nested mixed-indent block." in note_text
+    assert not following.xpath('ancestor-or-self::*[@id="fn-1"]')
+
+
+def test_footnote_markdown_blocks_preserve_tables_and_mathml_as_xhtml(
+    tmp_path: Path,
+) -> None:
+    chapter = tmp_path / "chapter_1.md"
+    chapter.write_text(
+        "Body [^1].\n\n"
+        "[^1]: Definition intro.\n\n"
+        "    | Symbol | Meaning |\n"
+        "    | --- | --- |\n"
+        "    | C | $C$ |\n\n"
+        "    Code sample:\n\n"
+        "        nested block\n\n"
+        "    Formula: $$M-C-M'$$\n"
+        "Following body paragraph.\n",
+        encoding="utf-8",
+    )
+    manager = FootnoteManager(
+        tmp_path,
+        epub_structure=[_entry("chapter_1", chapter)],
+    )
+    rendered = convert_markdown_to_html(
+        chapter.read_text(encoding="utf-8"),
+        standalone=False,
+        footnote_manager=manager,
+        source_chapter=chapter.stem,
+    )
+    etree.fromstring(f'<body xmlns="http://www.w3.org/1999/xhtml">{rendered}</body>')
+
+    assert 'class="footnote-def"' in rendered
+    dom = etree.fromstring(f'<body xmlns="http://www.w3.org/1999/xhtml">{rendered}</body>')
+    note = dom.xpath('//*[contains(concat(" ", normalize-space(@class), " "), " footnote-def ")]')[0]
+    table = dom.xpath('//*[local-name()="table"]')[0]
+    math = dom.xpath('//*[local-name()="math"]')[0]
+    nested = dom.xpath('//*[local-name()="pre"]//*[local-name()="code"][contains(., "nested block")]')[0]
+    following = dom.xpath('//*[local-name()="p"][contains(., "Following body paragraph.")]')[0]
+    assert table.xpath('ancestor-or-self::*[@id="fn-1"]')
+    assert math.xpath('ancestor-or-self::*[@id="fn-1"]')
+    assert nested.xpath('ancestor-or-self::*[@id="fn-1"]')
+    assert not following.xpath('ancestor-or-self::*[@id="fn-1"]')
 
 
 def test_reconfiguration_rescans_markdown_and_rebuilds_structural_state(
