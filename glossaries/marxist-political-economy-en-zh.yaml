@@ -1,0 +1,1109 @@
+# Extracted from validated translation_entities.json files; all entries are preferred suggestions.
+# Source disagreements were excluded; review before promoting entries to fixed.
+schema_version: 1
+metadata:
+  name: marxist-political-economy-en-zh
+  domain: Marxist political economy (English to Chinese)
+  source_language: English
+  target_language: Chinese
+  version: '2026-10-21'
+entries:
+- id: absolute-surplus-value
+  source: absolute surplus-value
+  target: 绝对剩余价值
+  policy: preferred
+  variants:
+  - absolute surplus value
+  note: 'How to Read Marx''s Capital: Surplus-value produced by lengthening the absolute duration of the working
+    day.'
+- id: abstract-labor
+  source: abstract labor
+  target: 抽象劳动
+  policy: preferred
+  variants:
+  - abstract human labor
+  - abstract human labour
+  - abstract labour
+  - equal human labor
+  note: 'How to Read Marx''s Capital: Human labor considered in the abstract as expenditure of physiological energy
+    and creator of value.'
+- id: alienation
+  source: alienation
+  target: 异化
+  policy: preferred
+  variants:
+  - alienated labor
+  - alienated labour
+  - estrangement
+  note: 'How to Read Marx''s Capital: The separation of the worker from the product of their labor, the act of production,
+    human species-essence, and other workers.'
+- id: anti-quantity-theory
+  source: anti-quantity theory
+  target: 反货币数量论
+  policy: preferred
+  category: monetary theory
+  note: 'Political Economy of Money and Finance: 由斯图亚特、图克和马克思阐发的观点，强调商品价值先于交换确定，流通所需货币量由物价与交易量决定'
+- id: asymmetric-information
+  source: asymmetric information
+  target: 信息不对称
+  policy: preferred
+  category: microeconomics
+  note: 'Political Economy of Money and Finance: 交易一方比另一方掌握更多相关信息的市场状态，导致逆向选择和道德风险'
+- id: bank-rate
+  source: Bank Rate
+  target: 银行官定利率
+  policy: preferred
+  category: central banking policy
+  note: 'Political Economy of Money and Finance: 中央银行向商业银行提供贴现或再贷款所收取的基准贴现率'
+- id: banking-controversy
+  source: banking controversy
+  target: 银行学派与通货学派之争
+  policy: preferred
+  variants:
+  - Banking/Currency controversy
+  category: monetary debate
+  note: 'Political Economy of Money and Finance: 1840年代围绕银行特许状法案及货币发行原则爆发的里程碑式大辩论'
+- id: banking-credit
+  source: banking credit
+  target: 银行信用
+  policy: preferred
+  variants:
+  - bank credit
+  category: credit system
+  note: 'Political Economy of Money and Finance: 银行通过吸收存款和发放贷款、贴现票据等形式向社会企业提供的间接信用'
+- id: bretton-woods-system
+  source: Bretton Woods system
+  target: 布雷顿森林体系
+  policy: preferred
+  category: international monetary system
+  note: 'Political Economy of Money and Finance: 战后以美元为核心的固定汇率双挂钩国际货币安排，1971-1973年解体'
+- id: bullion-controversy
+  source: bullion controversy
+  target: 金块争论
+  policy: preferred
+  category: monetary debate
+  note: 'Political Economy of Money and Finance: 19世纪初英国关于纸币不可兑现时期物价上涨与黄金外流原因的经典大辩论'
+- id: business-cycle
+  source: business cycle
+  target: 商业周期
+  policy: preferred
+  variants:
+  - trade cycle
+  category: crisis theory
+  note: 'Political Economy of Money and Finance: 资本主义市场经济经历复苏、繁荣、危机和萧条的周期性波动运动'
+- id: capital-market
+  source: capital market
+  target: 资本市场
+  policy: preferred
+  category: financial market
+  note: 'Political Economy of Money and Finance: 进行长期资金融通和股票、中长期债券交易的金融市场'
+- id: capitalist-mode-of-production
+  source: capitalist mode of production
+  target: 资本主义生产方式
+  policy: preferred
+  note: 'How to Read Marx''s Capital: The mode of production dominated by generalized commodity production, wage
+    labor, and capital valorization.'
+- id: central-bank-independence
+  source: central bank independence
+  target: 中央银行独立性
+  policy: preferred
+  category: central banking
+  note: 'Political Economy of Money and Finance: 中央银行在制定和实施货币政策时不受财政部与短期政治干预的自主权'
+- id: channel-of-circulation
+  source: channel of circulation
+  target: 流通渠道
+  policy: preferred
+  category: monetary theory
+  note: 'Political Economy of Money and Finance: 经济体中吸收并容纳日常商品流通所需货币量的客观渠道容量'
+- id: circuit-of-capital
+  source: circuit of capital
+  target: 资本循环
+  policy: preferred
+  category: marxian economics
+  note: 'Political Economy of Money and Finance: 产业资本依次经过购买、生产、销售三阶段并变换形态最后回到出发点的运动过程'
+- id: classical-political-economy
+  source: classical political economy
+  target: 古典政治经济学
+  policy: preferred
+  variants:
+  - classical economy
+  note: 'How to Read Marx''s Capital: The school of political economy founded by Petty, Smith, and Ricardo that
+    investigated the real relations of capitalist production.'
+- id: coin
+  source: coin
+  target: 铸币
+  policy: preferred
+  variants:
+  - paper money
+  - token of value
+  note: 'How to Read Marx''s Capital: Metallic or paper circulating media representing standard weights of gold
+    in circulation.'
+- id: commercial-capital
+  source: commercial capital
+  target: 商业资本
+  policy: preferred
+  category: marxian economics
+  note: 'Political Economy of Money and Finance: 从产业资本中分离出来专门从事商品买卖以实现剩余价值的职能资本'
+- id: commercial-credit
+  source: commercial credit
+  target: 商业信用
+  policy: preferred
+  category: credit system
+  note: 'Political Economy of Money and Finance: 从事生产和商品流通的企业之间以延期付款或汇票方式直接相互提供的信用'
+- id: commodity
+  source: commodity
+  target: 商品
+  policy: preferred
+  variants:
+  - commodities
+  note: 'How to Read Marx''s Capital: An external object that satisfies human needs and is produced for exchange.'
+- id: commodity-fetishism
+  source: commodity fetishism
+  target: 商品拜物教
+  policy: preferred
+  variants:
+  - commodity fetish
+  - fetishism of commodities
+  note: 'How to Read Marx''s Capital: The social phenomenon where social relations between producers take on the
+    mystical form of relations between things.'
+- id: complex-labor
+  source: complex labor
+  target: 复杂劳动
+  policy: preferred
+  variants:
+  - complex labour
+  - complicated labor
+  - compound labor
+  - skilled labor
+  note: 'How to Read Marx''s Capital: Simple labor intensified or multiplied, producing more value per unit of time.'
+- id: concrete-labor
+  source: concrete labor
+  target: 具体劳动
+  policy: preferred
+  variants:
+  - concrete useful labor
+  - concrete useful labour
+  - concrete, useful labor
+  - useful labor
+  note: 'How to Read Marx''s Capital: Labor considered in its specific, qualitative form producing a particular
+    use-value.'
+- id: constant-capital
+  source: constant capital
+  target: 不变资本
+  policy: preferred
+  note: 'How to Read Marx''s Capital: Part of capital turned into means of production whose value does not undergo
+    quantitative change in production.'
+- id: credit-money
+  source: credit money
+  target: 信用货币
+  policy: preferred
+  note: 'How to Read Marx''s Capital: Money arising directly from the function of money as a means of payment.'
+- id: critique-of-political-economy
+  source: critique of political economy
+  target: 政治经济学批判
+  policy: preferred
+  note: 'How to Read Marx''s Capital: Marx''s foundational scientific critique of the economic categories and bourgeois
+    foundations of capitalism.'
+- id: directly-social-labor
+  source: directly social labor
+  target: 直接社会劳动
+  policy: preferred
+  variants:
+  - directly social labour
+  - immediately social labor
+  - immediately social labour
+  - labor in directly social form
+  note: 'How to Read Marx''s Capital: Labor that is socially acknowledged immediately without mediation through
+    commodity exchange.'
+- id: discount
+  source: discount
+  target: 贴现
+  policy: preferred
+  variants:
+  - discounting
+  category: banking technique
+  note: 'Political Economy of Money and Finance: 银行买入未到期商业票据并扣除自贴现日至到期日利息的融资业务'
+- id: downswing
+  source: downswing
+  target: 下行期
+  policy: preferred
+  variants:
+  - downturn
+  - long downswing
+  category: business cycle
+  note: 'Political Economy of Money and Finance: 经济周期中投资收缩、增长乏力、信贷紧缩的下行与萧条阶段'
+- id: dual-character-of-labor
+  source: dual character of labor
+  target: 劳动的二重性
+  policy: preferred
+  variants:
+  - dual character of the labor
+  - twofold character of labor
+  - twofold character of labour
+  - twofold character of the labour
+  note: 'How to Read Marx''s Capital: The discovery by Marx that labor embodied in commodities is both concrete
+    useful labor and abstract human labor.'
+- id: effective-demand
+  source: effective demand
+  target: 有效需求
+  policy: preferred
+  category: macroeconomics
+  note: 'Political Economy of Money and Finance: 有支付能力并能在市场上实际实现的商品总需求'
+- id: efficient-market-hypothesis
+  source: efficient market hypothesis
+  target: 有效市场假说
+  policy: preferred
+  category: finance theory
+  note: 'Political Economy of Money and Finance: 主张金融资产价格充分反映了一切可用信息的金融经济学假说'
+- id: equivalent-form
+  source: equivalent form
+  target: 等价形式
+  policy: preferred
+  variants:
+  - equivalent value form
+  - equivalent value-form
+  note: 'How to Read Marx''s Capital: The pole in the value expression where a commodity serves as the material
+    in which another commodity''s value is expressed.'
+- id: equivalent-form-of-value
+  source: equivalent form of value
+  target: 等价形式
+  policy: preferred
+  category: marxian economics
+  note: 'Political Economy of Money and Finance: 在交换中充当表现其他商品价值材料的商品所处的形式'
+- id: exchange-process
+  source: exchange process
+  target: 交换过程
+  policy: preferred
+  variants:
+  - process of exchange
+  note: 'How to Read Marx''s Capital: The real social activity of commodity owners carrying out exchanges.'
+- id: exchange-relation
+  source: exchange-relation
+  target: 交换关系
+  policy: preferred
+  variants:
+  - exchange relation
+  note: 'How to Read Marx''s Capital: The quantitative or qualitative relation between commodities exchanged on
+    the market.'
+- id: exchange-value
+  source: exchange-value
+  target: 交换价值
+  policy: preferred
+  variants:
+  - exchange value
+  - exchange-values
+  note: 'How to Read Marx''s Capital: The quantitative relation or proportion in which use-values of one kind exchange
+    for use-values of another kind.'
+- id: expanded-form-of-value
+  source: expanded form of value
+  target: 总和的或扩大的价值形式
+  policy: preferred
+  variants:
+  - expanded value-form
+  - total form of value
+  - total or expanded form of value
+  note: 'How to Read Marx''s Capital: The second stage where a commodity expresses its value in the endless series
+    of all other commodities.'
+- id: fetish-character
+  source: fetish character
+  target: 拜物教性质
+  policy: preferred
+  variants:
+  - fetish character of the commodity
+  - fetish-character
+  note: 'How to Read Marx''s Capital: The objective semblance by which the social character of labor appears as
+    an inherent property of things.'
+- id: fictitious-capital
+  source: fictitious capital
+  target: 虚拟资本
+  policy: preferred
+  category: marxian economics
+  note: 'Political Economy of Money and Finance: 本身没有价值但能通过预期收益资本化在市场上买卖的所有权凭证（如股票、债券）'
+- id: financialisation
+  source: financialisation
+  target: 金融化
+  policy: preferred
+  variants:
+  - financialization
+  category: contemporary capitalism
+  note: 'Political Economy of Money and Finance: 金融动机、金融市场、金融机构与金融精英在经济运作中主导地位不断上升的历史过程'
+- id: form-of-value
+  source: form of value
+  target: 价值形式
+  policy: preferred
+  variants:
+  - forms of value
+  - value form
+  - value-form
+  note: 'How to Read Marx''s Capital: The mode of expression of commodity value in exchange, culminating in the
+    money form.'
+- id: forms-of-value
+  source: forms of value
+  target: 价值形式
+  policy: preferred
+  category: marxian economics
+  note: 'Political Economy of Money and Finance: 商品价值在交换关系中表现的历史与逻辑演进形式'
+- id: founder-s-profit
+  source: founder's profit
+  target: 创业利润
+  policy: preferred
+  category: financial category
+  note: 'Political Economy of Money and Finance: 希法亭强调的概念，即股份公司创办人通过发行股票市值与实际投入生产资本之间的差额利润'
+- id: free-banking
+  source: free banking
+  target: 自由银行业
+  policy: preferred
+  variants:
+  - free banking school
+  category: banking system
+  note: 'Political Economy of Money and Finance: 不存在中央银行与发钞垄断、由私人银行在市场竞争中自由发行兑现通货的制度构想'
+- id: functioning-capitalist
+  source: functioning capitalist
+  target: 职能资本家
+  policy: preferred
+  category: class category
+  note: 'Political Economy of Money and Finance: 在生产或流通中实际支配和运营借入资本并组织剥削剩余价值的资本家'
+- id: general-equivalent
+  source: general equivalent
+  target: 一般等价物
+  policy: preferred
+  variants:
+  - universal equivalent
+  note: 'How to Read Marx''s Capital: A commodity whose bodily form directly counts as the visible incarnation of
+    all human labor.'
+- id: general-form-of-value
+  source: general form of value
+  target: 一般价值形式
+  policy: preferred
+  variants:
+  - general value-form
+  category: marxian economics
+  note: 'Political Economy of Money and Finance: 所有商品的价值都统一表现在一种从商品界分离出来的共同商品上的形式 | How to Read Marx''s Capital:
+    The third stage where all commodities express their values in a single excluded commodity as a general equivalent.'
+- id: general-formula-for-capital
+  source: general formula for capital
+  target: 资本的总公式
+  policy: preferred
+  variants:
+  - general formula of capital
+  note: 'How to Read Marx''s Capital: The circulation formula M-C-M'' representing the movement of value becoming
+    capital.'
+- id: gold-standard
+  source: gold standard
+  target: 金本位制
+  policy: preferred
+  variants:
+  - gold-specie standard
+  category: monetary system
+  note: 'Political Economy of Money and Finance: 以黄金为本位币或流通货币可自由按固定比例兑换为黄金的货币制度'
+- id: hoard
+  source: hoard
+  target: 贮藏货币
+  policy: preferred
+  category: monetary concept
+  note: 'Political Economy of Money and Finance: 退出流通领域作为财富独立化身保存起来的货币准备金'
+- id: hoarding
+  source: hoarding
+  target: 货币贮藏
+  policy: preferred
+  variants:
+  - formation of hoards
+  category: economic behaviour
+  note: 'Political Economy of Money and Finance: 将货币退出流通转化为静止存量的行为过程及其对流通池的调节 | How to Read Marx''s Capital: The
+    withdrawal of money from circulation to store wealth in its metallic form.'
+- id: horizontalism
+  source: horizontalism
+  target: 水平主义
+  policy: preferred
+  variants:
+  - horizontal money supply
+  category: post-keynesian
+  note: 'Political Economy of Money and Finance: 摩尔提出的后凯恩斯主义观点，认为央行将利率作为外生政策变量，货币供给在特定利率水平上完全富有弹性呈水平线'
+- id: ideal-measure-of-value
+  source: ideal measure of value
+  target: 观念的价值尺度
+  policy: preferred
+  note: 'How to Read Marx''s Capital: Money functioning in the imagination as the measure of value without needing
+    to be physically present.'
+- id: immediately-socialized-labor
+  source: immediately socialized labor
+  target: 直接社会化的劳动
+  policy: preferred
+  variants:
+  - directly socialized labor
+  - immediately socialized labour
+  note: 'How to Read Marx''s Capital: Communal labor performed under common ownership and planned cooperation.'
+- id: individual-labor-time
+  source: individual labor-time
+  target: 个别劳动时间
+  policy: preferred
+  variants:
+  - individual labor time
+  - individual labour time
+  - individual labour-time
+  note: 'How to Read Marx''s Capital: The actual time expended by an individual producer to make a product.'
+- id: industrial-capital
+  source: industrial capital
+  target: 产业资本
+  policy: preferred
+  category: marxian economics
+  note: 'Political Economy of Money and Finance: 直接投入物质生产领域并生产剩余价值的职能资本形态'
+- id: interest-bearing-capital
+  source: interest-bearing capital
+  target: 生息资本
+  policy: preferred
+  category: marxian economics
+  note: 'Political Economy of Money and Finance: 为了获得利息而贷放给职能资本家的货币资本形式，公式为 G-G'''
+- id: joint-stock-capital
+  source: joint-stock capital
+  target: 股份资本
+  policy: preferred
+  category: capital form
+  note: 'Political Economy of Money and Finance: 通过联合投资发行股票组织起来的大型现代企业资本组织形态'
+- id: labor
+  source: labor
+  target: 劳动
+  policy: preferred
+  variants:
+  - labour
+  note: 'How to Read Marx''s Capital: Human purposeful activity aimed at producing use-values.'
+- id: labor-power
+  source: labor-power
+  target: 劳动力
+  policy: preferred
+  variants:
+  - labor power
+  - labour power
+  - labour-power
+  note: 'How to Read Marx''s Capital: The aggregate of physical and mental capabilities existing in a human being,
+    sold as a commodity.'
+- id: labour-theory-of-value
+  source: labour theory of value
+  target: 劳动价值论
+  policy: preferred
+  category: value theory
+  note: 'Political Economy of Money and Finance: 政治经济学基础理论，主张商品价值由生产该商品所需的社会必要劳动时间决定'
+- id: lender-of-last-resort
+  source: lender of last resort
+  target: 最后贷款人
+  policy: preferred
+  category: central banking
+  note: 'Political Economy of Money and Finance: 中央银行在流动性危机期间向面临挤兑但有偿付能力的商业银行提供紧急流动性支持的职能'
+- id: liquidity-preference
+  source: liquidity preference
+  target: 流动性偏好
+  policy: preferred
+  category: keynesian economics
+  note: 'Political Economy of Money and Finance: 凯恩斯提出的公众由于交易、预防和投机动机而愿意持有无利息货币现金的心理偏好'
+- id: loanable-capital
+  source: loanable capital
+  target: 借贷资本
+  policy: preferred
+  variants:
+  - loan capital
+  category: marxian economics
+  note: 'Political Economy of Money and Finance: 在信用市场上由货币资本家向借款人融通以获取利息的资本'
+- id: long-boom
+  source: long boom
+  target: 长期繁荣
+  policy: preferred
+  category: historical phase
+  note: 'Political Economy of Money and Finance: 二战结束至1970年代初西方资本主义经济经历的高增长低通胀黄金时期'
+- id: long-waves
+  source: long waves
+  target: 长波理论
+  policy: preferred
+  variants:
+  - long wave theories
+  - long wave theory
+  category: cyclical theory
+  note: 'Political Economy of Money and Finance: 资本主义经济每隔约半个世纪经历扩张与收缩长周期的理论'
+- id: magnitude-of-value
+  source: magnitude of value
+  target: 价值量
+  policy: preferred
+  variants:
+  - magnitude of the value
+  note: 'How to Read Marx''s Capital: The quantity of value in a commodity, measured by the socially necessary labor-time.'
+- id: market-socialism
+  source: market socialism
+  target: 市场社会主义
+  policy: preferred
+  category: socialist economics
+  note: 'Political Economy of Money and Finance: 试图将公有制与市场机制、价格体系相结合的社会主义经济理论与模式'
+- id: means-of-circulation
+  source: means of circulation
+  target: 流通手段
+  policy: preferred
+  variants:
+  - circulating medium
+  - medium of circulation
+  category: monetary function
+  note: 'Political Economy of Money and Finance: 货币充当商品买卖媒介的职能，公式为 W-G-W | How to Read Marx''s Capital: The function
+    of money as the mediating instrument in the commodity circulation process (C-M-C).'
+- id: means-of-exchange
+  source: means of exchange
+  target: 交换手段
+  policy: preferred
+  category: monetary function
+  note: 'Political Economy of Money and Finance: 货币用于商品直接交换与购买的职能范畴'
+- id: means-of-payment
+  source: means of payment
+  target: 支付手段
+  policy: preferred
+  category: monetary function
+  note: 'Political Economy of Money and Finance: 货币在延期付款、信用结算、税赋清偿中作为独立价值形式单向转移的职能 | How to Read Marx''s Capital:
+    The function of money when commodities are bought on credit and money settles debts.'
+- id: means-of-production
+  source: means of production
+  target: 生产资料
+  policy: preferred
+  note: 'How to Read Marx''s Capital: The physical inputs to the labor process, comprising instruments of labor
+    and subjects of labor.'
+- id: means-of-purchase
+  source: means of purchase
+  target: 购买手段
+  policy: preferred
+  category: monetary function
+  note: 'Political Economy of Money and Finance: 货币在现金现货买卖中即时清偿获取商品的职能'
+- id: means-of-subsistence
+  source: means of subsistence
+  target: 生活资料
+  policy: preferred
+  note: 'How to Read Marx''s Capital: Goods necessary for the maintenance and reproduction of the working person
+    and their family.'
+- id: measure-of-value
+  source: measure of value
+  target: 价值尺度
+  policy: preferred
+  variants:
+  - measure of values
+  category: monetary function
+  note: 'Political Economy of Money and Finance: 货币作为表现和衡量一切商品价值大小的社会尺度的基本职能 | How to Read Marx''s Capital: The
+    first primary function of money, providing commodities with the material for expressing their values as prices.'
+- id: merchants-capital
+  source: merchants' capital
+  target: 商人资本
+  policy: preferred
+  category: precapitalist category
+  note: 'Political Economy of Money and Finance: 前资本主义时期以低买高卖赚取商业利润的古老资本形态'
+- id: mode-of-production
+  source: mode of production
+  target: 生产方式
+  policy: preferred
+  note: 'How to Read Marx''s Capital: A specific historical manner of producing goods, defined by forces and relations
+    of production.'
+- id: monetarism
+  source: monetarism
+  target: 货币主义
+  policy: preferred
+  category: economic school
+  note: 'Political Economy of Money and Finance: 强调货币供应量是决定通胀与名义国民收入决定性因素的主流宏观学派'
+- id: monetary-crisis
+  source: monetary crisis
+  target: 货币危机
+  policy: preferred
+  category: crisis theory
+  note: 'Political Economy of Money and Finance: 商业信用中断、银行挤兑、现金需求暴增与支付手段匮乏引发的金融风暴'
+- id: money-as-money
+  source: money as money
+  target: 作为货币的货币
+  policy: preferred
+  category: marxian economics
+  note: 'Political Economy of Money and Finance: 货币超越流通与支付手段的职能形态，在贮藏货币、支付手段与世界货币中展现纯粹独立价值'
+- id: money-commodity
+  source: money commodity
+  target: 货币商品
+  policy: preferred
+  variants:
+  - money-commodity
+  note: 'How to Read Marx''s Capital: The particular commodity that serves as the general equivalent, historically
+    gold.'
+- id: money-form
+  source: money form
+  target: 货币形式
+  policy: preferred
+  variants:
+  - money-form
+  category: marxian economics
+  note: 'Political Economy of Money and Finance: 由某种特定商品（如黄金）独占一般等价物地位时所固定的最高价值形式 | How to Read Marx''s Capital:
+    The fourth stage where the general equivalent role becomes firmly attached to a specific commodity (gold).'
+- id: money-market
+  source: money market
+  target: 货币市场
+  policy: preferred
+  category: financial market
+  note: 'Political Economy of Money and Finance: 融资期限在一年以内的短期资金借贷与短期金融工具交易市场'
+- id: money-supply-endogeneity
+  source: money supply endogeneity
+  target: 货币供给内生性
+  policy: preferred
+  variants:
+  - endogenous money
+  - endogenous money supply
+  category: post-keynesian
+  note: 'Political Economy of Money and Finance: 主张货币供给由经济体系内部信贷需求驱动创造而非央行独立外生决定的理论'
+- id: money-supply-exogeneity
+  source: money supply exogeneity
+  target: 货币供给外生性
+  policy: preferred
+  variants:
+  - exogenous money
+  - exogenous money supply
+  category: monetary orthodox
+  note: 'Political Economy of Money and Finance: 主张货币数量完全由中央银行政策工具自主决定的传统正统假定'
+- id: money-dealing-capital
+  source: money-dealing capital
+  target: 货币经营资本
+  policy: preferred
+  category: marxian economics
+  note: 'Political Economy of Money and Finance: 专门为产业资本与商业资本办理收付、汇兑、保管账目等纯粹技术操作的资本'
+- id: monied-capitalist
+  source: monied capitalist
+  target: 货币资本家
+  policy: preferred
+  variants:
+  - money capitalist
+  category: class category
+  note: 'Political Economy of Money and Finance: 拥有货币资本并将其贷出以收取利息而不直接参与经营的资本所有者'
+- id: monopoly-profit
+  source: monopoly profit
+  target: 垄断利润
+  policy: preferred
+  category: economic category
+  note: 'Political Economy of Money and Finance: 垄断资本凭借市场支配地位长期获得的超过平均利润的高额利润'
+- id: necessary-labor
+  source: necessary labor
+  target: 必要劳动
+  policy: preferred
+  variants:
+  - necessary labour
+  note: 'How to Read Marx''s Capital: Portion of the working day in which the worker reproduces the value of their
+    labor-power.'
+- id: necessary-labor-time
+  source: necessary labor-time
+  target: 必要劳动时间
+  policy: preferred
+  variants:
+  - necessary labor time
+  - necessary labour time
+  - necessary labour-time
+  note: 'How to Read Marx''s Capital: The labor-time expended during necessary labor.'
+- id: neoclassical-synthesis
+  source: neoclassical synthesis
+  target: 新古典综合
+  policy: preferred
+  category: economic school
+  note: 'Political Economy of Money and Finance: 将凯恩斯宏观短期理论与新古典微观均衡理论结合的二战后主流经济学范式'
+- id: new-marx-reading
+  source: New Marx Reading
+  target: 新马克思阅读
+  policy: preferred
+  variants:
+  - Neue Marx-Lektüre
+  - new reading of Marx
+  note: 'How to Read Marx''s Capital: A German post-1965 strand of Marxist scholarship re-reading Capital through
+    its dialectical method and critique of traditional Marxism.'
+- id: nexus-rerum
+  source: nexus rerum
+  target: 事物联系
+  policy: preferred
+  category: philosophical concept
+  note: 'Political Economy of Money and Finance: 拉丁语概念，指资本主义社会中人与人的社会生产关系通过货币与商品产生的事物性联结'
+- id: optimal-contract-design
+  source: optimal contract design
+  target: 最优契约设计
+  policy: preferred
+  category: contract theory
+  note: 'Political Economy of Money and Finance: 在信息不对称与激励约束下设计借贷与委托代理合同的微观经济理论'
+- id: organic-composition-of-capital
+  source: organic composition of capital
+  target: 资本有机构成
+  policy: preferred
+  note: 'How to Read Marx''s Capital: The value composition of capital insofar as it is determined by and reflects
+    its technical composition (c:v).'
+- id: overaccumulation
+  source: overaccumulation
+  target: 过度积累
+  policy: preferred
+  variants:
+  - capital overaccumulation
+  category: crisis theory
+  note: 'Political Economy of Money and Finance: 资本积累速度超过劳动力供给或剩余价值生产潜力，导致利润率下降的资本过剩状态'
+- id: phantom-like-objectivity
+  source: phantom-like objectivity
+  target: 幽灵般的对象性
+  policy: preferred
+  variants:
+  - spectral objectivity
+  note: 'How to Read Marx''s Capital: Marx''s characterization of value as a purely social reality that lacks physical
+    tangibility.'
+- id: planned-socialist-economy
+  source: planned socialist economy
+  target: 计划社会主义经济
+  policy: preferred
+  category: socialist economics
+  note: 'Political Economy of Money and Finance: 生产资料公有制下由国家计划统一组织生产与资源分配的社会主义经济形态'
+- id: political-economy
+  source: political economy
+  target: 政治经济学
+  policy: preferred
+  note: 'How to Read Marx''s Capital: The theoretical study of production, distribution, and exchange in human societies.'
+- id: post-keynesian-economics
+  source: post-Keynesian economics
+  target: 后凯恩斯主义经济学
+  policy: preferred
+  category: economic school
+  note: 'Political Economy of Money and Finance: 坚持凯恩斯关于不确定性、有效需求及内生货币观点的非主流宏观经济学派'
+- id: price-form
+  source: price form
+  target: 价格形式
+  policy: preferred
+  variants:
+  - form of price
+  note: 'How to Read Marx''s Capital: The expression of the value of a commodity in money.'
+- id: price-specie-flow-mechanism
+  source: price-specie flow mechanism
+  target: 价格-铸币流动机制
+  policy: preferred
+  category: classical theory
+  note: 'Political Economy of Money and Finance: 休谟提出的经典国际收支自动调节机制，黄金流入抬高物价抑制出口促成逆转'
+- id: primitive-accumulation
+  source: primitive accumulation
+  target: 原始积累
+  policy: preferred
+  variants:
+  - original accumulation
+  - so-called primitive accumulation
+  note: 'How to Read Marx''s Capital: The historical process of divorcing the producer from the means of production,
+    creating wage labor and capital.'
+- id: private-labor
+  source: private labor
+  target: 私人劳动
+  policy: preferred
+  variants:
+  - private labour
+  note: 'How to Read Marx''s Capital: Labor conducted independently by isolated private producers.'
+- id: quantity-theory-of-money
+  source: quantity theory of money
+  target: 货币数量论
+  policy: preferred
+  variants:
+  - Quantity Theory
+  category: monetary theory
+  note: 'Political Economy of Money and Finance: 主张物价水平与货币价值直接由流通中的货币数量决定的经济学理论'
+- id: rate-of-interest
+  source: rate of interest
+  target: 利息率
+  policy: preferred
+  variants:
+  - interest rate
+  category: financial category
+  note: 'Political Economy of Money and Finance: 利息量与贷出资本总额的比率'
+- id: rate-of-profit
+  source: rate of profit
+  target: 利润率
+  policy: preferred
+  category: economic category
+  note: 'Political Economy of Money and Finance: 剩余价值与预付总资本的比率，反映资本的增殖程度 | How to Read Marx''s Capital: The proportion
+    of surplus-value to total capital invested (s/(c+v)).'
+- id: rate-of-surplus-value
+  source: rate of surplus-value
+  target: 剩余价值率
+  policy: preferred
+  variants:
+  - rate of surplus value
+  note: 'How to Read Marx''s Capital: The ratio of surplus-value to variable capital (s/v), measuring the degree
+    of exploitation.'
+- id: real-abstraction
+  source: real abstraction
+  target: 真实抽象
+  policy: preferred
+  variants:
+  - Realabstraktion
+  note: 'How to Read Marx''s Capital: An abstraction taking place not in thought, but objectively in social practice
+    (exchange).'
+- id: real-bills-doctrine
+  source: real bills doctrine
+  target: 真实票据原则
+  policy: preferred
+  category: banking theory
+  note: 'Political Economy of Money and Finance: 主张商业银行只要严格依据真实生产流通交易产生的短期商业票据放款，发行的货币就不会通胀的理论'
+- id: reflux
+  source: reflux
+  target: 回流
+  policy: preferred
+  variants:
+  - law of reflux
+  - principle of reflux
+  category: monetary theory
+  note: 'Political Economy of Money and Finance: 银行学派核心法则，指发行的银行券在完成交易后必然通过偿还贷款或存入银行自动回流发钞行'
+- id: regorging
+  source: regorging
+  target: 货币回流
+  policy: preferred
+  category: monetary theory
+  note: 'Political Economy of Money and Finance: 斯图亚特与马克思分析中，流通渠道饱和后多余纸币或铸币被吐出并退回银行与贮藏的机制；斯图亚特专门用法：超过流通需要的信用货币回到发行者/银行；学术资料把它说明为后来“回流法则”的先声。避免原译“回涌吐出”。'
+- id: reification
+  source: reification
+  target: 物化
+  policy: preferred
+  variants:
+  - Verdinglichung
+  note: 'How to Read Marx''s Capital: The transformation of social relations into relations between things.'
+- id: relative-form-of-value
+  source: relative form of value
+  target: 相对价值形式
+  policy: preferred
+  variants:
+  - relative value form
+  - relative value-form
+  category: marxian economics
+  note: 'Political Economy of Money and Finance: 在简单价值表现中通过另一商品的使用价值来表现自身价值的商品所采取的形式 | How to Read Marx''s Capital:
+    The pole in the value expression where a commodity expresses its value in another commodity.'
+- id: relative-surplus-value
+  source: relative surplus-value
+  target: 相对剩余价值
+  policy: preferred
+  variants:
+  - relative surplus value
+  note: 'How to Read Marx''s Capital: Surplus-value produced by shortening necessary labor-time through increased
+    productivity.'
+- id: say-s-law
+  source: Say's law
+  target: 萨伊定律
+  policy: preferred
+  category: classical economics
+  note: 'Political Economy of Money and Finance: 古典学派供给能够自创需求的教条，被马克思与凯恩斯坚决批判'
+- id: sensuous-supersensuous
+  source: sensuous-supersensuous
+  target: 可感觉而又超感觉的
+  policy: preferred
+  variants:
+  - sensuous, extrasensory
+  - sinnlich übersinnlich
+  note: 'How to Read Marx''s Capital: Marx''s formulation describing the dual nature of commodities as physical
+    things endowed with social value properties.'
+- id: simple-form-of-value
+  source: simple form of value
+  target: 简单的、个别的或偶然的价值形式
+  policy: preferred
+  variants:
+  - accidental form of value
+  - elementary form of value
+  - elementary value-form
+  - isolated form of value
+  - simple value-form
+  note: 'How to Read Marx''s Capital: The earliest value-form where one commodity expresses its value in a single
+    other commodity (x A = y B).'
+- id: simple-labor
+  source: simple labor
+  target: 简单劳动
+  policy: preferred
+  variants:
+  - simple human labor
+  - simple labour
+  - simple unskilled labor
+  - unskilled labor
+  note: 'How to Read Marx''s Capital: Average labor that every ordinary person can perform without special training.'
+- id: social-labor
+  source: social labor
+  target: 社会劳动
+  policy: preferred
+  variants:
+  - social labour
+  note: 'How to Read Marx''s Capital: Labor considered as part of the division of labor in society.'
+- id: social-reproduction
+  source: social reproduction
+  target: 社会再生产
+  policy: preferred
+  category: marxian economics
+  note: 'Political Economy of Money and Finance: 社会生产过程的不断重复与更新，包括生产力与生产关系的再生产'
+- id: socially-necessary-labor-time
+  source: socially necessary labor-time
+  target: 社会必要劳动时间
+  policy: preferred
+  variants:
+  - socially necessary labor time
+  - socially necessary labour time
+  - socially necessary labour-time
+  note: 'How to Read Marx''s Capital: The labor-time required to produce any use-value under normal conditions of
+    production with average skill and intensity.'
+- id: stagflation
+  source: stagflation
+  target: 滞胀
+  policy: preferred
+  category: macroeconomic condition
+  note: 'Political Economy of Money and Finance: 经济停滞、高失业与高通货膨胀并存的战后资本主义危机现象'
+- id: standard-of-price
+  source: standard of price
+  target: 价格标准
+  policy: preferred
+  variants:
+  - standard of prices
+  category: monetary concept
+  note: 'Political Economy of Money and Finance: 包含一定成色贵金属的法定度量衡重量单位 | How to Read Marx''s Capital: The technical
+    standard, a fixed weight of metal, used to measure quantities of gold as money.'
+- id: structuralism
+  source: structuralism
+  target: 结构主义
+  policy: preferred
+  category: post-keynesian
+  note: 'Political Economy of Money and Finance: 奇克、道与波林等人坚持的后凯恩斯主义观点，认为金融中介行为与资产负债表结构使内生货币供给曲线呈向上倾斜'
+- id: substance-of-value
+  source: substance of value
+  target: 价值实体
+  policy: preferred
+  variants:
+  - value substance
+  note: 'How to Read Marx''s Capital: Abstract human labor that forms the common social foundation of value.'
+- id: surplus-labor
+  source: surplus labor
+  target: 剩余劳动
+  policy: preferred
+  variants:
+  - surplus labour
+  note: 'How to Read Marx''s Capital: Portion of the working day beyond necessary labor in which the worker creates
+    surplus-value for the capitalist.'
+- id: surplus-labor-time
+  source: surplus labor-time
+  target: 剩余劳动时间
+  policy: preferred
+  variants:
+  - surplus labor time
+  - surplus labour time
+  - surplus labour-time
+  note: 'How to Read Marx''s Capital: The labor-time expended during surplus labor.'
+- id: surplus-value
+  source: surplus value
+  target: 剩余价值
+  policy: preferred
+  category: marxian economics
+  note: 'Political Economy of Money and Finance: 雇佣工人在剩余劳动时间内创造的被资本家无偿占有的超过劳动力价值的价值'
+- id: surplus-value-2
+  source: surplus-value
+  target: 剩余价值
+  policy: preferred
+  variants:
+  - Mehrwert
+  - surplus value
+  note: 'How to Read Marx''s Capital: The value created by unpaid surplus labor beyond the value of labor-power.'
+- id: total-labor-of-society
+  source: total labor of society
+  target: 社会总劳动
+  policy: preferred
+  variants:
+  - social total labor
+  - total labour of society
+  - total social labor
+  note: 'How to Read Marx''s Capital: The aggregate labor of all producers in a society.'
+- id: traditional-marxism
+  source: traditional Marxism
+  target: 传统马克思主义
+  policy: preferred
+  note: 'How to Read Marx''s Capital: The historical, often dogmatic interpretation of Marx''s thought shaped by
+    the Second and Third Internationals.'
+- id: transformation-of-money-into-capital
+  source: transformation of money into capital
+  target: 货币转化为资本
+  policy: preferred
+  note: 'How to Read Marx''s Capital: The transition from simple commodity circulation (C-M-C) to capital circulation
+    (M-C-M'').'
+- id: universal-equivalent
+  source: universal equivalent
+  target: 一般等价物
+  policy: preferred
+  category: marxian economics
+  note: 'Political Economy of Money and Finance: 能够直接与一切商品相交换并表现一切商品价值的特殊商品'
+- id: upswing
+  source: upswing
+  target: 上升期
+  policy: preferred
+  category: business cycle
+  note: 'Political Economy of Money and Finance: 经济周期中投资扩张、产出增长、信贷活跃的扩张繁荣阶段'
+- id: use-value
+  source: use-value
+  target: 使用价值
+  policy: preferred
+  variants:
+  - use value
+  - use-values
+  note: 'How to Read Marx''s Capital: The usefulness of a thing, conditioned by its physical properties.'
+- id: valorization
+  source: valorization
+  target: 价值增殖
+  policy: preferred
+  variants:
+  - process of valorization
+  - valorization process
+  - Verwertung
+  - Verwertungsprozess
+  note: 'How to Read Marx''s Capital: The process of self-expansion of capital value through the extraction of surplus-value.'
+- id: value
+  source: value
+  target: 价值
+  policy: preferred
+  note: 'How to Read Marx''s Capital: The common social substance of commodities, objectified human labor in the
+    abstract.'
+- id: value-abstraction
+  source: value abstraction
+  target: 价值抽象
+  policy: preferred
+  variants:
+  - abstraction, value
+  - Wertabstraktion
+  note: 'How to Read Marx''s Capital: The conceptual or real abstraction through which commodities are treated purely
+    as objects of value.'
+- id: value-objectivity
+  source: value-objectivity
+  target: 价值对象性
+  policy: preferred
+  variants:
+  - value objectivity
+  - Wertgegenständlichkeit
+  note: 'How to Read Marx''s Capital: The purely social, spectral objectivity of value that commodities possess
+    in exchange.'
+- id: value-relation
+  source: value-relation
+  target: 价值关系
+  policy: preferred
+  variants:
+  - value relation
+  note: 'How to Read Marx''s Capital: The social relation between commodities as values.'
+- id: variable-capital
+  source: variable capital
+  target: 可变资本
+  policy: preferred
+  note: 'How to Read Marx''s Capital: Part of capital turned into labor-power that reproduces its own value and
+    creates a surplus in production.'
+- id: vulgar-political-economy
+  source: vulgar political economy
+  target: 庸俗政治经济学
+  policy: preferred
+  variants:
+  - vulgar economics
+  note: 'How to Read Marx''s Capital: Shallow, apologetic economic theory dealing only with superficial appearances.'
+- id: working-day
+  source: working day
+  target: 工作日
+  policy: preferred
+  variants:
+  - working-day
+  note: 'How to Read Marx''s Capital: The daily duration of labor composed of necessary labor-time and surplus labor-time.'
+- id: world-money
+  source: world money
+  target: 世界货币
+  policy: preferred
+  variants:
+  - universal money
+  category: monetary function
+  note: 'Political Economy of Money and Finance: 货币越出一国国界在世界市场上作为一般支付手段、购买手段与社会财富的绝对化身 | How to Read Marx''s Capital:
+    The function of money functioning in international trade in its bullion form.'
+- id: worldview-marxism
+  source: worldview Marxism
+  target: 世界观马克思主义
+  policy: preferred
+  variants:
+  - Weltanschauungsmarxismus
+  note: 'How to Read Marx''s Capital: The simplified ideological doctrine of Marxism presented as a complete philosophical
+    world system.'
