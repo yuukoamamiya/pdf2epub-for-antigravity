@@ -438,7 +438,7 @@ def test_process_chapter_content_keeps_related_subsection_heading() -> None:
     assert "## A. 简要文献目录" in processed
 
 
-def test_process_chapter_content_removes_structural_ancestor_heading() -> None:
+def test_process_chapter_content_keeps_structural_ancestor_heading() -> None:
     processed = process_chapter_content(
         "0 Stuttgart (1770–1788)",
         2,
@@ -446,8 +446,9 @@ def test_process_chapter_content_removes_structural_ancestor_heading() -> None:
         True,
     )
 
-    assert processed.startswith("## 0 Stuttgart (1770–1788)\n\nChild body")
-    assert "# I Leben" not in processed
+    assert processed.startswith(
+        "# I Leben\n\n## 0 Stuttgart (1770–1788)\n\nChild body"
+    )
     assert processed.count("Child body") == 1
 
 

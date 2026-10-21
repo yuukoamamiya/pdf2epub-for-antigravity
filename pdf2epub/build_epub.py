@@ -282,21 +282,17 @@ def process_chapter_content(
     chapter_heading = f"{heading_prefix} {toc_title}"
 
     # A leaf unit may carry structural ancestor headings in front of its own
-    # heading (for example ``# Part`` followed by ``## Section``).  Structural
-    # parents get their own heading-only HTML page during the build, so remove
-    # an ancestor-only prefix before converting the leaf.  This keeps a parent
-    # TOC entry from pointing at the first child's body.
+    # heading (for example ``# Part`` followed by ``## Section``). Keep those
+    # headings in the first child's document so navigating to the structural
+    # parent displays its title before the child section.
     first_heading_idx = _find_first_heading(lines)
     title_line_idx = _find_matching_heading(lines, toc_title)
-    if (
+    has_structural_prefix = (
         first_heading_idx is not None
         and title_line_idx is not None
         and title_line_idx != first_heading_idx
-    ):
-        prefix = lines[:title_line_idx]
-        if _is_structural_heading_prefix(prefix):
-            lines = lines[title_line_idx:]
-            title_line_idx = 0
+        and _is_structural_heading_prefix(lines[:title_line_idx])
+    )
 
     # Check for the current heading at the beginning of the unit.  If it is
     # absent, the first heading is still the best authoritative replacement
@@ -315,6 +311,15 @@ def process_chapter_content(
 
     # Remove duplicate heading if present (OCR artifact)
     _remove_duplicate_heading(lines, title_line_idx, toc_title)
+
+    # Relevel the current unit's descendants while leaving any structural
+    # ancestor prefix at its original levels.
+    if has_structural_prefix and title_line_idx is not None:
+        prefix = '\n'.join(lines[:title_line_idx])
+        unit_content = relevel_content(
+            '\n'.join(lines[title_line_idx:]), toc_level, skip_first=True
+        )
+        return f"{prefix}\n{unit_content}" if prefix else unit_content
 
     # Relevel remaining headings
     return relevel_content('\n'.join(lines), toc_level, skip_first=True)
