@@ -24,11 +24,14 @@
 - 生成或判断 `toc_tree.json`、章节层级、标题归属；
 - 提取术语、决定术语译法、翻译元数据；
 - 判断脚注、尾注、插图属于正文还是页面装饰；
-- 直接写入 `translated/`、`polished_markdown/`、`translated_compressed/`、
-  `translated_novel/`、`translated_tex_units/` 等译文目录。
+- 为新书稿生产而直接写入 `translated/`、`polished_markdown/`、`translated_compressed/`、
+  `translated_novel/`、`translated_tex_units/` 等译文目录。用户明确授权的既有 EPUB/旧译稿
+  纯格式修复不属于新书稿生产；其范围和隔离要求见第 2.4、2.5 节及 `codex.md`。
 
-这类任务必须按 `AGENTS.md` 使用 Antigravity 工作区 Subagent。主 Agent 不阅读正文并翻译，
-不把译文贴在聊天里，不代替 Subagent 写目标文件。
+以上书稿判断条目指新书稿生产；既有产物格式修复所需的局部核对按第 2.4 节处理。
+
+上述新生产任务必须按 `AGENTS.md` 使用 Antigravity 工作区 Subagent。主 Agent 不阅读正文并
+翻译，不把译文贴在聊天里，不代替 Subagent 写目标文件。
 
 ### 1.2 仓库维护任务（本文件适用范围）
 
@@ -49,7 +52,9 @@
 如果用户同时要求“改代码”和“处理这本书”，把两件事分开：
 
 1. 代码改动直接做，用测试验证；
-2. 书稿内容处理按 `AGENTS.md` 交给工作区 Subagent。
+2. 新翻译、语义润色及新生产中的 OCR/TOC/脚注/插图等结构判断按 `AGENTS.md` 交给工作区
+   Subagent；经明确授权的既有产物纯格式修复按第 2.4、2.5 节隔离处理，不要求 Antigravity
+   工作区 Subagent；Codex 的方案→Luna 实施→主代理验收流程见 `codex.md`。
 
 无法判断任务类型时，先只读检查，再向用户确认。不要用“可能涉及书稿”为理由拒绝修改代码。
 
@@ -100,7 +105,7 @@ git diff --check
 
 推送前按第 6 节运行 DeepSec 扫描。
 
-### 2.4 不要修改用户配置和书稿目录
+### 2.4 默认不修改用户配置和书稿目录
 
 维护任务默认不碰：
 
@@ -110,12 +115,15 @@ git diff --check
 - `.secrets/`
 - `pages/`、`ocr_markdown/`、`translated/` 等运行产物
 
-除非用户明确要求修某个配置或检查某个产物。为了跑测试而改 `config.yaml` 是错误做法；
-测试应使用 `tmp_path` 和合成 fixture。
+除非用户明确要求修某个配置或检查某个产物。经用户明确授权的既有 EPUB/旧译稿纯格式修复，
+可以读取完成定位和验收所需的相关正文及产物；应保留原件，在 `.work/` staging 或独立副本
+中修复，并另存结果。该授权不包括新翻译、语义润色、OCR 或翻译服务调用，也不等于允许
+覆盖 `output/`。为了跑测试而改 `config.yaml` 是错误做法；测试应使用 `tmp_path` 和合成
+fixture。
 
-### 2.5 不要用真实书稿做测试
+### 2.5 不要在真实书稿目录运行生产流程
 
-不要在 `output/<title>/` 上运行：
+维护验证默认不要在真实 `output/<title>/` 上运行：
 
 - `ocr-pages`
 - `refine-local`
@@ -125,9 +133,11 @@ git diff --check
 
 这些命令会写文件、消耗额度、改变 checkpoint，并且可能覆盖用户正在进行的任务。需要验证
 代码时，用 `tmp_path`、最小 Markdown/JSON fixture 或单独复制的临时目录（放在 `.work/`，
-不要提交）。
+不要提交）。对明确授权的既有产物修复，如确需重建 EPUB，只能在 `.work/` staging 或独立
+副本上复用已有译文，不调用 OCR/翻译服务；保留原件，并说明构建方式及 checkpoint 是否刷新。
 
-只读诊断可以读 `output/<title>/*.json` 报告；不要阅读或翻译其中的正文内容。
+默认只读诊断可读 `output/<title>/*.json` 报告，不阅读正文。上述明确授权的产物格式修复可
+按授权范围读取必要正文以定位和验收，但不得借机翻译、润色或改写内容。
 
 ### 2.6 不要把书稿规则套到代码上
 
