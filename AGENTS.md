@@ -827,6 +827,11 @@ uv run pdf2epub -c config.yaml build-epub
 3. `source/` 快照只有在旁置身份记录、规范化输入身份/内容指纹和源树 SHA-256 均匹配时才可恢复；旧的无记录快照
    仅在本地输入可用且文件树完全相同时兼容恢复。身份不明或输入已切换时命令会失败并
    保留旧快照；请使用新的运行目录继续处理，不要手工覆盖 `source/`。
+4. TeX manifest schema 2 只复用当前校验过的单元：源指纹、布局指纹、源/目标语言、主文件和
+   `unit_chars` 必须与上次验证一致；每个单元的源哈希和已验证目标文件哈希也必须匹配。
+   编译成功后会记录 `validated_units` 与 `validated_target_sha256`，连续 `--resume` 保留这些
+   检查点。旧 manifest 没有目标哈希时一律视为未验证，重新交给 Subagent 并运行校验；不能
+   仅凭非空译文或旧 `validated_units` 跳过。
 
 ## 6. 断点、失败和打包禁令
 

@@ -19,8 +19,8 @@ def translate_arxiv_command(args):
     from pdf2epub.workflow_contracts import (
         atomic_write_json,
         atomic_write_text,
-        is_reusable_checkpoint,
         load_json_object,
+        sha256_file,
     )
 
     import shutil
@@ -99,20 +99,41 @@ def translate_arxiv_command(args):
                 "estimated_tokens": estimate_tokens(unit.source_text),
             })
             unit_entries.append(entry)
+        resume_context_matches = getattr(args, "resume", False) and all(
+            previous_manifest.get(key) == expected
+            for key, expected in (
+                ("source_fingerprint", document.source_fingerprint),
+                ("layout_fingerprint", document.layout_fingerprint),
+                ("source_language", source_language),
+                ("target_language", target_language),
+                ("main_tex", document.main_tex),
+                ("unit_chars", unit_chars),
+            )
+        )
+        previous_target_hashes = previous_manifest.get(
+            "validated_target_sha256", {}
+        )
+        previous_target_hashes = (
+            previous_target_hashes if isinstance(previous_target_hashes, dict) else {}
+        )
         completed_units = []
+        validated_target_sha256 = {}
         for entry in unit_entries:
             target_path = translated_units_dir / Path(entry["target_file"]).name
             previous_entry = previous_units.get(entry["id"], {})
-            if is_reusable_checkpoint(
-                target_path,
-                entry["id"],
-                entry.get("source_sha256", ""),
-                previously_validated,
-                {entry["id"]: previous_entry.get("source_sha256", "")},
+            previous_target_hash = previous_target_hashes.get(entry["id"])
+            if (
+                resume_context_matches
+                and isinstance(previous_target_hash, str)
+                and previous_entry.get("source_sha256") == entry.get("source_sha256")
+                and entry["id"] in previously_validated
+                and target_path.is_file()
+                and sha256_file(target_path) == previous_target_hash
             ):
                 completed_units.append(entry["id"])
+                validated_target_sha256[entry["id"]] = previous_target_hash
         manifest = {
-            "schema_version": 1,
+            "schema_version": 2,
             "workflow": "antigravity-subagent",
             "task": "translate-arxiv",
             "source_language": source_language,
@@ -128,6 +149,8 @@ def translate_arxiv_command(args):
             "unit_ids": [entry["id"] for entry in unit_entries],
             "units": unit_entries,
             "resume": getattr(args, "resume", False),
+            "validated_units": completed_units,
+            "validated_target_sha256": validated_target_sha256,
             "completed_units": completed_units,
             "pending_units": [
                 entry["id"] for entry in unit_entries if entry["id"] not in completed_units
@@ -239,6 +262,8 @@ def translate_arxiv_validate_command(args):
         invalid_units = []
         safety_blocked_units = []
         completed_units = []
+        candidate_target_sha256 = {}
+        candidate_target_paths = {}
         for entry in expected_entries:
             unit_id = entry.get("id", "unknown")
             if unit_id not in document_units:
@@ -253,7 +278,8 @@ def translate_arxiv_validate_command(args):
                 missing_units.append(unit_id)
                 continue
             source_text = source_path.read_text(encoding="utf-8")
-            target_text = target_path.read_text(encoding="utf-8")
+            target_bytes = target_path.read_bytes()
+            target_text = target_bytes.decode("utf-8")
             if hashlib.sha256(source_text.encode("utf-8")).hexdigest() != entry.get(
                 "source_sha256"
             ):
@@ -279,6 +305,8 @@ def translate_arxiv_validate_command(args):
                 continue
             translated[unit_id] = target_text
             completed_units.append(unit_id)
+            candidate_target_sha256[unit_id] = hashlib.sha256(target_bytes).hexdigest()
+            candidate_target_paths[unit_id] = target_path
 
         manifest["completed_units"] = completed_units
         manifest["pending_units"] = [
@@ -289,6 +317,7 @@ def translate_arxiv_validate_command(args):
         # project compiles successfully.  Keep a separate durable checkpoint
         # so --resume never trusts a truncated or compile-breaking file.
         manifest["validated_units"] = []
+        manifest["validated_target_sha256"] = {}
         manifest["safety_blocked_units"] = safety_blocked_units
         atomic_write_json(manifest_path, manifest)
         if snapshot_errors or missing_units or invalid_units:
@@ -315,7 +344,20 @@ def translate_arxiv_validate_command(args):
         if not result.success:
             logger.error(f"TeX validation failed:\n{result.tail()}")
             return 1
+        changed_during_compile = [
+            unit_id
+            for unit_id, expected_hash in candidate_target_sha256.items()
+            if not candidate_target_paths[unit_id].is_file()
+            or sha256_file(candidate_target_paths[unit_id]) != expected_hash
+        ]
+        if changed_during_compile:
+            logger.error(
+                "Translated TeX units changed during compilation; refusing to checkpoint: "
+                f"{changed_during_compile[:10]}"
+            )
+            return 1
         manifest["validated_units"] = completed_units
+        manifest["validated_target_sha256"] = candidate_target_sha256
         atomic_write_json(manifest_path, manifest)
         logger.success(f"TeX Subagent output compiled successfully: {result.pdf_path}")
         return 0
