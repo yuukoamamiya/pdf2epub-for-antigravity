@@ -12,7 +12,7 @@ import re
 import string
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Optional
 
 from ..workflow_contracts import sha256_file
 
