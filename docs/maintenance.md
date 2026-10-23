@@ -233,14 +233,17 @@ git diff --check
 
 基线以当前提交为准；如果全量测试数量变化，确认是新增测试而不是跳过/删除测试。
 
-CI 配置在 `.github/workflows/ci.yml`，本地应能跑通等价命令。
+仓库当前不配置自动 CI。维护任务按改动范围在本地运行验收命令；常用命令如下：
 
-CI 在 Ubuntu 上覆盖 Python 3.11、3.12、3.13，并在 Windows 上覆盖 Python 3.12。
-安装、工作流合同检查和 pytest 都显式指定矩阵 Python 版本，避免 `uv` 选择本地默认解释器。
-CI 使用固定版本的 Ruff（`uvx --from ruff==0.14.1`），只检查 `F821`、`F822`、`F823`
-未定义名称规则，不在此处引入项目依赖或要求一次性风格整改。空白检查对 PR 检查 base
-与提交间的差异，对 push 检查 push 前后差异；新分支的全零 before SHA 使用默认分支的
-merge base 作为起点；若没有共同祖先或合并基点就是当前提交，则从空树检查根提交。完整历史由 checkout 提供。
+```text
+uv run pytest -q
+uv run python scripts/check_workflow_contract.py
+uvx --from ruff==0.14.1 ruff check pdf2epub --select F821,F822,F823
+git diff --check
+```
+
+文档专属任务通常只需运行 `git diff --check`；维护代码时按改动范围运行相关测试，必要时再运行
+全量测试。`scripts/check_workflow_contract.py` 和 Ruff 检查仍可手动运行，不代表启用了自动 CI。
 
 ### 4.5 文档
 
