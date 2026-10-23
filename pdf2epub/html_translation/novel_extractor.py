@@ -62,7 +62,9 @@ class NovelExtractor:
         units = []
 
         for idx, item in enumerate(self.parser.spine):
-            href = item.get('full_href') or item.get('href', '')
+            # Use the authored URI for reads; full_href is already decoded and
+            # normalized for ZIP access and must not be URI-decoded a second time.
+            href = item.get('href', '')
             file_name = Path(href).stem
 
             try:

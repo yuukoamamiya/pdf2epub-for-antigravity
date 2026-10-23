@@ -17,12 +17,13 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Mapping, Optional, Set
+from urllib.parse import unquote_to_bytes, urlsplit
 from dataclasses import dataclass
 from loguru import logger
 from lxml import etree as LET
 from defusedxml import ElementTree as ET
 
-from .epub_parser import EPUBParser
+from .epub_parser import EPUBParser, EPUBResourceNotFoundError
 from .validation import nonempty_lines, tag_mismatch_count
 from pdf2epub.subagent_runtime import resolve_subagent_model
 from pdf2epub.subagent_safety import detect_refusal
@@ -58,9 +59,19 @@ def _package_relative_href(extract_dir: Path, base_dir: Path, href: str) -> Opti
     8.3 aliases.  Resolve both sides before comparing and append the URI
     fragment only after the filesystem-relative path has been computed.
     """
-    if not isinstance(href, str) or not href or "://" in href:
+    if not isinstance(href, str) or not href or "\\" in href or "\x00" in href:
         return None
-    path_part, separator, fragment = href.partition("#")
+    try:
+        uri = urlsplit(href)
+        if uri.scheme or uri.netloc or uri.path.startswith("/"):
+            return None
+        if re.search(r"%(?![0-9a-fA-F]{2})", uri.path):
+            return None
+        path_part = unquote_to_bytes(uri.path).decode("utf-8", errors="strict")
+    except (UnicodeDecodeError, ValueError):
+        return None
+    if "\\" in path_part or "\x00" in path_part:
+        return None
     if not path_part:
         candidate = Path(base_dir).resolve()
     else:
@@ -72,7 +83,7 @@ def _package_relative_href(extract_dir: Path, base_dir: Path, href: str) -> Opti
         relative = candidate.relative_to(Path(extract_dir).resolve()).as_posix()
     except ValueError:
         return None
-    return relative + (f"#{fragment}" if separator else "")
+    return relative + (f"#{uri.fragment}" if uri.fragment else "")
 
 
 def _safe_package_path(
@@ -1535,8 +1546,9 @@ class HTMLEpubPipeline:
                 # (bypasses ebooklib which modifies HTML - removes body class, head content)
                 content = self.parser.get_raw_content(href)
                 if content is None:
-                    logger.warning(f"Item not found: {href}")
-                    continue
+                    raise EPUBResourceNotFoundError(
+                        f"Spine document is missing or ambiguous in EPUB ZIP: {href}"
+                    )
 
                 # Decode if bytes
                 if isinstance(content, bytes):
@@ -1602,6 +1614,8 @@ class HTMLEpubPipeline:
                 lines = len(compressed.splitlines()) if compressed else 0
                 logger.debug(f"Compressed: {file_stem} ({lines} translatable lines)")
 
+            except EPUBResourceNotFoundError:
+                raise
             except Exception as e:
                 logger.warning(f"Failed to extract {href}: {e}")
 

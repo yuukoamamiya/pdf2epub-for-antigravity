@@ -11,8 +11,11 @@ Uses zipfile + lxml for direct EPUB parsing (no ebooklib dependency).
 """
 
 import zipfile
+import posixpath
+import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+from urllib.parse import unquote_to_bytes, urlsplit
 from loguru import logger
 from lxml import etree
 
@@ -35,6 +38,28 @@ def _safe_xml_parser() -> etree.XMLParser:
         no_network=True,
         huge_tree=False,
     )
+
+
+class EPUBResourceNotFoundError(FileNotFoundError):
+    """A manifest resource expected by the EPUB is absent from its ZIP."""
+
+
+def _decode_package_uri_path(href: str) -> str:
+    """Decode and validate the path component of an EPUB-relative URI."""
+    if not isinstance(href, str) or not href or "\x00" in href or "\\" in href:
+        raise ValueError(f"Invalid EPUB URI: {href!r}")
+    parts = urlsplit(href)
+    if parts.scheme or parts.netloc or parts.path.startswith("/"):
+        raise ValueError(f"EPUB URI must be package-relative: {href!r}")
+    if re.search(r"%(?![0-9a-fA-F]{2})", parts.path):
+        raise ValueError(f"Malformed percent escape in EPUB URI: {href!r}")
+    try:
+        path = unquote_to_bytes(parts.path).decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"Invalid UTF-8 escape in EPUB URI: {href!r}") from exc
+    if not path or "\x00" in path or "\\" in path or path.startswith("/"):
+        raise ValueError(f"Invalid EPUB URI path: {href!r}")
+    return path
 
 # Media type to category mapping
 MEDIA_TYPE_CATEGORIES = {
@@ -104,7 +129,14 @@ class EPUBParser:
             tree = etree.fromstring(container_xml, parser=_safe_xml_parser())
             rootfile = tree.find('.//container:rootfile', NAMESPACES)
             if rootfile is not None:
-                return rootfile.get('full-path', 'content.opf')
+                full_path = rootfile.get('full-path', 'content.opf')
+                decoded_path = _decode_package_uri_path(full_path)
+                normalized = posixpath.normpath(decoded_path)
+                if normalized in ("", ".", "..") or normalized.startswith("../"):
+                    raise ValueError("EPUB rootfile path escapes the package root")
+                return normalized
+        except ValueError:
+            raise
         except Exception as e:
             logger.warning(f"Failed to parse container.xml: {e}")
         return 'content.opf'
@@ -125,11 +157,14 @@ class EPUBParser:
             href = item.get('href', '')
             media_type = item.get('media-type', '')
 
-            # Resolve href relative to OPF location
-            if self._rootfile_dir:
-                full_href = f"{self._rootfile_dir}/{href}"
+            # Keep the manifest href as-authored. Remote non-document resources
+            # remain metadata-only; they are never fetched by this parser.
+            parsed_href = urlsplit(href)
+            is_remote = bool(parsed_href.scheme or parsed_href.netloc)
+            if is_remote:
+                full_href = None
             else:
-                full_href = href
+                full_href = self._resolve_href(href)
 
             manifest[item_id] = {
                 'id': item_id,
@@ -140,10 +175,12 @@ class EPUBParser:
         return manifest
 
     def _resolve_href(self, href: str) -> str:
-        """Resolve href relative to OPF directory."""
-        if self._rootfile_dir:
-            return f"{self._rootfile_dir}/{href}"
-        return href
+        """Resolve an EPUB-relative URI to one normalized ZIP member path."""
+        decoded_path = _decode_package_uri_path(href)
+        resolved = posixpath.normpath(posixpath.join(self._rootfile_dir, decoded_path))
+        if resolved in ("", ".", "..") or resolved.startswith("../"):
+            raise ValueError(f"EPUB URI escapes the package root: {href!r}")
+        return resolved
 
     @property
     def metadata(self) -> Dict:
@@ -231,10 +268,15 @@ class EPUBParser:
             linear = itemref.get('linear', 'yes')
 
             if idref not in self._manifest:
-                logger.warning(f"Spine item not found in manifest: {idref}")
-                continue
+                raise EPUBResourceNotFoundError(
+                    f"Spine item is missing from the manifest: {idref}"
+                )
 
             item = self._manifest[idref]
+            if item['full_href'] is None:
+                raise ValueError(
+                    f"Spine item must be a local EPUB resource: {item['href']!r}"
+                )
             spine_items.append({
                 'id': item['id'],
                 'href': item['href'],
@@ -285,6 +327,10 @@ class EPUBParser:
             # Determine category
             category = MEDIA_TYPE_CATEGORIES.get(media_type, 'other')
             if category in ('document', 'ncx'):
+                continue
+
+            if item['full_href'] is None:
+                logger.info(f"Skipping remote EPUB resource without fetching it: {href}")
                 continue
 
             # Read content
@@ -533,19 +579,12 @@ class EPUBParser:
             Raw bytes content or None if not found
         """
         try:
-            # Try with rootfile directory prefix first
             full_href = self._resolve_href(href)
-            if full_href in self._zf.namelist():
+            matches = self._zf.namelist().count(full_href)
+            if matches == 1:
                 return self._zf.read(full_href)
-
-            # Try direct path
-            if href in self._zf.namelist():
-                return self._zf.read(href)
-
-            # Search for matching filename
-            for name in self._zf.namelist():
-                if name.endswith(href) or name.endswith('/' + href):
-                    return self._zf.read(name)
+            if matches > 1:
+                raise ValueError(f"Ambiguous duplicate EPUB ZIP member: {full_href}")
 
             logger.warning(f"File not found in EPUB ZIP: {href}")
             return None

@@ -51,6 +51,12 @@ build-html-epub
 哈希和 `max_nonempty_lines` 预算均未变化，才复用已有的解包/压缩结果；实体表、外部术语表
 和正文 handoff 仍会重新生成，因此不会复用过期的翻译上下文。
 
+EPUB manifest 的 `href` 按相对 URI 解析：百分号编码只解码一次，`.`/`..` 会在 EPUB ZIP
+根目录内规范化，外部 URI 和越出根目录的路径不会作为本地文件读取。解析不会用同名文件
+猜测缺失资源；缺失或重复的 spine ZIP 条目会阻断 `html-prepare`，避免生成不完整的成功缓存。
+合法的远程非 spine manifest 资源可保留为元数据，但本地流程不会下载它们；远程 spine 文档
+不受支持并会失败。导航链接也使用 URI 路径解码，同时保留片段锚点。
+
 外部领域术语表通过配置中的 `translation.glossaries` 按书选择。它们不会默认全局
 生效，可以选择零个、一个或多个 YAML/JSON 文件。原文件只读，程序会把规范化快照
 放入当前书的 `output/<title>/translation_glossaries/` 并记录 SHA-256。Subagent
