@@ -171,7 +171,7 @@ def translate_arxiv_validate_command(args):
     from pdf2epub.subagent_safety import detect_refusal
     from pdf2epub.tex_translation.compiler import TexCompiler
     from pdf2epub.tex_translation.document import scan_project, tex_structure_tokens
-    from pdf2epub.workflow_contracts import sha256_file
+    from pdf2epub.workflow_contracts import atomic_write_json, sha256_file
 
     if not args.output_dir:
         logger.error("--output-dir is required for translate-arxiv-validate")
