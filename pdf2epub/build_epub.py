@@ -1406,51 +1406,29 @@ def generate_hierarchical_toc_html(
         return False
 
 
-def build_epub(config: BuildEpubConfig) -> Path:
-    """
-    Main entry point for building EPUB from toc_tree.json.
-
-    Args:
-        config: Build configuration
-
-    Returns:
-        Path to generated EPUB file
-    """
-    import shutil
-    from .epub.builder import EpubBuilder
-    from .epub.converter import ContentConverter
-    from .epub.footnotes import FootnoteManager, validate_footnote_graph
-
-    logger.info(f"Building EPUB for: {config.book_title}")
-    logger.info(f"Source: {'translated' if config.translated else 'polished_markdown'}")
-
-    # Load toc_tree.json
+def _load_build_toc(config: BuildEpubConfig) -> Tuple[Dict, Dict]:
+    """Load source and translated TOC data, including configured cover lookup."""
     toc_tree = load_toc_tree(config.toc_tree_path)
     original_toc_tree = toc_tree
-    logger.info(f"Loaded toc_tree.json with {len(toc_tree.get('chapters', []))} top-level entries")
+    logger.info(
+        f"Loaded toc_tree.json with {len(toc_tree.get('chapters', []))} top-level entries"
+    )
 
-    # Extract cover image from PDF if not provided
     if not config.cover_image:
         cover_page_info = toc_tree.get('cover_page') or {}
         cover_page_num = cover_page_info.get('page_number')
-
-        # Fallback: use page 1 as cover if no cover page specified
         if not cover_page_num:
             cover_page_num = 1
             logger.info("No cover page in TOC, using page 1 as cover")
 
         if cover_page_num:
-            # Look for original PDF (without page number patches) for clean cover
             pdf_path = config.output_dir / "input_original.pdf"
             if not pdf_path.exists():
                 pdf_path = config.output_dir / "input.pdf"
-
             if pdf_path.exists():
-                # Extract cover to images directory
                 images_dir = config.images_dir or (config.output_dir / "images")
                 images_dir.mkdir(parents=True, exist_ok=True)
                 cover_output = images_dir / "cover.jpg"
-
                 extracted = extract_cover_image(pdf_path, cover_output, cover_page_num)
                 if extracted:
                     config.cover_image = extracted
@@ -1458,7 +1436,6 @@ def build_epub(config: BuildEpubConfig) -> Path:
             else:
                 logger.warning("Cannot extract cover: PDF not found in output directory")
 
-    # Load translated TOC if building translated EPUB
     if config.translated:
         from .toc_translation_workflow import validate_toc_translation_subagent
 
@@ -1477,19 +1454,20 @@ def build_epub(config: BuildEpubConfig) -> Path:
         with open(translated_toc_path, 'r', encoding='utf-8') as f:
             toc_tree = json.load(f)
         logger.info("Loaded locally merged, validated toc_tree_translated.json")
-
         translated_title = toc_tree.get('book_title')
         if translated_title:
             config.book_title = translated_title
             logger.info(f"Using translated title: {config.book_title}")
 
-    # Flatten and process structure
+    return original_toc_tree, toc_tree
+
+
+def _prepare_epub_structure(config: BuildEpubConfig, toc_tree: Dict) -> List[Dict]:
+    """Resolve TOC units to Markdown files and enforce endnote prerequisites."""
     toc_structure = flatten_toc_tree(
         toc_tree['chapters'],
         use_translated_titles=config.translated,
     )
-
-    # Build structure with file paths
     epub_structure = build_epub_structure(
         toc_structure,
         config.markdown_dir,
@@ -1509,93 +1487,55 @@ def build_epub(config: BuildEpubConfig) -> Path:
             + "; ".join(endnote_build_report["errors"][:10])
         )
 
-    # Count chapters with files
     def count_with_files(entries):
         count = 0
-        for e in entries:
-            if 'file_path' in e or 'virtual_file_name' in e:
+        for entry in entries:
+            if 'file_path' in entry or 'virtual_file_name' in entry:
                 count += 1
-            if 'children' in e:
-                count += count_with_files(e['children'])
+            if 'children' in entry:
+                count += count_with_files(entry['children'])
         return count
 
-    chapters_with_files = count_with_files(epub_structure)
-    logger.info(f"Found markdown files for {chapters_with_files} chapters")
+    logger.info(f"Found markdown files for {count_with_files(epub_structure)} chapters")
+    return epub_structure
 
-    # Create temporary EPUB directory
+
+def _prepare_epub_staging(config: BuildEpubConfig) -> Tuple[Path, Dict[str, str]]:
+    """Recreate the build staging tree and copy supported images."""
+    import shutil
+
     epub_dir = config.output_dir / "epub_build"
     if epub_dir.exists():
         shutil.rmtree(epub_dir)
     epub_dir.mkdir(parents=True)
-
-    # Create EPUB directory structure
     (epub_dir / "META-INF").mkdir()
     (epub_dir / "text").mkdir()
     (epub_dir / "images").mkdir()
 
-    # Copy and compress images, get mapping
     image_mapping = {}
     if config.images_dir and config.images_dir.exists():
         images_dest = epub_dir / "images"
         for img_file in config.images_dir.iterdir():
             if img_file.is_file() and img_file.suffix.lower() in ['.jpg', '.jpeg', '.png', '.gif']:
-                dest_path = images_dest / img_file.name
-                shutil.copy(img_file, dest_path)
-                # Map original name to itself (no renaming for now)
+                shutil.copy(img_file, images_dest / img_file.name)
                 image_mapping[img_file.name] = img_file.name
         logger.info(f"Copied {len(image_mapping)} images from {config.images_dir}")
+    return epub_dir, image_mapping
 
-    # Create a minimal config object for EpubBuilder and ContentConverter
-    class MinimalConfig:
-        def __init__(self, book_title, author, language, markdown_dir, publisher):
-            self.book_title = book_title
-            self.author = author
-            self.publisher = publisher
-            self.language = language
-            self.markdown_dir = markdown_dir
 
-    metadata = resolve_book_metadata(
-        [original_toc_tree, toc_tree], config.config, config.output_dir
-    )
-    author = metadata["author"] or "Unknown"
-    publisher = metadata["publisher"]
-    language = 'zh' if config.translated else toc_tree.get('language', 'en')
-    if language.lower() in ['english', 'japanese', 'chinese']:
-        language = {'english': 'en', 'japanese': 'ja', 'chinese': 'zh'}.get(language.lower(), 'en')
-
-    minimal_config = MinimalConfig(
-        config.book_title, author, language, config.markdown_dir, publisher
-    )
-    builder = EpubBuilder(minimal_config)
-
-    # Validated Markdown is an immutable staging contract.  Do not run
-    # heuristic heading cleanup here: those helpers write back to
-    # ``config.markdown_dir`` and would make the packaged EPUB differ from
-    # the content that just passed translate/polish validation.  Structural
-    # cleanup belongs before validation (or in a separate generated copy).
-    converter = ContentConverter(minimal_config)
-
-    if config.combined_markdown_path:
-        write_combined_markdown(epub_structure, config.combined_markdown_path)
-
-    # Initialize FootnoteManager after cleanup so scanned refs/defs match the
-    # markdown that will actually be converted.
-    auto_global = has_notes_chapter(toc_tree.get('chapters', []))
-    if auto_global:
-        logger.info("Detected notes chapter, enabling global footnote mode")
-    footnote_manager = FootnoteManager(
-        config.markdown_dir,
-        auto_global=auto_global,
-        epub_structure=epub_structure,
-    )
-    converter.footnote_manager = footnote_manager
-    logger.debug(f"Initialized FootnoteManager in {footnote_manager.style.value} mode")
-
-    # Create basic EPUB files
-    builder.create_mimetype(epub_dir / "mimetype")
-    builder.create_container_xml(epub_dir / "META-INF" / "container.xml")
-    builder.create_stylesheet(epub_dir / "stylesheet.css")
-
+def _render_epub_content(
+    config: BuildEpubConfig,
+    epub_dir: Path,
+    epub_structure: List[Dict],
+    language: str,
+    footnote_manager,
+    auto_global: bool,
+    validate_footnote_graph,
+    image_mapping: Dict[str, str],
+    converter: ContentConverter,
+    builder: EpubBuilder,
+) -> List[str]:
+    """Render chapter XHTML, relocate page carry-over, and write navigation."""
     # Process and convert chapters
     all_html_files = []
     generated_html = {}
@@ -1802,6 +1742,18 @@ def build_epub(config: BuildEpubConfig) -> Path:
         f"{footnote_report['backref_hrefs']} backlink(s)"
     )
 
+    return all_html_files
+
+
+def _package_epub(
+    config: BuildEpubConfig,
+    epub_dir: Path,
+    builder: EpubBuilder,
+    all_html_files: List[str],
+) -> Path:
+    """Write package metadata and create the final EPUB archive."""
+    import shutil
+
     # Handle cover image
     cover_image = None
     if config.cover_image and config.cover_image.exists():
@@ -1838,6 +1790,96 @@ def build_epub(config: BuildEpubConfig) -> Path:
     logger.info(f"Build directory kept for debugging: {epub_dir}")
     return epub_path
 
+
+
+def build_epub(config: BuildEpubConfig) -> Path:
+    """
+    Main entry point for building EPUB from toc_tree.json.
+
+    Args:
+        config: Build configuration
+
+    Returns:
+        Path to generated EPUB file
+    """
+    from .epub.builder import EpubBuilder
+    from .epub.converter import ContentConverter
+    from .epub.footnotes import FootnoteManager, validate_footnote_graph
+
+    logger.info(f"Building EPUB for: {config.book_title}")
+    logger.info(f"Source: {'translated' if config.translated else 'polished_markdown'}")
+
+    original_toc_tree, toc_tree = _load_build_toc(config)
+
+    epub_structure = _prepare_epub_structure(config, toc_tree)
+
+    epub_dir, image_mapping = _prepare_epub_staging(config)
+
+    # Create a minimal config object for EpubBuilder and ContentConverter
+    class MinimalConfig:
+        def __init__(self, book_title, author, language, markdown_dir, publisher):
+            self.book_title = book_title
+            self.author = author
+            self.publisher = publisher
+            self.language = language
+            self.markdown_dir = markdown_dir
+
+    metadata = resolve_book_metadata(
+        [original_toc_tree, toc_tree], config.config, config.output_dir
+    )
+    author = metadata["author"] or "Unknown"
+    publisher = metadata["publisher"]
+    language = 'zh' if config.translated else toc_tree.get('language', 'en')
+    if language.lower() in ['english', 'japanese', 'chinese']:
+        language = {'english': 'en', 'japanese': 'ja', 'chinese': 'zh'}.get(language.lower(), 'en')
+
+    minimal_config = MinimalConfig(
+        config.book_title, author, language, config.markdown_dir, publisher
+    )
+    builder = EpubBuilder(minimal_config)
+
+    # Validated Markdown is an immutable staging contract.  Do not run
+    # heuristic heading cleanup here: those helpers write back to
+    # ``config.markdown_dir`` and would make the packaged EPUB differ from
+    # the content that just passed translate/polish validation.  Structural
+    # cleanup belongs before validation (or in a separate generated copy).
+    converter = ContentConverter(minimal_config)
+
+    if config.combined_markdown_path:
+        write_combined_markdown(epub_structure, config.combined_markdown_path)
+
+    # Initialize FootnoteManager after cleanup so scanned refs/defs match the
+    # markdown that will actually be converted.
+    auto_global = has_notes_chapter(toc_tree.get('chapters', []))
+    if auto_global:
+        logger.info("Detected notes chapter, enabling global footnote mode")
+    footnote_manager = FootnoteManager(
+        config.markdown_dir,
+        auto_global=auto_global,
+        epub_structure=epub_structure,
+    )
+    converter.footnote_manager = footnote_manager
+    logger.debug(f"Initialized FootnoteManager in {footnote_manager.style.value} mode")
+
+    # Create basic EPUB files
+    builder.create_mimetype(epub_dir / "mimetype")
+    builder.create_container_xml(epub_dir / "META-INF" / "container.xml")
+    builder.create_stylesheet(epub_dir / "stylesheet.css")
+
+    all_html_files = _render_epub_content(
+        config,
+        epub_dir,
+        epub_structure,
+        language,
+        footnote_manager,
+        auto_global,
+        validate_footnote_graph,
+        image_mapping,
+        converter,
+        builder,
+    )
+
+    return _package_epub(config, epub_dir, builder, all_html_files)
 
 def markdown_to_html(
     markdown_content: str,
