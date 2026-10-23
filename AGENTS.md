@@ -824,6 +824,9 @@ uv run pdf2epub -c config.yaml build-epub
    `.pdf2epub/tex_subagent_prompt.md` 和 manifest 处理 `pending_units`，写入
    `translated_tex_units/`；不得修改 `source/`。
 2. 执行 `translate-arxiv-validate --output-dir <run_dir>`；通过后才交付编译产物。
+3. `source/` 快照只有在旁置身份记录、规范化输入身份/内容指纹和源树 SHA-256 均匹配时才可恢复；旧的无记录快照
+   仅在本地输入可用且文件树完全相同时兼容恢复。身份不明或输入已切换时命令会失败并
+   保留旧快照；请使用新的运行目录继续处理，不要手工覆盖 `source/`。
 
 ## 6. 断点、失败和打包禁令
 

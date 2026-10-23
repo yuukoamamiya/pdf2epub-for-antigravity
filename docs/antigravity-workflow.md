@@ -209,7 +209,7 @@ handoff 指定的稀疏上下文。
 - 如果新增 worker context schema，必须更新 `AGENTS.md` 的读取规则、此处的 schema 表和
   `tests/workflow_optimizations_test.py` 的合同测试。
 
-TeX 使用独立的 `tex_units/` 和 `translated_tex_units/` 文件。校验时本地程序检查每个单元都存在，再从这些单元重建 `project/` 并编译，因此不会把初始原文工程误判为“已经翻完”。TeX 流程中的 XeLaTeX 只用于 `translate-arxiv-validate` 的项目编译门禁，不代表 EPUB 公式也会走 XeLaTeX。
+TeX 使用独立的 `tex_units/` 和 `translated_tex_units/` 文件。`source/` 恢复时要求旁置身份记录、输入身份/内容指纹及完整源树 SHA-256 匹配；旧的无记录快照仅在本地输入可用且树摘要相同的情况下接受，其他情况失败并保留旧快照。校验时本地程序检查每个单元都存在，再从这些单元重建 `project/` 并编译，因此不会把初始原文工程误判为“已经翻完”。TeX 流程中的 XeLaTeX 只用于 `translate-arxiv-validate` 的项目编译门禁，不代表 EPUB 公式也会走 XeLaTeX。
 
 ## EPUB 高保真翻译
 

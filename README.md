@@ -123,6 +123,8 @@ Chandra 是当前主 OCR，扫描、可搜索和混合 PDF 都使用视觉 OCR�
 | 轻小说 EPUB | 小说文本流程 | 是 | `translate-novel` → `translate-novel-validate` → `build-novel-epub` |
 | arXiv / 本地 TeX | TeX 单元流程 | 是 | `translate-arxiv` → `translate-arxiv-validate` |
 
+TeX 运行目录会核验源快照的输入身份、输入内容指纹和文件树摘要后再恢复；输入切换或旧快照无法验证时会明确失败并保留原目录。
+
 PDF 纯转换模式仍必须经过 OCR、结构整理和 polish；它只跳过实体、目录翻译和正文翻译，
 不会把“未整理的 OCR 文本”直接打包。
 

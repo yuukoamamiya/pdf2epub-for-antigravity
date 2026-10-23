@@ -815,6 +815,8 @@ EPUB 的“合并”只影响 Subagent 的工作上下文：`adjacent_chapter_di
 - 轻小说：`translate-novel` 准备文本单元和元数据 handoff，Subagent 写入译文，
   `translate-novel-validate` 通过后才能 `build-novel-epub`。
 - TeX：`translate-arxiv` 建立独立运行目录和 `translated_tex_units/`，Subagent 只修改译文单元；
+  `source/` 通过 `source/` 目录旁的身份记录（本地规范路径、目录/TeX 依赖树或归档文件内容指纹，或规范化 arXiv ID）和源树 SHA-256 核验后恢复。
+  旧的无记录快照仅在本地输入可用且树摘要完全相同时兼容恢复；不匹配或无法验证时明确失败并保留旧目录。
   `translate-arxiv-validate` 重建项目并进行本地编译，不能把未翻译的原始工程当作完成结果。
 
 ## 4. 依赖方向
