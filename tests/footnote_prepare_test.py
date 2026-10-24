@@ -16,8 +16,10 @@ from pdf2epub.refine.footnote_apply import (
     apply_footnote_normalization,
 )
 from pdf2epub.refine.footnote_matching import (
+    apply_edits as _apply_footnote_edits,
     block_text_variants as _block_text_variants,
     find_exact_signature_spans as _find_exact_signature_spans,
+    signature_with_map,
 )
 from pdf2epub.refine.footnote_status import footnote_normalization_status
 from pdf2epub.refine.footnote_validation import validate_footnote_decisions
@@ -129,6 +131,154 @@ def test_footnote_block_variants_include_a_matching_page_tail_line(tmp_path: Pat
     )
 
     assert "[^2]: 1\\*-28\\* (MEJB 2003, p. 4)" in variants
+
+
+def test_footnote_block_variants_reject_partial_page_tail_and_match_whole_list(tmp_path: Path):
+    (tmp_path / "pages").mkdir()
+    page = tmp_path / "pages" / "page_001.md"
+    page.write_text("1. Alpha entirely different middle ending Omega\n", encoding="utf-8")
+    block = {"html": "<ol><li>1. Alpha correct original content</li><li>2. Omega</li></ol>"}
+
+    variants = _block_text_variants(tmp_path, 1, block)
+
+    assert len(variants) == 2
+    assert all(variant.startswith("\x00ordered-list\x00") for variant in variants)
+    assert "1. Alpha entirely different middle ending Omega" not in variants
+
+
+@pytest.mark.parametrize(
+    ("source", "block", "should_match"),
+    [
+        ("1. Alpha\n2. Beta\n", "<ol><li>1. Alpha</li><li>2. Beta</li></ol>", True),
+        ("1. Alpha\n2. Beta\n3. Gamma\n", "<ol><li>1. Alpha</li><li>2. Beta</li><li>3. Gamma</li></ol>", True),
+        ("1. Alpha\n2. Beta\n", "<ol><li>Alpha</li><li>Beta</li></ol>", True),
+        ("1. Alpha\n2. Beta\n", "<ol><li><p>Alpha</p></li><li><p>Beta</p></li></ol>", True),
+        ("9. First note.\n10. Second note.\n", "<ol><li>9. First note.</li><li>10. Second note.</li></ol>", True),
+        ("9. First note.\n10. Second note.\n", "<ol start=9><li>First note.</li><li>Second note.</li></ol>", True),
+        ("1. Alpha\n2. Beta\n", "<ol><li>1. Alpha</li><li>2. Missing</li></ol>", False),
+        ("1. Alpha\n2. Wrong middle\n3. Gamma\n", "<ol><li>1. Alpha</li><li>2. Beta</li><li>3. Gamma</li></ol>", False),
+        ("2. Beta\n1. Alpha\n", "<ol><li>1. Alpha</li><li>2. Beta</li></ol>", False),
+        ("9. First note.\n10. Second note.\n", "<ol start=1><li>9. First note.</li><li>10. Second note.</li></ol>", False),
+        ("9. First note.\n11. Second note.\n", "<ol><li>9. First note.</li><li>11. Second note.</li></ol>", False),
+        ("9. First note.\n10. Second note.\n", "<ol><li>9. First note.</li><li>Second note.</li></ol>", False),
+    ],
+)
+def test_locate_block_matches_entire_ordered_multiline_list(
+    tmp_path: Path, source: str, block: str, should_match: bool
+):
+    records = [{"name": "unit.md", "start_page": 1, "end_page": 1}]
+    variants = _block_text_variants(tmp_path, 1, {"html": block})
+    try:
+        record, (start, end) = _locate_block({"unit.md": source}, records, 1, variants)
+    except ValueError:
+        assert not should_match
+        return
+
+    assert should_match
+    assert record["name"] == "unit.md"
+    assert source[start:end] == source.strip()
+
+
+def test_locate_block_rejects_ambiguous_duplicate_complete_lists(tmp_path: Path):
+    source = "1. Alpha\n2. Beta\n\n1. Alpha\n2. Beta\n"
+    variants = _block_text_variants(
+        tmp_path, 1, {"html": "<ol><li>1. Alpha</li><li>2. Beta</li></ol>"}
+    )
+
+    with pytest.raises(ValueError, match="multiple source spans"):
+        _locate_block(
+            {"unit.md": source},
+            [{"name": "unit.md", "start_page": 1, "end_page": 1}],
+            1,
+            variants,
+        )
+
+
+def test_locate_block_returns_exact_multiline_list_between_body_text(tmp_path: Path):
+    source = "Before paragraph.\n\n1. Alpha\n2. Beta\n\nAfter paragraph.\n"
+    variants = _block_text_variants(
+        tmp_path, 1, {"html": "<ol><li>Alpha</li><li>Beta</li></ol>"}
+    )
+
+    _record, (start, end) = _locate_block(
+        {"unit.md": source},
+        [{"name": "unit.md", "start_page": 1, "end_page": 1}],
+        1,
+        variants,
+    )
+
+    assert source[start:end] == "1. Alpha\n2. Beta"
+
+
+def test_nested_html_list_is_not_flattened_into_a_matchable_block(tmp_path: Path):
+    variants = _block_text_variants(
+        tmp_path,
+        1,
+        {"html": "<ol><li>Alpha<ul><li>nested</li></ul></li><li>Beta</li></ol>"},
+    )
+
+    assert variants == []
+
+
+def test_footnote_block_variants_preserve_url_punctuation_and_offsets():
+    auto = "See <https://example.org/a_b*c?q=x_y> and (https://example.org/a_b*c)."
+    bare = "See https://example.org/a_b*c?q=x_y and (https://example.org/a_b*c)."
+    assert signature_with_map(auto)[0] == signature_with_map(bare)[0]
+    assert _find_exact_signature_spans(auto, bare) == [(0, len(auto))]
+
+    escaped = r"https://example.org/a\_b\*c?x=1&amp;y=2"
+    signature, positions = signature_with_map(escaped)
+    needle = "https://example.org/a_b*c?x=1&y=2"
+    start = signature.index(needle)
+    span = _find_exact_signature_spans(escaped, needle)
+    assert len(span) == 1
+    left, right = span[0]
+    assert escaped[left:right] == escaped
+    assert escaped[positions[start] : right].endswith("&amp;y=2")
+
+    context = "Before &amp; after https://example.org/a_b and tail"
+    url_span = _find_exact_signature_spans(context, "https://example.org/a_b")
+    assert len(url_span) == 1
+    left, right = url_span[0]
+    assert context[left:right] == "https://example.org/a_b"
+    assert _find_exact_signature_spans(
+        "https://example.org/longer", "https://example.org/"
+    ) == []
+
+    prose_entity = "Before &ldquo;quoted&rsquo; end"
+    prose_span = _find_exact_signature_spans(prose_entity, "“quoted’ end")
+    assert len(prose_span) == 1
+    left, right = prose_span[0]
+    assert prose_entity[left:right] == "&ldquo;quoted&rsquo; end"
+
+    url_entity = "See <https://example.org/?a=1&amp;b=2> now"
+    url_span = _find_exact_signature_spans(url_entity, "https://example.org/?a=1&b=2")
+    assert len(url_span) == 1
+    left, right = url_span[0]
+    assert url_entity[left:right] == "<https://example.org/?a=1&amp;b=2>"
+
+    autolink_only = "<https://example.org/a_b>"
+    autolink_span = _find_exact_signature_spans(
+        autolink_only, "https://example.org/a_b"
+    )
+    assert len(autolink_span) == 1
+    left, right = autolink_span[0]
+    assert autolink_only[left:right] == autolink_only
+    assert _apply_footnote_edits(autolink_only, [(left, right, "")]) == ""
+
+    wrapped_url = "See (https://example.org/a_b)."
+    wrapped_span = _find_exact_signature_spans(
+        wrapped_url, "https://example.org/a_b"
+    )
+    assert len(wrapped_span) == 1
+    left, right = wrapped_span[0]
+    assert wrapped_url[left:right] == "https://example.org/a_b"
+
+    nbsp_text = "A&nbsp;B"
+    nbsp_span = _find_exact_signature_spans(nbsp_text, "A B")
+    assert len(nbsp_span) == 1
+    left, right = nbsp_span[0]
+    assert nbsp_text[left:right] == "A&nbsp;B"
 
 
 def _write_sidecar(
@@ -2038,6 +2188,54 @@ def test_apply_moves_cross_page_notes_but_keeps_body_order(tmp_path: Path):
     assert "[^36]: Footnote starts on A continuation text" in normalized
     assert "[^37]: New footnote" in normalized
     assert "36 Footnote starts on A" not in normalized
+
+
+def test_apply_moves_every_line_of_a_multiline_list_block(tmp_path: Path):
+    _write_native_sidecar(
+        tmp_path,
+        1,
+        [
+            _native_block("Body <sup>1</sup>", 0, y0=100),
+            {
+                "order": 1,
+                "label": "Footnote",
+                "bbox": [80, 820, 920, 980],
+                "html": "<ol><li><p>1. First list note</p></li><li><p>2. Second list note</p></li></ol>",
+            },
+        ],
+    )
+    source = tmp_path / "ocr_markdown"
+    source.mkdir()
+    (source / "chapter_1.md").write_text(
+        "Body <sup>1</sup>\n\n1. First list note\n2. Second list note\n",
+        encoding="utf-8",
+    )
+    (source / "tree_progress.json").write_text(
+        json.dumps({"units": [{"unit_id": "chapter_1", "index_path": [1],
+                               "file": "chapter_1.md", "page_range": [1, 1]}]}),
+        encoding="utf-8",
+    )
+    (tmp_path / "toc_tree.json").write_text("{}", encoding="utf-8")
+
+    prepare_footnote_subagent(tmp_path, book_title="Test Book")
+    (tmp_path / "footnote_decisions.json").write_text(
+        json.dumps({"schema_version": 1, "decisions": [{
+            "page": 1, "block": 1, "role": "footnote_start", "key": "1",
+            "confidence": "high",
+        }]}),
+        encoding="utf-8",
+    )
+    assert validate_footnote_decisions(tmp_path)["valid"] is True
+
+    result = apply_footnote_normalization(tmp_path)
+
+    assert result["valid"] is True
+    normalized = (tmp_path / "footnote_normalized" / "chapter_1.md").read_text(
+        encoding="utf-8"
+    )
+    assert "[^1]: First list note 2. Second list note" in normalized
+    assert "\n1. First list note\n" not in normalized
+    assert "\n2. Second list note\n" not in normalized
 
 
 def test_citation_decision_is_preserved_and_not_moved(tmp_path: Path):

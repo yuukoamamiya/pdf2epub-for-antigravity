@@ -23,7 +23,7 @@ _HTML_SUP_BLOCK_RE = re.compile(
     r"<sup\b[^>]*>.*?</sup>", re.IGNORECASE | re.DOTALL
 )
 _AUTO_LINK_RE = re.compile(
-    r"<(?P<url>(?:https?://|mailto:)[^>\n]+)>", re.IGNORECASE
+    r"<(?P<url>(?:https?://|mailto:)[^<>\s]+)>", re.IGNORECASE
 )
 _SUPERSCRIPT_DIGITS = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789")
 _CIRCLED_CHARS = (
@@ -32,6 +32,8 @@ _CIRCLED_CHARS = (
     "㊱㊲㊳㊴㊵㊶㊷㊸㊹㊺㊻㊼㊽㊾㊿"
 )
 _CIRCLED_DIGITS_MAP = {str(i): char for i, char in enumerate(_CIRCLED_CHARS, 1)}
+_ORDERED_LIST_VARIANT = "\x00ordered-list\x00"
+_UNORDERED_LIST_VARIANT = "\x00unordered-list\x00"
 
 
 def plain_block_text(block: Mapping[str, Any]) -> str:
@@ -45,14 +47,58 @@ def plain_block_text(block: Mapping[str, Any]) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
+def _append_decoded_signature(
+    decoded: str, position: int, chars: list[str], positions: list[int]
+) -> None:
+    for char in decoded:
+        if char.isspace():
+            if chars and chars[-1] != " ":
+                chars.append(" ")
+                positions.append(position)
+        else:
+            chars.append(char)
+            positions.append(position)
+
+
+def _append_url_signature(
+    value: str, start: int, end: int, chars: list[str], positions: list[int]
+) -> None:
+    """Append URL content with Markdown escapes/entities mapped to source."""
+    index = start
+    while index < end:
+        if value[index] == "\\" and index + 1 < end and value[index + 1] in string.punctuation:
+            index += 1
+            chars.append(value[index])
+            positions.append(index)
+            index += 1
+            continue
+        entity = re.match(r"&(?:[A-Za-z][A-Za-z0-9]+|#\d+|#x[0-9a-f]+);", value[index:end], re.I)
+        if entity:
+            decoded = html.unescape(entity.group(0))
+            if decoded != entity.group(0):
+                _append_decoded_signature(decoded, index, chars, positions)
+                index += len(entity.group(0))
+                continue
+        chars.append(value[index])
+        positions.append(index)
+        index += 1
+
+
 def signature_with_map(value: str) -> tuple[str, list[int]]:
     """Normalize OCR/Markdown text while retaining source offsets."""
-    value = html.unescape(str(value or ""))
+    value = str(value or "")
     chars: list[str] = []
     positions: list[int] = []
     index = 0
     while index < len(value):
         char = value[index]
+        entity = re.match(r"&(?:[A-Za-z][A-Za-z0-9]+|#\d+|#x[0-9a-f]+);", value[index:], re.I)
+        if entity:
+            decoded = html.unescape(entity.group(0))
+            if decoded != entity.group(0):
+                _append_decoded_signature(decoded, index, chars, positions)
+                index += len(entity.group(0))
+                continue
         if char == "[" and (index == 0 or value[index - 1] == "\n"):
             definition = re.match(
                 r"\[\^([A-Za-z0-9_-]+)\]\s*:\s*",
@@ -92,11 +138,12 @@ def signature_with_map(value: str) -> tuple[str, list[int]]:
         if char == "<":
             auto_link_match = _AUTO_LINK_RE.match(value, index)
             if auto_link_match:
-                url = auto_link_match.group("url")
-                url_start = auto_link_match.start("url")
-                chars.extend(url)
-                positions.extend(
-                    range(url_start, url_start + len(url))
+                _append_url_signature(
+                    value,
+                    auto_link_match.start("url"),
+                    auto_link_match.end("url"),
+                    chars,
+                    positions,
                 )
                 index = auto_link_match.end()
                 continue
@@ -110,6 +157,22 @@ def signature_with_map(value: str) -> tuple[str, list[int]]:
             close = value.find(">", index + 1)
             if close >= 0:
                 index = close + 1
+                continue
+        if re.match(r"(?:https?://|mailto:)", value[index:], re.IGNORECASE):
+            bare_url_match = re.match(
+                r"^(?:https?://|mailto:)[^\s<>]+", value[index:], re.IGNORECASE
+            )
+            if bare_url_match:
+                url = bare_url_match.group(0)
+                while url and url[-1] in ".,;:!?":
+                    url = url[:-1]
+                while url.endswith(")") and url.count(")") > url.count("("):
+                    url = url[:-1]
+                if not url:
+                    index += 1
+                    continue
+                _append_url_signature(value, index, index + len(url), chars, positions)
+                index += len(url)
                 continue
         if char == ">" and index > 0 and value[index - 1] not in " \n":
             index += 1
@@ -150,6 +213,33 @@ def _is_cjk(ch: str) -> bool:
 
 
 def _is_signature_boundary(text: str, start: int, end: int) -> bool:
+    url_start = bool(re.match(r"(?:https?://|mailto:)", text[start:end], re.I))
+    if url_start:
+        url_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~:/?#[]@!$&'()*+,;=%"
+        wrapped_in_parens = (
+            start > 0
+            and text[start - 1] == "("
+            and end < len(text)
+            and text[end] == ")"
+            and text[start:end].count("(") == text[start:end].count(")")
+        )
+        left_ok = start == 0 or text[start - 1] not in url_chars or wrapped_in_parens
+        if end >= len(text) or text[end] not in url_chars:
+            right_ok = True
+        else:
+            following = text[end]
+            next_char = text[end + 1] if end + 1 < len(text) else ""
+            sentence_punctuation = ".,;:!?"
+            unmatched_closing_paren = following == ")" and (
+                text[start:end].count("(") <= text[start:end].count(")")
+                or wrapped_in_parens
+            )
+            trailing_punctuation = (
+                following in sentence_punctuation
+                and (not next_char or next_char.isspace() or next_char in "\"'”’)]}")
+            )
+            right_ok = unmatched_closing_paren or trailing_punctuation
+        return left_ok and right_ok
     left_ok = (
         (start == 0)
         or (not text[start - 1].isalnum())
@@ -167,6 +257,15 @@ def _is_signature_boundary(text: str, start: int, end: int) -> bool:
 
 def _expand_mapped_span(source: str, start: int, end: int) -> tuple[int, int]:
     """Include formatting wrappers removed from a normalized signature."""
+    if (
+        start > 0
+        and end < len(source)
+        and source[start - 1] == "<"
+        and source[end] == ">"
+        and _AUTO_LINK_RE.fullmatch(source[start - 1 : end + 1])
+    ):
+        start -= 1
+        end += 1
     opening_tags = {
         match.group(1).casefold()
         for match in re.finditer(
@@ -206,6 +305,12 @@ def _expand_mapped_span(source: str, start: int, end: int) -> tuple[int, int]:
                     end = tag_end + 1
                     continue
         break
+    if end > 0:
+        entity_start = source.rfind("&", 0, end)
+        if entity_start >= 0:
+            entity = re.match(r"&(?:[A-Za-z][A-Za-z0-9]+|#\d+|#x[0-9a-f]+);", source[entity_start:], re.I)
+            if entity and entity_start < end <= entity_start + len(entity.group(0)):
+                end = entity_start + len(entity.group(0))
     return start, end
 
 
@@ -349,25 +454,89 @@ def block_text_variants(
     raw_text = plain_block_text(block)
     variants = [raw_text] if raw_text else []
     raw_html = block.get("html")
+    structured_list = False
     if raw_html:
-        stripped = html.unescape(str(raw_html))
-        stripped = re.sub(r"<[^>]+>", "", stripped)
-        compact = re.sub(r"\s+", " ", stripped).strip()
-        if compact and compact not in variants:
-            variants.append(compact)
-        math_spaced = re.sub(r"(<math>[^<]+</math>)", r" \1 ", str(raw_html))
-        if math_spaced != raw_html:
-            stripped_math = re.sub(r"<[^>]+>", "", html.unescape(math_spaced))
-            compact_math = re.sub(r"\s+", " ", stripped_math).strip()
-            if compact_math and compact_math not in variants:
-                variants.append(compact_math)
-    corrected = _corrected_block_text(output_dir, page, raw_text)
-    if not corrected and raw_html:
-        corrected = _corrected_block_text(output_dir, page, raw_html)
-    if corrected and corrected not in variants:
-        variants.append(corrected)
+        html_text = str(raw_html)
+        list_open = re.search(r"<(ol|ul)\b([^>]*)>", html_text, re.I)
+        list_items = re.findall(r"<li\b[^>]*>(.*?)</li\s*>", html_text, re.I | re.S)
+        if list_open and list_items:
+            structured_list = True
+            variants = []
+            if re.search(r"<(?:ol|ul)\b", html_text[list_open.end():], re.I):
+                list_items = []  # Nested lists have ambiguous source intervals.
+            else:
+                tag = list_open.group(1).casefold()
+                start_match = re.search(r"\bstart\s*=\s*['\"]?(\d+)", list_open.group(2), re.I)
+                declared_start = int(start_match.group(1)) if start_match else None
+                rendered: list[str] = []
+                explicit_numbers: list[int | None] = []
+                item_texts: list[str] = []
+                for item in list_items:
+                    item_text = html.unescape(item)
+                    item_text = re.sub(r"</?(?:p|div|span)\b[^>]*>", " ", item_text, flags=re.I)
+                    item_text = re.sub(r"<[^>]+>", " ", item_text)
+                    item_text = re.sub(r"\s+", " ", item_text).strip()
+                    if not item_text:
+                        list_items = []
+                        break
+                    if tag == "ol":
+                        explicit = re.match(r"^(\d+)[.)]\s+", item_text)
+                        explicit_numbers.append(int(explicit.group(1)) if explicit else None)
+                        item_texts.append(item_text)
+                    else:
+                        item_text = re.sub(r"^[-*+]\s+", "", item_text)
+                        rendered.append(f"- {item_text}")
+                if tag == "ol" and list_items:
+                    has_explicit = [number is not None for number in explicit_numbers]
+                    if any(has_explicit) and not all(has_explicit):
+                        list_items = []
+                    else:
+                        number = declared_start or (
+                            explicit_numbers[0]
+                            if explicit_numbers and explicit_numbers[0] is not None
+                            else 1
+                        )
+                        if declared_start is not None and all(has_explicit) and explicit_numbers[0] != declared_start:
+                            list_items = []
+                        elif explicit_numbers and all(has_explicit) and any(
+                            actual != number + index
+                            for index, actual in enumerate(explicit_numbers)
+                        ):
+                            list_items = []
+                        else:
+                            for item_text in item_texts:
+                                item_text = re.sub(r"^\d+[.)]\s+", "", item_text)
+                                rendered.append(f"{number}. {item_text}")
+                                number += 1
+                if list_items and rendered:
+                    prefix = _ORDERED_LIST_VARIANT if tag == "ol" else _UNORDERED_LIST_VARIANT
+                    variants.append(prefix + "\n".join(rendered))
+                    if tag == "ol":
+                        parenthesized = [
+                            re.sub(r"^(\d+)\. ", r"\1) ", item)
+                            for item in rendered
+                        ]
+                        variants.append(prefix + "\n".join(parenthesized))
+        else:
+            stripped = html.unescape(html_text)
+            stripped = re.sub(r"<[^>]+>", "", stripped)
+            compact = re.sub(r"\s+", " ", stripped).strip()
+            if compact and compact not in variants:
+                variants.append(compact)
+            math_spaced = re.sub(r"(<math>[^<]+</math>)", r" \1 ", html_text)
+            if math_spaced != html_text:
+                stripped_math = re.sub(r"<[^>]+>", "", html.unescape(math_spaced))
+                compact_math = re.sub(r"\s+", " ", stripped_math).strip()
+                if compact_math and compact_math not in variants:
+                    variants.append(compact_math)
+    if not structured_list:
+        corrected = _corrected_block_text(output_dir, page, raw_text)
+        if not corrected and raw_html:
+            corrected = _corrected_block_text(output_dir, page, raw_html)
+        if corrected and corrected not in variants:
+            variants.append(corrected)
     raw_md_path = Path(output_dir) / "pages" / f"page_{page:03d}.md"
-    if raw_md_path.is_file():
+    if raw_md_path.is_file() and not structured_list:
         try:
             def _extract_delimited_key(text: str) -> Optional[str]:
                 text = text.strip()
@@ -379,27 +548,21 @@ def block_text_variants(
                     return m_d.group(1)
                 return None
 
+            page_text = raw_md_path.read_text(encoding="utf-8")
             raw_key = _extract_delimited_key(raw_text)
-            raw_body = re.sub(r"^[①-⑳0-9\[\^\]\(\)（）.\s:：-]+", "", raw_text).strip()
-            clean_raw = re.sub(r"\\", "", re.sub(r"[*_~`$]", "", raw_body[:20])).strip()
-
-            for line in raw_md_path.read_text(encoding="utf-8").splitlines():
+            for line in page_text.splitlines():
                 line = line.strip()
                 if not line:
                     continue
                 line_key = _extract_delimited_key(line)
                 if raw_key and line_key and raw_key != line_key:
                     continue
-                if not line_key and not re.match(r"^(?:\[\^\w+\]|\d+\b|<sup\b)", line):
+                if not line_key:
                     continue
-
-                if clean_raw:
-                    clean_line = re.sub(r"\\", "", re.sub(r"[*_~`$]", "", line))
-                    if clean_raw[:12] not in clean_line:
-                        continue
-
-                if line not in variants:
-                    variants.append(line)
+                payload = re.sub(r"^(?:\[\^\w+\]|\d+|<sup\b[^>]*>\d+</sup>)[.)、，:：\s]*", "", line).strip()
+                if payload and signature_with_map(payload)[0] == signature_with_map(raw_text)[0]:
+                    if line not in variants:
+                        variants.append(line)
         except (OSError, UnicodeDecodeError):
             pass
     return variants

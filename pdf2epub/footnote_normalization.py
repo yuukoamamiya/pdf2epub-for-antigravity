@@ -65,9 +65,19 @@ def _note_section_keys(text: str) -> List[str]:
             if next_heading and len(next_heading.group(1)) <= note_level:
                 in_notes = False
                 continue
-            match = _LEGACY_DEF_RE.match(line)
+            match = _RAW_NOTE_DEF_RE.match(line)
             if match:
-                keys.append(match.group("key"))
+                k = (
+                    match.group("key")
+                    if "key" in match.groupdict()
+                    else (match.group("html_key") or match.group("number_key"))
+                )
+                if k:
+                    keys.append(k)
+            else:
+                match = _LEGACY_DEF_RE.match(line)
+                if match:
+                    keys.append(match.group("key"))
     return keys
 
 
@@ -78,35 +88,39 @@ def validate_polish_footnote_normalization(
     file_role: str | None = None,
     expected_endnote_keys: set[str] | None = None,
 ) -> List[str]:
-    """Validate a safe OCR ``<sup>`` to Markdown-footnote migration.
-
-    The check activates only when the source contains both numbered superscripts
-    and a recognizable Notes/注释 section. This prevents mathematical and table
-    superscripts from being treated as footnotes by default.
-    """
-    source_refs = [match.group("key") for match in _MARKDOWN_REF_RE.finditer(source_text)]
+    """Validate references and definitions selected by key or Notes structure."""
+    # Definitions are excluded by the negative colon lookahead; references
+    # after a Notes section still count as references in later body chapters.
+    markdown_ref_matches = list(_MARKDOWN_REF_RE.finditer(source_text))
+    source_refs = [match.group("key") for match in markdown_ref_matches]
     source_defs = [match.group("key") for match in _MARKDOWN_DEF_RE.finditer(source_text)]
     expected_keys = set(expected_endnote_keys or ())
     role = str(file_role or "").strip().lower()
     if role == "notes":
         source_defs = endnote_definition_keys(source_text, file_role="notes")
     else:
-        legacy_refs = [match.group("key") for match in _HTML_SUP_RE.finditer(source_text)]
         legacy_defs = _note_section_keys(source_text)
-        if legacy_refs and legacy_defs:
-            source_refs.extend(legacy_refs)
-            source_defs.extend(legacy_defs)
-        if expected_keys:
-            source_refs.extend(
-                match.group("key")
-                for match in _HTML_SUP_RE.finditer(source_text)
-                if match.group("key") in expected_keys
-            )
-            source_refs.extend(
-                match.group("value").translate(_UNICODE_DIGITS)
-                for match in _UNICODE_SUP_RE.finditer(source_text)
-                if match.group("value").translate(_UNICODE_DIGITS) in expected_keys
-            )
+        # Preserve every definition occurrence.  Numbered source definitions
+        # only count inside a confirmed Notes section; Markdown definitions
+        # were collected independently above and remain local definitions.
+        source_defs.extend(legacy_defs)
+        recognized_keys = expected_keys | set(source_defs)
+        note_ranges = _note_section_ranges(source_text)
+        occupied = [(m.start(), m.end()) for m in markdown_ref_matches]
+        for pattern, key_getter, allowed_keys in (
+            (_HTML_SUP_RE, lambda m: m.group("key"), recognized_keys),
+            (_UNICODE_SUP_RE, lambda m: m.group("value").translate(_UNICODE_DIGITS), expected_keys),
+        ):
+            for match in pattern.finditer(source_text):
+                key = key_getter(match)
+                if key not in allowed_keys:
+                    continue
+                if any(a < match.end() and match.start() < b for a, b in occupied):
+                    continue
+                if _is_note_definition_occurrence(source_text, match.start(), match.end(), note_ranges):
+                    continue
+                source_refs.append(key)
+                occupied.append((match.start(), match.end()))
     if not source_refs and not source_defs:
         return []
     target_refs = [match.group("key") for match in _MARKDOWN_REF_RE.finditer(target_text)]
@@ -143,6 +157,41 @@ def validate_polish_footnote_normalization(
                 "centralized endnote superscript references remain after polishing: "
                 f"{Counter(remaining_refs)}"
             )
-    elif source_defs and _HTML_SUP_RE.search(target_text):
-        errors.append("numbered HTML <sup> footnote markers remain after polishing")
+    else:
+        remaining = [
+            match.group("key") for match in _HTML_SUP_RE.finditer(target_text)
+            if match.group("key") in (expected_keys | set(source_refs))
+        ]
+        if remaining:
+            errors.append("numbered HTML <sup> footnote markers remain after polishing")
     return errors
+
+
+def _note_section_ranges(text: str) -> list[tuple[int, int]]:
+    ranges: list[tuple[int, int]] = []
+    active_start: int | None = None
+    level = 0
+    offset = 0
+    for line in text.splitlines(keepends=True):
+        heading = _NOTE_HEADING_RE.match(line.strip())
+        next_heading = re.match(r"^(#{1,6})\s+", line)
+        if active_start is not None and next_heading and len(next_heading.group(1)) <= level:
+            ranges.append((active_start, offset))
+            active_start = None
+        if heading:
+            active_start = offset + len(line)
+            level = len(heading.group("marks"))
+        offset += len(line)
+    if active_start is not None:
+        ranges.append((active_start, len(text)))
+    return ranges
+
+
+def _is_note_definition_occurrence(
+    text: str, start: int, end: int, note_ranges: list[tuple[int, int]]
+) -> bool:
+    if not any(a <= start < b for a, b in note_ranges):
+        return False
+    line_start = text.rfind("\n", 0, start) + 1
+    prefix = text[line_start:start]
+    return bool(re.fullmatch(r"[ \t]{0,3}(?:[-*+][ \t]+)?", prefix))

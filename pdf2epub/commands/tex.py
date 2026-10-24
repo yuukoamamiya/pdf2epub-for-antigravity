@@ -28,6 +28,9 @@ def translate_arxiv_command(args):
     from pdf2epub.tex_translation.document import discover_main_tex, scan_project
 
     config, _ = load_command_config(args)
+    from pdf2epub.pipeline_policy import PipelinePolicy
+    if PipelinePolicy.from_config(config).special_unit_modes:
+        raise ValueError("translation.special_units is supported only for PDF Markdown translation")
     source_language = args.source_language or config.get("tex_translation", {}).get(
         "source_language", "English"
     )

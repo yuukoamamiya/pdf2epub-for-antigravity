@@ -13,6 +13,7 @@ from loguru import logger
 
 from pdf2epub.utils.common import book_output_dir, load_config
 from pdf2epub.utils.logging_config import configure_logging
+from pdf2epub.pipeline_policy import PipelinePolicy
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,9 @@ def load_book_context(
     behavior and pass the inferred value through ``title``.
     """
     config, config_path = load_command_config(args)
+    if "novel" in operation and PipelinePolicy.from_config(config).special_unit_modes:
+        logger.error("translation.special_units is supported only for PDF Markdown translation")
+        return None
     book_title = title or config.get("title")
     if not book_title:
         logger.error("No title found in config.yaml")

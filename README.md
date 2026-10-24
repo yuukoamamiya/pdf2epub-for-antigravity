@@ -229,6 +229,17 @@ ocr-pages --resume
 → bash scripts/build_all_epubs.sh config.yaml
 ```
 
+PDF Markdown translation can opt into controlled handling for strictly structured bibliography and index units:
+
+```yaml
+translation:
+  special_units:
+    bibliography: controlled
+    index: controlled
+```
+
+After the normal `uv run pdf2epub -c config.yaml translate` preparation, eligible files are listed in `special_pending_files` and excluded from ordinary workers. For each one, run `uv run pdf2epub -c config.yaml special-unit-prepare --kind bibliography --file <unit.md>` (or `--kind index`), have the workspace Subagent complete its JSON result, then run `special-unit-apply` with the same arguments. Run `translate-validate --file <unit.md>` and the full `translate-validate` afterward. Mixed or ambiguous units stay on the ordinary translation path.
+
 翻译流程必须同时构建两个产物：正式书名的原稿英文 EPUB 和使用译名的译文 EPUB。推荐一次运行：
 
 ```text

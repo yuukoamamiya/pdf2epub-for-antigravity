@@ -992,6 +992,16 @@ binding；所有目标文件存在后才运行该门禁。需要显式提前做�
 
 参考文献和索引单元会额外进行离线数字标记校验，覆盖年份、版次、DOI/ISBN 片段、页码、页码范围和索引交叉引用；数字标记发生丢失、改写或重排时，校验会拒绝该单元。
 
+受控参考文献/索引模式是显式可选路径：在 PDF `translation` 配置中写入
+`special_units.bibliography: controlled` 和/或 `special_units.index: controlled`。普通
+`translate` 仍先运行强制 polish、TOC 和实体表门禁；它仅把严格解析且角色明确的特殊文件从
+普通 worker pending 列表中分离，并在 manifest `special_pending_files` 中记录。逐文件运行
+`special-unit-prepare --kind <bibliography|index> --file <file.md>`，让工作区 Subagent 只填写
+指定 result JSON，随后运行同参数 `special-unit-apply`。应用产物仍要经过普通单文件和全量
+`translate-validate`。应用 receipt 与 result/manifest 进入打包 freshness 合同，策略或映射文件
+变化会使旧全量 receipt 失效。混合正文、未识别的列表/页码结构、歧义交叉引用会留给普通
+`translate`，本地程序不按年份或 DOI 猜书目边界。
+
 Windows 下的批量替换、JSON 写入和正则处理应使用仓库已有的 UTF-8 脚本或可复用
 脚本，不要拼接复杂的 PowerShell `python -c` 内联命令。若确需运行独立 Python 检查，
 入口应设置 `PYTHONIOENCODING=utf-8`；仓库 CLI 会自动覆盖继承的 GBK 设置，并把该设置

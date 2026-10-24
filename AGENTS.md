@@ -639,6 +639,26 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
 
 ### 2.2 术语提取和翻译
 
+可选的受控书目/索引处理仅适用于 PDF Markdown translation pipeline，并通过配置显式开启：
+
+```yaml
+translation:
+  special_units:
+    bibliography: controlled
+    index: controlled
+```
+
+运行普通 `translate` 后，严格可解析的已标注角色单元会列入父 manifest 的
+`special_pending_files`，不会进入普通 `worker_handoffs/`。对每个文件分别运行
+`special-unit-prepare --kind bibliography|index --file <文件名>.md`，只让工作区 Subagent
+填写生成的 JSON 小结果，再运行同参数的 `special-unit-apply`。命令完整形式为
+`uv run pdf2epub -c config.yaml special-unit-prepare --kind <bibliography|index> --file <文件名>.md`
+与 `uv run pdf2epub -c config.yaml special-unit-apply --kind <bibliography|index> --file <文件名>.md`。
+Bibliography 仅翻译标题，条目正文
+按源文精确保留；Index 仅按条目ID映射术语，页码、顺序、层级和交叉引用需保持。混合正文、模糊
+边界、无法精确确认的交叉引用必须回退普通 `translate`，不得按年份/DOI猜测边界或让实体表代替
+索引翻译。apply 后仍须执行单文件及全量 `translate-validate`。该模式不替代 PDF 的强制 polish gate。
+
 实体表尚未存在时，确认上一步 `polish-validate` 已通过，再执行以下结构门禁；此时不得
 翻译：
 

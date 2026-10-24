@@ -238,6 +238,31 @@ def _prepare_pdf_markdown_task(args, task: str):
             if str(name).startswith("reference_glossary_")
         }
     try:
+        controlled_files = {}
+        if task == "translate":
+            configured_special = policy.special_unit_modes or {}
+            if configured_special:
+                from pdf2epub.special_unit_translation import controlled_unit_is_supported
+                roles = load_pdf_file_roles(output_dir)
+                for filename, role in roles.items():
+                    kind = str(role).lower()
+                    if configured_special.get(kind) != "controlled" or kind not in {"bibliography", "index"}:
+                        continue
+                    candidate = source_dir / filename
+                    unit_context = None
+                    context_path = (unit_context_files or {}).get(filename)
+                    if context_path and Path(context_path).is_file():
+                        try:
+                            unit_context = json.loads(Path(context_path).read_text(encoding="utf-8")).get("entries", [])
+                        except (OSError, json.JSONDecodeError):
+                            unit_context = None
+                    if candidate.is_file() and controlled_unit_is_supported(
+                        kind, candidate.read_bytes().decode("utf-8"),
+                        heading_binding=(heading_contexts or {}).get(filename),
+                        context_entries=unit_context,
+                        source_language=source_language,
+                    ):
+                        controlled_files[filename] = kind
         paths = prepare_markdown_subagent(
             output_dir,
             task,
@@ -271,6 +296,7 @@ def _prepare_pdf_markdown_task(args, task: str):
                 _load_pdf_toc_titles(output_dir) if task == "polish" else None
             ),
             config_path=context.config_path,
+            controlled_files=controlled_files or None,
         )
         from pdf2epub.subagent_runtime import write_worker_handoffs
 
@@ -301,6 +327,12 @@ def _prepare_pdf_markdown_task(args, task: str):
     logger.info(
         f"在 Antigravity 中让 Subagent 执行提示词，完成后运行 {task}-validate。"
     )
+    if task == "translate" and controlled_files:
+        logger.warning(
+            "Controlled units were removed from ordinary worker handoffs and remain in special_pending_files: "
+            + ", ".join(sorted(controlled_files))
+            + ". Run special-unit-prepare/apply for each; unsupported structures stay in ordinary translate."
+        )
     return 0
 
 
@@ -436,6 +468,37 @@ def _validate_pdf_markdown_task(args, task: str):
         ):
             logger.error(f"Unknown Markdown source file: {selected_file}")
             return 1
+    if task == "translate" and policy.special_unit_modes:
+        from pdf2epub.special_unit_context import build_special_unit_context
+        from pdf2epub.special_unit_translation import controlled_unit_is_supported, receipt_is_current
+        roles = load_pdf_file_roles(output_dir)
+        candidates = [selected_file] if selected_file else sorted(roles)
+        for filename in candidates:
+            role = str(roles.get(filename, "")).lower()
+            kind = role if policy.special_unit_modes.get(role) == "controlled" else ""
+            source = source_dir / filename
+            target = target_dir / filename
+            if not kind or not source.is_file():
+                continue
+            try:
+                special_context = build_special_unit_context(
+                    output_dir, filename, kind,
+                    source_language=policy.source_language or "English",
+                    target_language=policy.target_language or "Chinese",
+                )
+                if not controlled_unit_is_supported(
+                    kind, source.read_bytes().decode("utf-8"),
+                    heading_binding=special_context.get("heading_binding"),
+                    context_entries=special_context.get("entries", []),
+                ) or not target.is_file():
+                    continue
+                current = receipt_is_current(kind, source, output_dir, target, special_context)
+            except (ValueError, OSError, UnicodeError, json.JSONDecodeError) as exc:
+                current = False
+                logger.error(f"Controlled unit {filename} lacks current special context: {exc}")
+            if not current:
+                logger.error(f"Controlled unit {filename} has no current apply receipt; run special-unit-prepare/apply before translate-validate.")
+                return 1
     report = validate_markdown_subagent(
         output_dir,
         task,
@@ -865,3 +928,85 @@ def translate_validate_command(args):
         )
         return 1
     return _validate_pdf_markdown_task(args, "translate")
+
+
+def special_unit_prepare_command(args):
+    """Prepare a strict one-file bibliography/index hand-off."""
+    context = load_book_context(args, "special-unit-prepare")
+    if context is None:
+        return 1
+    try:
+        config = context.config
+        policy = PipelinePolicy.from_config(config)
+        kind = args.kind
+        if policy.special_unit_modes.get(kind) != "controlled":
+            raise ValueError(f"explicitly enable translation.special_units.{kind}: controlled")
+        source_dir, stage = _resolve_pdf_markdown_source(context.output_dir, config)
+        if stage != "polished":
+            raise ValueError("special-unit translation requires current validated polished Markdown")
+        from pdf2epub.toc_translation_workflow import validate_toc_translation_subagent
+        toc_report = validate_toc_translation_subagent(context.output_dir)
+        if not toc_report.get("valid"):
+            raise ValueError("validated translated TOC is required before special-unit prepare")
+        if policy.requires_entities and not args.skip_entities:
+            from pdf2epub.entity_extractor import validate_entities
+            path = context.output_dir / "translation_entities.json"
+            if not path.is_file():
+                raise ValueError("translation_entities.json is required; run extract-entities-validate")
+            data = json.loads(path.read_text(encoding="utf-8"))
+            errors = validate_entities(data, context.book_title, policy.source_language or "English", policy.target_language or "Chinese")
+            if errors:
+                raise ValueError("invalid translation_entities.json: " + "; ".join(errors))
+        source = (source_dir / args.file).resolve()
+        if source.parent != source_dir.resolve() or not source.is_file():
+            raise ValueError("--file must name a Markdown file directly inside the validated source directory")
+        roles = load_pdf_file_roles(context.output_dir)
+        role = str(roles.get(args.file, "")).lower()
+        if role != kind:
+            raise ValueError(f"{args.file} has role {role!r}; expected explicit role {kind!r} in toc_tree.json")
+        from pdf2epub.special_unit_context import build_special_unit_context
+        context_data = build_special_unit_context(
+            context.output_dir, args.file, kind,
+            source_language=policy.source_language or "English",
+            target_language=policy.target_language or "Chinese",
+        )
+        from pdf2epub.special_unit_translation import prepare
+        result = prepare(kind, source, context.output_dir, context.output_dir / "translated", context=context_data)
+        logger.success(f"Prepared controlled {kind} unit {args.file}; output manifest: {result}")
+        logger.warning("After Subagent completes its scoped JSON, run special-unit-apply, then translate-validate --file and full translate-validate.")
+        return 0
+    except Exception as exc:
+        logger.error(str(exc))
+        return 1
+
+
+def special_unit_apply_command(args):
+    """Assemble the confirmed controlled result into translated Markdown."""
+    context = load_book_context(args, "special-unit-apply")
+    if context is None:
+        return 1
+    try:
+        config = context.config
+        policy = PipelinePolicy.from_config(config)
+        if policy.special_unit_modes.get(args.kind) != "controlled":
+            raise ValueError(f"translation.special_units.{args.kind} is not enabled")
+        source_dir, stage = _resolve_pdf_markdown_source(context.output_dir, config)
+        if stage != "polished":
+            raise ValueError("special-unit apply requires current validated polished Markdown")
+        source = (source_dir / args.file).resolve()
+        if source.parent != source_dir.resolve() or not source.is_file():
+            raise ValueError("--file must name a Markdown file directly inside the validated source directory")
+        from pdf2epub.special_unit_context import build_special_unit_context
+        context_data = build_special_unit_context(
+            context.output_dir, args.file, args.kind,
+            source_language=policy.source_language or "English",
+            target_language=policy.target_language or "Chinese",
+        )
+        from pdf2epub.special_unit_translation import apply
+        target = apply(args.kind, source, context.output_dir, context.output_dir / "translated", context=context_data)
+        logger.success(f"Assembled controlled output: {target}")
+        logger.warning("Run translate-validate --file for this unit and the full translate-validate gate.")
+        return 0
+    except Exception as exc:
+        logger.error(str(exc))
+        return 1

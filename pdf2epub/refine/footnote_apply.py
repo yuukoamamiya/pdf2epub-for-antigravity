@@ -154,8 +154,19 @@ def _locate_block(
     matches: list[tuple[dict[str, Any], tuple[int, int]]] = []
     seen: set[tuple[str, int, int]] = set()
     for block_text in block_texts:
+        structured_kind = None
+        if block_text.startswith("\x00ordered-list\x00"):
+            structured_kind = "ordered"
+            block_text = block_text[len("\x00ordered-list\x00") :]
+        elif block_text.startswith("\x00unordered-list\x00"):
+            structured_kind = "unordered"
+            block_text = block_text[len("\x00unordered-list\x00") :]
         for record in expected:
             for span in _find_exact_signature_spans(source_texts[record["name"]], block_text):
+                if structured_kind and not _is_complete_markdown_list(
+                    source_texts[record["name"]], span, structured_kind
+                ):
+                    continue
                 identity = (record["name"], span[0], span[1])
                 if claimed_spans and identity in claimed_spans:
                     continue
@@ -199,6 +210,25 @@ def _locate_block(
             raise ValueError(f"could not locate OCR block text on page {page}")
         raise ValueError(f"OCR block text on page {page} matched multiple source spans")
     return matches[0]
+
+
+def _is_complete_markdown_list(
+    source: str, span: tuple[int, int], kind: str
+) -> bool:
+    start, end = span
+    if start and source[start - 1] != "\n":
+        return False
+    if end < len(source) and source[end] != "\n":
+        return False
+    lines = source[start:end].splitlines()
+    if not lines:
+        return False
+    pattern = (
+        r"[ \t]*\d+[.)][ \t]+\S"
+        if kind == "ordered"
+        else r"[ \t]*[-*+][ \t]+\S"
+    )
+    return all(re.match(pattern, line) for line in lines)
 
 
 def _write_failure(output_dir: Path, errors: list[str]) -> dict[str, Any]:

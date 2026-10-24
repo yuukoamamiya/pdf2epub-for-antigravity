@@ -6,7 +6,7 @@ workflow policy in one place so command handlers do not each grow their own
 set of ``pipeline`` special cases.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Mapping, Optional
 
 from pdf2epub.ocr_consensus import secondary_ocr_enabled
@@ -28,6 +28,7 @@ class PipelinePolicy:
     source_language: Optional[str]
     target_language: Optional[str]
     requires_ocr_correction: bool = True
+    special_unit_modes: Mapping[str, str] = field(default_factory=dict)
 
     @property
     def is_conversion(self) -> bool:
@@ -52,6 +53,18 @@ class PipelinePolicy:
 
         translation = config.get("translation")
         translation = translation if isinstance(translation, Mapping) else {}
+        special = translation.get("special_units", {})
+        if special is not None and not isinstance(special, Mapping):
+            raise ValueError("translation.special_units must be a mapping")
+        for name, value in (special or {}).items():
+            if name not in {"bibliography", "index"}:
+                raise ValueError(f"unknown translation.special_units key: {name}")
+            if not isinstance(value, str) or value != "controlled":
+                raise ValueError(
+                    f"translation.special_units.{name} must be 'controlled' when specified"
+                )
+        if special and kind != "translation":
+            raise ValueError("translation.special_units is supported only by the PDF translation pipeline")
         requires_translation = kind != "epub_conversion"
         requires_entities = requires_translation and bool(
             translation.get("require_entities", True)
@@ -76,6 +89,7 @@ class PipelinePolicy:
             # for scanned PDFs. With one OCR backend, raw pages remain the
             # selected source for backwards-compatible single-pass runs.
             requires_ocr_correction=secondary_ocr_enabled(config),
+            special_unit_modes=dict(special or {}),
             # Every PDF workflow must pass the polish gate, including pure
             # conversion.  Translation-specific gates are separate flags.
             requires_polish=True,

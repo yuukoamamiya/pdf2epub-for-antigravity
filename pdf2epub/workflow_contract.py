@@ -43,6 +43,8 @@ CLI_COMMANDS: Final[frozenset[str]] = frozenset(
         "repair-page-furniture",
         "repair-page-furniture-validate",
         "status",
+        "special-unit-apply",
+        "special-unit-prepare",
         "translate",
         "translate-arxiv",
         "translate-arxiv-validate",

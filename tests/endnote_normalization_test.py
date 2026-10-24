@@ -131,6 +131,62 @@ def test_unconverted_typed_endnotes_are_rejected() -> None:
     assert any("migration mismatch" in error for error in errors)
 
 
+def test_local_definition_key_does_not_double_count_its_heading_reference():
+    source = "# Index<sup>1</sup>\n\n[^1]: Note: original pagination.\n"
+    target = source.replace("<sup>1</sup>", "[^1]")
+
+    assert validate_polish_footnote_normalization(
+        source, target, expected_endnote_keys={"1"}
+    ) == []
+
+
+def test_references_after_notes_and_numeric_chapter_heading_are_counted():
+    text = (
+        "Body [^1].\n\n## Notes\n[^1]: First.\n\n"
+        "## Chapter 2\nMore [^2].\n\n[^2]: Second.\n"
+    )
+
+    assert validate_polish_footnote_normalization(text, text) == []
+
+
+def test_mixed_reference_syntaxes_are_counted_per_source_occurrence():
+    source = "A [^1] and <sup>1</sup>.\n"
+    target = "A [^1] and [^1].\n"
+
+    assert validate_polish_footnote_normalization(
+        source, target, expected_endnote_keys={"1"}
+    ) == []
+
+
+def test_unrelated_math_superscript_is_preserved_when_footnotes_migrate():
+    source = "Body <sup>1</sup> and x<sup>99</sup>.\n\n## Notes\n1. Endnote.\n"
+    target = "Body [^1] and x<sup>99</sup>.\n\n## Notes\n[^1]: Endnote.\n"
+
+    assert validate_polish_footnote_normalization(
+        source, target, expected_endnote_keys={"1"}
+    ) == []
+
+
+def test_mixed_local_and_notes_definitions_keep_all_definition_keys():
+    source = (
+        "[^9]: Local definition.\n\n## Notes\n"
+        "1. Central note.\n[^2]: Another local note definition.\n"
+    )
+    target = (
+        "[^9]: Local definition.\n\n## Notes\n"
+        "[^1]: Central note.\n[^2]: Another local note definition.\n"
+    )
+
+    assert validate_polish_footnote_normalization(source, target) == []
+
+
+def test_local_markdown_definition_does_not_activate_unicode_math_superscript():
+    source = "Body<sup>2</sup>, x².\n\n[^2]: Note.\n"
+    target = "Body[^2], x².\n\n[^2]: Note.\n"
+
+    assert validate_polish_footnote_normalization(source, target) == []
+
+
 def test_build_gate_rejects_raw_typed_endnotes(tmp_path):
     body = tmp_path / "chapter_1.md"
     notes = tmp_path / "chapter_12.md"

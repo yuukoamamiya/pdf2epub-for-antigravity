@@ -488,6 +488,25 @@ build-epub --translated → 最终译文 EPUB
 check-ready --stage package → build-epub → 原语言 EPUB
 ```
 
+### Controlled bibliography and index units
+
+`translation.special_units` is an opt-in policy map with `bibliography: controlled` and/or
+`index: controlled`. Omission preserves the historical translator hand-off. The PDF Markdown
+`translate` command uses the same strict parser as `special-unit-prepare` and removes only
+eligible files from ordinary pending worker assignments; names remain in the full source
+inventory and are recorded as `special_pending_files`. Ineligible mixed or ambiguous structures
+remain ordinary pending work.
+
+Each hand-off is file-scoped. Bibliography accepts a heading followed by unordered list entries;
+the result confirms stable entry IDs and supplies only a translated heading, while apply preserves
+all remaining source bytes. Index accepts plain entries with terminal page/range fields or
+explicit `see` references. Results map stable IDs to translated terms; apply preserves order,
+indentation, list prefixes, blank lines, page references, and heading structure. Unsupported
+structures and unresolved cross-references fail closed. Apply receipts bind source, result, policy
+version, and target hashes; present controlled-unit artifacts also enter the translated build
+freshness receipt. Dedicated outputs still require ordinary per-file and full
+`translate-validate` before packaging.
+
 结构判断、润色和翻译不会在本地 Python 进程中完成。每个 Subagent 只处理 worker
 manifest 指定的文件；大单元单独成批。polish 使用 `polish_worker_handoffs/`，正文翻译
 使用按 TOC 顺序装箱的 `worker_handoffs/`。相邻短章节可以共享一个 worker，但每个

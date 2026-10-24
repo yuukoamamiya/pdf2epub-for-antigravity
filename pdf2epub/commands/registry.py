@@ -517,6 +517,24 @@ def register_command_parsers(subparsers) -> None:
     )
     translate_validate_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.markdown", "translate_validate_command"))
 
+    special_prepare_parser = subparsers.add_parser(
+        "special-unit-prepare",
+        help="Prepare an opt-in controlled bibliography or index translation",
+        description="Create a strict file-scoped JSON hand-off; unsupported structures must use ordinary translate.",
+    )
+    special_prepare_parser.add_argument("--kind", required=True, choices=["bibliography", "index"])
+    special_prepare_parser.add_argument("--file", required=True, help="Markdown filename inside the validated polished source directory")
+    special_prepare_parser.add_argument("--skip-entities", action="store_true", help="Explicitly skip the entity glossary gate")
+    special_prepare_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.markdown", "special_unit_prepare_command"))
+
+    special_apply_parser = subparsers.add_parser(
+        "special-unit-apply",
+        help="Validate and atomically assemble a controlled bibliography or index result",
+    )
+    special_apply_parser.add_argument("--kind", required=True, choices=["bibliography", "index"])
+    special_apply_parser.add_argument("--file", required=True)
+    special_apply_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.markdown", "special_unit_apply_command"))
+
     # arXiv / TeX whole-mode translation
     translate_arxiv_parser = subparsers.add_parser(
         "translate-arxiv",

@@ -21,6 +21,10 @@ from pdf2epub.utils.logging_config import configure_logging
 def _load_html_book_context(args, operation: str):
     """Resolve the EPUB, title, output directory, and operation logging once."""
     config = load_config(args.config)
+    from pdf2epub.pipeline_policy import PipelinePolicy
+    if PipelinePolicy.from_config(config).special_unit_modes:
+        logger.error("translation.special_units is supported only for PDF Markdown translation")
+        return None
     book_title = config.get("title")
 
     def resolve_input(title):

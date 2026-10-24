@@ -29,6 +29,34 @@ from .workflow_contracts import (
 from .ocr_consensus import secondary_ocr_enabled
 from .subagent_safety import protected_workspace_snapshot
 
+
+def _controlled_special_checkpoint_is_current(output_dir, target, filename, kind, source_hash, source_language, target_language):
+    """Require a current apply receipt before reusing a controlled unit."""
+    stem = Path(filename).stem
+    try:
+        manifest = json.loads((Path(output_dir) / f"special_unit_{kind}_{stem}_manifest.json").read_text(encoding="utf-8"))
+        if not isinstance(manifest, dict) or manifest.get("kind") != kind or manifest.get("source_file") != filename:
+            return False
+        from pdf2epub.special_unit_context import build_special_unit_context
+        context = build_special_unit_context(
+            output_dir, filename, kind,
+            source_language=source_language,
+            target_language=target_language,
+        )
+        from pdf2epub.special_unit_translation import receipt_is_current
+        output_root = Path(output_dir).resolve()
+        source_path = (output_root / manifest["source_path"]).resolve()
+        if source_path != output_root and output_root not in source_path.parents:
+            return False
+        if source_path.name != filename:
+            return False
+        return (
+            hashlib.sha256(source_path.read_bytes()).hexdigest() == source_hash
+            and receipt_is_current(kind, source_path, output_dir, target, context)
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError, KeyError, TypeError):
+        return False
+
 def prepare_markdown_subagent(
     output_dir: Path,
     task: str,
@@ -56,6 +84,7 @@ def prepare_markdown_subagent(
     continuation_files: Optional[Mapping[str, Mapping[str, Any]]] = None,
     protected_toc_titles: Optional[Iterable[str]] = None,
     config_path: Optional[str | Path] = None,
+    controlled_files: Optional[Mapping[str, str]] = None,
 ) -> Dict[str, Path]:
     """Write a manifest and prompt for a markdown Subagent task."""
     source_dir = Path(source_dir)
@@ -94,6 +123,11 @@ def prepare_markdown_subagent(
         for name, role in (file_roles or {}).items()
         if str(role).strip().lower() in TRANSLATION_SPECIAL_ROLES
     }
+    controlled = {str(name): str(kind) for name, kind in (controlled_files or {}).items()}
+    if set(controlled) - {source.name for source in sources}:
+        raise ValueError("controlled special-unit files must be declared Markdown sources")
+    if any(kind not in {"bibliography", "index"} for kind in controlled.values()):
+        raise ValueError("unsupported controlled special-unit kind")
     polish_isolated_files = (
         {
             name
@@ -202,6 +236,11 @@ def prepare_markdown_subagent(
     }
 
     def _unit_context_is_current(name: str) -> bool:
+        previous_special_modes = previous_manifest.get("special_unit_modes", {})
+        if not isinstance(previous_special_modes, Mapping):
+            previous_special_modes = {}
+        if previous_special_modes.get(name) != controlled.get(name):
+            return False
         previous_unit_hashes = previous_manifest.get("unit_context_sha256", {})
         if not isinstance(previous_unit_hashes, Mapping):
             previous_unit_hashes = {}
@@ -326,6 +365,12 @@ def prepare_markdown_subagent(
             validated_files or (),
             validation_hashes,
             target_hashes,
+        ) and (
+            source.name not in controlled
+            or _controlled_special_checkpoint_is_current(
+                output_dir, target, source.name, controlled[source.name], source_hash,
+                source_language, target_language,
+            )
         ):
             completed_files.append(source.name)
         else:
@@ -333,6 +378,8 @@ def prepare_markdown_subagent(
     blocked_human_review_files = sorted(
         previous_human_review_files & set(pending_files)
     )
+    special_pending_files = [name for name in pending_files if name in controlled]
+    pending_files = [name for name in pending_files if name not in controlled]
     if resume and blocked_human_review_files and not allow_human_review_retry:
         raise ValueError(
             "Human review is required before another automatic retry for: "
@@ -388,6 +435,8 @@ def prepare_markdown_subagent(
         "oversized_files": oversized_files,
         "completed_files": completed_files,
         "pending_files": pending_files,
+        "special_pending_files": special_pending_files,
+        "special_unit_modes": dict(controlled),
         "atomic_output_contract": {
             "temporary_pattern": ".<assigned_filename>.tmp",
             "final_pattern": "<assigned_filename>",

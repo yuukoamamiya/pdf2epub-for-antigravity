@@ -56,10 +56,10 @@ def test_command_registry_registers_every_workflow_command():
         "illustration-prepare",
         "illustration-validate",
         "glossary-candidates",
-            "html-prepare",
-            "html-skeleton-retry",
-            "html-skeleton-restore",
-            "html-validate",
+        "html-prepare",
+        "html-skeleton-retry",
+        "html-skeleton-restore",
+        "html-validate",
         "ocr-pages",
         "ocr-consensus-rebuild",
         "ocr-correct",
@@ -80,6 +80,8 @@ def test_command_registry_registers_every_workflow_command():
         "translate-toc-validate",
         "translate-validate",
         "status",
+            "special-unit-apply",
+            "special-unit-prepare",
     }
     assert all(
         subparser.get_default("func") is not None
