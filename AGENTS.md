@@ -95,7 +95,11 @@ ocr:
   backend: chandra
   secondary:
     enabled: false
+footnotes:
+  mode: auto
 ```
+
+新建或复制配置时应显式保留 `footnotes.mode: auto`。`auto` 根据 TOC 结构判断处理方式；只有确认该书是集中尾注而非页底脚注时，才可考虑 `disabled`，其他情况或判断不确定时均使用 `auto`。确认存在尾注本身不代表应禁用：通常让 `auto` 将其判为 `endnotes_only`。
 
 所有 PDF 新运行一律使用视觉 OCR，不存在 `pdf_text.mode` 或其他页面来源开关。`pdf_text`
 配置已删除；配置中残留该字段时，配置加载和 `doctor` 必须明确报错，提示该字段已删除，
@@ -479,11 +483,13 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
    uv run pdf2epub -c config.yaml footnote-prepare
    ```
 
-   默认 `footnotes.mode: auto`：refine 阶段的 TOC Subagent 在 `toc_tree.json` 顶层写入
-   `footnote_mode`（`footnotes` 或 `endnotes_only`），本地按 effective mode 执行。集中尾注书
-   由 Subagent 判断为 `endnotes_only`；只有用户明确不做任何脚注/尾注处理时才设置
-   `footnotes.mode: disabled`，Subagent 不得用 `disabled` 规避判断。也可在配置中显式固定
-   `footnotes` / `endnotes_only` / `disabled`，显式值始终覆盖 TOC 判断。TOC 中标记为
+   新建或复制配置时显式写入 `footnotes.mode: auto`；其他情况或注释类型不确定时也使用 `auto`。
+   refine 阶段的 TOC Subagent 在 `toc_tree.json` 顶层写入 `footnote_mode`（`footnotes` 或
+   `endnotes_only`），本地按 effective mode 执行。只有确认该书是集中尾注而非页底脚注时，才可考虑
+   `disabled`；确认尾注存在本身不等于应禁用，通常由 `auto` 判为 `endnotes_only`。`disabled` 会同时
+   关闭脚注处理和尾注归一化；仅在确认是纯尾注且用户明确不需要任何脚注/尾注处理时才设置。
+   不得为省步骤或规避校验而关闭。也可在配置中显式固定 `footnotes` / `endnotes_only` / `disabled`，
+   显式值始终覆盖 TOC 判断。TOC 中标记为
    `toc`、`notes`、`bibliography`、`index`、`author_notes`、`catalog`、`ad`、
    `copyright`、`frontmatter`、`metadata` 或 `cover` 的单元不会把其内容
    当作页面脚注；若这类单元与正文共用一页，优先依据 `boundary_info.start_line`/
