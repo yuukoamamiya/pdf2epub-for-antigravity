@@ -1,0 +1,4251 @@
+{
+  "schema_version": 1,
+  "metadata": {
+    "audit_date": "2026-10-27",
+    "glossary_path": "glossaries/marxist-political-economy-en-zh.yaml",
+    "glossary_version": "2026-10-27",
+    "glossary_sha256": "c93c1ba74f7786eb3369ad8bdb875345572db722f85d912101addd02039f0ddb",
+    "baseline_entries": 148,
+    "entries_audited": 158,
+    "target_changes_applied_to_existing_entries": 0,
+    "new_entries": 10,
+    "removed_variant_strings": 10,
+    "entry_groups_with_variant_cleanup": 7,
+    "counts": {
+      "confirmed": 128,
+      "unverified": 5,
+      "contextual": 23,
+      "change_suggested": 2
+    },
+    "method": "每项 source 至少进行针对性网络查询；英文变体同时检查拼写与概念边界。状态依据实际返回的网页正文或可检索摘要，不声称所有页面全文都可读取。",
+    "limitations": [
+      "confirmed 表示已找到符合该学科语境的现行中文用例，不表示唯一、强制或在所有上下文可互换。",
+      "contextual 表示译法可用但存在多译、作者专用、时代或范围限制，或精确英中平行证据较弱。",
+      "unverified 表示本轮中文通行性证据不足，不表示译错。",
+      "全国科技名词委所引政治经济学 PDF 是征求意见稿，不是正式审定标准。",
+      "部分英语标题和日文原著资料只佐证概念身份，不能单独证明中文通行；本地旧译稿未充作网络通行证据。",
+      "实际查询使用了批量检索和经典原文交叉检索；报告不是词频统计，也不是文献计量学上的通行率估计。"
+    ]
+  },
+  "entries": [
+    {
+      "id": "absolute-surplus-value",
+      "source": "absolute surplus-value",
+      "target": "绝对剩余价值",
+      "variants_before_review": [
+        "absolute surplus value"
+      ],
+      "variants_after_review": [
+        "absolute surplus value"
+      ],
+      "status": "confirmed",
+      "suggested_target": "绝对剩余价值",
+      "explanation": "02.0122直接给出英中词对；仅作征求意见稿证据。",
+      "variant_notes": "",
+      "queries": [
+        "\"absolute surplus value\" \"绝对剩余价值\""
+      ],
+      "evidence": [
+        {
+          "url": "https://www.cnterm.cn/news/tzgg/202503/P020250909521438793386.pdf",
+          "title": "政治经济学名词征求意见稿",
+          "support": "02.0122直接给出英中词对；仅作征求意见稿证据。",
+          "level": "术语机构征求意见稿"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "abstract-labor",
+      "source": "abstract labor",
+      "target": "抽象劳动",
+      "variants_before_review": [
+        "abstract human labor",
+        "abstract human labour",
+        "abstract labour",
+        "equal human labor"
+      ],
+      "variants_after_review": [
+        "abstract human labor",
+        "abstract human labour",
+        "abstract labour",
+        "equal human labor"
+      ],
+      "status": "confirmed",
+      "suggested_target": "抽象劳动",
+      "explanation": "辞典英中条目明确对应。",
+      "variant_notes": "abstract human labour可具体译抽象人类劳动，equal human labor应保留相同的人类劳动的修饰。",
+      "queries": [
+        "\"abstract labour\" \"抽象劳动\""
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/dictionary-of-marxism/marxist.org-chinese-dictionary-of-marxism-A.htm",
+          "title": "《马克思主义思想辞典》A",
+          "support": "辞典英中条目明确对应。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "alienation",
+      "source": "alienation",
+      "target": "异化",
+      "variants_before_review": [
+        "alienated labor",
+        "alienated labour",
+        "estrangement"
+      ],
+      "variants_after_review": [
+        "estrangement"
+      ],
+      "status": "confirmed",
+      "suggested_target": "异化",
+      "explanation": "主词alienation译异化成立；论文中alienated labour对应异化劳动。 主译法保留；本轮已清理误归类的 variants。",
+      "variant_notes": "移除alienated labor、alienated labour变体，不能把异化劳动缩成异化。",
+      "queries": [
+        "\"alienation\" \"异化\" \"alienated labour\""
+      ],
+      "evidence": [
+        {
+          "url": "https://skxb.jsu.edu.cn/CN/Y2002/V23/I2/15",
+          "title": "吉首大学学报《劳动创造了美》",
+          "support": "主词alienation译异化成立；论文中alienated labour对应异化劳动。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": [
+        "删除非同义变体：alienated labor, alienated labour"
+      ]
+    },
+    {
+      "id": "anti-quantity-theory",
+      "source": "anti-quantity theory",
+      "target": "反货币数量论",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "unverified",
+      "suggested_target": "反货币数量论",
+      "explanation": "英文概念确有学术用例，但定向中文检索未获得反货币数量论的权威词对；保留待核。",
+      "variant_notes": "",
+      "queries": [
+        "\"anti-quantity theory\" 中文 货币"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.repository.cam.ac.uk/items/e6d2a344-5547-4dfd-8c77-0d9a3bb37d62",
+          "title": "剑桥大学论文 Marx's theory of money: A critique",
+          "support": "英文概念确有学术用例，但定向中文检索未获得反货币数量论的权威词对；保留待核。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "asymmetric-information",
+      "source": "asymmetric information",
+      "target": "信息不对称",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "信息不对称",
+      "explanation": "正文明确写信息不对称(asymmetric information)。",
+      "variant_notes": "",
+      "queries": [
+        "\"asymmetric information\" \"信息不对称\" site:gov.cn"
+      ],
+      "evidence": [
+        {
+          "url": "https://wap.miit.gov.cn/ztzl/rdzt/fpgzztbd/ygsj/art/2020/art_24e2042da1cd4527a505476c18cd9cf2.html",
+          "title": "工信部《基于信息化发展视角下精准扶贫的策略研究》",
+          "support": "正文明确写信息不对称(asymmetric information)。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "bank-rate",
+      "source": "Bank Rate",
+      "target": "银行官定利率",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "contextual",
+      "suggested_target": "银行官定利率",
+      "explanation": "词典采用银行贴现率、银行利率；当前银行官定利率解释性可懂，未查到其为首选通行词对。历史贴现率与现代政策利率需区分。 本轮不把有用例的异译直接判为错误，也不自动覆盖现行 target。",
+      "variant_notes": "不直接一律改成贴现率，随时代及央行制度确定。",
+      "queries": [
+        "\"Bank Rate\" \"银行利率\" 英国央行 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://dictionary.cambridge.org/us/dictionary/english-chinese-simplified/bank-rate",
+          "title": "剑桥英汉词典 bank rate",
+          "support": "词典采用银行贴现率、银行利率；当前银行官定利率解释性可懂，未查到其为首选通行词对。历史贴现率与现代政策利率需区分。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "banking-controversy",
+      "source": "banking controversy",
+      "target": "银行学派与通货学派之争",
+      "variants_before_review": [
+        "Banking/Currency controversy"
+      ],
+      "variants_after_review": [
+        "Banking/Currency controversy"
+      ],
+      "status": "confirmed",
+      "suggested_target": "银行学派与通货学派之争",
+      "explanation": "中文学术文章明确讨论两学派之争；当前译法语义成立。",
+      "variant_notes": "banking controversy仅在所注19世纪争论语境下使用。",
+      "queries": [
+        "\"banking controversy\" \"银行\" 学派 争论"
+      ],
+      "evidence": [
+        {
+          "url": "https://ptext.nju.edu.cn/info/1348/9140.htm",
+          "title": "南京大学《马克思〈伦敦笔记〉的通货学派与银行学派研究》",
+          "support": "中文学术文章明确讨论两学派之争；当前译法语义成立。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "banking-credit",
+      "source": "banking credit",
+      "target": "银行信用",
+      "variants_before_review": [
+        "bank credit"
+      ],
+      "variants_after_review": [
+        "bank credit"
+      ],
+      "status": "confirmed",
+      "suggested_target": "银行信用",
+      "explanation": "bank credit列银行信贷、银行信用；当前译法是通行选项。",
+      "variant_notes": "",
+      "queries": [
+        "\"bank credit\" \"银行信用\" site:cnterm.cn"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.edb.gov.hk/attachment/sc/curriculum-development/kla/pshe/references-and-resources/economics/glossary_for_economics_2020_clean_r2_SC.pdf",
+          "title": "香港教育局《中学经济科常用英汉辞汇》2020",
+          "support": "bank credit列银行信贷、银行信用；当前译法是通行选项。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "bretton-woods-system",
+      "source": "Bretton Woods system",
+      "target": "布雷顿森林体系",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "布雷顿森林体系",
+      "explanation": "正文采用布雷顿森林体系，并引用Bretton Woods System文献。",
+      "variant_notes": "",
+      "queries": [
+        "\"Bretton Woods system\" \"布雷顿森林体系\" site:gov.cn"
+      ],
+      "evidence": [
+        {
+          "url": "https://chinawto.mofcom.gov.cn/article/br/201911/20191102915909.shtml",
+          "title": "商务部《中美经贸关系的发展和展望》",
+          "support": "正文采用布雷顿森林体系，并引用Bretton Woods System文献。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "bullion-controversy",
+      "source": "bullion controversy",
+      "target": "金块争论",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "金块争论",
+      "explanation": "论述李嘉图的金块论争；金块争论与金块论争是可用说法。",
+      "variant_notes": "建议备注别称金块论争，非错误。",
+      "queries": [
+        "\"bullion controversy\" \"金块\" \"争论\""
+      ],
+      "evidence": [
+        {
+          "url": "https://ccj.pku.edu.cn/Article/DownLoad?id=271015650&type=ArticleFile",
+          "title": "北京大学经济学期刊论文PDF",
+          "support": "论述李嘉图的金块论争；金块争论与金块论争是可用说法。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "business-cycle",
+      "source": "business cycle",
+      "target": "商业周期",
+      "variants_before_review": [
+        "trade cycle"
+      ],
+      "variants_after_review": [
+        "trade cycle"
+      ],
+      "status": "confirmed",
+      "suggested_target": "商业周期",
+      "explanation": "business cycle的译名含经济周期、商业周期、商业循环；当前是通行选项。",
+      "variant_notes": "可注明经济周期为另一常用译法，不必强改。",
+      "queries": [
+        "\"business cycle\" \"商业周期\" \"经济周期\""
+      ],
+      "evidence": [
+        {
+          "url": "https://www.edb.gov.hk/attachment/sc/curriculum-development/kla/pshe/references-and-resources/economics/glossary_for_economics_2020_clean_r2_SC.pdf",
+          "title": "香港教育局经济辞汇",
+          "support": "business cycle的译名含经济周期、商业周期、商业循环；当前是通行选项。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "capital-market",
+      "source": "capital market",
+      "target": "资本市场",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "资本市场",
+      "explanation": "capital market直接列资本市场。",
+      "variant_notes": "",
+      "queries": [
+        "\"capital market\" \"资本市场\" site:gov.cn"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.edb.gov.hk/attachment/sc/curriculum-development/kla/pshe/references-and-resources/economics/glossary_for_economics_2020_clean_r2_SC.pdf",
+          "title": "香港教育局经济辞汇",
+          "support": "capital market直接列资本市场。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "capitalist-mode-of-production",
+      "source": "capitalist mode of production",
+      "target": "资本主义生产方式",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "资本主义生产方式",
+      "explanation": "中英文标题直接对应。",
+      "variant_notes": "",
+      "queries": [
+        "\"capitalist mode of production\" \"资本主义生产方式\""
+      ],
+      "evidence": [
+        {
+          "url": "https://www.cssn.cn/zx/mkszyzx/202210/t20221027_5555119.shtml",
+          "title": "中国社会科学网《资本主义生产方式的二重性及其正义悖论》",
+          "support": "中英文标题直接对应。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "central-bank-independence",
+      "source": "central bank independence",
+      "target": "中央银行独立性",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "中央银行独立性",
+      "explanation": "正文中央行独立性与Central Bank Independence明确并列。",
+      "variant_notes": "",
+      "queries": [
+        "\"central bank independence\" \"中央银行独立性\""
+      ],
+      "evidence": [
+        {
+          "url": "https://www.boc.cn/aboutboc/ab8/201305/t20130507_2257526.html",
+          "title": "中国银行转载人民日报《国际金融热词解读：央行独立性》",
+          "support": "正文中央行独立性与Central Bank Independence明确并列。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "channel-of-circulation",
+      "source": "channel of circulation",
+      "target": "流通渠道",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "流通渠道",
+      "explanation": "中译有国内流通渠道；英语原著channel of circulation可对应此货币流通语境。",
+      "variant_notes": "应限定货币流通的渠道，不把所有渠道理论视作专门概念。",
+      "queries": [
+        "\"channel of circulation\" 马克思 流通"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/03.htm",
+          "title": "《资本论》第一卷第三章中译",
+          "support": "中译有国内流通渠道；英语原著channel of circulation可对应此货币流通语境。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "circuit-of-capital",
+      "source": "circuit of capital",
+      "target": "资本循环",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "资本循环",
+      "explanation": "中文题名及英文关键词Circuit of Capital配对。",
+      "variant_notes": "",
+      "queries": [
+        "\"circuit of capital\" \"资本循环\""
+      ],
+      "evidence": [
+        {
+          "url": "https://newetds.lib.tsinghua.edu.cn/qh/paper/summary?dbCode=ETDQH&sysId=290733",
+          "title": "清华大学学位论文《资本循环、虚拟资本与经济虚拟化》",
+          "support": "中文题名及英文关键词Circuit of Capital配对。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "classical-political-economy",
+      "source": "classical political economy",
+      "target": "古典政治经济学",
+      "variants_before_review": [
+        "classical economy"
+      ],
+      "variants_after_review": [
+        "classical economy"
+      ],
+      "status": "confirmed",
+      "suggested_target": "古典政治经济学",
+      "explanation": "双语标题明确支持。",
+      "variant_notes": "classical economy的历史用法可沿用，但现代经济结构描述不可机械套用。",
+      "queries": [
+        "\"classical political economy\" \"古典政治经济学\""
+      ],
+      "evidence": [
+        {
+          "url": "https://xuebao.ruc.edu.cn/CN/Y2019/V33/I5/64",
+          "title": "人大《古典政治经济学与自然法传统》",
+          "support": "双语标题明确支持。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "coin",
+      "source": "coin",
+      "target": "铸币",
+      "variants_before_review": [
+        "paper money",
+        "token of value"
+      ],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "铸币",
+      "explanation": "原文区分铸币、纸币、价值符号；主词coin译铸币正确。 主译法保留；本轮已清理误归类的 variants。",
+      "variant_notes": "移除paper money、token of value变体，分别应译纸币、价值符号。",
+      "queries": [
+        "\"coin\" \"paper money\" \"铸币\" \"纸币\" 资本论"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx-engels/23/013.htm",
+          "title": "《马克思恩格斯全集》23卷第三章",
+          "support": "原文区分铸币、纸币、价值符号；主词coin译铸币正确。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": [
+        "删除非同义变体：paper money, token of value"
+      ]
+    },
+    {
+      "id": "commercial-capital",
+      "source": "commercial capital",
+      "target": "商业资本",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "商业资本",
+      "explanation": "02.0230直接列商业资本 commercial capital。",
+      "variant_notes": "",
+      "queries": [
+        "\"commercial capital\" \"商业资本\""
+      ],
+      "evidence": [
+        {
+          "url": "https://www.cnterm.cn/news/tzgg/202503/P020250909521438793386.pdf",
+          "title": "政治经济学名词征求意见稿",
+          "support": "02.0230直接列商业资本 commercial capital。",
+          "level": "术语机构征求意见稿"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "commercial-credit",
+      "source": "commercial credit",
+      "target": "商业信用",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "商业信用",
+      "explanation": "开篇明确并列商业信用与银行信用，对应英文原章commercial credit/bank credit。",
+      "variant_notes": "",
+      "queries": [
+        "商业信用 commercial credit"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx-engels2/07/25.htm",
+          "title": "《马克思恩格斯文集》7卷第二十五章",
+          "support": "开篇明确并列商业信用与银行信用，对应英文原章commercial credit/bank credit。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "commodity",
+      "source": "commodity",
+      "target": "商品",
+      "variants_before_review": [
+        "commodities"
+      ],
+      "variants_after_review": [
+        "commodities"
+      ],
+      "status": "confirmed",
+      "suggested_target": "商品",
+      "explanation": "commodity直接列商品。",
+      "variant_notes": "复数commodities与单数对应正确。",
+      "queries": [
+        "商品 commodity 资本论"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.edb.gov.hk/attachment/sc/curriculum-development/kla/pshe/references-and-resources/economics/glossary_for_economics_2020_clean_r2_SC.pdf",
+          "title": "香港教育局经济辞汇",
+          "support": "commodity直接列商品。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "commodity-fetishism",
+      "source": "commodity fetishism",
+      "target": "商品拜物教",
+      "variants_before_review": [
+        "commodity fetish",
+        "fetishism of commodities"
+      ],
+      "variants_after_review": [
+        "commodity fetish",
+        "fetishism of commodities"
+      ],
+      "status": "confirmed",
+      "suggested_target": "商品拜物教",
+      "explanation": "双语标题直接配对商品拜物教/Commodity Fetishism。",
+      "variant_notes": "commodity fetish在某些句中指被拜物化对象，宜据上下文保留名词区别。",
+      "queries": [
+        "\"commodity fetishism\" \"商品拜物教\" site:edu.cn"
+      ],
+      "evidence": [
+        {
+          "url": "https://xuebao.neu.edu.cn/social/CN/10.15936/j.cnki.1008-3758.2019.06.012",
+          "title": "东北大学学报《德国新马克思阅读运动的商品拜物教新释》",
+          "support": "双语标题直接配对商品拜物教/Commodity Fetishism。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "complex-labor",
+      "source": "complex labor",
+      "target": "复杂劳动",
+      "variants_before_review": [
+        "complex labour",
+        "complicated labor",
+        "compound labor",
+        "skilled labor"
+      ],
+      "variants_after_review": [
+        "complex labour",
+        "complicated labor",
+        "compound labor",
+        "skilled labor"
+      ],
+      "status": "confirmed",
+      "suggested_target": "复杂劳动",
+      "explanation": "正文复核复杂劳动的马克思语境，配合英语学术论文Complex Labor, Value and the Reduction Problem。",
+      "variant_notes": "skilled labor在一般劳动市场语境应译熟练劳动，不保证与复杂劳动普遍等同。",
+      "queries": [
+        "复杂劳动 complex labor 资本论"
+      ],
+      "evidence": [
+        {
+          "url": "https://ztzx.ruc.edu.cn/xzgd/2de2f9204f7c4e0abba7f4161bb8247f.htm",
+          "title": "人大政治经济学研究中心关于复杂劳动的论文",
+          "support": "正文复核复杂劳动的马克思语境，配合英语学术论文Complex Labor, Value and the Reduction Problem。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "concrete-labor",
+      "source": "concrete labor",
+      "target": "具体劳动",
+      "variants_before_review": [
+        "concrete useful labor",
+        "concrete useful labour",
+        "concrete, useful labor",
+        "useful labor"
+      ],
+      "variants_after_review": [
+        "concrete useful labor",
+        "concrete useful labour",
+        "concrete, useful labor",
+        "useful labor"
+      ],
+      "status": "confirmed",
+      "suggested_target": "具体劳动",
+      "explanation": "02.0047直接给出具体劳动 concrete labor；辞典亦说明有用劳动/具体劳动。",
+      "variant_notes": "concrete useful labor可保留具体有用劳动的限定，不宜一律删去有用。",
+      "queries": [
+        "\"concrete labour\" \"具体劳动\" site:edu.cn"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.cnterm.cn/news/tzgg/202503/P020250909521438793386.pdf",
+          "title": "政治经济学名词征求意见稿",
+          "support": "02.0047直接给出具体劳动 concrete labor；辞典亦说明有用劳动/具体劳动。",
+          "level": "术语机构征求意见稿"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "constant-capital",
+      "source": "constant capital",
+      "target": "不变资本",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "不变资本",
+      "explanation": "02.0111直接给出不变资本 constant capital。",
+      "variant_notes": "",
+      "queries": [
+        "\"constant capital\" \"不变资本\" site:cnterm.cn"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.cnterm.cn/news/tzgg/202503/P020250909521438793386.pdf",
+          "title": "政治经济学名词征求意见稿",
+          "support": "02.0111直接给出不变资本 constant capital。",
+          "level": "术语机构征求意见稿"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "credit-money",
+      "source": "credit money",
+      "target": "信用货币",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "信用货币",
+      "explanation": "credit money直接列信用货币。",
+      "variant_notes": "马克思语境不能自动等同任何现代法币，现有note限定支付手段恰当。",
+      "queries": [
+        "信用货币 credit money"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.edb.gov.hk/attachment/sc/curriculum-development/kla/pshe/references-and-resources/economics/glossary_for_economics_2020_clean_r2_SC.pdf",
+          "title": "香港教育局经济辞汇",
+          "support": "credit money直接列信用货币。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "critique-of-political-economy",
+      "source": "critique of political economy",
+      "target": "政治经济学批判",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "政治经济学批判",
+      "explanation": "双语题名支持政治经济学批判。",
+      "variant_notes": "",
+      "queries": [
+        "\"critique of political economy\" \"政治经济学批判\" site:edu.cn"
+      ],
+      "evidence": [
+        {
+          "url": "https://jxyyj.ruc.edu.cn/CN/abstract/abstract16767.shtml",
+          "title": "人大《〈政治经济学批判〉序言中的思想政治教育理念》",
+          "support": "双语题名支持政治经济学批判。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "directly-social-labor",
+      "source": "directly social labor",
+      "target": "直接社会劳动",
+      "variants_before_review": [
+        "directly social labour",
+        "immediately social labor",
+        "immediately social labour",
+        "labor in directly social form"
+      ],
+      "variants_after_review": [
+        "directly social labour",
+        "immediately social labor",
+        "immediately social labour",
+        "labor in directly social form"
+      ],
+      "status": "confirmed",
+      "suggested_target": "直接社会劳动",
+      "explanation": "正文将directly social labour与直接社会劳动并列。",
+      "variant_notes": "immediately social labour在同一概念语境可通用。",
+      "queries": [
+        "\"directly social labour\" \"直接社会劳动\""
+      ],
+      "evidence": [
+        {
+          "url": "https://mphilosophy.sysu.edu.cn/sites/default/files/2025-04/%E7%8E%B0%E4%BB%A3%E5%93%B2%E5%AD%A62024%E5%B9%B4%E7%AC%AC4%E6%9C%9F.pdf",
+          "title": "《现代哲学》2024年第4期",
+          "support": "正文将directly social labour与直接社会劳动并列。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "discount",
+      "source": "discount",
+      "target": "贴现",
+      "variants_before_review": [
+        "discounting"
+      ],
+      "variants_after_review": [
+        "discounting"
+      ],
+      "status": "contextual",
+      "suggested_target": "贴现",
+      "explanation": "discount列折扣、折现、贴现、贴水；银行票据语境的贴现成立。",
+      "variant_notes": "词条须保留banking technique限定，不用于一般折扣。",
+      "queries": [
+        "\"discount\" \"贴现\" site:hkma.gov.hk"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.edb.gov.hk/attachment/sc/curriculum-development/kla/pshe/references-and-resources/economics/glossary_for_economics_2020_clean_r2_SC.pdf",
+          "title": "香港教育局经济辞汇",
+          "support": "discount列折扣、折现、贴现、贴水；银行票据语境的贴现成立。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "doctrine-of-circulation",
+      "source": "doctrine of circulation",
+      "target": "流通论",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "流通论",
+      "explanation": "Chinese academic writing explicitly describes Uno’s 原理论 as consisting of 流通论、生产论、分配论. Earlier Japanese catalog and English publisher evidence is secondary corroboration.",
+      "variant_notes": "No variants recommended.",
+      "queries": [
+        "Uno Principles doctrine circulation production distribution",
+        "宇野弘蔵 経済原論 流通論"
+      ],
+      "evidence": [
+        {
+          "url": "https://theory.rmlt.com.cn/2015/0604/389969_2.shtml",
+          "title": "杨立国：《日本关于〈资本论〉的价值尺度论战（2）》— 人民论坛网",
+          "support": "Chinese scholarly article states Uno’s 《经济学原理论》 “由流通论、生产论、分配论三章构成” (the three chapters are circulation, production, distribution).",
+          "level": "Chinese academic article; author identified as Dalian University of Foreign Languages associate professor"
+        },
+        {
+          "url": "https://www.plutobooks.com/product/capitalism-and-the-dialectic/",
+          "title": "Capitalism and the Dialectic — Pluto Press",
+          "support": "Publisher contents list The Doctrine of Circulation.",
+          "level": "academic publisher contents"
+        },
+        {
+          "url": "https://ge.nii.ac.jp/ncid/BB20359656",
+          "title": "CiNii Books: 経済原論",
+          "support": "Catalog lists Uno’s original part heading 流通論; same Sino-Japanese term as Chinese 流通论.",
+          "level": "academic library catalog"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "doctrine-of-distribution",
+      "source": "doctrine of distribution",
+      "target": "分配论",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "分配论",
+      "explanation": "Chinese academic writing explicitly describes Uno’s 原理论 as consisting of 流通论、生产论、分配论. Earlier Japanese catalog and English publisher evidence is secondary corroboration.",
+      "variant_notes": "No variants recommended.",
+      "queries": [
+        "Uno Principles doctrine distribution contents",
+        "宇野弘蔵 経済原論 分配論"
+      ],
+      "evidence": [
+        {
+          "url": "https://theory.rmlt.com.cn/2015/0604/389969_2.shtml",
+          "title": "杨立国：《日本关于〈资本论〉的价值尺度论战（2）》— 人民论坛网",
+          "support": "Chinese scholarly article states Uno’s 《经济学原理论》 “由流通论、生产论、分配论三章构成” (the three chapters are circulation, production, distribution).",
+          "level": "Chinese academic article; author identified as Dalian University of Foreign Languages associate professor"
+        },
+        {
+          "url": "https://www.plutobooks.com/product/capitalism-and-the-dialectic/",
+          "title": "Capitalism and the Dialectic — Pluto Press",
+          "support": "Publisher contents list The Doctrine of Distribution.",
+          "level": "academic publisher contents"
+        },
+        {
+          "url": "https://ge.nii.ac.jp/ncid/BB20359656",
+          "title": "CiNii Books: 経済原論",
+          "support": "Catalog lists Uno’s original part heading 分配論; same Sino-Japanese term as Chinese 分配论.",
+          "level": "academic library catalog"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "doctrine-of-production",
+      "source": "doctrine of production",
+      "target": "生产论",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "生产论",
+      "explanation": "Chinese academic writing explicitly describes Uno’s 原理论 as consisting of 流通论、生产论、分配论. Earlier Japanese catalog and English publisher evidence is secondary corroboration.",
+      "variant_notes": "No variants recommended.",
+      "queries": [
+        "Uno Principles doctrine production contents",
+        "宇野弘蔵 経済原論 生産論"
+      ],
+      "evidence": [
+        {
+          "url": "https://theory.rmlt.com.cn/2015/0604/389969_2.shtml",
+          "title": "杨立国：《日本关于〈资本论〉的价值尺度论战（2）》— 人民论坛网",
+          "support": "Chinese scholarly article states Uno’s 《经济学原理论》 “由流通论、生产论、分配论三章构成” (the three chapters are circulation, production, distribution).",
+          "level": "Chinese academic article; author identified as Dalian University of Foreign Languages associate professor"
+        },
+        {
+          "url": "https://www.plutobooks.com/product/capitalism-and-the-dialectic/",
+          "title": "Capitalism and the Dialectic — Pluto Press",
+          "support": "Publisher contents list The Doctrine of Production.",
+          "level": "academic publisher contents"
+        },
+        {
+          "url": "https://ge.nii.ac.jp/ncid/BB20359656",
+          "title": "CiNii Books: 経済原論",
+          "support": "Catalog lists Uno’s original part heading 生産論; same Sino-Japanese term as Chinese 生产论.",
+          "level": "academic library catalog"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "downswing",
+      "source": "downswing",
+      "target": "下行期",
+      "variants_before_review": [
+        "downturn",
+        "long downswing"
+      ],
+      "variants_after_review": [
+        "downturn",
+        "long downswing"
+      ],
+      "status": "contextual",
+      "suggested_target": "下行期",
+      "explanation": "报告中downswing phase对应下行期，支持周期语境。",
+      "variant_notes": "long downswing不是不带限定的同义词，需保留长期修饰。",
+      "queries": [
+        "\"downswing\" \"下行\" 经济"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.cmbi.com/upload/2019011434747.pdf",
+          "title": "招银国际研究 Monthly Strategy",
+          "support": "报告中downswing phase对应下行期，支持周期语境。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "dual-character-of-labor",
+      "source": "dual character of labor",
+      "target": "劳动的二重性",
+      "variants_before_review": [
+        "dual character of the labor",
+        "twofold character of labor",
+        "twofold character of labour",
+        "twofold character of the labour"
+      ],
+      "variants_after_review": [
+        "dual character of the labor",
+        "twofold character of labor",
+        "twofold character of labour",
+        "twofold character of the labour"
+      ],
+      "status": "confirmed",
+      "suggested_target": "劳动的二重性",
+      "explanation": "中英文论文标题与摘要对应劳动二重性；现译劳动的二重性可用。",
+      "variant_notes": "",
+      "queries": [
+        "\"dual character of labour\" \"劳动\" \"二重性\""
+      ],
+      "evidence": [
+        {
+          "url": "https://www.zjujournals.com/soc/EN/abstract/abstract134066.shtml",
+          "title": "浙江大学学报《揭示劳动二重性、分析价值形式、批判拜物教》",
+          "support": "中英文论文标题与摘要对应劳动二重性；现译劳动的二重性可用。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "effective-demand",
+      "source": "effective demand",
+      "target": "有效需求",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "有效需求",
+      "explanation": "正文明确有效需求(effective demand)。",
+      "variant_notes": "",
+      "queries": [
+        "\"effective demand\" \"有效需求\" site:edu.cn"
+      ],
+      "evidence": [
+        {
+          "url": "https://econ.pku.edu.cn/ztbd/lkbt/2014lkbt/336516.htm",
+          "title": "北京大学经济学院关于有效需求文章",
+          "support": "正文明确有效需求(effective demand)。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "efficient-market-hypothesis",
+      "source": "efficient market hypothesis",
+      "target": "有效市场假说",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "有效市场假说",
+      "explanation": "正文明确有效市场假说(Efficient Market Hypothesis)。",
+      "variant_notes": "",
+      "queries": [
+        "\"efficient market hypothesis\" \"有效市场假说\" site:edu.cn"
+      ],
+      "evidence": [
+        {
+          "url": "https://iigf.cufe.edu.cn/info/1012/11794.htm",
+          "title": "中央财经大学绿色金融国际研究院",
+          "support": "正文明确有效市场假说(Efficient Market Hypothesis)。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "equivalent-form",
+      "source": "equivalent form",
+      "target": "等价形式",
+      "variants_before_review": [
+        "equivalent value form",
+        "equivalent value-form"
+      ],
+      "variants_after_review": [
+        "equivalent value form",
+        "equivalent value-form"
+      ],
+      "status": "confirmed",
+      "suggested_target": "等价形式",
+      "explanation": "02.0058将等价形式与the equivalent form of value对应。",
+      "variant_notes": "限定马克思价值形式语境。",
+      "queries": [
+        "\"equivalent form\" \"等价形式\" site:edu.cn"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.cnterm.cn/news/tzgg/202503/P020250909521438793386.pdf",
+          "title": "政治经济学名词征求意见稿",
+          "support": "02.0058将等价形式与the equivalent form of value对应。",
+          "level": "术语机构征求意见稿"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "equivalent-form-of-value",
+      "source": "equivalent form of value",
+      "target": "等价形式",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "等价形式",
+      "explanation": "02.0058直接支持该完整英语词组及中文。",
+      "variant_notes": "与equivalent-form是同目标重复条目，不是译法冲突。",
+      "queries": [
+        "\"equivalent form of value\" \"等价形式\""
+      ],
+      "evidence": [
+        {
+          "url": "https://www.cnterm.cn/news/tzgg/202503/P020250909521438793386.pdf",
+          "title": "政治经济学名词征求意见稿",
+          "support": "02.0058直接支持该完整英语词组及中文。",
+          "level": "术语机构征求意见稿"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "exchange-process",
+      "source": "exchange process",
+      "target": "交换过程",
+      "variants_before_review": [
+        "process of exchange"
+      ],
+      "variants_after_review": [
+        "process of exchange"
+      ],
+      "status": "confirmed",
+      "suggested_target": "交换过程",
+      "explanation": "中英文摘要同时用交换过程/exchange process。",
+      "variant_notes": "",
+      "queries": [
+        "\"exchange process\" \"交换过程\" 马克思"
+      ],
+      "evidence": [
+        {
+          "url": "https://journal.bit.edu.cn/sk/article/doi/10.15918/j.jbitss1009-3370.2024.2032?viewType=HTML",
+          "title": "北京理工大学学报《施坦沃特对马克思辩证法的分析性诠释》",
+          "support": "中英文摘要同时用交换过程/exchange process。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "exchange-relation",
+      "source": "exchange-relation",
+      "target": "交换关系",
+      "variants_before_review": [
+        "exchange relation"
+      ],
+      "variants_after_review": [
+        "exchange relation"
+      ],
+      "status": "confirmed",
+      "suggested_target": "交换关系",
+      "explanation": "文章明确解释exchange-relation为交换关系，并区别exchange-ratio。",
+      "variant_notes": "连字符变体正确。",
+      "queries": [
+        "\"exchange relation\" \"交换关系\" 马克思"
+      ],
+      "evidence": [
+        {
+          "url": "https://www5.zzu.edu.cn/cdd/info/1066/1749.htm",
+          "title": "郑州大学《马克思、恩格斯翻译思想的核心话语分析》",
+          "support": "文章明确解释exchange-relation为交换关系，并区别exchange-ratio。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "exchange-value",
+      "source": "exchange-value",
+      "target": "交换价值",
+      "variants_before_review": [
+        "exchange value",
+        "exchange-values"
+      ],
+      "variants_after_review": [
+        "exchange value",
+        "exchange-values"
+      ],
+      "status": "confirmed",
+      "suggested_target": "交换价值",
+      "explanation": "正文明确Exchange-value(交换价值)，同时区分value和use-value。",
+      "variant_notes": "",
+      "queries": [
+        "\"exchange-value\" \"交换价值\" site:edu.cn"
+      ],
+      "evidence": [
+        {
+          "url": "https://mky.hhu.edu.cn/2013/0906/c6549a95216/page.htm",
+          "title": "河海大学Patrick Murray讲学记录",
+          "support": "正文明确Exchange-value(交换价值)，同时区分value和use-value。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "expanded-form-of-value",
+      "source": "expanded form of value",
+      "target": "总和的或扩大的价值形式",
+      "variants_before_review": [
+        "expanded value-form",
+        "total form of value",
+        "total or expanded form of value"
+      ],
+      "variants_after_review": [
+        "expanded value-form",
+        "total form of value",
+        "total or expanded form of value"
+      ],
+      "status": "confirmed",
+      "suggested_target": "总和的或扩大的价值形式",
+      "explanation": "02.0062用total or expanded form of value，解释中有总和的或扩大的价值形式。",
+      "variant_notes": "expanded form本身也可作扩大的价值形式；长译名为经典全称。",
+      "queries": [
+        "\"expanded form of value\" \"总和\" 价值形式"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.cnterm.cn/news/tzgg/202503/P020250909521438793386.pdf",
+          "title": "政治经济学名词征求意见稿",
+          "support": "02.0062用total or expanded form of value，解释中有总和的或扩大的价值形式。",
+          "level": "术语机构征求意见稿"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "expanded-reproduction",
+      "source": "expanded reproduction",
+      "target": "扩大再生产",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "扩大再生产",
+      "explanation": "Established Chinese Marxian terminology.",
+      "variant_notes": "No variants recommended.",
+      "queries": [
+        "马克思 扩大再生产 中文 资本论 第二十一章"
+      ],
+      "evidence": [
+        {
+          "url": "https://marxistsarchive.mirrors.informatics.coop/chinese/marx-engels/24/023.htm",
+          "title": "《资本论》第二卷第二十一章：积累和扩大再生产",
+          "support": "Chapter heading and text use 扩大再生产.",
+          "level": "primary Marx text, Chinese translation"
+        },
+        {
+          "url": "https://marxists.org/chinese/dictionary-of-marxism/marxist.org-chinese-dictionary-of-marxism-R.htm",
+          "title": "《马克思主义思想辞典：R》",
+          "support": "Specialist glossary pairs 简单再生产和扩大再生产.",
+          "level": "specialist reference translation"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "fetish-character",
+      "source": "fetish character",
+      "target": "拜物教性质",
+      "variants_before_review": [
+        "fetish character of the commodity",
+        "fetish-character"
+      ],
+      "variants_after_review": [
+        "fetish character of the commodity",
+        "fetish-character"
+      ],
+      "status": "contextual",
+      "suggested_target": "拜物教性质",
+      "explanation": "节题采用商品的拜物教性质及其秘密；英语的fetish character对应拜物教性质。",
+      "variant_notes": "fetish character of the commodity须保留商品的，避免全短语被缩成单纯拜物教性质。",
+      "queries": [
+        "\"fetish character\" \"拜物教性质\""
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/01.htm",
+          "title": "《资本论》第一卷第一章",
+          "support": "节题采用商品的拜物教性质及其秘密；英语的fetish character对应拜物教性质。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "fictitious-capital",
+      "source": "fictitious capital",
+      "target": "虚拟资本",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "虚拟资本",
+      "explanation": "正文明确马克思虚拟资本(Fictitious Capital)。",
+      "variant_notes": "",
+      "queries": [
+        "\"fictitious capital\" \"虚拟资本\" site:edu.cn"
+      ],
+      "evidence": [
+        {
+          "url": "https://economics.nankai.edu.cn/2024/0206/c16003a536059/page.htm",
+          "title": "南开大学《为实体经济服务：金融效率评价的核心标准》",
+          "support": "正文明确马克思虚拟资本(Fictitious Capital)。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "financialisation",
+      "source": "financialisation",
+      "target": "金融化",
+      "variants_before_review": [
+        "financialization"
+      ],
+      "variants_after_review": [
+        "financialization"
+      ],
+      "status": "confirmed",
+      "suggested_target": "金融化",
+      "explanation": "英文论文标题Financialisation及中文解读金融化配对。",
+      "variant_notes": "financialization为拼写变体。",
+      "queries": [
+        "\"financialisation\" \"金融化\" site:edu.cn"
+      ],
+      "evidence": [
+        {
+          "url": "https://econ.ruc.edu.cn/kxyj/kycg/xslw/1619630aec044315bf93097b263bc8f9.htm",
+          "title": "人大经济学院金融化论文成果介绍",
+          "support": "英文论文标题Financialisation及中文解读金融化配对。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "form-of-value",
+      "source": "form of value",
+      "target": "价值形式",
+      "variants_before_review": [
+        "forms of value",
+        "value form",
+        "value-form"
+      ],
+      "variants_after_review": [
+        "forms of value",
+        "value form",
+        "value-form"
+      ],
+      "status": "confirmed",
+      "suggested_target": "价值形式",
+      "explanation": "中译价值形式与英文节题The Form of Value对应。",
+      "variant_notes": "与forms-of-value重复但无译法冲突。",
+      "queries": [
+        "\"form of value\" \"价值形式\" site:edu.cn"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/01.htm",
+          "title": "《资本论》第一卷第一章中英文",
+          "support": "中译价值形式与英文节题The Form of Value对应。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "forms-of-value",
+      "source": "forms of value",
+      "target": "价值形式",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "价值形式",
+      "explanation": "论文双语讨论forms of value与价值形式；单复数同译成立。",
+      "variant_notes": "可日后合并重复，当前保留ID不动。",
+      "queries": [
+        "\"forms of value\" \"价值形式\" site:edu.cn"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.zjujournals.com/soc/EN/abstract/abstract134066.shtml",
+          "title": "浙江大学学报价值形式论文",
+          "support": "论文双语讨论forms of value与价值形式；单复数同译成立。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "founder-s-profit",
+      "source": "founder's profit",
+      "target": "创业利润",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "创业利润",
+      "explanation": "明确希法亭创业利润概念；与当前note语境吻合。",
+      "variant_notes": "不要误解成一般创业经营利润。",
+      "queries": [
+        "\"创业利润\" 希法亭 site:edu.cn"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.sem.tsinghua.edu.cn/info/1154/12112.htm",
+          "title": "清华经管《金融资本》新书推介",
+          "support": "明确希法亭创业利润概念；与当前note语境吻合。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "free-banking",
+      "source": "free banking",
+      "target": "自由银行业",
+      "variants_before_review": [
+        "free banking school"
+      ],
+      "variants_after_review": [],
+      "status": "contextual",
+      "suggested_target": "自由银行业",
+      "explanation": "free banking对应自由银行制度/体系；央财会议用自由银行业思想。现译自由银行业可用。",
+      "variant_notes": "free banking school是自由银行学派，不应作为同目标变体。",
+      "queries": [
+        "\"free banking\" \"自由银行\" site:edu.cn"
+      ],
+      "evidence": [
+        {
+          "url": "https://qks.sufe.edu.cn/mv_html/j00001/201603/f49d6cd9-f797-49bb-83eb-70fd47a42f75_WEB.htm",
+          "title": "上财《银行商誉资本与货币竞争性发行》",
+          "support": "free banking对应自由银行制度/体系；央财会议用自由银行业思想。现译自由银行业可用。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": [
+        "删除非同义变体：free banking school"
+      ]
+    },
+    {
+      "id": "functioning-capitalist",
+      "source": "functioning capitalist",
+      "target": "职能资本家",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "职能资本家",
+      "explanation": "正文采用职能资本家并与借贷资本家区分；对应英语functioning capitalist。",
+      "variant_notes": "亦有执行职能的资本家的行文译法，不使用网络词典功能资本家。",
+      "queries": [
+        "\"functioning capitalist\" \"职能资本家\""
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx-engels2/07/00a.htm",
+          "title": "《马克思恩格斯文集》7卷说明",
+          "support": "正文采用职能资本家并与借贷资本家区分；对应英语functioning capitalist。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "general-equivalent",
+      "source": "general equivalent",
+      "target": "一般等价物",
+      "variants_before_review": [
+        "universal equivalent"
+      ],
+      "variants_after_review": [
+        "universal equivalent"
+      ],
+      "status": "confirmed",
+      "suggested_target": "一般等价物",
+      "explanation": "中英文摘要明确一般等价物/general equivalent。",
+      "variant_notes": "universal equivalent在此概念下成立。",
+      "queries": [
+        "\"general equivalent\" \"一般等价物\" site:edu.cn"
+      ],
+      "evidence": [
+        {
+          "url": "https://jxyyj.ruc.edu.cn/CN/abstract/abstract13799.shtml",
+          "title": "人大《货币本质的不可超越性》",
+          "support": "中英文摘要明确一般等价物/general equivalent。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "general-form-of-value",
+      "source": "general form of value",
+      "target": "一般价值形式",
+      "variants_before_review": [
+        "general value-form"
+      ],
+      "variants_after_review": [
+        "general value-form"
+      ],
+      "status": "confirmed",
+      "suggested_target": "一般价值形式",
+      "explanation": "02.0063直接列一般价值形式 general form of value。",
+      "variant_notes": "",
+      "queries": [
+        "\"general form of value\" \"一般价值形式\""
+      ],
+      "evidence": [
+        {
+          "url": "https://www.cnterm.cn/news/tzgg/202503/P020250909521438793386.pdf",
+          "title": "政治经济学名词征求意见稿",
+          "support": "02.0063直接列一般价值形式 general form of value。",
+          "level": "术语机构征求意见稿"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "general-formula-for-capital",
+      "source": "general formula for capital",
+      "target": "资本的总公式",
+      "variants_before_review": [
+        "general formula of capital"
+      ],
+      "variants_after_review": [
+        "general formula of capital"
+      ],
+      "status": "confirmed",
+      "suggested_target": "资本的总公式",
+      "explanation": "比较双语章节题名明确General Formula For Capital对应资本的总公式。",
+      "variant_notes": "",
+      "queries": [
+        "\"general formula for capital\" \"资本\" \"总公式\""
+      ],
+      "evidence": [
+        {
+          "url": "https://cesl.cupl.edu.cn/__local/3/7B/C6/3F5282B178FB5DB742811B6E1F9_9CEFEA97_38B0D.pdf",
+          "title": "中国政法大学《资本论中英文译本若干异同点之考究》",
+          "support": "比较双语章节题名明确General Formula For Capital对应资本的总公式。",
+          "level": "原典/机构/学术来源"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "gold-standard",
+      "source": "gold standard",
+      "target": "金本位制",
+      "variants_before_review": [
+        "gold-specie standard"
+      ],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "金本位制",
+      "explanation": "World Gold Council Chinese page describes currencies fixed to gold as 金本位制. gold-specie standard is narrower 金币本位制, not an alias.",
+      "variant_notes": "Baseline variant gold-specie standard is not a synonym for gold standard: the former is specifically 金币本位制; gold standard is 金本位制.",
+      "queries": [
+        "gold standard Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://china.gold.org/history-gold/the-classical-gold-standard",
+          "title": "Classical Gold Standard | World Gold Council",
+          "support": "World Gold Council Chinese page describes currencies fixed to gold as 金本位制. gold-specie standard is narrower 金币本位制, not an alias.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": [
+        "删除非同义变体：gold-specie standard"
+      ]
+    },
+    {
+      "id": "hoard",
+      "source": "hoard",
+      "target": "贮藏货币",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "贮藏货币",
+      "explanation": "Chinese Capital synopsis explicitly calls the accumulated money form 贮藏货币.",
+      "variant_notes": "No variants listed; do not infer aliases.",
+      "queries": [
+        "hoard Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx-engels/16/039.htm",
+          "title": "Marx, Capital Vol. I outline in Collected Works Vol. 16",
+          "support": "Chinese Capital synopsis explicitly calls the accumulated money form 贮藏货币.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "hoarding",
+      "source": "hoarding",
+      "target": "货币贮藏",
+      "variants_before_review": [
+        "formation of hoards"
+      ],
+      "variants_after_review": [
+        "formation of hoards"
+      ],
+      "status": "confirmed",
+      "suggested_target": "货币贮藏",
+      "explanation": "Capital Vol. II uses 货币贮藏 for the process. Distinguish process from resulting hoard.",
+      "variant_notes": "Variants: formation of hoards. Assess spelling vs concept differences.",
+      "queries": [
+        "hoarding Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx-engels/24/023.htm",
+          "title": "Marx and Engels Collected Works Vol. 24, Accumulation and Expanded Reproduction",
+          "support": "Capital Vol. II uses 货币贮藏 for the process. Distinguish process from resulting hoard.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "horizontalism",
+      "source": "horizontalism",
+      "target": "水平主义",
+      "variants_before_review": [
+        "horizontal money supply"
+      ],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "水平主义",
+      "explanation": "Article names the post-Keynesian school 水平主义. horizontal money supply describes its curve, not the school name.",
+      "variant_notes": "Variants: horizontal money supply. Assess spelling vs concept differences.",
+      "queries": [
+        "horizontalism Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.sohu.com/a/458276981_739032",
+          "title": "Yuan Hui, Horizontalism and Keynesian Monetary Thought (Chinese article)",
+          "support": "Article names the post-Keynesian school 水平主义. horizontal money supply describes its curve, not the school name.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": [
+        "删除非同义变体：horizontal money supply"
+      ]
+    },
+    {
+      "id": "ideal-measure-of-value",
+      "source": "ideal measure of value",
+      "target": "观念的价值尺度",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "观念的价值尺度",
+      "explanation": "Exact bilingual query returns ideal measure of value = 观念的价值尺度; lexical evidence, not official Marx edition.",
+      "variant_notes": "No variants listed; do not infer aliases.",
+      "queries": [
+        "ideal measure of value Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://dict.youdao.com/w/eng/ideal_value/",
+          "title": "Youdao English-Chinese dictionary: ideal measure of value",
+          "support": "Exact bilingual query returns ideal measure of value = 观念的价值尺度; lexical evidence, not official Marx edition.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "immediately-socialized-labor",
+      "source": "immediately socialized labor",
+      "target": "直接社会化的劳动",
+      "variants_before_review": [
+        "directly socialized labor",
+        "immediately socialized labour"
+      ],
+      "variants_after_review": [
+        "directly socialized labor",
+        "immediately socialized labour"
+      ],
+      "status": "contextual",
+      "suggested_target": "直接社会化劳动",
+      "explanation": "Chinese Capital passage uses 直接社会化劳动 for related wording; exact immediately/directly English equivalence not established.",
+      "variant_notes": "Variants: directly socialized labor, immediately socialized labour. Assess spelling vs concept differences.",
+      "queries": [
+        "immediately socialized labor Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx-engels-2/44/009.htm",
+          "title": "Marx and Engels Collected Works Vol. 44, Money or Commodity Circulation",
+          "support": "Chinese Capital passage uses 直接社会化劳动 for related wording; exact immediately/directly English equivalence not established.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "individual-labor-time",
+      "source": "individual labor-time",
+      "target": "个别劳动时间",
+      "variants_before_review": [
+        "individual labor time",
+        "individual labour time",
+        "individual labour-time"
+      ],
+      "variants_after_review": [
+        "individual labor time",
+        "individual labour time",
+        "individual labour-time"
+      ],
+      "status": "confirmed",
+      "suggested_target": "个别劳动时间",
+      "explanation": "Dictionary directly lists 个别劳动时间 for individual labour time / individual labor-time; hyphen and US/UK spelling are orthographic.",
+      "variant_notes": "Variants: individual labor time, individual labour time, individual labour-time. Assess spelling vs concept differences.",
+      "queries": [
+        "individual labor-time Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://dict.youdao.com/w/%E5%8A%B3%E5%8A%A8%E6%97%B6%E9%97%B4_%E5%8A%B3%E5%8A%A8%E6%97%B6/",
+          "title": "Youdao dictionary: individual labour time",
+          "support": "Dictionary directly lists 个别劳动时间 for individual labour time / individual labor-time; hyphen and US/UK spelling are orthographic.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "industrial-capital",
+      "source": "industrial capital",
+      "target": "产业资本",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "产业资本",
+      "explanation": "CNTERM result pairs 产业资本 / industrial capital. PDF consultation period is 2025-03-26 to 2025-06-26; draft only.",
+      "variant_notes": "No variants listed; do not infer aliases.",
+      "queries": [
+        "industrial capital Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.cnterm.cn/news/tzgg/202503/P020250909521438793386.pdf",
+          "title": "CNTERM Political Economy Nomenclature consultation PDF",
+          "support": "CNTERM result pairs 产业资本 / industrial capital. PDF consultation period is 2025-03-26 to 2025-06-26; draft only.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "industrial-reserve-army",
+      "source": "industrial reserve army",
+      "target": "产业后备军",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "产业后备军",
+      "explanation": "Established term; related to but not identical with relative surplus population.",
+      "variant_notes": "Do not treat relative surplus population as an alias.",
+      "queries": [
+        "马克思 industrial reserve army 中文 产业后备军 词典"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/dictionary-of-marxism/marxist.org-chinese-dictionary-of-marxism-R.htm",
+          "title": "《马克思主义思想辞典：R》",
+          "support": "Entry gives 劳动后备军或产业后备军.",
+          "level": "specialist reference translation"
+        },
+        {
+          "url": "https://www.marxists.org/chinese/rosdolsky/1969/18.htm",
+          "title": "罗曼·罗斯多尔斯基：《资本论的形成》第十八章",
+          "support": "Chapter heading uses 资本主义的人口规律和产业后备军.",
+          "level": "scholarly monograph translation"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "interest-bearing-capital",
+      "source": "interest-bearing capital",
+      "target": "生息资本",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "生息资本",
+      "explanation": "CNTERM result pairs 生息资本 / interest-bearing capital; consultation draft status applies.",
+      "variant_notes": "No variants listed; do not infer aliases.",
+      "queries": [
+        "interest-bearing capital Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.cnterm.cn/news/tzgg/202503/P020250909521438793386.pdf",
+          "title": "CNTERM Political Economy Nomenclature consultation PDF",
+          "support": "CNTERM result pairs 生息资本 / interest-bearing capital; consultation draft status applies.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "joint-stock-capital",
+      "source": "joint-stock capital",
+      "target": "股份资本",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "股份资本",
+      "explanation": "Chinese core-journal record uses 股份资本 in a Marx capital-form discussion. Do not assume equivalence with every use of share capital.",
+      "variant_notes": "No variants listed; do not infer aliases.",
+      "queries": [
+        "joint-stock capital Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://zjsh.cbpt.cnki.net/portal/journal/portal/client/paper/2aa2b15a666e1ed41bc4396004718e86",
+          "title": "Zhejiang Social Sciences journal record on joint-stock capital",
+          "support": "Chinese core-journal record uses 股份资本 in a Marx capital-form discussion. Do not assume equivalence with every use of share capital.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "labor",
+      "source": "labor",
+      "target": "劳动",
+      "variants_before_review": [
+        "labour"
+      ],
+      "variants_after_review": [
+        "labour"
+      ],
+      "status": "confirmed",
+      "suggested_target": "劳动",
+      "explanation": "Capital ch.5 uses 劳动 for purposeful activity; labour is spelling-only variant.",
+      "variant_notes": "Variants: labour. Check concept scope.",
+      "queries": [
+        "labor Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/05.htm",
+          "title": "Marx, Capital Vol. I, Chapter 5: Labour Process and Valorization Process",
+          "support": "Capital ch.5 uses 劳动 for purposeful activity; labour is spelling-only variant.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "labor-power",
+      "source": "labor-power",
+      "target": "劳动力",
+      "variants_before_review": [
+        "labor power",
+        "labour power",
+        "labour-power"
+      ],
+      "variants_after_review": [
+        "labor power",
+        "labour power",
+        "labour-power"
+      ],
+      "status": "confirmed",
+      "suggested_target": "劳动力",
+      "explanation": "Capital ch.4 uses 劳动力 for capacity sold as commodity; labor and labor-power are distinct categories.",
+      "variant_notes": "Variants: labor power, labour power, labour-power. Check concept scope.",
+      "queries": [
+        "labor-power Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/04.htm",
+          "title": "Marx, Capital Vol. I, Chapter 4: Transformation of Money into Capital",
+          "support": "Capital ch.4 uses 劳动力 for capacity sold as commodity; labor and labor-power are distinct categories.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "labour-theory-of-value",
+      "source": "labour theory of value",
+      "target": "劳动价值论",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "劳动价值论",
+      "explanation": "Journal bilingual title pairs 劳动价值论 and Labour Theory of Value; term spans classical and Marxian strands.",
+      "variant_notes": "No variants listed; do not infer aliases.",
+      "queries": [
+        "labour theory of value Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://xuebaosk.ahut.edu.cn/cn/article/doi/10.3969/j.issn.1671-9247.2017.03.003",
+          "title": "Anhui University of Technology journal, Labour Theory of Value and Utility Theory of Value",
+          "support": "Journal bilingual title pairs 劳动价值论 and Labour Theory of Value; term spans classical and Marxian strands.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "lender-of-last-resort",
+      "source": "lender of last resort",
+      "target": "最后贷款人",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "最后贷款人",
+      "explanation": "RUC monetary institute report directly pairs 最后贷款人理论 with Lender of Last Resort / LOLR.",
+      "variant_notes": "No variants listed; do not infer aliases.",
+      "queries": [
+        "lender of last resort Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.imi.ruc.edu.cn/docs/2020-12/73558a674eca4816be737c69e3dc304b.pdf",
+          "title": "RUC International Monetary Institute, Lender of Last Resort Theory",
+          "support": "RUC monetary institute report directly pairs 最后贷款人理论 with Lender of Last Resort / LOLR.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "liquidity-preference",
+      "source": "liquidity preference",
+      "target": "流动性偏好",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "流动性偏好",
+      "explanation": "Journal uses 流动性偏好 for liquidity preference in post-Keynesian literature.",
+      "variant_notes": "No variants listed; do not infer aliases.",
+      "queries": [
+        "liquidity preference Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://html.rhhz.net/NFJJ/html/1000-6249%282015%2905-028-12.htm",
+          "title": "Journal article on post-Keynesian endogenous money theory",
+          "support": "Journal uses 流动性偏好 for liquidity preference in post-Keynesian literature.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "loanable-capital",
+      "source": "loanable capital",
+      "target": "借贷资本",
+      "variants_before_review": [
+        "loan capital"
+      ],
+      "variants_after_review": [
+        "loan capital"
+      ],
+      "status": "unverified",
+      "suggested_target": "可贷资本",
+      "explanation": "Targeted search found no direct authoritative bilingual loanable capital entry. Do not infer equivalence with 借贷资本. 尚未取得足够权威的直接双语证据；这不等于判定原译错误。本轮保留原译。",
+      "variant_notes": "Variants: loan capital. Check concept scope.",
+      "queries": [
+        "loanable capital Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.cnterm.cn/sdgb/sdzsgb/jbxl/202005/t20200518_758892.html",
+          "title": "CNTERM economic nomenclature index (no loanable-capital entry found)",
+          "support": "Targeted search found no direct authoritative bilingual loanable capital entry. Do not infer equivalence with 借贷资本.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "long-boom",
+      "source": "long boom",
+      "target": "长期繁荣",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "contextual",
+      "suggested_target": "长期繁荣",
+      "explanation": "Academic Chinese table pairs Long Boom with 长期繁荣; term may denote postwar or other periods depending on context.",
+      "variant_notes": "No variants listed; do not infer aliases.",
+      "queries": [
+        "long boom Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.ims.sdu.edu.cn/__local/4/4E/6C/A6B9073EC6C1A971E3DB8401436_790994D8_E9096.pdf",
+          "title": "Academic article table using Long Boom / 长期繁荣",
+          "support": "Academic Chinese table pairs Long Boom with 长期繁荣; term may denote postwar or other periods depending on context.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "long-waves",
+      "source": "long waves",
+      "target": "长波理论",
+      "variants_before_review": [
+        "long wave theories",
+        "long wave theory"
+      ],
+      "variants_after_review": [
+        "long wave theories",
+        "long wave theory"
+      ],
+      "status": "change_suggested",
+      "suggested_target": "长波",
+      "explanation": "经济史论文与曼德尔著作书名把 long waves 译作“长波”。“长波理论”对应 long wave theory/theories，指解释长波的理论，现有 source 与 variants 将现象和理论合为一条。建议分开；本轮未直接改动 target。",
+      "variant_notes": "long wave theory / long wave theories 宜作为“长波理论”独立条目，不作 long waves 的纯词形变体。",
+      "queries": [
+        "long waves Chinese translation term",
+        "\"long waves\" \"长波\" site:edu.cn"
+      ],
+      "evidence": [
+        {
+          "url": "https://journal.scnu.edu.cn/cn/article/id/e4c7f8c3-7a5c-4826-ab40-e3b085650de1",
+          "title": "South China Normal University journal article, Five Economic Long Waves",
+          "support": "SCNU journal uses 经济长波 and identifies Kondratiev long waves.",
+          "level": "见来源与说明"
+        },
+        {
+          "url": "https://ptext.nju.edu.cn/info/1348/9800.htm",
+          "title": "南京大学《曼德尔其人及其对马克思主义理论的发展简介》",
+          "support": "文中列出《资本主义发展的长波》与Long Waves of Capitalist Development。",
+          "level": "高校学术资料"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "magnitude-of-value",
+      "source": "magnitude of value",
+      "target": "价值量",
+      "variants_before_review": [
+        "magnitude of the value"
+      ],
+      "variants_after_review": [
+        "magnitude of the value"
+      ],
+      "status": "confirmed",
+      "suggested_target": "价值量",
+      "explanation": "Marxism dictionary pairs 价值量 with quantity of value; exact query also maps magnitude of value to 价值量.",
+      "variant_notes": "Variants: magnitude of the value. Check concept scope.",
+      "queries": [
+        "magnitude of value Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxdic.com/article/2268",
+          "title": "The Great Dictionary of Marxism, Magnitude of Value",
+          "support": "Marxism dictionary pairs 价值量 with quantity of value; exact query also maps magnitude of value to 价值量.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "market-socialism",
+      "source": "market socialism",
+      "target": "市场社会主义",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "市场社会主义",
+      "explanation": "RUC economics journal uses 市场社会主义 for market socialism in title and English abstract.",
+      "variant_notes": "No variants listed; do not infer aliases.",
+      "queries": [
+        "market socialism Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://jxyyj.ruc.edu.cn/CN/abstract/abstract12341.shtml",
+          "title": "RUC Journal of Economics, Review of Market Socialism Theory",
+          "support": "RUC economics journal uses 市场社会主义 for market socialism in title and English abstract.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "means-of-circulation",
+      "source": "means of circulation",
+      "target": "流通手段",
+      "variants_before_review": [
+        "circulating medium",
+        "medium of circulation"
+      ],
+      "variants_after_review": [
+        "circulating medium",
+        "medium of circulation"
+      ],
+      "status": "confirmed",
+      "suggested_target": "流通手段",
+      "explanation": "CNTERM result pairs 流通手段 / means of circulation and defines its function; consultation draft only.",
+      "variant_notes": "Variants: circulating medium, medium of circulation. Check concept scope.",
+      "queries": [
+        "means of circulation Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.cnterm.cn/news/tzgg/202503/P020250909521438793386.pdf",
+          "title": "CNTERM Political Economy Nomenclature consultation PDF",
+          "support": "CNTERM result pairs 流通手段 / means of circulation and defines its function; consultation draft only.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "means-of-exchange",
+      "source": "means of exchange",
+      "target": "交换手段",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "交换手段",
+      "explanation": "Opened the Chinese Journal of Sociology article and located the exact parenthetical bilingual phrase at line 89: “交换手段(means of exchange)”. The context enumerates distinct monetary functions; keep means of exchange distinct from means of circulation, purchase, and payment.",
+      "variant_notes": "No baseline variants; do not infer aliases. Preserve the distinction from adjacent monetary functions.",
+      "queries": [
+        "means of exchange Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://html.rhhz.net/society/html/20190405.htm",
+          "title": "Yu Xin, Economy in a Substantive Sense, Chinese Journal of Sociology",
+          "support": "Opened the Chinese Journal of Sociology article and located the exact parenthetical bilingual phrase at line 89: “交换手段(means of exchange)”. The context enumerates distinct monetary functions; keep means of exchange distinct from means of circulation, purchase, and payment.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "means-of-payment",
+      "source": "means of payment",
+      "target": "支付手段",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "支付手段",
+      "explanation": "Capital ch.3 directly uses 支付手段 and distinguishes it from circulation medium.",
+      "variant_notes": "No variants listed; do not infer aliases.",
+      "queries": [
+        "means of payment Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/03.htm",
+          "title": "Marx, Capital Vol. I, Chapter 3: Money or Commodity Circulation",
+          "support": "Capital ch.3 directly uses 支付手段 and distinguishes it from circulation medium.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "means-of-production",
+      "source": "means of production",
+      "target": "生产资料",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "生产资料",
+      "explanation": "Capital ch.1 directly uses 生产资料 and contrasts it with means of subsistence.",
+      "variant_notes": "No variants listed; do not infer aliases.",
+      "queries": [
+        "means of production Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/01.htm",
+          "title": "Marx, Capital Vol. I, Chapter 1: The Commodity",
+          "support": "Capital ch.1 directly uses 生产资料 and contrasts it with means of subsistence.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "means-of-purchase",
+      "source": "means of purchase",
+      "target": "购买手段",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "购买手段",
+      "explanation": "Capital ch.3 directly uses 购买手段 and separately describes payment function.",
+      "variant_notes": "No variants listed; do not infer aliases.",
+      "queries": [
+        "means of purchase Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/03.htm",
+          "title": "Marx, Capital Vol. I, Chapter 3: Money or Commodity Circulation",
+          "support": "Capital ch.3 directly uses 购买手段 and separately describes payment function.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "means-of-subsistence",
+      "source": "means of subsistence",
+      "target": "生活资料",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "生活资料",
+      "explanation": "CNTERM result pairs 生活资料 / means of subsistence; Capital ch.1 also contrasts production means. Consultation draft.",
+      "variant_notes": "No variants listed; do not infer aliases.",
+      "queries": [
+        "means of subsistence Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.cnterm.cn/news/tzgg/202503/P020250909521438793386.pdf",
+          "title": "CNTERM Political Economy Nomenclature consultation PDF",
+          "support": "CNTERM result pairs 生活资料 / means of subsistence; Capital ch.1 also contrasts production means. Consultation draft.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "measure-of-value",
+      "source": "measure of value",
+      "target": "价值尺度",
+      "variants_before_review": [
+        "measure of values"
+      ],
+      "variants_after_review": [
+        "measure of values"
+      ],
+      "status": "confirmed",
+      "suggested_target": "价值尺度",
+      "explanation": "CNTERM draft directly pairs 价值尺度 / measure of value; distinct from standard of price.",
+      "variant_notes": "Variants: measure of values. Check concept scope.",
+      "queries": [
+        "measure of value Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.cnterm.cn/news/tzgg/202503/P020250909521438793386.pdf",
+          "title": "CNTERM Political Economy Nomenclature consultation PDF",
+          "support": "CNTERM draft directly pairs 价值尺度 / measure of value; distinct from standard of price.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "merchants-capital",
+      "source": "merchants' capital",
+      "target": "商人资本",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "商人资本",
+      "explanation": "NJU Capital III excerpt uses 商人资本; 商业资本 can be broader, so preserve contextual distinction.",
+      "variant_notes": "No variants listed; do not infer aliases.",
+      "queries": [
+        "merchants' capital Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://ptext.nju.edu.cn/info/1303/8500.htm",
+          "title": "Nanjing University Practice and Text, Capital Vol. III excerpt",
+          "support": "NJU Capital III excerpt uses 商人资本; 商业资本 can be broader, so preserve contextual distinction.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "mode-of-production",
+      "source": "mode of production",
+      "target": "生产方式",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "生产方式",
+      "explanation": "Marxist dictionary directly gives 生产方式 (mode of production).",
+      "variant_notes": "No variants listed; do not infer aliases.",
+      "queries": [
+        "mode of production Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/dictionary-of-marxism/marxist.org-chinese-dictionary-of-marxism-M.htm",
+          "title": "Marxist Dictionary, M entry: Mode of Production",
+          "support": "Marxist dictionary directly gives 生产方式 (mode of production).",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "monetarism",
+      "source": "monetarism",
+      "target": "货币主义",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "货币主义",
+      "explanation": "Cambridge English-Chinese dictionary renders monetarism as 货币主义.",
+      "variant_notes": "No variants listed; do not infer aliases.",
+      "queries": [
+        "monetarism Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://dictionary.cambridge.org/dictionary/english-chinese-simplified/monetarism",
+          "title": "Cambridge Dictionary, Monetarism",
+          "support": "Cambridge English-Chinese dictionary renders monetarism as 货币主义.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "monetary-crisis",
+      "source": "monetary crisis",
+      "target": "货币危机",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "货币危机",
+      "explanation": "Opened the PSSXiv record. It gives the bilingual title “马克思货币危机思想及其当代价值研究” / “Marx on Monetary Crisis: Contemporary Relevance”; the Chinese abstract and keywords also use 货币危机. Authors are affiliated with Yunnan Normal University and Chinese Academy of Social Sciences; the record says submitted to a journal, so this is a preprint, not a published article.",
+      "variant_notes": "No baseline variants; crisis terminology is context-specific, but this title directly confirms the English-Chinese pair.",
+      "queries": [
+        "monetary crisis Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://zsyyb.cn/abs/202510.03063",
+          "title": "PSSXiv preprint: Marx on Monetary Crisis: Contemporary Relevance",
+          "support": "Opened the PSSXiv record. It gives the bilingual title “马克思货币危机思想及其当代价值研究” / “Marx on Monetary Crisis: Contemporary Relevance”; the Chinese abstract and keywords also use 货币危机. Authors are affiliated with Yunnan Normal University and Chinese Academy of Social Sciences; the record says submitted to a journal, so this is a preprint, not a published article.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "money-as-money",
+      "source": "money as money",
+      "target": "作为货币的货币",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "作为货币的货币",
+      "explanation": "Capital ch.4 explicitly contrasts 作为货币的货币 with 作为资本的货币.",
+      "variant_notes": "No variants listed; do not infer aliases.",
+      "queries": [
+        "money as money Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/04.htm",
+          "title": "Marx, Capital Vol. I, Chapter 4: Transformation of Money into Capital",
+          "support": "Capital ch.4 explicitly contrasts 作为货币的货币 with 作为资本的货币.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "money-commodity",
+      "source": "money commodity",
+      "target": "货币商品",
+      "variants_before_review": [
+        "money-commodity"
+      ],
+      "variants_after_review": [
+        "money-commodity"
+      ],
+      "status": "confirmed",
+      "suggested_target": "货币商品",
+      "explanation": "Capital ch.1 directly uses 货币商品 for the commodity fixed as equivalent.",
+      "variant_notes": "Variants: money-commodity. Check concept scope.",
+      "queries": [
+        "money commodity Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/01.htm",
+          "title": "Marx, Capital Vol. I, Chapter 1: The Commodity",
+          "support": "Capital ch.1 directly uses 货币商品 for the commodity fixed as equivalent.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "money-form",
+      "source": "money form",
+      "target": "货币形式",
+      "variants_before_review": [
+        "money-form"
+      ],
+      "variants_after_review": [
+        "money-form"
+      ],
+      "status": "confirmed",
+      "suggested_target": "货币形式",
+      "explanation": "Capital ch.1 directly uses 货币形式 as developed value form.",
+      "variant_notes": "Variants: money-form. Check concept scope.",
+      "queries": [
+        "money form Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/01.htm",
+          "title": "Marx, Capital Vol. I, Chapter 1: The Commodity",
+          "support": "Capital ch.1 directly uses 货币形式 as developed value form.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "money-market",
+      "source": "money market",
+      "target": "货币市场",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "货币市场",
+      "explanation": "ICBC financial education page defines 货币市场 as short-term funding market; modern finance usage.",
+      "variant_notes": "No variants listed; do not infer aliases.",
+      "queries": [
+        "money market Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.icbc.com.cn/page/721852567268392968.html",
+          "title": "ICBC Financial Education, What Is the Money Market?",
+          "support": "ICBC financial education page defines 货币市场 as short-term funding market; modern finance usage.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "money-supply-endogeneity",
+      "source": "money supply endogeneity",
+      "target": "货币供给内生性",
+      "variants_before_review": [
+        "endogenous money",
+        "endogenous money supply"
+      ],
+      "variants_after_review": [
+        "endogenous money",
+        "endogenous money supply"
+      ],
+      "status": "confirmed",
+      "suggested_target": "货币供给内生性",
+      "explanation": "SUFE journal page directly discusses 货币供应量的内生性. endogenous money is related wording, not always an identical term.",
+      "variant_notes": "Variants: endogenous money, endogenous money supply. Check concept scope.",
+      "queries": [
+        "money supply endogeneity Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://qks.sufe.edu.cn/J/CDXB/Article/Details/A160824003488/CN",
+          "title": "SUFE journal, Empirical Study of Money Endogeneity in China",
+          "support": "SUFE journal page directly discusses 货币供应量的内生性. endogenous money is related wording, not always an identical term.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "money-supply-exogeneity",
+      "source": "money supply exogeneity",
+      "target": "货币供给外生性",
+      "variants_before_review": [
+        "exogenous money",
+        "exogenous money supply"
+      ],
+      "variants_after_review": [
+        "exogenous money",
+        "exogenous money supply"
+      ],
+      "status": "confirmed",
+      "suggested_target": "货币供给外生性",
+      "explanation": "Bilingual result labels 货币供给的外生性 as money supply exogeneity; it is opposite to endogeneity, not a variant.",
+      "variant_notes": "Variants: exogenous money, exogenous money supply. Check concept scope.",
+      "queries": [
+        "money supply exogeneity Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://dict.youdao.com/w/eng/%E8%B4%A7%E5%B8%81%E4%BE%9B%E7%BB%99%E7%9A%84%E5%A4%96%E7%94%9F%E6%80%A7/",
+          "title": "Youdao dictionary, Money Supply Exogeneity",
+          "support": "Bilingual result labels 货币供给的外生性 as money supply exogeneity; it is opposite to endogeneity, not a variant.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "money-dealing-capital",
+      "source": "money-dealing capital",
+      "target": "货币经营资本",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "货币经营资本",
+      "explanation": "Capital III ch.19 heading is 货币经营资本 and explains specialized money handling functions.",
+      "variant_notes": "No variants listed; do not infer aliases.",
+      "queries": [
+        "money-dealing capital Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx-engels2/07/19.htm",
+          "title": "Marx and Engels Collected Works Vol. 25, Chapter 19: Money-Dealing Capital",
+          "support": "Capital III ch.19 heading is 货币经营资本 and explains specialized money handling functions.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "monied-capitalist",
+      "source": "monied capitalist",
+      "target": "货币资本家",
+      "variants_before_review": [
+        "money capitalist"
+      ],
+      "variants_after_review": [
+        "money capitalist"
+      ],
+      "status": "unverified",
+      "suggested_target": "货币资本家",
+      "explanation": "Article maps monied/moneyed capital to 货币资本 but does not validate person noun monied capitalist = 货币资本家. 尚未取得足够权威的直接双语证据；这不等于判定原译错误。本轮保留原译。",
+      "variant_notes": "Variants: money capitalist. Check concept scope.",
+      "queries": [
+        "monied capitalist Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.dswxyjy.org.cn/BIG5/n1/2026/0527/c427153-40728506.html",
+          "title": "China Social Science Network article on Engels editing terminology in Capital Vol. III",
+          "support": "Article maps monied/moneyed capital to 货币资本 but does not validate person noun monied capitalist = 货币资本家.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "monopoly-profit",
+      "source": "monopoly profit",
+      "target": "垄断利润",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "垄断利润",
+      "explanation": "Bilingual glossary directly pairs 垄断利润 / Monopoly profits and defines monopoly earnings.",
+      "variant_notes": "No variants listed; do not infer aliases.",
+      "queries": [
+        "monopoly profit Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://regulationbodyofknowledge.org/wp-content/uploads/2013/04/glossary_CHINESE.pdf",
+          "title": "Chinese Glossary of Regulatory Economics, Monopoly Profits",
+          "support": "Bilingual glossary directly pairs 垄断利润 / Monopoly profits and defines monopoly earnings.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "necessary-labor",
+      "source": "necessary labor",
+      "target": "必要劳动",
+      "variants_before_review": [
+        "necessary labour"
+      ],
+      "variants_after_review": [
+        "necessary labour"
+      ],
+      "status": "confirmed",
+      "suggested_target": "必要劳动",
+      "explanation": "University Capital guide names wage-reproducing portion 必要劳动 and contrasts surplus labor.",
+      "variant_notes": "Variants: necessary labour. Check concept scope.",
+      "queries": [
+        "necessary labor Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://szb.nhmu.edu.cn/2021/0112/c4032a84662/page.htm",
+          "title": "Nanhua University Capital reading guide, Volume I",
+          "support": "University Capital guide names wage-reproducing portion 必要劳动 and contrasts surplus labor.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "necessary-labor-time",
+      "source": "necessary labor-time",
+      "target": "必要劳动时间",
+      "variants_before_review": [
+        "necessary labor time",
+        "necessary labour time",
+        "necessary labour-time"
+      ],
+      "variants_after_review": [
+        "necessary labor time",
+        "necessary labour time",
+        "necessary labour-time"
+      ],
+      "status": "confirmed",
+      "suggested_target": "必要劳动时间",
+      "explanation": "CNTERM draft directly lists 必要劳动时间 / necessary labor time and defines relation to surplus labor time.",
+      "variant_notes": "Variants: necessary labor time, necessary labour time, necessary labour-time. Check concept scope.",
+      "queries": [
+        "necessary labor-time Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.cnterm.cn/news/tzgg/202503/P020250909521438793386.pdf",
+          "title": "CNTERM Political Economy Nomenclature consultation PDF",
+          "support": "CNTERM draft directly lists 必要劳动时间 / necessary labor time and defines relation to surplus labor time.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "neoclassical-synthesis",
+      "source": "neoclassical synthesis",
+      "target": "新古典综合",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "contextual",
+      "suggested_target": "新古典综合派",
+      "explanation": "Chinese economics article says 新古典综合派 for Neoclassical Synthesis; full school label is more precise than baseline abbreviated form.",
+      "variant_notes": "No variants listed; do not infer aliases.",
+      "queries": [
+        "neoclassical synthesis Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.thepaper.cn/newsDetail_forward_25012834",
+          "title": "The Paper, What Kind of Macroeconomics Do We Study?",
+          "support": "Chinese economics article says 新古典综合派 for Neoclassical Synthesis; full school label is more precise than baseline abbreviated form.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "new-marx-reading",
+      "source": "New Marx Reading",
+      "target": "新马克思阅读",
+      "variants_before_review": [
+        "Neue Marx-Lektüre",
+        "new reading of Marx"
+      ],
+      "variants_after_review": [
+        "Neue Marx-Lektüre",
+        "new reading of Marx"
+      ],
+      "status": "confirmed",
+      "suggested_target": "新马克思阅读",
+      "explanation": "Chinese Marxism research article pairs 新马克思阅读 with Neue Marx-Lektüre; generic new reading of Marx is not automatically the school name.",
+      "variant_notes": "Variants: Neue Marx-Lektüre, new reading of Marx. Check concept scope.",
+      "queries": [
+        "New Marx Reading Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.dswxyjy.org.cn/n1/2019/0617/c427163-31163303.html",
+          "title": "China Social Science Network, Contemporary German Marx Research",
+          "support": "Chinese Marxism research article pairs 新马克思阅读 with Neue Marx-Lektüre; generic new reading of Marx is not automatically the school name.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "nexus-rerum",
+      "source": "nexus rerum",
+      "target": "事物联系",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "change_suggested",
+      "suggested_target": "物的神经",
+      "explanation": "《马克思恩格斯全集》第44卷注释把 nexus rerum 译为“物的神经”，并释作各种物的联系、主要的东西。现有“事物联系”接近释义；建议在直接引用《资本论》时采用经典译名，其他拉丁文语境不宜一律套用。",
+      "variant_notes": "No variants listed; do not infer aliases.",
+      "queries": [
+        "nexus rerum Chinese translation term",
+        "\"nexus rerum\" \"物的神经\""
+      ],
+      "evidence": [
+        {
+          "url": "https://marxists.architexturez.net/chinese/marx-engels-2/44/009.htm",
+          "title": "Marx and Engels Collected Works Vol. 44, Chapter 3",
+          "support": "Marx/Engels Chinese text glosses nexus rerum as 物的神经 and explains it as relations among things; baseline 事物关系 is paraphrase.",
+          "level": "见来源与说明"
+        },
+        {
+          "url": "https://www.marxists.org/chinese/marx-engels-2/44/032.htm",
+          "title": "《马克思恩格斯全集》第44卷注释141",
+          "support": "注释直接给出拉丁文、经典中文译名与释义。",
+          "level": "经典中译原典"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "optimal-contract-design",
+      "source": "optimal contract design",
+      "target": "最优契约设计",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "最优合同设计",
+      "explanation": "Chinese journal article directly titles Optimal Contract Design as 最优合同设计; 契约设计 is a disciplinary alternative.",
+      "variant_notes": "No variants listed; do not infer aliases.",
+      "queries": [
+        "optimal contract design Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.zgglkx.com/CN/10.16381/j.cnki.issn1003-207x.2016.05.011",
+          "title": "China Journal of Management Science, Optimal Contract Design under Principal-Agent Framework",
+          "support": "Chinese journal article directly titles Optimal Contract Design as 最优合同设计; 契约设计 is a disciplinary alternative.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "organic-composition-of-capital",
+      "source": "organic composition of capital",
+      "target": "资本有机构成",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "资本有机构成",
+      "explanation": "Capital ch.23 defines 资本的有机构成; compact 资本有机构成 appears in Chinese journal titles.",
+      "variant_notes": "No variants listed; do not infer aliases.",
+      "queries": [
+        "organic composition of capital Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/23.htm",
+          "title": "Marx, Capital Vol. I, Chapter 23: General Law of Capitalist Accumulation",
+          "support": "Capital ch.23 defines 资本的有机构成; compact 资本有机构成 appears in Chinese journal titles.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "overaccumulation",
+      "source": "overaccumulation",
+      "target": "过度积累",
+      "variants_before_review": [
+        "capital overaccumulation"
+      ],
+      "variants_after_review": [
+        "capital overaccumulation"
+      ],
+      "status": "confirmed",
+      "suggested_target": "过度积累",
+      "explanation": "Chinese journal record uses 过度积累 for overaccumulation of digital capital; capital overaccumulation is a scoped phrase.",
+      "variant_notes": "Variants: capital overaccumulation. Check concept scope.",
+      "queries": [
+        "overaccumulation Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://cnki.istiz.org.cn/kcms/detail/detail.aspx?dbcode=CJFD&dbname=CJFD2025&filename=ZZJP202505008",
+          "title": "Chinese journal record, Study on Digital Capital Overaccumulation",
+          "support": "Chinese journal record uses 过度积累 for overaccumulation of digital capital; capital overaccumulation is a scoped phrase.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "phantom-like-objectivity",
+      "source": "phantom-like objectivity",
+      "target": "幽灵般的对象性",
+      "variants_before_review": [
+        "spectral objectivity"
+      ],
+      "variants_after_review": [
+        "spectral objectivity"
+      ],
+      "status": "contextual",
+      "suggested_target": "幽灵般的对象性",
+      "explanation": "Opened the Chinese Capital excerpt and verified line 36: “同一的幽灵般的对象性”. This directly confirms the Chinese rendering in the canonical Capital text. The page is Chinese-only rather than a bilingual parallel edition, so retain contextual status for the exact English phrasing phantom-like objectivity; do not replace it with the related but distinct heading term 价值对象性.",
+      "variant_notes": "Baseline variant spectral objectivity is a related scholarly alternative; this Chinese passage specifically supports 幽灵般的对象性 for the phantom-like rendering.",
+      "queries": [
+        "phantom-like objectivity Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.htu.edu.cn/xsd/2021/0414/c14329a193828/page.htm",
+          "title": "Marx, Capital Vol. I (excerpt), Henan Normal University",
+          "support": "Opened the Chinese Capital excerpt and verified line 36: “同一的幽灵般的对象性”. This directly confirms the Chinese rendering in the canonical Capital text. The page is Chinese-only rather than a bilingual parallel edition, so retain contextual status for the exact English phrasing phantom-like objectivity; do not replace it with the related but distinct heading term 价值对象性.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "planned-socialist-economy",
+      "source": "planned socialist economy",
+      "target": "计划社会主义经济",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "unverified",
+      "suggested_target": "社会主义计划经济（建议候选，尚待直接双语证据）",
+      "explanation": "Search found socialist planned economy, not exact planned socialist economy; do not conflate with 计划经济 or 社会主义计划经济 without source context. 尚未取得足够权威的直接双语证据；这不等于判定原译错误。本轮保留原译。",
+      "variant_notes": "No variants listed; do not infer aliases.",
+      "queries": [
+        "planned socialist economy Chinese translation term"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.openstax.marxists.info/subject/china/peking-review/1973/PR1973-11a.htm",
+          "title": "Peking Review, Socialist Planned Economy (English text)",
+          "support": "Search found socialist planned economy, not exact planned socialist economy; do not conflate with 计划经济 or 社会主义计划经济 without source context.",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "political-economy",
+      "source": "political economy",
+      "target": "政治经济学",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "政治经济学",
+      "explanation": "词典条目直接列为“政治经济学（political economy）”。 当前译法得到直接支持。",
+      "variant_notes": "无变体；未发现需拆分的近邻概念。",
+      "queries": [
+        "political economy 中文 政治经济学"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/dictionary-of-marxism/marxist.org-chinese-dictionary-of-marxism-P.htm",
+          "title": "《马克思主义思想辞典：P》",
+          "support": "词典条目直接列为“政治经济学（political economy）”。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "post-keynesian-economics",
+      "source": "post-Keynesian economics",
+      "target": "后凯恩斯主义经济学",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "后凯恩斯主义经济学",
+      "explanation": "中国人民大学期刊摘要对应 Post Keynesian Economics，并在中文正文使用后凯恩斯主义/后凯恩斯经济学。 当前译法得到直接支持。",
+      "variant_notes": "不要与 New Keynesian economics（新凯恩斯主义经济学）混同。",
+      "queries": [
+        "post-Keynesian economics 中文 后凯恩斯主义经济学"
+      ],
+      "evidence": [
+        {
+          "url": "https://jxyyj.ruc.edu.cn/CN/abstract/abstract13647.shtml",
+          "title": "后凯恩斯经济学的新发展",
+          "support": "中国人民大学期刊摘要对应 Post Keynesian Economics，并在中文正文使用后凯恩斯主义/后凯恩斯经济学。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "price-form",
+      "source": "price form",
+      "target": "价格形式",
+      "variants_before_review": [
+        "form of price"
+      ],
+      "variants_after_review": [
+        "form of price"
+      ],
+      "status": "confirmed",
+      "suggested_target": "价格形式",
+      "explanation": "《资本论》中文版该章直接使用价值形式、价格形式、价值实体、价值对象性、使用价值、一般等价物等相应术语。 目标译名与经典中文文本相符。",
+      "variant_notes": "变体可作检索词，但不保证所有语境可互换。",
+      "queries": [
+        "Marx Capital price form 中文 价格形式"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/01.htm",
+          "title": "第一章 商品",
+          "support": "《资本论》中文版该章直接使用价值形式、价格形式、价值实体、价值对象性、使用价值、一般等价物等相应术语。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "price-of-production",
+      "source": "price of production",
+      "target": "生产价格",
+      "variants_before_review": [
+        "prices of production"
+      ],
+      "variants_after_review": [
+        "prices of production"
+      ],
+      "status": "confirmed",
+      "suggested_target": "生产价格",
+      "explanation": "Strong support from specialist reference, economics literature, and Chinese Capital translation.",
+      "variant_notes": "Plural prices of production is the grammatical plural of the same term.",
+      "queries": [
+        "马克思 生产价格 理论 中文 学术"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/dictionary-of-marxism/marxist.org-chinese-dictionary-of-marxism-P.htm",
+          "title": "《马克思主义思想辞典：P》",
+          "support": "Dedicated 生产价格 entry explains the Marxian category.",
+          "level": "specialist reference translation"
+        },
+        {
+          "url": "https://qks.sufe.edu.cn/J/CJYJ/Article/Details/A160824011099/CN",
+          "title": "试论生产价格模型 — 上海财经大学期刊社",
+          "support": "Journal abstract calls 生产价格 an important political-economy category.",
+          "level": "economics journal"
+        },
+        {
+          "url": "https://marxistsarchive.mirrors.informatics.coop/chinese/marx-engels/25/013.htm",
+          "title": "《资本论》第三卷第十二章：补充说明",
+          "support": "Chinese primary text repeatedly uses 生产价格.",
+          "level": "primary Marx text, Chinese translation"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "price-specie-flow-mechanism",
+      "source": "price-specie flow mechanism",
+      "target": "价格-铸币流动机制",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "contextual",
+      "suggested_target": "价格-铸币流动机制",
+      "explanation": "广州市地方金融管理局介绍铸币—物价流动机制；另见“价格-铸币流动机制”“价格—现金流动机制”译法，存在用词差异。 不能据此宣称唯一或普遍规范译法。",
+      "variant_notes": "可见铸币—物价/价格—现金等不同译法；不应声称唯一规范形式。",
+      "queries": [
+        "price-specie flow mechanism 中文 价格铸币流动机制"
+      ],
+      "evidence": [
+        {
+          "url": "https://jrjgj.gz.gov.cn/jrwh/jrbk/content/post_2791070.html",
+          "title": "汇率理论（theory of exchange rate）",
+          "support": "广州市地方金融管理局介绍铸币—物价流动机制；另见“价格-铸币流动机制”“价格—现金流动机制”译法，存在用词差异。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "primitive-accumulation",
+      "source": "primitive accumulation",
+      "target": "原始积累",
+      "variants_before_review": [
+        "original accumulation",
+        "so-called primitive accumulation"
+      ],
+      "variants_after_review": [
+        "original accumulation",
+        "so-called primitive accumulation"
+      ],
+      "status": "confirmed",
+      "suggested_target": "原始积累",
+      "explanation": "《资本论》该章标题直接使用“所谓原始积累”。 目标译名与经典中文文本相符。",
+      "variant_notes": "变体可作检索词，但不保证所有语境可互换。",
+      "queries": [
+        "Marx primitive accumulation 中文 原始积累"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/24.htm",
+          "title": "第二十四章 所谓原始积累",
+          "support": "《资本论》该章标题直接使用“所谓原始积累”。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "private-labor",
+      "source": "private labor",
+      "target": "私人劳动",
+      "variants_before_review": [
+        "private labour"
+      ],
+      "variants_after_review": [
+        "private labour"
+      ],
+      "status": "confirmed",
+      "suggested_target": "私人劳动",
+      "explanation": "《资本论》中文版该章直接使用价值形式、价格形式、价值实体、价值对象性、使用价值、一般等价物等相应术语。 目标译名与经典中文文本相符。",
+      "variant_notes": "变体为英美拼写或连字符差异。",
+      "queries": [
+        "Marx private labour 私人劳动 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/01.htm",
+          "title": "第一章 商品",
+          "support": "《资本论》中文版该章直接使用价值形式、价格形式、价值实体、价值对象性、使用价值、一般等价物等相应术语。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "pure-theory-of-capitalism",
+      "source": "pure theory of capitalism",
+      "target": "纯粹资本主义理论",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "contextual",
+      "suggested_target": "纯粹资本主义理论",
+      "explanation": "Concept is established, but exact shorter Chinese label has weaker online support than 纯粹资本主义社会理论; retain preferred, not fixed.",
+      "variant_notes": "Do not alias purely capitalist society; it is the theory’s object.",
+      "queries": [
+        "宇野弘藏 pure theory of capitalism 纯粹资本主义理论 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.sklib.cn/booklib/bookPreview?ID=10161336&SiteID=122&fromSubID=729",
+          "title": "《政治经济学中的辩证法与解构》图书预览",
+          "support": "Chinese book description names 纯粹资本主义社会理论, a closely related rendering.",
+          "level": "Chinese scholarly book description"
+        },
+        {
+          "url": "https://www.jstor.org/content/oa_chapter_monograph/10.1163/j.ctv1v7zbws.6",
+          "title": "What’s ‘Pure’ about Capitalism?: Uno’s Three-Level Method",
+          "support": "Brill chapter describes pure capitalism as Uno’s theory of principles.",
+          "level": "academic book chapter"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "purely-capitalist-society",
+      "source": "purely capitalist society",
+      "target": "纯粹资本主义社会",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "纯粹资本主义社会",
+      "explanation": "The Social Sciences Library uses the exact Chinese phrase 纯粹资本主义社会理论; the glossary target is its exact nominal constituent, not an inference from the Japanese title.",
+      "variant_notes": "Distinct from pure theory of capitalism, which names the theory.",
+      "queries": [
+        "宇野 纯粹资本主义社会 中文 学术"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.sklib.cn/booklib/bookPreview?ID=10161336&SiteID=122&fromSubID=729",
+          "title": "《政治经济学中的辩证法与解构》— 社科文库",
+          "support": "The Social Sciences Library book preview uses the exact phrase “纯粹资本主义社会理论” in its description of the Uno-Sekine framework; this confirms the target’s exact substring in Chinese scholarship.",
+          "level": "Chinese scholarly book listing, Social Sciences Library"
+        },
+        {
+          "url": "https://book.douban.com/subject/27187613/",
+          "title": "《政治经济学中的辩证法与解构》书目页",
+          "support": "Description uses 纯粹资本主义社会理论 for the Uno-Sekine framework.",
+          "level": "scholarly book listing"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "quantity-theory-of-money",
+      "source": "quantity theory of money",
+      "target": "货币数量论",
+      "variants_before_review": [
+        "Quantity Theory"
+      ],
+      "variants_after_review": [
+        "Quantity Theory"
+      ],
+      "status": "confirmed",
+      "suggested_target": "货币数量论",
+      "explanation": "全集文本明确出现“李嘉图的货币数量论”。 当前译法得到直接支持。",
+      "variant_notes": "Quantity Theory 是宽泛简称，只有货币语境明确时才可替代全称。",
+      "queries": [
+        "quantity theory of money 货币数量论 马克思 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx-engels-2/44/029.htm",
+          "title": "马恩全集第四十四卷：第二十三章",
+          "support": "全集文本明确出现“李嘉图的货币数量论”。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "rate-of-interest",
+      "source": "rate of interest",
+      "target": "利息率",
+      "variants_before_review": [
+        "interest rate"
+      ],
+      "variants_after_review": [
+        "interest rate"
+      ],
+      "status": "confirmed",
+      "suggested_target": "利息率",
+      "explanation": "全集文本使用利息率，并区分利润率与利息率。 目标译名与经典中文文本相符。",
+      "variant_notes": "变体可作检索词，但不保证所有语境可互换。",
+      "queries": [
+        "rate of interest 利息率 Marx 中文 资本论"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx-engels/25/027.htm",
+          "title": "第二十六章 货币资本的积累，它对利息率的影响",
+          "support": "全集文本使用利息率，并区分利润率与利息率。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "rate-of-profit",
+      "source": "rate of profit",
+      "target": "利润率",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "利润率",
+      "explanation": "全集文本直接用“利润率”并区分其与剩余价值率。 当前译法得到直接支持。",
+      "variant_notes": "与 rate of surplus-value 不同，分子/分母概念均不可互换。",
+      "queries": [
+        "rate of profit 利润率 Marx 资本论 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://marxistsarchive.mirrors.informatics.coop/chinese/marx-engels/25/004.htm",
+          "title": "第三章 利润率和剩余价值率的关系",
+          "support": "全集文本直接用“利润率”并区分其与剩余价值率。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "rate-of-surplus-value",
+      "source": "rate of surplus-value",
+      "target": "剩余价值率",
+      "variants_before_review": [
+        "rate of surplus value"
+      ],
+      "variants_after_review": [
+        "rate of surplus value"
+      ],
+      "status": "confirmed",
+      "suggested_target": "剩余价值率",
+      "explanation": "《资本论》直接使用剩余价值率、剩余劳动、工作日等术语。 目标译名与经典中文文本相符。",
+      "variant_notes": "变体可作检索词，但不保证所有语境可互换。",
+      "queries": [
+        "rate of surplus-value 剩余价值率 Marx 资本论 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/07.htm",
+          "title": "第七章 剩余价值率",
+          "support": "《资本论》直接使用剩余价值率、剩余劳动、工作日等术语。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "real-abstraction",
+      "source": "real abstraction",
+      "target": "真实抽象",
+      "variants_before_review": [
+        "Realabstraktion"
+      ],
+      "variants_after_review": [
+        "Realabstraktion"
+      ],
+      "status": "contextual",
+      "suggested_target": "现实抽象（“真实抽象”为可见异译，不应判错）",
+      "explanation": "中山大学《现代哲学》论文以现实抽象讨论马克思；复旦学者文章亦有“现实抽象（real abstraction）”用法。主流中文学术用例偏“现实抽象”，但“真实抽象”不是错误，宜标作异译。 本轮不把有用例的异译直接判为错误，也不自动覆盖现行 target。",
+      "variant_notes": "变体可作检索词，但不保证所有语境可互换。",
+      "queries": [
+        "real abstraction 真实抽象 马克思 中文 political economy",
+        "\"价值抽象\" \"现实抽象\" 马克思 翻译 真实抽象"
+      ],
+      "evidence": [
+        {
+          "url": "https://mphilosophy.sysu.edu.cn/sites/default/files/2020-06/%E7%8E%B0%E4%BB%A3%E5%93%B2%E5%AD%A62016%E5%B9%B4%E7%AC%AC4%E6%9C%9F.pdf",
+          "title": "《现代哲学》2016年第4期",
+          "support": "中山大学《现代哲学》论文以现实抽象讨论马克思；复旦学者文章亦有“现实抽象（real abstraction）”用法。主流中文学术用例偏“现实抽象”，但“真实抽象”不是错误，宜标作异译。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "real-bills-doctrine",
+      "source": "real bills doctrine",
+      "target": "真实票据原则",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "contextual",
+      "suggested_target": "真实票据理论（真实票据原则亦有实际用例）",
+      "explanation": "澎湃新闻文章直接使用“真实票据原则”（real bills doctrine）；中国社科网货币思想史文章使用“真实票据理论”。两者均有可靠中文学术/金融作者用例。 本轮不把有用例的异译直接判为错误，也不自动覆盖现行 target。",
+      "variant_notes": "来源用“真实票据理论”；不应与现行票据法真实交易要求混同。",
+      "queries": [
+        "real bills doctrine 真实票据理论 中国社会科学",
+        "site:m.thepaper.cn \"真实票据原则\" real bills doctrine"
+      ],
+      "evidence": [
+        {
+          "url": "https://m.thepaper.cn/newsDetail_forward_12822280",
+          "title": "流动性经济学｜拆解美联储资产负债表：从诞生到大萧条之后",
+          "support": "澎湃新闻文章直接使用“真实票据原则”（real bills doctrine）；中国社科网货币思想史文章使用“真实票据理论”。两者均有可靠中文学术/金融作者用例。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "reflux",
+      "source": "reflux",
+      "target": "回流",
+      "variants_before_review": [
+        "law of reflux",
+        "principle of reflux"
+      ],
+      "variants_after_review": [],
+      "status": "contextual",
+      "suggested_target": "Law of reflux译“回流定律”；单独reflux译“回流”",
+      "explanation": "南大研究文章明确写“回流定律（Law of Reflux）”；reflux 裸词只表达回流，需区别 law/principle 名称。 不能据此宣称唯一或普遍规范译法。",
+      "variant_notes": "law of reflux 是专门学说名，裸词 reflux 与 law/principle of reflux 不应无条件视为同义。",
+      "queries": [
+        "reflux monetary theory law of reflux 回流定律 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://ptextold.nju.edu.cn/e6/7a/c13379a648826/page.htm",
+          "title": "马克思《伦敦笔记》的通货学派与银行学派研究",
+          "support": "南大研究文章明确写“回流定律（Law of Reflux）”；reflux 裸词只表达回流，需区别 law/principle 名称。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": [
+        "删除非同义变体：law of reflux, principle of reflux"
+      ]
+    },
+    {
+      "id": "regorging",
+      "source": "regorging",
+      "target": "货币回流",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "unverified",
+      "suggested_target": "暂不固化译名，依语境说明",
+      "explanation": "斯图亚特原文解释 regorging 是货币余量的特定处置；本页为英文，不能证明任何中文通行译法。 本轮没有足以验证其中文通行译法的直接证据。",
+      "variant_notes": "斯图亚特的特定货币运用概念；未证实固定中文译名，勿混同 reflux。",
+      "queries": [
+        "regorging money James Steuart 中文 回流 货币"
+      ],
+      "evidence": [
+        {
+          "url": "https://en.marxists.info/reference/subject/economics/steuart/book4.htm",
+          "title": "斯图亚特《政治经济学原理》第四编",
+          "support": "斯图亚特原文解释 regorging 是货币余量的特定处置；本页为英文，不能证明任何中文通行译法。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "reification",
+      "source": "reification",
+      "target": "物化",
+      "variants_before_review": [
+        "Verdinglichung"
+      ],
+      "variants_after_review": [
+        "Verdinglichung"
+      ],
+      "status": "contextual",
+      "suggested_target": "物化",
+      "explanation": "中文辞典直接标注“物化（reification）”；相关德语词需要区分。 证据仅支持相邻概念或一般用法，须看语境。",
+      "variant_notes": "Verdinglichung 可译物化；Versachlichung 另有“事物化”译法，不宜作无差别变体。",
+      "queries": [
+        "reification Verdinglichung 中文 物化 马克思"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/dictionary-of-marxism/marxist.org-chinese-dictionary-of-marxism-R.htm",
+          "title": "《马克思主义思想辞典：R》",
+          "support": "中文辞典直接标注“物化（reification）”；相关德语词需要区分。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "relative-form-of-value",
+      "source": "relative form of value",
+      "target": "相对价值形式",
+      "variants_before_review": [
+        "relative value form",
+        "relative value-form"
+      ],
+      "variants_after_review": [
+        "relative value form",
+        "relative value-form"
+      ],
+      "status": "confirmed",
+      "suggested_target": "相对价值形式",
+      "explanation": "《资本论》中文版该章直接使用价值形式、价格形式、价值实体、价值对象性、使用价值、一般等价物等相应术语。 目标译名与经典中文文本相符。",
+      "variant_notes": "变体可作检索词，但不保证所有语境可互换。",
+      "queries": [
+        "relative form of value 相对价值形式 Marx 资本论 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/01.htm",
+          "title": "第一章 商品",
+          "support": "《资本论》中文版该章直接使用价值形式、价格形式、价值实体、价值对象性、使用价值、一般等价物等相应术语。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "relative-surplus-value",
+      "source": "relative surplus-value",
+      "target": "相对剩余价值",
+      "variants_before_review": [
+        "relative surplus value"
+      ],
+      "variants_after_review": [
+        "relative surplus value"
+      ],
+      "status": "confirmed",
+      "suggested_target": "相对剩余价值",
+      "explanation": "《资本论》使用相对剩余价值、可变资本等术语。 目标译名与经典中文文本相符。",
+      "variant_notes": "变体为英美拼写或连字符差异。",
+      "queries": [
+        "relative surplus value 相对剩余价值 Marx 资本论 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/09.htm",
+          "title": "第九章 剩余价值率和剩余价值量",
+          "support": "《资本论》使用相对剩余价值、可变资本等术语。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "say-s-law",
+      "source": "Say's law",
+      "target": "萨伊定律",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "萨伊定律",
+      "explanation": "中央财经大学期刊直接使用“萨伊定律”，确认中文译名。 当前译法得到直接支持。",
+      "variant_notes": "无变体；未发现需拆分的近邻概念。",
+      "queries": [
+        "Say's law 萨伊定律 中文 经济学 高校"
+      ],
+      "evidence": [
+        {
+          "url": "https://xbbjb.cufe.edu.cn/CN/Y2016/V0/I5/90",
+          "title": "对萨伊定律的解读",
+          "support": "中央财经大学期刊直接使用“萨伊定律”，确认中文译名。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "sensuous-supersensuous",
+      "source": "sensuous-supersensuous",
+      "target": "可感觉而又超感觉的",
+      "variants_before_review": [
+        "sensuous, extrasensory",
+        "sinnlich übersinnlich"
+      ],
+      "variants_after_review": [
+        "sinnlich übersinnlich"
+      ],
+      "status": "confirmed",
+      "suggested_target": "可感觉而又超感觉的（物）",
+      "explanation": "《资本论》中文原文明确写“可感觉而又超感觉的物或社会的物”；研究文献对德文原语列作 sinnlich übersinnlich / Ein sinnlich übersinnliches Ding。支持整组词及当前变体意图。",
+      "variant_notes": "德文 sinnlich übersinnlich 是短语核心，完整中文《资本论》表述为“可感觉而又超感觉的物”。sensuous, extrasensory 的 extrasensory 不等同 supersensuous，建议从 variants 移除或标为误收。",
+      "queries": [
+        "sensuous supersensuous Marx 中文 可感觉 超感觉",
+        "\"可感觉而又超感觉的物\" \"sinnlich übersinnlich\" 资本论"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/01.htm",
+          "title": "第一章 商品",
+          "support": "《资本论》中文原文明确写“可感觉而又超感觉的物或社会的物”；研究文献对德文原语列作 sinnlich übersinnlich / Ein sinnlich übersinnliches Ding。支持整组词及当前变体意图。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": [
+        "删除非同义变体：sensuous, extrasensory"
+      ]
+    },
+    {
+      "id": "simple-form-of-value",
+      "source": "simple form of value",
+      "target": "简单的、个别的或偶然的价值形式",
+      "variants_before_review": [
+        "accidental form of value",
+        "elementary form of value",
+        "elementary value-form",
+        "isolated form of value",
+        "simple value-form"
+      ],
+      "variants_after_review": [
+        "accidental form of value",
+        "elementary form of value",
+        "elementary value-form",
+        "isolated form of value",
+        "simple value-form"
+      ],
+      "status": "confirmed",
+      "suggested_target": "简单的、个别的或偶然的价值形式",
+      "explanation": "《资本论》中文版该章直接使用价值形式、价格形式、价值实体、价值对象性、使用价值、一般等价物等相应术语。 目标译名与经典中文文本相符。",
+      "variant_notes": "变体可作检索词，但不保证所有语境可互换。",
+      "queries": [
+        "simple form of value elementary accidental simple value form 中文 资本论"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/01.htm",
+          "title": "第一章 商品",
+          "support": "《资本论》中文版该章直接使用价值形式、价格形式、价值实体、价值对象性、使用价值、一般等价物等相应术语。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "simple-labor",
+      "source": "simple labor",
+      "target": "简单劳动",
+      "variants_before_review": [
+        "simple human labor",
+        "simple labour",
+        "simple unskilled labor",
+        "unskilled labor"
+      ],
+      "variants_after_review": [
+        "simple human labor",
+        "simple labour",
+        "simple unskilled labor",
+        "unskilled labor"
+      ],
+      "status": "contextual",
+      "suggested_target": "简单劳动",
+      "explanation": "正文称简单劳动，并注释英国经济学家称其为 unskilled labour；该特定出处支持此处对应，但不能扩展为所有语境同义。 不能据此宣称唯一或普遍规范译法。",
+      "variant_notes": "该来源脚注明确把此处 simple labor 与 unskilled labour 联系起来；跨语境仍需区分简单劳动范畴和一般意义的非熟练劳动。",
+      "queries": [
+        "simple labor simple labour unskilled labor Marx 中文 简单劳动"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx-engels/13/002.htm",
+          "title": "第一册资本：商品",
+          "support": "正文称简单劳动，并注释英国经济学家称其为 unskilled labour；该特定出处支持此处对应，但不能扩展为所有语境同义。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "simple-reproduction",
+      "source": "simple reproduction",
+      "target": "简单再生产",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "简单再生产",
+      "explanation": "Established Chinese Marxian terminology.",
+      "variant_notes": "No variants recommended.",
+      "queries": [
+        "马克思 简单再生产 中文 资本论 第二十章"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/21.htm",
+          "title": "《资本论》第一卷第二十一章：简单再生产",
+          "support": "This URL is Volume I, Chapter 21; its chapter title and text use 简单再生产. Corrected volume label (not Volume II).",
+          "level": "primary Marx text, Chinese translation"
+        },
+        {
+          "url": "https://marxists.org/chinese/dictionary-of-marxism/marxist.org-chinese-dictionary-of-marxism-R.htm",
+          "title": "《马克思主义思想辞典：R》",
+          "support": "Specialist glossary pairs 简单再生产和扩大再生产.",
+          "level": "specialist reference translation"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "social-labor",
+      "source": "social labor",
+      "target": "社会劳动",
+      "variants_before_review": [
+        "social labour"
+      ],
+      "variants_after_review": [
+        "social labour"
+      ],
+      "status": "confirmed",
+      "suggested_target": "社会劳动",
+      "explanation": "马恩文本讨论简单劳动和社会劳动。 目标译名与经典中文文本相符。",
+      "variant_notes": "不要和 total labor of society（社会总劳动）混同。",
+      "queries": [
+        "social labor social labour 马克思 社会劳动 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx-engels/13/002.htm",
+          "title": "第一篇 资本一般：商品",
+          "support": "马恩文本讨论简单劳动和社会劳动。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "social-reproduction",
+      "source": "social reproduction",
+      "target": "社会再生产",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "社会再生产",
+      "explanation": "中文辞典使用社会再生产术语。 目标译名与经典中文文本相符。",
+      "variant_notes": "无变体；未发现需拆分的近邻概念。",
+      "queries": [
+        "social reproduction 社会再生产 中文 Marx"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/dictionary-of-marxism/marxist.org-chinese-dictionary-of-marxism-R.htm",
+          "title": "《马克思主义思想辞典：R》",
+          "support": "中文辞典使用社会再生产术语。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "socially-necessary-labor-time",
+      "source": "socially necessary labor-time",
+      "target": "社会必要劳动时间",
+      "variants_before_review": [
+        "socially necessary labor time",
+        "socially necessary labour time",
+        "socially necessary labour-time"
+      ],
+      "variants_after_review": [
+        "socially necessary labor time",
+        "socially necessary labour time",
+        "socially necessary labour-time"
+      ],
+      "status": "confirmed",
+      "suggested_target": "社会必要劳动时间",
+      "explanation": "哈维中文导读使用社会必要劳动时间等术语。 目标译名与经典中文文本相符。",
+      "variant_notes": "变体为英美拼写或连字符差异。",
+      "queries": [
+        "socially necessary labour time 社会必要劳动时间 资本论 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/reference-books/david-harvey2010/01.htm",
+          "title": "一｜商品与交换",
+          "support": "哈维中文导读使用社会必要劳动时间等术语。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "stages-theory",
+      "source": "stages theory",
+      "target": "阶段论",
+      "variants_before_review": [
+        "stages-theory"
+      ],
+      "variants_after_review": [
+        "stages-theory"
+      ],
+      "status": "confirmed",
+      "suggested_target": "阶段论",
+      "explanation": "Chinese scholarship supports 阶段论. 资本主义发展阶段论 is descriptive expansion, not a distinct variant.",
+      "variant_notes": "Keep stages-theory as orthographic variant only.",
+      "queries": [
+        "宇野弘藏 阶段论 资本主义发展阶段论 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.aisixiang.com/data/142523.html",
+          "title": "柴崎慎也、江原庆：什么是商业资本？",
+          "support": "Chinese scholarly article calls Uno’s account 资本主义阶段论 and says it is called 阶段论.",
+          "level": "Chinese scholarly article"
+        },
+        {
+          "url": "https://www.ydylcn.com/skwx_ydyl/initDatabaseDetail?contentId=10472588&contentType=literature&siteId=1",
+          "title": "宇野理论的缺陷及其对日本马克思主义经济学研究的贡献",
+          "support": "Chinese academic entry names Uno’s levels 原理论、阶段论、现状分析.",
+          "level": "Chinese academic reference"
+        },
+        {
+          "url": "https://www.tulips.tsukuba.ac.jp/exhibition/unobunko/dankairon.html",
+          "title": "筑波大学：段階論の成立",
+          "support": "University archive identifies the historical stages of Uno’s theory.",
+          "level": "university archive"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "stagflation",
+      "source": "stagflation",
+      "target": "滞胀",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "滞胀",
+      "explanation": "教育局经济词表明确列 stagflation—滞胀。 当前译法得到直接支持。",
+      "variant_notes": "无变体；未发现需拆分的近邻概念。",
+      "queries": [
+        "stagflation 滞胀 中文 经济学 名词"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.edb.gov.hk/attachment/sc/curriculum-development/kla/pshe/references-and-resources/economics/glossary_for_economics_2020_clean_r2_SC.pdf",
+          "title": "香港教育局《经济学词汇》",
+          "support": "教育局经济词表明确列 stagflation—滞胀。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "standard-of-price",
+      "source": "standard of price",
+      "target": "价格标准",
+      "variants_before_review": [
+        "standard of prices"
+      ],
+      "variants_after_review": [
+        "standard of prices"
+      ],
+      "status": "confirmed",
+      "suggested_target": "价格标准",
+      "explanation": "文本明确说“价值尺度进一步发展成为价格标准”，支持 standard of price 对应“价格标准”。 当前译法得到直接支持。",
+      "variant_notes": "变体可作检索词，但不保证所有语境可互换。",
+      "queries": [
+        "standard of price 价格标准 Marx 资本论 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx-engels/16/039.htm",
+          "title": "马恩全集第十六卷：资本论第一卷提纲",
+          "support": "文本明确说“价值尺度进一步发展成为价格标准”，支持 standard of price 对应“价格标准”。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "structuralism",
+      "source": "structuralism",
+      "target": "结构主义",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "contextual",
+      "suggested_target": "结构主义",
+      "explanation": "北京大学学术材料使用结构主义一般译名；不能据此确认后凯恩斯主义词条。 证据仅支持相邻概念或一般用法，须看语境。",
+      "variant_notes": "无变体；未发现需拆分的近邻概念。",
+      "queries": [
+        "structuralism 结构主义 中文 经济学 学术"
+      ],
+      "evidence": [
+        {
+          "url": "https://ccj.pku.edu.cn/Article/DownLoad?id=301275631&type=ArticleFile",
+          "title": "发展经济学中的结构主义和新古典主义思潮",
+          "support": "北京大学学术材料使用结构主义一般译名；不能据此确认后凯恩斯主义词条。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "substance-of-value",
+      "source": "substance of value",
+      "target": "价值实体",
+      "variants_before_review": [
+        "value substance"
+      ],
+      "variants_after_review": [
+        "value substance"
+      ],
+      "status": "confirmed",
+      "suggested_target": "价值实体",
+      "explanation": "《资本论》中文版该章直接使用价值形式、价格形式、价值实体、价值对象性、使用价值、一般等价物等相应术语。 目标译名与经典中文文本相符。",
+      "variant_notes": "变体可作检索词，但不保证所有语境可互换。",
+      "queries": [
+        "substance of value 价值实体 Marx 资本论"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/01.htm",
+          "title": "第一章 商品",
+          "support": "《资本论》中文版该章直接使用价值形式、价格形式、价值实体、价值对象性、使用价值、一般等价物等相应术语。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "surplus-labor",
+      "source": "surplus labor",
+      "target": "剩余劳动",
+      "variants_before_review": [
+        "surplus labour"
+      ],
+      "variants_after_review": [
+        "surplus labour"
+      ],
+      "status": "confirmed",
+      "suggested_target": "剩余劳动",
+      "explanation": "《资本论》直接使用剩余价值率、剩余劳动、工作日等术语。 目标译名与经典中文文本相符。",
+      "variant_notes": "变体可作检索词，但不保证所有语境可互换。",
+      "queries": [
+        "surplus labor 剩余劳动 Marx 中文 资本论"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/07.htm",
+          "title": "第七章 剩余价值率",
+          "support": "《资本论》直接使用剩余价值率、剩余劳动、工作日等术语。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "surplus-labor-time",
+      "source": "surplus labor-time",
+      "target": "剩余劳动时间",
+      "variants_before_review": [
+        "surplus labor time",
+        "surplus labour time",
+        "surplus labour-time"
+      ],
+      "variants_after_review": [
+        "surplus labor time",
+        "surplus labour time",
+        "surplus labour-time"
+      ],
+      "status": "confirmed",
+      "suggested_target": "剩余劳动时间",
+      "explanation": "《资本论》直接使用剩余价值率、剩余劳动、工作日等术语。 目标译名与经典中文文本相符。",
+      "variant_notes": "包含 time，和 surplus labor 不是同义项。",
+      "queries": [
+        "surplus labor time 剩余劳动时间 Marx 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/07.htm",
+          "title": "第七章 剩余价值率",
+          "support": "《资本论》直接使用剩余价值率、剩余劳动、工作日等术语。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "surplus-value",
+      "source": "surplus value",
+      "target": "剩余价值",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "剩余价值",
+      "explanation": "《资本论》直接使用剩余价值率、剩余劳动、工作日等术语。 目标译名与经典中文文本相符。",
+      "variant_notes": "无变体；未发现需拆分的近邻概念。",
+      "queries": [
+        "surplus value 剩余价值 Marx 中文 资本论"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/07.htm",
+          "title": "第七章 剩余价值率",
+          "support": "《资本论》直接使用剩余价值率、剩余劳动、工作日等术语。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "surplus-value-2",
+      "source": "surplus-value",
+      "target": "剩余价值",
+      "variants_before_review": [
+        "Mehrwert",
+        "surplus value"
+      ],
+      "variants_after_review": [
+        "Mehrwert",
+        "surplus value"
+      ],
+      "status": "confirmed",
+      "suggested_target": "剩余价值",
+      "explanation": "《资本论》直接使用剩余价值率、剩余劳动、工作日等术语。 目标译名与经典中文文本相符。",
+      "variant_notes": "变体可作检索词，但不保证所有语境可互换。",
+      "queries": [
+        "total labor of society 社会总劳动 Marx 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/07.htm",
+          "title": "第七章 剩余价值率",
+          "support": "《资本论》直接使用剩余价值率、剩余劳动、工作日等术语。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "total-labor-of-society",
+      "source": "total labor of society",
+      "target": "社会总劳动",
+      "variants_before_review": [
+        "social total labor",
+        "total labour of society",
+        "total social labor"
+      ],
+      "variants_after_review": [
+        "social total labor",
+        "total labour of society",
+        "total social labor"
+      ],
+      "status": "contextual",
+      "suggested_target": "社会总劳动",
+      "explanation": "文本出现社会工作日、社会总劳动的概念，但没有直接英中词条对照。 不能据此宣称唯一或普遍规范译法。",
+      "variant_notes": "变体可作检索词，但不保证所有语境可互换。",
+      "queries": [
+        "traditional Marxism 传统马克思主义 中文 学术"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx-engels/50/003.htm",
+          "title": "《马克思恩格斯全集》第五十卷：社会流通",
+          "support": "文本出现社会工作日、社会总劳动的概念，但没有直接英中词条对照。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "traditional-marxism",
+      "source": "traditional Marxism",
+      "target": "传统马克思主义",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "contextual",
+      "suggested_target": "传统马克思主义",
+      "explanation": "词典有“传统马克思主义”用例，但讨论特定争论者的学派标签，不能确认该词所有上下文均等值。 不能据此宣称唯一或普遍规范译法。",
+      "variant_notes": "该学派标签边界随作者而异；本轮无统一定义证据。",
+      "queries": [
+        "transformation of money into capital 货币转化为资本 资本论 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/dictionary-of-marxism/marxist.org-chinese-dictionary-of-marxism-R.htm",
+          "title": "《马克思主义思想辞典：R》",
+          "support": "词典有“传统马克思主义”用例，但讨论特定争论者的学派标签，不能确认该词所有上下文均等值。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "transformation-of-money-into-capital",
+      "source": "transformation of money into capital",
+      "target": "货币转化为资本",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "货币转化为资本",
+      "explanation": "《资本论》该章标题直接使用“剩余价值转化为资本”。 目标译名与经典中文文本相符。",
+      "variant_notes": "无变体；未发现需拆分的近邻概念。",
+      "queries": [
+        "universal equivalent 一般等价物 Marx 资本论 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/22.htm",
+          "title": "第二十二章 剩余价值转化为资本",
+          "support": "《资本论》该章标题直接使用“剩余价值转化为资本”。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "universal-equivalent",
+      "source": "universal equivalent",
+      "target": "一般等价物",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "一般等价物",
+      "explanation": "《资本论》中文版该章直接使用价值形式、价格形式、价值实体、价值对象性、使用价值、一般等价物等相应术语。 目标译名与经典中文文本相符。",
+      "variant_notes": "无变体；未发现需拆分的近邻概念。",
+      "queries": [
+        "upswing business cycle 上升期 景气上升 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/01.htm",
+          "title": "第一章 商品",
+          "support": "《资本论》中文版该章直接使用价值形式、价格形式、价值实体、价值对象性、使用价值、一般等价物等相应术语。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "upswing",
+      "source": "upswing",
+      "target": "上升期",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "contextual",
+      "suggested_target": "上升期",
+      "explanation": "台湾发展委员会讨论商业周期的扩张期（expansion）；没有直接证据证明 upswing 必须译为“上升期”。 不能据此宣称唯一或普遍规范译法。",
+      "variant_notes": "无变体；未发现需拆分的近邻概念。",
+      "queries": [
+        "use-value 使用价值 Marx Capital 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.ndc.gov.tw/News_Content.aspx?n=F6997D6F7B464C6D&s=2110C32151EE4454&sms=ABEDD47E0F71F82C",
+          "title": "景气循环的意义为何？何谓扩张期、收缩期？",
+          "support": "台湾发展委员会讨论商业周期的扩张期（expansion）；没有直接证据证明 upswing 必须译为“上升期”。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "use-value",
+      "source": "use-value",
+      "target": "使用价值",
+      "variants_before_review": [
+        "use value",
+        "use-values"
+      ],
+      "variants_after_review": [
+        "use value",
+        "use-values"
+      ],
+      "status": "confirmed",
+      "suggested_target": "使用价值",
+      "explanation": "《资本论》中文版该章直接使用价值形式、价格形式、价值实体、价值对象性、使用价值、一般等价物等相应术语。 目标译名与经典中文文本相符。",
+      "variant_notes": "变体为英美拼写或连字符差异。",
+      "queries": [
+        "valorization Verwertung 价值增殖 中文 马克思"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/01.htm",
+          "title": "第一章 商品",
+          "support": "《资本论》中文版该章直接使用价值形式、价格形式、价值实体、价值对象性、使用价值、一般等价物等相应术语。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "valorization",
+      "source": "valorization",
+      "target": "价值增殖",
+      "variants_before_review": [
+        "process of valorization",
+        "valorization process",
+        "Verwertung",
+        "Verwertungsprozess"
+      ],
+      "variants_after_review": [
+        "process of valorization",
+        "valorization process",
+        "Verwertung",
+        "Verwertungsprozess"
+      ],
+      "status": "contextual",
+      "suggested_target": "价值增殖",
+      "explanation": "《资本论》直接把资本生产过程称为价值增殖过程；对 valorization 的译法支持来自马克思术语语境，不是逐词词典条目。 不能据此宣称唯一或普遍规范译法。",
+      "variant_notes": "变体可作检索词，但不保证所有语境可互换。",
+      "queries": [
+        "value 价值 Marx 资本论 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/05.htm",
+          "title": "第五章 劳动过程和价值增殖过程",
+          "support": "《资本论》直接把资本生产过程称为价值增殖过程；对 valorization 的译法支持来自马克思术语语境，不是逐词词典条目。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "value",
+      "source": "value",
+      "target": "价值",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "价值",
+      "explanation": "《资本论》中文版该章直接使用价值形式、价格形式、价值实体、价值对象性、使用价值、一般等价物等相应术语。 目标译名与经典中文文本相符。",
+      "variant_notes": "无变体；未发现需拆分的近邻概念。",
+      "queries": [
+        "value abstraction Wertabstraktion 价值抽象 中文 Marx"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/01.htm",
+          "title": "第一章 商品",
+          "support": "《资本论》中文版该章直接使用价值形式、价格形式、价值实体、价值对象性、使用价值、一般等价物等相应术语。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "value-abstraction",
+      "source": "value abstraction",
+      "target": "价值抽象",
+      "variants_before_review": [
+        "abstraction, value",
+        "Wertabstraktion"
+      ],
+      "variants_after_review": [
+        "abstraction, value",
+        "Wertabstraktion"
+      ],
+      "status": "confirmed",
+      "suggested_target": "价值抽象",
+      "explanation": "《资本论》原文直接使用“价值抽象”；德文 Wertabstraktion 也在中文版本注释/研究文献中出现。 当前译法得到直接支持。",
+      "variant_notes": "变体可作检索词，但不保证所有语境可互换。",
+      "queries": [
+        "value objectivity Wertgegenständlichkeit 价值对象性 中文 Marx"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/01.htm",
+          "title": "马克思《资本论》第一章",
+          "support": "《资本论》原文直接使用“价值抽象”；德文 Wertabstraktion 也在中文版本注释/研究文献中出现。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "value-objectivity",
+      "source": "value-objectivity",
+      "target": "价值对象性",
+      "variants_before_review": [
+        "value objectivity",
+        "Wertgegenständlichkeit"
+      ],
+      "variants_after_review": [
+        "value objectivity",
+        "Wertgegenständlichkeit"
+      ],
+      "status": "confirmed",
+      "suggested_target": "价值对象性",
+      "explanation": "中文学术文本将 value objectivity / Wertgegenständlichkeit 对应“价值对象性”。 当前译法得到直接支持。",
+      "variant_notes": "变体可作检索词，但不保证所有语境可互换。",
+      "queries": [
+        "value relation 价值关系 Marx 资本论 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://ptext.nju.edu.cn/info/1348/9323.htm",
+          "title": "马克思主义与批判理论",
+          "support": "中文学术文本将 value objectivity / Wertgegenständlichkeit 对应“价值对象性”。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "value-relation",
+      "source": "value-relation",
+      "target": "价值关系",
+      "variants_before_review": [
+        "value relation"
+      ],
+      "variants_after_review": [
+        "value relation"
+      ],
+      "status": "confirmed",
+      "suggested_target": "价值关系",
+      "explanation": "文本直接讨论商品的价值关系。 当前译法得到直接支持。",
+      "variant_notes": "变体可作检索词，但不保证所有语境可互换。",
+      "queries": [
+        "variable capital 可变资本 Marx 资本论 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx-engels-2/44/007.htm",
+          "title": "马克思恩格斯全集第四十四卷：第一章 商品",
+          "support": "文本直接讨论商品的价值关系。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "variable-capital",
+      "source": "variable capital",
+      "target": "可变资本",
+      "variants_before_review": [],
+      "variants_after_review": [],
+      "status": "confirmed",
+      "suggested_target": "可变资本",
+      "explanation": "《资本论》章名直接使用可变资本，并讨论庸俗政治经济学。 目标译名与经典中文文本相符。",
+      "variant_notes": "无变体；未发现需拆分的近邻概念。",
+      "queries": [
+        "vulgar political economy 庸俗政治经济学 Marx 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/06.htm",
+          "title": "第六章 不变资本和可变资本",
+          "support": "《资本论》章名直接使用可变资本，并讨论庸俗政治经济学。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "vulgar-political-economy",
+      "source": "vulgar political economy",
+      "target": "庸俗政治经济学",
+      "variants_before_review": [
+        "vulgar economics"
+      ],
+      "variants_after_review": [
+        "vulgar economics"
+      ],
+      "status": "contextual",
+      "suggested_target": "庸俗政治经济学",
+      "explanation": "原文用“庸俗的让·巴·萨伊”等措辞，支持庸俗经济学概念；political economy 修饰语在本页面未与该词组并列。 不能据此宣称唯一或普遍规范译法。",
+      "variant_notes": "变体可作检索词，但不保证所有语境可互换。",
+      "queries": [
+        "working day 工作日 Marx Capital 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/06.htm",
+          "title": "第六章 不变资本和可变资本",
+          "support": "原文用“庸俗的让·巴·萨伊”等措辞，支持庸俗经济学概念；political economy 修饰语在本页面未与该词组并列。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "working-day",
+      "source": "working day",
+      "target": "工作日",
+      "variants_before_review": [
+        "working-day"
+      ],
+      "variants_after_review": [
+        "working-day"
+      ],
+      "status": "confirmed",
+      "suggested_target": "工作日",
+      "explanation": "《资本论》直接使用剩余价值率、剩余劳动、工作日等术语。 目标译名与经典中文文本相符。",
+      "variant_notes": "变体为英美拼写或连字符差异。",
+      "queries": [
+        "world money 世界货币 Marx 资本论 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/07.htm",
+          "title": "第七章 剩余价值率",
+          "support": "《资本论》直接使用剩余价值率、剩余劳动、工作日等术语。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "world-money",
+      "source": "world money",
+      "target": "世界货币",
+      "variants_before_review": [
+        "universal money"
+      ],
+      "variants_after_review": [
+        "universal money"
+      ],
+      "status": "confirmed",
+      "suggested_target": "世界货币",
+      "explanation": "上海财经大学期刊网页的中英双语摘要/正文列出货币职能 “world money”，对应中文“世界货币”；直接支持当前译名。",
+      "variant_notes": "universal money 在部分理论语境相近，本轮无直接证据确认普遍同义。",
+      "queries": [
+        "worldview Marxism Weltanschauungsmarxismus 世界观马克思主义 中文",
+        "\"world money\" \"世界货币\" 上财 货币理论重塑"
+      ],
+      "evidence": [
+        {
+          "url": "https://qks.shufe.edu.cn/mv_html/j00001/201709/53b2cde8-d747-4c69-a66c-5e63826ff22f_WEB.htm",
+          "title": "货币理论重塑：分解与统一分析框架",
+          "support": "上海财经大学期刊网页的中英双语摘要/正文列出货币职能 “world money”，对应中文“世界货币”；直接支持当前译名。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    },
+    {
+      "id": "worldview-marxism",
+      "source": "worldview Marxism",
+      "target": "世界观马克思主义",
+      "variants_before_review": [
+        "Weltanschauungsmarxismus"
+      ],
+      "variants_after_review": [
+        "Weltanschauungsmarxismus"
+      ],
+      "status": "contextual",
+      "suggested_target": "世界观马克思主义（特定理论语境）",
+      "explanation": "南京大学刊载的海因里希论文明确使用“世界观马克思主义中”；属于特定批判语境的术语用例，并不等同“马克思主义世界观”。",
+      "variant_notes": "变体可作检索词，但不保证所有语境可互换。",
+      "queries": [
+        "primitive accumulation original accumulation 原始积累 变体 中文",
+        "site:ptextold.nju.edu.cn \"世界观马克思主义\" 海因里希 政治经济学批判的对象"
+      ],
+      "evidence": [
+        {
+          "url": "https://ptextold.nju.edu.cn/ad/a9/c13164a634281/page.htm",
+          "title": "海因里希：政治经济学批判的对象",
+          "support": "南京大学刊载的海因里希论文明确使用“世界观马克思主义中”；属于特定批判语境的术语用例，并不等同“马克思主义世界观”。",
+          "level": "见来源与说明"
+        }
+      ],
+      "applied_changes": []
+    }
+  ],
+  "followup_actions": [
+    {
+      "date": "2026-10-28",
+      "action": "按用户指示，删除历史网络核查标记为 unverified 的词条；删除只表示当时证据不足，不表示译法错误。",
+      "removed_ids": [
+        "anti-quantity-theory",
+        "loanable-capital",
+        "monied-capitalist",
+        "planned-socialist-economy",
+        "regorging"
+      ],
+      "current_entry_count": 153,
+      "current_glossary_version": "2026-10-28",
+      "current_glossary_sha256": "4b0b0909a4c8bcf231a81efd437a0e0764e1ad1019eb214a806385d7acbe6272"
+    }
+  ]
+}

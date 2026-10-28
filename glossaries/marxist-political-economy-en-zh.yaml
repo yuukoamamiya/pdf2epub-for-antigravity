@@ -1,12 +1,12 @@
-# Extracted from validated translation_entities.json files; all entries are preferred suggestions.
-# Source disagreements were excluded; review before promoting entries to fixed.
+# Existing entries were extracted from validated translation_entities.json files; all entries are preferred suggestions.
+# Ten additions were cross-checked against current source/translation passages on 2026-10-27; no fixed entries added.
 schema_version: 1
 metadata:
   name: marxist-political-economy-en-zh
   domain: Marxist political economy (English to Chinese)
   source_language: English
   target_language: Chinese
-  version: '2026-10-21'
+  version: '2026-10-28'
 entries:
 - id: absolute-surplus-value
   source: absolute surplus-value
@@ -32,17 +32,8 @@ entries:
   target: 异化
   policy: preferred
   variants:
-  - alienated labor
-  - alienated labour
   - estrangement
-  note: 'How to Read Marx''s Capital: The separation of the worker from the product of their labor, the act of production,
-    human species-essence, and other workers.'
-- id: anti-quantity-theory
-  source: anti-quantity theory
-  target: 反货币数量论
-  policy: preferred
-  category: monetary theory
-  note: 'Political Economy of Money and Finance: 由斯图亚特、图克和马克思阐发的观点，强调商品价值先于交换确定，流通所需货币量由物价与交易量决定'
+  note: "How to Read Marx's Capital: The separation of the worker from the product of their labor, the act of production, human species-essence, and other workers. 译名提示：alienation 译“异化”；alienated labor/labour 是“异化劳动”，不作“异化”的同义变体。"
 - id: asymmetric-information
   source: asymmetric information
   target: 信息不对称
@@ -133,11 +124,7 @@ entries:
   source: coin
   target: 铸币
   policy: preferred
-  variants:
-  - paper money
-  - token of value
-  note: 'How to Read Marx''s Capital: Metallic or paper circulating media representing standard weights of gold
-    in circulation.'
+  note: "Coin 指金属铸币；纸币与价值符号是不同货币概念，不作 coin 的同义变体。参见 https://www.marxists.org/chinese/marx-engels/23/013.htm。"
 - id: commercial-capital
   source: commercial capital
   target: 商业资本
@@ -223,6 +210,21 @@ entries:
   - discounting
   category: banking technique
   note: 'Political Economy of Money and Finance: 银行买入未到期商业票据并扣除自贴现日至到期日利息的融资业务'
+- id: doctrine-of-circulation
+  source: doctrine of circulation
+  target: 流通论
+  policy: preferred
+  note: 'Uno, Principles of Political Economy: one of the three doctrines structuring the pure theory; source/translation: output/Principles of Political Economy - Theory of a Purely Capitalist Society/ocr_markdown/chapter_10.4.md:11 and translated/chapter_10.4.md:11.'
+- id: doctrine-of-distribution
+  source: doctrine of distribution
+  target: 分配论
+  policy: preferred
+  note: 'Uno, Principles of Political Economy: one of the three doctrines structuring the pure theory; source/translation: output/Principles of Political Economy - Theory of a Purely Capitalist Society/ocr_markdown/chapter_10.4.md:11 and translated/chapter_10.4.md:11.'
+- id: doctrine-of-production
+  source: doctrine of production
+  target: 生产论
+  policy: preferred
+  note: 'Uno, Principles of Political Economy: one of the three doctrines structuring the pure theory; source/translation: output/Principles of Political Economy - Theory of a Purely Capitalist Society/ocr_markdown/chapter_10.4.md:11 and translated/chapter_10.4.md:11.'
 - id: downswing
   source: downswing
   target: 下行期
@@ -304,6 +306,11 @@ entries:
   - total or expanded form of value
   note: 'How to Read Marx''s Capital: The second stage where a commodity expresses its value in the endless series
     of all other commodities.'
+- id: expanded-reproduction
+  source: expanded reproduction
+  target: 扩大再生产
+  policy: preferred
+  note: 'Marxian reproduction analysis; Basic Theory of Capitalism: source/translation at output/The Basic Theory of Capitalism - The Forms and Substance of the Capitalist Economy/ocr_markdown/chapter_13.part2.md:133 and translated/chapter_13.part2.md:57.'
 - id: fetish-character
   source: fetish character
   target: 拜物教性质
@@ -353,10 +360,8 @@ entries:
   source: free banking
   target: 自由银行业
   policy: preferred
-  variants:
-  - free banking school
   category: banking system
-  note: 'Political Economy of Money and Finance: 不存在中央银行与发钞垄断、由私人银行在市场竞争中自由发行兑现通货的制度构想'
+  note: "Political Economy of Money and Finance: 不存在中央银行与发钞垄断、由私人银行在市场竞争中自由发行兑现通货的制度构想。Free Banking School 应译“自由银行学派”，指思想流派而非制度同义语。参见 https://www.bimba.pku.edu.cn/dpsbs/xzsq/dsxz/441524.htm。"
 - id: functioning-capitalist
   source: functioning capitalist
   target: 职能资本家
@@ -392,10 +397,8 @@ entries:
   source: gold standard
   target: 金本位制
   policy: preferred
-  variants:
-  - gold-specie standard
   category: monetary system
-  note: 'Political Economy of Money and Finance: 以黄金为本位币或流通货币可自由按固定比例兑换为黄金的货币制度'
+  note: "Political Economy of Money and Finance: 以黄金为本位币或流通货币可自由按固定比例兑换为黄金的货币制度。gold-specie standard 是金币本位制这一较窄子类，不作 gold standard 的变体。参见 https://china.gold.org/history-gold/the-classical-gold-standard。"
 - id: hoard
   source: hoard
   target: 贮藏货币
@@ -415,10 +418,8 @@ entries:
   source: horizontalism
   target: 水平主义
   policy: preferred
-  variants:
-  - horizontal money supply
   category: post-keynesian
-  note: 'Political Economy of Money and Finance: 摩尔提出的后凯恩斯主义观点，认为央行将利率作为外生政策变量，货币供给在特定利率水平上完全富有弹性呈水平线'
+  note: 'Political Economy of Money and Finance: 摩尔提出的后凯恩斯主义观点，认为央行将利率作为外生政策变量，货币供给在特定利率水平上完全富有弹性呈水平线。水平货币供给曲线是主张或图形描述，不是学派名称变体。'
 - id: ideal-measure-of-value
   source: ideal measure of value
   target: 观念的价值尺度
@@ -448,6 +449,11 @@ entries:
   policy: preferred
   category: marxian economics
   note: 'Political Economy of Money and Finance: 直接投入物质生产领域并生产剩余价值的职能资本形态'
+- id: industrial-reserve-army
+  source: industrial reserve army
+  target: 产业后备军
+  policy: preferred
+  note: 'Marxian term for the concrete form of relative surplus population; Principles of Political Economy source/translation at output/Principles of Political Economy - Theory of a Purely Capitalist Society/ocr_markdown/chapter_11.part1.md:349 and translated/chapter_11.part1.md:258.'
 - id: interest-bearing-capital
   source: interest-bearing capital
   target: 生息资本
@@ -495,14 +501,6 @@ entries:
   policy: preferred
   category: keynesian economics
   note: 'Political Economy of Money and Finance: 凯恩斯提出的公众由于交易、预防和投机动机而愿意持有无利息货币现金的心理偏好'
-- id: loanable-capital
-  source: loanable capital
-  target: 借贷资本
-  policy: preferred
-  variants:
-  - loan capital
-  category: marxian economics
-  note: 'Political Economy of Money and Finance: 在信用市场上由货币资本家向借款人融通以获取利息的资本'
 - id: long-boom
   source: long boom
   target: 长期繁荣
@@ -658,14 +656,6 @@ entries:
   policy: preferred
   category: marxian economics
   note: 'Political Economy of Money and Finance: 专门为产业资本与商业资本办理收付、汇兑、保管账目等纯粹技术操作的资本'
-- id: monied-capitalist
-  source: monied capitalist
-  target: 货币资本家
-  policy: preferred
-  variants:
-  - money capitalist
-  category: class category
-  note: 'Political Economy of Money and Finance: 拥有货币资本并将其贷出以收取利息而不直接参与经营的资本所有者'
 - id: monopoly-profit
   source: monopoly profit
   target: 垄断利润
@@ -738,12 +728,6 @@ entries:
   - spectral objectivity
   note: 'How to Read Marx''s Capital: Marx''s characterization of value as a purely social reality that lacks physical
     tangibility.'
-- id: planned-socialist-economy
-  source: planned socialist economy
-  target: 计划社会主义经济
-  policy: preferred
-  category: socialist economics
-  note: 'Political Economy of Money and Finance: 生产资料公有制下由国家计划统一组织生产与资源分配的社会主义经济形态'
 - id: political-economy
   source: political economy
   target: 政治经济学
@@ -762,6 +746,13 @@ entries:
   variants:
   - form of price
   note: 'How to Read Marx''s Capital: The expression of the value of a commodity in money.'
+- id: price-of-production
+  source: price of production
+  target: 生产价格
+  policy: preferred
+  variants:
+  - prices of production
+  note: 'Marxian category of commodity price formed by cost-price plus average profit; Basic Theory of Capitalism source/translation at output/The Basic Theory of Capitalism - The Forms and Substance of the Capitalist Economy/polished_markdown/chapter_15.part1.md:92 and translated/chapter_15.part1.md:254.'
 - id: price-specie-flow-mechanism
   source: price-specie flow mechanism
   target: 价格-铸币流动机制
@@ -784,6 +775,16 @@ entries:
   variants:
   - private labour
   note: 'How to Read Marx''s Capital: Labor conducted independently by isolated private producers.'
+- id: pure-theory-of-capitalism
+  source: pure theory of capitalism
+  target: 纯粹资本主义理论
+  policy: preferred
+  note: 'Uno, Principles of Political Economy: abstract theory of the capitalist system; source/translation at output/Principles of Political Economy - Theory of a Purely Capitalist Society/ocr_markdown/chapter_11.part1.md:39 and translated/chapter_11.part1.md:37.'
+- id: purely-capitalist-society
+  source: purely capitalist society
+  target: 纯粹资本主义社会
+  policy: preferred
+  note: 'Uno, Principles of Political Economy: theoretical abstraction in which production is organized through commodities; source/translation at output/Principles of Political Economy - Theory of a Purely Capitalist Society/ocr_markdown/chapter_11.part1.md:41 and translated/chapter_11.part1.md:39.'
 - id: quantity-theory-of-money
   source: quantity theory of money
   target: 货币数量论
@@ -833,17 +834,8 @@ entries:
   source: reflux
   target: 回流
   policy: preferred
-  variants:
-  - law of reflux
-  - principle of reflux
   category: monetary theory
-  note: 'Political Economy of Money and Finance: 银行学派核心法则，指发行的银行券在完成交易后必然通过偿还贷款或存入银行自动回流发钞行'
-- id: regorging
-  source: regorging
-  target: 货币回流
-  policy: preferred
-  category: monetary theory
-  note: 'Political Economy of Money and Finance: 斯图亚特与马克思分析中，流通渠道饱和后多余纸币或铸币被吐出并退回银行与贮藏的机制；斯图亚特专门用法：超过流通需要的信用货币回到发行者/银行；学术资料把它说明为后来“回流法则”的先声。避免原译“回涌吐出”。'
+  note: "Political Economy of Money and Finance: 银行券发行后经交易而回到银行体系的过程；law of reflux / principle of reflux 完整译为“回流法则／回流原理”，裸词 reflux 仅为“回流”，不是整句术语的词形变体。"
 - id: reification
   source: reification
   target: 物化
@@ -880,10 +872,8 @@ entries:
   target: 可感觉而又超感觉的
   policy: preferred
   variants:
-  - sensuous, extrasensory
   - sinnlich übersinnlich
-  note: 'How to Read Marx''s Capital: Marx''s formulation describing the dual nature of commodities as physical
-    things endowed with social value properties.'
+  note: "How to Read Marx's Capital: Marx's formulation describing the dual nature of commodities as physical things endowed with social value properties. 此处强调商品的感性与超感性双重性质；extrasensory 易指超感知或超感官能力，不纳入变体。"
 - id: simple-form-of-value
   source: simple form of value
   target: 简单的、个别的或偶然的价值形式
@@ -906,6 +896,11 @@ entries:
   - simple unskilled labor
   - unskilled labor
   note: 'How to Read Marx''s Capital: Average labor that every ordinary person can perform without special training.'
+- id: simple-reproduction
+  source: simple reproduction
+  target: 简单再生产
+  policy: preferred
+  note: 'Marxian reproduction analysis at an unchanged scale; Basic Theory of Capitalism source/translation at output/The Basic Theory of Capitalism - The Forms and Substance of the Capitalist Economy/ocr_markdown/chapter_13.part2.md:65-67 and translated/chapter_13.part2.md:37.'
 - id: social-labor
   source: social labor
   target: 社会劳动
@@ -929,6 +924,13 @@ entries:
   - socially necessary labour-time
   note: 'How to Read Marx''s Capital: The labor-time required to produce any use-value under normal conditions of
     production with average skill and intensity.'
+- id: stages-theory
+  source: stages theory
+  target: 阶段论
+  policy: preferred
+  variants:
+  - stages-theory
+  note: 'Uno, Principles of Political Economy: study of historical stages of capitalist development; source/translation at output/Principles of Political Economy - Theory of a Purely Capitalist Society/ocr_markdown/chapter_11.part1.md:37 and translated/chapter_11.part1.md:35.'
 - id: stagflation
   source: stagflation
   target: 滞胀
