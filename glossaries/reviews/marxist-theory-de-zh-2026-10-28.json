@@ -1,0 +1,3500 @@
+{
+  "schema_version": 1,
+  "metadata": {
+    "audit_date": "2026-10-28",
+    "glossary_path": "glossaries/marxist-theory-de-zh.yaml",
+    "glossary_version": "2026-10-28",
+    "glossary_sha256": "cc3d62353df8623fc32b34eca5cfa52f819c9b73d420b0919ee8dcb409382a48",
+    "entries_audited": 126,
+    "glossary_modified": true,
+    "counts": {
+      "confirmed": 63,
+      "contextual": 50,
+      "change_suggested": 7,
+      "unverified": 6
+    },
+    "method": "三个Codex子代理按词条检索，主代理复核来源对应与疑难项。采纳专业辞典、经典文本对应章节、期刊及高校研究用例；检索摘要与已打开正文分别标注。",
+    "limitations": [
+      "confirmed表示找到符合当前语境的中译证据，不表示唯一译法或国家审定术语，也不等于词频统计。",
+      "contextual表示主译可用但有语境、搭配、来源强度或变体范围限制；不能与证据不足混为一谈。",
+      "change_suggested包括首选译名与变体整理建议，不意味着当前主译一律错误。所有建议尚未写回德文表。",
+      "unverified表示本轮网络材料不足以确认中文通行性，不代表词义错误或德文概念不存在。",
+      "经典原文与中译相同章节/段落的对应可构成证据，无需在同一个网页出现德中双语。",
+      "部分条目只获取搜索摘要；上传书摘和普通词典仅按有限来源处理。本地书稿未作为网络通行性证据。"
+    ],
+    "historical_baseline": {
+      "glossary_version": "2026-10-21",
+      "glossary_sha256": "cc3d62353df8623fc32b34eca5cfa52f819c9b73d420b0919ee8dcb409382a48",
+      "entries_audited": 126
+    },
+    "glossary_sha256_after_application": "309e80d460edebb6484666c010b9d2150a5d00aa281578dfc35c4b5a44432e65",
+    "entries_after_application": 120,
+    "application_status": "applied"
+  },
+  "entries": [
+    {
+      "id": "absoluter-mehrwert",
+      "source": "absoluter Mehrwert",
+      "current_target": "绝对剩余价值",
+      "variants": [],
+      "queries": [
+        "absoluter Mehrwert 绝对剩余价值 德文 中文 Marx",
+        "\"绝对剩余价值\" \"absoluter Mehrwert\" 资本论 中文",
+        "\"absolute Mehrwert\" \"绝对剩余价值\" 德文 资本论"
+      ],
+      "evidence": [
+        {
+          "title": "Absoluter Mehrwert",
+          "url": "https://www.exit-online.org/absoluter-mehrwert/",
+          "support": "德文条目解释绝对剩余价值通过延长工作日等方式增加；未呈现中文对应。",
+          "level": "理论网站",
+          "access": "检索结果摘要；未打开全文核验"
+        },
+        {
+          "title": "剩余价值词条",
+          "url": "https://knowecon.com/wiki/%E5%89%A9%E4%BD%99%E4%BB%B7%E5%80%BC",
+          "support": "词条直接将 absoluter Mehrwert 对应“绝对剩余价值”，并解释其通过延长工作日等增加剩余劳动。",
+          "level": "术语百科",
+          "access": "搜索结果摘要；链接可供全文复核"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "绝对剩余价值",
+      "note": "德文术语与中文“绝对剩余价值”直接对应；其定义为在必要劳动之外延长剩余劳动。",
+      "ordinal": 1,
+      "variant_notes": ""
+    },
+    {
+      "id": "abstrakt-menschliche-arbeit",
+      "source": "abstrakt menschliche Arbeit",
+      "current_target": "抽象人类劳动",
+      "variants": [
+        "abstrakte Arbeit"
+      ],
+      "queries": [
+        "abstrakt menschliche Arbeit 抽象人类劳动 德文 中文 Marx"
+      ],
+      "evidence": [
+        {
+          "title": "第一章 商品",
+          "url": "https://www.marxists.org/chinese/marx/capital/01.htm",
+          "support": "《资本论》译文出现“抽象人类劳动”。",
+          "level": "经典文本中译",
+          "access": "检索结果摘要；未打开全文核验"
+        },
+        {
+          "title": "现代哲学2014年第4期",
+          "url": "https://mphilosophy.sysu.edu.cn/sites/default/files/2020-06/%E7%8E%B0%E4%BB%A3%E5%93%B2%E5%AD%A62014%E7%AC%AC4%E6%9C%9F.pdf",
+          "support": "论文并列 abstrakt menschliche Arbeit 与抽象人类劳动。",
+          "level": "高校论文",
+          "access": "检索结果摘要；未打开全文核验"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "抽象人类劳动",
+      "note": "检索到的中译材料与当前词义大体一致。",
+      "ordinal": 2,
+      "variant_notes": "需按语境核实该变体是否与主词等义。"
+    },
+    {
+      "id": "akkumulation-des-kapitals",
+      "source": "Akkumulation des Kapitals",
+      "current_target": "资本积累",
+      "variants": [],
+      "queries": [
+        "Akkumulation des Kapitals 资本积累 德文 中文 Marx",
+        "\"Akkumulation des Kapitals\" \"资本积累\" 马克思 术语",
+        "\"Die Akkumulation des Kapitals\" \"资本积累\" \"资本论\" 马恩全集",
+        "\"剩余价值再转化为资本\" \"资本积累\" 马克思"
+      ],
+      "evidence": [
+        {
+          "title": "资本积累论（中文）",
+          "url": "https://www.marxists.org/chinese/rosa-luxemburg/1913/08.htm",
+          "support": "中文书名《资本积累论》对应德文 Die Akkumulation des Kapitals。",
+          "level": "经典文本中译",
+          "access": "检索结果摘要；未打开全文核验"
+        },
+        {
+          "title": "德文原典",
+          "url": "https://www.marxists.org/deutsch/archiv/luxemburg/1913/akkkap/index.htm",
+          "support": "德文原书名。",
+          "level": "经典文本原文",
+          "access": "检索结果摘要；未打开全文核验"
+        },
+        {
+          "title": "罗莎·卢森堡《资本积累论》译后记",
+          "url": "https://www.marxists.org/chinese/rosa-luxemburg/1913/33.htm",
+          "support": "说明 Die Akkumulation des Kapitals 是卢森堡著作原名，中文书名《资本积累论》；这只是专名证据，不决定本条一般概念译名。",
+          "level": "经典著作译后记",
+          "access": "搜索结果摘要；链接可供全文复核"
+        },
+        {
+          "title": "《资本论》第二十二章：剩余价值转化为资本",
+          "url": "https://www.marxists.org/chinese/marx/capital/22.htm",
+          "support": "中文经典文本明确把“把剩余价值再转化为资本”称为“资本积累”，支持一般概念 target；不是卢森堡书名。",
+          "level": "经典文本中译",
+          "access": "搜索结果摘要；建议点击链接复核全文"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "资本积累",
+      "note": "此处是一般范畴 Akkumulation des Kapitals，译“资本积累”。《资本积累论》仅是卢森堡同名专著的中文书名，不应据此给一般术语加“论”。",
+      "ordinal": 3,
+      "variant_notes": ""
+    },
+    {
+      "id": "allgemeines-aquivalent",
+      "source": "allgemeines Äquivalent",
+      "current_target": "一般等价物",
+      "variants": [],
+      "queries": [
+        "allgemeines Äquivalent 一般等价物 德文 中文 Marx",
+        "\"allgemeines Äquivalent\" \"一般等价物\" 马克思 资本论 中文"
+      ],
+      "evidence": [
+        {
+          "title": "Zur Kritik der Politischen Ökonomie",
+          "url": "https://biancahoegel.de/archiv/marx_engels/kritik_pol_oek/erstes_kapitel.html",
+          "support": "原文有 allgemeines Äquivalent，但本次未找到可靠中文同段版本。",
+          "level": "德文经典文本",
+          "access": "检索结果摘要；未打开全文核验"
+        },
+        {
+          "title": "一般等价物词条",
+          "url": "https://knowecon.com/wiki/%E4%B8%80%E8%88%AC%E7%AD%89%E4%BB%B7%E7%89%A9",
+          "support": "给出德文 Allgemeines Äquivalent 与中文“一般等价物”对应；二手术语资料。",
+          "level": "术语百科",
+          "access": "检索结果摘要；未打开全文核验"
+        },
+        {
+          "title": "《资本论》第一卷第一章（中译）",
+          "url": "https://www.marxists.org/chinese/marx/capital/01.htm",
+          "support": "中文原典讨论一般等价形式、商品与货币的关系；与该章德文原词一般等价物段落对应。",
+          "level": "经典文本中译",
+          "access": "搜索结果摘要；链接可供全文复核"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "一般等价物",
+      "note": "《资本论》价值形式分析中的一般等价物，中文术语为“一般等价物”；已找到术语资料和经典文本对应章节。",
+      "ordinal": 4,
+      "variant_notes": ""
+    },
+    {
+      "id": "arbeitskraft",
+      "source": "Arbeitskraft",
+      "current_target": "劳动力",
+      "variants": [],
+      "queries": [
+        "Arbeitskraft 劳动力 德文 中文 Marx"
+      ],
+      "evidence": [
+        {
+          "title": "资本论第四章",
+          "url": "https://www.marxists.org/chinese/marx/capital/04.htm",
+          "support": "中文原典使用“劳动力”；并将其释为劳动力或劳动能力。",
+          "level": "经典文本中译",
+          "access": "检索结果摘要；未打开全文核验"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "劳动力",
+      "note": "检索到的中译材料与当前词义大体一致。",
+      "ordinal": 5,
+      "variant_notes": ""
+    },
+    {
+      "id": "basis",
+      "source": "Basis",
+      "current_target": "基础",
+      "variants": [
+        "materielle Basis",
+        "ökonomische Basis"
+      ],
+      "queries": [
+        "Basis 基础 德文 中文 Marx"
+      ],
+      "evidence": [
+        {
+          "title": "北京大学：经济基础与上层建筑",
+          "url": "https://marxism.pku.edu.cn/xzlt/9mkszyxy1340591.htm",
+          "support": "解释“经济基础”为经济结构/生产关系总和，说明基础需结合限定语境。",
+          "level": "高校研究",
+          "access": "检索结果摘要；未打开全文核验"
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "基础",
+      "note": "Basis可泛指基础；materielle/ökonomische Basis是有限定的短语，不宜无语境合并。",
+      "variant_notes": "materielle Basis、ökonomische Basis分别含物质、经济限定，不能统一丢弃限定语。",
+      "ordinal": 6
+    },
+    {
+      "id": "bewutsein",
+      "source": "Bewußtsein",
+      "current_target": "意识",
+      "variants": [],
+      "queries": [
+        "Bewußtsein 意识 德文 中文 Marx"
+      ],
+      "evidence": [
+        {
+          "title": "马克思主义历史考证大辞典第二卷",
+          "url": "https://www.cp.com.cn/book/30e31e6b-2.html",
+          "support": "词条目录直接对应“意识（Bewußtsein）”。",
+          "level": "权威术语辞典",
+          "access": "检索结果摘要；未打开全文核验"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "意识",
+      "note": "检索到的中译材料与当前词义大体一致。",
+      "ordinal": 7,
+      "variant_notes": ""
+    },
+    {
+      "id": "bourgeoisie",
+      "source": "Bourgeoisie",
+      "current_target": "资产阶级",
+      "variants": [
+        "Bourgeois"
+      ],
+      "queries": [
+        "Bourgeoisie 资产阶级 德文 中文 Marx"
+      ],
+      "evidence": [
+        {
+          "title": "资产阶级的翻译及其中国化",
+          "url": "https://xbshkx.cdut.edu.cn/cn/article/pdf/preview/10.3969/j.issn.1672-0539.2020.01.020.pdf",
+          "support": "研究梳理 Bourgeoisie 的中文译名演变，资产阶级为通行译词。",
+          "level": "学术期刊论文",
+          "access": "检索结果摘要；未打开全文核验"
+        },
+        {
+          "title": "资产者的问题",
+          "url": "https://ptext.nju.edu.cn/info/1181/3488.htm",
+          "support": "明确区分 bourgeois（资产者）与 bourgeoisie（资产阶级）。",
+          "level": "高校研究",
+          "access": "检索结果摘要；未打开全文核验"
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "资产阶级",
+      "note": "Bourgeoisie指阶级集体，Bourgeois多指个体资产者；不应作为无差别变体。",
+      "variant_notes": "Bourgeois指资产者个体，Bourgeoisie指资产阶级，建议移除个体词作为等价变体。",
+      "ordinal": 8
+    },
+    {
+      "id": "burgerliche-gesellschaft",
+      "source": "bürgerliche Gesellschaft",
+      "current_target": "市民社会",
+      "variants": [
+        "Civil Society"
+      ],
+      "queries": [
+        "bürgerliche Gesellschaft 市民社会 德文 中文 Marx"
+      ],
+      "evidence": [
+        {
+          "title": "马克思的市民社会概念",
+          "url": "https://xsyk.cbpt.cnki.net/portal/journal/portal/client/paper/24ff8f0603fd209bad070b6261996f74",
+          "support": "文中直接并列 bürgerliche Gesellschaft 与市民社会，并说明特定语境可指现代资产阶级社会。",
+          "level": "学术期刊论文",
+          "access": "检索结果摘要；未打开全文核验"
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "市民社会",
+      "note": "可译市民社会，也可能依文本语境译资产阶级社会。",
+      "ordinal": 9,
+      "variant_notes": "可译市民社会，也可能依文本语境译资产阶级社会。"
+    },
+    {
+      "id": "charaktermaske",
+      "source": "Charaktermaske",
+      "current_target": "人格面具",
+      "variants": [],
+      "queries": [
+        "Charaktermaske 人格面具 德文 中文 Marx"
+      ],
+      "evidence": [
+        {
+          "title": "马克思主义历史考证大辞典第二卷",
+          "url": "https://www.cp.com.cn/book/30e31e6b-2.html",
+          "support": "辞典目录译作“（性格）面具（Charaktermaske）”，没有支持“人格面具”的直接证据。",
+          "level": "权威术语辞典",
+          "access": "检索结果摘要；未打开全文核验"
+        },
+        {
+          "url": "https://ptextold.nju.edu.cn/15/37/c13372a595255/page.htm",
+          "title": "列斐伏尔与社会批判理论",
+          "support": "马克思主义研究语境中也有使用人格面具的例子，但该用例不是直接德中词对。",
+          "level": "学术研究",
+          "access": "搜索结果摘要；未逐页全文核读"
+        }
+      ],
+      "status": "change_suggested",
+      "suggested_target": "性格面具",
+      "note": "商务印书馆HKWM中译目录采用（性格）面具，建议本表优先用性格面具。人格面具也见于部分马克思主义中文讨论，不能由辞典差异推断为绝对错误；应避免与荣格Persona概念混淆。",
+      "ordinal": 10,
+      "variant_notes": ""
+    },
+    {
+      "id": "darstellungsmethode",
+      "source": "Darstellungsmethode",
+      "current_target": "叙述方法",
+      "variants": [],
+      "queries": [
+        "Darstellungsmethode 叙述方法 德文 中文 Marx"
+      ],
+      "evidence": [
+        {
+          "title": "马克思《资本论》的研究方法和叙述方法再审视",
+          "url": "https://cnki.istiz.org.cn/kcms/detail/detail.aspx?dbcode=CJFD&dbname=CJFD2025&filename=NMGR202503009",
+          "support": "中文论文使用“叙述方法”。",
+          "level": "学术论文",
+          "access": "检索结果摘要；未打开全文核验"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "叙述方法",
+      "note": "检索到的中译材料与当前词义大体一致。",
+      "ordinal": 11,
+      "variant_notes": ""
+    },
+    {
+      "id": "der-einzige",
+      "source": "Der Einzige",
+      "current_target": "唯一者",
+      "variants": [
+        "Einzige"
+      ],
+      "queries": [
+        "Der Einzige 唯一者 德文 中文 Marx"
+      ],
+      "evidence": [
+        {
+          "title": "德意志意识形态",
+          "url": "https://www.marxists.org/chinese/pdf/marx-engels/mes01.pdf",
+          "support": "编者注提到施蒂纳著作《唯一者及其所有物》，支持唯一者的中文用法。",
+          "level": "经典文本/编注",
+          "access": "检索结果摘要；未打开全文核验"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "唯一者",
+      "note": "检索到的中译材料与当前词义大体一致。",
+      "ordinal": 12,
+      "variant_notes": "需按语境核实该变体是否与主词等义。"
+    },
+    {
+      "id": "dialektische-darstellung",
+      "source": "dialektische Darstellung",
+      "current_target": "辩证叙述",
+      "variants": [],
+      "queries": [
+        "\"dialektische Darstellung\" 辩证叙述 马克思 中文 翻译",
+        "\"dialektische Darstellung\" \"辩证叙述\" 《资本论》中文 术语"
+      ],
+      "evidence": [
+        {
+          "title": "Ferrer AI Textual 术语清单",
+          "url": "https://philarchive.org/archive/FERFAT-10",
+          "support": "页面列出 Dialektische Darstellung—辩证叙述；来源为AI辅助术语文稿，权威性低，仅作线索，不足以确认标准译法。",
+          "level": "低可信二手资料",
+          "access": "搜索结果摘要；需全文复核"
+        }
+      ],
+      "status": "unverified",
+      "suggested_target": "辩证叙述",
+      "note": "检索发现低可信 AI 术语文稿列出“辩证叙述”，但未找到可采信的学术或经典文本对译；保持 unverified。",
+      "ordinal": 13,
+      "variant_notes": ""
+    },
+    {
+      "id": "doppelcharakter-der-arbeit",
+      "source": "Doppelcharakter der Arbeit",
+      "current_target": "劳动的二重性",
+      "variants": [],
+      "queries": [
+        "Doppelcharakter der Arbeit 劳动的二重性 德文 中文 Marx"
+      ],
+      "evidence": [
+        {
+          "title": "马克思主义历史考证大辞典第二卷",
+          "url": "https://www.cp.com.cn/book/30e31e6b-2.html",
+          "support": "辞典目录直接列“劳动的二重性（Doppelcharakter der Arbeit）”。",
+          "level": "权威术语辞典",
+          "access": "检索结果摘要；未打开全文核验"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "劳动的二重性",
+      "note": "检索到的中译材料与当前词义大体一致。",
+      "ordinal": 14,
+      "variant_notes": ""
+    },
+    {
+      "id": "durchschnittsprofit",
+      "source": "Durchschnittsprofit",
+      "current_target": "平均利润",
+      "variants": [],
+      "queries": [
+        "Durchschnittsprofit 平均利润 德文 中文 Marx"
+      ],
+      "evidence": [
+        {
+          "title": "马恩全集第二十五卷第九章",
+          "url": "https://www.marxists.org/chinese/marx-engels/25/010.htm",
+          "support": "中文原典直接使用平均利润。",
+          "level": "经典文本中译",
+          "access": "检索结果摘要；未打开全文核验"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "平均利润",
+      "note": "检索到的中译材料与当前词义大体一致。",
+      "ordinal": 15,
+      "variant_notes": ""
+    },
+    {
+      "id": "durchschnittsprofitrate",
+      "source": "Durchschnittsprofitrate",
+      "current_target": "平均利润率",
+      "variants": [
+        "allgemeine Profitrate"
+      ],
+      "queries": [
+        "Durchschnittsprofitrate 平均利润率 德文 中文 Marx"
+      ],
+      "evidence": [
+        {
+          "title": "马恩全集第二十五卷第九章",
+          "url": "https://www.marxists.org/chinese/marx-engels/25/010.htm",
+          "support": "章节名并列一般利润率（平均利润率），说明存在语境差别。",
+          "level": "经典文本中译",
+          "access": "检索结果摘要；未打开全文核验"
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "平均利润率",
+      "note": "原典标题并列一般利润率/平均利润率；按具体定义和语境处理。",
+      "ordinal": 16,
+      "variant_notes": "原典标题并列一般利润率/平均利润率；按具体定义和语境处理。"
+    },
+    {
+      "id": "einfache-arbeit",
+      "source": "einfache Arbeit",
+      "current_target": "简单劳动",
+      "variants": [],
+      "queries": [
+        "einfache Arbeit 简单劳动 德文 中文 Marx",
+        "\"einfache Arbeit\" \"简单劳动\" 术语 翻译 Marx",
+        "\"einfache Arbeit\" \"简单劳动\" 资本论",
+        "\"einfache Arbeit\" \"简单劳动\" 资本论 第一章 中文"
+      ],
+      "evidence": [
+        {
+          "title": "德文术语条目",
+          "url": "https://inkrit.de/e_inkritpedia/e_maincode/doku.php?id=a%3Aabstrakte_arbeit",
+          "support": "德文资料引述 einfache Arbeit，但未给中文对应。",
+          "level": "术语辞典",
+          "access": "检索结果摘要；未打开全文核验"
+        },
+        {
+          "title": "《资本论》第一卷第一章（中译）",
+          "url": "https://www.marxists.org/chinese/marx/capital/01.htm",
+          "support": "中文原典直接使用“简单劳动”，并描述其作为不同劳动的计量单位；与该章德文 einfache Arbeit 对应。",
+          "level": "经典文本中译",
+          "access": "搜索结果摘要；链接可供全文复核"
+        },
+        {
+          "title": "《资本论》第一卷第一章（德文）",
+          "url": "https://marx-zh-cn.github.io/docs/MEW-ZENO/13/ME13-015.html",
+          "support": "德文原文出现“Es ist einfache Arbeit, wozu jedes Durchschnittsindividuum abgerichtet werden kann”。",
+          "level": "经典文本原文",
+          "access": "搜索结果摘要；链接可供全文复核"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "简单劳动",
+      "note": "《资本论》第一卷商品章将 einfache Arbeit 译为“简单劳动”，并与简单平均劳动范畴相连。",
+      "ordinal": 17,
+      "variant_notes": ""
+    },
+    {
+      "id": "einfache-zirkulation",
+      "source": "einfache Zirkulation",
+      "current_target": "简单流通",
+      "variants": [],
+      "queries": [
+        "einfache Zirkulation 简单流通 德文 中文 Marx"
+      ],
+      "evidence": [
+        {
+          "title": "einfache Zirkulation 术语条目",
+          "url": "https://inkrit.de/e_inkritpedia/e_maincode/doku.php?id=e%3Aeinfache_zirkulation",
+          "support": "术语条目给出中文“简单流通”。",
+          "level": "术语辞典",
+          "access": "检索结果摘要；未打开全文核验"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "简单流通",
+      "note": "检索到的中译材料与当前词义大体一致。",
+      "ordinal": 18,
+      "variant_notes": ""
+    },
+    {
+      "id": "entfremdung",
+      "source": "Entfremdung",
+      "current_target": "异化",
+      "variants": [
+        "entfremdet",
+        "Entäußerung"
+      ],
+      "queries": [
+        "Entfremdung 异化 德文 中文 Marx"
+      ],
+      "evidence": [
+        {
+          "title": "社会对抗：马克思交往异化思想的实质",
+          "url": "https://xb.szu.edu.cn/article/2016/1000-260X-33-5-53.html",
+          "support": "直接指出 Entfremdung 与 Entäußerung 的译法及语义不可简单混同。",
+          "level": "大学学报论文",
+          "access": "检索结果摘要；未打开全文核验"
+        },
+        {
+          "title": "1844年经济学哲学手稿",
+          "url": "https://www.marxists.org/chinese/marx/marxist.org-chinese-marx-1844.htm",
+          "support": "中译文并用异化、外化。",
+          "level": "经典文本中译",
+          "access": "检索结果摘要；未打开全文核验"
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "异化",
+      "note": "Entfremdung与Entäußerung相关但并非任何语境下都可互换；建议移除同义变体或明确各自译法。",
+      "variant_notes": "entfremdet为异化的；Entäußerung有外化、异化等译法，应单独处理。",
+      "ordinal": 19
+    },
+    {
+      "id": "epistemologischer-bruch",
+      "source": "epistemologischer Bruch",
+      "current_target": "认识论断裂",
+      "variants": [],
+      "queries": [
+        "epistemologischer Bruch 认识论断裂 德文 中文 Marx"
+      ],
+      "evidence": [
+        {
+          "title": "晚期阿尔都塞对认识论断裂的自我突破",
+          "url": "https://zxyj.cbpt.cnki.net/portal/journal/portal/client/paper/84d3cbef7a3ee0cbd99e5ac6ab2140fd",
+          "support": "直接使用“认识论断裂”。",
+          "level": "中文核心期刊",
+          "access": "检索结果摘要；未打开全文核验"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "认识论断裂",
+      "note": "检索到的中译材料与当前词义大体一致。",
+      "ordinal": 20,
+      "variant_notes": ""
+    },
+    {
+      "id": "erscheinungsform",
+      "source": "Erscheinungsform",
+      "current_target": "显现形式",
+      "variants": [],
+      "queries": [
+        "Erscheinungsform 显现形式 德文 中文 Marx"
+      ],
+      "evidence": [
+        {
+          "title": "马克思主义历史考证大辞典第三卷",
+          "url": "https://www.cp.com.cn/book/fa542a86-d.html",
+          "support": "辞典对 Erscheinungsform 的对应译法是“表现形式”。",
+          "level": "权威术语辞典",
+          "access": "检索结果摘要；未打开全文核验"
+        },
+        {
+          "title": "现代哲学2014年第4期",
+          "url": "https://mphilosophy.sysu.edu.cn/sites/default/files/2020-06/%E7%8E%B0%E4%BB%A3%E5%93%B2%E5%AD%A62014%E7%AC%AC4%E6%9C%9F.pdf",
+          "support": "论文明确对照 Erscheinungsform/表现形式。",
+          "level": "高校论文",
+          "access": "检索结果摘要；未打开全文核验"
+        }
+      ],
+      "status": "change_suggested",
+      "suggested_target": "表现形式",
+      "note": "权威辞典与高校论文支持“表现形式”，建议替换“显现形式”。",
+      "ordinal": 21,
+      "variant_notes": ""
+    },
+    {
+      "id": "fetischcharakter",
+      "source": "Fetischcharakter",
+      "current_target": "拜物教性质",
+      "variants": [],
+      "queries": [
+        "Fetischcharakter 拜物教性质 德文 中文 Marx"
+      ],
+      "evidence": [
+        {
+          "title": "Fetischismus 及相关词在马克思著作中的话语变迁",
+          "url": "https://mphilosophy.sysu.edu.cn/sites/default/files/2020-06/%E7%8E%B0%E4%BB%A3%E5%93%B2%E5%AD%A62017%E7%AC%AC1%E6%9C%9F.pdf",
+          "support": "论文将 Der Fetischcharakter der Ware 对应为“商品的拜物教性质”。",
+          "level": "高校论文",
+          "access": "检索结果摘要；未打开全文核验"
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "拜物教性质",
+      "note": "证据对应完整搭配“商品的拜物教性质”；可在词条注释中标明搭配。",
+      "ordinal": 22,
+      "variant_notes": ""
+    },
+    {
+      "id": "fiktives-kapital",
+      "source": "fiktives Kapital",
+      "current_target": "虚拟资本",
+      "variants": [],
+      "queries": [
+        "fiktives Kapital 虚拟资本 德文 中文 Marx"
+      ],
+      "evidence": [
+        {
+          "title": "虚拟资本理论研究导论",
+          "url": "https://marxism.ssap.com.cn/skwx_marxism/LiteratureDetail.aspx?ID=153775",
+          "support": "社科文献出版社研究数据库使用“虚拟资本”。",
+          "level": "学术专著/数据库",
+          "access": "检索结果摘要；未打开全文核验"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "虚拟资本",
+      "note": "检索到的中译材料与当前词义大体一致。",
+      "ordinal": 23,
+      "variant_notes": ""
+    },
+    {
+      "id": "formelle-subsumtion",
+      "source": "formelle Subsumtion",
+      "current_target": "形式隶属",
+      "variants": [],
+      "queries": [
+        "formelle Subsumtion 形式隶属 德文 中文 Marx"
+      ],
+      "evidence": [
+        {
+          "title": "形式隶属专题研究",
+          "url": "https://ptextold.nju.edu.cn/57/05/c13164a612101/page.htm",
+          "support": "南京大学研究使用“形式从属”，构成当前“形式隶属”的异译证据。",
+          "level": "高校研究",
+          "access": "检索结果摘要；未打开全文核验"
+        }
+      ],
+      "status": "change_suggested",
+      "suggested_target": "形式从属",
+      "note": "形式隶属与形式从属都有用例，检索到大学研究采用后者。",
+      "ordinal": 24,
+      "variant_notes": ""
+    },
+    {
+      "id": "forschungsmethode",
+      "source": "Forschungsmethode",
+      "current_target": "研究方法",
+      "variants": [],
+      "queries": [
+        "Forschungsmethode 研究方法 德文 中文 Marx"
+      ],
+      "evidence": [
+        {
+          "title": "马克思的研究方法新论",
+          "url": "https://www.dswxyjy.org.cn/n1/2019/0617/c427184-31158188.html",
+          "support": "中文论文固定使用“研究方法”。",
+          "level": "理论研究文章",
+          "access": "检索结果摘要；未打开全文核验"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "研究方法",
+      "note": "检索到的中译材料与当前词义大体一致。",
+      "ordinal": 25,
+      "variant_notes": ""
+    },
+    {
+      "id": "gattungswesen",
+      "source": "Gattungswesen",
+      "current_target": "类本质",
+      "variants": [
+        "Gattung"
+      ],
+      "queries": [
+        "Gattungswesen 类本质 德文 中文 Marx"
+      ],
+      "evidence": [
+        {
+          "title": "1844年经济学哲学手稿",
+          "url": "https://www.marxists.org/chinese/marx-engels/42/003.htm",
+          "support": "经典中译使用“类存在物”；该术语也有“类本质”译法。",
+          "level": "经典文本中译",
+          "access": "检索结果摘要；未打开全文核验"
+        },
+        {
+          "title": "昆明学院学报2022",
+          "url": "https://xb.kmu.edu.cn/22412.pdf",
+          "support": "论文指出“类本质”可能遮蔽 Wesen 的存在义。",
+          "level": "学术期刊论文",
+          "access": "检索结果摘要；未打开全文核验"
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "类本质",
+      "note": "Gattungswesen译作类本质/类存在物均见；Gattung单独是“类”，建议删除该变体。",
+      "variant_notes": "Gattung通常是类，并不等于类本质，应移出等价变体。",
+      "ordinal": 26
+    },
+    {
+      "id": "gebrauchswert",
+      "source": "Gebrauchswert",
+      "current_target": "使用价值",
+      "variants": [],
+      "queries": [
+        "Gebrauchswert 使用价值 德文 中文 Marx"
+      ],
+      "evidence": [
+        {
+          "title": "资本论第一卷节选",
+          "url": "https://www.htu.edu.cn/xsd/2021/0414/c14329a193828/page.htm",
+          "support": "中文文本使用“使用价值”。",
+          "level": "高校经典文本选编",
+          "access": "检索结果摘要；未打开全文核验"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "使用价值",
+      "note": "检索到的中译材料与当前词义大体一致。",
+      "ordinal": 27,
+      "variant_notes": ""
+    },
+    {
+      "id": "geld-als-geld",
+      "source": "Geld als Geld",
+      "current_target": "货币作为货币",
+      "variants": [],
+      "queries": [
+        "\"Geld als Geld\" \"货币作为货币\" 马克思",
+        "\"Geld als Geld\" 货币作为货币 马克思 中文 术语",
+        "\"货币作为货币\" \"货币作为资本\" 马克思 中文原典"
+      ],
+      "evidence": [
+        {
+          "title": "卡·马克思《资本论》第一卷提纲",
+          "url": "https://www.marxists.org/chinese/marx-engels/16/039.htm",
+          "support": "中文原典直接区分“货币作为货币的流通”与“货币作为资本的流通”。",
+          "level": "经典文本中译",
+          "access": "搜索结果摘要；建议点击链接复核全文"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "货币作为货币",
+      "note": "《资本论》第一卷提纲的中文原典直接使用“货币作为货币”，并与“货币作为资本”对照；当前译法可确认。",
+      "ordinal": 28,
+      "variant_notes": ""
+    },
+    {
+      "id": "geld-als-selbstzweck",
+      "source": "Geld als Selbstzweck",
+      "current_target": "货币作为目的本身",
+      "variants": [],
+      "queries": [
+        "\"Geld als Selbstzweck\" 马克思 货币 目的本身",
+        "\"Geld als Selbstzweck\" \"货币作为目的本身\"",
+        "\"Geld als Selbstzweck\" Heinrich Marx Geld"
+      ],
+      "evidence": [
+        {
+          "title": "Karl Marx: Urtext（1858），Geld als Selbstzweck",
+          "url": "https://external.dandelon.com/download/attachments/dandelon/ids/AT001A74E9CC7C6F86007C1257E1800441172.pdf",
+          "support": "德文篇名直接出现 Geld als Selbstzweck；仅证明德文术语用法，未证明当前中文译法。",
+          "level": "德文研究目录",
+          "access": "搜索结果摘要；建议点击链接复核全文"
+        }
+      ],
+      "status": "unverified",
+      "suggested_target": "货币作为目的本身",
+      "note": "此条指货币作为独立财富/目的本身的特殊规定；目前检索到的材料仅能确认德文表述，未找到足以确认当前中文措辞的可靠中译，故维持 unverified。",
+      "ordinal": 29,
+      "variant_notes": ""
+    },
+    {
+      "id": "geldfetisch",
+      "source": "Geldfetisch",
+      "current_target": "货币拜物教",
+      "variants": [],
+      "queries": [
+        "Geldfetisch 货币拜物教 德文 中文 Marx",
+        "\"Geldfetisch\" \"货币拜物教\""
+      ],
+      "evidence": [
+        {
+          "url": "https://mphilosophy.sysu.edu.cn/sites/default/files/2020-06/%E7%8E%B0%E4%BB%A3%E5%93%B2%E5%AD%A62017%E7%AC%AC1%E6%9C%9F.pdf",
+          "title": "Fetischismus及相关词在马克思著作中的话语变迁",
+          "support": "论文直接将Geldfetisch对应货币拜物教，并讨论货币物神译法。",
+          "level": "学术研究",
+          "access": "搜索结果摘要；未逐页全文核读"
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "货币拜物教",
+      "note": "论文直接对应货币拜物教与Geldfetisch，同时提出货币物神的另一译法；当前译名有依据，需留意Fetisch与Fetischismus的区别。",
+      "ordinal": 30,
+      "variant_notes": ""
+    },
+    {
+      "id": "geldform",
+      "source": "Geldform",
+      "current_target": "货币形式",
+      "variants": [],
+      "queries": [
+        "Geldform 货币形式 德文 中文 Marx",
+        "\"Geldform\" \"货币形式\" 术语 翻译 Marx",
+        "\"Geldform\" \"货币形式\" 马克思 中文"
+      ],
+      "evidence": [
+        {
+          "title": "价值形式的商品—货币拜物教之谜",
+          "url": "https://ptextold.nju.edu.cn/a0/91/c13164a630929/page.htm",
+          "support": "研究文章写出货币形式（Geldform）。",
+          "level": "高校研究",
+          "access": "检索结果摘要；未打开全文核验"
+        },
+        {
+          "title": "德语助手 Geldform 词条",
+          "url": "https://www.godic.net/dicts/de/Geldform",
+          "support": "双语词典将 Geldform 释为货币形式。",
+          "level": "双语词典",
+          "access": "检索结果摘要；未打开全文核验"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "货币形式",
+      "note": "南京大学研究文章明确写“货币形式（Geldform）”，德汉词条也给出“货币形式”；当前中译有直接支持。",
+      "ordinal": 31,
+      "variant_notes": ""
+    },
+    {
+      "id": "geldkrise",
+      "source": "Geldkrise",
+      "current_target": "货币危机",
+      "variants": [],
+      "queries": [
+        "\"Geldkrise\" \"货币危机\" Marx 资本论",
+        "\"Geldkrise\" \"货币危机\" 马克思 翻译",
+        "\"Geldkrise\" \"货币危机\" MEGA 术语对照"
+      ],
+      "evidence": [
+        {
+          "title": "MEGA术语对照表",
+          "url": "https://tohoku.repo.nii.ac.jp/record/123869/files/160926-SHENG-167-1.pdf",
+          "support": "检索结果中的多语术语表列 Geldkrise 对应中文“货币危机”；属对照资料而非马克思原典。",
+          "level": "学术对照资料",
+          "access": "搜索结果摘要；需全文复核"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "货币危机",
+      "note": "MEGA II-10 术语对照表列 Geldkrise 并给出“货币危机”对应（另有金融恐慌、货币恐慌等历史译法）；当前词条译法有直接依据，历史译词差异可记为上下文信息。",
+      "ordinal": 32,
+      "variant_notes": ""
+    },
+    {
+      "id": "geldware",
+      "source": "Geldware",
+      "current_target": "货币商品",
+      "variants": [],
+      "queries": [
+        "Geldware 货币商品 德文 中文 Marx",
+        "\"Geldware\" \"货币商品\" 术语 翻译 Marx"
+      ],
+      "evidence": [
+        {
+          "title": "资本论第一卷第一篇商品与货币",
+          "url": "https://www.diancangwang.cn/waiguomingzhu/ac82405c9cbe/909b5d49b4e0.html",
+          "support": "中文原典正文直接使用货币商品（Geldware）。",
+          "level": "经典文本中译",
+          "access": "检索结果摘要；未打开全文核验"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "货币商品",
+      "note": "《资本论》中文正文直接出现“货币商品（Geldware）”；当前译法获经典中译直接支持。",
+      "ordinal": 33,
+      "variant_notes": ""
+    },
+    {
+      "id": "geltung",
+      "source": "Geltung",
+      "current_target": "有效性",
+      "variants": [],
+      "queries": [
+        "Geltung 有效性 德文 中文 Marx"
+      ],
+      "evidence": [
+        {
+          "title": "马克思主义与批判理论：Geltung 译注",
+          "url": "https://ptextold.nju.edu.cn/96/e2/c13379a562914/page.htm",
+          "support": "译注说明 Geltung 可译效力、有效等，需依文本语境。",
+          "level": "高校研究/译注",
+          "access": "检索结果摘要；未打开全文核验"
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "有效性",
+      "note": "Geltung在价值理论、社会效力及法律语境译法不同，需标注上下文。",
+      "ordinal": 34,
+      "variant_notes": ""
+    },
+    {
+      "id": "gemeinwesen",
+      "source": "Gemeinwesen",
+      "current_target": "共同体",
+      "variants": [
+        "Gemeinschaft"
+      ],
+      "queries": [
+        "Gemeinwesen 共同体 德文 中文 Marx",
+        "\"Gemeinwesen\" \"共同体\" 术语 翻译 Marx"
+      ],
+      "evidence": [
+        {
+          "title": "《德意志意识形态》共同体概念研究",
+          "url": "https://mphilosophy.sysu.edu.cn/sites/default/files/2020-06/2009%E5%B9%B4%E7%AC%AC4%E6%9C%9F-%E6%80%BB.pdf",
+          "support": "指出 Gemeinwesen 有时译共同体、有时译社会联系，并与 Gemeinschaft 区分。",
+          "level": "高校学术期刊",
+          "access": "检索结果摘要；未打开全文核验"
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "共同体",
+      "note": "全集中 Gemeinwesen 有时译“共同体”、有时译“社会联系”；在《德意志意识形态》语境也有“共同体”用例。与 Gemeinschaft 的关系需按具体文本区分。",
+      "variant_notes": "Gemeinschaft与Gemeinwesen有重合译法但概念不可直接互换。",
+      "ordinal": 35
+    },
+    {
+      "id": "gesellschaftlich-notwendige-arbeitszeit",
+      "source": "gesellschaftlich notwendige Arbeitszeit",
+      "current_target": "社会必要劳动时间",
+      "variants": [],
+      "queries": [
+        "gesellschaftlich notwendige Arbeitszeit 社会必要劳动时间 德文 中文 Marx"
+      ],
+      "evidence": [
+        {
+          "title": "资本论第一卷节选",
+          "url": "https://www.htu.edu.cn/xsd/2021/0414/c14329a193828/page.htm",
+          "support": "原文定义社会必要劳动时间。",
+          "level": "高校经典文本选编",
+          "access": "检索结果摘要；未打开全文核验"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "社会必要劳动时间",
+      "note": "检索到的中译材料与当前词义大体一致。",
+      "ordinal": 36,
+      "variant_notes": ""
+    },
+    {
+      "id": "gesellschaftliches-sein",
+      "source": "gesellschaftliches Sein",
+      "current_target": "社会存在",
+      "variants": [
+        "Sein"
+      ],
+      "queries": [
+        "gesellschaftliches Sein 社会存在 德文 中文 Marx"
+      ],
+      "evidence": [
+        {
+          "title": "定在概念：马克思早期思想构境的历史线索",
+          "url": "https://www.cssn.cn/mkszy/mkszy_mkszyfzs/202207/t20220728_5432941.shtml",
+          "support": "指出马克思较少使用 gesellschaftliches Sein，而常用 gesellschaftliches Dasein。",
+          "level": "中国社会科学网论文",
+          "access": "检索结果摘要；未打开全文核验"
+        },
+        {
+          "title": "马克思的社会存在概念",
+          "url": "https://www.cssn.cn/zx/mkszyzx/202210/t20221027_5555216.shtml",
+          "support": "中文研究使用社会存在，同时讨论原典概念问题。",
+          "level": "中国社会科学网论文",
+          "access": "检索结果摘要；未打开全文核验"
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "社会存在",
+      "note": "社会存在是通用译名，但需区分 Sein 与 Dasein；变体 Sein 过宽。",
+      "variant_notes": "Sein是存在，缺少gesellschaftlich限定，不能自动译为社会存在。",
+      "ordinal": 37
+    },
+    {
+      "id": "gesetz-vom-tendenziellen-fall-der-profitrate",
+      "source": "Gesetz vom tendenziellen Fall der Profitrate",
+      "current_target": "利润率趋向下降的规律",
+      "variants": [
+        "tendenzieller Fall der Profitrate"
+      ],
+      "queries": [
+        "Gesetz vom tendenziellen Fall der Profitrate 利润率趋向下降的规律 德文 中文 Marx"
+      ],
+      "evidence": [
+        {
+          "title": "马恩全集第二十五卷第三篇",
+          "url": "https://www.marxists.org/chinese/marx-engels/25/014.htm",
+          "support": "章节标题直接使用“利润率趋向下降的规律”。",
+          "level": "经典文本中译",
+          "access": "检索结果摘要；未打开全文核验"
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "利润率趋向下降的规律",
+      "note": "马克思原典章节标题使用“利润率趋向下降的规律”；变体省略 Gesetz，指该规律的趋势表述。",
+      "variant_notes": "tendenzieller Fall der Profitrate省略Gesetz，宜译利润率趋向下降，不自动补规律。",
+      "ordinal": 38
+    },
+    {
+      "id": "groe-industrie",
+      "source": "große Industrie",
+      "current_target": "大工业",
+      "variants": [
+        "Großindustrie"
+      ],
+      "queries": [
+        "große Industrie 大工业 德文 中文 Marx"
+      ],
+      "evidence": [
+        {
+          "title": "德意志意识形态",
+          "url": "https://www.marxists.org/chinese/pdf/marx-engels/mes01.pdf",
+          "support": "中文原典使用“大工业”。",
+          "level": "经典文本中译",
+          "access": "检索结果摘要；未打开全文核验"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "大工业",
+      "note": "检索到的中译材料与当前词义大体一致。",
+      "ordinal": 39,
+      "variant_notes": "需按语境核实该变体是否与主词等义。"
+    },
+    {
+      "id": "herrschende-klasse",
+      "source": "herrschende Klasse",
+      "current_target": "统治阶级",
+      "variants": [],
+      "queries": [
+        "herrschende Klasse 统治阶级 德文 中文 Marx"
+      ],
+      "evidence": [
+        {
+          "title": "德意志意识形态",
+          "url": "https://www.marxists.org/chinese/marx-engels2/01/16.htm",
+          "support": "中文原典使用“统治阶级”。",
+          "level": "经典文本中译",
+          "access": "检索结果摘要；未打开全文核验"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "统治阶级",
+      "note": "检索到的中译材料与当前词义大体一致。",
+      "ordinal": 40,
+      "variant_notes": ""
+    },
+    {
+      "id": "historischer-materialismus",
+      "source": "historischer Materialismus",
+      "current_target": "历史唯物主义",
+      "variants": [],
+      "queries": [
+        "historischer Materialismus 历史唯物主义 德文 中文 Marx"
+      ],
+      "evidence": [
+        {
+          "title": "历史唯物主义的历史概念",
+          "url": "https://marx.ruc.edu.cn/sy/mydj/5f137a579372480cad7f7607ea8b0605.htm",
+          "support": "研究指出历史唯物主义概念的命名由恩格斯发展定型，中文术语通行。",
+          "level": "高校学者论文",
+          "access": "检索结果摘要；未打开全文核验"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "历史唯物主义",
+      "note": "“历史唯物主义”是该学说的中文通行术语。该名称的术语史涉及恩格斯的使用与定型，但不妨碍确认当前译名；Materialismus 单独不能作为本条变体。",
+      "ordinal": 41,
+      "variant_notes": ""
+    },
+    {
+      "id": "idealismus",
+      "source": "Idealismus",
+      "current_target": "唯心主义",
+      "variants": [],
+      "queries": [
+        "Idealismus 唯心主义 德文 中文 Marx"
+      ],
+      "evidence": [
+        {
+          "title": "重思马克思对德国观念论的批判",
+          "url": "https://www.cssn.cn/zx/zx_rdkx/202211/t20221103_5558777.shtml",
+          "support": "指出 Idealismus 可译唯心主义、理想主义、理念论、观念论；全集第二版使用唯心主义。",
+          "level": "中国社会科学网论文",
+          "access": "检索结果摘要；未打开全文核验"
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "唯心主义",
+      "note": "唯心主义是全集第二版译法；德哲史语境可有观念论/理念论等译法。",
+      "ordinal": 42,
+      "variant_notes": ""
+    },
+    {
+      "ordinal": 43,
+      "id": "ideologie",
+      "source": "Ideologie",
+      "current_target": "意识形态",
+      "variants": [
+        "ideologisch"
+      ],
+      "queries": [
+        "Ideologie 中文 意识形态 德意志意识形态 德文 汉译 学术"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.dswxyjy.org.cn/n1/2023/1030/c427184-40106071.html",
+          "title": "《德意志意识形态》“费尔巴哈”章的文本性质、文字判读和德文汉译",
+          "support": "文章讨论Ideologie曾译“观念体系”，并说明“意识形态”现已成为高频通行术语。",
+          "level": "high",
+          "access": "真实搜索结果摘要；未逐页核读全文"
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "意识形态",
+      "note": "文章讨论Ideologie曾译“观念体系”，并说明“意识形态”现已成为高频通行术语。",
+      "variant_notes": "ideologisch为形容词，需译作意识形态的等，不能机械套名词译法。"
+    },
+    {
+      "ordinal": 44,
+      "id": "industrielle-reservearmee",
+      "source": "industrielle Reservearmee",
+      "current_target": "产业后备军",
+      "variants": [
+        "relative Überbevölkerung"
+      ],
+      "queries": [
+        "industrielle Reservearmee 中文 产业后备军 马克思 原典"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx-engels-2/44/029.htm",
+          "title": "马恩全集第四十四卷——第二十三章 资本主义积累的一般规律",
+          "support": "中文原典用“产业后备军”，并在积累规律中讨论相对过剩人口；两者相关但应区分概念。",
+          "level": "high",
+          "access": "真实搜索结果摘要；未逐页核读全文"
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "产业后备军",
+      "note": "中文原典用“产业后备军”，并在积累规律中讨论相对过剩人口；两者相关但应区分概念。",
+      "variant_notes": "relative Überbevölkerung为相对过剩人口；与产业后备军关系密切，但不宜不加区分地替换。"
+    },
+    {
+      "ordinal": 45,
+      "id": "kapital-im-allgemeinen",
+      "source": "Kapital im Allgemeinen",
+      "current_target": "一般资本",
+      "variants": [],
+      "queries": [
+        "Kapital im Allgemeinen 中文 资本一般 马克思"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.inkrit.de/neuinkrit/e_inkritpedia/e_maincode/doku.php?id=k%3Akapital_im_allgemeinen",
+          "title": "Kapital im Allgemeinen (INKRIT)",
+          "support": "INKRIT多语词条直接列中文“资本一般”；CSSN同批结果也使用“资本一般”。当前词表“一般资本”可考虑修正。",
+          "level": "high",
+          "access": "真实搜索结果摘要；未逐页核读全文"
+        }
+      ],
+      "status": "change_suggested",
+      "suggested_target": "资本一般",
+      "note": "INKRIT多语词条直接列中文“资本一般”；CSSN同批结果也使用“资本一般”。当前词表“一般资本”可考虑修正。",
+      "variant_notes": []
+    },
+    {
+      "ordinal": 46,
+      "id": "kapitalfetisch",
+      "source": "Kapitalfetisch",
+      "current_target": "资本拜物教",
+      "variants": [],
+      "queries": [
+        "Kapitalfetisch 资本拜物教 Kapitalfetisch 中文 翻译"
+      ],
+      "evidence": [
+        {
+          "url": "https://mphilosophy.sysu.edu.cn/sites/default/files/2020-06/%E7%8E%B0%E4%BB%A3%E5%93%B2%E5%AD%A62017%E7%AC%AC1%E6%9C%9F.pdf",
+          "title": "Fetischismus及相关词在马克思著作中的话语变迁",
+          "support": "论文讨论“资本物神的观念”（Kapitalfetisch）也译作“资本拜物教的观念”；支持概念，译法形式有差异。",
+          "level": "high",
+          "access": "真实搜索结果摘要；未逐页核读全文"
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "资本拜物教",
+      "note": "论文讨论“资本物神的观念”（Kapitalfetisch）也译作“资本拜物教的观念”；支持概念，译法形式有差异。",
+      "variant_notes": []
+    },
+    {
+      "ordinal": 47,
+      "id": "klasse",
+      "source": "Klasse",
+      "current_target": "阶级",
+      "variants": [
+        "Klassen"
+      ],
+      "queries": [
+        "Klasse Marx Klassen 阶级 德意志意识形态 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/pdf/marx-engels/mes01.pdf",
+          "title": "马克思恩格斯文集第一卷《德意志意识形态》",
+          "support": "原典译本在《德意志意识形态》语境使用“阶级”；此次检索摘要未提供词形逐句对照。",
+          "level": "medium",
+          "access": "真实搜索结果摘要；未逐页核读全文"
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "阶级",
+      "note": "原典译本在《德意志意识形态》语境使用“阶级”；此次检索摘要未提供词形逐句对照。",
+      "variant_notes": [
+        "须按词性和具体语境分别判断，不自动套用主词译法。"
+      ]
+    },
+    {
+      "ordinal": 48,
+      "id": "kommunismus",
+      "source": "Kommunismus",
+      "current_target": "共产主义",
+      "variants": [
+        "kommunistisch"
+      ],
+      "queries": [
+        "Kommunismus 共产主义 德意志意识形态 马克思 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://xuebaosk.ahut.edu.cn/article/doi/10.3969/j.issn.1671-9247.2025.05.001?viewType=HTML",
+          "title": "《德意志意识形态》中的共产主义审视",
+          "support": "文章标题及摘要直接以“共产主义”讨论该书文本。",
+          "level": "high",
+          "access": "真实搜索结果摘要；未逐页核读全文"
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "共产主义",
+      "note": "文章标题及摘要直接以“共产主义”讨论该书文本。",
+      "variant_notes": "kommunistisch为形容词，需按句法处理为共产主义的等。"
+    },
+    {
+      "ordinal": 49,
+      "id": "komplizierte-arbeit",
+      "source": "komplizierte Arbeit",
+      "current_target": "复杂劳动",
+      "variants": [],
+      "queries": [
+        "komplizierte Arbeit 复杂劳动 资本论 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://ztzx.ruc.edu.cn/xzgd/2de2f9204f7c4e0abba7f4161bb8247f.htm",
+          "title": "人大研究中心：马克思关于复杂劳动的论述",
+          "support": "文章明确讨论马克思复杂劳动，直接用“复杂劳动”作为术语。",
+          "level": "high",
+          "access": "真实搜索结果摘要；未逐页核读全文"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "复杂劳动",
+      "note": "文章明确讨论马克思复杂劳动，直接用“复杂劳动”作为术语。",
+      "variant_notes": []
+    },
+    {
+      "ordinal": 50,
+      "id": "konkrete-arbeit",
+      "source": "konkrete Arbeit",
+      "current_target": "具体劳动",
+      "variants": [],
+      "queries": [
+        "konkrete Arbeit 具体劳动 资本论 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.dswxyjy.org.cn/n1/2019/0617/c427160-31161996.html",
+          "title": "准确解读《资本论》的原理和方法",
+          "support": "文章引用《资本论》价值形式分析，明确使用“具体劳动”。",
+          "level": "high",
+          "access": "真实搜索结果摘要；未逐页核读全文"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "具体劳动",
+      "note": "文章引用《资本论》价值形式分析，明确使用“具体劳动”。",
+      "variant_notes": []
+    },
+    {
+      "ordinal": 51,
+      "id": "konkurrenz-der-vielen-kapitalien",
+      "source": "Konkurrenz der vielen Kapitalien",
+      "current_target": "许多资本的竞争",
+      "variants": [],
+      "queries": [
+        "Konkurrenz der vielen Kapitalien 中文 许多资本的竞争"
+      ],
+      "evidence": [
+        {
+          "url": "https://ztzx.ruc.edu.cn/xzgd/c53d60e81f9c4798976c2e920c8a835d.htm",
+          "title": "中国人民大学研究中心：诸资本的积累、竞争与积聚",
+          "support": "文章将Concurrenz der Capitalien说明为“诸资本的竞争”，指出德文复数表达多个资本。",
+          "level": "high",
+          "access": "真实搜索结果摘要；未逐页核读全文"
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "许多资本的竞争",
+      "note": "文章将Concurrenz der Capitalien说明为“诸资本的竞争”，指出德文复数表达多个资本。",
+      "variant_notes": []
+    },
+    {
+      "ordinal": 52,
+      "id": "konstantes-kapital",
+      "source": "konstantes Kapital",
+      "current_target": "不变资本",
+      "variants": [],
+      "queries": [
+        "konstantes Kapital 不变资本 中文 资本论"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx-engels-2/44/012.htm",
+          "title": "马恩全集第四十四卷第六章 不变资本和可变资本",
+          "support": "原典中文标题及正文直接使用“不变资本”。",
+          "level": "high",
+          "access": "真实搜索结果摘要；未逐页核读全文"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "不变资本",
+      "note": "原典中文标题及正文直接使用“不变资本”。",
+      "variant_notes": []
+    },
+    {
+      "ordinal": 53,
+      "id": "kostpreis",
+      "source": "Kostpreis",
+      "current_target": "成本价格",
+      "variants": [],
+      "queries": [
+        "Kostpreis Kostenpreis 成本价格 资本论 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx-engels/26-1/005.htm",
+          "title": "马恩全集第二十六卷第一册第三章 亚当·斯密",
+          "support": "注释给出Kostenpreis/Kostpreis的中文“费用价格”，并分析多种含义；INKRIT词条明确列“成本价格”。译名存在语境差异。",
+          "level": "high",
+          "access": "真实搜索结果摘要；未逐页核读全文"
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "成本价格",
+      "note": "注释给出Kostenpreis/Kostpreis的中文“费用价格”，并分析多种含义；INKRIT词条明确列“成本价格”。译名存在语境差异。",
+      "variant_notes": []
+    },
+    {
+      "ordinal": 54,
+      "id": "kreditkrise",
+      "source": "Kreditkrise",
+      "current_target": "信用危机",
+      "variants": [],
+      "queries": [
+        "Kreditkrise 德语 信用危机 马克思 中文",
+        "\"Kreditkrise\" \"信用危机\""
+      ],
+      "evidence": [
+        {
+          "url": "https://inkrit.de/neuinkrit/e_inkritpedia/e_maincode/doku.php?id=k%3Akreditkrise",
+          "title": "Kreditkrise — Historisch-kritisches Wörterbuch des Marxismus",
+          "support": "词条中文栏列信用危机。",
+          "level": "马克思主义专业辞典",
+          "access": "搜索结果摘要；未逐页全文核读"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "信用危机",
+      "note": "HKWM多语词条明确给出信用危机，属于马克思主义语境的直接德中对照。",
+      "variant_notes": []
+    },
+    {
+      "ordinal": 55,
+      "id": "kreditsystem",
+      "source": "Kreditsystem",
+      "current_target": "信用制度",
+      "variants": [],
+      "queries": [
+        "Kreditsystem 信用制度 资本论 中文 马克思"
+      ],
+      "evidence": [
+        {
+          "url": "https://dylc.cbpt.cnki.net/portal/journal/portal/client/paper/a54d27269ac18354025317b5873a55aa",
+          "title": "东岳论丛：马克思信用制度理论",
+          "support": "搜索结果摘要直接使用“信用制度”讨论马克思《资本论》中的信用制度理论。",
+          "level": "medium",
+          "access": "真实搜索结果摘要；未逐页核读全文"
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "信用制度",
+      "note": "搜索结果摘要直接使用“信用制度”讨论马克思《资本论》中的信用制度理论。",
+      "variant_notes": []
+    },
+    {
+      "ordinal": 56,
+      "id": "krisentheorie",
+      "source": "Krisentheorie",
+      "current_target": "危机理论",
+      "variants": [],
+      "queries": [
+        "Krisentheorie 危机理论 马克思 中文 学术"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/reference-books/simon-clarke-1994/01.htm",
+          "title": "第一章 导言：马克思主义和危机理论",
+          "support": "中文译本标题直接使用“危机理论”，并讨论马克思主义危机理论。",
+          "level": "medium",
+          "access": "真实搜索结果摘要；未逐页核读全文"
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "危机理论",
+      "note": "中文译本标题直接使用“危机理论”，并讨论马克思主义危机理论。",
+      "variant_notes": []
+    },
+    {
+      "ordinal": 57,
+      "id": "kritik",
+      "source": "Kritik",
+      "current_target": "批判",
+      "variants": [
+        "kritische Kritik",
+        "reine Kritik"
+      ],
+      "queries": [
+        "Marx Kritik kritische Kritik reine Kritik 批判的批判 德意志意识形态 中文 德文"
+      ],
+      "evidence": [
+        {
+          "url": "https://ptext.nju.edu.cn/info/1348/9166.htm",
+          "title": "法兰克福学派——从“马克思咖啡厅”到“马克斯咖啡厅”",
+          "support": "The Chinese academic text explicitly says Kritik is conventionally translated as 批判 and discusses its range of meanings. The German Ideology variants kritische Kritik and reine Kritik are author-specific polemical phrases, not alternate headwords for the ordinary noun.",
+          "level": "search_snippet",
+          "access": "Search result snippet; page body not independently inspected."
+        },
+        {
+          "url": "https://www.marxists.org/chinese/marx-engels/02/008.htm",
+          "title": "马克思恩格斯全集第二卷：批判的批判的通讯",
+          "support": "《神圣家族》相关章标题与正文使用批判的批判，支持青年黑格尔派论战的特定表述。",
+          "level": "search_snippet",
+          "access": "Search result snippet."
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "批判",
+      "note": "批判 is established for Kritik. Keep the Young Hegelian labels 批判的批判 and 纯粹批判 as context-specific phrases rather than variants that replace the base term.",
+      "variant_notes": "kritische Kritik为批判的批判；reine Kritik为纯粹批判，不宜都退化为批判。"
+    },
+    {
+      "ordinal": 58,
+      "id": "kritik-der-politischen-okonomie",
+      "source": "Kritik der politischen Ökonomie",
+      "current_target": "政治经济学批判",
+      "variants": [],
+      "queries": [
+        "Kritik der politischen Ökonomie 政治经济学批判 德文 中文 马克思"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.inkrit.de/e_inkritpedia/e_maincode/doku.php?id=k%3Akritik_der_politischen_oekonomie",
+          "title": "Inkrit-Pedia: Kritik der politischen Ökonomie",
+          "support": "The German headword is listed with the Chinese equivalent 政治经济学批判.",
+          "level": "multilingual_glossary",
+          "access": "Search result snippet; page body not independently inspected."
+        },
+        {
+          "url": "https://www.marxists.org/chinese/pdf/marx-engels/me2/me2-44.pdf",
+          "title": "马克思恩格斯文集：Kritik der politischen Ökonomie（德文书名页）",
+          "support": "Search snippet shows the German title on the Marx/Engels text and corroborates the exact German phrase; the Chinese project title is 政治经济学批判.",
+          "level": "bibliographic_cross_language",
+          "access": "Search result snippet."
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "政治经济学批判",
+      "note": "The German–Chinese glossary entry and the standard Chinese title of Marx’s work support the existing target.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 59,
+      "id": "lohnarbeit",
+      "source": "Lohnarbeit",
+      "current_target": "雇佣劳动",
+      "variants": [],
+      "queries": [
+        "Lohnarbeit 雇佣劳动 德意志意识形态 中文 Marx 德文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.inkrit.de/e_inkritpedia/e_maincode/doku.php?id=l%3Alohnarbeit",
+          "title": "Inkrit-Pedia: Lohnarbeit",
+          "support": "The multilingual lexicon explicitly lists C: gùyōng láodòng 雇佣劳动 for the German headword Lohnarbeit.",
+          "level": "multilingual_glossary",
+          "access": "Search result snippet; page body not independently inspected."
+        },
+        {
+          "url": "https://www.marxists.org/chinese/marx-engels/mia-chinese-marx-1847-1849.htm",
+          "title": "马克思：《雇佣劳动与资本》",
+          "support": "The canonical Chinese title uses 雇佣劳动 for the corresponding Marxian concept; the German title is Lohnarbeit und Kapital.",
+          "level": "work_title_cross_language",
+          "access": "Search result snippet."
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "雇佣劳动",
+      "note": "Lexical and canonical-title evidence support 雇佣劳动.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 60,
+      "id": "materialistische-geschichtsauffassung",
+      "source": "materialistische Geschichtsauffassung",
+      "current_target": "唯物主义历史观",
+      "variants": [],
+      "queries": [
+        "materialistische Geschichtsauffassung 唯物主义历史观 Marx 中文 德文"
+      ],
+      "evidence": [
+        {
+          "url": "https://marx.ruc.edu.cn/sy/mydj/5f137a579372480cad7f7607ea8b0605.htm",
+          "title": "张秀琴：历史唯物主义的历史概念",
+          "support": "The Chinese scholarly source distinguishes Marx’s and Engels’s historical terminology and explicitly connects materialistische Geschichtsauffassung with 唯物主义历史观/唯物史观 usage.",
+          "level": "search_snippet",
+          "access": "Search result snippet; page body not independently inspected."
+        },
+        {
+          "url": "https://src.ruc.edu.cn/CN/article/downloadArticleFile.do?attachType=PDF&id=347",
+          "title": "以历史唯物主义为基础的马克思主义社会学",
+          "support": "The paper discusses the German phrase materialistische Geschichtsauffassung and its Chinese rendering in the context of Marxist historiography.",
+          "level": "search_snippet",
+          "access": "Search result snippet."
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "唯物主义历史观",
+      "note": "The Chinese convention is well supported, but sources distinguish related expressions such as 唯物史观 and 历史唯物主义; retain the baseline wording for this German phrase.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 61,
+      "id": "mehrarbeit",
+      "source": "Mehrarbeit",
+      "current_target": "剩余劳动",
+      "variants": [],
+      "queries": [
+        "Mehrarbeit 剩余劳动 Marx 德文 中文 资本论"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.inkrit.de/e_inkritpedia/e_maincode/doku.php?id=m%3Amehrarbeit",
+          "title": "Inkrit-Pedia: Mehrarbeit",
+          "support": "Multilingual entry explicitly gives Chinese 剩余劳动 for Mehrarbeit.",
+          "level": "multilingual_glossary",
+          "access": "Search result snippet; page body not independently inspected."
+        },
+        {
+          "url": "https://www.diancangwang.cn/waiguomingzhu/ac82405c9cbe/adbbb172fb7c.html",
+          "title": "《资本论》第一卷第三篇：绝对剩余价值的生产",
+          "support": "Chinese passage explicitly labels Mehrarbeit as 剩余劳动, with the German term shown in parentheses.",
+          "level": "primary_translation_with_german",
+          "access": "Search result snippet."
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "剩余劳动",
+      "note": "Primary translation and multilingual glossary directly support the established equivalent.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 62,
+      "id": "mehrwert",
+      "source": "Mehrwert",
+      "current_target": "剩余价值",
+      "variants": [],
+      "queries": [
+        "Mehrwert 剩余价值 Marx 德文 中文 资本论"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.godic.net/dicts/de/Mehrwert",
+          "title": "德语助手：Mehrwert 德汉词典",
+          "support": "The economics sense is translated as 剩余价值.",
+          "level": "dictionary_entry",
+          "access": "Search result snippet."
+        },
+        {
+          "url": "https://www.marxists.org/chinese/marx-engels-2/26/004.htm",
+          "title": "《反杜林论》第二编：政治经济学",
+          "support": "Chinese Marx/Engels text identifies the increment Marx calls Mehrwert as 剩余价值; supports the standard Marxian usage.",
+          "level": "primary_translation_context",
+          "access": "Search result snippet."
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "剩余价值",
+      "note": "Standard Marxian translation is directly supported by dictionary and primary-text context.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 63,
+      "id": "mehrwertmasse",
+      "source": "Mehrwertmasse",
+      "current_target": "剩余价值量",
+      "variants": [],
+      "queries": [
+        "Mehrwertmasse 剩余价值量 德文 中文 马克思",
+        "Marx Kapital \"Rate und Masse des Mehrwerts\" Mehrwertmasse",
+        "\"Mehrwertmasse\" \"剩余价值量\"",
+        "\"剩余价值率和剩余价值量\" 《资本论》"
+      ],
+      "evidence": [
+        {
+          "url": "https://biancahoegel.com/archiv/marx_engels/kapital/bd1/me23_321.htm",
+          "title": "Das Kapital I — Rate und Masse des Mehrwerts",
+          "support": "第九章定义Masse des Mehrwerts，等于可变资本量与剩余价值率之积。",
+          "level": "经典德文原文",
+          "access": "搜索结果摘要；未逐页全文核读"
+        },
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/09.htm",
+          "title": "第九章：剩余价值率和剩余价值量",
+          "support": "对应章节标题及相同计算关系使用剩余价值量。",
+          "level": "经典中译",
+          "access": "搜索结果摘要；未逐页全文核读"
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "剩余价值量",
+      "note": "《资本论》第一卷第九章中德对应标题和相同计算关系，支持剩余价值量。德文标题采用Masse des Mehrwerts而非合成词Mehrwertmasse，因此明确记录为同概念的组合形式对应。",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 64,
+      "id": "mehrwertrate",
+      "source": "Mehrwertrate",
+      "current_target": "剩余价值率",
+      "variants": [],
+      "queries": [
+        "Mehrwertrate 剩余价值率 德文 中文 m v"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.inkrit.de/e_inkritpedia/e_maincode/doku.php?id=m%3Amehrwertrate",
+          "title": "Inkrit-Pedia: Mehrwertrate",
+          "support": "Multilingual entry gives 剩余价值率 for Mehrwertrate and states the m/v formula.",
+          "level": "multilingual_glossary",
+          "access": "Search result snippet."
+        },
+        {
+          "url": "https://marx-zh-cn.github.io/docs/MEW-ZH/25/MEW25-004.html",
+          "title": "《资本论》第三卷：剩余价值率与利润率",
+          "support": "Chinese translation calls the ratio m/v 剩余价值率.",
+          "level": "primary_translation_context",
+          "access": "Search result snippet; German corresponding text not independently inspected."
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "剩余价值率",
+      "note": "The lexical entry directly pairs the German term with the Chinese target and the primary text confirms the m/v concept.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 65,
+      "id": "menschliche-emanzipation",
+      "source": "menschliche Emanzipation",
+      "current_target": "人的解放",
+      "variants": [],
+      "queries": [
+        "menschliche Emanzipation 人的解放 Marx 德文 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.bpb.de/shop/zeitschriften/apuz/archiv/525498/die-freiheit-im-lichtedes-marxismus-leninismus/",
+          "title": "Die Freiheit im Lichte des Marxismus-Leninismus",
+          "support": "German source uses menschliche Emanzipation in the Marx discussion; Chinese Marxist scholarship uses 人的解放 for the associated emancipatory concept. Cross-source conceptual evidence, not a bilingual edition pair.",
+          "level": "contextual_cross_source",
+          "access": "Search result snippets only."
+        },
+        {
+          "url": "https://marxism.ssap.com.cn/skwx_marxism/LiteratureDetail.aspx?id=121707",
+          "title": "人的解放问题与唯物主义历史观",
+          "support": "Chinese scholarly source defines the Marxian concept as 人的解放.",
+          "level": "scholarly_context",
+          "access": "Search result snippet."
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "人的解放",
+      "note": "The existing Chinese term is conventional; evidence connects the German expression and Chinese concept across separate sources rather than one bilingual translation.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 66,
+      "id": "monetare-werttheorie",
+      "source": "monetäre Werttheorie",
+      "current_target": "货币价值论",
+      "variants": [],
+      "queries": [
+        "monetäre Werttheorie 货币价值论 Neue Marx-Lektüre 德文 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://ptext.nju.edu.cn/info/1348/9207.htm",
+          "title": "李乾坤：马克思价值形式理论研究的历史演进与当代展望",
+          "support": "Root-verified NJU source discusses the monetary value-theory debate and the Neue Marx-Lektüre context; supports 货币价值论 as the Chinese label in this scholarly usage.",
+          "level": "scholarly_author_specific",
+          "access": "Opened and inspected by parent agent; scholarly usage, not a general dictionary entry."
+        },
+        {
+          "url": "https://www.metropolis-verlag.de/Geldtheorie-und-monetaere-Werttheorie-von-Marx-im-Unterschied-zu-Keynes/14128/book.do",
+          "title": "Michael Wendl: Geldtheorie und monetäre Werttheorie von Marx im Unterschied zu Keynes",
+          "support": "German publication title confirms the exact German term and its Marx-theory context.",
+          "level": "bibliographic_context",
+          "access": "Search result snippet."
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "货币价值论",
+      "note": "The translation is supported as a field-specific label in New Marx Reading scholarship; do not generalize it to all uses of Werttheorie.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 67,
+      "id": "mystifikation",
+      "source": "Mystifikation",
+      "current_target": "神秘化",
+      "variants": [],
+      "queries": [
+        "Mystifikation 神秘化 Marx 资本论 德文 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://inkrit.de/e_inkritpedia/e_maincode/doku.php?id=m%3Amystifikation",
+          "title": "Inkrit-Pedia: Mystifikation",
+          "support": "Multilingual entry explicitly lists the Chinese equivalents 神秘性 and 神秘化 for Mystifikation; the latter matches the baseline target.",
+          "level": "multilingual_glossary",
+          "access": "Search result snippet; page body not independently inspected."
+        },
+        {
+          "url": "https://ptextold.nju.edu.cn/b8/74/c12208a243828/page.htm",
+          "title": "马克思的哲学和实践",
+          "support": "Chinese scholarly source names Mystification/Mystifikation among Marx’s Capital concepts and gives 神秘化.",
+          "level": "scholarly_context",
+          "access": "Search result snippet."
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "神秘化",
+      "note": "Both a multilingual terminology entry and Chinese Marx scholarship support 神秘化.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 68,
+      "id": "notwendige-arbeit",
+      "source": "notwendige Arbeit",
+      "current_target": "必要劳动",
+      "variants": [],
+      "queries": [
+        "notwendige Arbeit 必要劳动 Marx necessary labour 德文 资本论 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx-engels2/08/28.htm",
+          "title": "马克思：《必要劳动和剩余劳动（剩余产品）》",
+          "support": "Chinese title and text use 必要劳动 as the paired Marxian category; search did not expose the corresponding German headword in this excerpt.",
+          "level": "primary_translation_context",
+          "access": "Search result snippet."
+        },
+        {
+          "url": "https://www.cssn.cn/zx/mkszyzx/202210/t20221027_5555189.shtml",
+          "title": "马克思政治经济学的哲学性质问题论纲",
+          "support": "Chinese scholarly discussion uses 必要劳动 in the Marxian distinction from surplus labour.",
+          "level": "scholarly_context",
+          "access": "Search result snippet."
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "必要劳动",
+      "note": "The target is standard in Marxian Chinese usage, but this search did not locate a direct German–Chinese pairing for the exact phrase notwendige Arbeit.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 69,
+      "id": "organische-zusammensetzung-des-kapitals",
+      "source": "organische Zusammensetzung des Kapitals",
+      "current_target": "资本有机构成",
+      "variants": [
+        "organische Zusammensetzung"
+      ],
+      "queries": [
+        "organische Zusammensetzung des Kapitals 资本有机构成 Wertzusammensetzung technical composition 中文 德文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.cnterm.cn/news/tzgg/202503/P020250909521438793386.pdf",
+          "title": "全国科学技术名词审定委员会：经济学名词（资本构成术语）",
+          "support": "该征求意见稿提供中文及英文概念对照，仅作辅助；德文对应另由经典原文核对。",
+          "level": "全国科技名词委征求意见稿（非正式审定标准）",
+          "access": "Search result snippet; PDF body not independently inspected."
+        },
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/23.htm",
+          "title": "《资本论》第一卷第二十三章：资本主义积累的一般规律",
+          "support": "Chinese chapter discusses the relation between technical composition and value composition of capital, the defining context for organic composition.",
+          "level": "primary_translation_context",
+          "access": "Search result snippet."
+        },
+        {
+          "url": "https://marx-ebooks.github.io/docs/MEW-ZENO/23/ME23-640.html",
+          "title": "Das Kapital, Band I, Kapitel 23: Das allgemeine Gesetz der kapitalistischen Akkumulation",
+          "support": "German text names the value-composition determined by technical composition organische Zusammensetzung des Kapitals.",
+          "level": "primary_source",
+          "access": "Search result snippet."
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "资本有机构成",
+      "note": "Chinese terminology standard, Chinese Capital chapter, and German original support the equivalent and the technical definition.",
+      "variant_notes": {
+        "organische Zusammensetzung": "The shortened form is acceptable only where the capital-composition topic is explicit; otherwise retain the full source phrase."
+      }
+    },
+    {
+      "ordinal": 70,
+      "id": "politische-emanzipation",
+      "source": "politische Emanzipation",
+      "current_target": "政治解放",
+      "variants": [],
+      "queries": [
+        "politische Emanzipation 政治解放 Marx 中文 德文 Zur Judenfrage"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx-engels2/01/02.htm",
+          "title": "马克思：《论犹太人问题》",
+          "support": "Chinese translation uses 政治解放 for Marx’s political emancipation concept and contrasts it with 人的解放.",
+          "level": "primary_translation",
+          "access": "Search result snippet."
+        },
+        {
+          "url": "https://de.wikisource.org/wiki/Zur_Judenfrage",
+          "title": "Karl Marx: Zur Judenfrage",
+          "support": "German primary text explicitly uses die politische Emancipation and staatsbürgerliche, die politische Emancipation.",
+          "level": "primary_source",
+          "access": "Search result snippet."
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "政治解放",
+      "note": "The Chinese and German versions of Zur Judenfrage establish the term directly; Marx distinguishes it from full human emancipation.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 71,
+      "id": "praxis",
+      "source": "Praxis",
+      "current_target": "实践",
+      "variants": [
+        "praktisch"
+      ],
+      "queries": [
+        "Marx Praxis 实践 praktisch 实践的 德意志意识形态 中文",
+        "Praxis 实践 Marx 德意志意识形态 术语"
+      ],
+      "status": "contextual",
+      "suggested_target": "实践",
+      "note": "Praxis名词的中文术语为“实践”；《马克思主义思想辞典》及高校研究直接使用“实践（Praxis）”。",
+      "variant_notes": "praktisch为形容词或副词，需按句法处理，不能无条件套实践。",
+      "evidence": [
+        {
+          "title": "马克思主义思想辞典：P",
+          "url": "https://www.marxists.org/chinese/dictionary-of-marxism/marxist.org-chinese-dictionary-of-marxism-P.htm",
+          "support": "词条标题直接为“实践（praxis）”，并讨论马克思的实践概念。",
+          "access": "实际搜索结果摘要，未逐页核读全文",
+          "level": "high"
+        },
+        {
+          "title": "《现代哲学》2015年第4期",
+          "url": "https://mphilosophy.sysu.edu.cn/sites/default/files/2020-06/%E7%8E%B0%E4%BB%A3%E5%93%B2%E5%AD%A62015%E5%B9%B4%E7%AC%AC4%E6%9C%9F.pdf",
+          "support": "文中明确区分“实践”（Praxis）和“实践的/地”（praktisch）。",
+          "access": "实际搜索结果摘要，未逐页核读全文",
+          "level": "high"
+        }
+      ]
+    },
+    {
+      "ordinal": 72,
+      "id": "privateigentum",
+      "source": "Privateigentum",
+      "current_target": "私有制",
+      "variants": [
+        "Eigentum"
+      ],
+      "queries": [
+        "Privateigentum 私有制 Eigentum 所有制 马克思 中文 德意志意识形态"
+      ],
+      "status": "contextual",
+      "suggested_target": "私有制",
+      "note": "Privateigentum可译“私有财产”或“私有制”，中文经典文本在制度语境中用“私有制”；Eigentum本身可指财产、所有权或所有制，不能作为Privateigentum无条件变体。",
+      "variant_notes": "Eigentum是财产、所有权或所有制，不必然含私人限定，不应作为私有制的等价变体。",
+      "evidence": [
+        {
+          "title": "中国人民大学哲学院：马克思恩格斯对Eigentum的语境用法",
+          "url": "https://phi.ruc.edu.cn/xsyj/sxwk/f64fda797bae42a287dc3dea57db99fc.htm",
+          "support": "讨论Eigentum可按语境译财产、所有制，并引用《德意志意识形态》中的私有制用例。",
+          "access": "实际搜索结果摘要，未逐页核读全文",
+          "level": "high"
+        },
+        {
+          "title": "《共产党宣言》中文文本",
+          "url": "https://www.marxists.org/chinese/marx/01.htm",
+          "support": "中文经典文本使用“私有财产”“私有制”等表达；显示需按语境区分property与制度概念。",
+          "access": "实际搜索结果摘要，未逐页核读全文",
+          "level": "high"
+        }
+      ]
+    },
+    {
+      "ordinal": 73,
+      "id": "produktionskostentheorie",
+      "source": "Produktionskostentheorie",
+      "current_target": "生产费用论",
+      "variants": [],
+      "queries": [
+        "Produktionskostentheorie 生产费用论 生产费用价值理论 Marx 中文",
+        "production cost theory Marx 生产费用论 政治经济学"
+      ],
+      "status": "unverified",
+      "suggested_target": "生产费用论",
+      "note": "检索到德文经济学辞典对Produktionskostentheorie的定义，但本轮未找到足以确认中文固定译名“生产费用论”的可靠中文术语来源，暂标unverified。",
+      "variant_notes": [],
+      "evidence": [
+        {
+          "title": "Gabler Wirtschaftslexikon：Produktionskostentheorie",
+          "url": "https://wirtschaftslexikon.gabler.de/definition/produktionskostentheorie-46900",
+          "support": "德文辞典定义其为以工资、资本利息、地租等生产成本解释长期均衡价格的价值理论；不提供中文固定译名。",
+          "access": "实际搜索结果摘要，未逐页核读全文",
+          "level": "high"
+        }
+      ]
+    },
+    {
+      "ordinal": 74,
+      "id": "produktionskrafte",
+      "source": "Produktionskräfte",
+      "current_target": "生产力",
+      "variants": [
+        "Produktivkräfte"
+      ],
+      "queries": [
+        "Produktionskräfte 生产力 Produktivkräfte 德意志意识形态 中文",
+        "Produktivkräfte 生产力 Marx 德文 中文 术语"
+      ],
+      "status": "contextual",
+      "suggested_target": "生产力",
+      "note": "中文研究和马克思主义词典常将Produktivkräfte译为“生产力”；Produktionskräfte/Produktionskraft也见于早期或不同语法形式，需区分单数、复数及历史用法。",
+      "variant_notes": [
+        "Produktivkräfte是固定常见复数形式；Produktionskraft/Produktionskräfte形式不应扩大为所有“生产力”词形的无差别替换。"
+      ],
+      "evidence": [
+        {
+          "title": "《马克思主义思想辞典》相关篇章",
+          "url": "https://www.marxists.org/chinese/pdf/philosophy/110404.pdf",
+          "support": "中文词条说明马克思通常将Produktivkräfte译为“生产力”。",
+          "access": "实际搜索结果摘要，未逐页核读全文",
+          "level": "high"
+        },
+        {
+          "title": "学术月刊：马克思生产力概念考察",
+          "url": "https://xsyk.cbpt.cnki.net/portal/journal/portal/client/paper/a07a2f1d1da0fcde102820350c4e5bab",
+          "support": "论文区分早期Produktionskraft与《德意志意识形态》中的Produktivkräfte概念用法。",
+          "access": "实际搜索结果摘要，未逐页核读全文",
+          "level": "high"
+        }
+      ]
+    },
+    {
+      "ordinal": 75,
+      "id": "produktionspreis",
+      "source": "Produktionspreis",
+      "current_target": "生产价格",
+      "variants": [],
+      "queries": [
+        "Produktionspreis 生产价格 成本价格 平均利润 资本论 第三卷",
+        "马克思 生产价格 成本价格 平均利润 中文"
+      ],
+      "evidence": [
+        {
+          "title": "《资本论》第三卷：生产价格",
+          "url": "https://www.marxists.org/chinese/marx-engels/25/010.htm",
+          "support": "该章阐释生产价格由成本价格加平均利润构成，直接支持“生产价格”的概念对应。",
+          "level": "high",
+          "access": "搜索结果摘要，未逐页核读全文"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "生产价格",
+      "note": "术语译名与《资本论》中文译本及学术文献一致；其范畴关系是成本价格加平均利润。",
+      "variant_notes": []
+    },
+    {
+      "ordinal": 76,
+      "id": "produktionsverhaltnisse",
+      "source": "Produktionsverhältnisse",
+      "current_target": "生产关系",
+      "variants": [],
+      "queries": [
+        "Produktionsverhältnisse 生产关系 马克思 德意志意识形态 中文术语",
+        "生产关系 马克思主义术语词典 Produktionsverhältnisse"
+      ],
+      "evidence": [
+        {
+          "title": "马克思主义术语词典：生产关系",
+          "url": "https://www.marxdic.com/article/2199",
+          "support": "词条说明马克思文本中的生产关系概念及中文术语用法；支持“生产关系”作为标准译名。",
+          "level": "high",
+          "access": "搜索结果摘要，未逐页核读全文"
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "生产关系",
+      "note": "“生产关系”是该马克思主义经济学范畴的惯用译名；须结合语境区分相关但范围不同的交往关系、交往形式。",
+      "variant_notes": []
+    },
+    {
+      "ordinal": 77,
+      "id": "produktionsweise",
+      "source": "Produktionsweise",
+      "current_target": "生产方式",
+      "variants": [],
+      "queries": [
+        "Produktionsweise 生产方式 德意志意识形态 南京大学",
+        "马克思 Produktionsweise 中文 生产方式 核心范畴"
+      ],
+      "evidence": [
+        {
+          "title": "周嘉昕：历史与文本中的马克思“生产方式”概念",
+          "url": "https://ptextold.nju.edu.cn/d9/aa/c13379a514474/page.htm",
+          "support": "中文学术文章讨论《德意志意识形态》的生产方式范畴，直接印证中文用语“生产方式”。",
+          "level": "high",
+          "access": "主代理已打开正文，核对文章标题和生产方式论述"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "生产方式",
+      "note": "中文研究将Produktionsweise作为“生产方式”讨论，其概念涉及物质生产的方式及生产力、生产关系。",
+      "variant_notes": []
+    },
+    {
+      "ordinal": 78,
+      "id": "profit",
+      "source": "Profit",
+      "current_target": "利润",
+      "variants": [],
+      "queries": [
+        "Profit 利润 马克思 剩余价值 利润概念 中文",
+        "《资本论》第三卷 利润 剩余价值 利润率 马克思 中文"
+      ],
+      "evidence": [
+        {
+          "title": "《资本论》第三卷第二章：利润率",
+          "url": "https://www.marxists.org/chinese/marx-engels/25/003.htm",
+          "support": "正文区分利润与剩余价值，并以总资本为分母定义利润率。",
+          "level": "high",
+          "access": "主代理已打开正文，核对第6—10行"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "利润",
+      "note": "在马克思政治经济学语境中Profit译为“利润”；不能与Mehrwert（剩余价值）直接等同，利润是剩余价值的转化表现。",
+      "variant_notes": []
+    },
+    {
+      "ordinal": 79,
+      "id": "profitrate",
+      "source": "Profitrate",
+      "current_target": "利润率",
+      "variants": [],
+      "queries": [
+        "Profitrate 利润率 马克思 资本论 第三卷",
+        "Marx Profitrate Verhältnis Mehrwert Gesamtkapital 中文 利润率"
+      ],
+      "evidence": [
+        {
+          "title": "《资本论》第三卷第二章：利润率",
+          "url": "https://marxists.org/chinese/marx-engels/25/003.htm",
+          "support": "正文区分利润与剩余价值，并以总资本为分母定义利润率。",
+          "level": "high",
+          "access": "主代理已打开正文，核对第6—10行"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "利润率",
+      "note": "Profitrate意为利润率；马克思分析中常以剩余价值/预付总资本表示，须区别Mehrwertrate（剩余价值率）。",
+      "variant_notes": []
+    },
+    {
+      "ordinal": 80,
+      "id": "proletariat",
+      "source": "Proletariat",
+      "current_target": "无产阶级",
+      "variants": [
+        "Proletarier"
+      ],
+      "queries": [
+        "Proletariat 无产阶级 Proletarier 无产者 区别 中文",
+        "Proletarier 无产者 Proletariat 无产阶级 译名"
+      ],
+      "evidence": [
+        {
+          "title": "北京大学马克思主义学院：无产阶级概念",
+          "url": "https://marxism.pku.edu.cn/xzlt/9mkszyxy1294262.htm",
+          "support": "文章直接将Proletariat对应为“无产阶级”，并说明这是阶级概念。",
+          "level": "high",
+          "access": "搜索结果摘要，未逐页核读全文"
+        },
+        {
+          "title": "四川商务职业学院：‘全世界无产者，联合起来！’的历史出场及汉译演变",
+          "url": "https://www.scsw.edu.cn/szb/info/1041/4117.htm",
+          "support": "文章区分Proletarier所指的个体“无产者”与Proletariat所指的群体/阶级“无产阶级”。",
+          "level": "high",
+          "access": "搜索结果摘要，未逐页核读全文"
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "无产阶级",
+      "note": "Proletariat指无产者构成的阶级；Proletarier指个体无产者，二者不得作为无差别变体替换。",
+      "variant_notes": "Proletarier是无产者，Proletariat是无产阶级，个体与阶级需区分。"
+    },
+    {
+      "ordinal": 81,
+      "id": "reelle-subsumtion",
+      "source": "reelle Subsumtion",
+      "current_target": "实际隶属",
+      "variants": [],
+      "queries": [
+        "reelle Subsumtion 实际从属 南京大学 马克思"
+      ],
+      "evidence": [
+        {
+          "title": "南京大学：实际从属（reelle Subsumtion）相关研究",
+          "url": "https://ptextold.nju.edu.cn/57/05/c13164a612101/page.htm",
+          "support": "来源直接以“实际从属”对应reelle Subsumtion；比“实际隶属”更符合该概念在中文马克思研究中的术语用法。",
+          "level": "high",
+          "access": "主代理提供来源，页面内容摘要/对应术语明确"
+        }
+      ],
+      "status": "change_suggested",
+      "suggested_target": "实际从属",
+      "note": "建议首选实际从属，以与形式从属成对；当前实际隶属可理解，但本轮核到的中文研究直接采用实际从属。此项为术语一致性建议。",
+      "variant_notes": []
+    },
+    {
+      "ordinal": 82,
+      "id": "relative-wertform",
+      "source": "relative Wertform",
+      "current_target": "相对价值形式",
+      "variants": [],
+      "queries": [
+        "relative Wertform 相对价值形式 资本论 中文",
+        "relative value-form 相对价值形式 马克思 术语词典"
+      ],
+      "evidence": [
+        {
+          "title": "《资本论》第一卷：商品的相对价值形式",
+          "url": "https://www.marxists.org/chinese/marx/capital/01.htm",
+          "support": "中文经典文本使用“相对价值形式”并解释一种商品如何在另一商品中表现其价值。",
+          "level": "high",
+          "access": "搜索结果摘要，未逐页核读全文"
+        },
+        {
+          "title": "马克思主义大辞典：相对价值形式",
+          "url": "https://www.marxdic.com/article/2277",
+          "support": "词条标题直接为“相对价值形式（relative value form）”，对应术语明确。",
+          "level": "high",
+          "access": "搜索结果摘要，未逐页核读全文"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "相对价值形式",
+      "note": "该术语的经典中文译名稳定为“相对价值形式”，与等价形式构成价值表现的两极。",
+      "variant_notes": []
+    },
+    {
+      "ordinal": 83,
+      "id": "relativer-mehrwert",
+      "source": "relativer Mehrwert",
+      "current_target": "相对剩余价值",
+      "variants": [],
+      "queries": [
+        "relativer Mehrwert 相对剩余价值 马克思 中文",
+        "relativer Mehrwert relative surplus value 资本论 中文 术语"
+      ],
+      "evidence": [
+        {
+          "title": "《资本论》第一卷：相对剩余价值的概念",
+          "url": "https://www.marxists.org/chinese/marx/capital/10.htm",
+          "support": "中文经典文本明确定义：通过缩短必要劳动时间、改变工作日中必要劳动与剩余劳动的比例所生产的剩余价值称为相对剩余价值。",
+          "level": "high",
+          "access": "搜索结果摘要，未逐页核读全文"
+        },
+        {
+          "title": "《马克思恩格斯全集》第四十四卷：相对剩余价值的概念",
+          "url": "https://www.marxists.org/chinese/marx-engels-2/44/016.htm",
+          "support": "卷本章节标题及正文采用“相对剩余价值”，与现有目标译名一致。",
+          "level": "high",
+          "access": "搜索结果摘要，未逐页核读全文"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "相对剩余价值",
+      "note": "relativer Mehrwert译为“相对剩余价值”，指通过降低劳动力价值、缩短必要劳动时间而增加的剩余价值；与绝对剩余价值区分。",
+      "variant_notes": []
+    },
+    {
+      "ordinal": 84,
+      "id": "schatzbildung",
+      "source": "Schatzbildung",
+      "current_target": "货币贮藏",
+      "variants": [],
+      "queries": [
+        "Schatzbildung 贮藏货币 货币贮藏 马克思 资本论",
+        "Schatzbildung Marx Kapital 中文 货币贮藏 贮藏货币"
+      ],
+      "evidence": [
+        {
+          "title": "《资本论》第一卷：货币或商品流通",
+          "url": "https://www.marxists.org/chinese/marx/capital/03.htm",
+          "support": "中文文本讨论货币作为贮藏货币及货币贮藏在金属流通中的职能，直接支持‘货币贮藏’作为概念译法。",
+          "level": "high",
+          "access": "搜索结果摘要，未逐页核读全文"
+        },
+        {
+          "title": "《资本论》第一卷：商品与货币（含德文术语对照）",
+          "url": "https://www.diancangwang.cn/waiguomingzhu/ac82405c9cbe/909b5d49b4e0.html",
+          "support": "文本将货币凝固为贮藏货币的过程与Schatzbildner关联，提供Schatz词族对应的中文语境。",
+          "level": "medium",
+          "access": "搜索结果摘要，未逐页核读全文"
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "货币贮藏",
+      "note": "Schatzbildung指货币退出流通并作为价值贮藏的过程；中文资本论文本采用‘货币贮藏’等表述。若语境指单纯财富积累，需结合上下文决定是否简化为‘贮藏’。",
+      "variant_notes": []
+    },
+    {
+      "ordinal": 85,
+      "id": "schein",
+      "source": "Schein",
+      "current_target": "假象",
+      "variants": [],
+      "queries": [
+        "Marx Schein Erscheinung Wesen 假象 表象 中文 资本论 德文"
+      ],
+      "evidence": [
+        {
+          "url": "https://mphilosophy.sysu.edu.cn/sites/default/files/2020-07/现代哲学2019年第3期.pdf",
+          "title": "《现代哲学》2019年第3期：本质、显现与假象",
+          "support": "Source distinguishes Schein from Wesen/Erscheinung and gives 假象 in the Chinese discussion.",
+          "level": "search_snippet",
+          "access": "Search result snippet; page body not independently inspected."
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "假象",
+      "note": "Source distinguishes Schein from Wesen/Erscheinung and gives 假象 in the Chinese discussion.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 86,
+      "id": "scheinausgleich",
+      "source": "Scheinausgleich",
+      "current_target": "表面调和",
+      "variants": [],
+      "queries": [
+        "Scheinausgleich Marx Scheinausgleich 中文 表面调和 德文",
+        "Scheinausgleich Marx Ausgleich 中文 调和 资本主义 德文"
+      ],
+      "evidence": [],
+      "status": "unverified",
+      "suggested_target": "表面调和",
+      "note": "Two targeted searches returned no stable German–Chinese equivalent; lexical gloss alone is insufficient.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 87,
+      "id": "selbstbetatigung",
+      "source": "Selbstbetätigung",
+      "current_target": "自主活动",
+      "variants": [
+        "Selbsttätigkeit"
+      ],
+      "queries": [
+        "Selbstbetätigung Selbsttätigkeit 德国意识形态 自主活动 中文 原文"
+      ],
+      "evidence": [
+        {
+          "url": "https://ptextold.nju.edu.cn/e1/5e/c27389a581982/page.htm",
+          "title": "张一兵：《人的自主活动力量颠倒地表现为事物的力量——广松涉版〈德意志意识形态〉“费尔巴哈章”新探》",
+          "support": "Page body defines 自主活动 and discusses it in the German Ideology; it supports 自主活动 for Selbstbetätigung, but does not independently establish that Selbsttätigkeit is interchangeable.",
+          "level": "page_body",
+          "access": "Opened source; title and abstract inspected."
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "自主活动",
+      "note": "Nanjing University discussion directly associates both German terms with 自主活动; near-synonymy does not establish full interchangeability.",
+      "variant_notes": {
+        "Selbsttätigkeit": "Search evidence does not establish unconditional interchangeability; preserve contextual distinction."
+      }
+    },
+    {
+      "ordinal": 88,
+      "id": "sinnliche-tatigkeit",
+      "source": "sinnliche Tätigkeit",
+      "current_target": "感性活动",
+      "variants": [],
+      "queries": [
+        "sinnliche Tätigkeit 感性活动 德意志意识形态 中文 马克思"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/pdf/marx-engels/mes01.pdf",
+          "title": "《德意志意识形态》中文本（马克思恩格斯文集第1卷）",
+          "support": "Chinese Marx/Engels text and scholarship use 感性活动 for sinnliche Tätigkeit.",
+          "level": "search_snippet",
+          "access": "Search result snippet; page body not independently inspected."
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "感性活动",
+      "note": "Chinese Marx/Engels text and scholarship use 感性活动 for sinnliche Tätigkeit.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 89,
+      "id": "subjektive-arbeitswertlehre",
+      "source": "subjektive Arbeitswertlehre",
+      "current_target": "主观劳动价值论",
+      "variants": [],
+      "queries": [
+        "subjektive Arbeitswertlehre 中文 主观劳动价值论 马克思",
+        "主观劳动价值论 Arbeitswertlehre Marx 德文 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://external.dandelon.com/download/attachments/dandelon/ids/AT001A74E9CC7C6F86007C1257E1800441172.pdf",
+          "title": "Michael Heinrich: Die Wissenschaft vom Wert — Inhaltsverzeichnis",
+          "support": "目录中有Subjektive Arbeitswertlehre und Produktionskostentheorie bei Adam Smith；仅证明德文术语存在，不能单独证明中译通行。",
+          "level": "德文著作目录",
+          "access": "搜索结果摘要；未逐页全文核读"
+        }
+      ],
+      "status": "unverified",
+      "suggested_target": "主观劳动价值论",
+      "note": "海因里希著作德文目录确有Subjektive Arbeitswertlehre这一标题，但本轮未找到足以确认主观劳动价值论为通行中译的可靠中文材料。",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 90,
+      "id": "tauschwert",
+      "source": "Tauschwert",
+      "current_target": "交换价值",
+      "variants": [],
+      "queries": [
+        "Tauschwert 交换价值 Marx 德文 资本论 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/01.htm",
+          "title": "《资本论》第一卷第一章：商品",
+          "support": "Chinese Capital text supports 交换价值.",
+          "level": "search_snippet",
+          "access": "Search result snippet; page body not independently inspected."
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "交换价值",
+      "note": "Chinese Capital text supports 交换价值.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 91,
+      "id": "technische-zusammensetzung",
+      "source": "technische Zusammensetzung",
+      "current_target": "技术构成",
+      "variants": [],
+      "queries": [
+        "technische Zusammensetzung des Kapitals 技术构成 马克思 中文 德文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/23.htm",
+          "title": "《资本论》第一卷第二十三章：资本主义积累的一般规律",
+          "support": "Capital chapter on composition supports 技术构成 in the compound technical composition of capital.",
+          "level": "search_snippet",
+          "access": "Search result snippet; page body not independently inspected."
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "技术构成",
+      "note": "Capital chapter on composition supports 技术构成 in the compound technical composition of capital.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 92,
+      "id": "teilung-der-arbeit",
+      "source": "Teilung der Arbeit",
+      "current_target": "分工",
+      "variants": [
+        "Arbeitsteilung"
+      ],
+      "queries": [
+        "Teilung der Arbeit Arbeitsteilung 分工 德意志意识形态 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/pdf/marx-engels/mea01.pdf",
+          "title": "《德意志意识形态》中文本",
+          "support": "Chinese German-Ideology translation supports 分工; variants are related forms.",
+          "level": "search_snippet",
+          "access": "Search result snippet; page body not independently inspected."
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "分工",
+      "note": "Chinese German-Ideology translation supports 分工; variants are related forms.",
+      "variant_notes": {
+        "Arbeitsteilung": "Search evidence does not establish unconditional interchangeability; preserve contextual distinction."
+      }
+    },
+    {
+      "ordinal": 93,
+      "id": "theoretisches-feld",
+      "source": "theoretisches Feld",
+      "current_target": "理论场域",
+      "variants": [],
+      "queries": [
+        "\"theoretisches Feld\" Althusser 中文 理论场域 理论领域",
+        "theoretisches Feld 理论领域 马克思 德文 中文"
+      ],
+      "evidence": [],
+      "status": "unverified",
+      "suggested_target": "理论场域",
+      "note": "Two targeted searches did not establish a stable German–Chinese match for this phrase.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 94,
+      "id": "transformationsproblem",
+      "source": "Transformationsproblem",
+      "current_target": "转型问题",
+      "variants": [],
+      "queries": [
+        "Transformationsproblem Wert Produktionspreise 转形问题 价值 生产价格 上财"
+      ],
+      "evidence": [
+        {
+          "url": "https://marxism.ssap.com.cn/skwx_marxism/LiteratureDetail.aspx?ID=38724",
+          "title": "成本价格转形与转形问题C体系的特点",
+          "support": "Chinese political-economy scholarship uses 转形问题 for the value-to-production-price problem; 转型问题 is not preferred here.",
+          "level": "search_snippet",
+          "access": "Search result snippet; page body not independently inspected."
+        }
+      ],
+      "status": "change_suggested",
+      "suggested_target": "转形问题",
+      "note": "Chinese political-economy scholarship uses 转形问题 for the value-to-production-price problem; 转型问题 is not preferred here.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 95,
+      "id": "trinitarische-formel",
+      "source": "Trinitarische Formel",
+      "current_target": "三位一体公式",
+      "variants": [],
+      "queries": [
+        "\"Trinitarische Formel\" 三位一体公式 马克思 资本论 中文",
+        "Die trinitarische Formel 第四十八章 三位一体的公式 资本论 德文 中文",
+        "Kapital 48 \"Die trinitarische Formel\" Marx deutsch"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx-engels/25/049.htm",
+          "title": "《资本论》第三卷第四十八章：三位一体的公式",
+          "support": "Chinese Chapter 48 title is 三位一体的公式; German Chapter 48 title is Die trinitarische Formel. Same-chapter cross-language match.",
+          "level": "same_chapter_cross_language",
+          "access": "Search results identify the Chinese and German Chapter 48 titles."
+        },
+        {
+          "url": "https://www.biancahoegel.de/archiv/marx_engels/kapital/bd3/me25_822.htm",
+          "title": "Das Kapital III — Die trinitarische Formel",
+          "support": "德文第48章标题，与中文同章对应。",
+          "level": "经典德文原文",
+          "access": "搜索结果摘要；未逐页全文核读"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "三位一体公式",
+      "note": "The Chinese Chapter 48 title and German chapter title establish 三位一体的公式/三位一体公式 directly.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 96,
+      "id": "trager",
+      "source": "Träger",
+      "current_target": "承担者",
+      "variants": [],
+      "queries": [
+        "Träger ökonomischer Verhältnisse 承担者 马克思 中文 资本论"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/reference-books/norman-geras-1983/04.htm",
+          "title": "诺曼·杰拉斯：《保卫人性》",
+          "support": "Chinese edition uses 承担者 in the relevant economic-relations phrasing.",
+          "level": "search_snippet",
+          "access": "Search result snippet; page body not independently inspected."
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "承担者",
+      "note": "Chinese edition uses 承担者 in the relevant economic-relations phrasing.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 97,
+      "id": "umschlag-der-aneignungsgesetze",
+      "source": "Umschlag der Aneignungsgesetze",
+      "current_target": "占有规律的转变",
+      "variants": [],
+      "queries": [
+        "Umschlag der Aneignungsgesetze 马克思 占有规律 转化 中文",
+        "Umschlag Aneignungsgesetze 原始积累 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/22.htm",
+          "title": "《资本论》第一卷第二十二章：占有规律的转变",
+          "support": "Chapter heading supports a Chinese rendering of the concept; exact German phrase alignment was not verified.",
+          "level": "same_chapter_cross_language",
+          "access": "Chapter-level cross-reference; exact passage not inspected."
+        },
+        {
+          "url": "https://prokla.de/index.php/PROKLA/en/article/download/332/297/594",
+          "title": "PROKLA: The transformation of the laws of appropriation",
+          "support": "German discussion treats the transformation of appropriation laws as concealing unpaid appropriation; this confirms context, not Chinese wording.",
+          "level": "search_snippet",
+          "access": "Search snippet; page body not independently inspected."
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "占有规律的转变",
+      "note": "The Capital chapter heading supports the Chinese concept; PROKLA confirms the German theoretical context. Exact sentence-level alignment remains unverified.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 98,
+      "id": "ursprungliche-akkumulation",
+      "source": "ursprüngliche Akkumulation",
+      "current_target": "原始积累",
+      "variants": [],
+      "queries": [
+        "ursprüngliche Akkumulation 原始积累 德意志意识形态 资本论 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx-engels-2/44/030.htm",
+          "title": "《资本论》第一卷第二十四章：所谓原始积累",
+          "support": "Chinese title/translation supports 原始积累.",
+          "level": "search_snippet",
+          "access": "Search result snippet; page body not independently inspected."
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "原始积累",
+      "note": "Chinese title/translation supports 原始积累.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 99,
+      "id": "variables-kapital",
+      "source": "variables Kapital",
+      "current_target": "可变资本",
+      "variants": [],
+      "queries": [
+        "variables Kapital 可变资本 variable capital 中文 马克思 资本论"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/06.htm",
+          "title": "《资本论》第一卷第六章：不变资本和可变资本",
+          "support": "Chinese Capital chapter supports 可变资本.",
+          "level": "search_snippet",
+          "access": "Search result snippet; page body not independently inspected."
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "可变资本",
+      "note": "Chinese Capital chapter supports 可变资本.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 100,
+      "id": "verdinglichung",
+      "source": "Verdinglichung",
+      "current_target": "物化",
+      "variants": [
+        "Versachlichung"
+      ],
+      "queries": [
+        "Verdinglichung Versachlichung 物化 事物化 Marx 中文 南大 清华"
+      ],
+      "evidence": [
+        {
+          "url": "https://ptextold.nju.edu.cn/09/4f/c27389a461135/page.htm",
+          "title": "张义修：《马克思主义“物化”批判逻辑的再发现——基于对马克思、卢卡奇与法兰克福学派的概念史考察》",
+          "support": "Page body explicitly differentiates Verdinglichung（物化） from Versachlichung（事物化） and warns against conflating them.",
+          "level": "page_body",
+          "access": "Opened source; title, abstract and terminology discussion inspected."
+        },
+        {
+          "url": "https://www.rwxy.tsinghua.edu.cn/info/1161/6473.htm",
+          "title": "马克思哲学论坛第三十六期举行",
+          "support": "报告明确区分物象化（Versachlichung）与物化（Verdinglichung）。",
+          "level": "学术研究",
+          "access": "已打开网页正文，核对第68—69行"
+        }
+      ],
+      "status": "change_suggested",
+      "suggested_target": "物化",
+      "note": "物化对应Verdinglichung可保留；修改建议针对变体：Versachlichung应按研究语境另列物象化、事物化等译法，不宜作为无条件同义变体。",
+      "variant_notes": "移除Versachlichung等价变体，另条记录其物象化、事物化等译法。"
+    },
+    {
+      "ordinal": 101,
+      "id": "verelendungstheorie",
+      "source": "Verelendungstheorie",
+      "current_target": "贫困化理论",
+      "variants": [],
+      "queries": [
+        "Verelendungstheorie 贫困化理论 马克思 中文 绝对 相对贫困",
+        "Verelendungstheorie 中文 德文 马克思 贫困化"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.verben.de/substantive/ressourcen/Verelendungstheorie.htm",
+          "title": "Verelendungstheorie（德汉词条）",
+          "support": "Bilingual terminology resource gives 贫困化理论; lexical evidence only, not a scholarly Marx-text translation.",
+          "level": "dictionary_entry",
+          "access": "Search snippet; page body not independently inspected."
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "贫困化理论",
+      "note": "A bilingual terminology resource supports 贫困化理论; evidence is lexical and not an authoritative scholarly translation.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 102,
+      "id": "verkehr",
+      "source": "Verkehr",
+      "current_target": "交往",
+      "variants": [
+        "Verkehrsverhältnisse"
+      ],
+      "queries": [
+        "Verkehr Verkehrsverhältnisse 交往 交往关系 德意志意识形态 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://cjjc.ruc.edu.cn/CN/Y2025/V47/I7/6",
+          "title": "《国际新闻界》2025年第7期：Verkehr的翻译与马克思的传播观",
+          "support": "The article directly discusses translating Verkehr as 交往 and distinguishes related compounds.",
+          "level": "search_snippet",
+          "access": "Search snippet; page body not independently inspected."
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "交往",
+      "note": "German–Chinese Marx text usage supports 交往 for Verkehr; compounds require separate handling.",
+      "variant_notes": "Verkehrsverhältnisse应译交往关系，不能丢弃Verhältnisse。"
+    },
+    {
+      "ordinal": 103,
+      "id": "verkehrsform",
+      "source": "Verkehrsform",
+      "current_target": "交往形式",
+      "variants": [
+        "Form des Verkehrs"
+      ],
+      "queries": [
+        "Verkehrsform 交往形式 Verkehrsform 德意志意识形态 中文 马克思"
+      ],
+      "evidence": [
+        {
+          "url": "https://cjjc.ruc.edu.cn/CN/Y2024/V46/I4/6",
+          "title": "《国际新闻界》2024年第4期：马克思文本中的Verkehr概念",
+          "support": "Chinese scholarship explicitly pairs Verkehrsform with 交往形式 and discusses the word-order variant Form des Verkehrs.",
+          "level": "search_snippet",
+          "access": "Search snippet; page body not independently inspected."
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "交往形式",
+      "note": "Chinese scholarship explicitly pairs Verkehrsform with 交往形式; Form des Verkehrs is a reordered variant whose exact scope remains context-dependent.",
+      "variant_notes": {
+        "Form des Verkehrs": "Search evidence does not establish unconditional interchangeability; preserve contextual distinction."
+      }
+    },
+    {
+      "ordinal": 104,
+      "id": "verwandlung-von-geld-in-kapital",
+      "source": "Verwandlung von Geld in Kapital",
+      "current_target": "货币转化为资本",
+      "variants": [
+        "Verwandlung des Geldes in Kapital"
+      ],
+      "queries": [
+        "Verwandlung von Geld in Kapital 货币转化为资本 德文 资本论"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/04.htm",
+          "title": "《资本论》第一卷第四章：货币转化为资本",
+          "support": "Chinese chapter title supports 货币转化为资本; German Urtext title is Verwandlung des Geldes in Kapital.",
+          "level": "same_chapter_cross_language",
+          "access": "Chinese translation and German Urtext were separately identified in search results."
+        },
+        {
+          "url": "https://www.marxists.org/deutsch/archiv/marx-engels/1858/urtext/3.htm",
+          "title": "Karl Marx: Urtext — Verwandlung des Geldes in Kapital",
+          "support": "German text uses the same phrase for the transition to capital.",
+          "level": "search_snippet",
+          "access": "Search snippet; page body not independently inspected."
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "货币转化为资本",
+      "note": "Chinese Capital translation supports 货币转化为资本.",
+      "variant_notes": {
+        "Verwandlung des Geldes in Kapital": "Search evidence does not establish unconditional interchangeability; preserve contextual distinction."
+      }
+    },
+    {
+      "ordinal": 105,
+      "id": "verwertung",
+      "source": "Verwertung",
+      "current_target": "价值增殖",
+      "variants": [
+        "Selbstverwertung"
+      ],
+      "queries": [
+        "Verwertung Selbstverwertung 价值增殖 自我增殖 Marx 德文 中文",
+        "Wertverwertung Selbstverwertung 自我增殖 价值增殖"
+      ],
+      "evidence": [
+        {
+          "url": "https://zxyj.cbpt.cnki.net/portal/journal/portal/client/paper/80072fd6cf20f22a6925fb805ede2df7",
+          "title": "《哲学研究》：资本的价值自行增殖过程",
+          "support": "Chinese scholarship gives Selbstverwertung as 自行增殖; supports distinguishing reflexive Selbstverwertung from bare Verwertung.",
+          "level": "search_snippet",
+          "access": "Search snippet; page body not independently inspected."
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "价值增殖",
+      "note": "Chinese scholarly discussion maps Selbstverwertung to 自行增殖; this does not make it a variant of Verwertung in every context.",
+      "variant_notes": "Selbstverwertung强调自行增殖，需保留Selbst限定。"
+    },
+    {
+      "ordinal": 106,
+      "id": "verwertungsproze",
+      "source": "Verwertungsprozeß",
+      "current_target": "价值增殖过程",
+      "variants": [],
+      "queries": [
+        "Verwertungsprozeß 价值增殖过程 Marx 德文 中文",
+        "\"Verwertungsprozeß\" \"价值增殖过程\""
+      ],
+      "evidence": [
+        {
+          "url": "https://mphilosophy.sysu.edu.cn/sites/default/files/2024-05/%E5%AE%9A%E7%A8%BF%20%E7%8E%B0%E4%BB%A3%E5%93%B2%E5%AD%A62023%E7%AC%AC6%E6%9C%9F.pdf",
+          "title": "马克思“资本观”三题议（现代哲学2023年第6期）",
+          "support": "论文并列劳动过程和价值增殖过程的德文Arbeitsprozeß und Verwertungsprozeß。",
+          "level": "学术研究",
+          "access": "搜索结果摘要；未逐页全文核读"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "价值增殖过程",
+      "note": "学术论文直接对照Verwertungsprozeß与价值增殖过程；旧拼写ß不影响该词对应。",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 107,
+      "id": "wahrer-sozialismus",
+      "source": "wahrer Sozialismus",
+      "current_target": "真正社会主义",
+      "variants": [],
+      "queries": [
+        "wahrer Sozialismus 真正社会主义 德意志意识形态 Marx 中文 德文",
+        "\"wahrer Sozialismus\" site:marxists.org/deutsch/archiv/marx-engels/1848",
+        "\"真正的社会主义\" site:marxists.org/chinese/marx/01.htm"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/deutsch/archiv/marx-engels/1848/manifest/3-sozkomm.htm",
+          "title": "Manifest der Kommunistischen Partei — Sozialistische und kommunistische Literatur",
+          "support": "第三部分关于德国社会主义的段落出现wahrer Sozialismus。",
+          "level": "经典原文",
+          "access": "搜索结果摘要；未逐页全文核读"
+        },
+        {
+          "url": "https://www.marxists.org/chinese/marx/01.htm",
+          "title": "马克思恩格斯：共产党宣言",
+          "support": "对应段落将该德国思潮译为真正的社会主义。",
+          "level": "经典文本中译",
+          "access": "搜索结果摘要；未逐页全文核读"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "真正社会主义",
+      "note": "《共产党宣言》第三部分中德相应段落支持真正的社会主义；这是特定思潮名称，应保留引号所表达的批判语气。",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 108,
+      "id": "warenfetisch",
+      "source": "Warenfetisch",
+      "current_target": "商品拜物教",
+      "variants": [],
+      "queries": [
+        "Warenfetisch Warenfetischismus 商品拜物教 Marx 德文 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://mphilosophy.sysu.edu.cn/sites/default/files/2020-06/%E7%8E%B0%E4%BB%A3%E5%93%B2%E5%AD%A62017%E7%AC%AC1%E6%9C%9F.pdf",
+          "title": "Fetischismus及相关词在马克思著作中的话语变迁",
+          "support": "论文将Warenfetisch直接对应商品拜物教，并讨论商品物神的译法。",
+          "level": "学术研究",
+          "access": "搜索结果摘要；未逐页全文核读"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "商品拜物教",
+      "note": "Chinese scholarship explicitly identifies Warenfetisch as 商品拜物教.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 109,
+      "id": "weltgeld",
+      "source": "Weltgeld",
+      "current_target": "世界货币",
+      "variants": [],
+      "queries": [
+        "Weltgeld 世界货币 Marx 德文 中文 资本论"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.imi.ruc.edu.cn/IMIsd/gjjr/f6b95a496429412e84990d93a6b66cc4.htm",
+          "title": "马克思的国际金融理论",
+          "support": "Chinese Marxist economics uses 世界货币 for Marx’s world-money function.",
+          "level": "search_snippet",
+          "access": "Search snippet; page body not independently inspected."
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "世界货币",
+      "note": "Chinese Marxist economic scholarship uses 世界货币.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 110,
+      "id": "weltgeschichte",
+      "source": "Weltgeschichte",
+      "current_target": "世界历史",
+      "variants": [
+        "weltgeschichtlich"
+      ],
+      "queries": [
+        "Weltgeschichte weltgeschichtlich 世界历史 世界历史性 德意志意识形态 德文 中文",
+        "weltgeschichtlich 世界历史性"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/pdf/marx-engels/mes01.pdf",
+          "title": "《德意志意识形态》（中文文本）",
+          "support": "Chinese edition uses 世界历史 for the noun; this does not establish equivalence with adjective weltgeschichtlich.",
+          "level": "contextual",
+          "access": "Search snippet; page body not independently inspected."
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "世界历史",
+      "note": "Chinese scholarship supports noun 世界历史. This does not establish adjective weltgeschichtlich as interchangeable.",
+      "variant_notes": "weltgeschichtlich为世界历史的或世界历史性的，不能机械套用名词。"
+    },
+    {
+      "ordinal": 111,
+      "id": "wertausdruck",
+      "source": "Wertausdruck",
+      "current_target": "价值表现",
+      "variants": [],
+      "queries": [
+        "Wertausdruck 价值表现 Marx 德文 资本论 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.diancangwang.cn/waiguomingzhu/ac82405c9cbe/909b5d49b4e0.html",
+          "title": "《资本论》第一卷第一章：商品",
+          "support": "Chinese text labels the form of value expression as 价值表现 and includes the German headword Wertausdruck.",
+          "level": "same_section_cross_language",
+          "access": "Search result snippet shows Wertausdruck with the Chinese passage."
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "价值表现",
+      "note": "Chinese Capital passage supports 价值表现.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 112,
+      "id": "wertform",
+      "source": "Wertform",
+      "current_target": "价值形式",
+      "variants": [],
+      "queries": [
+        "Wertform 价值形式 Marx 德文 资本论 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/01.htm",
+          "title": "《资本论》第一卷第一章：商品",
+          "support": "Chinese Capital text and scholarship support 价值形式.",
+          "level": "search_snippet",
+          "access": "Search result snippet; page body not independently inspected."
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "价值形式",
+      "note": "Chinese Capital text and scholarship support 价值形式.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 113,
+      "id": "wertformanalyse",
+      "source": "Wertformanalyse",
+      "current_target": "价值形式分析",
+      "variants": [],
+      "queries": [
+        "Wertformanalyse 价值形式分析 Marx 德文 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://zjsh.cbpt.cnki.net/portal/journal/portal/client/paper/358e1c8c25b11b3cada10883f5d1c676",
+          "title": "《浙江社会科学》：价值形式分析的方法",
+          "support": "Chinese scholarship uses 价值形式分析 as a named method.",
+          "level": "contextual",
+          "access": "Search snippet; page body not independently inspected."
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "价值形式分析",
+      "note": "Chinese scholarship uses 价值形式分析 for the named interpretive method.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 114,
+      "id": "wertgegenstandlichkeit",
+      "source": "Wertgegenständlichkeit",
+      "current_target": "价值对象性",
+      "variants": [],
+      "queries": [
+        "Wertgegenständlichkeit 价值对象性 Marx 德文 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://ptextold.nju.edu.cn/ce/52/c12201a249426/page.htm",
+          "title": "周嘉昕：“物象化”、“物化”还是“对象化”？",
+          "support": "Article prints Wertgegenständlichkeit with 价值对象性 in a discussion of Marx’s Capital text.",
+          "level": "search_snippet",
+          "access": "Search snippet; page body not independently inspected."
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "价值对象性",
+      "note": "Chinese Capital text explicitly renders Wertgegenständlichkeit as 价值对象性.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 115,
+      "id": "wertgroe",
+      "source": "Wertgröße",
+      "current_target": "价值量",
+      "variants": [],
+      "queries": [
+        "Wertgröße 价值量 Marx 德文 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/01.htm",
+          "title": "《资本论》第一卷第一章：商品",
+          "support": "Chinese translation supports 价值量.",
+          "level": "search_snippet",
+          "access": "Search result snippet; page body not independently inspected."
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "价值量",
+      "note": "Chinese translation supports 价值量.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 116,
+      "id": "wertma",
+      "source": "Wertmaß",
+      "current_target": "价值尺度",
+      "variants": [
+        "Maß der Werte"
+      ],
+      "queries": [
+        "Wertmaß Maß der Werte 价值尺度 Marx 德文 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/03.htm",
+          "title": "《资本论》第一卷第三章：货币或商品流通",
+          "support": "Chapter gives 价值尺度; German section heading Maß der Werte is paired with this Chinese section in the bilingual contents.",
+          "level": "same_section_cross_language",
+          "access": "Search result snippets show Chinese chapter text and bilingual contents."
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "价值尺度",
+      "note": "Chapter 3 Chinese text uses 价值尺度; the paired German section title is Maß der Werte.",
+      "variant_notes": {
+        "Maß der Werte": "Search evidence does not establish unconditional interchangeability; preserve contextual distinction."
+      }
+    },
+    {
+      "ordinal": 117,
+      "id": "wertsubstanz",
+      "source": "Wertsubstanz",
+      "current_target": "价值实体",
+      "variants": [
+        "Substanz des Werts"
+      ],
+      "queries": [
+        "Wertsubstanz Substanz des Werts 价值实体 Marx 德文 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://marx-ebooks.github.io/docs/MEW-ZH/23/MEW23-008.html",
+          "title": "《资本论》第一卷第一章：商品的两个因素",
+          "support": "Chinese heading explicitly gives 价值实体 with German Wertsubstanz in parentheses.",
+          "level": "same_section_cross_language",
+          "access": "Search result snippet displays German term and Chinese rendering."
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "价值实体",
+      "note": "The Chinese section heading explicitly pairs 价值实体 with Wertsubstanz.",
+      "variant_notes": {
+        "Substanz des Werts": "Search evidence does not establish unconditional interchangeability; preserve contextual distinction."
+      }
+    },
+    {
+      "ordinal": 118,
+      "id": "werttheorie",
+      "source": "Werttheorie",
+      "current_target": "价值论",
+      "variants": [],
+      "queries": [
+        "Werttheorie 价值论 Marx 德文 中文",
+        "\"Werttheorie\" \"价值论\" 马克思"
+      ],
+      "evidence": [
+        {
+          "url": "https://ptext.nju.edu.cn/info/1348/9207.htm",
+          "title": "李乾坤：马克思价值形式理论研究的历史演进与当代展望",
+          "support": "论文使用价值理论、价值论，并直接对照货币价值论与monetäre Werttheorie；此证据对独立词项属于搭配和语境支持。",
+          "level": "学术研究",
+          "access": "搜索结果摘要；未逐页全文核读"
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "价值论",
+      "note": "马克思价值研究中价值论和价值理论均有学术用例；NJU文章在monetäre Werttheorie完整搭配中直接使用货币价值论，支持本条译法，但不能据此认定所有学科只有价值论这一译名。",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 119,
+      "id": "wertzusammensetzung",
+      "source": "Wertzusammensetzung",
+      "current_target": "价值构成",
+      "variants": [],
+      "queries": [
+        "Wertzusammensetzung 价值构成 不变资本 可变资本 Marx 德文 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/23.htm",
+          "title": "《资本论》第一卷第二十三章：资本主义积累的一般规律",
+          "support": "Chinese text explains capital value-composition through the constant/variable capital ratio; German Chapter 23 uses Wertzusammensetzung. Contextual support only.",
+          "level": "same_chapter_cross_language",
+          "access": "Search results cross-identify Chinese chapter and German original wording."
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "价值构成",
+      "note": "Chapter 23 explains value composition through the constant/variable capital ratio; this supports a contextual rendering, not a fixed dictionary equivalent.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 120,
+      "id": "wesensphilosophie",
+      "source": "Wesensphilosophie",
+      "current_target": "本质哲学",
+      "variants": [],
+      "queries": [
+        "Wesensphilosophie 本质哲学 Marx 德文 中文",
+        "Wesensphilosophie 中文哲学术语 德文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.scribd.com/document/932136607/本真性的黑话-论德意志意识形态-阿多诺",
+          "title": "阿多诺：《本真性的黑话：论德意志意识形态》中译摘录",
+          "support": "Search snippet directly pairs 本质哲学 with Wesensphilosophie in the Chinese translation excerpt; supports the target but source is an uploaded excerpt, not an authoritative full edition.",
+          "level": "published_translation_excerpt",
+          "access": "Search result snippet only; Scribd upload provenance and page body not independently verified."
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "本质哲学",
+      "note": "A Chinese translation excerpt directly pairs 本质哲学 with Wesensphilosophie; source provenance and broader standardization remain limited.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 121,
+      "id": "zahlungsmittel",
+      "source": "Zahlungsmittel",
+      "current_target": "支付手段",
+      "variants": [],
+      "queries": [
+        "Zahlungsmittel 支付手段 Marx 德文 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://de.langenscheidt.com/deutsch-chinesisch/zahlungsmittel",
+          "title": "Langenscheidt 德汉词典：Zahlungsmittel",
+          "support": "Dictionary gives 支付手段.",
+          "level": "dictionary_entry",
+          "access": "Search snippet; page body not independently inspected."
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "支付手段",
+      "note": "The bilingual section heading plus a German–Chinese dictionary support 支付手段.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 122,
+      "id": "zinstragendes-kapital",
+      "source": "zinstragendes Kapital",
+      "current_target": "生息资本",
+      "variants": [],
+      "queries": [
+        "zinstragendes Kapital 生息资本 Marx 德文 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx-engels/25/022.htm",
+          "title": "《资本论》第三卷第二十一章：生息资本",
+          "support": "Chinese chapter heading and text use 生息资本.",
+          "level": "search_snippet",
+          "access": "Search snippet; page body not independently inspected."
+        },
+        {
+          "url": "https://biancahoegel.de/archiv/marx_engels/kapital/bd3/me25_607.htm",
+          "title": "Das zinstragende Kapital",
+          "support": "German text labels the concept zinstragendes Kapital.",
+          "level": "search_snippet",
+          "access": "Search snippet; page body not independently inspected."
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "生息资本",
+      "note": "Chinese Capital Volume III supports 生息资本.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 123,
+      "id": "zirkulationsmittel",
+      "source": "Zirkulationsmittel",
+      "current_target": "流通手段",
+      "variants": [],
+      "queries": [
+        "Zirkulationsmittel 流通手段 Marx 德文 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.diancangwang.cn/waiguomingzhu/ac82405c9cbe/909b5d49b4e0.html",
+          "title": "《资本论》第一卷第一篇：商品与货币",
+          "support": "Chinese contents pair 流通手段 with Zirkulationsmittel.",
+          "level": "same_section_cross_language",
+          "access": "Search snippet displays bilingual section heading."
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "流通手段",
+      "note": "German and Chinese Capital text headings pair Zirkulationsmittel with 流通手段.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 124,
+      "id": "aquivalentform",
+      "source": "Äquivalentform",
+      "current_target": "等价形式",
+      "variants": [],
+      "queries": [
+        "Äquivalentform 等价形式 Marx German Chinese 资本论"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/marx/capital/01.htm",
+          "title": "《资本论》第一卷第一章：商品",
+          "support": "Chinese section heading uses 等价形式 in the corresponding German Äquivalentform discussion.",
+          "level": "same_section_cross_language",
+          "access": "Search result snippet from the bilingual section."
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "等价形式",
+      "note": "Chinese Capital text supports 等价形式.",
+      "variant_notes": {}
+    },
+    {
+      "ordinal": 125,
+      "id": "uberbau",
+      "source": "Überbau",
+      "current_target": "上层建筑",
+      "variants": [
+        "ideologischer Überbau"
+      ],
+      "queries": [
+        "Überbau ideologischer Überbau 上层建筑 Marx 德文 中文"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/reference-books/prawer-1976/05.htm",
+          "title": "Prawer：《实践和意识形态》",
+          "support": "Chinese text quotes Überbau and renders it as 思想上层建筑 in the German Ideology discussion.",
+          "level": "search_snippet",
+          "access": "Search snippet; page body not independently inspected."
+        }
+      ],
+      "status": "contextual",
+      "suggested_target": "上层建筑",
+      "note": "Chinese Marx text supports 上层建筑; ideologischer Überbau is a narrower descriptive compound.",
+      "variant_notes": "ideologischer Überbau含思想或意识形态限定，不能总是省略。"
+    },
+    {
+      "ordinal": 126,
+      "id": "uberproduktionskrise",
+      "source": "Überproduktionskrise",
+      "current_target": "生产过剩危机",
+      "variants": [],
+      "queries": [
+        "Überproduktionskrise 生产过剩危机 Marx 德文 中文",
+        "\"Überproduktionskrise\" \"生产过剩危机\""
+      ],
+      "evidence": [
+        {
+          "url": "https://de.pons.com/%C3%BCbersetzung/deutsch-chinesisch/%C3%9Cberproduktionskrise",
+          "title": "PONS德汉词典：Überproduktionskrise",
+          "support": "直接释为生产过剩危机。",
+          "level": "出版机构双语词典",
+          "access": "搜索结果摘要；未逐页全文核读"
+        }
+      ],
+      "status": "confirmed",
+      "suggested_target": "生产过剩危机",
+      "note": "PONS德汉词典直接列生产过剩危机，当前对应有明确词典证据。",
+      "variant_notes": {}
+    }
+  ],
+  "application": {
+    "applied_date": "2026-10-28",
+    "status": "applied",
+    "entries_before": 126,
+    "entries_after": 120,
+    "removed_ids": [
+      "dialektische-darstellung",
+      "geld-als-selbstzweck",
+      "produktionskostentheorie",
+      "scheinausgleich",
+      "subjektive-arbeitswertlehre",
+      "theoretisches-feld"
+    ],
+    "target_changes": {
+      "charaktermaske": {
+        "before": "人格面具",
+        "after": "性格面具"
+      },
+      "erscheinungsform": {
+        "before": "显现形式",
+        "after": "表现形式"
+      },
+      "formelle-subsumtion": {
+        "before": "形式隶属",
+        "after": "形式从属"
+      },
+      "kapital-im-allgemeinen": {
+        "before": "一般资本",
+        "after": "资本一般"
+      },
+      "reelle-subsumtion": {
+        "before": "实际隶属",
+        "after": "实际从属"
+      },
+      "transformationsproblem": {
+        "before": "转型问题",
+        "after": "转形问题"
+      }
+    },
+    "variant_removals": [
+      {
+        "id": "basis",
+        "variant": "materielle Basis"
+      },
+      {
+        "id": "basis",
+        "variant": "ökonomische Basis"
+      },
+      {
+        "id": "bourgeoisie",
+        "variant": "Bourgeois"
+      },
+      {
+        "id": "entfremdung",
+        "variant": "entfremdet"
+      },
+      {
+        "id": "entfremdung",
+        "variant": "Entäußerung"
+      },
+      {
+        "id": "gattungswesen",
+        "variant": "Gattung"
+      },
+      {
+        "id": "gemeinwesen",
+        "variant": "Gemeinschaft"
+      },
+      {
+        "id": "gesellschaftliches-sein",
+        "variant": "Sein"
+      },
+      {
+        "id": "gesetz-vom-tendenziellen-fall-der-profitrate",
+        "variant": "tendenzieller Fall der Profitrate"
+      },
+      {
+        "id": "ideologie",
+        "variant": "ideologisch"
+      },
+      {
+        "id": "industrielle-reservearmee",
+        "variant": "relative Überbevölkerung"
+      },
+      {
+        "id": "kommunismus",
+        "variant": "kommunistisch"
+      },
+      {
+        "id": "kritik",
+        "variant": "kritische Kritik"
+      },
+      {
+        "id": "kritik",
+        "variant": "reine Kritik"
+      },
+      {
+        "id": "praxis",
+        "variant": "praktisch"
+      },
+      {
+        "id": "privateigentum",
+        "variant": "Eigentum"
+      },
+      {
+        "id": "proletariat",
+        "variant": "Proletarier"
+      },
+      {
+        "id": "verdinglichung",
+        "variant": "Versachlichung"
+      },
+      {
+        "id": "verkehr",
+        "variant": "Verkehrsverhältnisse"
+      },
+      {
+        "id": "verwertung",
+        "variant": "Selbstverwertung"
+      },
+      {
+        "id": "weltgeschichte",
+        "variant": "weltgeschichtlich"
+      },
+      {
+        "id": "uberbau",
+        "variant": "ideologischer Überbau"
+      }
+    ],
+    "retained_target_with_variant_removal": [
+      "verdinglichung"
+    ],
+    "glossary_sha256_before": "cc3d62353df8623fc32b34eca5cfa52f819c9b73d420b0919ee8dcb409382a48",
+    "glossary_sha256_after": "309e80d460edebb6484666c010b9d2150a5d00aa281578dfc35c4b5a44432e65"
+  }
+}

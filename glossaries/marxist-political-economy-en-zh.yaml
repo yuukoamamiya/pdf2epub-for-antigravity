@@ -509,13 +509,18 @@ entries:
   note: 'Political Economy of Money and Finance: 二战结束至1970年代初西方资本主义经济经历的高增长低通胀黄金时期'
 - id: long-waves
   source: long waves
+  target: 长波
+  policy: preferred
+  category: cyclical theory
+  note: 'Political Economy of Money and Finance: 指资本主义经济中周期性发展的长波现象；解释长波的理论另列为 long wave theory。'
+- id: long-wave-theory
+  source: long wave theory
   target: 长波理论
   policy: preferred
   variants:
   - long wave theories
-  - long wave theory
   category: cyclical theory
-  note: 'Political Economy of Money and Finance: 资本主义经济每隔约半个世纪经历扩张与收缩长周期的理论'
+  note: '指用于解释长波现象的理论，与 long waves 所指的长波现象区分。'
 - id: magnitude-of-value
   source: magnitude of value
   target: 价值量
@@ -696,10 +701,10 @@ entries:
     its dialectical method and critique of traditional Marxism.'
 - id: nexus-rerum
   source: nexus rerum
-  target: 事物联系
+  target: 物的神经
   policy: preferred
   category: philosophical concept
-  note: 'Political Economy of Money and Finance: 拉丁语概念，指资本主义社会中人与人的社会生产关系通过货币与商品产生的事物性联结'
+  note: 'Political Economy of Money and Finance: 拉丁语概念，指资本主义社会中人与人的社会生产关系通过货币与商品产生的事物性联结；在《资本论》引文中沿用“物的神经”这一经典译法。拉丁语字面含义更广，泛指事物之间的联系，不宜视为所有语境的固定译法。'
 - id: optimal-contract-design
   source: optimal contract design
   target: 最优契约设计

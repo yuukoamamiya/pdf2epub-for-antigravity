@@ -1,4 +1,4 @@
-> 后续记录（2026-10-28）：已按用户指示删除以下5项证据不足词条：`anti-quantity-theory`、`loanable-capital`、`monied-capitalist`、`planned-socialist-economy`、`regorging`。当前正式词表为153项；下文158项数据保留为2026-10-27历史审计记录。删除表示当时证据不足，不表示译法错误。
+> 后续记录（2026-10-28）：已删除5项证据不足词条，并应用两项术语调整：`long waves` 改为“长波”，另增 `long wave theory` →“长波理论”；`nexus rerum` 改为“物的神经”。当前正式词表共154项。下文158项逐项审计及其SHA为2026-10-27历史记录；删除记录见同日 removals 文件，本轮调整见2026-10-28应用记录。历史判断不代表当前词条仍未修改。
 
 # 马克思政治经济学英中术语表：全项网络核对
 
@@ -41,7 +41,7 @@
 | anti-quantity theory | 反货币数量论 | 反货币数量论；英文概念确有学术用例，但定向中文检索未获得反货币数量论的权威词对；保留待核。 |
 | Bank Rate | 银行官定利率 | 银行官定利率；词典采用银行贴现率、银行利率；当前银行官定利率解释性可懂，未查到其为首选通行词对。历史贴现率与现代政策利率需区分。 本轮不把有用例的异译直接判为错误，也不自动覆盖现行 target。 |
 | loanable capital | 借贷资本 | 可贷资本；Targeted search found no direct authoritative bilingual loanable capital entry. Do not infer equivalence with 借贷资本. 尚未取得足够权威的直接双语证据；这不等于判定原译错误。本轮保留原译。 |
-| long waves | 长波理论 | 长波；经济史论文与曼德尔著作书名把 long waves 译作“长波”。“长波理论”对应 long wave theory/theories，指解释长波的理论，现有 source 与 variants 将现象和理论合为一条。建议分开；本轮未直接改动 target。 |
+| long waves | 长波理论 | 长波；经济史论文与曼德尔著作书名把 long waves 译作“长波”。“长波理论”对应 long wave theory/theories，指解释长波的理论，现有 source 与 variants 将现象和理论合为一条。建议分开；截至2026-10-27未直接改动 target；2026-10-28已按后续记录应用。 |
 | monied capitalist | 货币资本家 | 货币资本家；Article maps monied/moneyed capital to 货币资本 but does not validate person noun monied capitalist = 货币资本家. 尚未取得足够权威的直接双语证据；这不等于判定原译错误。本轮保留原译。 |
 | nexus rerum | 事物联系 | 物的神经；《马克思恩格斯全集》第44卷注释把 nexus rerum 译为“物的神经”，并释作各种物的联系、主要的东西。现有“事物联系”接近释义；建议在直接引用《资本论》时采用经典译名，其他拉丁文语境不宜一律套用。 |
 | planned socialist economy | 计划社会主义经济 | 社会主义计划经济（建议候选，尚待直接双语证据）；Search found socialist planned economy, not exact planned socialist economy; do not conflate with 计划经济 or 社会主义计划经济 without source context. 尚未取得足够权威的直接双语证据；这不等于判定原译错误。本轮保留原译。 |
@@ -126,7 +126,7 @@
 | 70 | liquidity preference | 流动性偏好 | 有通行用例支持 |
 | 71 | loanable capital | 借贷资本 | 证据不足，待核 |
 | 72 | long boom | 长期繁荣 | 需限定语境／存在异译 |
-| 73 | long waves | 长波理论 | 建议调整（未覆盖原译） |
+| 73 | long waves | 长波理论 | 建议调整（已于2026-10-28应用） |
 | 74 | magnitude of value | 价值量 | 有通行用例支持 |
 | 75 | market socialism | 市场社会主义 | 有通行用例支持 |
 | 76 | means of circulation | 流通手段 | 有通行用例支持 |
@@ -153,7 +153,7 @@
 | 97 | necessary labor-time | 必要劳动时间 | 有通行用例支持 |
 | 98 | neoclassical synthesis | 新古典综合 | 需限定语境／存在异译 |
 | 99 | New Marx Reading | 新马克思阅读 | 有通行用例支持 |
-| 100 | nexus rerum | 事物联系 | 建议调整（未覆盖原译） |
+| 100 | nexus rerum | 事物联系 | 建议调整（已于2026-10-28应用） |
 | 101 | optimal contract design | 最优契约设计 | 有通行用例支持 |
 | 102 | organic composition of capital | 资本有机构成 | 有通行用例支持 |
 | 103 | overaccumulation | 过度积累 | 有通行用例支持 |
@@ -1025,8 +1025,8 @@
 
 ### 73. long waves → 长波理论
 
-- ID：`long-waves`；判断：建议调整（未覆盖原译）。
-- 说明：经济史论文与曼德尔著作书名把 long waves 译作“长波”。“长波理论”对应 long wave theory/theories，指解释长波的理论，现有 source 与 variants 将现象和理论合为一条。建议分开；本轮未直接改动 target。
+- ID：`long-waves`；判断：建议调整（已于2026-10-28应用）。
+- 说明：经济史论文与曼德尔著作书名把 long waves 译作“长波”。“长波理论”对应 long wave theory/theories，指解释长波的理论，现有 source 与 variants 将现象和理论合为一条。建议分开；截至2026-10-27未直接改动 target；2026-10-28已按后续记录应用。
 - 建议：长波
 - 原 variants：long wave theories, long wave theory
 - 当前 variants：long wave theories, long wave theory
@@ -1324,7 +1324,7 @@
 
 ### 100. nexus rerum → 事物联系
 
-- ID：`nexus-rerum`；判断：建议调整（未覆盖原译）。
+- ID：`nexus-rerum`；判断：建议调整（已于2026-10-28应用）。
 - 说明：《马克思恩格斯全集》第44卷注释把 nexus rerum 译为“物的神经”，并释作各种物的联系、主要的东西。现有“事物联系”接近释义；建议在直接引用《资本论》时采用经典译名，其他拉丁文语境不宜一律套用。
 - 建议：物的神经
 - 原 variants：无

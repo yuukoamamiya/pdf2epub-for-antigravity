@@ -4247,5 +4247,45 @@
       "current_glossary_version": "2026-10-28",
       "current_glossary_sha256": "4b0b0909a4c8bcf231a81efd437a0e0764e1ad1019eb214a806385d7acbe6272"
     }
-  ]
+  ],
+  "post_review_application": {
+    "date": "2026-10-28",
+    "target_changes": [
+      {
+        "id": "long-waves",
+        "source": "long waves",
+        "before": "长波理论",
+        "after": "长波"
+      },
+      {
+        "id": "nexus-rerum",
+        "source": "nexus rerum",
+        "before": "事物联系",
+        "after": "物的神经"
+      }
+    ],
+    "new_entries": [
+      {
+        "id": "long-wave-theory",
+        "source": "long wave theory",
+        "target": "长波理论",
+        "variants": [
+          "long wave theories"
+        ]
+      }
+    ],
+    "variant_reassignment": {
+      "from_id": "long-waves",
+      "to_id": "long-wave-theory",
+      "source_forms": [
+        "long wave theory",
+        "long wave theories"
+      ]
+    },
+    "current_entry_count": 154,
+    "current_glossary_version": "2026-10-28",
+    "current_glossary_sha256": "5012fb101a68469de9bc37b8835cdf78f65253211e0098a361e5a4cbedad5632",
+    "current_glossary_line_endings": "CRLF",
+    "application_record": "glossaries/reviews/marxist-political-economy-en-zh-2026-10-28.md"
+  }
 }

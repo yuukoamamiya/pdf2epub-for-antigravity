@@ -6,7 +6,7 @@ metadata:
   domain: Marxist theory and political economy (German to Chinese)
   source_language: German
   target_language: Chinese
-  version: '2026-10-21'
+  version: '2026-10-28'
 entries:
 - id: absoluter-mehrwert
   source: absoluter Mehrwert
@@ -48,9 +48,6 @@ entries:
   source: Basis
   target: 基础
   policy: preferred
-  variants:
-  - materielle Basis
-  - ökonomische Basis
   category: Philosophical Term
   note: 'Die deutsche Ideologie: 经济基础，决定上层建筑的物质生产和交往关系总和。'
 - id: bewutsein
@@ -63,8 +60,6 @@ entries:
   source: Bourgeoisie
   target: 资产阶级
   policy: preferred
-  variants:
-  - Bourgeois
   category: Social / Economic Term
   note: 'Die deutsche Ideologie: 占有生产资料并剥削雇佣劳动的现代统治阶级。'
 - id: burgerliche-gesellschaft
@@ -74,14 +69,13 @@ entries:
   variants:
   - Civil Society
   category: Philosophical / Political Term
-  note: 'Die deutsche Ideologie: 由物质交往和物质生产关系构成的经济与私人生活领域（对应资产阶级社会）。'
+  note: 'Die deutsche Ideologie: 由物质交往和物质生产关系构成的经济与私人生活领域（对应资产阶级社会）。 使用提示：在《德意志意识形态》中通常指市民社会；明确指资本主义社会总体时，可按语境译作“资产阶级社会”。'
 - id: charaktermaske
   source: Charaktermaske
-  target: 人格面具
+  target: 性格面具
   policy: preferred
   category: Kritik der politischen Ökonomie
-  note: 'Die Wissenschaft vom Wert: Die ökonomische Rolle, die ein Akteur in der kapitalistischen Zirkulation und
-    Produktion einnimmt'
+  note: 'Die Wissenschaft vom Wert: Die ökonomische Rolle, die ein Akteur in der kapitalistischen Zirkulation und Produktion einnimmt 使用提示：建议译作“性格面具”，指行动者在资本主义生产和流通过程中承担的经济角色。'
 - id: darstellungsmethode
   source: Darstellungsmethode
   target: 叙述方法
@@ -97,13 +91,6 @@ entries:
   - Einzige
   category: Philosophical Term
   note: 'Die deutsche Ideologie: 施蒂纳哲学的核心范畴，排斥一切社会普遍性与本质规定的纯粹个体。'
-- id: dialektische-darstellung
-  source: dialektische Darstellung
-  target: 辩证叙述
-  policy: preferred
-  category: Methodologie
-  note: 'Die Wissenschaft vom Wert: Die systematische Entwicklung der Kategorien aus ihren inneren Widersprüchen
-    im ''Kapital'''
 - id: doppelcharakter-der-arbeit
   source: Doppelcharakter der Arbeit
   target: 劳动的二重性
@@ -145,9 +132,6 @@ entries:
   source: Entfremdung
   target: 异化
   policy: preferred
-  variants:
-  - entfremdet
-  - Entäußerung
   category: Philosophical Term; Philosophische Anthropologie
   note: 'Die Wissenschaft vom Wert: Die Entäußerung und Beherrschung des Menschen durch seine eigenen Tätigkeiten,
     Produkte und Verhältnisse | Die deutsche Ideologie: 人自身的创造物与人对立并反过来统治人的历史状态。'
@@ -160,18 +144,16 @@ entries:
     zur eigentlichen Wissenschaft'
 - id: erscheinungsform
   source: Erscheinungsform
-  target: 显现形式
+  target: 表现形式
   policy: preferred
   category: Dialektik
-  note: 'Die Wissenschaft vom Wert: Die Form, in der das innere Wesen oder der Wert an der Oberfläche der Zirkulation
-    in die Erscheinung tritt'
+  note: 'Die Wissenschaft vom Wert: Die Form, in der das innere Wesen oder der Wert an der Oberfläche der Zirkulation in die Erscheinung tritt 使用提示：首选译作“表现形式”。'
 - id: fetischcharakter
   source: Fetischcharakter
   target: 拜物教性质
   policy: preferred
   category: Fetischismus
-  note: 'Die Wissenschaft vom Wert: Der Schein, als wohnten den Produkten der Arbeit gesellschaftliche Eigenschaften
-    von Natur aus inne'
+  note: 'Die Wissenschaft vom Wert: Der Schein, als wohnten den Produkten der Arbeit gesellschaftliche Eigenschaften von Natur aus inne 使用提示：常见固定搭配为“商品的拜物教性质”。'
 - id: fiktives-kapital
   source: fiktives Kapital
   target: 虚拟资本
@@ -181,11 +163,10 @@ entries:
     Ertrag'
 - id: formelle-subsumtion
   source: formelle Subsumtion
-  target: 形式隶属
+  target: 形式从属
   policy: preferred
   category: Kapitaltheorie
-  note: 'Die Wissenschaft vom Wert: Die Unterordnung tradierter Arbeitsprozesse unter das Kommando des Kapitals
-    ohne grundlegende technische Umwälzung'
+  note: 'Die Wissenschaft vom Wert: Die Unterordnung tradierter Arbeitsprozesse unter das Kommando des Kapitals ohne grundlegende technische Umwälzung 使用提示：译作“形式从属”，与reelle Subsumtion“实际从属”相对。'
 - id: forschungsmethode
   source: Forschungsmethode
   target: 研究方法
@@ -197,11 +178,8 @@ entries:
   source: Gattungswesen
   target: 类本质
   policy: preferred
-  variants:
-  - Gattung
   category: Philosophical Term; Philosophische Anthropologie
-  note: 'Die Wissenschaft vom Wert: Der Begriff des spezifisch menschlichen Wesens in den Frühschriften von Marx
-    und Feuerbach | Die deutsche Ideologie: 费尔巴哈哲学中的核心概念，指人类整体作为有意识、自由活动的普遍本质。'
+  note: 'Die Wissenschaft vom Wert: Der Begriff des spezifisch menschlichen Wesens in den Frühschriften von Marx und Feuerbach | Die deutsche Ideologie: 费尔巴哈哲学中的核心概念，指人类整体作为有意识、自由活动的普遍本质。 使用提示：指人的类本质或类存在物；单独的Gattung仅为“类”，不作等价变体。'
 - id: gebrauchswert
   source: Gebrauchswert
   target: 使用价值
@@ -215,19 +193,12 @@ entries:
   category: Geldtheorie
   note: 'Die Wissenschaft vom Wert: Die Bestimmung des Geldes außerhalb der bloßen Zirkulation (Schatz, Zahlungsmittel,
     Weltgeld)'
-- id: geld-als-selbstzweck
-  source: Geld als Selbstzweck
-  target: 货币作为目的本身
-  policy: preferred
-  category: Geldtheorie / Kapitaltheorie
-  note: 'Die Wissenschaft vom Wert: Die Bewegung des Geldes, in der die quantitative Vermehrung des Tauschwerts
-    zum ausschließlichen Zweck wird；按“money as an end in itself”含义调整；这里 Selbstzweck 是目的本身，不是“自在目的”。'
 - id: geldfetisch
   source: Geldfetisch
   target: 货币拜物教
   policy: preferred
   category: Fetischismus
-  note: 'Die Wissenschaft vom Wert: Der Schein, als sei Geld von Natur aus unmittelbar gesellschaftlich austauschbar'
+  note: 'Die Wissenschaft vom Wert: Der Schein, als sei Geld von Natur aus unmittelbar gesellschaftlich austauschbar 使用提示：译作“货币拜物教”，按此复合词语境处理。'
 - id: geldform
   source: Geldform
   target: 货币形式
@@ -254,14 +225,11 @@ entries:
   target: 有效性
   policy: preferred
   category: Erkenntnistheorie / Werttheorie
-  note: 'Die Wissenschaft vom Wert: Das gesellschaftliche Anerkanntsein und Funktionieren der abstrakten Arbeit
-    und der Wertformen im Tausch'
+  note: 'Die Wissenschaft vom Wert: Das gesellschaftliche Anerkanntsein und Funktionieren der abstrakten Arbeit und der Wertformen im Tausch 使用提示：价值理论中可指抽象劳动或价值形式的社会有效性；法律语境按上下文译作“效力”或“有效性”。'
 - id: gemeinwesen
   source: Gemeinwesen
   target: 共同体
   policy: preferred
-  variants:
-  - Gemeinschaft
   category: Philosophical / Political Term
   note: 'Die deutsche Ideologie: 社会联合体、普遍社会存在或公共生活。'
 - id: gesellschaftlich-notwendige-arbeitszeit
@@ -275,16 +243,12 @@ entries:
   source: gesellschaftliches Sein
   target: 社会存在
   policy: preferred
-  variants:
-  - Sein
   category: Philosophical Term
   note: 'Die deutsche Ideologie: 人类社会的物质生活过程，“不是意识决定生活，而是生活决定意识”。'
 - id: gesetz-vom-tendenziellen-fall-der-profitrate
   source: Gesetz vom tendenziellen Fall der Profitrate
   target: 利润率趋向下降的规律
   policy: preferred
-  variants:
-  - tendenzieller Fall der Profitrate
   category: Dynamik des Kapitalismus
   note: 'Die Wissenschaft vom Wert: Marx'' Hypothese, dass das Steigen der organischen Zusammensetzung die gesellschaftliche
     Profitrate langfristig senkt'
@@ -318,32 +282,26 @@ entries:
   source: Ideologie
   target: 意识形态
   policy: preferred
-  variants:
-  - ideologisch
   category: Philosophical Term
   note: 'Die deutsche Ideologie: 虚假观念体系或由特定经济基础决定的观念上层建筑。'
 - id: industrielle-reservearmee
   source: industrielle Reservearmee
   target: 产业后备军
   policy: preferred
-  variants:
-  - relative Überbevölkerung
   category: Kapitaltheorie
   note: 'Die Wissenschaft vom Wert: Die durch Akkumulation und Mechanisierung freigesetzte relative Überbevölkerung'
 - id: kapital-im-allgemeinen
   source: Kapital im Allgemeinen
-  target: 一般资本
+  target: 资本一般
   policy: preferred
   category: Kritik der politischen Ökonomie
-  note: 'Die Wissenschaft vom Wert: Marx'' methodische Abstraktionsebene zur Erfassung der allgemeinen Wesensbestimmungen
-    des Kapitals vor der Konkurrenz'
+  note: 'Die Wissenschaft vom Wert: Marx'' methodische Abstraktionsebene zur Erfassung der allgemeinen Wesensbestimmungen des Kapitals vor der Konkurrenz 使用提示：首选译作“资本一般”。'
 - id: kapitalfetisch
   source: Kapitalfetisch
   target: 资本拜物教
   policy: preferred
   category: Fetischismus
-  note: 'Die Wissenschaft vom Wert: Die verkehrte Vorstellung, als bringe der Wert aus sich selbst heraus Mehrwert
-    hervor (G-G'')'
+  note: 'Die Wissenschaft vom Wert: Die verkehrte Vorstellung, als bringe der Wert aus sich selbst heraus Mehrwert hervor (G-G'') 使用提示：按资本拜物教语境理解，不与其他Fetisch复合词混为同一术语。'
 - id: klasse
   source: Klasse
   target: 阶级
@@ -356,8 +314,6 @@ entries:
   source: Kommunismus
   target: 共产主义
   policy: preferred
-  variants:
-  - kommunistisch
   category: Political / Philosophical Term
   note: 'Die deutsche Ideologie: 消灭私有制、消灭阶级与异化、实现人的自由全面发展的现实运动与社会制度。'
 - id: komplizierte-arbeit
@@ -417,9 +373,6 @@ entries:
   source: Kritik
   target: 批判
   policy: preferred
-  variants:
-  - kritische Kritik
-  - reine Kritik
   category: Philosophical Term
   note: 'Die deutsche Ideologie: 反思与解构；青年黑格尔派自诩为“纯粹批判”或“批判的批判”。'
 - id: kritik-der-politischen-okonomie
@@ -517,25 +470,14 @@ entries:
   source: Praxis
   target: 实践
   policy: preferred
-  variants:
-  - praktisch
   category: Philosophical Term
   note: 'Die deutsche Ideologie: 能动的感性活动，人类变革自然与社会的客观物质活动。'
 - id: privateigentum
   source: Privateigentum
   target: 私有制
   policy: preferred
-  variants:
-  - Eigentum
   category: Economic / Legal Term
-  note: 'Die deutsche Ideologie: 对生产资料或劳动产品的私人占有及其制度。'
-- id: produktionskostentheorie
-  source: Produktionskostentheorie
-  target: 生产费用论
-  policy: preferred
-  category: Ökonomische Theorie
-  note: 'Die Wissenschaft vom Wert: Theorie, die den Wert oder Preis aus den Einkommensteilen (Lohn, Profit, Rente)
-    additiv zusammensetzt'
+  note: 'Die deutsche Ideologie: 对生产资料或劳动产品的私人占有及其制度。 使用提示：制度关系语境译“私有制”；强调具体财产时可译“私有财产”，不得将不带私人限定的Eigentum作等价变体。'
 - id: produktionskrafte
   source: Produktionskräfte
   target: 生产力
@@ -579,17 +521,14 @@ entries:
   source: Proletariat
   target: 无产阶级
   policy: preferred
-  variants:
-  - Proletarier
   category: Social / Economic Term
   note: 'Die deutsche Ideologie: 没有生产资料、出卖劳动力的现代工人阶级。'
 - id: reelle-subsumtion
   source: reelle Subsumtion
-  target: 实际隶属
+  target: 实际从属
   policy: preferred
   category: Kapitaltheorie
-  note: 'Die Wissenschaft vom Wert: Die durch Maschinerie und Großindustrie technisch und organisatorisch umgewälzte
-    Unterordnung der Arbeit unter das Kapital'
+  note: 'Die Wissenschaft vom Wert: Die durch Maschinerie und Großindustrie technisch und organisatorisch umgewälzte Unterordnung der Arbeit unter das Kapital 使用提示：首选译作“实际从属”，与formelle Subsumtion“形式从属”成对。'
 - id: relative-wertform
   source: relative Wertform
   target: 相对价值形式
@@ -616,13 +555,6 @@ entries:
   category: Dialektik
   note: 'Die Wissenschaft vom Wert: Die notwendige, aber täuschende oder unselbständige Erscheinungsweise des Wesens
     im kapitalistischen Alltag；马克思辩证法语境常与 Wesen（本质）、Erscheinung（现象/显现）区分；具体句子中也可能译作表象。'
-- id: scheinausgleich
-  source: Scheinausgleich
-  target: 表面调和
-  policy: preferred
-  category: Krisen- und Konkurrenztheorie
-  note: 'Die Wissenschaft vom Wert: Die bloß scheinbare Harmonisierung und Ausgleichsbewegung antagonistischer Verhältnisse
-    in der Zirkulation；未找到稳定通行的中文术语；按词义和原术语库说明，指对抗关系在流通中的表面调和/均衡。'
 - id: selbstbetatigung
   source: Selbstbetätigung
   target: 自主活动
@@ -637,13 +569,6 @@ entries:
   policy: preferred
   category: Philosophical Term
   note: 'Die deutsche Ideologie: 费尔巴哈唯物主义所忽视、而在辩证唯物主义中被确立为第一性的客观物质实践。'
-- id: subjektive-arbeitswertlehre
-  source: subjektive Arbeitswertlehre
-  target: 主观劳动价值论
-  policy: preferred
-  category: Ökonomische Theorie
-  note: 'Die Wissenschaft vom Wert: Auf Smith zurückgehende Konzeption des Werts gemessen an Mühe und Beschwerde
-    des Individuums'
 - id: tauschwert
   source: Tauschwert
   target: 交换价值
@@ -666,20 +591,12 @@ entries:
   - Arbeitsteilung
   category: Economic / Philosophical Term
   note: 'Die deutsche Ideologie: 生产活动的分化，异化、私有制和阶级划分的历史根源。'
-- id: theoretisches-feld
-  source: theoretisches Feld
-  target: 理论场域
-  policy: preferred
-  category: Erkenntnistheorie
-  note: 'Die Wissenschaft vom Wert: Der begriffliche Gesamtzusammenhang und Problemhorizont einer theoretischen
-    Disziplin (Althusser)'
 - id: transformationsproblem
   source: Transformationsproblem
-  target: 转型问题
+  target: 转形问题
   policy: preferred
   category: Preistheorie
-  note: 'Die Wissenschaft vom Wert: Das theoretische Problem der mathematisch-logischen Transformation von Werten
-    in Produktionspreise'
+  note: 'Die Wissenschaft vom Wert: Das theoretische Problem der mathematisch-logischen Transformation von Werten in Produktionspreise 使用提示：讨论价值向生产价格转化时译作“转形问题”。'
 - id: trinitarische-formel
   source: Trinitarische Formel
   target: 三位一体公式
@@ -717,11 +634,8 @@ entries:
   source: Verdinglichung
   target: 物化
   policy: preferred
-  variants:
-  - Versachlichung
   category: Kritische Philosophie
-  note: 'Die Wissenschaft vom Wert: Die Verwandlung zwischenmenschlicher gesellschaftlicher Verhältnisse in sachliche
-    Eigenschaften von Dingen'
+  note: 'Die Wissenschaft vom Wert: Die Verwandlung zwischenmenschlicher gesellschaftlicher Verhältnisse in sachliche Eigenschaften von Dingen 使用提示：Versachlichung依语境另译“物象化”或“事物化”，不作等价变体。'
 - id: verelendungstheorie
   source: Verelendungstheorie
   target: 贫困化理论
@@ -733,8 +647,6 @@ entries:
   source: Verkehr
   target: 交往
   policy: preferred
-  variants:
-  - Verkehrsverhältnisse
   category: Philosophical Term
   note: 'Die deutsche Ideologie: 人们之间的物质联系与社会交往（在早期马克思著作中常等同于生产关系）。'
 - id: verkehrsform
@@ -758,8 +670,6 @@ entries:
   source: Verwertung
   target: 价值增殖
   policy: preferred
-  variants:
-  - Selbstverwertung
   category: Kapitaltheorie
   note: 'Die Wissenschaft vom Wert: Der Prozeß der Erzeugung von Mehrwert durch Ausbeutung fremder Lohnarbeit'
 - id: verwertungsproze
@@ -779,8 +689,7 @@ entries:
   target: 商品拜物教
   policy: preferred
   category: Fetischismus
-  note: 'Die Wissenschaft vom Wert: Die Verdinglichung der gesellschaftlichen Verhältnisse der privaten Produzenten
-    zu dinglichen Eigenschaften der Waren'
+  note: 'Die Wissenschaft vom Wert: Die Verdinglichung der gesellschaftlichen Verhältnisse der privaten Produzenten zu dinglichen Eigenschaften der Waren 使用提示：译作“商品拜物教”；注意与“商品的拜物教性质”按德文原词区分。'
 - id: weltgeld
   source: Weltgeld
   target: 世界货币
@@ -791,8 +700,6 @@ entries:
   source: Weltgeschichte
   target: 世界历史
   policy: preferred
-  variants:
-  - weltgeschichtlich
   category: Philosophical / Historical Term
   note: 'Die deutsche Ideologie: 大工业和世界交往打破各民族闭关自守状态后形成的全球性历史过程。'
 - id: wertausdruck
@@ -894,8 +801,6 @@ entries:
   source: Überbau
   target: 上层建筑
   policy: preferred
-  variants:
-  - ideologischer Überbau
   category: Philosophical Term
   note: 'Die deutsche Ideologie: 建立在经济基础之上的政治法律设施及意识形态体系。'
 - id: uberproduktionskrise
