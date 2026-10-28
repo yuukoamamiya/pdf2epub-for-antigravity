@@ -4284,8 +4284,146 @@
     },
     "current_entry_count": 154,
     "current_glossary_version": "2026-10-28",
-    "current_glossary_sha256": "5012fb101a68469de9bc37b8835cdf78f65253211e0098a361e5a4cbedad5632",
+    "current_glossary_sha256": "e5f3425727d9310c3cf10d127c209f7d0f6617f618417f18d910330c38dcd160",
     "current_glossary_line_endings": "CRLF",
-    "application_record": "glossaries/reviews/marxist-political-economy-en-zh-2026-10-28.md"
+    "application_record": "glossaries/reviews/marxist-political-economy-en-zh-2026-10-28.md",
+    "historical_current_entry_count": 154,
+    "historical_current_glossary_sha256": "5012fb101a68469de9bc37b8835cdf78f65253211e0098a361e5a4cbedad5632"
+  },
+  "post_review_application_followup": {
+    "date": "2026-10-28",
+    "previous_applied_entry_count": 154,
+    "previous_applied_glossary_sha256": "5012fb101a68469de9bc37b8835cdf78f65253211e0098a361e5a4cbedad5632",
+    "target_changes": [
+      {
+        "id": "bank-rate",
+        "source": "Bank Rate",
+        "before": "银行官定利率",
+        "after": "银行利率"
+      },
+      {
+        "id": "neoclassical-synthesis",
+        "source": "neoclassical synthesis",
+        "before": "新古典综合",
+        "after": "新古典综合派"
+      },
+      {
+        "id": "real-abstraction",
+        "source": "real abstraction",
+        "before": "真实抽象",
+        "after": "现实抽象"
+      },
+      {
+        "id": "real-bills-doctrine",
+        "source": "real bills doctrine",
+        "before": "真实票据原则",
+        "after": "真实票据理论"
+      }
+    ],
+    "removed_variants": {
+      "abstract-labor": [
+        "abstract human labor",
+        "abstract human labour",
+        "equal human labor"
+      ],
+      "classical-political-economy": [
+        "classical economy"
+      ],
+      "commodity-fetishism": [
+        "commodity fetish"
+      ],
+      "complex-labor": [
+        "skilled labor"
+      ],
+      "concrete-labor": [
+        "concrete useful labor",
+        "concrete useful labour",
+        "concrete, useful labor",
+        "useful labor"
+      ],
+      "downswing": [
+        "long downswing"
+      ],
+      "fetish-character": [
+        "fetish character of the commodity"
+      ],
+      "money-supply-endogeneity": [
+        "endogenous money",
+        "endogenous money supply"
+      ],
+      "money-supply-exogeneity": [
+        "exogenous money",
+        "exogenous money supply"
+      ],
+      "simple-labor": [
+        "simple human labor",
+        "simple unskilled labor",
+        "unskilled labor"
+      ],
+      "valorization": [
+        "Verwertungsprozess",
+        "process of valorization",
+        "valorization process"
+      ],
+      "world-money": [
+        "universal money"
+      ]
+    },
+    "added_variants": {
+      "concrete-labor": [
+        "concrete labour"
+      ]
+    },
+    "contextual_notes_updated": [
+      "bank-rate",
+      "discount",
+      "downswing",
+      "fetish-character",
+      "immediately-socialized-labor",
+      "long-boom",
+      "neoclassical-synthesis",
+      "phantom-like-objectivity",
+      "price-specie-flow-mechanism",
+      "pure-theory-of-capitalism",
+      "real-abstraction",
+      "real-bills-doctrine",
+      "reification",
+      "simple-labor",
+      "structuralism",
+      "total-labor-of-society",
+      "traditional-marxism",
+      "upswing",
+      "valorization",
+      "vulgar-political-economy",
+      "worldview-marxism"
+    ],
+    "contextual_entry_count": 21,
+    "bank_rate_note_before": "Political Economy of Money and Finance: 中央银行向商业银行提供贴现或再贷款所收取的基准贴现率",
+    "bank_rate_evidence_sources": [
+      {
+        "url": "https://dictionary.cambridge.org/us/dictionary/english-chinese-simplified/bank-rate",
+        "checked_by": "independent subagent"
+      },
+      {
+        "url": "https://www.bankofengland.co.uk/monetary-policy/the-interest-rate-bank-rate",
+        "checked_by": "independent subagent"
+      }
+    ],
+    "current_entry_count": 154,
+    "current_glossary_version": "2026-10-28",
+    "current_glossary_sha256": "e5f3425727d9310c3cf10d127c209f7d0f6617f618417f18d910330c38dcd160",
+    "current_glossary_line_endings": "CRLF",
+    "application_record": "glossaries/reviews/marxist-political-economy-en-zh-2026-10-28.md",
+    "note_clarifications": {
+      "abstract-labor": "abstract human labour=抽象人类劳动；equal human labor=相同的人类劳动",
+      "commodity-fetishism": "commodity fetish可能指拜物化的商品对象，依句法和引文传统处理，不与commodity fetishism无条件等同",
+      "complex-labor": "skilled labor=熟练劳动",
+      "concrete-labor": "concrete useful labor=具体有用劳动；保留concrete labour英式拼写",
+      "money-supply-endogeneity": "endogenous money=内生货币；endogenous money supply=内生货币供给；区别于货币供给内生性",
+      "money-supply-exogeneity": "exogenous money=外生货币；exogenous money supply=外生货币供给；区别于货币供给外生性",
+      "world-money": "universal money译法依作者及货币理论语境判断，不无条件等同于world money",
+      "simple-labor": "unskilled labor=非熟练劳动",
+      "valorization": "保留Verwertung作为德语术语变体，移除带process限定的英语短语"
+    }
   }
 }

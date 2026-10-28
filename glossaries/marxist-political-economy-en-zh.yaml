@@ -21,12 +21,8 @@ entries:
   target: 抽象劳动
   policy: preferred
   variants:
-  - abstract human labor
-  - abstract human labour
   - abstract labour
-  - equal human labor
-  note: 'How to Read Marx''s Capital: Human labor considered in the abstract as expenditure of physiological energy
-    and creator of value.'
+  note: 'How to Read Marx''s Capital: Human labor considered in the abstract as expenditure of physiological energy and creator of value. abstract human labour 通常译“抽象人类劳动”，equal human labor 可译“相同的人类劳动”；这些增加限定的表达不作为本词条别名'
 - id: alienation
   source: alienation
   target: 异化
@@ -42,10 +38,10 @@ entries:
   note: 'Political Economy of Money and Finance: 交易一方比另一方掌握更多相关信息的市场状态，导致逆向选择和道德风险'
 - id: bank-rate
   source: Bank Rate
-  target: 银行官定利率
+  target: 银行利率
   policy: preferred
   category: central banking policy
-  note: 'Political Economy of Money and Finance: 中央银行向商业银行提供贴现或再贷款所收取的基准贴现率'
+  note: 'Political Economy of Money and Finance: 指央行规定或设定的利率。19—20世纪英国贴现或再贴现制度语境中可译“银行贴现率”；现代英国 Bank Rate 是英格兰银行向存放资金的商业银行支付的政策利率，并非一律指央行贷款贴现率。参见 Cambridge Dictionary: https://dictionary.cambridge.org/us/dictionary/english-chinese-simplified/bank-rate；Bank of England: https://www.bankofengland.co.uk/monetary-policy/the-interest-rate-bank-rate。'
 - id: banking-controversy
   source: banking controversy
   target: 银行学派与通货学派之争
@@ -116,10 +112,7 @@ entries:
   source: classical political economy
   target: 古典政治经济学
   policy: preferred
-  variants:
-  - classical economy
-  note: 'How to Read Marx''s Capital: The school of political economy founded by Petty, Smith, and Ricardo that
-    investigated the real relations of capitalist production.'
+  note: 'How to Read Marx''s Capital: The school of political economy founded by Petty, Smith, and Ricardo that investigated the real relations of capitalist production. “classical economy”曾作历史简称，但在现代语境存在歧义，不作为无条件同义变体'
 - id: coin
   source: coin
   target: 铸币
@@ -149,10 +142,8 @@ entries:
   target: 商品拜物教
   policy: preferred
   variants:
-  - commodity fetish
   - fetishism of commodities
-  note: 'How to Read Marx''s Capital: The social phenomenon where social relations between producers take on the
-    mystical form of relations between things.'
+  note: 'How to Read Marx''s Capital: The social phenomenon where social relations between producers take on the mystical form of relations between things. commodity fetish 在某些句子中指拜物化的商品对象；需依句法和引文传统处理，不与 commodity fetishism 无条件等同'
 - id: complex-labor
   source: complex labor
   target: 复杂劳动
@@ -161,19 +152,14 @@ entries:
   - complex labour
   - complicated labor
   - compound labor
-  - skilled labor
-  note: 'How to Read Marx''s Capital: Simple labor intensified or multiplied, producing more value per unit of time.'
+  note: 'How to Read Marx''s Capital: Simple labor intensified or multiplied, producing more value per unit of time. skilled labor 通常译“熟练劳动”，不能与复杂劳动无条件等同'
 - id: concrete-labor
   source: concrete labor
   target: 具体劳动
   policy: preferred
   variants:
-  - concrete useful labor
-  - concrete useful labour
-  - concrete, useful labor
-  - useful labor
-  note: 'How to Read Marx''s Capital: Labor considered in its specific, qualitative form producing a particular
-    use-value.'
+  - concrete labour
+  note: 'How to Read Marx''s Capital: Labor considered in its specific, qualitative form producing a particular use-value. concrete useful labor 可译“具体有用劳动”，比 concrete labor 多出 useful 限定，不作为同义别名'
 - id: constant-capital
   source: constant capital
   target: 不变资本
@@ -209,7 +195,7 @@ entries:
   variants:
   - discounting
   category: banking technique
-  note: 'Political Economy of Money and Finance: 银行买入未到期商业票据并扣除自贴现日至到期日利息的融资业务'
+  note: 'Political Economy of Money and Finance: 银行买入未到期商业票据并扣除自贴现日至到期日利息的融资业务；此处指银行买入未到期商业票据并扣除利息的贴现业务，不泛指折扣或减价'
 - id: doctrine-of-circulation
   source: doctrine of circulation
   target: 流通论
@@ -231,9 +217,8 @@ entries:
   policy: preferred
   variants:
   - downturn
-  - long downswing
   category: business cycle
-  note: 'Political Economy of Money and Finance: 经济周期中投资收缩、增长乏力、信贷紧缩的下行与萧条阶段'
+  note: 'Political Economy of Money and Finance: 经济周期中投资收缩、增长乏力、信贷紧缩的下行与萧条阶段；指商业周期中的下行阶段；long downswing 带有持续时间限定，不作为本词条同义变体'
 - id: dual-character-of-labor
   source: dual character of labor
   target: 劳动的二重性
@@ -316,10 +301,8 @@ entries:
   target: 拜物教性质
   policy: preferred
   variants:
-  - fetish character of the commodity
   - fetish-character
-  note: 'How to Read Marx''s Capital: The objective semblance by which the social character of labor appears as
-    an inherent property of things.'
+  note: 'How to Read Marx''s Capital: The objective semblance by which the social character of labor appears as an inherent property of things. 指拜物教性质这一抽象特征；fetish character of the commodity 是带有 commodity 修饰的完整表达，不作本词条变体'
 - id: fictitious-capital
   source: fictitious capital
   target: 虚拟资本
@@ -361,7 +344,7 @@ entries:
   target: 自由银行业
   policy: preferred
   category: banking system
-  note: "Political Economy of Money and Finance: 不存在中央银行与发钞垄断、由私人银行在市场竞争中自由发行兑现通货的制度构想。Free Banking School 应译“自由银行学派”，指思想流派而非制度同义语。参见 https://www.bimba.pku.edu.cn/dpsbs/xzsq/dsxz/441524.htm。"
+  note: 'Political Economy of Money and Finance: 不存在中央银行与发钞垄断、由私人银行在市场竞争中自由发行兑现通货的制度构想。Free Banking School 应译“自由银行学派”，指思想流派而非制度同义语。参见 https://www.bimba.pku.edu.cn/dpsbs/xzsq/dsxz/441524.htm。'
 - id: functioning-capitalist
   source: functioning capitalist
   target: 职能资本家
@@ -433,7 +416,7 @@ entries:
   variants:
   - directly socialized labor
   - immediately socialized labour
-  note: 'How to Read Marx''s Capital: Communal labor performed under common ownership and planned cooperation.'
+  note: 'How to Read Marx''s Capital: Communal labor performed under common ownership and planned cooperation. 仅在马克思主义劳动社会化讨论中按“直接社会化的劳动”使用；保留拼写和措辞变体不代表可脱离理论语境互换'
 - id: individual-labor-time
   source: individual labor-time
   target: 个别劳动时间
@@ -506,7 +489,7 @@ entries:
   target: 长期繁荣
   policy: preferred
   category: historical phase
-  note: 'Political Economy of Money and Finance: 二战结束至1970年代初西方资本主义经济经历的高增长低通胀黄金时期'
+  note: 'Political Economy of Money and Finance: 二战结束至1970年代初西方资本主义经济经历的高增长低通胀黄金时期；此处特指二战后至20世纪70年代初的历史性长期繁荣阶段，不泛指任何长时间的经济增长'
 - id: long-waves
   source: long waves
   target: 长波
@@ -641,20 +624,14 @@ entries:
   source: money supply endogeneity
   target: 货币供给内生性
   policy: preferred
-  variants:
-  - endogenous money
-  - endogenous money supply
   category: post-keynesian
-  note: 'Political Economy of Money and Finance: 主张货币供给由经济体系内部信贷需求驱动创造而非央行独立外生决定的理论'
+  note: 'Political Economy of Money and Finance: 主张货币供给由经济体系内部信贷需求驱动创造而非央行独立外生决定的理论；endogenous money 可译“内生货币”，endogenous money supply 可译“内生货币供给”；二者不等同于“货币供给内生性”这一性质或命题名称'
 - id: money-supply-exogeneity
   source: money supply exogeneity
   target: 货币供给外生性
   policy: preferred
-  variants:
-  - exogenous money
-  - exogenous money supply
   category: monetary orthodox
-  note: 'Political Economy of Money and Finance: 主张货币数量完全由中央银行政策工具自主决定的传统正统假定'
+  note: 'Political Economy of Money and Finance: 主张货币数量完全由中央银行政策工具自主决定的传统正统假定；exogenous money 可译“外生货币”，exogenous money supply 可译“外生货币供给”；二者不等同于“货币供给外生性”这一性质或命题名称'
 - id: money-dealing-capital
   source: money-dealing capital
   target: 货币经营资本
@@ -686,10 +663,10 @@ entries:
   note: 'How to Read Marx''s Capital: The labor-time expended during necessary labor.'
 - id: neoclassical-synthesis
   source: neoclassical synthesis
-  target: 新古典综合
+  target: 新古典综合派
   policy: preferred
   category: economic school
-  note: 'Political Economy of Money and Finance: 将凯恩斯宏观短期理论与新古典微观均衡理论结合的二战后主流经济学范式'
+  note: 'Political Economy of Money and Finance: 将凯恩斯宏观短期理论与新古典微观均衡理论结合的二战后主流经济学范式；指学派时用“新古典综合派”；指综合理论或范式时可译“新古典综合”'
 - id: new-marx-reading
   source: New Marx Reading
   target: 新马克思阅读
@@ -731,8 +708,7 @@ entries:
   policy: preferred
   variants:
   - spectral objectivity
-  note: 'How to Read Marx''s Capital: Marx''s characterization of value as a purely social reality that lacks physical
-    tangibility.'
+  note: 'How to Read Marx''s Capital: Marx''s characterization of value as a purely social reality that lacks physical tangibility. 此处指马克思所说价值的非物质对象性；spectral objectivity 为相关异译，具体译法依引文传统处理'
 - id: political-economy
   source: political economy
   target: 政治经济学
@@ -763,7 +739,7 @@ entries:
   target: 价格-铸币流动机制
   policy: preferred
   category: classical theory
-  note: 'Political Economy of Money and Finance: 休谟提出的经典国际收支自动调节机制，黄金流入抬高物价抑制出口促成逆转'
+  note: 'Political Economy of Money and Finance: 休谟提出的经典国际收支自动调节机制，黄金流入抬高物价抑制出口促成逆转；指休谟提出的经典国际收支自动调节机制；“价格—铸币流动机制”等译法亦见用例，术语格式可随文献体例调整'
 - id: primitive-accumulation
   source: primitive accumulation
   target: 原始积累
@@ -784,7 +760,7 @@ entries:
   source: pure theory of capitalism
   target: 纯粹资本主义理论
   policy: preferred
-  note: 'Uno, Principles of Political Economy: abstract theory of the capitalist system; source/translation at output/Principles of Political Economy - Theory of a Purely Capitalist Society/ocr_markdown/chapter_11.part1.md:39 and translated/chapter_11.part1.md:37.'
+  note: 'Uno, Principles of Political Economy: abstract theory of the capitalist system; source/translation at output/Principles of Political Economy - Theory of a Purely Capitalist Society/ocr_markdown/chapter_11.part1.md:39 and translated/chapter_11.part1.md:37. 指关于资本主义体系的抽象理论，区别于 purely capitalist society 所指的“纯粹资本主义社会”'
 - id: purely-capitalist-society
   source: purely capitalist society
   target: 纯粹资本主义社会
@@ -823,31 +799,30 @@ entries:
     of exploitation.'
 - id: real-abstraction
   source: real abstraction
-  target: 真实抽象
+  target: 现实抽象
   policy: preferred
   variants:
   - Realabstraktion
-  note: 'How to Read Marx''s Capital: An abstraction taking place not in thought, but objectively in social practice
-    (exchange).'
+  note: 'How to Read Marx''s Capital: An abstraction taking place not in thought, but objectively in social practice (exchange). 本词条采用学术文献中常见的“现实抽象”；“真实抽象”亦有实际用例，作为异译保留'
 - id: real-bills-doctrine
   source: real bills doctrine
-  target: 真实票据原则
+  target: 真实票据理论
   policy: preferred
   category: banking theory
-  note: 'Political Economy of Money and Finance: 主张商业银行只要严格依据真实生产流通交易产生的短期商业票据放款，发行的货币就不会通胀的理论'
+  note: 'Political Economy of Money and Finance: 主张商业银行只要严格依据真实生产流通交易产生的短期商业票据放款，发行的货币就不会通胀的理论；“真实票据原则”亦有可靠中文用例，作为异译保留'
 - id: reflux
   source: reflux
   target: 回流
   policy: preferred
   category: monetary theory
-  note: "Political Economy of Money and Finance: 银行券发行后经交易而回到银行体系的过程；law of reflux / principle of reflux 完整译为“回流法则／回流原理”，裸词 reflux 仅为“回流”，不是整句术语的词形变体。"
+  note: 'Political Economy of Money and Finance: 银行券发行后经交易而回到银行体系的过程；law of reflux / principle of reflux 完整译为“回流法则／回流原理”，裸词 reflux 仅为“回流”，不是整句术语的词形变体。'
 - id: reification
   source: reification
   target: 物化
   policy: preferred
   variants:
   - Verdinglichung
-  note: 'How to Read Marx''s Capital: The transformation of social relations into relations between things.'
+  note: 'How to Read Marx''s Capital: The transformation of social relations into relations between things. 此处按马克思主义理论语境译“物化”；德语 Verdinglichung 通常对应物化，Versachlichung 的译法需按具体文本另行判断'
 - id: relative-form-of-value
   source: relative form of value
   target: 相对价值形式
@@ -896,11 +871,8 @@ entries:
   target: 简单劳动
   policy: preferred
   variants:
-  - simple human labor
   - simple labour
-  - simple unskilled labor
-  - unskilled labor
-  note: 'How to Read Marx''s Capital: Average labor that every ordinary person can perform without special training.'
+  note: 'How to Read Marx''s Capital: Average labor that every ordinary person can perform without special training. 此处指社会平均的简单劳动；unskilled labor 可译“非熟练劳动”，不能据个别语境用法推广为普遍同义词'
 - id: simple-reproduction
   source: simple reproduction
   target: 简单再生产
@@ -956,7 +928,7 @@ entries:
   target: 结构主义
   policy: preferred
   category: post-keynesian
-  note: 'Political Economy of Money and Finance: 奇克、道与波林等人坚持的后凯恩斯主义观点，认为金融中介行为与资产负债表结构使内生货币供给曲线呈向上倾斜'
+  note: 'Political Economy of Money and Finance: 奇克、道与波林等人坚持的后凯恩斯主义观点，认为金融中介行为与资产负债表结构使内生货币供给曲线呈向上倾斜；词条保留一般“结构主义”译名；当前类别及定义特指后凯恩斯主义内部有关金融结构的观点'
 - id: substance-of-value
   source: substance of value
   target: 价值实体
@@ -1003,13 +975,12 @@ entries:
   - social total labor
   - total labour of society
   - total social labor
-  note: 'How to Read Marx''s Capital: The aggregate labor of all producers in a society.'
+  note: 'How to Read Marx''s Capital: The aggregate labor of all producers in a society. 指社会全部生产者劳动的总和；注意与 social labor（社会劳动）区分'
 - id: traditional-marxism
   source: traditional Marxism
   target: 传统马克思主义
   policy: preferred
-  note: 'How to Read Marx''s Capital: The historical, often dogmatic interpretation of Marx''s thought shaped by
-    the Second and Third Internationals.'
+  note: 'How to Read Marx''s Capital: The historical, often dogmatic interpretation of Marx''s thought shaped by the Second and Third Internationals. 此处指受第二、第三国际传统影响的特定马克思主义解释传统；作为学派标签时边界会随作者和研究语境变化'
 - id: transformation-of-money-into-capital
   source: transformation of money into capital
   target: 货币转化为资本
@@ -1027,7 +998,7 @@ entries:
   target: 上升期
   policy: preferred
   category: business cycle
-  note: 'Political Economy of Money and Finance: 经济周期中投资扩张、产出增长、信贷活跃的扩张繁荣阶段'
+  note: 'Political Economy of Money and Finance: 经济周期中投资扩张、产出增长、信贷活跃的扩张繁荣阶段；指商业周期中的上升阶段，不泛指任何一般性上升趋势'
 - id: use-value
   source: use-value
   target: 使用价值
@@ -1041,11 +1012,8 @@ entries:
   target: 价值增殖
   policy: preferred
   variants:
-  - process of valorization
-  - valorization process
   - Verwertung
-  - Verwertungsprozess
-  note: 'How to Read Marx''s Capital: The process of self-expansion of capital value through the extraction of surplus-value.'
+  note: 'How to Read Marx''s Capital: The process of self-expansion of capital value through the extraction of surplus-value. 此处指资本价值通过榨取剩余价值而自行增殖；process of valorization 等带过程限定的短语不并入裸词变体'
 - id: value
   source: value
   target: 价值
@@ -1089,7 +1057,7 @@ entries:
   policy: preferred
   variants:
   - vulgar economics
-  note: 'How to Read Marx''s Capital: Shallow, apologetic economic theory dealing only with superficial appearances.'
+  note: 'How to Read Marx''s Capital: Shallow, apologetic economic theory dealing only with superficial appearances. 此处是马克思主义批判传统中对仅处理表象、具辩护性的政治经济学的称谓，不等同于一般政治经济学'
 - id: working-day
   source: working day
   target: 工作日
@@ -1101,16 +1069,12 @@ entries:
   source: world money
   target: 世界货币
   policy: preferred
-  variants:
-  - universal money
   category: monetary function
-  note: 'Political Economy of Money and Finance: 货币越出一国国界在世界市场上作为一般支付手段、购买手段与社会财富的绝对化身 | How to Read Marx''s Capital:
-    The function of money functioning in international trade in its bullion form.'
+  note: 'Political Economy of Money and Finance: 货币越出一国国界在世界市场上作为一般支付手段、购买手段与社会财富的绝对化身 | How to Read Marx''s Capital: The function of money functioning in international trade in its bullion form. universal money 的具体译法依作者及货币理论语境判断，不无条件等同于 world money'
 - id: worldview-marxism
   source: worldview Marxism
   target: 世界观马克思主义
   policy: preferred
   variants:
   - Weltanschauungsmarxismus
-  note: 'How to Read Marx''s Capital: The simplified ideological doctrine of Marxism presented as a complete philosophical
-    world system.'
+  note: 'How to Read Marx''s Capital: The simplified ideological doctrine of Marxism presented as a complete philosophical world system. 此处指将马克思主义简化为完整哲学世界体系的特定意识形态形态，不泛指马克思主义的世界观'
