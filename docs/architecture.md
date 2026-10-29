@@ -898,6 +898,58 @@ build-html-epub
   → 保留原始 HTML 结构的译文 EPUB
 ```
 
+HTML 翻译服务边界：
+
+```text
+commands.html
+  → HTMLEpubPipeline（公开兼容 API；高层阶段编排与薄适配）
+      ├→ extraction → metadata_preparation
+      ├→ translation_validation → metadata_validation + unit_files
+      ├→ reporting
+      └→ reconstruction
+          └→ build_html_epub / HTMLEpubBuilder（公开构建 API）
+              ├→ build_contracts
+              ├→ package_locator → package_paths
+              ├→ package_metadata → metadata_values + package_paths
+              ├→ package_navigation → package_paths
+              └→ package_resources
+
+commands.novel → NovelExtractor（小说正文提取） + HTMLEpubPipeline metadata API /
+                 HTMLMetadataValidator → HTMLEpubBuilder（EPUB 重建/打包）
+```
+
+`HTMLEpubPipeline`、`HTMLEpubBuilder`、`build_html_epub` 及其包级导出继续作为调用接口。
+`builder.py` 保留公开方法及必要的私有兼容适配（例如分片合并、缓存、report/validation
+服务转发）；提取、校验、重建和报表主体分别由下列服务拥有。服务层不反向导入 `builder.py`
+或 `commands/`；command handler 通过现有 pipeline/build API 编排阶段。
+`html_translation.__init__` 通过惰性公开导出保留包级兼容名称；直接导入 translation validator
+不会加载 builder 或 `package_resources`，访问 builder/build API 时才按需载入对应实现。
+
+- `build_contracts.py`：定义 `BuildConfig` 和导航更新失败类型，供构建与重建边界共享。
+- `package_paths.py`：提供 EPUB 内相对 href、包内路径限制、安全 XML parser 和导航元素小工具。
+  `package_locator.py`：从 extracted package 定位 OPF、NCX 和 nav 文档，并使用这些路径规则。
+- `metadata_values.py`：提供书名/作者排序值和 JSON 安全转换；metadata preparation、extraction
+  和 OPF 更新共享这些值操作。
+- `package_metadata.py`：把已校验的翻译元数据写入 OPF。`package_navigation.py` 更新 NCX/nav
+  目标并记录组件状态、warning 和更新数。`package_resources.py` 负责 EPUB 解包、XHTML 替换、
+  CSS 归一化、ZIP 打包和输出校验。
+- `extraction.py`：准备 XHTML 压缩单元、mapping、分片和提取 cache，并触发单独的 metadata
+  handoff 准备；它拥有源正文提取和压缩阶段。
+- `metadata_preparation.py`：生成 `metadata_translation_source.json` 与 prompt，并管理该任务
+  使用的上下文；`metadata_validation.py`：独立检查翻译元数据字段、来源 hash 和拒答信号。
+- `translation_validation.py`：按单文件或全量检查翻译单元、metadata、标签和角色内容，写入
+  文件校验 ledger/checkpoint。通过现有 `validate_translated_units()` 入口可单独运行该阶段，
+  不会因此重新提取源 XHTML。
+- `unit_files.py`：维护映射合同中的翻译文件 inventory、part 排序/合并与逻辑单元记录。
+  `reporting.py`：汇总阶段和导航状态，写翻译报告。
+- `reconstruction.py`：按现有 mapping 恢复最终 XHTML，执行构建前校验门禁，读取已翻译 metadata，
+  并调用公开 EPUB 构建接口；可用当前产物独立重建，不重新提取源 XHTML。
+
+正文提取、元数据准备/校验、翻译校验、恢复和 EPUB 打包是可分别调用的服务边界。metadata
+或导航值在重建/打包阶段更新时不会因此触发 XHTML extraction；重新准备 metadata handoff
+仍通过 metadata preparation 阶段显式执行。此拆分没有改变 HTML 工作流顺序或 manifest/report
+schema。
+
 HTML 单元要求非空内容一一对应；标签、属性、实体、容器和嵌套关系由本地校验器检查。
 HTML 构建还会把 NCX/nav 更新结果写入导航报告；已有导航文档更新失败时默认阻断打包，
 只有显式确认参数才能放行。EPUB 只提供其中一种导航格式时，另一种记录为缺失而不是异常。

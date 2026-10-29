@@ -25,13 +25,16 @@ def test_production_modules_do_not_import_private_batching_helpers():
                 assert not (private_names & {alias.name for alias in node.names}), path
 
 
-def test_html_builder_uses_public_special_role_audit_service():
-    imports = _imports("pdf2epub/html_translation/builder.py")
+def test_html_translation_validator_owns_special_role_audit_rule():
+    imports = _imports("pdf2epub/html_translation/translation_validation.py")
     assert any(
         node.module == "pdf2epub.special_role_audit"
         and any(alias.name == "validate_special_role_markers" for alias in node.names)
         for node in imports
     )
+    builder = (ROOT / "pdf2epub/html_translation/builder.py").read_text(encoding="utf-8")
+    assert "validate_special_role_markers" not in builder
+    assert "HTMLTranslationValidator" in builder
 
 
 def test_validation_checkpoint_service_does_not_import_the_validator():

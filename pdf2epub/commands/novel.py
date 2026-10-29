@@ -391,7 +391,8 @@ def build_novel_epub_command(args):
     from pathlib import Path
     from pdf2epub.html_translation.epub_parser import EPUBParser
     from pdf2epub.html_translation.novel_extractor import NovelExtractor
-    from pdf2epub.html_translation.builder import BuildConfig, HTMLEpubBuilder, sanitize_filename
+    from pdf2epub.html_translation.builder import BuildConfig, HTMLEpubBuilder
+    from pdf2epub.utils.paths import sanitize_filename
 
     context = load_book_context(args, "build-novel-epub")
     if context is None:
