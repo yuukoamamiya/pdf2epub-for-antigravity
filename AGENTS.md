@@ -53,10 +53,11 @@ Subagent。既有 EPUB 故障定位所需的局部版面核对按授权维护范
    单 OCR 时忽略遗留的共识报告；不要用文件是否存在来猜当前模式。
 4. 所有本地命令使用 `uv run pdf2epub -c <配置> <命令>`。准备命令只会生成 prompt、manifest
    和本地中间结果，不代表 Subagent 工作已经完成。
-5. 每个准备命令成功后立即检查其 prompt、manifest 和 `pending_files`/`pending_units`，
-   打开 Antigravity 工作区 Subagent，让它直接写入指定目录；主 Agent 不在聊天中翻译或代写译文。
-6. Subagent 完成后先跑对应的单文件校验，再跑全量校验；只有当前源哈希、checkpoint、
-   结构校验和安全审计都通过，才可进入下一阶段或打包。
+5. 每个准备命令成功后立即检查 prompt、manifest 和 `pending_files`/`pending_units`；只有存在
+   pending/review 任务时才打开工作区 Subagent 并交付其 scoped handoff。主 Agent 不在聊天中翻译、
+   代写译文或自行作书稿语义决定。
+6. Subagent 完成后先跑对应的单文件校验，再跑全量校验。脚注、插图阶段即使无待复核项，也必须运行
+   各自的 validate/apply；只有当前源哈希、checkpoint、结构校验和安全审计都通过，才可进入下一阶段或打包。
 7. 中断或失败时保留已有产物，先校验，再使用原命令的 `--resume`；只重做 pending/invalid 项。
 
 常用验收命令：
@@ -523,9 +524,9 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    `N.`/`N)`/`N、` 定义开头、不以句末标点结尾，并与正文 scope 的标题变体精确匹配。
    `Notes to Chapter N` 等页眉和 `Abbreviations` 等未匹配标题不切换 scope；同一标题匹配
    多个 scope 时只记录 ambiguity 并保持当前 scope。scope key 形如 `u4c1`，内部 key 为
-   `fnc-<scope>-<number>`，同一 scope 的第 N 个重复定义为 `...-oN`。跨 scope 重复或
-   同一 scope 内重复定义的 key 会改写；其他 key 保持原数字。scope 目录只进入
-   `footnote_normalization.json` 的报告字段，不写入 output。Notes 的“外层页计数器 +
+   `fnc-<scope>-<key>`，同一 scope 的第 N 个重复定义为 `...-oN`。跨 scope 重复或
+   同一 scope 内重复定义的 key 会改写；未重复 key 保持原 marker key。scope 目录没有独立文件，
+   相关事实写入 `footnote_normalization.json` 报告字段。Notes 的“外层页计数器 +
    内层真实注释号”只在当前 scope 的正文引用集合
    包含内层数字且内层不小于外层时采用内层，否则保留外层，避免把 `3. 2005 was...` 误判为
    第 2005 条。重复 key 没有章标题、引用所在 scope 没有定义、定义 scope 没有正文 span
@@ -537,7 +538,7 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    `endnotes` 报告记录
    `scope_mode`、`scopes`、`scoped_keys`、`double_numbered_definition_count`、
    `duplicate_definition_occurrences` 和 `orphan_scoped_definitions`。EPUB 中的引用和定义
-   仍显示原始数字，内部 `fnc-` key 只用于链接和锚点。
+   显示由内部 key 解码；集中尾注中的数字/圈号别名可规范化为数字，去重后缀不会显示，内部 key 用于链接和锚点。
 
    Notes 定义还支持 OCR 产生的可选无序列表标记 `- N.`、`* N.`、`+ N.`；它们与
    `N.`/`N)`/`N：` 等价，由 `footnote-apply` 的本地 normalization 直接改写为
@@ -563,7 +564,7 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    uv run pdf2epub -c config.yaml footnote-apply
    ```
 
-   标记身份解析保留原始显示标签：数字与圈号维持历史数字别名，星号/匕首号及显式上标字母使用
+   标记身份解析分别记录可见标记和内部 key：数字与圈号维持历史数字别名，星号/匕首号及显式上标字母使用
    分离的 ASCII key，字母区分大小写。裸 `a)`、乘法星号和 Markdown 强调不因形状相似而自动成为脚注；
    重复标记跨空间 lane 时必须提供能包含目标标记的精确 `marker_context`，apply 不按“最后一个匹配”猜测。
    明确 `Footnote` 标签在可靠窄边栏或表格邻接位置进入候选后仍需视觉复核。

@@ -8,8 +8,8 @@
 > `AGENTS.md` 的“Subagent 总闸”只约束**书稿内容任务**，不约束**代码/测试/文档维护任务**。
 
 维护任务可以直接读取和修改 `pdf2epub/`、`tests/`、`docs/`、`README.md`、`AGENTS.md`、
-`pyproject.toml` 和 CI 配置，不需要打开 Antigravity 工作区 Subagent，也不需要让 Subagent
-代写代码。
+`pyproject.toml` 和 CI 配置，不需要打开 Antigravity 工作区 Subagent。Codex 的实现委派遵循
+[`codex.md`](../codex.md)；其他编码 Agent 可直接实施。
 
 ---
 
@@ -44,8 +44,9 @@
 - 修复 Windows 兼容性、路径处理、编码问题；
 - 评估或实现某个工作流改进。
 
-维护任务**不需要** Antigravity Subagent，**不需要**运行真实书稿流水线，也不应该为了“验证”
-去跑 OCR、翻译或打包真实书籍。
+一般编码 Agent 维护任务不需要 Antigravity Subagent，也不需要运行真实书稿流水线。Codex
+仓库维护遵循根目录 [`codex.md`](../codex.md)：主代理诊断并明确范围，调度 GPT-6 Luna Codex
+子代理实施，随后由主代理独立验收并按规则提交；本指南的通用维护建议不取代该流程。
 
 ### 1.3 混合任务
 
@@ -307,8 +308,8 @@ git -c http.proxy=http://127.0.0.1:10809 -c https.proxy=http://127.0.0.1:10809 p
 
 ### 5.1 “修一个 bug”
 
-直接改源码和测试，不需要 Subagent。先写失败测试或最小复现，再修实现。修完跑目标测试和
-全量测试。
+先写失败测试或最小复现，再修实现并按任务范围验证。Codex 主/子代理分工及提交边界遵循
+[`codex.md`](../codex.md)；其他编码 Agent 可直接实施，不需要 Antigravity 工作区 Subagent。
 
 ### 5.2 “加一个新配置/新模式”
 

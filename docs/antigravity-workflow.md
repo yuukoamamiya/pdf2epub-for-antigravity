@@ -541,6 +541,9 @@ pipeline: epub_conversion
 草稿还会对明显的“大跨度目录/附录包装节点”执行保守的层级解构，Subagent 只需复核
 结果。
 
+<a id="pdf-footnote-and-endnote-contract"></a>
+## PDF 脚注与尾注合同
+
 对于所有 PDF，在 `refine-local` 后、`polish` 前运行 `footnote-prepare`。扫描 PDF 使用
 OCR layout sidecar；旧原生文字运行在旧版本的 `ocr-pages` 阶段生成带 PDF 坐标、文本块和字体
 元数据的 native layout sidecar。两种来源在本地使用不同的候选筛选器，但都按页面内实际顺序
@@ -582,14 +585,25 @@ Subagent；双 OCR 模式下，主/次候选存在性或 layout 证据不同的�
 `footnote_decisions.json` 中的 `region_audits` 和每个 review block 的决定，随后用
 `footnote-validate` 校验；兼容恢复仍接受 flat `decisions`。旧原生文字运行不运行视觉 OCR
 共识，即使配置残留次 OCR 开关，也只使用原生版面证据。
-候选/区域报告可附 `layout_scope`；bbox、粗略位置及附近结构标签只是位置提示，不证明语义归属。
-明确 `Footnote` 标签只有在可靠页底、窄边栏或表格邻接位置进入候选，非页底/表格邻接项仍需视觉复核。
-数字和圈号继续共享历史数字 key；`*`/`**`/`***`、`†`/`‡` 与显式 `<sup>a</sup>` 字母使用独立
-ASCII key，字母区分大小写，显示时保留印刷标签。裸 `a)`、乘法星号和 Markdown 强调不因字形自动
-成为注脚。相同标记跨空间 lane 有歧义时，Subagent 必须给出包含目标标记的精确 `marker_context`；
-apply 无法唯一定位时阻断，不按出现顺序选择。
-集中 typed Notes 也只把显式 `<sup>symbol/letter</sup>` 定义与正文显式上标引用配对后归一化；裸段首字母
-和 `a)` 不参与集中尾注匹配。
+候选/区域报告可附 `layout_scope`；bbox、粗略位置及附近结构标签只是几何提示，不证明语义归属。
+不同 lane 不自动合并；可能跨 lane 的桥接项以及边栏/表格候选进入复核，不代表自动归属或完整布局
+复原。明确 `Footnote` 标签可扩大候选召回，但标签本身不创建注释；表格邻接的显式 `<sup>a</sup>`
+可进入复核，而 Table/Cell/Caption 标签自身不会成为注释。清晰的全宽单栏页底脚注仍可本地接受。
+
+标记内部使用稳定 key；页脚数字/圈号显示保留印刷标签，例如数字 `1` 与圈号
+`①` 都对应历史 key `1`；新建页脚圈号使用 `fnm-circle-1`，重复数字仍显示 `1` 但内部用
+`fnm-number-1-o2`。星号、匕首号和字母使用 `fnm-star-1`、`fnm-dagger`、`fnm-letter-a` 等 key，
+字母大小写有别；集中尾注去重时 key 形如 `fnc-u4c1-1` 或 `fnc-u4c1-fnm-dagger`。
+普通遗留自定义 `custom1-2` 标签不改写。裸 `a)`、任意星号/字母及公式中的符号不会自动判为注释。
+集中尾注路径仅当 typed Notes 中显式 `<sup>symbol/letter</sup>` 定义与正文显式上标引用配对时，
+才处理这些特殊标记；公式排除是窄范围保护，不代表识别所有数学语境。将候选确认为注释定义时，
+决定复制候选安全 `key` 和 `marker_label`；特殊标记的 `marker_label` 必填。
+候选带 `requires_marker_context` 时，还须给出当前源 Markdown 中包含目标上标引用本身的精确短片段，
+包括 `<sup>…</sup>`。
+例如印刷标记 † 使用 `"key": "fnm-dagger"`、`"marker_label": "†"` 和包含 `<sup>†</sup>` 的
+`marker_context`；仅描述附近文本或图片转录不能定位源标记。apply 只接受唯一命中，否则阻断。
+其他歧义引用不因此一概阻断；EPUB 构建可保留明确但未链接的
+上标作为审阅信号。
 
 脚注和整页插图的证据选择由同一套本地边界负责：`refine/pdf_evidence.py` 统一判断
 `native_text`、`single_ocr` 和 `two_ocr`，`refine/layout_evidence.py` 统一读取 sidecar、
@@ -724,11 +738,12 @@ Markdown 脚注语法会被保留，页脚脚注仍按上一节的页面候选�
 - 正文 span 内收集 `<sup>N</sup>`、Unicode 上标和已有 `[^N]` 引用；同文件存在
   `[^N]:` 定义时该引用按页脚注处理，不进入尾注证据。
 
-触发 `per_chapter` 模式的条件是同一数字 key 在至少两个 scope 有定义，或同一
-`(scope, key)` 有多个定义。只有需要去重的 key 改写为 `fnc-<scope>-<number>`；同一 scope
-的第 N≥2 个定义使用 `fnc-<scope>-<number>-oN`。定义和引用分别按文件/行顺序、阅读顺序
-配对：第 1 个引用指向基础 key，第 2 个引用指向 `-o2`。非重复 key 保持原数字，未触发
-scoping 的书籍仍走原有全局路径。
+触发 `per_chapter` 模式的条件是同一 marker key 在至少两个 scope 有定义，或同一
+`(scope, key)` 有多个定义。去重时定义采用 `fnc-<scope>-<key>`，重复定义增加 `-oN`；数字例子
+如 `fnc-u4c1-1`、`fnc-u4c1-1-o2`。特殊标记例子为 `fnc-u4c1-fnm-dagger`，重复项为
+`...-o2`。定义与引用按文件/行顺序及阅读顺序配对。一个 scope/key 只有一个定义时，同一
+scope 内多条引用都可指向它；存在多个定义时仍逐次配对，引用数超过定义数则阻断。非重复
+key 保持原 key，未触发 scoping 的书籍沿用原有路径。
 
 Notes 中可能出现“外层页计数器 + 内层真实注释号”（例如 `1. 16. ...`）。只有内层数字出现在
 当前 scope 的正文引用集合中，且内层不小于外层时，才采用内层作为 key 并剥离内层编号；
@@ -741,8 +756,8 @@ scope 边界处停止。单一 scope/key 定义可供同一 scope 的多个引�
 `toc_heading_recovery.json`）后重跑 `footnote-prepare → footnote-validate →
 footnote-apply`：重复 key 落在 `scope_key=None`；定义所在 scope 没有正文 span；引用所在
 scope 没有对应定义；有多个定义时引用数超过定义数。定义数多于引用数时，多出的定义仍写入
-Notes，并作为 `orphan_scoped_definitions` 报告。scope 目录不写入 `output/`，只进入
-`footnote_normalization.json` 的 `endnotes` 报告字段（`scope_mode`、`scopes`、
+Notes，并作为 `orphan_scoped_definitions` 报告。scope 目录没有独立文件；相关事实写入
+`output/<title>/footnote_normalization.json` 的 `endnotes` 报告字段（`scope_mode`、`scopes`、
 `scoped_keys`、`double_numbered_definition_count`、`duplicate_definition_occurrences`、
 `orphan_scoped_definitions`）。
 
@@ -787,8 +802,17 @@ Subagent；它必须为每条写入 `endnote_definition_decisions.json` 的一�
 `footnote_status` 对已记录的文件做 freshness 检查，缺失或变化时 stale，并提示重跑
 `footnote-prepare → footnote-validate → footnote-apply`。没有歧义时不要求这两个哈希。
 
+`footnote_normalization.json` schema 4、页面候选/决定/尾注边界复核合同 schema 1、TOC schema 2
+是相互独立的版本号。旧 normalization schema 1–3 是 stale：运行
+`uv run pdf2epub -c <配置> footnote-prepare`；只有新 manifest 为 `pending_review` 时，才把当前
+manifest 列出的任务交给工作区 Subagent。随后运行 `footnote-validate` 和 `footnote-apply`，
+即使没有待复核项也要执行。保留旧产物和 checkpoint，不手工改 schema 或哈希。归一化源变化可能
+使 polish、翻译或 EPUB 构建 checkpoint 过期；先查看 `status` 与 pending/invalid 报告，按门禁
+恢复，不要直接构建。仅合同升级本身不要求重跑 OCR；只有源页或证据实际过期时才回到 OCR。
+
 EPUB 构建时，`pdf2epub/epub/footnotes/keys.py` 的 `display_footnote_key()` 负责把
-`fnc-<scope>-<number>` 和 `...-oN` 显示为原始数字；链接、ID 和扫描器仍使用真实 key。
+`fnc-<scope>-<key>` 和 `...-oN` 显示为对应的可见标记；集中尾注的数字/圈号别名可能规范化为数字，
+去重后缀不会显示。页脚圈号显示保留其圈号标记；链接、ID 和扫描器仍使用真实 key。
 因此读者看到 `[1]`，而锚点和跨章往返使用内部唯一 key。
 
 `footnotes.mode` 默认是 `auto`。refine TOC Subagent 必须在 `toc_tree.json` 顶层写入

@@ -53,19 +53,9 @@ sidecar 和 `use_text_layer` probe 仅作为旧产物兼容读取，用于恢复
 异常页及其源哈希写入 `ocr_anomaly_report.json`。只有异常页交给 `ocr-correct` 做页图复核；其他
 页作为未复核直通副本。该启发式只发复核信号，无法证明页面有错，最终以页图为准；不确定结果会阻断后续流程。
 
-当前默认主 OCR 是 Chandra。脚注阶段先使用 OCR sidecar 的 `bbox[3]`、页底相交比例、标记、
-块间距和连续编号推断页面级脚注区域；纯数字页码会排除。明确的 `Footnote` 标签只有在页底、
-窄边栏或表格邻接等可靠位置证据下才进入候选；非页底项仍需视觉复核。
-旧的原生文字运行若反复显示稳定的正文/脚注字号阶梯，还会把与注脚字号一致、却没有同页上标或脚注标签的
-出版年份及明显嵌在正文流中的数字块记为 `suppressed_native_citations`，不派发视觉复核；其他数字候选仍保留
-给 Subagent 判断，避免把字号差异当成脚注语义。
-清晰、连续的区域由本地直接处理，只有边界不清、续文、OCR 证据冲突或疑似漏检才生成区域级视觉
-审计任务。审计任务会附带页面 PNG，能渲染时还附带脚注区域裁剪图；最终仍由本地校验 exact
-`page/block` 决定后才 apply。配置中的未注册或退役后端会被 `doctor` 阻断。
-脚注标记保留可见标签和内部 ASCII key：数字与圈号沿用历史数字别名；`*`/`**`/`***`、`†`/`‡`
-及明确上标字母使用独立 key，大小写区分。裸 `a)`、乘号附近的星号和 Markdown 强调不会仅凭字符
-形状自动判为脚注；同一标记在多个正文位置出现时，复核必须提供精确 `marker_context`。集中尾注只在
-typed Notes 中的显式上标定义与正文上标引用配对时处理符号/字母标记；普通行首字母不会被当作尾注。
+当前默认主 OCR 是 Chandra。脚注候选综合 OCR layout、页面位置和文字线索；版面只用于召回与
+组织复核范围，最终归属仍按流程合同审阅。详见下方“脚注与尾注”及
+[`docs/antigravity-workflow.md`](docs/antigravity-workflow.md#pdf-footnote-and-endnote-contract)。
 Chandra 的 Cloudflare Access 凭据放在 `.secrets/chandra-access.json`。YAML 中只配置本地凭据
 目录，不写入密钥本身。
 
@@ -284,25 +274,26 @@ bash scripts/build_all_epubs.sh config.yaml
 `illustration-prepare` 可生成 `auto_resolved` 的封面决定；仍必须运行后续的
 `illustration-validate` 和 `illustration-apply`。
 
-方括号中的阶段只表示是否需要工作区 Subagent。`illustration-validate`、
-`illustration-apply`、`footnote-validate` 和 `footnote-apply` 是确定性检查点，即使没有候选或
-没有待复核项也必须运行；它们会生成空的或已绑定的、可供后续阶段消费的产物。任何
-`*_subagent_prompt.md` 或 manifest 出现后，都要先交给工作区 Subagent，再运行后续校验；
+方括号中的阶段只表示是否需要工作区 Subagent。只把 manifest 中实际列出的 pending 任务交给
+工作区 Subagent；`illustration-validate`、`illustration-apply`、`footnote-validate` 和
+`footnote-apply` 是确定性检查点，即使没有待复核项也必须运行。不要因空任务跳过校验或 apply；
 不要跳过中间门禁。polish 的普通章节按 `subagent.batching.polish_max_files`（默认 4）打包；
 index、bibliography、notes 和版权/前置页等特殊单元始终使用独立 worker，不与普通章节混排。
 
-默认 `footnotes.mode: auto`：refine 阶段的 TOC Subagent 会读取全书结构，在 `toc_tree.json`
-顶层写入 `footnote_mode`。集中 Notes/Endnotes 且按章组织或重新编号时选 `endnotes_only`；
-注释主要印在页面底部时选 `footnotes`；两者都有或证据不清时也选 `footnotes`，因为它同时
-支持页面脚注和集中尾注归一化。`endnotes_only` 会跳过页面脚注检测，但仍会依据 TOC 中
-`type: notes` 的单元，把正文上标和编号尾注归一化为 `[^N]` / `[^N]:`。也可显式设置
-`footnotes.mode: footnotes` / `endnotes_only` 覆盖 TOC 判断；只有明确不做任何脚注/尾注处理时
-才设置 `footnotes.mode: disabled`。明确标记为 `toc`、`notes`、`bibliography`、`index`、
-`author_notes`、`catalog` 或 `ad` 的 TOC 单元不会被页面脚注检测误搬移。构建 EPUB 前若
-typed `notes` 单元仍含原始编号尾注或正文仍含对应未链接上标，构建会阻断。
-尾注和页面脚注可包含多个 Markdown 段落及列表、引文、表格等块；归一化会保留这些边界。
-同一作用域内只有一个定义时，多个正文引用可共同链接到该定义；有多个定义时仍按保守的
-逐次配对规则处理，无法唯一配对的引用不会被强行链接。
+### 脚注与尾注
+
+| 模式 | 行为 |
+|---|---|
+| `auto`（默认） | 由 TOC 结构审阅选择 `footnotes` 或 `endnotes_only`。 |
+| `footnotes` | 处理页面脚注，也支持集中 `type: notes` 单元的尾注归一化。 |
+| `endnotes_only` | 跳过页面脚注检测，仍处理集中 Notes 尾注。 |
+| `disabled` | 关闭页面脚注和尾注处理；只在明确不需要两者时使用，不用于绕过校验。 |
+
+版面位置只用于候选召回和组织复核；边栏、表格邻接、跨栏歧义仍需审阅。数字/圈号、星号、匕首号
+和显式上标字母可按各自标记规则识别；裸 `a)`、星号、字母或公式符号不能仅凭字形认作注释，
+公式上下文识别也有限。
+段落、列表、引文、表格等脚注块会保留结构；普通注释续句跨页时保留软换行，不因此另起段落。旧的
+`footnote_normalization.json` schema 1–3 checkpoint 需要按[升级与恢复步骤](docs/antigravity-workflow.md#pdf-footnote-and-endnote-contract)重新准备、按 pending 状态派发复核并运行 validate/apply。
 
 ## 结果在哪里
 

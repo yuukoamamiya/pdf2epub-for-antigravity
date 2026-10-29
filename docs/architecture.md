@@ -226,17 +226,19 @@ TOC 中标记为
 - `refine/footnote_status.py`：集中计算脚注归一化 checkpoint 的哈希和 freshness 状态；不依赖
   apply/prepare 编排，供命令层和 readiness 诊断复用。
 
-按章尾注 scope 只是派生报告，不写入 `output/`。`footnote_apply.py` 在生成
+按章尾注 scope 是归一化用的派生数据，没有独立 scope 文件；其事实嵌入
+`footnote_normalization.json` 的 `endnotes` 报告。`footnote_apply.py` 在生成
 `footnote_normalized/` 前加载 `toc_tree.json` 和 `ocr_markdown/tree_progress.json`；
 缺少 TOC 或 scope 构建失败时，如果 Notes 仍有重复 key，归一化必须失败并提示，不能静默退回
-`footnotes.mode: disabled`。scope 触发条件为同一数字 key 在至少两个 scope 有定义，或同一
+`footnotes.mode: disabled`。scope 触发条件为同一 marker key 在至少两个 scope 有定义，或同一
 `(scope, key)` 有多个定义。跨 scope 重复或同一 scope 内重复定义的 key 会改写为
-`fnc-<scope>-<number>` / `...-oN`；其他 key 保持原数字。定义多于
+`fnc-<scope>-<key>` / `...-oN`；未重复 key 保持原 marker key。定义多于
 引用时多出的定义保留为 orphan；引用所在 scope 无定义、定义 scope 无正文 span、存在多个
 定义且引用数超过定义数或重复 key 落在未匹配区域时 fail closed。单一定义可由同一 scope
-内的多条引用共享。EPUB 侧由
+内的多条引用共享。标记形式、结构续接及恢复合同详见
+[`docs/antigravity-workflow.md` 脚注与尾注合同](antigravity-workflow.md#pdf-footnote-and-endnote-contract)。EPUB 侧由
 `pdf2epub/epub/footnotes/keys.py` 的 `display_footnote_key()` 统一把内部 key 还原为读者
-看到的原始数字；scanner、链接和锚点仍使用真实 key。
+显示由内部 key 解码；集中尾注中的数字/圈号别名可规范化为数字，去重后缀不会显示；scanner、链接和锚点仍使用真实 key。
 
 集中尾注定义边界的手递合同位于 `endnote_review.py`：
 `footnote_subagent_manifest.json` 增加 `endnote_ambiguity_count`、`endnote_ambiguities`、
@@ -568,13 +570,15 @@ OCR：
 共识文件而切换证据路径。
 
 整页插图只在 `illustration_bindings.json` 中出现 `full_page_insert` 时影响 `PageMerger`；
-脚注只在 Subagent 将候选标记为 `footnote_start`、`footnote_continuation` 或
-`footnote_definition` 时移动。脚注的作用域来自 `tree_progress.json` 的完整 `unit_id`，
-而不是顶层 TOC；相同数字在不同实际单元中可以重新开始。跨页顺序由页面和 block 顺序保留，
+脚注只在本地规则接受或 Subagent 决定并经校验后，候选角色为 `footnote_start`、
+`footnote_continuation` 或 `footnote_definition` 时移动。脚注的作用域来自 `tree_progress.json` 的完整 `unit_id`，
+而不是顶层 TOC；相同 marker key 在不同实际单元中可以重新开始。跨页顺序由页面和 block 顺序保留，
 所以“正文 → A 脚注 → B 正文 → A 脚注续文 → B 脚注”不会被错误重排。
 
 集中尾注走独立的确定性归一化路径：`tree_progress.json`/TOC 中 `type: notes` 的文件是
-尾注定义源，不要求 Markdown 内再次出现 `# Notes` 标题。`footnote-apply` 在生成
+尾注定义源，不要求 Markdown 内再次出现 `# Notes` 标题。定义语法、块续接、marker key
+和 schema 恢复合同见[脚注与尾注合同](antigravity-workflow.md#pdf-footnote-and-endnote-contract)。
+`footnote-apply` 在生成
 `footnote_normalized/` 时识别 `N. text`、`- N. text`/`* N. text`/`+ N. text`、
 `N text`、`<sup>N</sup> text` 和已有 `[^N]: text`，并只把与这些定义匹配的普通单元上标
 转为 `[^N]`。带列表标记的定义在本地 normalization 中直接改写为 `[^N]: text`，不交给
