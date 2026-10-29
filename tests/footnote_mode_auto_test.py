@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+import pdf2epub.refine.footnote_apply as footnote_apply
 from pdf2epub.refine.footnote_apply import apply_footnote_normalization
 from pdf2epub.refine.footnote_options import (
     DEFAULT_FOOTNOTE_MODE,
@@ -289,6 +290,59 @@ def test_toc_mode_change_makes_checkpoint_stale(tmp_path: Path):
     validation = validate_footnote_decisions(tmp_path, config=config)
     assert validation["valid"] is False
     assert any("requires footnotes" in error for error in validation["errors"])
+
+
+def test_apply_checks_stale_target_units_before_writing_any_planned_unit(
+    tmp_path: Path,
+):
+    _write_minimal_book(tmp_path, "endnotes_only")
+    config = {"footnotes": {"mode": "endnotes_only"}}
+    prepare_footnote_candidates(tmp_path, config=config)
+    assert validate_footnote_decisions(tmp_path, config=config)["valid"] is True
+
+    target = tmp_path / "footnote_normalized"
+    target.mkdir()
+    (target / "stale.md").write_text("preserve me", encoding="utf-8")
+    (target / "chapter_1.md").write_text("old derived body", encoding="utf-8")
+
+    result = apply_footnote_normalization(tmp_path, config=config)
+
+    assert result["valid"] is False
+    assert "stale Markdown units" in result["errors"][0]
+    assert (target / "stale.md").read_text(encoding="utf-8") == "preserve me"
+    assert (target / "chapter_1.md").read_text(encoding="utf-8") == "old derived body"
+
+
+def test_apply_rejects_source_change_after_planning_before_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _write_minimal_book(tmp_path, "endnotes_only")
+    config = {"footnotes": {"mode": "endnotes_only"}}
+    prepare_footnote_candidates(tmp_path, config=config)
+    assert validate_footnote_decisions(tmp_path, config=config)["valid"] is True
+
+    target = tmp_path / "footnote_normalized"
+    target.mkdir()
+    (target / "chapter_1.md").write_text("previous derived text", encoding="utf-8")
+    original_planner = footnote_apply.resolve_page_decisions
+
+    def planner_then_mutate(*args, **kwargs):
+        resolution = original_planner(*args, **kwargs)
+        (tmp_path / "ocr_markdown" / "chapter_1.md").write_text(
+            "changed after plan\n", encoding="utf-8"
+        )
+        return resolution
+
+    monkeypatch.setattr(footnote_apply, "resolve_page_decisions", planner_then_mutate)
+    result = apply_footnote_normalization(tmp_path, config=config)
+
+    assert result["valid"] is False
+    assert any("changed after footnote planning" in error for error in result["errors"])
+    assert (target / "chapter_1.md").read_text(encoding="utf-8") == "previous derived text"
+    checkpoint = json.loads(
+        (tmp_path / "footnote_normalization.json").read_text(encoding="utf-8")
+    )
+    assert checkpoint["valid"] is False
 
 
 def test_old_checkpoint_without_configured_mode_remains_compatible(

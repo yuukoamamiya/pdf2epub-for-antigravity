@@ -855,9 +855,15 @@ PDF 结构阶段采用“共享证据、分离语义”的边界：
 | `footnote_continuation.py` | 跨页续文版面/语义证据和汇总 | 连续区域发现、最终脚注角色、Markdown 修改、插图分类 |
 | `footnote_signals.py` | 共用标签、编号和上标识别信号 | 页面候选编排、Subagent 决策、Markdown 修改 |
 | `illustration_prepare.py` | 整页插图候选、图片复核窗口和页面角色 handoff | 脚注归并、章节末尾注释 |
-| `footnote_apply.py` / `page_merger.py` | 消费已验证决定并生成派生源稿 | 再次猜测 Subagent 决定 |
-| `footnote_matching.py` | block 文本变体、唯一源文定位和非重叠编辑区间 | 扫描 sidecar、决定脚注角色、修改工作流状态 |
+| `footnote_apply_inputs.py` | 脚注决定合同、模式和共识 freshness 门禁；读取 unit 源文本、TOC/tree 与 endnote 决定，并记录原始 Markdown 字节哈希 | OCR block 定位、脚注归属、编辑或写派生稿 |
+| `footnote_apply_resolution.py` | 将候选与已验证决定按 page/block 定位到源 unit，处理 primary/secondary 来源、`primary_disposition`、章节归属、续注和 `marker_context` 引用绑定 | 修改 Markdown、写 normalization checkpoint |
+| `footnote_edit_plan.py` | 持有纯内存 `FootnoteEditPlan`，验证越界/重叠编辑，应用编辑、放置章节末脚注并按已给 TOC scope 归一化 endnotes | 文件读取/写入、决定脚注语义或猜测缺失引用 |
+| `footnote_apply.py` / `page_merger.py` | apply 协调器先完成计划与转换，再检查源 Markdown inventory 和目标 stale unit，原子写派生稿，最后写有效 normalization checkpoint；page merger 消费已验证决定并生成派生源稿 | 再次猜测 Subagent 决定、在验证计划前写派生正文 |
+| `footnote_matching.py` | block 文本变体、源文签名匹配、marker 查找与替换工具 | 工作流编排、决定脚注角色、写 normalization checkpoint |
 | `footnote_status.py` | 归一化 checkpoint 的哈希和 freshness 诊断 | 候选扫描、脚注物化、修改 Markdown |
+
+脚注 apply 按“前置门禁/证据快照 → block 定位和 unit/lane 归属 → 引用与定义绑定 → 编辑冲突校验 → 内存纯转换 → 原子写入 → success checkpoint”的顺序运行。计划和所有绑定必须完整通过后才允许写入；源 unit 的哈希在读取原始字节时快照，写入前重新扫描 `ocr_markdown/*.md` 并与该快照逐项比较，同时先检查 `footnote_normalized/` 是否有不属于当前源 inventory 的 stale Markdown。
+任一计划、绑定、冲突或写前 inventory 校验失败时只写无效诊断 checkpoint，不改派生正文，也不生成有效 checkpoint。schema 保持 `footnote_candidates.json`/决定验证的 prepare schema 2 与 `footnote_normalization.json` schema 5；哈希快照字段不改变产物合同。
 
 新增 PDF 结构信号时，先判断它是共享的几何/证据事实还是某个领域的语义规则。前者进入
 共享模块并补一组跨阶段测试，后者只进入对应的 prepare/apply 模块。命令 handler 只读取

@@ -44,6 +44,9 @@ def test_low_level_footnote_modules_do_not_depend_on_coordinators():
         "pdf2epub.refine.footnote_validation",
     }
     for module_name in (
+        "pdf2epub.refine.footnote_edit_plan",
+        "pdf2epub.refine.footnote_apply_resolution",
+        "pdf2epub.refine.footnote_apply_inputs",
         "pdf2epub.refine.footnote_options",
         "pdf2epub.refine.footnote_contracts",
         "pdf2epub.refine.footnote_signals",
@@ -59,6 +62,24 @@ def test_validation_does_not_depend_on_candidate_preparation_coordinator():
     assert "pdf2epub.refine.footnote_prepare" not in _module_imports(
         "pdf2epub.refine.footnote_validation"
     )
+
+
+def test_edit_plan_service_has_no_filesystem_access():
+    path = REFINE_DIR / "footnote_edit_plan.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    filesystem_methods = {"open", "read_text", "read_bytes", "write_text", "write_bytes", "mkdir"}
+    calls = {
+        node.func.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+    }
+    names = {
+        node.func.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert not (filesystem_methods & calls)
+    assert "open" not in names
 
 
 def test_region_scanner_uses_the_geometry_region_module():

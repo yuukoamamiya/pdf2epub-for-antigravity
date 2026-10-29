@@ -474,3 +474,6 @@ def test_two_column_numeric_marker_requires_context_and_applies_per_lane(tmp_pat
     rejected = apply_footnote_normalization(tmp_path)
     assert rejected["valid"] is False
     assert any("marker" in error for error in rejected["errors"])
+    assert (tmp_path / "footnote_normalized" / source.name).read_text(
+        encoding="utf-8"
+    ) == normalized
