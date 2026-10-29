@@ -47,7 +47,15 @@ cli.py
 Subagent 合同层
 ├── markdown_handoff.py              Markdown handoff 编排
 ├── markdown_handoff_planning.py      源 inventory、统计和批次计划
+├── markdown_handoff_context.py       已声明交接上下文的只读归一化
+├── markdown_handoff_resume.py        旧 manifest 加载与恢复决策
+├── markdown_handoff_manifest.py      manifest 字段组装与目录边界校验
+├── markdown_handoff_prompt.py        根据 typed prompt 数据渲染提示词
 ├── markdown_subagent_validation.py  Markdown 输出校验和 validated staging
+├── markdown_validation_context.py   校验路径、选中文件、选项和前轮状态加载
+├── markdown_validation_audit.py     Markdown 单文件内容审计和批次汇总
+├── markdown_validation_state.py     review 重试与人工升级决策
+├── markdown_validation_persistence.py validated staging、报告/checkpoint 和隔离写入
 ├── markdown_validation_checkpoint.py 临时输出清理和无效目标隔离
 ├── markdown_validation.py           结构、脚注、双语和特殊标记规则
 ├── special_role_audit.py             书目/索引标记审计
@@ -318,11 +326,19 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
 
 这些模块是格式无关或 Markdown/TOC 专用的本地合同实现：
 
-- `markdown_handoff.py`：扫描源单元、计算统计信息、恢复 checkpoint、生成 manifest 和 prompt。
+- `markdown_handoff.py`：协调规划、上下文、恢复、manifest 和 prompt 服务，写入本次 handoff 产物。
 - `markdown_handoff_planning.py`：以 `MarkdownHandoffPlan` 返回已校验的源文件 inventory、哈希、统计、角色、续文信息和默认批次计划；不读写 manifest/prompt，也不导入 handoff 编排器。
-- `markdown_subagent_validation.py`：检查目标文件、结构标记、拒答、哈希和特殊角色内容，
-  并在通过后复制到 `validated/`。
+- `markdown_handoff_context.py`：将已声明的上下文文件投影为 handoff 可用路径和 hash；不读取未声明上下文。
+- `markdown_handoff_resume.py`：读取旧 manifest 和校验检查点，判断单元上下文是否仍可复用，并生成恢复决定。
+- `markdown_handoff_manifest.py`：组装 manifest 数据，并检查可选视觉复核、次 OCR、review 输出目录相对 output 的边界；不负责协调器提供的 source/target/scratch 字符串，也不渲染 prompt。
+- `markdown_handoff_prompt.py`：从明确的 prompt identity、batching 和路径数据渲染提示词，不读取工作区文件。
+- `markdown_subagent_validation.py`：负责校验命令的协调，按顺序调用上下文加载、内容审计、review 状态决策和持久化服务；不承载规则实现。
+- `markdown_validation_context.py`：只读加载 manifest review/protected-workspace 快照，解析选中文件范围，并构造路径、审计选项和上下文类型。
+- `markdown_validation_audit.py`：`load_file_input()` 负责读取一次源/目标字节快照；`audit_markdown_file()` 接收 typed 字节输入和审计选项，不读写路径，执行 TOC 标签、结构标记、目标语言、特殊角色、脚注、拒答及 polish 内容/版面审计；批次入口仅聚合逐文件结果。
+- `markdown_validation_state.py`：纯函数决定首次 review 的 Subagent 重试和同一 review 信号持续后的人工升级。
+- `markdown_validation_persistence.py`：formal 校验的唯一副作用层，清理 assigned 文件的遗留临时文件，应用规范化计划、维护 validated staging、合并局部 ledger、写报告并隔离无效目标。
 - `markdown_validation_checkpoint.py`：清理 atomic-write 遗留临时文件、隔离无效输出供恢复诊断；不执行内容审计，也不导入 validator。
+- 依赖方向保持单向：handoff/validation 协调入口调用各自的 context、planning/resume、audit/state、manifest/prompt 或 persistence 服务；纯审计和状态服务不导入协调器，checkpoint 工具也不反向导入 validator。Markdown 校验报告和 manifest 的既有 schema 合同保持不变。
 - `markdown_validation.py`：提供纯函数式的 Markdown 风险检测、目标语言审计、规范化辅助
   函数和 polish 内容保真检查；它会阻断结构性空父标题导致的重复正文，并对 `notes`
   单元中的标准尾注章节标题提供窄范围页眉误报豁免。已登记的 TOC Part/Chapter
@@ -501,7 +517,10 @@ polish + 工作区 Subagent + polish-validate（所有 PDF 必需；review_requi
 `polish_file_validation.json`，不创建或清理 `polished_markdown/validated/`，也不移动或删除
 已暂存文件，因此多个 worker 可并发执行而不会争写共享 checkpoint。Worker 全部结束后，主
 Agent 仍运行正式 `polish-validate --file`（或全量 `polish-validate`）写入权威 checkpoint；
-worker 自检通过不代表 checkpoint 已建立。后续打包和翻译门禁只认主 Agent 的权威校验记录。
+worker 自检通过不代表 checkpoint 已建立。check-only 即使识别出 Markdown 外层 fence 或可
+修复的参考文献标题，也只在内存中校验规范化候选，不改目标 Markdown、validated 副本、临时
+文件、ledger 或报告。formal 校验才会应用规范化；目标 hash 在写入后按实际落盘字节计算，
+validated 副本和 checkpoint 以该内容为准。后续打包和翻译门禁只认主 Agent 的权威校验记录。
 
 翻译分支：
 extract-entities + 工作区 Subagent + extract-entities-validate
