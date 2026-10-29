@@ -8,25 +8,16 @@ never produce native pages; the native branch exists only for old artifacts.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from ..ocr_consensus import consensus_is_current, ocr_evidence_mode
+from ..ocr_source import is_legacy_native_source
 
 
 def is_native_text_source(output_dir: Path) -> bool:
     """Return whether the page set is a legacy native PDF text extraction."""
-    try:
-        progress = json.loads(
-            (Path(output_dir) / "pages" / "ocr_progress.json").read_text(
-                encoding="utf-8"
-            )
-        )
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        return False
-    return isinstance(progress, Mapping) and progress.get("mode") == "native_text"
-
+    return is_legacy_native_source(output_dir)
 
 def pdf_evidence_mode(
     output_dir: Path,

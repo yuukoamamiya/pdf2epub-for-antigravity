@@ -336,13 +336,13 @@ def ocr_correct_command(args):
     if context is None:
         return 1
     output_dir = context.output_dir
-    probe = _load_probe(output_dir)
-    # Legacy artifact compatibility: older native-text runs wrote this probe
-    # shape.  New runs never receive a ``use_text_layer`` recommendation.
-    if (
-        probe.get("classification") == "native_text"
-        and probe.get("recommendation") == "use_text_layer"
-    ):
+    from pdf2epub.ocr_source import is_legacy_native_source
+    try:
+        legacy_native = is_legacy_native_source(output_dir)
+    except ValueError as exc:
+        logger.error(str(exc))
+        return 1
+    if legacy_native:
         logger.info(
             "This PDF uses a high-confidence native text layer; visual OCR correction is not applicable."
         )
@@ -483,12 +483,13 @@ def ocr_correct_validate_command(args):
     if context is None:
         return 1
     output_dir = context.output_dir
-    probe = _load_probe(output_dir)
-    # Legacy artifact compatibility: only old native-text runs have this shape.
-    if (
-        probe.get("classification") == "native_text"
-        and probe.get("recommendation") == "use_text_layer"
-    ):
+    from pdf2epub.ocr_source import is_legacy_native_source
+    try:
+        legacy_native = is_legacy_native_source(output_dir)
+    except ValueError as exc:
+        logger.error(str(exc))
+        return 1
+    if legacy_native:
         logger.info("Native text PDF: OCR correction validation is not applicable.")
         return 0
     if not _require_complete_ocr_pages(output_dir):

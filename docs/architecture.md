@@ -26,7 +26,7 @@
 - manifest、prompt、validation report 和源文件 SHA-256 共同构成可恢复的任务合同。
 - 各工作流通过共享契约复用能力，但不直接互相调用另一种格式的业务实现。
 - PDF 翻译与纯转换共享源稿准备、polish、校验和 EPUB 构建；流程差异由统一的
-  `PipelinePolicy` 声明，不在各 command handler 中重复判断。
+  `PipelinePolicy` 声明，不在各 command handler 中重复判断；未知 pipeline 在策略解析时统一拒绝。
 
 ## 2. 分层结构
 
@@ -45,15 +45,19 @@ cli.py
             └── ocr/                 页面 OCR 后端、sidecar 和双 OCR 共识
 
 Subagent 合同层
-├── markdown_handoff.py              Markdown handoff 生成
+├── markdown_handoff.py              Markdown handoff 编排
+├── markdown_handoff_planning.py      源 inventory、统计和批次计划
 ├── markdown_subagent_validation.py  Markdown 输出校验和 validated staging
+├── markdown_validation_checkpoint.py 临时输出清理和无效目标隔离
 ├── markdown_validation.py           结构、脚注、双语和特殊标记规则
+├── special_role_audit.py             书目/索引标记审计
 ├── document_roles.py                特殊单元角色和参考文献识别
 ├── entity_context.py               书内实体术语交接和新鲜度合同
 ├── page_furniture_rules.py          页眉、页脚、页码候选的纯规则
 ├── pdf_unit_roles.py                PDF 精修单元角色的只读投影
 ├── toc_translation_workflow.py      PDF TOC handoff、合并和校验
-├── subagent_runtime.py              模型选择、token 估算和批次 handoff
+├── batching_service.py              公共批次配置、token 估算和文件批次规划
+├── subagent_runtime.py              模型选择、scoped worker handoff 和 dispatch 编排
 ├── subagent_dispatch.py             assignment digest、原子 lease 和冲突检测
 └── subagent_safety.py               拒答/免责声明检测
 ```
@@ -112,6 +116,7 @@ Subagent 合同层
 
 PDF 精修的核心领域模块如下：
 
+- `ocr_options.py`：只解析 OCR 配置选项，不依赖后端或流程策略；`ocr_source.py`：统一读取 OCR progress 与旧 probe，progress 是 legacy 来源的权威记录，矛盾元数据阻断，单独的旧 probe 不足以跳过 OCR 门禁。`utils/paths.py` 提供不依赖业务策略的书名路径工具，供 OCR backend 与日志层使用。
 - `ocr_consensus.py`：解释 `ocr.secondary.enabled`，生成 `single_ocr`/`two_ocr` 证据模式，
   校验次 OCR 配置、文件哈希和 `ocr_consensus.json` 是否仍对应当前页面集；提供
   `ocr-consensus-rebuild`，在已有两套 OCR 产物完整时离线重算共识而不重新调用后端。
@@ -220,7 +225,8 @@ TOC 中标记为
 - `refine/footnote_apply.py`：只消费已验证的脚注决定，按完整 TOC `unit_id` 合并脚注到单元末尾，
   保留 `citation`、`bibliography` 和普通正文原位。次 OCR 独有脚注必须带显式文本、来源单元
   和 `primary_disposition`；主 OCR 重复块只有在明确列出 `primary_block(s)` 时才会删除，重复
-  编号引用无法唯一定位时阻断而不猜测。
+  编号引用无法唯一定位时阻断而不猜测。章节定义转换、normalized unit 原子持久化/inventory
+  和成功 checkpoint 写入由独立 helper 承担；apply 编排不复制这些持久化合同。
 - `refine/footnote_matching.py`：集中处理 sidecar block 到 Markdown 源文的安全定位、文本变体和
   非重叠编辑区间；不读取工作流状态，也不执行脚注物化。
 - `refine/footnote_status.py`：集中计算脚注归一化 checkpoint 的哈希和 freshness 状态；不依赖
@@ -306,8 +312,10 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
 这些模块是格式无关或 Markdown/TOC 专用的本地合同实现：
 
 - `markdown_handoff.py`：扫描源单元、计算统计信息、恢复 checkpoint、生成 manifest 和 prompt。
+- `markdown_handoff_planning.py`：以 `MarkdownHandoffPlan` 返回已校验的源文件 inventory、哈希、统计、角色、续文信息和默认批次计划；不读写 manifest/prompt，也不导入 handoff 编排器。
 - `markdown_subagent_validation.py`：检查目标文件、结构标记、拒答、哈希和特殊角色内容，
   并在通过后复制到 `validated/`。
+- `markdown_validation_checkpoint.py`：清理 atomic-write 遗留临时文件、隔离无效输出供恢复诊断；不执行内容审计，也不导入 validator。
 - `markdown_validation.py`：提供纯函数式的 Markdown 风险检测、目标语言审计、规范化辅助
   函数和 polish 内容保真检查；它会阻断结构性空父标题导致的重复正文，并对 `notes`
   单元中的标准尾注章节标题提供窄范围页眉误报豁免。已登记的 TOC Part/Chapter
@@ -316,6 +324,7 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
   触发双语警告。该模块把角色判断委托给
   `document_roles.py`，把页眉页脚候选判断委托给 `page_furniture_rules.py`，避免校验模块
   反向依赖具体修复工作流。
+- `special_role_audit.py`：为 PDF/EPUB 共用的 bibliography/index 单元审计数字与条目身份标记；不依赖 Markdown validator 或 HTML builder。
 - `footnote_normalization.py`：提供 polish 阶段的尾注引用/定义迁移校验；它只校验
   Subagent 输出，不负责识别页面脚注或修改源稿。
 - `commands/markdown_context.py`：只读加载 TOC、续文和章节分组上下文；准备、校验和
@@ -343,8 +352,17 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
   void 元素仍是自闭合形式；输出的章节文档可由严格 XML parser 读取。
 - 连续的长编号论述由 polish handoff 要求保留为转义数字标记（如 `17\.`）的普通段落；真实枚举
   仍保留列表结构。translate handoff 和本地校验共同保证已转义标记不退化为有序列表。
-- `subagent_runtime.py`：提供模型配置解析、token 估算、批次规划及按章节/批次隔离的 handoff；
-  worker 文件数的有效上限为 8。
+- `batching_service.py`：公共拥有 batch 配置、token 估算、文件安全批次算法和 pending queue；
+  worker 文件数的有效上限为 8。`markdown_handoff`、`page_furniture_repair`、HTML builder
+  和 Markdown command 应依赖该服务，不应导入 `subagent_runtime` 的私有 batching helper。
+- `subagent_runtime.py`：负责模型选择、scoped worker handoff、章节装箱和 dispatch 合同。
+  它为旧调用保留必要的私有 helper 重导出，但新生产调用直接依赖 `batching_service.py`。
+- `html_translation/compressed_cache.py`：独立验证 EPUB 输入哈希、压缩 mapping、有效 translation
+  parts 及行数预算，并写入/检查压缩提取 receipt；不导入 HTML pipeline/builder。builder 保留薄包装
+  以兼容既有调用。
+- `utils/paths.py`、`ocr_options.py`、`ocr_source.py`：分别提供书名路径处理、次 OCR 开关读取、
+  OCR progress/probe 页面来源读取。`ocr_source.py` 以旧 progress 识别已知 legacy 来源；命令和
+  refine 编排依赖这些窄服务，不复制各自的底层解析。
 - `subagent_safety.py`：集中处理拒答、免责声明和翻译占位套话检测，避免各工作流使用不同规则。
 - `toc_translation_workflow.py`：维护 TOC 的原始结构、节点数量、非标题字段和翻译结果校验。
   prepare 阶段同时生成源合同和扁平模板；Subagent 只提交
@@ -368,8 +386,9 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
   `container_only` 节点不生成虚构的 Markdown 锚点；它保留 TOC 层级，并导航到所属文件或首个
   含内容的后代。`visible` 节点的投影锚点缺失或落在不同标题时阻断构建。
 
-Subagent 合同已按职责拆分到上述具体模块，不再提供聚合式兼容门面。调用方应直接导入
-所属模块；移动公共函数时必须同步更新调用方、文档和契约测试。
+Subagent 合同由上述具体模块按职责拥有，不新增聚合式兼容门面。`subagent_runtime.py` 仍只为
+历史调用保留必要的 helper 重导出；生产调用应直接依赖所属服务。移动公共函数时必须同步更新
+调用方、文档和契约测试。
 
 ### 2.4 按 TOC 章节装箱的实现边界
 
@@ -589,8 +608,13 @@ polish 或 translate Subagent。原始 OCR 单元不覆盖。
 尾注定义的后续段落和 Markdown 块通过四空格续行保留在定义内，并在下一个定义、明确标题或
 已知 scope 边界处停止。单一 `(scope, key)` 定义可供该 scope 的多个引用共同使用；同一范围
 存在多个定义时仍按顺序逐次配对，额外引用不猜测目标。
-该输出合同已更新到 `footnote_normalization.json` schema 4；旧 schema 1–3 checkpoint 会失效，
-须重新运行 `footnote-prepare → footnote-validate → footnote-apply`。
+当前 `footnote_candidates.json`、`footnote_decisions.json` 和
+`footnote_decision_validation.json` 使用 prepare/decision schema 2；尾注边界歧义及其决定独立使用
+schema 1。该输出合同已更新到 `footnote_normalization.json` schema 5；旧 schema 1–4 checkpoint 会失效，
+须重新运行 `footnote-prepare`，按新 manifest 的 pending 状态复核并写决定，再运行
+`footnote-validate → footnote-apply`。无需重跑 OCR。本次文档/代码维护不自动处理书稿产物；
+恢复命令会更新准备合同，并由 apply 重建 `footnote_normalized/` 与成功 checkpoint，用户需按需
+备份旧派生结果。
 `footnote_normalization.json` 的 `endnotes` 子报告记录最终定义键、转换引用数、scope 统计、
 双层编号识别数、重复定义和孤立定义，供后续审计。
 

@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from loguru import logger
 
 from pdf2epub.utils.logging_config import configure_logging
-from pdf2epub.utils.common import book_output_dir
+from pdf2epub.utils.paths import book_output_dir
 from ..illustration_extractor import extract_illustrations
 
 # Configure logger

@@ -18,7 +18,8 @@ import yaml
 from pdf2epub.ocr.backends import supported_backends
 from pdf2epub.ocr_consensus import secondary_ocr_enabled, secondary_backend_name
 from pdf2epub.ocr_progress import assess_progress
-from pdf2epub.pipeline_policy import PipelinePolicy, SUPPORTED_PIPELINE_NAMES
+from pdf2epub.pipeline_policy import PipelinePolicy
+from pdf2epub.ocr_source import is_legacy_native_source
 from pdf2epub.utils.common import (
     book_output_dir,
     resolve_book_input_path,
@@ -207,14 +208,17 @@ def _pdf_stages(
     ocr_status, ocr_detail = _pdf_ocr_status(output_dir, input_path)
     stages.append(_status_record("ocr-pages", "ocr-pages --resume", ocr_status, ocr_detail))
 
-    probe = _read_json(output_dir / "pdf_text_probe.json")
-    # Legacy artifact compatibility: old native-text runs skip visual OCR
-    # correction.  New probes always recommend ``ocr_required``.
-    native_text = (
-        probe.get("classification") == "native_text"
-        and probe.get("recommendation") == "use_text_layer"
-    )
-    review_required = policy.requires_visual_ocr_review(output_dir)
+    try:
+        native_text = is_legacy_native_source(output_dir)
+    except ValueError as exc:
+        stages.append(_status_record("ocr-source", "ocr-pages --resume", "blocked", str(exc)))
+        native_text = False
+    try:
+        review_required = policy.requires_visual_ocr_review(output_dir)
+    except ValueError as exc:
+        review_required = True
+        if not any(stage["name"] == "ocr-source" for stage in stages):
+            stages.append(_status_record("ocr-source", "ocr-pages --resume", "blocked", str(exc)))
     if native_text or not review_required:
         stages.append(
             _status_record(
@@ -463,7 +467,13 @@ def build_status(config_path: str | Path = "config.yaml") -> dict[str, Any]:
     report["input_type"] = input_type
     report["input_path"] = str(input_path)
     report["input_exists"] = input_path.is_file()
-    policy = PipelinePolicy.from_config(config)
+    try:
+        policy = PipelinePolicy.from_config(config)
+    except ValueError as exc:
+        report["config_valid"] = False
+        report["errors"] = [str(exc)]
+        report["stages"] = [_status_record("pipeline", "doctor", "blocked", str(exc))]
+        return report
     report["pipeline"] = policy.kind
     if input_type == "epub":
         stages = _html_stages(output_dir)
@@ -509,12 +519,13 @@ def build_doctor(config_path: str | Path = "config.yaml") -> dict[str, Any]:
 
     title = str(config.get("title") or "").strip()
     check("title", bool(title), "title is configured" if title else "title is missing")
-    configured_kind = str(config.get("pipeline") or config.get("mode") or "translation").strip().lower()
-    check(
-        "pipeline",
-        configured_kind in SUPPORTED_PIPELINE_NAMES,
-        f"pipeline: {configured_kind or 'translation'}",
-    )
+    try:
+        policy = PipelinePolicy.from_config(config)
+    except ValueError as exc:
+        policy = None
+        check("pipeline", False, str(exc))
+    else:
+        check("pipeline", True, f"pipeline: {policy.kind}")
     output_dir = book_output_dir(title) if title else Path("output") / "untitled"
     try:
         input_type, input_path = _resolve_input(config, path, output_dir)

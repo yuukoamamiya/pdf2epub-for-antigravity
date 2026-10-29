@@ -15,7 +15,7 @@ from .footnote_options import (
 from .pdf_evidence import pdf_evidence_mode, require_current_consensus
 
 
-FOOTNOTE_NORMALIZATION_SCHEMA_VERSION = 4
+FOOTNOTE_NORMALIZATION_SCHEMA_VERSION = 5
 _SAFE_FILENAME_RE = re.compile(r"^[^/\\]+\.md$")
 
 
@@ -151,7 +151,16 @@ def footnote_normalization_status(
             "footnote normalization and decision validation use different footnotes.mode values",
         )
     if config is not None:
-        configured_mode = pdf_evidence_mode(output_dir, config)
+        try:
+            configured_mode = pdf_evidence_mode(output_dir, config)
+        except ValueError as exc:
+            fail("invalid_evidence_metadata", str(exc))
+            return {
+                "current": False,
+                "status": "stale",
+                "failures": failures,
+                "detail": "footnote evidence metadata is invalid; rerun OCR and footnote preparation",
+            }
         if report_mode != configured_mode:
             fail(
                 "configured_evidence_mode_mismatch",

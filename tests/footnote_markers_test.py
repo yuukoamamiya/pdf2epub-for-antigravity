@@ -5,10 +5,18 @@ from lxml import etree
 import pytest
 
 from pdf2epub.epub.footnotes import FootnoteManager
-from pdf2epub.footnote_keys import marker_from_label, marker_label_from_key, output_marker_key
+from pdf2epub.footnote_keys import (
+    CIRCLED_LABELS,
+    canonical_numeric_label,
+    is_valid_footnote_key,
+    marker_from_label,
+    marker_label_from_key,
+    output_marker_key,
+)
 from pdf2epub.epub.footnotes.keys import display_footnote_key
 from pdf2epub.markdown_to_html import convert_markdown_to_html
 from pdf2epub.refine.footnote_apply import apply_footnote_normalization
+from pdf2epub.refine.footnote_contracts import FOOTNOTE_PREPARE_SCHEMA_VERSION
 from pdf2epub.refine.footnote_matching import marker_spans, marker_context_matches
 from pdf2epub.refine.footnote_prepare import prepare_footnote_candidates
 from pdf2epub.refine.footnote_handoff import prepare_footnote_subagent
@@ -62,6 +70,9 @@ def test_marker_identity_preserves_printed_form_and_case():
         assert (marker.key, marker.label) == (key, label)
     assert leading_footnote_key("1 Note") == "1"
     assert leading_footnote_key("① Note") == "1"
+    assert leading_footnote_key("１２ Note") == "12"
+    assert leading_footnote_key("١٢ Note") == "12"
+    assert leading_footnote_key("¹² Note") == "12"
     assert leading_footnote_key("a list item") is None
     assert marker_from_label("") is None
     assert marker_from_label("①②") is None
@@ -71,6 +82,55 @@ def test_marker_identity_preserves_printed_form_and_case():
     assert output_marker_key("1", "1", 2) == "fnm-number-1-o2"
     assert display_footnote_key("fnm-number-1-o2") == "1"
     assert display_footnote_key("fnm-circle-1-o2") == "①"
+
+
+def test_all_fifty_circled_labels_have_stable_one_based_keys():
+    assert len(CIRCLED_LABELS) == 50
+    for number, label in enumerate(CIRCLED_LABELS, 1):
+        marker = marker_from_label(label)
+        assert marker is not None
+        assert (marker.label, marker.key) == (label, str(number))
+        assert marker_label_from_key(f"fnm-circle-{number}") == label
+
+
+@pytest.mark.parametrize(
+    ("label", "key"),
+    [("123", "123"), ("１２３", "123"), ("١٢٣", "123"), ("¹²³", "123")],
+)
+def test_numeric_marker_forms_canonicalize_to_ascii_but_keep_printed_label(label, key):
+    marker = marker_from_label(label)
+    assert marker is not None
+    assert marker.label == label
+    assert marker.key == key
+    assert canonical_numeric_label(label) == key
+    assert is_valid_footnote_key(marker.key)
+
+
+def test_decorative_number_forms_are_not_treated_as_numeric_sequences():
+    assert marker_from_label("①②") is None
+    assert canonical_numeric_label("①") is None
+    assert marker_from_label("①").key == "1"
+    assert marker_from_label("１２３４５") is None
+    assert not is_valid_footnote_key("١٢٣")
+
+
+@pytest.mark.parametrize(
+    ("candidate_schema", "validation_schema", "expected"),
+    [(1, 2, "candidate report"), (2, 1, "decision validation")],
+)
+def test_apply_rejects_old_marker_checkpoint_contracts(
+    tmp_path: Path, candidate_schema: int, validation_schema: int, expected: str
+):
+    (tmp_path / "footnote_candidates.json").write_text(
+        json.dumps({"schema_version": candidate_schema}), encoding="utf-8"
+    )
+    (tmp_path / "footnote_decision_validation.json").write_text(
+        json.dumps({"schema_version": validation_schema}), encoding="utf-8"
+    )
+    result = apply_footnote_normalization(tmp_path)
+    assert result["valid"] is False
+    assert expected in result["errors"][0]
+    assert FOOTNOTE_PREPARE_SCHEMA_VERSION == 2
 
 
 def test_special_marker_matching_is_exact_and_ignores_prose_star():
@@ -310,7 +370,7 @@ def test_reviewed_repeated_marker_context_binds_each_reference_exactly(tmp_path:
         json.dumps(report, ensure_ascii=False), encoding="utf-8"
     )
     (tmp_path / "footnote_decisions.json").write_text(
-        json.dumps({"schema_version": 1, "decisions": [
+        json.dumps({"schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION, "decisions": [
             {"page": 1, "block": 1, "role": "footnote_start", "key": "fnm-star-1",
              "marker_label": "*", "marker_context": "Left <sup>*</sup>"},
             {"page": 1, "block": 2, "role": "footnote_start", "key": "fnm-star-1",
@@ -395,7 +455,7 @@ def test_two_column_numeric_marker_requires_context_and_applies_per_lane(tmp_pat
             })
     decisions = [item for audit in region_audits for item in audit["decisions"]]
     (tmp_path / "footnote_decisions.json").write_text(
-        json.dumps({"schema_version": 1, "region_audits": region_audits, "decisions": decisions}),
+        json.dumps({"schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION, "region_audits": region_audits, "decisions": decisions}),
         encoding="utf-8",
     )
     assert validate_footnote_decisions(tmp_path)["valid"] is True
@@ -407,7 +467,7 @@ def test_two_column_numeric_marker_requires_context_and_applies_per_lane(tmp_pat
     for item in decisions:
         item["marker_context"] = "<sup>1</sup>"
     (tmp_path / "footnote_decisions.json").write_text(
-        json.dumps({"schema_version": 1, "region_audits": region_audits, "decisions": decisions}),
+        json.dumps({"schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION, "region_audits": region_audits, "decisions": decisions}),
         encoding="utf-8",
     )
     assert validate_footnote_decisions(tmp_path)["valid"] is True

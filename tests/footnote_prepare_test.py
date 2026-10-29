@@ -9,6 +9,8 @@ from lxml import etree
 from pdf2epub.refine.footnote_prepare import (
     prepare_footnote_candidates,
 )
+from pdf2epub.refine.footnote_contracts import FOOTNOTE_PREPARE_SCHEMA_VERSION
+from pdf2epub.refine.footnote_status import FOOTNOTE_NORMALIZATION_SCHEMA_VERSION
 from pdf2epub.refine.footnote_candidates import candidate_for_block
 from pdf2epub.refine.footnote_handoff import prepare_footnote_subagent
 from pdf2epub.refine.footnote_apply import (
@@ -326,7 +328,7 @@ def test_footnote_status_reports_candidate_hash_as_root_cause(tmp_path: Path):
     normalization.write_text(
         json.dumps(
             {
-                "schema_version": 4,
+                "schema_version": FOOTNOTE_NORMALIZATION_SCHEMA_VERSION,
                 "valid": True,
                 "status": "validated",
                 "ocr_evidence_mode": "single_ocr",
@@ -373,11 +375,11 @@ def test_footnote_status_requires_current_toc_for_scoped_endnotes(tmp_path: Path
     )
     toc_tree = tmp_path / "toc_tree.json"
 
-    def write_checkpoint(endnotes: dict, toc_hash=None) -> None:
+    def write_checkpoint(endnotes: dict, toc_hash=None, schema_version=None) -> None:
         (tmp_path / "footnote_normalization.json").write_text(
             json.dumps(
                 {
-                    "schema_version": 4,
+                    "schema_version": schema_version or FOOTNOTE_NORMALIZATION_SCHEMA_VERSION,
                     "valid": True,
                     "status": "validated",
                     "ocr_evidence_mode": "single_ocr",
@@ -407,6 +409,15 @@ def test_footnote_status_requires_current_toc_for_scoped_endnotes(tmp_path: Path
     )
     status = footnote_normalization_status(tmp_path)
     assert status["current"] is True
+
+    write_checkpoint(
+        {"scope_mode": "per_chapter"},
+        hashlib.sha256(toc_tree.read_bytes()).hexdigest(),
+        schema_version=4,
+    )
+    status = footnote_normalization_status(tmp_path)
+    assert status["current"] is False
+    assert status["failures"][0]["code"] == "normalization_schema_mismatch"
 
     write_checkpoint({"scope_mode": "per_chapter"})
     status = footnote_normalization_status(tmp_path)
@@ -445,7 +456,7 @@ def _write_native_sidecar(
     (pages_dir / "ocr_progress.json").write_text(
         json.dumps(
             {
-                "schema_version": 2,
+                "schema_version": 1,
                 "mode": "native_text",
                 "backend": "native_text",
                 "total_pages": page,
@@ -2058,7 +2069,7 @@ def test_validated_decisions_are_projected_to_sparse_unit_context(tmp_path: Path
     (tmp_path / "footnote_decisions.json").write_text(
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
                 "decisions": [
                     {
                         "page": 1,
@@ -2094,7 +2105,7 @@ def test_unresolved_decision_requires_human_review(tmp_path: Path):
     (tmp_path / "footnote_decisions.json").write_text(
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
                 "decisions": [
                     {
                         "page": 1,
@@ -2163,7 +2174,7 @@ def test_apply_moves_cross_page_notes_but_keeps_body_order(tmp_path: Path):
     (tmp_path / "footnote_decisions.json").write_text(
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
                 "decisions": [
                     {
                         "page": 2,
@@ -2248,7 +2259,7 @@ def test_apply_moves_every_line_of_a_multiline_list_block(tmp_path: Path):
 
     prepare_footnote_subagent(tmp_path, book_title="Test Book")
     (tmp_path / "footnote_decisions.json").write_text(
-        json.dumps({"schema_version": 1, "decisions": [{
+        json.dumps({"schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION, "decisions": [{
             "page": 1, "block": 1, "role": "footnote_start", "key": "1",
             "confidence": "high",
         }]}),
@@ -2297,7 +2308,7 @@ def test_citation_decision_is_preserved_and_not_moved(tmp_path: Path):
     (tmp_path / "footnote_decisions.json").write_text(
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
                 "decisions": [
                     {
                         "page": 1,
@@ -2531,7 +2542,7 @@ def test_secondary_only_footnote_decision_materializes_explicit_text(
         encoding="utf-8",
     )
     report = {
-        "schema_version": 1,
+        "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
         "source_kind": "ocr",
         "ocr_evidence_mode": "two_ocr",
         "sidecar_sha256": {},
@@ -2558,7 +2569,7 @@ def test_secondary_only_footnote_decision_materializes_explicit_text(
     (tmp_path / "footnote_decisions.json").write_text(
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
                 "decisions": [
                     {
                         "page": 1,
@@ -2648,7 +2659,7 @@ def test_secondary_only_repeated_marker_fails_closed(tmp_path: Path):
     (tmp_path / "footnote_candidates.json").write_text(
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
                 "source_kind": "ocr",
                 "ocr_evidence_mode": "two_ocr",
                 "pages": [
@@ -2675,6 +2686,7 @@ def test_secondary_only_repeated_marker_fails_closed(tmp_path: Path):
             {
                 "valid": True,
                 "status": "validated",
+                "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
                 "decisions": [
                     {
                         "page": 1,
@@ -2729,7 +2741,7 @@ def test_secondary_only_can_remove_an_explicit_primary_duplicate(tmp_path: Path)
     (tmp_path / "footnote_candidates.json").write_text(
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
                 "source_kind": "ocr",
                 "ocr_evidence_mode": "two_ocr",
                 "pages": [
@@ -2756,6 +2768,7 @@ def test_secondary_only_can_remove_an_explicit_primary_duplicate(tmp_path: Path)
             {
                 "valid": True,
                 "status": "validated",
+                "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
                 "decisions": [
                     {
                         "page": 1,

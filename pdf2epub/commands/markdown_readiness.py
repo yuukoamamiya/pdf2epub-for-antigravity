@@ -16,6 +16,7 @@ from pdf2epub.entity_context import entity_context_is_current
 from pdf2epub.ocr_correction import ocr_correction_is_current, select_refinement_pages
 from pdf2epub.ocr_progress import assess_progress
 from pdf2epub.pipeline_policy import PipelinePolicy
+from pdf2epub.ocr_source import is_legacy_native_source
 from pdf2epub.utils.common import book_output_dir, load_config
 from pdf2epub.utils.fingerprints import pages_fingerprint
 from pdf2epub.validation_receipts import validation_receipt_is_current
@@ -97,15 +98,13 @@ def run_readiness_check(
     from pdf2epub.ocr_anomalies import scan_ocr_pages
 
     anomaly_report = scan_ocr_pages(output_dir)
-    current_probe = {}
     try:
-        current_probe = json.loads(probe_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        pass
-    legacy_native_text = (
-        current_probe.get("classification") == "native_text"
-        and current_probe.get("recommendation") == "use_text_layer"
-    )
+        legacy_native_text = is_legacy_native_source(output_dir)
+        source_error = None
+    except ValueError as exc:
+        legacy_native_text = False
+        source_error = str(exc)
+        record("ocr_page_source", False, source_error)
     if legacy_native_text:
         anomaly_report = {**anomaly_report, "review_required_files": [], "scan_errors": []}
     anomaly_files = anomaly_report["review_required_files"]
@@ -128,20 +127,13 @@ def run_readiness_check(
         ),
     )
 
-    probe = {}
+    native_text = legacy_native_text
     try:
-        value = json.loads(probe_path.read_text(encoding="utf-8"))
-        if isinstance(value, dict):
-            probe = value
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        pass
-    # Legacy artifact compatibility: old native-text runs do not need the
-    # visual OCR correction checkpoint.
-    native_text = (
-        probe.get("classification") == "native_text"
-        and probe.get("recommendation") == "use_text_layer"
-    )
-    correction_required = policy.requires_visual_ocr_review(output_dir)
+        correction_required = policy.requires_visual_ocr_review(output_dir)
+    except ValueError as exc:
+        correction_required = True
+        if source_error is None:
+            record("ocr_page_source", False, str(exc))
     correction_ready = native_text or not correction_required or ocr_correction_is_current(
         output_dir, config
     )
@@ -164,7 +156,8 @@ def run_readiness_check(
         pages_dir, _page_source_kind = select_refinement_pages(output_dir, config=config)
     except ValueError as exc:
         pages_dir = raw_pages_dir
-        record("ocr_page_source", False, str(exc))
+        if source_error is None:
+            record("ocr_page_source", False, str(exc))
 
     toc_path = output_dir / "toc_tree.json"
     toc_errors: list[str] = []

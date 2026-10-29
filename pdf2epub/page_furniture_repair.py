@@ -14,15 +14,14 @@ import shutil
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
-from .subagent_runtime import (
-    _batch_queue,
-    _batching_config,
-    _markdown_files,
-    _recommended_batches,
+from .batching_service import (
+    batch_queue as _batch_queue,
+    batching_config as _batching_config,
+    markdown_files as _markdown_files,
+    recommended_batches as _recommended_batches,
     estimate_tokens,
-    resolve_subagent_model,
-    write_worker_handoffs,
 )
+from .subagent_runtime import resolve_subagent_model, write_worker_handoffs
 from .page_furniture_rules import candidate_for_line
 from .workflow_contracts import atomic_write_json, atomic_write_text, relative_posix_path
 

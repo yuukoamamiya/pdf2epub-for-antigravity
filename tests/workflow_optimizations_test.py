@@ -233,6 +233,55 @@ def test_pipeline_policy_exposes_one_supported_pipeline_registry():
     assert PipelinePolicy.from_config({"pipeline": "translation"}).kind == "translation"
     assert PipelinePolicy.from_config({"pipeline": "epub_conversion"}).kind == "epub_conversion"
     assert PipelinePolicy.from_config({"pipeline": "ocr_to_epub"}).kind == "epub_conversion"
+    import pytest
+    with pytest.raises(ValueError, match="unsupported pipeline"):
+        PipelinePolicy.from_config({"pipeline": "mystery"})
+
+
+def test_legacy_native_source_requires_consistent_page_progress(tmp_path: Path):
+    from pdf2epub.ocr_source import is_legacy_native_source
+
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    progress = pages / "ocr_progress.json"
+    probe = tmp_path / "pdf_text_probe.json"
+    progress.write_text(json.dumps({"mode": "native_text"}), encoding="utf-8")
+    assert is_legacy_native_source(tmp_path) is True
+    progress.write_text(json.dumps({"mode": "visual_ocr"}), encoding="utf-8")
+    probe.write_text(json.dumps({"classification": "native_text", "recommendation": "use_text_layer"}), encoding="utf-8")
+    import pytest
+    with pytest.raises(ValueError, match="conflicting PDF source metadata"):
+        is_legacy_native_source(tmp_path)
+    probe.write_text(json.dumps({"schema_version": 3, "classification": "native_text", "recommendation": "ocr_required"}), encoding="utf-8")
+    progress.write_text(json.dumps({"mode": "native_text"}), encoding="utf-8")
+    with pytest.raises(ValueError, match="requires visual OCR"):
+        is_legacy_native_source(tmp_path)
+    progress.unlink()
+    assert is_legacy_native_source(tmp_path) is False
+
+
+def test_legacy_native_source_ignores_unusable_json_and_requires_progress(tmp_path: Path):
+    from pdf2epub.ocr_source import is_legacy_native_source
+
+    (tmp_path / "pages").mkdir()
+    (tmp_path / "pages" / "ocr_progress.json").write_text("[]", encoding="utf-8")
+    (tmp_path / "pdf_text_probe.json").write_text(json.dumps({"schema_version": 3, "recommendation": "ocr_required"}), encoding="utf-8")
+    assert is_legacy_native_source(tmp_path) is False
+    (tmp_path / "pages" / "ocr_progress.json").write_text("{broken", encoding="utf-8")
+    assert is_legacy_native_source(tmp_path) is False
+
+
+def test_legacy_native_source_rejects_non_string_progress_mode(tmp_path: Path):
+    import pytest
+    from pdf2epub.ocr_source import is_legacy_native_source
+
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    progress_path = pages / "ocr_progress.json"
+    for invalid_mode in ([], {}):
+        progress_path.write_text(json.dumps({"mode": invalid_mode}), encoding="utf-8")
+        with pytest.raises(ValueError, match="mode must be a string"):
+            is_legacy_native_source(tmp_path)
 
 
 def test_native_polish_prompt_requires_paragraph_reconstruction(tmp_path: Path):
@@ -252,6 +301,10 @@ def test_native_polish_prompt_requires_paragraph_reconstruction(tmp_path: Path):
             }
         ),
         encoding="utf-8",
+    )
+    (tmp_path / "pages").mkdir()
+    (tmp_path / "pages" / "ocr_progress.json").write_text(
+        json.dumps({"mode": "native_text"}), encoding="utf-8"
     )
 
     paths = prepare_markdown_subagent(

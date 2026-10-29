@@ -63,13 +63,8 @@ def _require_reviewed_ocr_anomalies(output_dir: Path, config: dict | None) -> No
     pages_dir = Path(output_dir) / "pages"
     if not any(pages_dir.glob("page_*.md")):
         return
-    try:
-        import json
-
-        probe = json.loads((Path(output_dir) / "pdf_text_probe.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError, TypeError):
-        probe = {}
-    if probe.get("classification") == "native_text" and probe.get("recommendation") == "use_text_layer":
+    from pdf2epub.ocr_source import is_legacy_native_source
+    if is_legacy_native_source(output_dir):
         return
     from pdf2epub.ocr_anomalies import scan_ocr_pages
     from pdf2epub.ocr_correction import ocr_correction_is_current

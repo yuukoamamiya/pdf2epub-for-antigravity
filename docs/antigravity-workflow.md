@@ -306,6 +306,11 @@ ocr-pages
 native layout；候选报告中的 `ocr_evidence_mode: single_ocr` 只是下游兼容字段，不代表
 调用了 OCR 或可以读取旧的双 OCR 检查点。
 
+恢复时若旧 `pages/ocr_progress.json` 标记 `native_text`，而同目录新式 `pdf_text_probe.json`
+又与之矛盾，不要仅凭 probe 或进度文件决定重跑 OCR。核对 PDF 哈希、运行时间/标识及逐页
+sidecar 的 `source_kind`/`backend` 是否属于同一运行；元数据无法互相印证时先人工核对恢复来源。
+确认完整旧原生运行后继续只读恢复，不重新 OCR。
+
 ## PDF 结构精修
 
 ```text
@@ -802,11 +807,15 @@ Subagent；它必须为每条写入 `endnote_definition_decisions.json` 的一�
 `footnote_status` 对已记录的文件做 freshness 检查，缺失或变化时 stale，并提示重跑
 `footnote-prepare → footnote-validate → footnote-apply`。没有歧义时不要求这两个哈希。
 
-`footnote_normalization.json` schema 4、页面候选/决定/尾注边界复核合同 schema 1、TOC schema 2
-是相互独立的版本号。旧 normalization schema 1–3 是 stale：运行
-`uv run pdf2epub -c <配置> footnote-prepare`；只有新 manifest 为 `pending_review` 时，才把当前
-manifest 列出的任务交给工作区 Subagent。随后运行 `footnote-validate` 和 `footnote-apply`，
-即使没有待复核项也要执行。保留旧产物和 checkpoint，不手工改 schema 或哈希。归一化源变化可能
+`footnote_candidates.json`、`footnote_decisions.json` 和 `footnote_decision_validation.json`
+使用 prepare/decision schema 2；`endnote_definition_ambiguities.json` 及其 decisions 保持独立
+schema 1；`footnote_normalization.json` 使用 schema 5，TOC 使用 schema 2。版本号彼此独立。
+旧 normalization schema 1–4 和旧 prepare/decision schema 均不能复用：运行
+`uv run pdf2epub -c <配置> footnote-prepare`；只把新 manifest 列出的 pending/review 项交给
+工作区 Subagent。随后必须运行 `footnote-validate` 和 `footnote-apply`，即使没有待复核项也要执行。
+保留旧产物和 checkpoint，不手工改 schema 或哈希。该合同升级不要求重跑 OCR；恢复命令会更新准备
+manifest/prompt，并由 apply 重建 `footnote_normalized/` 与成功 checkpoint。若需保留旧派生结果，
+应在恢复前备份。归一化源变化可能
 使 polish、翻译或 EPUB 构建 checkpoint 过期；先查看 `status` 与 pending/invalid 报告，按门禁
 恢复，不要直接构建。仅合同升级本身不要求重跑 OCR；只有源页或证据实际过期时才回到 OCR。
 

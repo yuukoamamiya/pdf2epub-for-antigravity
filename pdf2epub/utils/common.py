@@ -10,6 +10,7 @@ from typing import Dict, Optional, Any, Union, Iterable, Sequence
 
 from loguru import logger
 from pdf2epub.pipeline_policy import PipelinePolicy
+from pdf2epub.utils.paths import book_output_dir, sanitize_filename
 
 
 def is_epub_conversion_pipeline(config: Optional[dict]) -> bool:
@@ -212,6 +213,7 @@ def load_config(config_path: str = "config.yaml") -> Dict:
     from pdf2epub.ocr_consensus import validate_ocr_config
 
     validate_ocr_config(config)
+    PipelinePolicy.from_config(config)
     return config
 
 
@@ -224,48 +226,6 @@ def ensure_directory(directory_path: Path) -> None:
     """
     Path(directory_path).mkdir(parents=True, exist_ok=True)
 
-
-def sanitize_filename(filename: str) -> str:
-    """
-    Sanitize a filename for filesystem compatibility.
-    
-    Args:
-        filename: The filename to sanitize
-    
-    Returns:
-        Sanitized filename safe for filesystem use
-    """
-    if not isinstance(filename, str):
-        filename = str(filename)
-
-    # Replace rather than silently remove separators so the displayed title
-    # remains recognizable while never becoming another path component.
-    sanitized = filename.replace("\x00", "_")
-    sanitized = "".join("_" if c in '<>:"/\\|?*' else c for c in sanitized)
-    sanitized = " ".join(sanitized.split())
-    sanitized = sanitized.strip(" .")
-
-    # Windows device names are unsafe even when they have an extension.
-    reserved = {"CON", "PRN", "AUX", "NUL"}
-    reserved.update(f"COM{i}" for i in range(1, 10))
-    reserved.update(f"LPT{i}" for i in range(1, 10))
-    if sanitized.split(".", 1)[0].upper() in reserved:
-        sanitized = f"_{sanitized}"
-
-    return sanitized[:200].rstrip(" .") or "untitled"
-
-
-def book_output_dir(book_title: str, root: Union[str, Path] = "output") -> Path:
-    """Return a filesystem-safe book directory contained by ``root``."""
-    root_path = Path(root)
-    resolved_root = root_path.resolve()
-    candidate = root_path / sanitize_filename(book_title)
-    resolved_candidate = candidate.resolve()
-    try:
-        resolved_candidate.relative_to(resolved_root)
-    except ValueError as exc:
-        raise ValueError("Book title escapes the output directory") from exc
-    return candidate
 
 
 def guess_language(markdown_dir: Path) -> str:

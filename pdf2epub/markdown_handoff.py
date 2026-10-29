@@ -4,21 +4,16 @@ from __future__ import annotations
 
 import json
 import hashlib
-import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
-from .subagent_runtime import (
-    POLISH_ISOLATED_ROLES,
-    _batch_queue,
-    _batching_config,
-    _markdown_files,
-    _recommended_batches,
+from .batching_service import (
+    batch_queue as _batch_queue,
     effective_max_concurrency,
-    estimate_tokens,
-    resolve_subagent_model,
+    recommended_batches as _recommended_batches,
 )
-from .document_roles import TRANSLATION_SPECIAL_ROLES
+from .markdown_handoff_planning import plan_markdown_handoff
+from .subagent_runtime import resolve_subagent_model
 from .workflow_contracts import (
     MARKDOWN_VALIDATION_SCHEMA_VERSION,
     atomic_write_json,
@@ -89,93 +84,23 @@ def prepare_markdown_subagent(
     """Write a manifest and prompt for a markdown Subagent task."""
     source_dir = Path(source_dir)
     target_dir = Path(target_dir)
-    if declared_files is None:
-        sources = _markdown_files(source_dir)
-    else:
-        names = list(dict.fromkeys(str(name) for name in declared_files))
-        sources = []
-        for name in names:
-            candidate = source_dir / name
-            if Path(name).name != name or candidate.suffix.lower() != ".md":
-                raise ValueError(f"Invalid declared Markdown filename: {name}")
-            if not candidate.is_file():
-                raise ValueError(f"Declared Markdown source is missing: {name}")
-            sources.append(candidate)
-    if not sources:
-        raise ValueError(f"No Markdown source units found in {source_dir}")
-
+    plan = plan_markdown_handoff(
+        source_dir, task, config, declared_files=declared_files,
+        file_roles=file_roles, controlled_files=controlled_files,
+        continuation_files=continuation_files,
+    )
+    sources = plan.sources
     model = resolve_subagent_model(config, task)
-    batching = _batching_config(config)
-    file_stats: Dict[str, Dict[str, int]] = {}
-    source_sha256: Dict[str, str] = {}
-    for source in sources:
-        raw = source.read_bytes()
-        text = raw.decode("utf-8")
-        source_sha256[source.name] = hashlib.sha256(raw).hexdigest()
-        file_stats[source.name] = {
-            "size_bytes": len(raw),
-            "line_count": len(text.splitlines()),
-            "nonempty_line_count": len([line for line in text.splitlines() if line.strip()]),
-            "estimated_tokens": estimate_tokens(text),
-        }
-    normalized_roles = {
-        str(name): str(role).strip().lower()
-        for name, role in (file_roles or {}).items()
-        if str(role).strip().lower() in TRANSLATION_SPECIAL_ROLES
-    }
-    controlled = {str(name): str(kind) for name, kind in (controlled_files or {}).items()}
-    if set(controlled) - {source.name for source in sources}:
-        raise ValueError("controlled special-unit files must be declared Markdown sources")
-    if any(kind not in {"bibliography", "index"} for kind in controlled.values()):
-        raise ValueError("unsupported controlled special-unit kind")
-    polish_isolated_files = (
-        {
-            name
-            for name, role in normalized_roles.items()
-            if role in POLISH_ISOLATED_ROLES
-        }
-        if task == "polish"
-        else None
-    )
-    task_max_files = (
-        batching["polish_max_files"] if task == "polish" else batching["max_files"]
-    )
-    continuation_metadata = {
-        str(name): dict(value)
-        for name, value in (continuation_files or {}).items()
-        if str(name).strip() and isinstance(value, Mapping)
-    }
-    # Older callers may not provide refinement metadata. Keep a conservative
-    # filename fallback for compatibility, but prefer the explicit part order
-    # emitted by tree_progress.json whenever it is available.
-    for source in sources:
-        if source.name in continuation_metadata:
-            continue
-        match = re.search(
-            r"\.part(?P<number>[2-9][0-9]*)\.md$", source.name, re.IGNORECASE
-        )
-        if match:
-            continuation_metadata[source.name] = {
-                "is_continuation": True,
-                "part_number": int(match.group("number")),
-            }
-    recommended_batches = _recommended_batches(
-        file_stats,
-        task_max_files,
-        batching["max_source_tokens"],
-        batching["single_file_max_bytes"],
-        batching["max_nonempty_lines"],
-        isolated_files=polish_isolated_files,
-    )
-    oversized_files = [
-        name
-        for name, stats in file_stats.items()
-        if (
-            stats["estimated_tokens"] > batching["max_source_tokens"]
-            or stats["size_bytes"] > batching["single_file_max_bytes"]
-            or stats["nonempty_line_count"] > batching["max_nonempty_lines"]
-        )
-    ]
+    batching = plan.batching
+    file_stats = plan.file_stats
+    source_sha256 = plan.source_sha256
+    normalized_roles = plan.normalized_roles
+    controlled = plan.controlled_files
+    polish_isolated_files = plan.isolated_files
+    task_max_files = plan.task_max_files
+    continuation_metadata = plan.continuation_files
+    recommended_batches = plan.recommended_batches
+    oversized_files = plan.oversized_files
     validated_files = None
     validation: Dict[str, Any] = {}
     previous_manifest: Dict[str, Any] = {}
@@ -614,17 +539,8 @@ def prepare_markdown_subagent(
                 "Only one OCR backend was enabled for this run, so no page-level visual OCR correction was performed. Preserve OCR characters, words, symbols, and line content; polish only line wrapping, paragraph boundaries, and block structure.",
                 "Do not silently repair OCR characters, spelling, or wording during polish. If page-level OCR correction is needed, rerun OCR with ocr.secondary.enabled set to true.",
             ]
-        probe_path = Path(output_dir) / "pdf_text_probe.json"
-        try:
-            probe = json.loads(probe_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError, AttributeError):
-            probe = {}
-        # Legacy artifact compatibility: only old native-text runs carry this
-        # probe shape and already-extracted native layout.
-        if (
-            probe.get("classification") == "native_text"
-            and probe.get("recommendation") == "use_text_layer"
-        ):
+        from pdf2epub.ocr_source import is_legacy_native_source
+        if is_legacy_native_source(Path(output_dir)):
             native_layout_rules = [
                 "This is a high-confidence native vector-text PDF, not a visual OCR result. Do not perform speculative spelling, glyph, or wording corrections; preserve the extracted source text except for necessary whitespace and line-wrap normalization.",
                 "The native PDF text layer records positioned visual lines, not reliable semantic paragraphs. Determine paragraph boundaries from the layout and content: merge soft line wraps belonging to one prose paragraph with spaces, while preserving true paragraph breaks, headings, lists, quotations, tables, captions, formulas, and footnote blocks.",

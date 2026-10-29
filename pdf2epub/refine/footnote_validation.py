@@ -26,6 +26,7 @@ from .footnote_options import (
     resolve_effective_footnote_mode,
 )
 from .footnote_report import FOOTNOTE_PREPARE_SCHEMA_VERSION
+from ..footnote_keys import canonical_numeric_label
 from .pdf_evidence import pdf_evidence_mode, require_current_consensus
 
 
@@ -402,6 +403,10 @@ def validate_footnote_decisions(
         key = item.get("key")
         if key is not None:
             key = str(key).strip()
+            if not re.fullmatch(r"[A-Za-z0-9_-]+", key):
+                canonical_numeric = canonical_numeric_label(key)
+                if canonical_numeric is not None:
+                    key = canonical_numeric
             if not re.fullmatch(r"[A-Za-z0-9_-]+", key):
                 errors.append(
                     f"invalid footnote key for {address[0]}:{address[1]}:{address[2]}"

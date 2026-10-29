@@ -38,6 +38,17 @@ def test_status_empty_output_points_to_ocr(tmp_path: Path, monkeypatch):
     assert report["next_command"].endswith("ocr-pages --resume")
 
 
+def test_unknown_pipeline_is_blocked_by_doctor_and_status(tmp_path: Path, monkeypatch):
+    config_path = _config(tmp_path, pipeline="mystery")
+    monkeypatch.chdir(tmp_path)
+    status = build_status(config_path)
+    assert status["config_valid"] is False
+    assert status["stages"][0]["status"] == "blocked"
+    doctor = build_doctor(config_path)
+    pipeline = next(item for item in doctor["checks"] if item["name"] == "pipeline")
+    assert pipeline["status"] == "blocked"
+
+
 def test_status_reports_complete_ocr_but_missing_toc(tmp_path: Path, monkeypatch):
     config_path = _config(tmp_path)
     monkeypatch.chdir(tmp_path)
@@ -154,6 +165,10 @@ def test_status_only_skips_ocr_correct_for_explicit_native_legacy(tmp_path: Path
             }
         ),
         encoding="utf-8",
+    )
+    (output_dir / "pages").mkdir(exist_ok=True)
+    (output_dir / "pages" / "ocr_progress.json").write_text(
+        json.dumps({"mode": "native_text"}), encoding="utf-8"
     )
     report = build_status(config_path)
     stages = {item["name"]: item for item in report["stages"]}

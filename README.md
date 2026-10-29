@@ -99,6 +99,14 @@ Chandra 是当前主 OCR，扫描、可搜索和混合 PDF 都使用视觉 OCR�
 旧的原生文本路径已经删除，不再有配置入口。旧运行留下的 `source_kind: native_text`
 页面 sidecar 仍可被 refine、脚注和插图阶段只读读取，以便恢复旧输出；新运行不会生成这类
 页面，也不会因为目录中存在旧 sidecar 而改变 OCR 路径。
+若恢复时旧 `ocr_progress.json` 的 `native_text` 与同目录 probe 信息冲突，应核对 PDF 哈希、
+运行标识/时间及逐页 sidecar 来源；不能确认它们属于同一运行时先人工核对恢复元数据，不要
+仅因冲突就重新 OCR。
+
+脚注标记识别和审计会记录印刷 label，同时使用稳定的 ASCII 内部 key：全角数字、阿拉伯数字和
+上标数字按十进制值归一为同一数字 key；圈码 `①` 至 `㊿` 映射到对应的数字 key（1 至 50）。
+圈码和符号按既有显示合同呈现，数字 key 用于链接、锚点和重复项区分。星号、匕首号和大小写字母
+使用独立 key，避免链接锚点依赖非 ASCII 标记或误合并不同印刷符号。
 
 ## 当前输出和公式策略
 
@@ -293,7 +301,7 @@ index、bibliography、notes 和版权/前置页等特殊单元始终使用独�
 和显式上标字母可按各自标记规则识别；裸 `a)`、星号、字母或公式符号不能仅凭字形认作注释，
 公式上下文识别也有限。
 段落、列表、引文、表格等脚注块会保留结构；普通注释续句跨页时保留软换行，不因此另起段落。旧的
-`footnote_normalization.json` schema 1–3 checkpoint 需要按[升级与恢复步骤](docs/antigravity-workflow.md#pdf-footnote-and-endnote-contract)重新准备、按 pending 状态派发复核并运行 validate/apply。
+当前 prepare/decision validation 使用 schema 2，normalization 使用 schema 5；尾注边界歧义复核另用 schema 1。`footnote_normalization.json` schema 1–4 及 prepare/decision schema 1 checkpoint 需按[升级与恢复步骤](docs/antigravity-workflow.md#pdf-footnote-and-endnote-contract)重新执行 `footnote-prepare`，只复核新 manifest 中的 pending 项，再运行 validate/apply。无需重新 OCR；恢复会刷新准备合同，并重建 `footnote_normalized/` 与成功 checkpoint。本次维护不会自动修改书稿产物；若需保留旧派生结果，请在运行恢复前备份。
 
 ## 结果在哪里
 

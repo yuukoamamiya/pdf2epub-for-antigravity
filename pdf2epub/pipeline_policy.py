@@ -9,7 +9,7 @@ set of ``pipeline`` special cases.
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Optional
 
-from pdf2epub.ocr_consensus import secondary_ocr_enabled
+from pdf2epub.ocr_options import secondary_ocr_enabled
 
 
 CONVERSION_PIPELINE_NAMES = frozenset({"epub_conversion", "ocr_to_epub"})
@@ -38,14 +38,9 @@ class PipelinePolicy:
     def requires_visual_ocr_review(self, output_dir: Any = None) -> bool:
         """Whether workflow policy or current raw pages require visual review."""
         if output_dir is not None:
-            from pathlib import Path
-            import json
+            from pdf2epub.ocr_source import is_legacy_native_source
 
-            try:
-                probe = json.loads((Path(output_dir) / "pdf_text_probe.json").read_text(encoding="utf-8"))
-            except (OSError, ValueError, TypeError):
-                probe = {}
-            if probe.get("classification") == "native_text" and probe.get("recommendation") == "use_text_layer":
+            if is_legacy_native_source(output_dir):
                 return False
         if self.requires_ocr_correction:
             return True
@@ -68,9 +63,9 @@ class PipelinePolicy:
         configured_kind = str(
             config.get("pipeline") or config.get("mode") or "translation"
         ).strip().lower()
+        if configured_kind not in SUPPORTED_PIPELINE_NAMES:
+            raise ValueError(f"unsupported pipeline: {configured_kind}; expected one of {sorted(SUPPORTED_PIPELINE_NAMES)}")
         kind = "epub_conversion" if configured_kind in CONVERSION_PIPELINE_NAMES else configured_kind
-        if not kind:
-            kind = "translation"
 
         translation = config.get("translation")
         translation = translation if isinstance(translation, Mapping) else {}

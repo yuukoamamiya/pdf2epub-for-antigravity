@@ -48,16 +48,9 @@ def prepare_refine_subagent(
 
     model = resolve_subagent_model(config, "refine")
     page_source_kind = selected_page_source_kind(output_dir, pages_dir)
-    probe_path = output_dir / "pdf_text_probe.json"
-    if probe_path.is_file():
-        try:
-            probe = json.loads(probe_path.read_text(encoding="utf-8"))
-            # Legacy artifact compatibility: old native runs already wrote
-            # page layout into ``pages/``.
-            if probe.get("recommendation") == "use_text_layer":
-                page_source_kind = "native_text"
-        except (OSError, json.JSONDecodeError):
-            pass
+    from pdf2epub.ocr_source import is_legacy_native_source
+    if is_legacy_native_source(output_dir):
+        page_source_kind = "native_text"
     # OCR keeps the untouched source beside the processed input.  Native PDF
     # bookmarks must be read from that original whenever it is available.
     pdf_path = output_dir / "input_original.pdf"

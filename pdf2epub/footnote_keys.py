@@ -10,8 +10,29 @@ from typing import Optional
 CIRCLED_LABELS = (
     "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
     "㉑㉒㉓㉔㉕㉖㉗㉘㉙㉚㉛㉜㉝㉞㉟"
-    "㊱㊲㊳㊴㊵㊶㊷㊸㊹㊺㊽㊾㊿"
+    "㊱㊲㊳㊴㊵㊶㊷㊸㊹㊺㊻㊼㊽㊾㊿"
 )
+
+_SUPERSCRIPT_DIGITS = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789")
+_KEY_RE = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def canonical_numeric_label(value: str) -> Optional[str]:
+    """Return ASCII decimal digits for recognized printed numeric forms."""
+    value = str(value or "").strip().translate(_SUPERSCRIPT_DIGITS)
+    if not value:
+        return None
+    digits: list[str] = []
+    for char in value:
+        if not char.isdecimal():
+            return None
+        digits.append(str(int(char)))
+    return "".join(digits) if len(digits) <= 4 else None
+
+
+def is_valid_footnote_key(key: str) -> bool:
+    """Whether a persisted logical marker key is safe ASCII."""
+    return bool(_KEY_RE.fullmatch(str(key or "")))
 
 
 @dataclass(frozen=True)
@@ -25,12 +46,11 @@ class FootnoteMarker:
 
 def marker_from_label(label: str) -> Optional[FootnoteMarker]:
     value = html.unescape(str(label or "")).strip()
-    if re.fullmatch(r"\d{1,4}", value):
-        return FootnoteMarker("numeric", value, value)
     if len(value) == 1 and value in CIRCLED_LABELS:
         return FootnoteMarker("numeric", value, str(CIRCLED_LABELS.index(value) + 1))
-    if re.fullmatch(r"[⁰¹²³⁴⁵⁶⁷⁸⁹]{1,4}", value):
-        return FootnoteMarker("numeric", value, value.translate(str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789")))
+    numeric = canonical_numeric_label(value)
+    if numeric is not None:
+        return FootnoteMarker("numeric", value, numeric)
     if re.fullmatch(r"\*{1,3}", value):
         return FootnoteMarker("star", value, f"fnm-star-{len(value)}")
     if value in {"†", "††"}:
@@ -50,11 +70,11 @@ def key_from_printed_marker(label: str) -> Optional[str]:
 def marker_label_from_key(key: str) -> Optional[str]:
     """Decode only the bounded reserved marker namespace, including repeats."""
     value = re.sub(r"-o(?:[2-9]|[1-9][0-9]+)$", "", str(key or ""))
-    circle = re.fullmatch(r"fnm-circle-(\d{1,2})", value)
+    circle = re.fullmatch(r"fnm-circle-([0-9]{1,2})", value)
     if circle:
         number = int(circle.group(1))
         return CIRCLED_LABELS[number - 1] if 1 <= number <= len(CIRCLED_LABELS) else None
-    number = re.fullmatch(r"fnm-number-(\d{1,4})", value)
+    number = re.fullmatch(r"fnm-number-([0-9]{1,4})", value)
     if number:
         return number.group(1)
     match = re.fullmatch(
@@ -99,4 +119,5 @@ def output_marker_key(key: str, marker_label: str, occurrence: int = 1) -> str:
 __all__ = [
     "FootnoteMarker", "marker_from_label", "marker_label_from_key",
     "output_marker_key", "CIRCLED_LABELS", "key_from_printed_marker",
+    "canonical_numeric_label", "is_valid_footnote_key",
 ]

@@ -24,6 +24,7 @@ from lxml import etree as LET
 from defusedxml import ElementTree as ET
 
 from .epub_parser import EPUBParser, EPUBResourceNotFoundError
+from .compressed_cache import CompressedExtractionCache
 from .validation import nonempty_lines, tag_mismatch_count
 from pdf2epub.subagent_runtime import resolve_subagent_model
 from pdf2epub.subagent_safety import detect_refusal
@@ -32,8 +33,8 @@ from pdf2epub.document_roles import (
     infer_translation_file_role,
     is_density_exempt_role,
 )
+from pdf2epub.special_role_audit import validate_special_role_markers
 from pdf2epub.markdown_validation import (
-    _validate_special_role_markers,
     target_language_ratio_check,
 )
 from pdf2epub.utils.common import sanitize_filename
@@ -1495,11 +1496,11 @@ class HTMLEpubPipeline:
             Number of files extracted
         """
         import json
-        from pdf2epub.subagent_runtime import _batching_config
+        from pdf2epub.batching_service import batching_config
         from .compressor import HTMLCompressor
         from .verified_compactor import VerifiedCompactor
 
-        batching = _batching_config(self.config)
+        batching = batching_config(self.config)
         if self._compressed_cache_is_current(
             max_nonempty_lines=batching["max_nonempty_lines"]
         ):
@@ -1632,64 +1633,29 @@ class HTMLEpubPipeline:
         self._write_compressed_cache(max_nonempty_lines=batching["max_nonempty_lines"])
         return extracted
 
+    def _compressed_cache_service(self):
+        return CompressedExtractionCache(
+            self.output_dir, self.epub_path, self.compressed_units_dir
+        )
+
     def _compressed_cache_path(self) -> Path:
-        return self.output_dir / "html_prepare_cache.json"
+        return self._compressed_cache_service().path
 
     def _compressed_cache_files(self) -> Dict[str, str]:
-        """Hash the active compressed units and their mappings."""
-        files: Dict[str, str] = {}
-        for mapping_path in sorted(self.compressed_units_dir.glob("*.mapping.json")):
-            files[mapping_path.name] = hashlib.sha256(mapping_path.read_bytes()).hexdigest()
-            stem = mapping_path.name[:-len(".mapping.json")]
-            try:
-                mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
-            except (OSError, UnicodeError, json.JSONDecodeError):
-                mapping = {}
-            active_names = mapping.get("translation_parts")
-            if not isinstance(active_names, list) or not active_names:
-                active_names = [f"{stem}.md"]
-            for name in active_names:
-                path = self.compressed_units_dir / str(name)
-                if path.is_file():
-                    files[path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
-        return files
+        """Compatibility wrapper for the compressed extraction cache service."""
+        return self._compressed_cache_service().files()
 
     def _compressed_cache_is_current(self, *, max_nonempty_lines: int) -> bool:
-        """Check whether extraction output can be reused safely."""
-        cache_path = self._compressed_cache_path()
-        if not cache_path.is_file() or not self.epub_path.is_file():
-            return False
-        try:
-            cache = json.loads(cache_path.read_text(encoding="utf-8"))
-            if cache.get("schema_version") != 1:
-                return False
-            if cache.get("input_epub_sha256") != hashlib.sha256(
-                self.epub_path.read_bytes()
-            ).hexdigest():
-                return False
-            if int(cache.get("max_nonempty_lines", 0)) != int(max_nonempty_lines):
-                return False
-            expected = cache.get("compressed_files")
-            if not isinstance(expected, dict) or not expected:
-                return False
-            actual = self._compressed_cache_files()
-            return expected == actual
-        except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
-            return False
+        """Compatibility wrapper for extraction receipt freshness checks."""
+        return self._compressed_cache_service().is_current(
+            max_nonempty_lines=max_nonempty_lines
+        )
 
     def _write_compressed_cache(self, *, max_nonempty_lines: int) -> None:
-        """Record the reusable extraction snapshot after a complete pass."""
-        if not self.epub_path.is_file():
-            return
-        cache = {
-            "schema_version": 1,
-            "input_epub_sha256": hashlib.sha256(
-                self.epub_path.read_bytes()
-            ).hexdigest(),
-            "max_nonempty_lines": int(max_nonempty_lines),
-            "compressed_files": self._compressed_cache_files(),
-        }
-        atomic_write_json(self._compressed_cache_path(), cache)
+        """Compatibility wrapper to write the extraction receipt."""
+        self._compressed_cache_service().write(
+            max_nonempty_lines=max_nonempty_lines
+        )
 
     def create_metadata_translation_source(
         self,
@@ -2372,7 +2338,7 @@ The output must have this shape:
             role = str(group.get("role") or "").strip().lower()
             if not role:
                 continue
-            marker_errors = _validate_special_role_markers(
+            marker_errors = validate_special_role_markers(
                 "\n".join(group["sources"]),
                 "\n".join(group["targets"]),
                 role,

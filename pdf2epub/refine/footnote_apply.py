@@ -15,7 +15,12 @@ from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from ..workflow_contracts import atomic_write_json, atomic_write_text, sha256_file
-from ..footnote_keys import marker_label_from_key, output_marker_key
+from ..footnote_keys import (
+    canonical_numeric_label,
+    is_valid_footnote_key,
+    marker_label_from_key,
+    output_marker_key,
+)
 from .pdf_evidence import pdf_evidence_mode, require_current_consensus
 from .footnote_options import (
     EFFECTIVE_FOOTNOTE_MODES,
@@ -38,6 +43,7 @@ from .footnote_status import (
     markdown_inventory as _markdown_inventory,
     unit_records as _unit_records,
 )
+from .footnote_contracts import FOOTNOTE_PREPARE_SCHEMA_VERSION
 from .endnote_normalization import normalize_endnotes
 from .endnote_review import (
     AMBIGUITIES_FILENAME,
@@ -302,6 +308,62 @@ def _write_failure(output_dir: Path, errors: list[str]) -> dict[str, Any]:
     return result
 
 
+def _write_success_report(output_dir: Path, result: dict[str, Any]) -> dict[str, Any]:
+    """Commit the validated normalization checkpoint after all outputs exist."""
+    atomic_write_json(Path(output_dir) / "footnote_normalization.json", result)
+    return result
+
+
+def _write_normalized_units(
+    source_dir: Path,
+    target_dir: Path,
+    transformed: Mapping[str, str],
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Atomically materialize converted units and return source/target hashes."""
+    target_dir.mkdir(parents=True, exist_ok=True)
+    for name, text in transformed.items():
+        atomic_write_text(target_dir / name, text)
+    source_hashes = _markdown_inventory(source_dir)
+    target_hashes = _markdown_inventory(target_dir)
+    extra_files = sorted(set(target_hashes) - set(source_hashes))
+    if extra_files:
+        raise ValueError(
+            "footnote_normalized contains stale Markdown units not present "
+            f"in ocr_markdown: {', '.join(extra_files[:20])}"
+        )
+    return source_hashes, target_hashes
+
+
+def _append_chapter_end_definitions(
+    transformed: dict[str, str],
+    records: list[dict[str, Any]],
+    notes_by_chapter: Mapping[str, list[dict[str, Any]]],
+) -> None:
+    """Render each chapter's reviewed notes at its last physical unit."""
+    final_file_by_chapter: dict[str, dict[str, Any]] = {}
+    for record in records:
+        current = final_file_by_chapter.get(record["chapter_id"])
+        if current is None or (record["unit_order"], record["part_index"]) >= (
+            current["unit_order"], current["part_index"]
+        ):
+            final_file_by_chapter[record["chapter_id"]] = record
+    for chapter_id, notes in notes_by_chapter.items():
+        target_record = final_file_by_chapter.get(chapter_id)
+        if target_record is None:
+            raise ValueError(f"no chapter-end unit found for {chapter_id}")
+        definitions = [
+            _format_footnote_definition(
+                note["output_key"], _join_footnote_parts(note["parts"])
+            )
+            for note in notes
+        ]
+        if definitions:
+            current = transformed[target_record["name"]].rstrip()
+            transformed[target_record["name"]] = (
+                current + "\n\n" + "\n\n".join(definitions) + "\n"
+            )
+
+
 def apply_footnote_normalization(
     output_dir: Path,
     *,
@@ -326,6 +388,16 @@ def apply_footnote_normalization(
         return _write_failure(output_dir, [str(exc)])
 
     report_mode = str(report.get("ocr_evidence_mode") or "single_ocr")
+    if report.get("schema_version") != FOOTNOTE_PREPARE_SCHEMA_VERSION:
+        return _write_failure(
+            output_dir,
+            ["footnote candidate report uses an older marker contract; rerun footnote-prepare"],
+        )
+    if validation.get("schema_version") != FOOTNOTE_PREPARE_SCHEMA_VERSION:
+        return _write_failure(
+            output_dir,
+            ["footnote decision validation uses an older marker contract; rerun footnote-validate"],
+        )
     report_footnote_mode = str(
         report.get("footnote_mode") or "footnotes"
     ).strip().lower()
@@ -347,7 +419,10 @@ def apply_footnote_normalization(
             ],
         )
     if config is not None:
-        configured_mode = pdf_evidence_mode(output_dir, config)
+        try:
+            configured_mode = pdf_evidence_mode(output_dir, config)
+        except ValueError as exc:
+            return _write_failure(output_dir, [f"invalid PDF evidence metadata: {exc}"])
         if report_mode != configured_mode or validation_mode != configured_mode:
             return _write_failure(
                 output_dir,
@@ -529,12 +604,14 @@ def apply_footnote_normalization(
             continue
 
         key = str(decision.get("key") or "").strip()
+        if not is_valid_footnote_key(key):
+            key = canonical_numeric_label(key) or key
         marker_label = str(
             decision.get("marker_label")
             or marker_label_from_key(key)
             or key
         ).strip()
-        if not re.fullmatch(r"[A-Za-z0-9_-]+", key):
+        if not is_valid_footnote_key(key):
             errors.append(f"moved footnote at {page}:{block_index} has no valid key")
             continue
         if source == "primary":
@@ -894,35 +971,8 @@ def apply_footnote_normalization(
         if name not in transformed:
             transformed[name] = text
 
-    # Append to the last physical file of each emitted logical TOC unit.
-    # Parts of one oversized unit share the same scope; sibling TOC units
-    # do not, so their independently restarted footnote numbers remain
-    # independent.
-    final_file_by_chapter: dict[str, dict[str, Any]] = {}
-    for record in records:
-        current = final_file_by_chapter.get(record["chapter_id"])
-        if current is None or (record["unit_order"], record["part_index"]) >= (
-            current["unit_order"],
-            current["part_index"],
-        ):
-            final_file_by_chapter[record["chapter_id"]] = record
-    for chapter_id, notes in notes_by_chapter.items():
-        target_record = final_file_by_chapter.get(chapter_id)
-        if target_record is None:
-            raise ValueError(f"no chapter-end unit found for {chapter_id}")
-        definitions = []
-        for note in notes:
-            # Each reviewed OCR block is already an ordered fragment. Preserve
-            # paragraph and Markdown block boundaries while joining fragments.
-            joined = _join_footnote_parts(note["parts"])
-            definitions.append(
-                _format_footnote_definition(note["output_key"], joined)
-            )
-        if definitions:
-            current = transformed[target_record["name"]].rstrip()
-            transformed[target_record["name"]] = (
-                current + "\n\n" + "\n\n".join(definitions) + "\n"
-            )
+    # Parts share a chapter scope; sibling TOC units keep independent numbering.
+    _append_chapter_end_definitions(transformed, records, notes_by_chapter)
 
     if report_footnote_mode != "disabled":
         scope_directory: Optional[dict[str, Any]] = None
@@ -955,23 +1005,11 @@ def apply_footnote_normalization(
             return _write_failure(output_dir, [detail])
 
     try:
-        target_dir.mkdir(parents=True, exist_ok=True)
-        for name, text in transformed.items():
-            atomic_write_text(target_dir / name, text)
+        source_hashes, target_hashes = _write_normalized_units(
+            source_dir, target_dir, transformed
+        )
     except (OSError, UnicodeError, ValueError) as exc:
         return _write_failure(output_dir, [f"could not write normalized source: {exc}"])
-
-    source_hashes = _markdown_inventory(source_dir)
-    target_hashes = _markdown_inventory(target_dir)
-    extra_files = sorted(set(target_hashes) - set(source_hashes))
-    if extra_files:
-        return _write_failure(
-            output_dir,
-            [
-                "footnote_normalized contains stale Markdown units not present "
-                f"in ocr_markdown: {', '.join(extra_files[:20])}"
-            ],
-        )
     result = {
         "schema_version": FOOTNOTE_NORMALIZATION_SCHEMA_VERSION,
         "source_kind": report.get("source_kind", "ocr"),
@@ -1016,8 +1054,7 @@ def apply_footnote_normalization(
             else None
         ),
     }
-    atomic_write_json(output_dir / "footnote_normalization.json", result)
-    return result
+    return _write_success_report(output_dir, result)
 
 
 __all__ = [

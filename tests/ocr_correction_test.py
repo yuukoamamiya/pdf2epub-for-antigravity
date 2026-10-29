@@ -105,6 +105,9 @@ def test_native_text_skips_visual_correction(tmp_path: Path):
         ),
         encoding="utf-8",
     )
+    (pages / "ocr_progress.json").write_text(
+        json.dumps({"mode": "native_text"}), encoding="utf-8"
+    )
 
     selected, kind = select_refinement_pages(tmp_path, require_correction=True)
 

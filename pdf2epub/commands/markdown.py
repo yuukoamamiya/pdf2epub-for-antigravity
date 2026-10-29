@@ -152,7 +152,7 @@ def _prepare_pdf_markdown_task(args, task: str):
             build_toc_heading_contexts,
             validate_toc_translation_subagent,
         )
-        from pdf2epub.subagent_runtime import _batching_config
+        from pdf2epub.batching_service import batching_config
 
         toc_report = validate_toc_translation_subagent(output_dir)
         if not toc_report["valid"]:
@@ -167,7 +167,7 @@ def _prepare_pdf_markdown_task(args, task: str):
         )
         global_toc_outline = build_global_toc_outline(
             output_dir,
-            token_budget=_batching_config(config)["global_toc_tokens"],
+            token_budget=batching_config(config)["global_toc_tokens"],
         )
         target_dir = output_dir / "translated"
         require_entities = PipelinePolicy.from_config(config).requires_entities

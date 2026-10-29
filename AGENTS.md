@@ -423,8 +423,10 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    的原生 layout sidecar（`coordinate_system: page_points`），它们只供旧输出恢复读取，
    新运行不再生成，也没有配置入口。若
    `pages/ocr_progress.json` 的 `mode` 为 `native_text`，说明这是旧原生运行；不要再执行
-   视觉 OCR。当
-   `ocr.secondary.enabled: true` 且配置了有效次 OCR 时，此命令还会逐页复核主 OCR，生成
+   视觉 OCR。若同目录的新 probe 与旧 native 进度冲突，先核对 PDF 哈希、运行标识/时间和逐页
+   sidecar 的 `source_kind`/`backend`；无法确认属于同一运行时人工核对恢复元数据，不得一律重新 OCR；
+   确认是完整旧原生运行后继续只读恢复。当 `ocr.secondary.enabled: true` 且配置了有效次 OCR 时，
+   此命令还会逐页复核主 OCR，生成
    `ocr_secondary/` 和 `ocr_consensus.json`；一致页自动接受，只有两个 OCR 有实质差异，
    或被共同漏检哨兵选中的页面才进入下一步视觉 Subagent。
    哨兵默认每 20 页抽查一页，并把内部文本密度显著低于相邻页的页面列为风险页；这些规则
@@ -564,7 +566,13 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    uv run pdf2epub -c config.yaml footnote-apply
    ```
 
-   标记身份解析分别记录可见标记和内部 key：数字与圈号维持历史数字别名，星号/匕首号及显式上标字母使用
+   当前脚注 prepare/decision validation 使用 schema 2；尾注边界歧义及其决定仍是独立 schema 1，
+   normalization 使用 schema 5。旧 normalization schema 1–4 或旧 prepare/decision schema 不能复用：
+   重新执行 prepare，只派发新 manifest 的 pending 项，再 validate/apply；无需重新 OCR。apply 会重建
+   `footnote_normalized/` 和成功 checkpoint，需保留旧派生版本时先备份。
+
+   标记身份解析分别记录可见标记和内部 key：全角/阿拉伯/上标十进制数字归一到 ASCII 数字逻辑 key，
+   但保留原始可见 label；`①` 至 `㊿` 映射到 1 至 50 的数字 key。星号/匕首号及显式上标字母使用
    分离的 ASCII key，字母区分大小写。裸 `a)`、乘法星号和 Markdown 强调不因形状相似而自动成为脚注；
    重复标记跨空间 lane 时必须提供能包含目标标记的精确 `marker_context`，apply 不按“最后一个匹配”猜测。
    明确 `Footnote` 标签在可靠窄边栏或表格邻接位置进入候选后仍需视觉复核。

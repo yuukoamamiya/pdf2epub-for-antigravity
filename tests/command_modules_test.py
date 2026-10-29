@@ -14,6 +14,7 @@ from pdf2epub.pdf_unit_roles import load_pdf_file_roles
 from pdf2epub.commands.sources import _resolve_pdf_polish_source
 from pdf2epub.commands.registry import register_command_parsers
 from pdf2epub.commands.runtime import load_book_context
+from pdf2epub.refine.footnote_status import FOOTNOTE_NORMALIZATION_SCHEMA_VERSION
 from pdf2epub.workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION, sha256_file
 
 
@@ -227,7 +228,7 @@ def test_polish_prefers_current_footnote_normalized_source(tmp_path: Path):
         tmp_path / "footnote_normalization.json",
         json.dumps(
             {
-                "schema_version": 4,
+                "schema_version": FOOTNOTE_NORMALIZATION_SCHEMA_VERSION,
                 "valid": True,
                 "status": "validated",
                 "source_sha256": {"chapter_1.md": sha256_file(source_dir / "chapter_1.md")},

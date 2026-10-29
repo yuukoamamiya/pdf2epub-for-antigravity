@@ -502,20 +502,9 @@ def select_refinement_pages(
     """Select the page set for TOC/refinement and report its provenance."""
     output_dir = Path(output_dir)
     raw = raw_page_dir(output_dir)
-    probe_path = output_dir / "pdf_text_probe.json"
-    probe: Dict[str, Any] = {}
-    try:
-        value = json.loads(probe_path.read_text(encoding="utf-8"))
-        if isinstance(value, dict):
-            probe = value
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        pass
-    # Legacy artifact compatibility: old native-text runs kept their page
-    # layout in ``pages/`` and never produced a visual correction checkpoint.
-    if (
-        probe.get("classification") == "native_text"
-        and probe.get("recommendation") == "use_text_layer"
-    ):
+    # Only a current legacy page-progress record selects the native evidence path.
+    from pdf2epub.ocr_source import is_legacy_native_source
+    if is_legacy_native_source(output_dir):
         return raw, "native_text"
     if config is not None and not secondary_ocr_enabled(config):
         from pdf2epub.ocr_anomalies import scan_ocr_pages
