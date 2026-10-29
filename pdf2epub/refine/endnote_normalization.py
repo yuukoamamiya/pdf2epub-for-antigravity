@@ -14,12 +14,17 @@ chapter before keys are rewritten to globally unique ``fnc-...`` keys.
 from __future__ import annotations
 
 import hashlib
+import html
 import json
 import re
 from collections import Counter, defaultdict
 from typing import Any, Mapping, Optional
 
-from ..footnote_normalization import endnote_definition_keys
+from ..footnote_normalization import (
+    _is_math_or_formula_superscript,
+    endnote_definition_keys,
+)
+from ..footnote_keys import key_from_printed_marker
 from .endnote_review import NUMBERED_PUNCT_DEF_RE as _NUMBERED_PUNCT_DEF_RE
 from .endnote_review import is_ambiguous_definition_line
 from .endnote_scopes import markdown_fence_mask, scope_for_line, scope_report
@@ -31,7 +36,7 @@ _MARKDOWN_DEF_RE = re.compile(
     re.MULTILINE,
 )
 _HTML_DEF_RE = re.compile(
-    rf"^[ \t]*<sup\b[^>]*>[ \t]*(?P<key>\d+)[ \t]*</sup>"
+    rf"^[ \t]*<sup\b[^>]*>[ \t]*(?P<key>[^<>]+?)[ \t]*</sup>"
     rf"[ \t]*(?:[.:：。）)]\s*)?(?P<content>\S.*)$",
     re.IGNORECASE,
 )
@@ -42,7 +47,7 @@ _INNER_KEY_RE = re.compile(
     r"^(?P<key>\d+)[ \t]*[.)。：:、][ \t]+(?P<content>\S.*)$"
 )
 _HTML_SUP_RE = re.compile(
-    r"<sup\b[^>]*>[ \t]*(?P<key>\d+)[ \t]*</sup>",
+    r"<sup\b[^>]*>[ \t]*(?P<key>[^<>]+?)[ \t]*</sup>",
     re.IGNORECASE,
 )
 _UNICODE_SUP_RE = re.compile(r"(?P<value>[⁰¹²³⁴⁵⁶⁷⁸⁹]+)")
@@ -56,8 +61,16 @@ _RAW_NOTE_DEF_RE = re.compile(
     rf")[ \t]+",
     re.IGNORECASE | re.MULTILINE,
 )
+_RAW_SUP_NOTE_DEF_RE = re.compile(
+    r"^[ \t]{0,3}<sup\b[^>]*>[ \t]*(?P<key>[^<>]+?)[ \t]*</sup>"
+    r"[ \t]*(?:[.:：。）)])?[ \t]+\S.*$",
+    re.IGNORECASE | re.MULTILINE,
+)
 _SCOPED_KEY_RE = re.compile(
     r"^fnc-(?P<scope>[A-Za-z0-9]+)-(?P<number>\d+)(?:-o\d+)?$"
+)
+_SCOPED_MARKER_RE = re.compile(
+    r"^fnc-[A-Za-z0-9]+-(?P<marker>fnm-.+?)(?:-o\d+)?$"
 )
 
 
@@ -78,7 +91,12 @@ def _definition_line(
 
     match = _HTML_DEF_RE.match(line)
     if match:
-        return match.group("key"), match.group("content").strip(), "html"
+        key = key_from_printed_marker(html.unescape(match.group("key")))
+        if key and (
+            not key.startswith("fnm-letter-")
+            or key in body_keys
+        ):
+            return key, match.group("content").strip(), "html"
 
     match = _NUMBERED_PUNCT_DEF_RE.match(line)
     if match:
@@ -268,7 +286,15 @@ def _raw_body_keys(texts: Mapping[str, str], note_files: set[str]) -> set[str]:
             line for index, line in enumerate(lines) if not fenced_lines[index]
         )
         keys.update(match.group("key") for match in _MARKDOWN_REF_RE.finditer(body_text))
-        keys.update(match.group("key") for match in _HTML_SUP_RE.finditer(body_text))
+        keys.update(
+            key
+            for match in _HTML_SUP_RE.finditer(body_text)
+            if (key := key_from_printed_marker(html.unescape(match.group("key"))))
+            and not (
+                key.startswith("fnm-letter-")
+                and _is_math_or_formula_superscript(body_text, match.start())
+            )
+        )
         for match in _UNICODE_SUP_RE.finditer(body_text):
             keys.add(match.group("value").translate(_UNICODE_DIGITS))
     return keys
@@ -279,13 +305,18 @@ def _replace_body_markers(text: str, definition_keys: set[str]) -> tuple[str, in
 
     def replace_html(match: re.Match[str]) -> str:
         nonlocal converted
-        key = match.group("key")
+        key = key_from_printed_marker(html.unescape(match.group("key")))
+        if not key:
+            return match.group(0)
+        if (
+            key.startswith("fnm-letter-")
+            and _is_math_or_formula_superscript(text, match.start())
+        ):
+            return match.group(0)
         if key not in definition_keys:
             return match.group(0)
         converted += 1
         return f"[^{key}]"
-
-    text = _HTML_SUP_RE.sub(replace_html, text)
 
     def replace_unicode(match: re.Match[str]) -> str:
         nonlocal converted
@@ -295,8 +326,17 @@ def _replace_body_markers(text: str, definition_keys: set[str]) -> tuple[str, in
         converted += 1
         return f"[^{key}]"
 
-    text = _UNICODE_SUP_RE.sub(replace_unicode, text)
-    return text, converted
+    lines = text.splitlines(keepends=True)
+    fenced = markdown_fence_mask([line.rstrip("\r\n") for line in lines])
+    output: list[str] = []
+    for index, line in enumerate(lines):
+        if fenced[index]:
+            output.append(line)
+            continue
+        output.append(
+            _UNICODE_SUP_RE.sub(replace_unicode, _HTML_SUP_RE.sub(replace_html, line))
+        )
+    return "".join(output), converted
 
 
 def _empty_report(status: str, note_files: set[str]) -> dict[str, Any]:
@@ -965,12 +1005,24 @@ def validate_normalized_endnotes(
     definition_keys: set[str] = set()
     errors: list[str] = []
     for name in sorted(note_files):
-        keys = set(endnote_definition_keys(source_texts[name], file_role="notes"))
+        source = source_texts[name]
+        keys = set(endnote_definition_keys(source, file_role="notes"))
         definition_keys.update(keys)
         raw_defs = [
             match.group("html_key") or match.group("number_key")
-            for match in _RAW_NOTE_DEF_RE.finditer(source_texts[name])
+            for match in _RAW_NOTE_DEF_RE.finditer(source)
         ]
+        lines = source.splitlines()
+        fenced_lines = markdown_fence_mask(lines)
+        for index, line in enumerate(lines):
+            if fenced_lines[index]:
+                continue
+            match = _RAW_SUP_NOTE_DEF_RE.match(line)
+            if match is None:
+                continue
+            key = key_from_printed_marker(html.unescape(match.group("key")))
+            if key and key.startswith("fnm-"):
+                raw_defs.append(key)
         if raw_defs:
             errors.append(
                 f"raw centralized endnote definitions remain in {name}: "
@@ -978,22 +1030,38 @@ def validate_normalized_endnotes(
             )
 
     scoped_numbers: set[str] = set()
+    scoped_markers: set[str] = set()
     for key in definition_keys:
         match = _SCOPED_KEY_RE.match(key)
         if match:
             scoped_numbers.add(match.group("number"))
+        marker_match = _SCOPED_MARKER_RE.match(key)
+        if marker_match:
+            scoped_markers.add(marker_match.group("marker"))
 
     for name, text in source_texts.items():
         if name in note_files:
             continue
-        raw_refs = [
-            match.group("key")
-            for match in _HTML_SUP_RE.finditer(text)
-            if match.group("key") in definition_keys
-        ]
+        lines = text.splitlines()
+        fenced_lines = markdown_fence_mask(lines)
+        body_text = "\n".join(
+            line for index, line in enumerate(lines) if not fenced_lines[index]
+        )
+        raw_refs = []
+        for match in _HTML_SUP_RE.finditer(body_text):
+            key = key_from_printed_marker(html.unescape(match.group("key")))
+            if (
+                key
+                and (key in definition_keys or key in scoped_markers)
+                and not (
+                    key.startswith("fnm-letter-")
+                    and _is_math_or_formula_superscript(body_text, match.start())
+                )
+            ):
+                raw_refs.append(match.group("key").strip())
         raw_refs.extend(
             match.group("value").translate(_UNICODE_DIGITS)
-            for match in _UNICODE_SUP_RE.finditer(text)
+            for match in _UNICODE_SUP_RE.finditer(body_text)
             if match.group("value").translate(_UNICODE_DIGITS) in definition_keys
         )
         if raw_refs:
@@ -1004,14 +1072,25 @@ def validate_normalized_endnotes(
             continue
         residual_scoped = [
             match.group("key")
-            for match in _HTML_SUP_RE.finditer(text)
+            for match in _HTML_SUP_RE.finditer(body_text)
             if match.group("key") in scoped_numbers
+            and not _is_math_or_formula_superscript(body_text, match.start())
         ]
-        for match in _UNICODE_SUP_RE.finditer(text):
+        residual_scoped.extend(
+            match.group("key").strip()
+            for match in _HTML_SUP_RE.finditer(body_text)
+            if key_from_printed_marker(html.unescape(match.group("key"))) in scoped_markers
+            and not (
+                key_from_printed_marker(html.unescape(match.group("key")))
+                and key_from_printed_marker(html.unescape(match.group("key"))).startswith("fnm-letter-")
+                and _is_math_or_formula_superscript(body_text, match.start())
+            )
+        )
+        for match in _UNICODE_SUP_RE.finditer(body_text):
             val = match.group("value").translate(_UNICODE_DIGITS)
             if val in scoped_numbers:
                 if val in {"2", "3"}:
-                    prefix = text[max(0, match.start() - 10) : match.start()]
+                    prefix = body_text[max(0, match.start() - 10) : match.start()]
                     if _PHYSICAL_UNIT_EXPONENT_RE.search(prefix):
                         continue
                 residual_scoped.append(val)

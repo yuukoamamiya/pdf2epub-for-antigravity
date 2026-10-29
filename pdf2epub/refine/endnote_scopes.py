@@ -9,9 +9,12 @@ unmatched headings are reported so normalization can fail closed.
 from __future__ import annotations
 
 import re
+import html
 from collections import defaultdict
 from typing import Any, Iterable, Mapping, Optional
 
+from ..footnote_keys import key_from_printed_marker
+from ..footnote_normalization import _is_math_or_formula_superscript
 from .footnote_structure import FOOTNOTE_STRUCTURE_EXEMPT_TYPES
 
 
@@ -44,13 +47,13 @@ _TITLE_OUTER_MARK_PAIRS = {
     ("'", "'"),
 }
 _HTML_SUP_RE = re.compile(
-    r"<sup\b[^>]*>[ \t]*(?P<key>\d+)[ \t]*</sup>",
+    r"<sup\b[^>]*>[ \t]*(?P<key>[^<>]+?)[ \t]*</sup>",
     re.IGNORECASE,
 )
 _UNICODE_SUP_RE = re.compile(r"(?P<value>[⁰¹²³⁴⁵⁶⁷⁸⁹]+)")
 _UNICODE_DIGITS = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789")
-_MARKDOWN_REF_RE = re.compile(r"\[\^(?P<key>\d+)\](?!:)")
-_MARKDOWN_DEF_RE = re.compile(r"^[ \t]*\[\^(?P<key>\d+)\]:", re.MULTILINE)
+_MARKDOWN_REF_RE = re.compile(r"\[\^(?P<key>[A-Za-z0-9_-]+)\](?!:)")
+_MARKDOWN_DEF_RE = re.compile(r"^[ \t]*\[\^(?P<key>[A-Za-z0-9_-]+)\]:", re.MULTILINE)
 
 
 def markdown_fence_mask(lines: list[str]) -> list[bool]:
@@ -447,9 +450,15 @@ def _collect_scope_references(
             if not scope_key:
                 continue
             for match in _HTML_SUP_RE.finditer(line):
+                key = key_from_printed_marker(html.unescape(match.group("key")))
+                if not key or (
+                    key.startswith("fnm-letter-")
+                    and _is_math_or_formula_superscript(line, match.start())
+                ):
+                    continue
                 references[scope_key].append(
                     {
-                        "key": match.group("key"),
+                        "key": key,
                         "file": name,
                         "line": line_number,
                         "start": match.start(),

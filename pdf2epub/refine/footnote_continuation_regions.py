@@ -69,6 +69,13 @@ def _continuous_numeric_regions(
         bbox = _normalise_bbox(block, sidecar)
         if not text or not bbox or not key or _NUMERIC_ONLY_RE.fullmatch(text):
             continue
+        # Special markers (for example *, †, or ‡) remain ordinary candidates
+        # for their owning review path, but numeric sequence inference must not
+        # assume they can be converted to an integer.
+        try:
+            numeric_key = int(key)
+        except (TypeError, ValueError):
+            continue
         if bbox[3] < minimum_edge:
             continue
         label = str(block.get("label") or "").strip()
@@ -77,7 +84,7 @@ def _continuous_numeric_regions(
         records.append(
             {
                 "index": index,
-                "key": int(key),
+                "key": numeric_key,
                 "bbox": bbox,
                 "label": label,
             }

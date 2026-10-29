@@ -582,6 +582,14 @@ Subagent；双 OCR 模式下，主/次候选存在性或 layout 证据不同的�
 `footnote_decisions.json` 中的 `region_audits` 和每个 review block 的决定，随后用
 `footnote-validate` 校验；兼容恢复仍接受 flat `decisions`。旧原生文字运行不运行视觉 OCR
 共识，即使配置残留次 OCR 开关，也只使用原生版面证据。
+候选/区域报告可附 `layout_scope`；bbox、粗略位置及附近结构标签只是位置提示，不证明语义归属。
+明确 `Footnote` 标签只有在可靠页底、窄边栏或表格邻接位置进入候选，非页底/表格邻接项仍需视觉复核。
+数字和圈号继续共享历史数字 key；`*`/`**`/`***`、`†`/`‡` 与显式 `<sup>a</sup>` 字母使用独立
+ASCII key，字母区分大小写，显示时保留印刷标签。裸 `a)`、乘法星号和 Markdown 强调不因字形自动
+成为注脚。相同标记跨空间 lane 有歧义时，Subagent 必须给出包含目标标记的精确 `marker_context`；
+apply 无法唯一定位时阻断，不按出现顺序选择。
+集中 typed Notes 也只把显式 `<sup>symbol/letter</sup>` 定义与正文显式上标引用配对后归一化；裸段首字母
+和 `a)` 不参与集中尾注匹配。
 
 脚注和整页插图的证据选择由同一套本地边界负责：`refine/pdf_evidence.py` 统一判断
 `native_text`、`single_ocr` 和 `two_ocr`，`refine/layout_evidence.py` 统一读取 sidecar、

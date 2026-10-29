@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import re
+import html
 from collections import Counter
 from typing import List
+
+from .footnote_keys import key_from_printed_marker
 
 
 _NOTE_HEADING_RE = re.compile(
@@ -12,7 +15,7 @@ _NOTE_HEADING_RE = re.compile(
     re.IGNORECASE,
 )
 _HTML_SUP_RE = re.compile(
-    r"<sup\b[^>]*>\s*(?P<key>\d+)\s*</sup>", re.IGNORECASE
+    r"<sup\b[^>]*>\s*(?P<key>[A-Za-z0-9_-]+)\s*</sup>", re.IGNORECASE
 )
 _UNICODE_SUP_RE = re.compile(r"(?P<value>[⁰¹²³⁴⁵⁶⁷⁸⁹]+)")
 _UNICODE_DIGITS = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789")
@@ -28,6 +31,11 @@ _RAW_NOTE_DEF_RE = re.compile(
     r")[ \t]+",
     re.IGNORECASE | re.MULTILINE,
 )
+_RAW_SUP_NOTE_DEF_RE = re.compile(
+    r"^[ \t]{0,3}<sup\b[^>]*>[ \t]*(?P<key>[^<>]+?)[ \t]*</sup>"
+    r"[ \t]*(?:[.:：。）)])?[ \t]+",
+    re.IGNORECASE | re.MULTILINE,
+)
 
 
 def endnote_definition_keys(text: str, *, file_role: str | None = None) -> List[str]:
@@ -39,6 +47,12 @@ def endnote_definition_keys(text: str, *, file_role: str | None = None) -> List[
     """
     keys = [match.group("key") for match in _MARKDOWN_DEF_RE.finditer(text)]
     if str(file_role or "").strip().lower() == "notes":
+        keys.extend(
+            key
+            for match in _RAW_SUP_NOTE_DEF_RE.finditer(text)
+            if (key := key_from_printed_marker(html.unescape(match.group("key"))))
+            and key != html.unescape(match.group("key")).strip()
+        )
         keys.extend(
             match.group("html_key") or match.group("number_key")
             for match in _RAW_NOTE_DEF_RE.finditer(text)
@@ -155,9 +169,14 @@ def validate_polish_footnote_normalization(
                 f"{Counter(remaining_raw_defs)}"
             )
         remaining_refs = [
-            match.group("key")
+            key_from_printed_marker(match.group("key")) or match.group("key")
             for match in _HTML_SUP_RE.finditer(target_text)
-            if match.group("key") in expected_keys
+            if (key_from_printed_marker(match.group("key")) or match.group("key")) in expected_keys
+            and not (
+                key_from_printed_marker(match.group("key"))
+                and key_from_printed_marker(match.group("key")).startswith("fnm-letter-")
+                and _is_math_or_formula_superscript(target_text, match.start())
+            )
         ]
         if remaining_refs:
             errors.append(

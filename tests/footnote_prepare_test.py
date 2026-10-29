@@ -326,7 +326,7 @@ def test_footnote_status_reports_candidate_hash_as_root_cause(tmp_path: Path):
     normalization.write_text(
         json.dumps(
             {
-                "schema_version": 3,
+                "schema_version": 4,
                 "valid": True,
                 "status": "validated",
                 "ocr_evidence_mode": "single_ocr",
@@ -377,7 +377,7 @@ def test_footnote_status_requires_current_toc_for_scoped_endnotes(tmp_path: Path
         (tmp_path / "footnote_normalization.json").write_text(
             json.dumps(
                 {
-                    "schema_version": 3,
+                    "schema_version": 4,
                     "valid": True,
                     "status": "validated",
                     "ocr_evidence_mode": "single_ocr",

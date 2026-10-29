@@ -175,6 +175,11 @@ PDF 精修的核心领域模块如下：
 候选、决定校验、materialize 和 status 阶段都用当前 effective mode 比较 checkpoint；
 TOC 的 `footnote_mode` 变化导致 effective mode 改变时视为 stale，必须重跑
 `footnote-prepare → footnote-validate → footnote-apply`。
+脚注匹配使用 `pdf2epub/footnote_keys.py` 中的 dependency-free marker codec：打印标签与内部安全 key
+分开记录，数字/圈号保持数字别名，特殊符号和明确上标字母采用独立 key；读者显示层不暴露重复编号
+所用的内部 occurrence suffix。候选中的 `layout_scope` 仅为几何提示；同一 key 跨空间 lane 时必须经
+`marker_context` 唯一绑定正文引用。裸 `a)`、乘法符号或 Markdown 强调不会自动升级为脚注标记。
+集中 typed Notes 的特殊标记路径只接收成对的显式上标定义/引用；通用文字行不进入该匹配器。
 TOC 中标记为
   `toc`、`notes`、`bibliography`、`index`、`author_notes`、
   `catalog`、`ad`、`copyright`、`frontmatter`、`metadata` 或 `cover` 的单元也不会进入
@@ -580,7 +585,7 @@ polish 或 translate Subagent。原始 OCR 单元不覆盖。
 尾注定义的后续段落和 Markdown 块通过四空格续行保留在定义内，并在下一个定义、明确标题或
 已知 scope 边界处停止。单一 `(scope, key)` 定义可供该 scope 的多个引用共同使用；同一范围
 存在多个定义时仍按顺序逐次配对，额外引用不猜测目标。
-该输出合同已更新到 `footnote_normalization.json` schema 3；旧 schema 2 checkpoint 会失效，
+该输出合同已更新到 `footnote_normalization.json` schema 4；旧 schema 1–3 checkpoint 会失效，
 须重新运行 `footnote-prepare → footnote-validate → footnote-apply`。
 `footnote_normalization.json` 的 `endnotes` 子报告记录最终定义键、转换引用数、scope 统计、
 双层编号识别数、重复定义和孤立定义，供后续审计。

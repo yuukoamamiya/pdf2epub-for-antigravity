@@ -15,7 +15,7 @@ from .footnote_options import (
 from .pdf_evidence import pdf_evidence_mode, require_current_consensus
 
 
-FOOTNOTE_NORMALIZATION_SCHEMA_VERSION = 3
+FOOTNOTE_NORMALIZATION_SCHEMA_VERSION = 4
 _SAFE_FILENAME_RE = re.compile(r"^[^/\\]+\.md$")
 
 

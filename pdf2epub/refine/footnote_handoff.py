@@ -305,6 +305,13 @@ def prepare_footnote_subagent(
         "even when no candidate was emitted.\n\nCandidate page sidecars and visual evidence:",
     )
     prompt += (
+        "\n\nMarker identity contract: for moved definitions, copy the candidate's exact safe `key` and exact visible `marker_label`. "
+        "`marker_label` preserves printed spelling and case (`*`, `**`, `†`, `‡`, `a`, `A`); `key` is internal ASCII identity. "
+        "Never substitute one for the other. A bare `a)` may be a list item, and bare `*` may be multiplication or Markdown emphasis; "
+        "classify only with explicit note syntax/label and page-image evidence. If multiple body markers could match, provide an exact short `marker_context`; apply refuses to guess. "
+        "Continuations use the start's internal `key`.\n\n"
+    )
+    prompt += (
         "\n\nFor every secondary-only moved decision, also include "
         "`primary_disposition`: `absent` when the Chandra/refinement text truly "
         "does not contain this note, or `remove` when it contains a duplicate "

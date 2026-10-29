@@ -18,6 +18,7 @@ from .footnote_continuation_regions import (
 )
 from .footnote_layout import (
     DEFAULT_REGION_MAX_GAP,
+    layout_scope as _layout_scope,
     region_compact_blocks as _region_compact_blocks,
     region_layout_evidence as _region_layout_evidence,
     region_union_bbox as _region_union_bbox,
@@ -58,6 +59,111 @@ def build_page_footnote_regions(
         return []
     blocks = sidecar.get("blocks", [])
     ordered = sorted(by_index)
+    scopes = {
+        index: _layout_scope(sidecar, index)
+        for index in ordered
+        if 0 <= index < len(blocks) and isinstance(blocks[index], Mapping)
+    }
+    # Infer candidate lanes from actual horizontal overlap, not the page
+    # midpoint. That keeps centered or narrow single-column text together.
+    lane_components: list[list[int]] = []
+    ambiguous_lane_blocks: set[int] = set()
+    for index in ordered:
+        bbox = scopes.get(index, {}).get("bbox")
+        if not bbox:
+            continue
+        neighbors = [
+            other
+            for other in ordered
+            if other != index
+            and scopes.get(other, {}).get("bbox")
+            and _horizontal_overlap(bbox, scopes[other]["bbox"]) >= 0.2
+        ]
+        if any(
+            _horizontal_overlap(
+                scopes[left]["bbox"], scopes[right]["bbox"]
+            ) < 0.2
+            for neighbor_index, left in enumerate(neighbors)
+            for right in neighbors[neighbor_index + 1 :]
+        ):
+            ambiguous_lane_blocks.add(index)
+    for index in ordered:
+        scope = scopes.get(index, {})
+        bbox = scope.get("bbox")
+        if not bbox:
+            lane_components.append([index])
+            continue
+        width = float(bbox[2]) - float(bbox[0])
+        placement = str(scope.get("placement") or "")
+        if placement in {"full_width", "margin_left", "margin_right"}:
+            lane_components.append([index])
+            continue
+        if index in ambiguous_lane_blocks:
+            lane_components.append([index])
+            continue
+        matches: list[int] = []
+        for component_index, component in enumerate(lane_components):
+            if any(member in ambiguous_lane_blocks for member in component):
+                continue
+            if len(component) == 1:
+                other = scopes.get(component[0], {})
+                other_bbox = other.get("bbox")
+                other_width = (
+                    float(other_bbox[2]) - float(other_bbox[0])
+                    if other_bbox
+                    else 0.0
+                )
+                if str(other.get("placement") or "") in {
+                    "full_width",
+                    "margin_left",
+                    "margin_right",
+                }:
+                    continue
+            else:
+                other_bbox = None
+                for member in component:
+                    member_box = scopes.get(member, {}).get("bbox")
+                    if member_box and _horizontal_overlap(bbox, member_box) >= 0.2:
+                        other_bbox = member_box
+                        break
+                other_width = (
+                    float(other_bbox[2]) - float(other_bbox[0])
+                    if other_bbox
+                    else 0.0
+                )
+            if (
+                other_bbox
+                and width < 0.72
+                and other_width < 0.72
+                and _horizontal_overlap(bbox, other_bbox) >= 0.2
+            ):
+                matches.append(component_index)
+        if not matches:
+            lane_components.append([index])
+        elif len(matches) > 1:
+            # A mid-width block touching two otherwise separate lanes must not
+            # collapse their evidence into one region.
+            lane_components.append([index])
+            ambiguous_lane_blocks.add(index)
+        else:
+            first = matches[0]
+            lane_components[first].append(index)
+    for lane_number, component in enumerate(lane_components, 1):
+        lane_id = f"candidate_lane_{lane_number:02d}"
+        for index in component:
+            scope = scopes.get(index)
+            if scope and scope.get("placement") not in {
+                "full_width",
+                "margin_left",
+                "margin_right",
+            }:
+                scope["scope_id"] = lane_id
+    key_scopes: dict[str, set[str]] = {}
+    for index, item in by_index.items():
+        key = str(item.get("key") or "").strip()
+        scope_id = str(scopes.get(index, {}).get("scope_id") or "")
+        if key and scope_id:
+            key_scopes.setdefault(key, set()).add(scope_id)
     groups: list[list[int]] = []
     for index in ordered:
         if not groups:
@@ -79,9 +185,16 @@ def build_page_footnote_regions(
             if current_box and previous_box
             else 1.0
         )
-        linked = index == previous + 1 and (
-            vertical_gap <= DEFAULT_REGION_MAX_GAP
-            or _horizontal_overlap(current_box, previous_box) >= 0.35
+        same_scope = (
+            scopes.get(index, {}).get("scope_id")
+            == scopes.get(previous, {}).get("scope_id")
+        )
+        horizontal_overlap = _horizontal_overlap(current_box, previous_box)
+        linked = (
+            index == previous + 1
+            and same_scope
+            and horizontal_overlap >= 0.2
+            and -DEFAULT_REGION_MAX_GAP <= vertical_gap <= DEFAULT_REGION_MAX_GAP
         )
         if linked:
             groups[-1].append(index)
@@ -113,7 +226,39 @@ def build_page_footnote_regions(
             right == left + 1
             for left, right in zip(numeric_keys, numeric_keys[1:])
         )
+        layout_evidence = _region_layout_evidence(
+            sidecar,
+            indexes,
+            context_indexes=context_indexes,
+        )
         reasons: list[str] = []
+        if any(
+            len(key_scopes.get(str(item.get("key") or ""), set())) > 1
+            for item in item_candidates
+            if item.get("key")
+        ):
+            reasons.append("duplicate_key_across_layout_scopes")
+        if any(int(item["block"]) in ambiguous_lane_blocks for item in item_candidates):
+            reasons.append("layout_lane_bridge_ambiguity")
+        if any(
+            scopes.get(int(item["block"]), {}).get("placement")
+            in {"margin_left", "margin_right"}
+            for item in item_candidates
+            if str(item.get("block", "")).lstrip("-").isdigit()
+        ):
+            reasons.append("margin_note_requires_visual_review")
+        if (
+            not layout_evidence.get("tail_aligned")
+            and any(
+                _FOOTNOTE_LABEL_RE.search(str(item.get("label") or ""))
+                and item.get("key")
+                and item.get("local_role") != "footnote_continuation"
+                and scopes.get(int(item["block"]), {}).get("available")
+                for item in item_candidates
+                if str(item.get("block", "")).lstrip("-").isdigit()
+            )
+        ):
+            reasons.append("explicit_footnote_label_outside_page_tail")
         if any(item.get("audit_only") for item in item_candidates):
             reasons.append("suspected_missed_bottom_numeric_block")
         if any(
@@ -175,11 +320,6 @@ def build_page_footnote_regions(
             ):
                 reasons.append("footnote_region_boundary_uncertain")
 
-        layout_evidence = _region_layout_evidence(
-            sidecar,
-            indexes,
-            context_indexes=context_indexes,
-        )
         # A numeric run is not semantic proof. Local acceptance requires an
         # independent signal plus page-relative tail evidence.
         all_numbered = bool(item_candidates) and all(
@@ -271,6 +411,9 @@ def build_page_footnote_regions(
             "disposition": role,
             "reasons": sorted(set(reasons)),
             "layout_evidence": layout_evidence,
+            "layout_scopes": [
+                {"block": index, **scopes.get(index, {})} for index in indexes
+            ],
             "local_acceptance_evidence": local_acceptance_evidence,
             "blocks": _region_compact_blocks(sidecar, all_candidates, indexes),
         }
@@ -279,6 +422,12 @@ def build_page_footnote_regions(
             item["region_id"] = region_id
             item["region_confidence"] = region["confidence"]
             item["layout_evidence"] = layout_evidence
+            item["layout_scope"] = scopes.get(int(item["block"]), {})
+            if (
+                item.get("key")
+                and len(key_scopes.get(str(item.get("key") or ""), set())) > 1
+            ):
+                item["requires_marker_context"] = True
             if "ordinary_text_below_numeric_block" in reasons:
                 item["confidence"] = "review"
                 item["disposition"] = "review_required"

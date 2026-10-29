@@ -29,6 +29,8 @@ DEFAULT_REGION_MAX_GAP = 0.035
 DEFAULT_RECALL_AUDIT_EDGE_MARGIN = 0.04
 DEFAULT_LAYOUT_GAP_FACTOR = 2.0
 DEFAULT_LAYOUT_TAIL_FACTOR = 1.5
+DEFAULT_TABLE_NOTE_MAX_GAP = 0.035
+_TABLE_LABEL_RE = re.compile(r"\btable\b", re.IGNORECASE)
 _INLINE_LIST_CONTEXT_END_RE = re.compile(r"(?:[:：]|[.!?。！？])\s*$")
 
 
@@ -206,6 +208,137 @@ def region_layout_evidence(
         "median_block_height": round(median_height, 6),
         "median_vertical_gap": round(median_gap, 6),
     }
+
+
+def layout_scope(
+    sidecar: Mapping[str, Any], block_index: int
+) -> dict[str, Any]:
+    """Describe a block's coarse page position for human review.
+
+    Scope labels are geometric hints only. They never establish note meaning
+    or ownership. Wide blocks are kept distinct from column lanes so a footer
+    spanning both columns cannot bridge two otherwise separate note regions.
+    """
+    blocks = sidecar.get("blocks", [])
+    if not isinstance(blocks, list) or not 0 <= int(block_index) < len(blocks):
+        return {"available": False, "placement": "unknown", "scope_id": None}
+    block = blocks[int(block_index)]
+    if not isinstance(block, Mapping):
+        return {"available": False, "placement": "unknown", "scope_id": None}
+    bbox = _normalise_bbox(block, sidecar)
+    if not bbox:
+        return {"available": False, "placement": "unknown", "scope_id": None}
+
+    x0, y0, x1, y1 = (float(value) for value in bbox)
+    width = x1 - x0
+    center = (x0 + x1) / 2
+    if width >= 0.72:
+        placement = "full_width"
+        scope_id = "full_width"
+    elif x1 <= 0.22:
+        placement = "margin_left"
+        scope_id = "margin_left"
+    elif x0 >= 0.78:
+        placement = "margin_right"
+        scope_id = "margin_right"
+    elif center < 0.5:
+        placement = "column_left"
+        scope_id = "column_left"
+    else:
+        placement = "column_right"
+        scope_id = "column_right"
+
+    nearby: list[dict[str, Any]] = []
+    for index, candidate in enumerate(blocks):
+        if index == int(block_index) or not isinstance(candidate, Mapping):
+            continue
+        candidate_bbox = _normalise_bbox(candidate, sidecar)
+        if not candidate_bbox:
+            continue
+        vertical_distance = max(
+            0.0,
+            y0 - float(candidate_bbox[3]),
+            float(candidate_bbox[1]) - y1,
+        )
+        if vertical_distance > 0.06:
+            continue
+        candidate_center = (float(candidate_bbox[0]) + float(candidate_bbox[2])) / 2
+        same_lane = (
+            scope_id == "full_width"
+            or (candidate_center < 0.5) == (center < 0.5)
+        )
+        if not same_lane:
+            continue
+        label = str(candidate.get("label") or "").strip()
+        nearby.append(
+            {
+                "block": index,
+                "label": label,
+                "bbox": [round(float(value), 6) for value in candidate_bbox],
+            }
+        )
+    return {
+        "available": True,
+        "scope_id": scope_id,
+        "placement": placement,
+        "bbox": [round(value, 6) for value in bbox],
+        "nearby_blocks": nearby,
+    }
+
+
+def table_adjacent(
+    sidecar: Mapping[str, Any],
+    block_index: int,
+    bbox: Optional[Iterable[float]] = None,
+    *,
+    max_gap: float = DEFAULT_TABLE_NOTE_MAX_GAP,
+) -> bool:
+    """Return whether a block follows a nearby labeled table geometrically.
+
+    This is a location fact for candidate review, not evidence that the block
+    is a table note. The table must precede the block in sidecar order, end
+    above it on the page, and overlap its horizontal span.
+    """
+    blocks = sidecar.get("blocks", [])
+    index = int(block_index)
+    if not isinstance(blocks, list) or not 0 <= index < len(blocks):
+        return False
+    candidate_block = blocks[index]
+    if not isinstance(candidate_block, Mapping):
+        return False
+    candidate_bbox = (
+        [float(value) for value in bbox]
+        if bbox is not None
+        else _normalise_bbox(candidate_block, sidecar)
+    )
+    if not candidate_bbox or len(candidate_bbox) != 4:
+        return False
+    candidate_width = max(0.0, candidate_bbox[2] - candidate_bbox[0])
+    if candidate_width <= 0:
+        return False
+    for table_index, table_block in enumerate(blocks[:index]):
+        if not isinstance(table_block, Mapping):
+            continue
+        if not _TABLE_LABEL_RE.search(str(table_block.get("label") or "")):
+            continue
+        table_bbox = _normalise_bbox(table_block, sidecar)
+        if not table_bbox:
+            continue
+        gap = float(candidate_bbox[1]) - float(table_bbox[3])
+        table_width = max(0.0, float(table_bbox[2]) - float(table_bbox[0]))
+        overlap = max(
+            0.0,
+            min(float(candidate_bbox[2]), float(table_bbox[2]))
+            - max(float(candidate_bbox[0]), float(table_bbox[0])),
+        )
+        denominator = min(candidate_width, table_width)
+        if (
+            0.0 <= gap <= float(max_gap)
+            and denominator > 0
+            and overlap / denominator >= 0.2
+        ):
+            return True
+    return False
 
 
 def body_flow_warning(
@@ -556,6 +689,8 @@ _is_ordinary_body_block = is_ordinary_body_block
 _layout_records = layout_records
 _page_layout_profile = page_layout_profile
 _region_layout_evidence = region_layout_evidence
+_layout_scope = layout_scope
+_table_adjacent = table_adjacent
 _body_flow_warning = body_flow_warning
 _inline_ordered_list_warning = inline_ordered_list_warning
 _bottom_geometry = bottom_geometry
@@ -572,9 +707,11 @@ __all__ = [
     "inline_ordered_list_warning",
     "is_ordinary_body_block",
     "layout_records",
+    "layout_scope",
     "page_layout_profile",
     "region_compact_blocks",
     "region_layout_evidence",
     "region_union_bbox",
     "suspected_missed_block_indexes",
+    "table_adjacent",
 ]

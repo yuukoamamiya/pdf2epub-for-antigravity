@@ -227,7 +227,7 @@ def test_polish_prefers_current_footnote_normalized_source(tmp_path: Path):
         tmp_path / "footnote_normalization.json",
         json.dumps(
             {
-                "schema_version": 3,
+                "schema_version": 4,
                 "valid": True,
                 "status": "validated",
                 "source_sha256": {"chapter_1.md": sha256_file(source_dir / "chapter_1.md")},

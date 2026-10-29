@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from ..workflow_contracts import sha256_file
+from ..footnote_keys import CIRCLED_LABELS, marker_from_label, marker_label_from_key
 
 
 _MARKDOWN_REF_RE = re.compile(r"\[\^(?P<key>[A-Za-z0-9_-]+)\]")
@@ -27,12 +28,9 @@ _AUTO_LINK_RE = re.compile(
 )
 _SUPERSCRIPT_DIGITS = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789")
 _DIGITS_TO_SUPERSCRIPT = str.maketrans("0123456789", "⁰¹²³⁴⁵⁶⁷⁸⁹")
-_CIRCLED_CHARS = (
-    "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
-    "㉑㉒㉓㉔㉕㉖㉗㉘㉙㉚㉛㉜㉝㉞㉟"
-    "㊱㊲㊳㊴㊵㊶㊷㊸㊹㊺㊻㊼㊽㊾㊿"
-)
+_CIRCLED_CHARS = CIRCLED_LABELS
 _CIRCLED_DIGITS_MAP = {str(i): char for i, char in enumerate(_CIRCLED_CHARS, 1)}
+
 _ORDERED_LIST_VARIANT = "\x00ordered-list\x00"
 _UNORDERED_LIST_VARIANT = "\x00unordered-list\x00"
 
@@ -208,6 +206,9 @@ def _expand_markdown_definition_prefix(
     line_start = source.rfind("\n", 0, start) + 1
     prefix = re.match(r"\[\^[A-Za-z0-9_-]+\]\s*:\s*", source[line_start:])
     if prefix and line_start <= start <= line_start + len(prefix.group(0)):
+        return line_start, end
+    marker_prefix = re.match(r"^\\?\*{1,3}[ \t]+", source[line_start:])
+    if marker_prefix and line_start <= start <= line_start + len(marker_prefix.group(0)):
         return line_start, end
     return start, end
 
@@ -602,7 +603,14 @@ def load_sidecar_block(
     return block
 
 
-def marker_spans(source: str, key: str) -> list[tuple[int, int, str]]:
+def marker_spans(
+    source: str, key: str, marker_label: str | None = None
+) -> list[tuple[int, int, str]]:
+    printed_label = str(marker_label or marker_label_from_key(key) or key)
+    parsed_label = marker_from_label(printed_label)
+    special_label = marker_label_from_key(key) is not None or bool(
+        parsed_label and parsed_label.kind == "numeric" and printed_label != str(key)
+    )
     escaped = re.escape(str(key))
     spans: list[tuple[int, int, str]] = []
     html_sup_ranges = [
@@ -626,16 +634,35 @@ def marker_spans(source: str, key: str) -> list[tuple[int, int, str]]:
         line_start = source.rfind("\n", 0, index) + 1
         return bool(re.match(r"^\[\^[^\]\n]+\]\s*:", source[line_start:]))
 
-    for match in re.finditer(
-        _HTML_SUP_RE_TEMPLATE.format(key=escaped),
-        source,
-        flags=re.IGNORECASE,
-    ):
+    if special_label:
+        sup_matches = re.finditer(r"<sup\b[^>]*>(.*?)</sup>", source, flags=re.IGNORECASE | re.DOTALL)
+        marker_matches = [
+            match for match in sup_matches
+            if html.unescape(match.group(1)).strip() == printed_label
+        ]
+        if parsed_label and parsed_label.kind == "numeric" and printed_label != str(key):
+            for match in re.finditer(re.escape(printed_label), source):
+                if not is_inside_html_sup(match.start()) and not is_inside_definition_line(match.start()):
+                    append_span(match.start(), match.end(), "unicode_circled")
+        if printed_label.startswith("*"):
+            escaped_pattern = re.compile(r"\\(?P<label>\*{1,3})")
+            marker_matches.extend(
+                match for match in escaped_pattern.finditer(source)
+                if match.group("label") == printed_label
+                and not is_inside_definition_line(match.start())
+            )
+    else:
+        marker_matches = list(re.finditer(
+            _HTML_SUP_RE_TEMPLATE.format(key=escaped), source, flags=re.IGNORECASE
+        ))
+    for match in marker_matches:
         if not is_inside_definition_line(match.start()):
             append_span(match.start(), match.end(), "sup")
     for match in _MARKDOWN_REF_RE.finditer(source):
         if match.group("key") == str(key) and not is_inside_definition_line(match.start()):
             append_span(match.start(), match.end(), "markdown")
+    if special_label:
+        return sorted(spans)
     superscript = str(key).translate(_DIGITS_TO_SUPERSCRIPT)
     if superscript != str(key):
         for match in re.finditer(re.escape(superscript), source):
@@ -667,10 +694,54 @@ def marker_context_matches(
     normalized_context = re.sub(r"\s+", " ", str(context or "")).strip().casefold()
     if not normalized_context:
         return False
+    normalized_source, positions = _normalize_context_with_map(source)
     start, end, _kind = span
-    window = source[max(0, start - 120) : min(len(source), end + 120)]
-    normalized_window = re.sub(r"\s+", " ", window).strip().casefold()
-    return normalized_context in normalized_window
+    occurrences = [
+        match.start()
+        for match in re.finditer(re.escape(normalized_context), normalized_source)
+    ]
+    explicit_marker = bool(
+        re.search(
+            r"<sup\b|\[\^[A-Za-z0-9_-]+\]|[⁰¹²³⁴⁵⁶⁷⁸⁹①-⑳†‡*]",
+            normalized_context,
+        )
+    )
+    if explicit_marker and len(occurrences) != 1:
+        return False
+    containing = [
+        offset
+        for offset in occurrences
+        if positions[offset] <= start
+        and (positions[offset + len(normalized_context) - 1] + 1) >= end
+    ]
+    if containing:
+        return len(containing) == 1
+    if explicit_marker:
+        return False
+    if len(occurrences) != 1:
+        return False
+    occurrence_start = positions[occurrences[0]]
+    occurrence_end = positions[occurrences[0] + len(normalized_context) - 1] + 1
+    return start - 120 <= occurrence_start and occurrence_end <= end + 120
+
+
+def _normalize_context_with_map(value: str) -> tuple[str, list[int]]:
+    chars: list[str] = []
+    positions: list[int] = []
+    pending_space: Optional[int] = None
+    for index, char in enumerate(value):
+        if char.isspace():
+            if chars and pending_space is None:
+                pending_space = index
+            continue
+        if pending_space is not None:
+            chars.append(" ")
+            positions.append(pending_space)
+            pending_space = None
+        folded = char.casefold()
+        chars.extend(folded)
+        positions.extend([index] * len(folded))
+    return "".join(chars), positions
 
 
 def secondary_primary_blocks(decision: Mapping[str, Any]) -> list[int]:
@@ -693,19 +764,28 @@ def secondary_primary_blocks(decision: Mapping[str, Any]) -> list[int]:
     return blocks
 
 
-def strip_note_key(text: str, key: str | None) -> str:
+def strip_note_key(
+    text: str, key: str | None, marker_label: str | None = None
+) -> str:
     # Keep Markdown block boundaries intact. OCR notes can contain separate
     # paragraphs, lists, quotations, or tables; flattening whitespace here
     # changes their meaning before they reach the footnote definition parser.
     value = str(text or "").strip()
     if not key:
         return value
-    escaped = re.escape(str(key))
-    patterns = [
-        rf"\[\^{escaped}\]",
-        rf"<sup\b[^>]*>\s*{escaped}\s*</sup>",
-        escaped,
-    ]
+    printed_label = str(marker_label or marker_label_from_key(str(key)) or key)
+    escaped = re.escape(printed_label)
+    key_escaped = re.escape(str(key))
+    patterns = [rf"\[\^{key_escaped}\]", rf"<sup\b[^>]*>\s*{escaped}\s*</sup>", rf"\\?{escaped}"]
+    if key_escaped != escaped:
+        patterns.extend([
+            rf"<sup\b[^>]*>\s*{key_escaped}\s*</sup>",
+            rf"\\?{key_escaped}",
+        ])
+    if printed_label == "†":
+        patterns.append(r"<sup\b[^>]*>\s*(?:&dagger;|&#8224;|&#x2020;)\s*</sup>")
+    elif printed_label == "‡":
+        patterns.append(r"<sup\b[^>]*>\s*(?:&Dagger;|&#8225;|&#x2021;)\s*</sup>")
     if str(key) in _CIRCLED_DIGITS_MAP:
         circled = re.escape(_CIRCLED_DIGITS_MAP[str(key)])
         patterns.extend([
@@ -716,12 +796,13 @@ def strip_note_key(text: str, key: str | None) -> str:
     if superscript != str(key):
         patterns.append(re.escape(superscript))
     joined = "|".join(patterns)
+    flags = 0 if marker_label_from_key(str(key)) is not None else re.IGNORECASE
     value = re.sub(
         rf"^\s*(?:{joined})\s*(?:[.)、，:：-]\s*)?",
         "",
         value,
         count=1,
-        flags=re.IGNORECASE,
+        flags=flags,
     )
     return value.strip()
 

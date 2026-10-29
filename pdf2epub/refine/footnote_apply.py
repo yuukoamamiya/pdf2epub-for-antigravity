@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from ..workflow_contracts import atomic_write_json, atomic_write_text, sha256_file
+from ..footnote_keys import marker_label_from_key, output_marker_key
 from .pdf_evidence import pdf_evidence_mode, require_current_consensus
 from .footnote_options import (
     EFFECTIVE_FOOTNOTE_MODES,
@@ -170,6 +171,16 @@ def _candidate_decisions(
                     "block": address[2],
                     "role": str(candidate.get("local_role") or "footnote_start"),
                     "key": str(candidate.get("key") or ""),
+                    **(
+                        {"marker_label": str(candidate.get("marker_label") or "")}
+                        if candidate.get("marker_label")
+                        else {}
+                    ),
+                    **(
+                        {"requires_marker_context": True}
+                        if candidate.get("requires_marker_context") is True
+                        else {}
+                    ),
                     "confidence": "local_high",
                 },
             )
@@ -518,6 +529,11 @@ def apply_footnote_normalization(
             continue
 
         key = str(decision.get("key") or "").strip()
+        marker_label = str(
+            decision.get("marker_label")
+            or marker_label_from_key(key)
+            or key
+        ).strip()
         if not re.fullmatch(r"[A-Za-z0-9_-]+", key):
             errors.append(f"moved footnote at {page}:{block_index} has no valid key")
             continue
@@ -649,10 +665,11 @@ def apply_footnote_normalization(
         chapter_id = record["chapter_id"]
         if role in {"footnote_start", "footnote_definition"}:
             occurrence = len(active_by_chapter_key[(chapter_id, key)]) + 1
-            output_key = key if occurrence == 1 else f"{key}-{occurrence}"
+            output_key = output_marker_key(key, marker_label, occurrence)
             note = {
                 "chapter_id": chapter_id,
                 "key": key,
+                "marker_label": marker_label,
                 "output_key": output_key,
                 "source_page": page,
                 "source_file": record["name"],
@@ -660,6 +677,7 @@ def apply_footnote_normalization(
                 "start_span": span,
                 "source": source,
                 "marker_context": str(decision.get("marker_context") or "").strip(),
+                "requires_marker_context": decision.get("requires_marker_context") is True,
             }
             active_by_chapter_key[(chapter_id, key)].append(note)
             notes_by_chapter[chapter_id].append(note)
@@ -685,11 +703,13 @@ def apply_footnote_normalization(
             note_text = _strip_note_key(
                 str(decision.get("text") or ""),
                 key if role != "footnote_continuation" else None,
+                marker_label if role != "footnote_continuation" else None,
             )
         else:
             note_text = _strip_note_key(
                 source_texts[record["name"]][span[0] : span[1]],
                 key if role != "footnote_continuation" else None,
+                marker_label if role != "footnote_continuation" else None,
             )
         if not note_text:
             errors.append(f"{page}:{block_index}: footnote text is empty after removing its key")
@@ -704,6 +724,7 @@ def apply_footnote_normalization(
                 "block": block_index,
                 "role": role,
                 "key": key,
+                "marker_label": marker_label,
                 "output_key": note["output_key"],
                 "file": record["name"],
                 "chapter_id": chapter_id,
@@ -740,7 +761,7 @@ def apply_footnote_normalization(
             (s, e) for s, e, _ in edits_by_file.get(note["source_file"], [])
         }
         marker_candidates = [
-            item for item in _marker_spans(source, note["key"])
+            item for item in _marker_spans(source, note["key"], note["marker_label"])
             if item[1] <= start and (item[0], item[1]) not in claimed_spans
         ]
         target_file = note["source_file"]
@@ -754,7 +775,7 @@ def apply_footnote_normalization(
             ]
             for earlier_record in reversed(sibling_records):
                 earlier_source = source_texts[earlier_record["name"]]
-                earlier_spans = _marker_spans(earlier_source, note["key"])
+                earlier_spans = _marker_spans(earlier_source, note["key"], note["marker_label"])
                 claimed_spans = {
                     (start, end)
                     for start, end, _ in edits_by_file.get(earlier_record["name"], [])
@@ -785,7 +806,7 @@ def apply_footnote_normalization(
                     )
                     for prec_record in preceding_records:
                         prec_source = source_texts[prec_record["name"]]
-                        prec_spans = _marker_spans(prec_source, note["key"])
+                        prec_spans = _marker_spans(prec_source, note["key"], note["marker_label"])
                         claimed_spans = {
                             (start, end)
                             for start, end, _ in edits_by_file.get(prec_record["name"], [])
@@ -805,10 +826,8 @@ def apply_footnote_normalization(
                                 if note in notes_by_chapter[old_chapter_id]:
                                     notes_by_chapter[old_chapter_id].remove(note)
                                 new_occurrence = len(active_by_chapter_key[(new_chapter_id, note["key"])]) + 1
-                                note["output_key"] = (
-                                    note["key"]
-                                    if new_occurrence == 1
-                                    else f"{note['key']}-{new_occurrence}"
+                                note["output_key"] = output_marker_key(
+                                    note["key"], note["marker_label"], new_occurrence
                                 )
                                 note["chapter_id"] = new_chapter_id
                                 active_by_chapter_key[(new_chapter_id, note["key"])].append(note)
@@ -823,14 +842,20 @@ def apply_footnote_normalization(
                                         res_item["output_key"] = note["output_key"]
                             break
 
-        if note.get("source") == "secondary":
-            marker_context = str(note.get("marker_context") or "").strip()
-            if marker_context:
-                marker_candidates = [
-                    item
-                    for item in marker_candidates
-                    if _marker_context_matches(source, item, marker_context)
-                ]
+        marker_context = str(note.get("marker_context") or "").strip()
+        if marker_context:
+            marker_candidates = [
+                item
+                for item in marker_candidates
+                if _marker_context_matches(source, item, marker_context)
+            ]
+        marker_is_typed = marker_label_from_key(note["key"]) is not None
+        if (
+            note.get("source") == "secondary"
+            or note.get("requires_marker_context")
+            or bool(marker_context)
+            or (marker_is_typed and len(marker_candidates) > 1)
+        ):
             if len(marker_candidates) != 1:
                 context_hint = (
                     "; provide a unique marker_context"
@@ -972,6 +997,7 @@ def apply_footnote_normalization(
             {
                 "chapter_id": note["chapter_id"],
                 "key": note["key"],
+                "marker_label": note["marker_label"],
                 "output_key": note["output_key"],
                 "source_page": note["source_page"],
                 "part_count": len(note["parts"]),

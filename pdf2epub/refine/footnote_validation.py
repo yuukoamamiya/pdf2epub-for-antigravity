@@ -382,6 +382,17 @@ def validate_footnote_decisions(
                 f"{address[0]}:{address[1]}:{address[2]}"
             )
             continue
+        if (
+            candidate.get("requires_marker_context") is True
+            and str(item.get("role") or "").strip()
+            in {"footnote_start", "footnote_definition"}
+            and not str(item.get("marker_context") or "").strip()
+        ):
+            errors.append(
+                "candidate requires an exact marker_context to disambiguate its layout scope: "
+                f"{address[0]}:{address[1]}:{address[2]}"
+            )
+            continue
         role = str(item.get("role") or "").strip()
         if role not in _DECISION_ROLES:
             errors.append(
@@ -406,6 +417,25 @@ def validate_footnote_decisions(
                 f"decision key does not match OCR key for {address[0]}:{address[1]}:{address[2]}"
             )
             continue
+        candidate_marker_label = str(candidate.get("marker_label") or "")
+        decision_marker_label = str(item.get("marker_label") or "")
+        marker_identity = candidate.get("marker_identity")
+        marker_kind = (
+            str(marker_identity.get("kind") or "")
+            if isinstance(marker_identity, Mapping)
+            else ""
+        )
+        if (
+            role in {"footnote_start", "footnote_definition"}
+            and candidate_marker_label
+            and marker_kind != "numeric"
+        ):
+            if decision_marker_label != candidate_marker_label:
+                errors.append(
+                    f"decision marker_label must preserve printed marker for "
+                    f"{address[0]}:{address[1]}:{address[2]}"
+                )
+                continue
         if source == "secondary" and role in _MOVED_ROLES:
             text = str(item.get("text") or "").strip()
             if not text:
@@ -478,6 +508,10 @@ def validate_footnote_decisions(
         )
         if key is not None:
             decision["key"] = key
+        if candidate_marker_label:
+            decision["marker_label"] = candidate_marker_label
+        if candidate.get("requires_marker_context") is True:
+            decision["requires_marker_context"] = True
         if source == "secondary" and role in _MOVED_ROLES:
             decision["primary_disposition"] = primary_disposition
             decision["primary_blocks"] = normalized_primary_blocks

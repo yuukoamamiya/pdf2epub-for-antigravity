@@ -16,6 +16,7 @@ from .footnote_layout import (
     bottom_geometry as _bottom_geometry,
     inline_ordered_list_warning as _inline_ordered_list_warning,
     page_layout_profile as _page_layout_profile,
+    table_adjacent as _table_adjacent,
 )
 from .footnote_options import (
     DEFAULT_AUTO_ACCEPT,
@@ -32,6 +33,7 @@ from .footnote_signals import (
     _NUMERIC_ONLY_RE,
     _FURNITURE_LABEL_RE,
     leading_footnote_key as _leading_footnote_key,
+    leading_footnote_marker as _leading_footnote_marker,
 )
 from .layout_evidence import (
     normalized_bbox as _normalise_bbox,
@@ -75,7 +77,10 @@ def candidate_for_block(
         intersection_ratio=bottom_intersection_ratio,
     )
     is_bottom = bool(geometry["is_bottom"])
-    key = _leading_footnote_key(text)
+    marker = _leading_footnote_marker(text) or _leading_footnote_marker(
+        str(block.get("html") or "")
+    )
+    key = marker.key if marker else None
     layout_profile = (
         dict(layout_profile)
         if isinstance(layout_profile, Mapping)
@@ -87,6 +92,15 @@ def candidate_for_block(
         bbox
         and content_bottom is not None
         and float(bbox[3]) >= float(content_bottom) - tail_tolerance
+    )
+    structural_label = bool(
+        re.search(r"\b(?:table|tablecell|cell|caption|figure|image)\b", label, re.IGNORECASE)
+    )
+    table_adjacent = bool(
+        key
+        and not label_is_footnote
+        and not structural_label
+        and _table_adjacent(sidecar, block_index, bbox)
     )
 
     # Lists that follow a nearby prose sentence and still sit above the page
@@ -110,7 +124,37 @@ def candidate_for_block(
         return None
     if label_is_furniture and not region_evidence:
         return None
-    if not (is_bottom or relative_tail or region_evidence):
+    # A leading letter followed by ')' is indistinguishable from a list item
+    # without an explicit note label or independently detected note region.
+    raw_html = str(block.get("html") or "")
+    explicit_sup_letter = bool(
+        marker
+        and marker.kind == "letter"
+        and re.match(r"^\s*<sup\b", raw_html, re.IGNORECASE)
+    )
+    if marker and marker.kind == "letter" and not (
+        label_is_footnote or region_evidence or (table_adjacent and explicit_sup_letter)
+    ):
+        return None
+    reliable_nonbottom_location = bool(
+        bbox
+        and (
+            float(bbox[3]) >= 0.6
+            or (
+                float(bbox[2]) - float(bbox[0]) <= 0.45
+                and (
+                    float(bbox[0]) <= 0.12
+                    or float(bbox[2]) >= 0.88
+                )
+            )
+        )
+    )
+    explicit_label_review = bool(
+        label_is_footnote
+        and reliable_nonbottom_location
+        and not (is_bottom or relative_tail or region_evidence)
+    )
+    if not (is_bottom or relative_tail or region_evidence or explicit_label_review or table_adjacent):
         return None
     if not (label_is_footnote or key or region_evidence):
         return None
@@ -130,6 +174,11 @@ def candidate_for_block(
         "label": label,
         "bbox": bbox,
         "key": key,
+        "marker_label": marker.label if marker else "",
+        "marker_identity": (
+            {"kind": marker.kind, "label": marker.label, "key": marker.key}
+            if marker else None
+        ),
         "bottom_edge": geometry["bottom_edge"],
         "bottom_intersection_ratio": geometry["intersection_ratio"],
         "bottom_geometry": (
@@ -166,6 +215,13 @@ def candidate_for_block(
         candidate["confidence"] = "review"
         candidate["disposition"] = "review_required"
         candidate["review_reason"] = flow_warning
+    if explicit_label_review and not (is_bottom or relative_tail or region_evidence):
+        candidate["review_reason"] = "explicit_footnote_label_outside_page_tail"
+    if table_adjacent:
+        candidate["review_reason"] = "marker_near_table_requires_visual_review"
+    if explicit_label_review or table_adjacent:
+        candidate["confidence"] = "review"
+        candidate["disposition"] = "review_required"
     if force_review:
         candidate.setdefault("review_reason", "ocr_consensus_visual_review")
     if region_evidence:
@@ -404,7 +460,8 @@ def candidate_for_native_block(
 ) -> Optional[dict[str, Any]]:
     """Build conservative native-text candidates for workspace review."""
     text = _text_from_block(block)
-    key = _leading_footnote_key(text)
+    marker = _leading_footnote_marker(text)
+    key = marker.key if marker else None
     if not text or _NATIVE_NUMERIC_ONLY_RE.fullmatch(text) or (
         key is None and not region_evidence
     ):
@@ -429,6 +486,11 @@ def candidate_for_native_block(
     if candidate is None:
         return None
     candidate["key"] = key
+    candidate["marker_label"] = marker.label if marker else ""
+    candidate["marker_identity"] = (
+        {"kind": marker.kind, "label": marker.label, "key": marker.key}
+        if marker else None
+    )
     candidate["source_kind"] = "native_text"
     candidate["review_reason"] = (
         "continuous_numeric_region" if region_evidence else "native_layout_candidate"
