@@ -1,4 +1,5 @@
 import pytest
+from lxml import etree
 
 from pdf2epub.epub.footnotes import FootnoteManager, display_footnote_key
 from pdf2epub.epub.footnotes import validate_footnote_graph
@@ -188,6 +189,213 @@ def test_restarted_note_numbers_are_scoped_per_chapter() -> None:
     assert report["scoped_keys"] == ["1", "2"]
     assert report["duplicate_definition_occurrences"] == []
     assert report["orphan_definition_keys"] == []
+
+
+def test_endnote_normalization_preserves_multiblock_content_and_boundaries(
+    tmp_path,
+) -> None:
+    source = {
+        "body.md": "Body <sup>1</sup> and <sup>2</sup>.\n",
+        "notes.md": (
+            "1. First paragraph.\n\n"
+            "Second paragraph.\n\n"
+            "> Quoted passage.\n\n"
+            "- Listed item\n\n"
+            "| A | B |\n| --- | --- |\n| 1 | 2 |\n\n"
+            "    # Code comment\n\n"
+            "## Notes for another section\n\n"
+            "2. Separate definition.\n"
+        ),
+    }
+
+    normalized, report = normalize_endnotes(source, {"notes.md": "notes"})
+    repeated, second_report = normalize_endnotes(
+        normalized, {"notes.md": "notes"}
+    )
+
+    assert report["valid"] is True
+    assert report["normalized_definition_count"] == 2
+    assert normalized["notes.md"] == (
+        "[^1]: First paragraph.\n\n"
+        "    Second paragraph.\n\n"
+        "    > Quoted passage.\n\n"
+        "    - Listed item\n\n"
+        "    | A | B |\n"
+        "    | --- | --- |\n"
+        "    | 1 | 2 |\n\n"
+        "        # Code comment\n\n"
+        "## Notes for another section\n\n"
+        "[^2]: Separate definition.\n"
+    )
+    assert repeated == normalized
+    assert second_report["status"] == "validated"
+
+    body_path = tmp_path / "body.md"
+    notes_path = tmp_path / "notes.md"
+    body_path.write_text(normalized["body.md"], encoding="utf-8")
+    notes_path.write_text(normalized["notes.md"], encoding="utf-8")
+    structure = [
+        {"unit_id": "body", "file_path": body_path, "part_files": [body_path]},
+        {
+            "unit_id": "notes",
+            "file_path": notes_path,
+            "part_files": [notes_path],
+            "type": "notes",
+        },
+    ]
+    manager = FootnoteManager(tmp_path, auto_global=True, epub_structure=structure)
+    notes_html = convert_markdown_to_html(
+        normalized["notes.md"],
+        "Book",
+        standalone=False,
+        footnote_manager=manager,
+        source_chapter=notes_path.stem,
+    )
+
+    assert "Second paragraph." in notes_html
+    assert "Quoted passage." in notes_html
+    assert "Listed item" in notes_html
+    assert "<table>" in notes_html
+    assert "<pre><code># Code comment" in notes_html
+    notes_dom = etree.fromstring(
+        f'<body xmlns="http://www.w3.org/1999/xhtml">{notes_html}</body>'
+    )
+    first_definition = notes_dom.xpath(
+        '//*[local-name()="div" and @class="footnote-def"]'
+    )[0]
+    assert first_definition.xpath('.//*[local-name()="table"]')
+    assert first_definition.xpath('.//*[local-name()="blockquote"]')
+    assert first_definition.xpath('.//*[local-name()="ul"]')
+    assert first_definition.xpath('.//*[local-name()="pre"]')
+    assert "another section" not in " ".join(
+        "".join(first_definition.itertext()).split()
+    )
+
+
+def test_legacy_normalization_keeps_fenced_code_inside_note() -> None:
+    source = {
+        "body.md": "Body <sup>1</sup>.\n",
+        "notes.md": (
+            "1. Note.\n\n"
+            "```python\n"
+            "# code comment\n"
+            "1. Not a definition\n"
+            "print(1)\n"
+            "```\n\n"
+            "## Next section\n\n"
+            "2. Another note.\n"
+        ),
+    }
+
+    normalized, report = normalize_endnotes(source, {"notes.md": "notes"})
+    repeated, _ = normalize_endnotes(normalized, {"notes.md": "notes"})
+
+    assert report["definition_keys"] == ["1", "2"]
+    assert normalized["notes.md"] == (
+        "[^1]: Note.\n\n"
+        "    ```python\n"
+        "    # code comment\n"
+        "    1. Not a definition\n"
+        "    print(1)\n"
+        "    ```\n\n"
+        "## Next section\n\n"
+        "[^2]: Another note.\n"
+    )
+    assert repeated == normalized
+
+
+def test_scoped_notes_ignore_matched_headings_inside_fenced_code() -> None:
+    toc, progress, texts = _simple_book(
+        body=(
+            "# Part 1: Roots\n"
+            "## 1. First Chapter\n"
+            "First <sup>1</sup>.\n"
+            "## 2. Second Chapter\n"
+            "Second <sup>1</sup>.\n"
+        ),
+        notes=(
+            "# Notes\n"
+            "## Chapter 1: First Chapter\n"
+            "1. First scoped note.\n\n"
+            "```markdown\n"
+            "## Chapter 2: Second Chapter\n"
+            "1. Not a definition\n"
+            "# code comment\n"
+            "```\n\n"
+            "## Chapter 2: Second Chapter\n"
+            "1. Second scoped note.\n"
+        ),
+        children=[
+            {"title": "1. First Chapter", "start_page": 2, "end_page": 5},
+            {"title": "2. Second Chapter", "start_page": 6, "end_page": 10},
+        ],
+    )
+    directory = build_endnote_scope_directory(toc, progress, texts)
+
+    normalized, report = normalize_endnotes(
+        texts,
+        {"chapter_1.md": "", "chapter_2.md": "", "chapter_3.md": "notes"},
+        scopes=directory,
+    )
+    repeated, _ = normalize_endnotes(
+        normalized,
+        {"chapter_1.md": "", "chapter_2.md": "", "chapter_3.md": "notes"},
+        scopes=directory,
+    )
+
+    assert report["scope_mode"] == "per_chapter"
+    assert normalized["chapter_3.md"] == (
+        "# Notes\n"
+        "## Chapter 1: First Chapter\n"
+        "[^fnc-u2c1-1]: First scoped note.\n\n"
+        "    ```markdown\n"
+        "    ## Chapter 2: Second Chapter\n"
+        "    1. Not a definition\n"
+        "    # code comment\n"
+        "    ```\n\n"
+        "## Chapter 2: Second Chapter\n"
+        "[^fnc-u2c2-1]: Second scoped note.\n"
+    )
+    assert repeated == normalized
+
+
+def test_scoped_endnote_single_definition_can_serve_repeated_refs() -> None:
+    toc, progress, texts = _simple_book(
+        body=(
+            "# Part 1: Roots\n"
+            "## 1. First Chapter\n"
+            "Repeated <sup>1</sup> and <sup>1</sup>.\n"
+            "## 2. Second Chapter\n"
+            "Other <sup>1</sup>.\n"
+        ),
+        notes=(
+            "# Notes\n"
+            "## Chapter 1: First Chapter\n"
+            "1. One definition for both references.\n"
+            "## Chapter 2: Second Chapter\n"
+            "1. Separate scope definition.\n"
+        ),
+        children=[
+            {"title": "1. First Chapter", "start_page": 2, "end_page": 5},
+            {"title": "2. Second Chapter", "start_page": 6, "end_page": 10},
+        ],
+    )
+    directory = build_endnote_scope_directory(toc, progress, texts)
+
+    normalized, report = normalize_endnotes(
+        texts,
+        {"chapter_1.md": "", "chapter_2.md": "", "chapter_3.md": "notes"},
+        scopes=directory,
+    )
+
+    assert report["valid"] is True
+    assert report["normalized_definition_count"] == 2
+    assert "Repeated [^fnc-u2c1-1] and [^fnc-u2c1-1]." in normalized[
+        "chapter_2.md"
+    ]
+    assert "[^fnc-u2c1-1]: One definition for both references." in normalized[
+        "chapter_3.md"
+    ]
 
 
 def test_double_numbered_notes_use_inner_key_with_body_evidence() -> None:

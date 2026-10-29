@@ -109,6 +109,22 @@ class FootnoteMapper:
                 (key, defn.chapter, definition_in_file[file_counter_key])
             ] = count
 
+        # A single unambiguous definition is a reusable target for every
+        # reference to that key. Multiple definitions retain positional
+        # matching so excess references remain conservatively unlinked.
+        for key, count in def_counts.items():
+            if count != 1:
+                continue
+            for ref in references.get(key, []):
+                self.reference_occurrence_count[(key, ref.chapter)] = 1
+            per_file: Dict[str, int] = {}
+            for ref in sorted(
+                references.get(key, []),
+                key=lambda item: (self._chapter_sort_key(item.chapter), item.line_num),
+            ):
+                per_file[ref.chapter] = per_file.get(ref.chapter, 0) + 1
+                self.reference_occurrence_in_file[(key, ref.chapter, per_file[ref.chapter])] = 1
+
         logger.debug(f"Built occurrence mapping: {len(ref_counts)} unique ref keys, {len(def_counts)} unique def keys")
 
     def build_local_occurrence_mappings(
@@ -200,6 +216,19 @@ class FootnoteMapper:
                         (key, defn.chapter, occurrence_in_file[file_counter_key])
                     ] = position
                     chapter_mapping['definition_by_occurrence'][(key, position)] = defn
+
+            for key, key_definitions in defs_by_key.items():
+                if len(key_definitions) != 1:
+                    continue
+                for position_key in list(chapter_mapping['reference_positions']):
+                    if position_key[0] == key:
+                        chapter_mapping['reference_positions'][position_key] = 1
+                for occurrence_key in list(chapter_mapping['reference_occurrence_in_file']):
+                    if occurrence_key[0] == key:
+                        chapter_mapping['reference_occurrence_in_file'][occurrence_key] = 1
+                for source in part_files:
+                    if chapter_mapping['reference_occurrence_count'].get((key, source)):
+                        chapter_mapping['reference_occurrence_count'][(key, source)] = 1
 
             # Validate ref/def counts match
             unique_ref_keys = set(refs_by_key.keys())

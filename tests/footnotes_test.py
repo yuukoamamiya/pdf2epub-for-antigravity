@@ -145,10 +145,10 @@ def test_hyphenated_footnote_keys_render_as_links(tmp_path: Path) -> None:
     assert "[^1-2]" not in html_files["chapter_1.1.html"]
     assert 'href="chapter_1.2.html#fn-1-2-1"' in html_files["chapter_1.1.html"]
     assert report["forward_hrefs"] == 1
-    assert report["backref_hrefs"] == 0
+    assert report["backref_hrefs"] == 1
 
 
-def test_unbalanced_local_occurrences_degrade_to_visible_unlinked_refs(
+def test_repeated_refs_share_one_local_definition_across_parts(
     tmp_path: Path,
 ) -> None:
     first = tmp_path / "chapter_1.part1.md"
@@ -160,8 +160,66 @@ def test_unbalanced_local_occurrences_degrade_to_visible_unlinked_refs(
     manager = FootnoteManager(tmp_path, epub_structure=structure)
     report = validate_footnote_graph(_render(structure, manager))
 
-    assert report["forward_hrefs"] == 1
-    assert report["unlinked_sup_count"] == 1
+    assert report["forward_hrefs"] == 2
+    assert report["backref_hrefs"] == 2
+    assert report["unlinked_sup_count"] == 0
+
+
+def test_repeated_refs_share_one_local_definition_in_one_file(tmp_path: Path) -> None:
+    chapter = tmp_path / "chapter_1.md"
+    chapter.write_text(
+        "One [^1]. Two [^1].\n\n[^1]: One reusable definition.\n",
+        encoding="utf-8",
+    )
+    structure = [_entry("chapter_1", chapter)]
+
+    manager = FootnoteManager(tmp_path, epub_structure=structure)
+    html_files = _render(structure, manager)
+    report = validate_footnote_graph(html_files)
+
+    assert report["forward_hrefs"] == 2
+    assert report["backref_hrefs"] == 2
+    assert report["unlinked_sup_count"] == 0
+
+
+def test_repeated_refs_share_one_global_notes_definition(tmp_path: Path) -> None:
+    body = tmp_path / "chapter_1.md"
+    notes = tmp_path / "chapter_2.md"
+    body.write_text("One [^1]. Two [^1].\n", encoding="utf-8")
+    notes.write_text("[^1]: One global definition.\n", encoding="utf-8")
+    structure = [
+        _entry("chapter_1", body),
+        _entry("chapter_2", notes, entry_type="notes"),
+    ]
+
+    manager = FootnoteManager(tmp_path, auto_global=True, epub_structure=structure)
+    html_files = _render(structure, manager)
+    report = validate_footnote_graph(html_files)
+
+    assert report["forward_hrefs"] == 2
+    assert report["backref_hrefs"] == 2
+    assert report["unlinked_sup_count"] == 0
+
+
+def test_page_note_aliases_share_occurrence_ids_and_backlinks(tmp_path: Path) -> None:
+    body = tmp_path / "chapter_1.md"
+    notes = tmp_path / "chapter_2.md"
+    body.write_text("One [^197n67]. Two [^67].\n", encoding="utf-8")
+    notes.write_text("[^67]: One shared note.\n", encoding="utf-8")
+    structure = [
+        _entry("chapter_1", body),
+        _entry("chapter_2", notes, entry_type="notes"),
+    ]
+
+    manager = FootnoteManager(tmp_path, auto_global=True, epub_structure=structure)
+    html_files = _render(structure, manager)
+    report = validate_footnote_graph(html_files)
+
+    assert 'id="fnref-chapter_1-67"' in html_files["chapter_1.html"]
+    assert 'id="fnref-chapter_1-67-2"' in html_files["chapter_1.html"]
+    assert report["forward_hrefs"] == 2
+    assert report["backref_hrefs"] == 2
+    assert report["backref_broken_count"] == 0
 
 
 def test_refine_boundary_stitcher_links_one_safe_adjacent_reference(tmp_path: Path):
@@ -197,7 +255,7 @@ def test_global_occurrence_mapping_without_semantic_sections_is_valid(
     report = validate_footnote_graph(_render(structure, manager))
 
     assert report["forward_hrefs"] == 2
-    assert report["backref_hrefs"] == 0
+    assert report["backref_hrefs"] == 2
 
 
 def test_no_colon_definitions_are_limited_to_structural_notes_scope(

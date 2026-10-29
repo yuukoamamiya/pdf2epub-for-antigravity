@@ -22,7 +22,7 @@ from typing import Any, Mapping, Optional
 from ..footnote_normalization import endnote_definition_keys
 from .endnote_review import NUMBERED_PUNCT_DEF_RE as _NUMBERED_PUNCT_DEF_RE
 from .endnote_review import is_ambiguous_definition_line
-from .endnote_scopes import scope_for_line, scope_report
+from .endnote_scopes import markdown_fence_mask, scope_for_line, scope_report
 
 
 _KEY = r"[A-Za-z0-9_-]+"
@@ -174,14 +174,102 @@ def _definition_decision_errors(
     )
 
 
+def _is_notes_heading(
+    lines: list[str],
+    index: int,
+    *,
+    scopes: Optional[Mapping[str, Any]] = None,
+    name: Optional[str] = None,
+) -> bool:
+    """Recognize Markdown headings and headings explicitly found by scope review."""
+    line = lines[index]
+    if re.match(r"^[ \t]{0,3}#{1,6}\s+\S", line):
+        return True
+    if scopes is None or name is None:
+        return False
+    line_number = index + 1
+    if any(
+        str(item.get("file")) == name and int(item.get("line", -1)) == line_number
+        for item in scopes.get("unmatched_notes_headings", []) or []
+    ):
+        return True
+    spans = (scopes.get("notes_spans", {}) or {}).get(name, [])
+    return any(
+        int(span.get("start_line", -1)) == line_number
+        for span in spans
+        if isinstance(span, Mapping)
+    )
+
+
+def _definition_continuations(
+    lines: list[str],
+    fenced_lines: list[bool],
+    start: int,
+    end: int,
+    *,
+    name: str,
+    scopes: Optional[Mapping[str, Any]],
+    scope_key: Optional[str],
+) -> list[int]:
+    """Collect note continuation blocks without crossing a heading or scope.
+
+    In typed Notes units, unindented text after a blank line is part of the
+    current note until another definition or standalone heading starts. The
+    returned source lines are later indented as Markdown footnote content.
+    """
+    continuation_indexes: list[int] = []
+    for index in range(start + 1, end):
+        line = lines[index]
+        if not fenced_lines[index] and _is_notes_heading(
+            lines, index, scopes=scopes, name=name
+        ):
+            break
+        if scopes is not None and scope_key is not None:
+            line_scope = scope_for_line(scopes, name, index + 1)
+            if line_scope != scope_key:
+                break
+        if line.strip():
+            continuation_indexes.append(index)
+    return continuation_indexes
+
+
+def _next_definition_line(
+    lines: list[str],
+    fenced_lines: list[bool],
+    start: int,
+    body_keys: set[str],
+    *,
+    name: str,
+    decisions: Mapping[tuple[str, int], str],
+    scopes: Optional[Mapping[str, Any]],
+) -> int:
+    """Find the next typed endnote boundary after a definition marker."""
+    for index in range(start + 1, len(lines)):
+        if fenced_lines[index]:
+            continue
+        if _is_notes_heading(lines, index, scopes=scopes, name=name):
+            return index
+        previous_blank = index == 0 or not lines[index - 1].strip()
+        if _definition_line(
+            lines[index], body_keys=body_keys, previous_line_blank=previous_blank
+        ) is not None and decisions.get((_normalized_decision_file(name), index + 1)) != "continuation":
+            return index
+    return len(lines)
+
+
 def _raw_body_keys(texts: Mapping[str, str], note_files: set[str]) -> set[str]:
     keys: set[str] = set()
     for name, text in texts.items():
         if name in note_files:
             continue
-        keys.update(match.group("key") for match in _MARKDOWN_REF_RE.finditer(text))
-        keys.update(match.group("key") for match in _HTML_SUP_RE.finditer(text))
-        for match in _UNICODE_SUP_RE.finditer(text):
+        lines = text.splitlines()
+        fenced_lines = markdown_fence_mask(lines)
+        body_text = "\n".join(
+            line for index, line in enumerate(lines) if not fenced_lines[index]
+        )
+        keys.update(match.group("key") for match in _MARKDOWN_REF_RE.finditer(body_text))
+        keys.update(match.group("key") for match in _HTML_SUP_RE.finditer(body_text))
+        for match in _UNICODE_SUP_RE.finditer(body_text):
             keys.add(match.group("value").translate(_UNICODE_DIGITS))
     return keys
 
@@ -351,14 +439,19 @@ def _replace_scoped_references(
                     "but has no definition in that chapter"
                 )
                 continue
-            if len(references) > len(definitions):
+            if len(definitions) > 1 and len(references) > len(definitions):
                 errors.append(
                     f"endnote key {key} has {len(references)} references but only "
                     f"{len(definitions)} definitions in scope {scope_key}"
                 )
                 continue
-            for index, reference in enumerate(references):
-                target = definitions[index]["output_key"]
+            targets = (
+                [definitions[0]] * len(references)
+                if len(definitions) == 1
+                else definitions[: len(references)]
+            )
+            for definition, reference in zip(targets, references):
+                target = definition["output_key"]
                 edits_by_file[reference["file"]].append(
                     (
                         int(reference["line"]),
@@ -405,7 +498,11 @@ def _normalize_scoped(
     definition_errors: list[str] = []
     for name in file_order:
         lines = source_texts[name].splitlines()
-        for line_number, line in enumerate(lines, 1):
+        fenced_lines = markdown_fence_mask(lines)
+        for line_index, line in enumerate(lines):
+            if fenced_lines[line_index]:
+                continue
+            line_number = line_index + 1
             previous_line_blank = line_number == 1 or not lines[line_number - 2].strip()
             previous_line = lines[line_number - 2] if line_number > 1 else None
             parsed = _definition_line(
@@ -429,6 +526,23 @@ def _normalize_scoped(
                 continue
             raw_key, content, kind = parsed
             scope_key = scope_for_line(scopes, name, line_number)
+            continuation_indexes = _definition_continuations(
+                lines,
+                fenced_lines,
+                line_index,
+                _next_definition_line(
+                    lines,
+                    fenced_lines,
+                    line_index,
+                    body_keys,
+                    name=name,
+                    decisions=decisions,
+                    scopes=scopes,
+                ),
+                name=name,
+                scopes=scopes,
+                scope_key=scope_key,
+            )
             key, content, double_numbered = _apply_double_numbering(
                 key=raw_key,
                 content=content,
@@ -442,6 +556,7 @@ def _normalize_scoped(
                     "raw_key": raw_key,
                     "key": key,
                     "content": content,
+                    "continuation_lines": continuation_indexes,
                     "kind": kind,
                     "scope_key": scope_key,
                     "double_numbered": double_numbered,
@@ -504,7 +619,7 @@ def _normalize_scoped(
                         "but has no definition in that chapter; check the TOC, "
                         "chapter headings, or scope assignment"
                     )
-                elif len(references) > len(definitions):
+                elif len(definitions) > 1 and len(references) > len(definitions):
                     errors.append(
                         f"endnote key {key} has {len(references)} references but "
                         f"only {len(definitions)} definitions in scope "
@@ -533,6 +648,7 @@ def _normalize_scoped(
         occurrence["output_key"] = base if index == 1 else f"{base}-o{index}"
 
     definition_edits: dict[str, dict[int, str]] = defaultdict(dict)
+    lines_by_file = {name: text.splitlines() for name, text in source_texts.items()}
     for occurrence in occurrences:
         changed = (
             occurrence["output_key"] != occurrence["raw_key"]
@@ -543,6 +659,12 @@ def _normalize_scoped(
         definition_edits[occurrence["file"]][occurrence["line"]] = (
             f"[^{occurrence['output_key']}]: {occurrence['content']}".rstrip()
         )
+        if occurrence["kind"] != "markdown":
+            for line_index in occurrence["continuation_lines"]:
+                line = lines_by_file[occurrence["file"]][line_index]
+                definition_edits[occurrence["file"]][line_index + 1] = (
+                    f"    {line}"
+                )
 
     transformed = dict(source_texts)
     normalized_definition_count = 0
@@ -550,7 +672,8 @@ def _normalize_scoped(
         lines = transformed[name].splitlines()
         for line_number, replacement in edits.items():
             lines[line_number - 1] = replacement
-            normalized_definition_count += 1
+            if re.match(r"^\[\^[^]]+\]:", replacement):
+                normalized_definition_count += 1
         trailing_newline = transformed[name].endswith(("\n", "\r"))
         transformed[name] = "\n".join(lines) + ("\n" if trailing_newline else "")
 
@@ -672,7 +795,11 @@ def _normalize_legacy(
     for name in sorted(note_files):
         edits: dict[int, str] = {}
         lines = source_texts[name].splitlines()
-        for line_number, line in enumerate(lines, 1):
+        fenced_lines = markdown_fence_mask(lines)
+        for line_index, line in enumerate(lines):
+            if fenced_lines[line_index]:
+                continue
+            line_number = line_index + 1
             previous_line_blank = line_number == 1 or not lines[line_number - 2].strip()
             previous_line = lines[line_number - 2] if line_number > 1 else None
             parsed = _definition_line(
@@ -705,6 +832,26 @@ def _normalize_legacy(
             definitions[key] = (name, line_number, kind)
             if kind != "markdown":
                 edits[line_number] = f"[^{key}]: {content}".rstrip()
+                continuation_indexes = _definition_continuations(
+                    lines,
+                    fenced_lines,
+                    line_index,
+                    _next_definition_line(
+                        lines,
+                        fenced_lines,
+                        line_index,
+                        body_keys,
+                        name=name,
+                        decisions=decisions,
+                        scopes=None,
+                    ),
+                    name=name,
+                    scopes=None,
+                    scope_key=None,
+                )
+                for continuation_index in continuation_indexes:
+                    continuation_line = lines[continuation_index]
+                    edits[continuation_index + 1] = f"    {continuation_line}"
         if edits:
             definition_edits[name] = edits
 
@@ -723,7 +870,8 @@ def _normalize_legacy(
         lines = transformed[name].splitlines()
         for line_number, replacement in edits.items():
             lines[line_number - 1] = replacement
-            normalized_definition_count += 1
+            if re.match(r"^\[\^[^]]+\]:", replacement):
+                normalized_definition_count += 1
         trailing_newline = transformed[name].endswith(("\n", "\r"))
         transformed[name] = "\n".join(lines) + ("\n" if trailing_newline else "")
 

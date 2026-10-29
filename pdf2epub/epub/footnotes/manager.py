@@ -373,7 +373,9 @@ class FootnoteManager:
         target_chapter = self._binding_file_stem(binding.get("definition_file", ""))
         fn_id = self._boundary_definition_anchor_id(binding)
         occurrence = binding.get("reference_occurrence_in_file") or 1
-        fnref_id = self._fnref_id(source_chapter, original_key, occurrence)
+        page_note = re.match(r"^\d+n(\d+)$", original_key)
+        identity_key = page_note.group(1) if page_note else original_key
+        fnref_id = self._fnref_id(source_chapter, identity_key, occurrence)
         html_target = self.get_html_filename(target_chapter)
         return (
             f'<sup id="{fnref_id}"><a class="footnote-ref" '
@@ -384,7 +386,9 @@ class FootnoteManager:
         source_chapter = self._binding_file_stem(binding.get("reference_file", ""))
         key = str(binding.get("key", ""))
         occurrence = binding.get("reference_occurrence_in_file") or 1
-        fnref_id = self._fnref_id(source_chapter, key, occurrence)
+        page_note = re.match(r"^\d+n(\d+)$", key)
+        identity_key = page_note.group(1) if page_note else key
+        fnref_id = self._fnref_id(source_chapter, identity_key, occurrence)
         backref_link = f"{self.get_html_filename(source_chapter)}#{fnref_id}"
         return self._backref_html(backref_link, key)
 
@@ -571,16 +575,30 @@ class FootnoteManager:
             else:
                 fn_id = self._footnote_definition_id(key)
             backref_html = ""
-            ref_occurrence = occurrence_in_file if occurrence_in_file is not None else 1
             matching_refs = [
                 ref for ref in self.scanner.references.get(key, [])
                 if ref.chapter == source_chapter
             ]
             matching_refs.sort(key=lambda ref: ref.line_num)
-            if 1 <= ref_occurrence <= len(matching_refs):
-                fnref_id = self._fnref_id(source_chapter, key, ref_occurrence)
-                backref_link = f"{self.get_html_filename(source_chapter)}#{fnref_id}"
-                backref_html = self._backref_html(backref_link, key)
+            definitions_in_source = [
+                definition for definition in self.scanner.definitions.get(key, [])
+                if definition.chapter == source_chapter
+            ]
+            if len(definitions_in_source) == 1 and matching_refs:
+                backref_html = "".join(
+                    self._backref_html(
+                        f"{self.get_html_filename(source_chapter)}#"
+                        f"{self._fnref_id(source_chapter, key, index)}",
+                        key,
+                    )
+                    for index, _ref in enumerate(matching_refs, 1)
+                )
+            else:
+                ref_occurrence = occurrence_in_file if occurrence_in_file is not None else 1
+                if 1 <= ref_occurrence <= len(matching_refs):
+                    fnref_id = self._fnref_id(source_chapter, key, ref_occurrence)
+                    backref_link = f"{self.get_html_filename(source_chapter)}#{fnref_id}"
+                    backref_html = self._backref_html(backref_link, key)
 
         return self._definition_html(fn_id, key, content, backref_html)
 
@@ -623,12 +641,13 @@ class FootnoteManager:
             local_mapping.get('reference_occurrence_in_file', {}).items(),
             key=lambda item: (self._chapter_sort_key(item[0][1]), item[0][2]),
         )
+        links = []
         for (ref_key, ref_chapter, ref_occurrence_in_file), ref_position in reference_entries:
             if ref_key == key and ref_position == occurrence_num:
                 fnref_id = self._fnref_id(ref_chapter, key, ref_occurrence_in_file)
                 backref_link = f"{self.get_html_filename(ref_chapter)}#{fnref_id}"
-                return self._backref_html(backref_link, key)
-        return ""
+                links.append(self._backref_html(backref_link, key))
+        return "".join(links)
 
     def _get_global_definition_html(
         self,
@@ -663,7 +682,23 @@ class FootnoteManager:
             occurrence_num = 1
 
         fn_id = self._footnote_definition_id(key, occurrence_num)
-        return self._definition_html(fn_id, key, content, "")
+        backref_html = self._global_definition_backref_html(key, occurrence_num)
+        return self._definition_html(fn_id, key, content, backref_html)
+
+    def _global_definition_backref_html(self, key: str, occurrence_num: int) -> str:
+        """Render a backlink for every reference mapped to this definition."""
+        links = []
+        entries = sorted(
+            self.mapper.reference_occurrence_in_file.items(),
+            key=lambda item: (self._chapter_sort_key(item[0][1]), item[0][2]),
+        )
+        for (ref_key, ref_chapter, ref_occurrence), target_occurrence in entries:
+            if ref_key != key or target_occurrence != occurrence_num:
+                continue
+            ref_id = self._fnref_id(ref_chapter, key, ref_occurrence)
+            href = f"{self.get_html_filename(ref_chapter)}#{ref_id}"
+            links.append(self._backref_html(href, key))
+        return "".join(links)
 
     def _footnote_definition_id(
         self,
@@ -758,7 +793,7 @@ class FootnoteManager:
                 f"Footnote '{original_key}' in {source_chapter} could not be "
                 "matched safely within its structural scope"
             )
-            fnref_id = self._fnref_id(source_chapter, original_key, occurrence_in_file)
+            fnref_id = self._fnref_id(source_chapter, key, occurrence_in_file)
             return (
                 f'<sup id="{fnref_id}">'
                 f'[{display_footnote_key(original_key)}]</sup>'
@@ -816,7 +851,11 @@ class FootnoteManager:
                 if defn.chapter == source_chapter
             ]
             definitions_in_source.sort(key=lambda defn: defn.line_num)
-            target_occurrence = occurrence_in_file if occurrence_in_file is not None else 1
+            target_occurrence = (
+                1
+                if len(definitions_in_source) == 1
+                else occurrence_in_file if occurrence_in_file is not None else 1
+            )
             if not (1 <= target_occurrence <= len(definitions_in_source)):
                 return unlinked_reference()
             fnref_id = self._fnref_id(source_chapter, key, occurrence_in_file)
@@ -856,7 +895,7 @@ class FootnoteManager:
 
             if target_chapter == source_chapter:
                 # Same file reference
-                fnref_id = self._fnref_id(source_chapter, original_key, occurrence_in_file)
+                fnref_id = self._fnref_id(source_chapter, key, occurrence_in_file)
                 html_target = self.get_html_filename(source_chapter)
                 occ_num = occurrence_num if occurrence_num else 1
                 fn_id = self._footnote_definition_id(key, occ_num)
@@ -868,7 +907,7 @@ class FootnoteManager:
                 # Cross-file reference
                 fn_id = self._footnote_definition_id(key, occurrence_num)
 
-                fnref_id = self._fnref_id(source_chapter, original_key, occurrence_in_file)
+                fnref_id = self._fnref_id(source_chapter, key, occurrence_in_file)
                 html_target = self.get_html_filename(target_chapter)
 
                 return (

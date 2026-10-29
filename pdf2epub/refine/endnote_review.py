@@ -19,6 +19,7 @@ from ..workflow_contracts import atomic_write_json, sha256_file
 from .endnote_scopes import (
     EndnoteScopeError,
     build_endnote_scope_directory,
+    markdown_fence_mask,
     scope_for_line,
 )
 
@@ -158,7 +159,10 @@ def collect_endnote_definition_ambiguities(
         if text is None:
             continue
         lines = text.splitlines()
+        fenced_lines = markdown_fence_mask(lines)
         for line_number, line in enumerate(lines, 1):
+            if fenced_lines[line_number - 1]:
+                continue
             previous_line = lines[line_number - 2] if line_number > 1 else None
             if not is_ambiguous_definition_line(line, previous_line, line_number):
                 continue

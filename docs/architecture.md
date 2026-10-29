@@ -227,8 +227,9 @@ TOC 中标记为
 `footnotes.mode: disabled`。scope 触发条件为同一数字 key 在至少两个 scope 有定义，或同一
 `(scope, key)` 有多个定义。跨 scope 重复或同一 scope 内重复定义的 key 会改写为
 `fnc-<scope>-<number>` / `...-oN`；其他 key 保持原数字。定义多于
-引用时多出的定义保留为 orphan；引用所在 scope 无定义、定义 scope 无正文 span、引用数超过
-定义数或重复 key 落在未匹配区域时 fail closed。EPUB 侧由
+引用时多出的定义保留为 orphan；引用所在 scope 无定义、定义 scope 无正文 span、存在多个
+定义且引用数超过定义数或重复 key 落在未匹配区域时 fail closed。单一定义可由同一 scope
+内的多条引用共享。EPUB 侧由
 `pdf2epub/epub/footnotes/keys.py` 的 `display_footnote_key()` 统一把内部 key 还原为读者
 看到的原始数字；scanner、链接和锚点仍使用真实 key。
 
@@ -574,7 +575,13 @@ OCR：
 转为 `[^N]`。带列表标记的定义在本地 normalization 中直接改写为 `[^N]: text`，不交给
 polish 或 translate Subagent。原始 OCR 单元不覆盖。
 可按章重启的重复编号由 `endnote_scopes.py` 配对后改写为 `fnc-<scope>-<number>`；无法
-唯一配对（缺少章标题、scope 没有正文 span、引用/定义数量不符）时阻断归一化。
+唯一配对（缺少章标题、scope 没有正文 span，或同一 key 有多个定义且引用数超过定义数）时
+阻断归一化。围栏代码中的标题和编号行只作为当前 note 的内容，不参与 scope 切换或定义发现。
+尾注定义的后续段落和 Markdown 块通过四空格续行保留在定义内，并在下一个定义、明确标题或
+已知 scope 边界处停止。单一 `(scope, key)` 定义可供该 scope 的多个引用共同使用；同一范围
+存在多个定义时仍按顺序逐次配对，额外引用不猜测目标。
+该输出合同已更新到 `footnote_normalization.json` schema 3；旧 schema 2 checkpoint 会失效，
+须重新运行 `footnote-prepare → footnote-validate → footnote-apply`。
 `footnote_normalization.json` 的 `endnotes` 子报告记录最终定义键、转换引用数、scope 统计、
 双层编号识别数、重复定义和孤立定义，供后续审计。
 

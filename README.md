@@ -295,6 +295,9 @@ index、bibliography、notes 和版权/前置页等特殊单元始终使用独�
 才设置 `footnotes.mode: disabled`。明确标记为 `toc`、`notes`、`bibliography`、`index`、
 `author_notes`、`catalog` 或 `ad` 的 TOC 单元不会被页面脚注检测误搬移。构建 EPUB 前若
 typed `notes` 单元仍含原始编号尾注或正文仍含对应未链接上标，构建会阻断。
+尾注和页面脚注可包含多个 Markdown 段落及列表、引文、表格等块；归一化会保留这些边界。
+同一作用域内只有一个定义时，多个正文引用可共同链接到该定义；有多个定义时仍按保守的
+逐次配对规则处理，无法唯一配对的引用不会被强行链接。
 
 ## 结果在哪里
 

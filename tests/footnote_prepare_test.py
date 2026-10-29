@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pymupdf as fitz
 import pytest
+from lxml import etree
 
 from pdf2epub.refine.footnote_prepare import (
     prepare_footnote_candidates,
@@ -15,6 +16,8 @@ from pdf2epub.refine.footnote_apply import (
     _candidate_decisions,
     apply_footnote_normalization,
 )
+from pdf2epub.epub.footnotes import FootnoteManager
+from pdf2epub.markdown_to_html import convert_markdown_to_html
 from pdf2epub.refine.footnote_matching import (
     apply_edits as _apply_footnote_edits,
     block_text_variants as _block_text_variants,
@@ -323,7 +326,7 @@ def test_footnote_status_reports_candidate_hash_as_root_cause(tmp_path: Path):
     normalization.write_text(
         json.dumps(
             {
-                "schema_version": 2,
+                "schema_version": 3,
                 "valid": True,
                 "status": "validated",
                 "ocr_evidence_mode": "single_ocr",
@@ -374,7 +377,7 @@ def test_footnote_status_requires_current_toc_for_scoped_endnotes(tmp_path: Path
         (tmp_path / "footnote_normalization.json").write_text(
             json.dumps(
                 {
-                    "schema_version": 2,
+                    "schema_version": 3,
                     "valid": True,
                     "status": "validated",
                     "ocr_evidence_mode": "single_ocr",
@@ -2185,9 +2188,35 @@ def test_apply_moves_cross_page_notes_but_keeps_body_order(tmp_path: Path):
     assert "A body [^36]" in normalized
     assert "B body [^37]" in normalized
     assert normalized.index("B body") < normalized.index("[^36]:")
-    assert "[^36]: Footnote starts on A continuation text" in normalized
+    assert "[^36]: Footnote starts on A\n    continuation text" in normalized
     assert "[^37]: New footnote" in normalized
     assert "36 Footnote starts on A" not in normalized
+    normalized_path = tmp_path / "footnote_normalized" / "chapter_1.md"
+    manager = FootnoteManager(
+        normalized_path.parent,
+        epub_structure=[
+            {
+                "unit_id": "chapter_1",
+                "file_path": normalized_path,
+                "part_files": [normalized_path],
+            }
+        ],
+    )
+    rendered = convert_markdown_to_html(
+        normalized,
+        "Book",
+        standalone=False,
+        footnote_manager=manager,
+        source_chapter=normalized_path.stem,
+    )
+    dom = etree.fromstring(
+        f'<body xmlns="http://www.w3.org/1999/xhtml">{rendered}</body>'
+    )
+    definition = dom.xpath('//*[local-name()="div" and @class="footnote-def"]')[0]
+    paragraph = definition.xpath('./*[local-name()="p"]')[0]
+    assert "Footnote starts on A continuation text" in " ".join(
+        "".join(paragraph.itertext()).split()
+    )
 
 
 def test_apply_moves_every_line_of_a_multiline_list_block(tmp_path: Path):
@@ -2233,7 +2262,7 @@ def test_apply_moves_every_line_of_a_multiline_list_block(tmp_path: Path):
     normalized = (tmp_path / "footnote_normalized" / "chapter_1.md").read_text(
         encoding="utf-8"
     )
-    assert "[^1]: First list note 2. Second list note" in normalized
+    assert "[^1]: First list note\n    2. Second list note" in normalized
     assert "\n1. First list note\n" not in normalized
     assert "\n2. Second list note\n" not in normalized
 

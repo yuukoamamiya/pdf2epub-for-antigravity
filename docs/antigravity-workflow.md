@@ -725,11 +725,14 @@ scoping 的书籍仍走原有全局路径。
 Notes 中可能出现“外层页计数器 + 内层真实注释号”（例如 `1. 16. ...`）。只有内层数字出现在
 当前 scope 的正文引用集合中，且内层不小于外层时，才采用内层作为 key 并剥离内层编号；
 `3. 2005 was...` 因 2005 不在引用集合中而保持 key `3`。该判定只在 scope 目录可用时启用。
+尾注定义的后续段落和 Markdown 块以定义续行形式保留，并在下一个定义、明确标题或已知
+scope 边界处停止。单一 scope/key 定义可供同一 scope 的多个引用共享；多个定义仍按
+出现顺序逐次配对，超出定义数时归一化阻断，不按内容猜测目标。
 
 以下情况必须 fail closed，并提示修复 `toc_tree.json`/章标题（可先检查
 `toc_heading_recovery.json`）后重跑 `footnote-prepare → footnote-validate →
 footnote-apply`：重复 key 落在 `scope_key=None`；定义所在 scope 没有正文 span；引用所在
-scope 没有对应定义；某个 scope 的引用数超过定义数。定义数多于引用数时，多出的定义仍写入
+scope 没有对应定义；有多个定义时引用数超过定义数。定义数多于引用数时，多出的定义仍写入
 Notes，并作为 `orphan_scoped_definitions` 报告。scope 目录不写入 `output/`，只进入
 `footnote_normalization.json` 的 `endnotes` 报告字段（`scope_mode`、`scopes`、
 `scoped_keys`、`double_numbered_definition_count`、`duplicate_definition_occurrences`、

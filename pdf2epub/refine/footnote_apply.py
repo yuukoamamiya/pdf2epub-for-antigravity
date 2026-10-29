@@ -68,6 +68,40 @@ def _split_multi_sups(text: str) -> str:
     return re.sub(r"<sup\b[^>]*>(.*?)</sup>", repl, text, flags=re.IGNORECASE | re.DOTALL)
 
 
+def _format_footnote_definition(key: str, content: str) -> str:
+    """Nest multiline Markdown blocks under a generated footnote definition."""
+    lines = content.strip().splitlines()
+    if not lines:
+        return f"[^{key}]:"
+    if re.match(r"^(?:>|[-*+]\s+|\d+[.)]\s+|\|.*\||```|~~~)", lines[0].lstrip()):
+        nested = [f"    {line}" if line.strip() else "" for line in lines]
+        return f"[^{key}]:\n" + "\n".join(nested)
+    nested = [
+        f"    {line}" if line.strip() else ""
+        for line in lines[1:]
+    ]
+    return f"[^{key}]: {lines[0]}" + (
+        "\n" + "\n".join(nested) if nested else ""
+    )
+
+
+def _join_footnote_parts(parts: list[str]) -> str:
+    """Soft-wrap prose fragments while preserving explicit Markdown blocks."""
+    result = ""
+    block_start = re.compile(
+        r"^(?:>|[-*+]\s+|\d+[.)]\s+|\|.*\||```|~~~|"
+        r"</?(?:blockquote|table|pre|ul|ol)\b)",
+        re.IGNORECASE,
+    )
+    for part in (value.strip() for value in parts if value and value.strip()):
+        if not result:
+            result = part
+            continue
+        separator = "\n\n" if block_start.match(part.lstrip()) else "\n"
+        result += separator + part
+    return result.strip()
+
+
 def _candidate_decisions(
     report: Mapping[str, Any],
     validation: Mapping[str, Any],
@@ -853,8 +887,12 @@ def apply_footnote_normalization(
             raise ValueError(f"no chapter-end unit found for {chapter_id}")
         definitions = []
         for note in notes:
-            joined = " ".join(part for part in note["parts"] if part).strip()
-            definitions.append(f"[^{note['output_key']}]: {joined}")
+            # Each reviewed OCR block is already an ordered fragment. Preserve
+            # paragraph and Markdown block boundaries while joining fragments.
+            joined = _join_footnote_parts(note["parts"])
+            definitions.append(
+                _format_footnote_definition(note["output_key"], joined)
+            )
         if definitions:
             current = transformed[target_record["name"]].rstrip()
             transformed[target_record["name"]] = (

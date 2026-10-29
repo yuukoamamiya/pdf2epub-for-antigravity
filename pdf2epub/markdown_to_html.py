@@ -620,12 +620,14 @@ def preprocess_footnotes_local(markdown_content: str, footnote_manager, source_c
             # Process footnote references [^key]
             def replace_ref(match):
                 fn_key = match.group(1)
-                reference_occurrence_in_file[fn_key] = reference_occurrence_in_file.get(fn_key, 0) + 1
+                page_note_match = re.match(r"^(\d+)n(\d+)$", fn_key)
+                counter_key = page_note_match.group(2) if page_note_match else fn_key
+                reference_occurrence_in_file[counter_key] = reference_occurrence_in_file.get(counter_key, 0) + 1
                 return footnote_manager.get_footnote_html(
                     fn_key,
                     source_chapter,
                     line_num=line_num,
-                    occurrence_in_file=reference_occurrence_in_file[fn_key],
+                    occurrence_in_file=reference_occurrence_in_file[counter_key],
                 ) or match.group(0)
 
             # Replace footnote references
@@ -695,12 +697,14 @@ def preprocess_footnotes_global(markdown_content: str, footnote_manager, source_
 
         def replace_ref(match):
             fn_key = match.group(1)
-            reference_occurrence_in_file[fn_key] = reference_occurrence_in_file.get(fn_key, 0) + 1
+            page_note_match = re.match(r"^(\d+)n(\d+)$", fn_key)
+            counter_key = page_note_match.group(2) if page_note_match else fn_key
+            reference_occurrence_in_file[counter_key] = reference_occurrence_in_file.get(counter_key, 0) + 1
             return footnote_manager.get_footnote_html(
                 fn_key,
                 source_chapter,
                 line_num=line_num,
-                occurrence_in_file=reference_occurrence_in_file[fn_key],
+                occurrence_in_file=reference_occurrence_in_file[counter_key],
             ) or match.group(0)
 
         line = re.sub(

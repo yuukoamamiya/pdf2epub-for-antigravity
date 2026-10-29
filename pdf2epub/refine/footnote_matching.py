@@ -694,7 +694,10 @@ def secondary_primary_blocks(decision: Mapping[str, Any]) -> list[int]:
 
 
 def strip_note_key(text: str, key: str | None) -> str:
-    value = re.sub(r"\s+", " ", str(text or "")).strip()
+    # Keep Markdown block boundaries intact. OCR notes can contain separate
+    # paragraphs, lists, quotations, or tables; flattening whitespace here
+    # changes their meaning before they reach the footnote definition parser.
+    value = str(text or "").strip()
     if not key:
         return value
     escaped = re.escape(str(key))

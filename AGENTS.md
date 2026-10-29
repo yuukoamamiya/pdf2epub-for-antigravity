@@ -529,9 +529,12 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    内层真实注释号”只在当前 scope 的正文引用集合
    包含内层数字且内层不小于外层时采用内层，否则保留外层，避免把 `3. 2005 was...` 误判为
    第 2005 条。重复 key 没有章标题、引用所在 scope 没有定义、定义 scope 没有正文 span
-   或引用数超过定义数时必须 fail closed，并提示修复 TOC/章标题（可先检查
+   或同一 key 有多个定义且引用数超过定义数时必须 fail closed，并提示修复 TOC/章标题（可先检查
    `toc_heading_recovery.json`）后重跑 `footnote-prepare → footnote-validate →
-   footnote-apply`；不得改用 `footnotes.mode: disabled` 绕过。`endnotes` 报告记录
+   footnote-apply`；不得改用 `footnotes.mode: disabled` 绕过。一个作用域内只有一个
+   定义时可供多个正文引用共同使用；多个定义仍按出现顺序保守配对，超出定义数时停止归一化，
+   不作猜测。尾注段落和列表、引文、表格等 Markdown 块应保留边界。
+   `endnotes` 报告记录
    `scope_mode`、`scopes`、`scoped_keys`、`double_numbered_definition_count`、
    `duplicate_definition_occurrences` 和 `orphan_scoped_definitions`。EPUB 中的引用和定义
    仍显示原始数字，内部 `fnc-` key 只用于链接和锚点。

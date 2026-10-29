@@ -53,6 +53,35 @@ _MARKDOWN_REF_RE = re.compile(r"\[\^(?P<key>\d+)\](?!:)")
 _MARKDOWN_DEF_RE = re.compile(r"^[ \t]*\[\^(?P<key>\d+)\]:", re.MULTILINE)
 
 
+def markdown_fence_mask(lines: list[str]) -> list[bool]:
+    """Mark fenced-code lines so source-like code is not read as structure."""
+    mask = [False] * len(lines)
+    fence_char: Optional[str] = None
+    fence_length = 0
+    for index, line in enumerate(lines):
+        if fence_char is not None:
+            mask[index] = True
+            close = re.match(r"^[ \t]{0,3}(`{3,}|~{3,})[ \t]*$", line)
+            if (
+                close
+                and close.group(1)[0] == fence_char
+                and len(close.group(1)) >= fence_length
+            ):
+                fence_char = None
+                fence_length = 0
+            continue
+        opening = re.match(r"^[ \t]{0,3}(`{3,}|~{3,})(.*)$", line)
+        if opening is None:
+            continue
+        run = opening.group(1)
+        if run[0] == "`" and "`" in opening.group(2):
+            continue
+        mask[index] = True
+        fence_char = run[0]
+        fence_length = len(run)
+    return mask
+
+
 class EndnoteScopeError(ValueError):
     """Raised when the scope directory cannot be built safely."""
 
@@ -233,11 +262,12 @@ def _build_body_spans(
                 continue
             body_files.append(name)
             lines = source_texts[name].splitlines()
+            fenced_lines = markdown_fence_mask(lines)
             spans: list[dict[str, Any]] = []
             span_start = 1
             span_scope = current
             for line_number, line in enumerate(lines, 1):
-                heading = _HEADING_RE.match(line)
+                heading = None if fenced_lines[line_number - 1] else _HEADING_RE.match(line)
                 if heading:
                     matches = _match_scopes(heading.group("title"), candidates)
                     if len(matches) == 1:
@@ -331,15 +361,16 @@ def _build_notes_spans(
                 continue
             notes_files.append(name)
             lines = source_texts[name].splitlines()
+            fenced_lines = markdown_fence_mask(lines)
             spans: list[dict[str, Any]] = []
             span_start = 1
             span_scope = current
             for line_number, line in enumerate(lines, 1):
-                heading = _HEADING_RE.match(line)
+                heading = None if fenced_lines[line_number - 1] else _HEADING_RE.match(line)
                 if heading is not None:
                     heading_title: Optional[str] = heading.group("title")
                     plain_text = False
-                elif _is_plain_text_heading(lines, line_number - 1):
+                elif not fenced_lines[line_number - 1] and _is_plain_text_heading(lines, line_number - 1):
                     heading_title = line.strip()
                     plain_text = True
                 else:
@@ -400,11 +431,18 @@ def _collect_scope_references(
     references: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for name in body_files:
         text = source_texts[name]
-        page_note_keys = {
-            match.group("key") for match in _MARKDOWN_DEF_RE.finditer(text)
-        }
         lines = text.splitlines()
+        fenced_lines = markdown_fence_mask(lines)
+        page_note_keys = {
+            match.group("key")
+            for line_index, line in enumerate(lines)
+            if not fenced_lines[line_index]
+            for match in [_MARKDOWN_DEF_RE.match(line)]
+            if match
+        }
         for line_number, line in enumerate(lines, 1):
+            if fenced_lines[line_number - 1]:
+                continue
             scope_key = _scope_for_line(body_spans, name, line_number)
             if not scope_key:
                 continue
