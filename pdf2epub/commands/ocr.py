@@ -18,7 +18,7 @@ from pdf2epub.ocr_consensus import (
     secondary_backend_name,
 )
 from pdf2epub.ocr_progress import assess_progress
-from pdf2epub.utils.common import resolve_book_input_path
+from pdf2epub.utils.input_paths import resolve_book_input_path
 from pdf2epub.workflow_contracts import (
     MARKDOWN_VALIDATION_SCHEMA_VERSION,
     atomic_write_json,

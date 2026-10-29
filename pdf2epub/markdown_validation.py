@@ -265,13 +265,14 @@ def polish_structure_audit(
     return result
 
 
-from .special_role_audit import (
-    special_role_numeric_markers as _special_role_numeric_markers,
-    validate_special_role_markers as _validate_special_role_markers,
-)
+from .special_role_audit import special_role_numeric_markers, validate_special_role_markers
+
+# Compatibility aliases used by downstream callers and older tests.
+_special_role_numeric_markers = special_role_numeric_markers
+_validate_special_role_markers = validate_special_role_markers
 
 
-def _validate_footnote_markers(source_text: str, target_text: str) -> list[str]:
+def validate_footnote_markers(source_text: str, target_text: str) -> list[str]:
     """Require translated Markdown to preserve exact footnote marker syntax."""
     marker_re = re.compile(r"\[\^([A-Za-z0-9_-]+)\]")
     source_markers = [match.group(1) for match in marker_re.finditer(source_text)]
@@ -371,7 +372,7 @@ def fix_reference_heading_mismatch(
         }
     ]
 
-def _heading_reduction_is_duplicate_only(source_text: str, target_text: str) -> bool:
+def heading_reduction_is_duplicate_only(source_text: str, target_text: str) -> bool:
     """Allow polishing to remove only headings duplicated in the source.
 
     This covers running headers repeated across a page boundary without
@@ -873,9 +874,16 @@ __all__ = [
     "detect_bilingual_output",
     "detect_polish_page_furniture",
     "fix_reference_heading_mismatch",
+    "heading_reduction_is_duplicate_only",
     "polish_content_integrity_check",
     "polish_structure_audit",
     "strip_outer_markdown_fences",
     "target_language_ratio_check",
     "translation_diff_summary",
+    "validate_footnote_markers",
 ]
+
+
+# Compatibility aliases; new code should use the public names.
+_validate_footnote_markers = validate_footnote_markers
+_heading_reduction_is_duplicate_only = heading_reduction_is_duplicate_only

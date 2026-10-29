@@ -12,7 +12,7 @@ from pathlib import Path
 from loguru import logger
 
 from pdf2epub.commands.runtime import load_book_context
-from pdf2epub.utils.common import resolve_book_input_path
+from pdf2epub.utils.input_paths import resolve_book_input_path
 
 
 _NOVEL_IMAGE_MARKER_RE = re.compile(r"\[Image:\s*([^\]]+)\]")

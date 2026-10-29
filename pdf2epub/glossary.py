@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Mapping, Optional
 
 import yaml
 
-from pdf2epub.utils.common import sanitize_filename
+from pdf2epub.utils.paths import sanitize_filename
 from pdf2epub.workflow_contracts import atomic_write_text
 
 

@@ -1277,7 +1277,7 @@ def _package_epub(
     )
 
     # Create final EPUB with sanitized filename
-    from .utils.common import sanitize_filename
+    from .utils.paths import sanitize_filename
     safe_title = sanitize_filename(config.book_title)
     epub_path = config.output_epub or (config.output_dir / f"{safe_title}.epub")
     builder.create_epub(epub_dir, epub_path)

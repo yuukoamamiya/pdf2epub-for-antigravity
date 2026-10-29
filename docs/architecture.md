@@ -62,6 +62,13 @@ Subagent 合同层
 └── subagent_safety.py               拒答/免责声明检测
 ```
 
+`utils/paths.py` 提供不依赖业务策略的书名路径处理；`utils/input_paths.py` 负责输入文件查找；
+`utils/configuration.py` 负责 YAML 配置加载及 OCR/pipeline 合法性校验；
+`utils/json_response.py` 负责模型响应 JSON 提取、解析与失败留档；
+`utils/language_detection.py` 负责 Markdown 集合的语言探测；`utils/filesystem.py` 提供轻量目录操作。
+`utils/common.py` 仅为旧调用方保留显式兼容导出；生产模块应直接导入上述职责 owner，避免公共入口
+重新聚合不相关职责或让纯路径工具依赖业务策略。
+
 ### 2.1 CLI 层
 
 [`pdf2epub/cli.py`](../pdf2epub/cli.py) 只负责：

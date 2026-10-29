@@ -71,10 +71,10 @@ def resolve_subagent_model(
     return configured.strip() if isinstance(configured, str) and configured.strip() else fallback
 
 from .batching_service import (
-    markdown_files as _markdown_files,
-    batching_config as _batching_config,
-    recommended_batches as _recommended_batches,
-    batch_queue as _batch_queue,
+    markdown_files,
+    batching_config,
+    recommended_batches,
+    batch_queue,
     positive_int,
     effective_max_concurrency,
     estimate_tokens,
@@ -637,7 +637,7 @@ def _chapter_worker_groups(manifest: Mapping[str, Any]) -> List[Dict[str, Any]]:
             for name in assigned
             if isinstance(file_stats.get(name), Mapping)
         }
-        batches = _recommended_batches(
+        batches = recommended_batches(
             stats,
             max_files,
             max_tokens,
@@ -1478,3 +1478,10 @@ __all__ = [
     "write_batch_handoffs",
     "write_worker_handoffs",
 ]
+
+
+# Compatibility exports for callers predating batching_service.
+_batching_config = batching_config
+_recommended_batches = recommended_batches
+_batch_queue = batch_queue
+_markdown_files = markdown_files

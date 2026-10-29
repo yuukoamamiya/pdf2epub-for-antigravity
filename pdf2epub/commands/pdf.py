@@ -15,7 +15,7 @@ from pdf2epub.commands.sources import (
     _resolve_pdf_polish_source,
 )
 from pdf2epub.pipeline_policy import PipelinePolicy
-from pdf2epub.utils.common import sanitize_filename
+from pdf2epub.utils.paths import sanitize_filename
 from pdf2epub.validation_receipts import validation_receipt_is_current
 
 

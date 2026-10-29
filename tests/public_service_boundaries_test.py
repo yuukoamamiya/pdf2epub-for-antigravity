@@ -42,6 +42,46 @@ def test_validation_checkpoint_service_does_not_import_the_validator():
     )
 
 
+def test_production_code_imports_common_helpers_from_their_owner_modules():
+    for path in (ROOT / "pdf2epub").rglob("*.py"):
+        if path.name == "common.py":
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        assert not any(
+            isinstance(node, ast.ImportFrom)
+            and node.module == "pdf2epub.utils.common"
+            for node in ast.walk(tree)
+        ), path.relative_to(ROOT)
+
+
+def test_path_helpers_do_not_load_workflow_policy():
+    imports = _imports("pdf2epub/utils/paths.py")
+    assert not any(
+        node.module == "pdf2epub.pipeline_policy" for node in imports
+    )
+
+
+def test_common_module_keeps_explicit_legacy_reexports():
+    from pdf2epub.utils import common, input_paths
+
+    assert common.resolve_book_input_path is input_paths.resolve_book_input_path
+    assert common.resolve_input_path is input_paths.resolve_input_path
+
+
+def test_subagent_validation_uses_public_role_and_heading_services():
+    imports = _imports("pdf2epub/markdown_subagent_validation.py")
+    assert any(
+        node.module == "special_role_audit"
+        and any(alias.name == "validate_special_role_markers" for alias in node.names)
+        for node in imports
+    )
+    assert not any(
+        node.module == "markdown_validation"
+        and any(alias.name.startswith("_") for alias in node.names)
+        for node in imports
+    )
+
+
 def test_internal_import_graph_is_acyclic_and_business_layers_do_not_import_commands():
     modules = {}
     for path in (ROOT / "pdf2epub").rglob("*.py"):

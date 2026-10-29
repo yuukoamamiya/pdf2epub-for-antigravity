@@ -29,7 +29,7 @@ from pdf2epub.commands.markdown_context import (
 )
 from pdf2epub.pdf_unit_roles import load_pdf_file_roles
 from pdf2epub.pipeline_policy import PipelinePolicy
-from pdf2epub.utils.common import load_config
+from pdf2epub.utils.configuration import load_config
 from pdf2epub.workflow_contracts import (
     MARKDOWN_VALIDATION_SCHEMA_VERSION,
     atomic_write_json,

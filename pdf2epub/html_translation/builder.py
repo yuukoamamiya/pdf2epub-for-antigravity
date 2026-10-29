@@ -37,7 +37,7 @@ from pdf2epub.special_role_audit import validate_special_role_markers
 from pdf2epub.markdown_validation import (
     target_language_ratio_check,
 )
-from pdf2epub.utils.common import sanitize_filename
+from pdf2epub.utils.paths import sanitize_filename
 from pdf2epub.utils.html_safety import sanitize_html_document
 from pdf2epub.workflow_contracts import atomic_write_json, atomic_write_text
 

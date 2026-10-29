@@ -11,7 +11,8 @@ from typing import Any, Optional
 
 from loguru import logger
 
-from pdf2epub.utils.common import book_output_dir, load_config
+from pdf2epub.utils.paths import book_output_dir
+from pdf2epub.utils.configuration import load_config
 from pdf2epub.utils.logging_config import configure_logging
 from pdf2epub.pipeline_policy import PipelinePolicy
 

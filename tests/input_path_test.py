@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from pdf2epub.utils.common import resolve_book_input_path
+from pdf2epub.utils.input_paths import resolve_book_input_path
 
 
 def test_resolve_book_input_prefers_config_path_relative_to_config(tmp_path: Path):

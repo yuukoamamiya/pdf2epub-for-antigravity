@@ -17,7 +17,8 @@ from pdf2epub.ocr_correction import ocr_correction_is_current, select_refinement
 from pdf2epub.ocr_progress import assess_progress
 from pdf2epub.pipeline_policy import PipelinePolicy
 from pdf2epub.ocr_source import is_legacy_native_source
-from pdf2epub.utils.common import book_output_dir, load_config
+from pdf2epub.utils.paths import book_output_dir
+from pdf2epub.utils.configuration import load_config
 from pdf2epub.utils.fingerprints import pages_fingerprint
 from pdf2epub.validation_receipts import validation_receipt_is_current
 from pdf2epub.workflow_contracts import atomic_write_json

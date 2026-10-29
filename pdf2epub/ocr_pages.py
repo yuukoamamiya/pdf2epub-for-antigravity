@@ -114,7 +114,7 @@ def ocr_pdf_chunk(
     spec = get_backend_spec(backend)
     if spec.chunk_processor is not None:
         if backend == "vllm" and config is None:
-            from .utils.common import load_config
+            from .utils.configuration import load_config
             config = load_config()
 
         kwargs = {

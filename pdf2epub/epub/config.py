@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Dict, Any
 
-from pdf2epub.utils.common import book_output_dir, sanitize_filename
+from pdf2epub.utils.paths import book_output_dir, sanitize_filename
 
 
 @dataclass

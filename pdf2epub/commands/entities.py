@@ -21,7 +21,7 @@ from pdf2epub.entity_context import (
     prepare_entity_subagent_task,
     validate_entity_source_manifest,
 )
-from pdf2epub.utils.common import book_output_dir
+from pdf2epub.utils.paths import book_output_dir
 from pdf2epub.workflow_contracts import atomic_write_json
 
 

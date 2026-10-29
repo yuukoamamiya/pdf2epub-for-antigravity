@@ -18,9 +18,8 @@ from .footnote_normalization import (
     validate_polish_footnote_normalization,
 )
 from .markdown_validation import (
-    _heading_reduction_is_duplicate_only,
-    _special_role_numeric_markers,
-    _validate_special_role_markers,
+    heading_reduction_is_duplicate_only,
+    validate_footnote_markers,
     detect_bilingual_output,
     detect_polish_page_furniture,
     fix_reference_heading_mismatch,
@@ -31,9 +30,9 @@ from .markdown_validation import (
     strip_outer_markdown_fences,
     target_language_ratio_check,
     translation_diff_summary,
-    _validate_footnote_markers,
 )
-from .batching_service import markdown_files as _markdown_files
+from .batching_service import markdown_files
+from .special_role_audit import validate_special_role_markers
 from .subagent_safety import detect_refusal, protected_workspace_changes
 from .utils.ocr_artifacts import clean_ocr_page_artifacts
 from .workflow_contracts import (
@@ -141,7 +140,7 @@ def validate_markdown_subagent(
                 )
         except (OSError, UnicodeError, json.JSONDecodeError):
             protected_workspace_blocked = []
-    all_sources = _markdown_files(source_dir)
+    all_sources = markdown_files(source_dir)
     selected = None
     if selected_files is not None:
         selected = {str(name) for name in selected_files}
@@ -430,7 +429,7 @@ def validate_markdown_subagent(
             mismatch_allowed = (
                 pattern == r"^#{1,6}\s"
                 and tolerate_duplicate_headings
-                and _heading_reduction_is_duplicate_only(comparison_source, target_text)
+                and heading_reduction_is_duplicate_only(comparison_source, target_text)
             )
             if (source_count != target_count or heading_levels_changed) and not mismatch_allowed:
                 invalid.append(
@@ -482,7 +481,7 @@ def validate_markdown_subagent(
             "catalog",
             "ad",
         }:
-            role_errors = _validate_special_role_markers(
+            role_errors = validate_special_role_markers(
                 source_text,
                 target_text,
                 role,
@@ -494,7 +493,7 @@ def validate_markdown_subagent(
                 valid_files.remove(source.name)
 
         if task == "translate":
-            footnote_marker_errors = _validate_footnote_markers(
+            footnote_marker_errors = validate_footnote_markers(
                 source_text, target_text
             )
             invalid.extend(
@@ -578,7 +577,7 @@ def validate_markdown_subagent(
         target_sha256[source.name] = hashlib.sha256(target.read_bytes()).hexdigest()
 
     extras = [] if partial else sorted(
-        path.name for path in _markdown_files(target_dir)
+        path.name for path in markdown_files(target_dir)
         if path.name not in {p.name for p in sources}
     )
     if extras:
