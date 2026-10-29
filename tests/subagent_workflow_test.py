@@ -238,6 +238,38 @@ def test_markdown_validation_read_only_keeps_existing_validated_copy(tmp_path: P
     assert not (tmp_path / "polish_file_validation.json").exists()
 
 
+@pytest.mark.parametrize("task,source_text,target_text,fix_reference", [
+    ("polish", "# Heading\nBody\n", "```markdown\n# Heading\nBody\n```\n", False),
+    ("translate", "正文\n\nREFERENCES\n", "正文\n\n## 参考文献\n", True),
+])
+def test_check_only_normalization_does_not_rewrite_target(
+    tmp_path: Path, task: str, source_text: str, target_text: str, fix_reference: bool
+):
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
+
+    source_dir, target_dir = tmp_path / "source", tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "unit.md").write_text(source_text, encoding="utf-8")
+    target = target_dir / "unit.md"
+    original = target_text.encode("utf-8")
+    target.write_bytes(original)
+
+    report = validate_markdown_subagent(
+        tmp_path, task, source_dir, target_dir,
+        create_validated_copy=False,
+        fix_reference_headings=fix_reference,
+        structural_patterns=(r"^#{1,6}\s",) if fix_reference else (),
+    )
+
+    assert target.read_bytes() == original
+    assert report["normalized_files"] == ["unit.md"]
+    import hashlib
+    assert report["target_sha256"]["unit.md"] == hashlib.sha256(original).hexdigest()
+    assert not (target_dir / "validated").exists()
+    assert not (tmp_path / f"{task}_validation.json").exists()
+
+
 def test_check_only_validation_keeps_invalid_target_and_temp_files(tmp_path: Path):
     from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
@@ -304,6 +336,107 @@ def test_formal_validation_still_quarantines_invalid_target(tmp_path: Path):
     )
     assert (tmp_path / "scratch" / "polish" / "invalid_outputs" / "unit.md").is_file()
     assert (tmp_path / "polish_file_validation.json").is_file()
+
+
+def test_partial_missing_target_invalidates_only_its_checkpoint_and_staging(
+    tmp_path: Path,
+):
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
+
+    source_dir, target_dir = tmp_path / "source", tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    for name in ("one.md", "other.md"):
+        (source_dir / name).write_text("Body.\n", encoding="utf-8")
+        (target_dir / name).write_text("Body.\n", encoding="utf-8")
+
+    validate_markdown_subagent(
+        tmp_path, "polish", source_dir, target_dir,
+        selected_files=["one.md", "other.md"],
+    )
+    checkpoint_path = tmp_path / "polish_file_validation.json"
+    previous = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    (target_dir / "one.md").unlink()
+
+    report = validate_markdown_subagent(
+        tmp_path, "polish", source_dir, target_dir, selected_files=["one.md"]
+    )
+
+    current = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    assert report["missing"] == ["one.md"]
+    assert current["files"]["one.md"]["valid"] is False
+    assert current["files"]["other.md"] == previous["files"]["other.md"]
+    assert not (target_dir / "validated" / "one.md").exists()
+    assert (target_dir / "validated" / "other.md").is_file()
+
+
+def test_partial_protected_workspace_block_clears_only_selected_staging(
+    tmp_path: Path,
+):
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
+    from pdf2epub.subagent_safety import protected_workspace_snapshot
+
+    (tmp_path / "pdf2epub").mkdir()
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'test'\n", encoding="utf-8")
+    protected = tmp_path / "pdf2epub" / "rule.py"
+    protected.write_text("RULE = 1\n", encoding="utf-8")
+    source_dir, target_dir = tmp_path / "source", tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    for name in ("one.md", "other.md"):
+        (source_dir / name).write_text("Body.\n", encoding="utf-8")
+        (target_dir / name).write_text("Body.\n", encoding="utf-8")
+    (tmp_path / "polish_subagent_manifest.json").write_text(
+        json.dumps({"protected_workspace": protected_workspace_snapshot(tmp_path)}),
+        encoding="utf-8",
+    )
+    validate_markdown_subagent(
+        tmp_path, "polish", source_dir, target_dir,
+        selected_files=["one.md", "other.md"],
+    )
+    protected.write_text("RULE = 2\n", encoding="utf-8")
+
+    report = validate_markdown_subagent(
+        tmp_path, "polish", source_dir, target_dir, selected_files=["one.md"]
+    )
+
+    assert report["safety_blocked"]
+    assert not (target_dir / "validated" / "one.md").exists()
+    assert (target_dir / "validated" / "other.md").is_file()
+
+
+def test_partial_refusal_invalidates_only_its_own_staging_and_ledger(
+    tmp_path: Path,
+):
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
+
+    source_dir, target_dir = tmp_path / "source", tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    for name in ("good.md", "refusal.md", "unselected.md"):
+        (source_dir / name).write_text("A short ordinary source paragraph.\n", encoding="utf-8")
+        (target_dir / name).write_text("Eine kurze Übersetzung.\n", encoding="utf-8")
+    validate_markdown_subagent(
+        tmp_path, "translate", source_dir, target_dir,
+        selected_files=["good.md", "refusal.md", "unselected.md"],
+    )
+    ledger_path = tmp_path / "translate_file_validation.json"
+    before = json.loads(ledger_path.read_text(encoding="utf-8"))
+    (target_dir / "refusal.md").write_text("I cannot help you with that.\n", encoding="utf-8")
+
+    report = validate_markdown_subagent(
+        tmp_path, "translate", source_dir, target_dir,
+        selected_files=["good.md", "refusal.md"],
+    )
+
+    after = json.loads(ledger_path.read_text(encoding="utf-8"))
+    assert report["safety_blocked"] == ["refusal.md"]
+    assert after["files"]["good.md"]["valid"] is True
+    assert after["files"]["refusal.md"]["valid"] is False
+    assert after["files"]["unselected.md"] == before["files"]["unselected.md"]
+    assert (target_dir / "validated" / "good.md").is_file()
+    assert not (target_dir / "validated" / "refusal.md").exists()
+    assert (target_dir / "validated" / "unselected.md").is_file()
 
 
 def test_polish_does_not_emit_bilingual_warning_for_unchanged_english(
@@ -1333,6 +1466,9 @@ def test_markdown_validation_stages_repaired_reference_heading(tmp_path: Path):
     assert (target_dir / "validated" / "unit.md").read_text(encoding="utf-8") == (
         "正文\n\n参考文献\n\n史密斯，A。\n"
     )
+    import hashlib
+    normalized = (target_dir / "validated" / "unit.md").read_bytes()
+    assert report["target_sha256"]["unit.md"] == hashlib.sha256(normalized).hexdigest()
 
 
 def test_markdown_validation_preserves_source_code_fences(tmp_path: Path):

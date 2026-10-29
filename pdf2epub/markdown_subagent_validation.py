@@ -3,84 +3,25 @@
 from __future__ import annotations
 
 import hashlib
-import json
-import re
-import shutil
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional
+from typing import Any, Dict, Iterable, Mapping, Optional
 
-from .document_roles import (
-    DENSITY_EXEMPT_ROLES,
-    TRANSLATION_SPECIAL_ROLES,
-)
-from .footnote_normalization import (
-    endnote_definition_keys,
-    validate_polish_footnote_normalization,
-)
-from .markdown_validation import (
-    heading_reduction_is_duplicate_only,
-    validate_footnote_markers,
-    detect_bilingual_output,
-    detect_polish_page_furniture,
-    fix_reference_heading_mismatch,
-    is_bibliography_text,
-    is_front_matter_text,
-    polish_content_integrity_check,
-    polish_structure_audit,
-    strip_outer_markdown_fences,
-    target_language_ratio_check,
-    translation_diff_summary,
-)
 from .batching_service import markdown_files
-from .special_role_audit import validate_special_role_markers
-from .subagent_safety import detect_refusal, protected_workspace_changes
-from .utils.ocr_artifacts import clean_ocr_page_artifacts
-from .workflow_contracts import (
-    MARKDOWN_VALIDATION_SCHEMA_VERSION,
-    atomic_write_json,
-    atomic_write_text,
+from .markdown_validation_context import load_markdown_validation_context
+from .markdown_validation_audit import audit_markdown_files
+from .markdown_validation_state import resolve_review_state
+from .markdown_validation_persistence import (
+    begin_validation_io,
+    stage_normalized_and_validated_targets,
+    persist_validation_report,
 )
+from .workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION
 
 
 # Changing the warning gate is a validation-contract change.  Older reports
 # were allowed to stage files while carrying advisory warnings, so callers
 # must not treat a pre-v2 report as proof that the new gate was evaluated.
 VALIDATION_SCHEMA_VERSION = MARKDOWN_VALIDATION_SCHEMA_VERSION
-def _structural_mismatch_reason(
-    pattern: str,
-    source_text: str,
-    target_text: str,
-    source_count: int,
-    target_count: int,
-) -> str:
-    """Explain a structural mismatch with useful source/target line numbers."""
-    if pattern == r"^#{1,6}\s":
-        heading_pattern = re.compile(r"^(#{1,6})\s", re.MULTILINE)
-
-        def describe(text: str) -> str:
-            headings = [
-                (text.count("\n", 0, match.start()) + 1, len(match.group(1)))
-                for match in heading_pattern.finditer(text)
-            ]
-            return ", ".join(f"L{line} (level {level})" for line, level in headings) or "none"
-
-        return (
-            "structural marker mismatch: Markdown heading structure mismatch: "
-            f"source={source_count} [{describe(source_text)}]; "
-            f"target={target_count} [{describe(target_text)}]"
-        )
-    return (
-        f"structural marker mismatch: {pattern} "
-        f"(source={source_count}, target={target_count})"
-    )
-
-
-from .markdown_validation_checkpoint import (
-    discard_abandoned_temp_targets as _discard_abandoned_temp_targets,
-    quarantine_invalid_targets as _quarantine_invalid_targets,
-)
-
-
 def validate_markdown_subagent(
     output_dir: Path,
     task: str,
@@ -101,480 +42,59 @@ def validate_markdown_subagent(
     ] = None,
 ) -> Dict:
     """Validate a Subagent markdown hand-off and optionally stage it."""
-    source_dir = Path(source_dir)
-    target_dir = Path(target_dir)
-    previous_review_files: set[str] = set()
-    previous_review_keys: set[tuple[str, str]] = set()
-    previous_manifest_path = output_dir / f"{task}_subagent_manifest.json"
-    protected_workspace_blocked: list[str] = []
-    if previous_manifest_path.is_file():
-        try:
-            loaded_manifest = json.loads(
-                previous_manifest_path.read_text(encoding="utf-8")
-            )
-            if isinstance(loaded_manifest, dict):
-                previous_review = loaded_manifest.get("previous_review_required", {})
-                if isinstance(previous_review, Mapping):
-                    for name, items in previous_review.items():
-                        file_name = str(name)
-                        if not file_name.strip():
-                            continue
-                        previous_review_files.add(file_name)
-                        if isinstance(items, list):
-                            for item in items:
-                                if isinstance(item, Mapping) and item.get("kind"):
-                                    previous_review_keys.add(
-                                        (file_name, str(item["kind"]))
-                                    )
-        except (OSError, json.JSONDecodeError, UnicodeError):
-            previous_review_files = set()
-    if previous_manifest_path.is_file():
-        try:
-            manifest_for_guard = json.loads(
-                previous_manifest_path.read_text(encoding="utf-8")
-            )
-            if isinstance(manifest_for_guard, Mapping):
-                protected_workspace_blocked = protected_workspace_changes(
-                    output_dir,
-                    manifest_for_guard.get("protected_workspace", {}),
-                )
-        except (OSError, UnicodeError, json.JSONDecodeError):
-            protected_workspace_blocked = []
-    all_sources = markdown_files(source_dir)
-    selected = None
-    if selected_files is not None:
-        selected = {str(name) for name in selected_files}
-        available = {path.name for path in all_sources}
-        unknown = sorted(selected - available)
-        if unknown:
-            raise ValueError(f"Unknown Markdown source file(s): {', '.join(unknown)}")
-        sources = [path for path in all_sources if path.name in selected]
-    else:
-        sources = all_sources
-    partial = selected is not None
-    discarded_temp_files = (
-        _discard_abandoned_temp_targets(
-            target_dir, [source.name for source in sources]
-        )
-        if create_validated_copy
-        else []
+    context = load_markdown_validation_context(
+        output_dir, task, source_dir, target_dir,
+        structural_patterns=structural_patterns,
+        create_validated_copy=create_validated_copy,
+        file_roles=file_roles,
+        tolerate_duplicate_headings=tolerate_duplicate_headings,
+        validate_footnote_normalization=validate_footnote_normalization,
+        fix_reference_headings=fix_reference_headings,
+        selected_files=selected_files,
+        target_language=target_language,
+        allow_review_warnings=allow_review_warnings,
+        protected_toc_titles=protected_toc_titles or (),
+        continuation_toc_titles=continuation_toc_titles,
     )
-    missing: List[str] = []
-    invalid: List[Dict[str, str]] = []
-    safety_blocked: List[str] = []
-    valid_files: List[str] = []
+    target_dir = context.paths.target_dir
+    validated_dir = context.paths.validated_dir
+    sources = context.sources
+    partial = context.partial
+    allow_review_warnings = context.allow_review_warnings
+    previous_review_files = set(context.review_snapshot.files)
+    previous_review_keys = set(context.review_snapshot.keys)
+    protected_workspace_blocked = list(context.review_snapshot.protected_workspace_blocked)
+    task = context.options.task
+    normalized_roles = dict(context.options.file_roles)
+    normalized_protected_toc_titles = list(context.options.protected_toc_titles)
+    normalized_continuation_toc_titles = context.options.continuation_toc_titles
+    discarded_temp_files = begin_validation_io(context)
+    audit = audit_markdown_files(context)
+    missing = audit.missing
+    invalid = audit.invalid
+    safety_blocked = list(audit.safety_blocked)
     if protected_workspace_blocked:
         safety_blocked.append(
             "protected workspace changed during Subagent hand-off: "
             + ", ".join(protected_workspace_blocked)
         )
-        # Do not create a resumable content checkpoint after an unauthorized
-        # repository mutation, even if the Markdown itself looks valid.
-        valid_files.clear()
-    source_sha256: Dict[str, str] = {}
-    target_sha256: Dict[str, str] = {}
-    normalized_files: List[str] = []
-    reference_heading_fixes: List[Dict[str, Any]] = []
-    diff_summary: Dict[str, Dict[str, Any]] = {}
-    structural_warnings: List[Dict[str, Any]] = []
-    target_language_audits: Dict[str, Dict[str, Any]] = {}
-    target_language_blocked: List[str] = []
-    polish_page_furniture_warnings: List[Dict[str, Any]] = []
-    polish_toc_label_exemptions: List[Dict[str, Any]] = []
-    polish_content_integrity: Dict[str, Dict[str, Any]] = {}
-    polish_structure_audits: Dict[str, Dict[str, Any]] = {}
-    review_required: List[Dict[str, Any]] = []
-    normalized_roles = {
-        str(name): str(role).strip().lower()
-        for name, role in (file_roles or {}).items()
-        if str(role).strip().lower() in TRANSLATION_SPECIAL_ROLES
-    }
-    expected_endnote_keys: set[str] = set()
-    if task == "polish":
-        for source in sources:
-            if normalized_roles.get(source.name) != "notes":
-                continue
-            try:
-                expected_endnote_keys.update(
-                    endnote_definition_keys(
-                        source.read_text(encoding="utf-8"),
-                        file_role="notes",
-                    )
-                )
-            except (OSError, UnicodeError):
-                continue
-    normalized_protected_toc_titles = list(
-        dict.fromkeys(
-            str(title).strip()
-            for title in (protected_toc_titles or ())
-            if str(title).strip()
-        )
-    )
-    normalized_continuation_toc_titles = {
-        str(name): {
-            str(title).strip()
-            for title in titles
-            if str(title).strip()
-        }
-        for name, titles in (continuation_toc_titles or {}).items()
-        if str(name).strip() and titles is not None
-    }
-    bilingual_warnings: List[Dict[str, Any]] = []
-    validated_dir = target_dir / "validated"
-    # Never leave a previous successful hand-off usable after a later failed
-    # validation.  The validated directory is a generated staging area.
-    # Read-only checks must not touch it because other workers may be running
-    # concurrently against the same shared staging directory.
-    if create_validated_copy and validated_dir.exists() and not partial:
-        shutil.rmtree(validated_dir)
-
-    for source in sources:
-        target = target_dir / source.name
-        if not target.exists():
-            missing.append(source.name)
-            if partial and create_validated_copy:
-                (validated_dir / source.name).unlink(missing_ok=True)
-            continue
-        try:
-            source_bytes = source.read_bytes()
-            source_sha256[source.name] = hashlib.sha256(source_bytes).hexdigest()
-            source_text = source_bytes.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            invalid.append(
-                {
-                    "file": source.name,
-                    "reason": f"source UTF-8 decode error: {exc}",
-                }
-            )
-            continue
-        try:
-            target_bytes = target.read_bytes()
-            target_sha256[source.name] = hashlib.sha256(target_bytes).hexdigest()
-            target_text = target_bytes.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            invalid.append(
-                {
-                    "file": source.name,
-                    "reason": f"UTF-8 decode error (truncated file?): {exc}",
-                }
-            )
-            continue
-        target_text, stripped_fence = strip_outer_markdown_fences(target_text)
-        if stripped_fence:
-            atomic_write_text(target, target_text)
-            normalized_files.append(source.name)
-        if task == "polish" and normalized_protected_toc_titles:
-            def normalize_label(value: str) -> str:
-                value = re.sub(r"^\s*#{1,6}\s+", "", value.strip())
-                value = re.sub(r"[*_`]+", "", value).strip()
-                return re.sub(r"\s+", " ", value).casefold()
-
-            source_labels = [
-                normalize_label(line)
-                for line in source_text.splitlines()
-                if normalize_label(line)
-            ]
-            target_labels = [
-                normalize_label(line)
-                for line in target_text.splitlines()
-                if normalize_label(line)
-            ]
-            source_prefix_labels = {
-                normalize_label(line)
-                for line in source_text.splitlines()[:5]
-                if normalize_label(line)
-            }
-            for title in normalized_protected_toc_titles:
-                normalized_title = normalize_label(title)
-                if (
-                    source_labels.count(normalized_title) == 1
-                    and target_labels.count(normalized_title) == 0
-                ):
-                    continuation_titles = normalized_continuation_toc_titles.get(
-                        source.name, set()
-                    )
-                    if (
-                        normalized_title in {
-                            normalize_label(value) for value in continuation_titles
-                        }
-                        and normalized_title in source_prefix_labels
-                    ):
-                        polish_toc_label_exemptions.append(
-                            {
-                                "file": source.name,
-                                "kind": "polish_continuation_toc_label_removed",
-                                "reason": (
-                                    "a top-level ancestor label was removed from the "
-                                    "opening of a continuation part"
-                                ),
-                                "title": title,
-                            }
-                        )
-                        continue
-                    review_required.append(
-                        {
-                            "file": source.name,
-                            "kind": "polish_unique_toc_label_removed",
-                            "reason": (
-                                "a unique source TOC label disappeared during polish; "
-                                "confirm that it was not a running header"
-                            ),
-                            "title": title,
-                        }
-                    )
-        if task == "translate" and fix_reference_headings:
-            target_text, fixes = fix_reference_heading_mismatch(source_text, target_text)
-            if fixes:
-                atomic_write_text(target, target_text)
-                normalized_files.append(source.name)
-                reference_heading_fixes.extend(
-                    {"file": source.name, **fix} for fix in fixes
-                )
-        if task == "translate":
-            escaped_number_re = re.compile(r"^(\d+)\\\.\s", re.MULTILINE)
-            source_numbered_prose = escaped_number_re.findall(source_text)
-            target_numbered_prose = escaped_number_re.findall(target_text)
-            if source_numbered_prose != target_numbered_prose:
-                invalid.append(
-                    {
-                        "file": source.name,
-                        "reason": (
-                            "escaped numbered-prose markers changed or were lost: "
-                            f"expected {source_numbered_prose}, found {target_numbered_prose}"
-                        ),
-                    }
-                )
-        diff_summary[source.name] = translation_diff_summary(source_text, target_text)
-        if not target_text.strip() and bool(source_text.strip()):
-            invalid.append({"file": source.name, "reason": "target is empty"})
-            continue
-        role = normalized_roles.get(source.name)
-        if not role and is_bibliography_text(source_text):
-            role = "bibliography"
-            normalized_roles[source.name] = role
-        if task == "translate" and role not in DENSITY_EXEMPT_ROLES:
-            language_kwargs = {}
-            if role in {"metadata", "frontmatter", "copyright", "cover"} or is_front_matter_text(source_text):
-                language_kwargs = {
-                    "min_source_letters": 50,
-                    "min_target_letters": 20,
-                }
-            language_audit = target_language_ratio_check(
-                source_text, target_text, target_language, **language_kwargs
-            )
-            target_language_audits[source.name] = language_audit
-            if language_audit.get("blocked"):
-                invalid.append(
-                    {
-                        "file": source.name,
-                        "reason": str(language_audit["reason"]),
-                    }
-                )
-                target_language_blocked.append(source.name)
-        refusal = detect_refusal(source_text, target_text)
-        if refusal:
-            invalid.append(
-                {"file": source.name, "reason": f"refusal/disclaimer detected: {refusal}"}
-            )
-            safety_blocked.append(source.name)
-            continue
-        warning = (
-            detect_bilingual_output(source_text, target_text)
-            if task == "translate"
-            else None
-        )
-        language_audit = target_language_audits.get(source.name, {})
-        if (
-            warning
-            and task == "translate"
-            and language_audit.get("applicable")
-            and source.name not in target_language_blocked
-        ):
-            invalid.append(
-                {
-                    "file": source.name,
-                    "reason": (
-                        "untranslated_source_detected: long unchanged source "
-                        f"span at lines {warning['start_line']}-{warning['end_line']}"
-                    ),
-                }
-            )
-            target_language_blocked.append(source.name)
-        elif warning and source.name not in normalized_roles:
-            warning["file"] = source.name
-            bilingual_warnings.append(warning)
-            if task == "translate":
-                review_required.append(
-                    {
-                        "file": source.name,
-                        "kind": "bilingual_output",
-                        "reason": warning["reason"],
-                        "start_line": warning["start_line"],
-                        "end_line": warning["end_line"],
-                    }
-                )
-        for pattern in structural_patterns:
-            comparison_source = source_text
-            if pattern == r"!\[[^\]]*\]\([^)]+\)":
-                comparison_source = clean_ocr_page_artifacts(source_text)
-            source_matches = list(re.finditer(pattern, comparison_source, flags=re.MULTILINE))
-            target_matches = list(re.finditer(pattern, target_text, flags=re.MULTILINE))
-            source_count = len(source_matches)
-            target_count = len(target_matches)
-            heading_levels_changed = (
-                pattern == r"^#{1,6}\s"
-                and [len(match.group(0).split()[0]) for match in source_matches]
-                != [len(match.group(0).split()[0]) for match in target_matches]
-            )
-            mismatch_allowed = (
-                pattern == r"^#{1,6}\s"
-                and tolerate_duplicate_headings
-                and heading_reduction_is_duplicate_only(comparison_source, target_text)
-            )
-            if (source_count != target_count or heading_levels_changed) and not mismatch_allowed:
-                invalid.append(
-                    {
-                        "file": source.name,
-                        "reason": _structural_mismatch_reason(
-                            pattern,
-                            comparison_source,
-                            target_text,
-                            source_count,
-                            target_count,
-                        ),
-                    }
-                )
-                break
-            if (source_count != target_count or heading_levels_changed) and mismatch_allowed:
-                structural_warnings.append(
-                    {
-                        "file": source.name,
-                        "reason": "duplicate Markdown heading removed during polishing",
-                        "source_count": source_count,
-                        "target_count": target_count,
-                    }
-                )
-        else:
-            footnote_errors = (
-                validate_polish_footnote_normalization(
-                    source_text,
-                    target_text,
-                    file_role=role,
-                    expected_endnote_keys=expected_endnote_keys,
-                )
-                if validate_footnote_normalization
-                else []
-            )
-            if footnote_errors:
-                invalid.extend(
-                    {"file": source.name, "reason": error}
-                    for error in footnote_errors
-                )
-            else:
-                valid_files.append(source.name)
-
-        if role in {
-            "bibliography",
-            "index",
-            "notes",
-            "author_notes",
-            "catalog",
-            "ad",
-        }:
-            role_errors = validate_special_role_markers(
-                source_text,
-                target_text,
-                role,
-                allow_page_furniture_deletion=task != "translate",
-            )
-            for role_error in role_errors:
-                invalid.append({"file": source.name, "reason": role_error})
-            if role_errors and source.name in valid_files:
-                valid_files.remove(source.name)
-
-        if task == "translate":
-            footnote_marker_errors = validate_footnote_markers(
-                source_text, target_text
-            )
-            invalid.extend(
-                {"file": source.name, "reason": error}
-                for error in footnote_marker_errors
-            )
-            if footnote_marker_errors and source.name in valid_files:
-                valid_files.remove(source.name)
-
-        if task == "polish":
-            integrity = polish_content_integrity_check(
-                source_text, target_text, file_role=role
-            )
-            polish_content_integrity[source.name] = integrity
-            if not integrity["valid"]:
-                invalid.extend(
-                    {"file": source.name, "reason": reason}
-                    for reason in integrity["errors"]
-                )
-                if source.name in valid_files:
-                    valid_files.remove(source.name)
-            for finding in detect_polish_page_furniture(
-                target_text,
-                role=role,
-                protected_toc_titles=normalized_protected_toc_titles,
-            ):
-                item = {"file": source.name, **finding}
-                polish_page_furniture_warnings.append(item)
-                review_required.append(
-                    {
-                        "file": source.name,
-                        "kind": "polish_page_furniture",
-                        "reason": (
-                            "high-confidence page-furniture candidate remains after polish"
-                        ),
-                        **finding,
-                    }
-                )
-            structure_audit = polish_structure_audit(
-                source_text,
-                target_text,
-                role=role,
-            )
-            polish_structure_audits[source.name] = structure_audit
-            if structure_audit.get("status") == "review":
-                review_required.append(
-                    {
-                        "file": source.name,
-                        "kind": "polish_paragraph_fragmentation",
-                        "reason": str(
-                            structure_audit.get(
-                                "reason",
-                                "polish output may contain visual-line paragraph fragmentation",
-                            )
-                        ),
-                        "audit": structure_audit,
-                    }
-                )
-
-        if source.name in target_language_blocked and source.name in valid_files:
-            valid_files.remove(source.name)
-
-        source_fence_count = source_text.count("```")
-        target_fence_count = target_text.count("```")
-        if source_fence_count != target_fence_count:
-            invalid.append(
-                {
-                    "file": source.name,
-                    "reason": (
-                        "Markdown code fence mismatch: "
-                        f"expected {source_fence_count}, got {target_fence_count}"
-                    ),
-                }
-            )
-            if source.name in valid_files:
-                valid_files.remove(source.name)
-
-        # Normalization and high-confidence heading repair may have rewritten
-        # the target after its initial read.  Receipts must attest to the
-        # bytes that will actually be copied into validated/ and packaged.
-        target_sha256[source.name] = hashlib.sha256(target.read_bytes()).hexdigest()
+    valid_files = audit.valid_files
+    source_sha256 = audit.source_sha256
+    target_sha256 = audit.target_sha256
+    normalized_files = audit.normalized_files
+    normalized_targets = audit.normalized_targets
+    reference_heading_fixes = audit.reference_heading_fixes
+    diff_summary = audit.diff_summary
+    structural_warnings = audit.structural_warnings
+    target_language_audits = audit.target_language_audits
+    target_language_blocked = audit.target_language_blocked
+    polish_page_furniture_warnings = audit.polish_page_furniture_warnings
+    polish_toc_label_exemptions = audit.polish_toc_label_exemptions
+    polish_content_integrity = audit.polish_content_integrity
+    polish_structure_audits = audit.polish_structure_audits
+    review_required = audit.review_required
+    bilingual_warnings = audit.bilingual_warnings
+    normalized_roles = audit.file_roles
 
     extras = [] if partial else sorted(
         path.name for path in markdown_files(target_dir)
@@ -585,89 +105,29 @@ def validate_markdown_subagent(
             {"file": name, "reason": "unexpected extra target file"}
             for name in extras
         )
-    review_required_files = sorted(
-        {str(item["file"]) for item in review_required if item.get("file")}
+    review_state = resolve_review_state(
+        review_required, missing, invalid, previous_review_files, previous_review_keys
     )
-    human_review_required = [
-        {
-            **item,
-            "action": "ask_human",
-            "reason": (
-                "the same review signal persisted after a Subagent retry; "
-                "automatic retries are paused"
-            ),
-        }
-        for item in review_required
-        if (
-            str(item.get("file") or "") in previous_review_files
-            and (
-                not previous_review_keys
-                or (
-                    str(item.get("file") or ""),
-                    str(item.get("kind") or ""),
-                )
-                in previous_review_keys
-            )
-        )
-    ]
-    human_review_keys = {
-        (str(item.get("file") or ""), str(item.get("kind") or ""))
-        for item in human_review_required
-    }
-    retry_required = [
-        {
-            "file": name,
-            "kind": "missing_output",
-            "action": "retry_subagent",
-            "reason": "Subagent did not write the assigned target file",
-        }
-        for name in missing
-    ]
-    retry_required.extend(
-        {
-            **item,
-            "kind": "invalid_output",
-            "action": "retry_subagent",
-        }
-        for item in invalid
-    )
-    retry_required.extend(
-        {
-            **item,
-            "action": "retry_subagent",
-        }
-        for item in review_required
-        if (
-            str(item.get("file") or ""), str(item.get("kind") or "")
-        ) not in human_review_keys
-    )
-    retry_required_files = sorted(
-        {str(item["file"]) for item in retry_required if item.get("file")}
-    )
-    human_review_required_files = sorted(
-        {
-            str(item["file"])
-            for item in human_review_required
-            if item.get("file")
-        }
-    )
+    review_required_files = list(review_state.review_required_files)
+    human_review_required = list(review_state.human_review_required)
+    retry_required = list(review_state.retry_required)
+    retry_required_files = list(review_state.retry_required_files)
+    human_review_required_files = list(review_state.human_review_required_files)
     if not allow_review_warnings:
         for name in review_required_files:
             if name in valid_files:
                 valid_files.remove(name)
-    if partial:
-        invalid_names = {item["file"] for item in invalid if item.get("file")}
-        if not allow_review_warnings:
-            invalid_names.update(review_required_files)
-        if create_validated_copy:
-            for name in invalid_names:
-                (validated_dir / name).unlink(missing_ok=True)
-    if create_validated_copy and not missing and not invalid and not safety_blocked and (
-        allow_review_warnings or not review_required
-    ):
-        validated_dir.mkdir(parents=True, exist_ok=True)
-        for source in sources:
-            shutil.copy2(target_dir / source.name, validated_dir / source.name)
+    if protected_workspace_blocked:
+        # A guard failure is never allowed to appear as a successful file checkpoint.
+        valid_files.clear()
+    invalid_names = {str(item.get("file")) for item in invalid if item.get("file")}
+    target_hashes = stage_normalized_and_validated_targets(
+        context, normalized_targets, sources, invalid_names, set(review_required_files),
+        missing=missing, invalid=invalid, safety_blocked=safety_blocked,
+        review_required=review_required,
+        protected_workspace_blocked=bool(protected_workspace_blocked),
+    )
+    target_sha256.update(target_hashes)
 
     report = {
         "schema_version": VALIDATION_SCHEMA_VERSION,
@@ -722,93 +182,12 @@ def validate_markdown_subagent(
             and (allow_review_warnings or not review_required)
         ),
     }
-    report_path = (
-        output_dir / f"{task}_file_validation.json"
-        if partial
-        else output_dir / f"{task}_validation.json"
+    return persist_validation_report(
+        context,
+        report,
+        discarded_temp_files=discarded_temp_files,
+        polish_content_integrity=polish_content_integrity,
+        polish_structure_audits=polish_structure_audits,
     )
-    if partial:
-        existing: Dict[str, Any] = {}
-        if report_path.is_file():
-            try:
-                loaded = json.loads(report_path.read_text(encoding="utf-8"))
-                if isinstance(loaded, dict):
-                    existing = loaded
-            except (OSError, json.JSONDecodeError):
-                existing = {}
-        records = existing.get("files", {})
-        if not isinstance(records, dict):
-            records = {}
-        for name in report["files_checked"]:
-            records[name] = {
-                "schema_version": VALIDATION_SCHEMA_VERSION,
-                "valid": name in report["valid_files"] and not report["missing"],
-                "source_sha256": report["source_sha256"].get(name),
-                "target_sha256": report["target_sha256"].get(name),
-                "invalid": [item for item in report["invalid"] if item["file"] == name],
-                "safety_blocked": name in report["safety_blocked"],
-                "target_language_blocked": name in report["target_language_blocked"],
-                "target_language_audit": report["target_language_audits"].get(name),
-                "review_required": [
-                    item
-                    for item in report["review_required"]
-                    if item.get("file") == name
-                ],
-                "retry_required": [
-                    item
-                    for item in report["retry_required"]
-                    if item.get("file") == name
-                ],
-                "human_review_required": [
-                    item
-                    for item in report["human_review_required"]
-                    if item.get("file") == name
-                ],
-                "review_warnings_acknowledged": bool(
-                    report.get("allow_review_warnings")
-                    and any(
-                        item.get("file") == name
-                        for item in report["review_required"]
-                    )
-                ),
-                "polish_content_integrity": polish_content_integrity.get(name),
-                "polish_structure_audit": polish_structure_audits.get(name),
-            }
-        ledger = {
-            "schema_version": VALIDATION_SCHEMA_VERSION,
-            "task": task,
-            "scope": "file-checkpoints",
-            "files": records,
-        }
-        if create_validated_copy:
-            atomic_write_json(report_path, ledger)
-    else:
-        if create_validated_copy:
-            atomic_write_json(report_path, report)
-    invalid_target_names = {
-        str(item.get("file"))
-        for item in invalid
-        if isinstance(item, Mapping) and item.get("file")
-    }
-    quarantined_files = (
-        _quarantine_invalid_targets(
-            output_dir, task, target_dir, invalid_target_names
-        )
-        if create_validated_copy
-        else {}
-    )
-    report["discarded_temp_files"] = discarded_temp_files
-    report["quarantined_files"] = quarantined_files
-    # The report is written once more so recovery metadata is durable even
-    # when the target itself was invalid and moved out of the active directory.
-    if partial:
-        ledger["discarded_temp_files"] = discarded_temp_files
-        ledger["quarantined_files"] = quarantined_files
-        if create_validated_copy:
-            atomic_write_json(report_path, ledger)
-    else:
-        if create_validated_copy:
-            atomic_write_json(report_path, report)
-    return report
 
 __all__ = ["validate_markdown_subagent"]

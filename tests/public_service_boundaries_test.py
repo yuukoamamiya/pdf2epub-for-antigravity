@@ -68,8 +68,8 @@ def test_common_module_keeps_explicit_legacy_reexports():
     assert common.resolve_input_path is input_paths.resolve_input_path
 
 
-def test_subagent_validation_uses_public_role_and_heading_services():
-    imports = _imports("pdf2epub/markdown_subagent_validation.py")
+def test_markdown_audit_uses_public_role_and_heading_services():
+    imports = _imports("pdf2epub/markdown_validation_audit.py")
     assert any(
         node.module == "special_role_audit"
         and any(alias.name == "validate_special_role_markers" for alias in node.names)

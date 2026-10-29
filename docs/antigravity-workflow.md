@@ -102,7 +102,10 @@ prompt 使用“本次 hand-off 使用的同一配置”措辞，不编造路径
 `polished_markdown/validated/`，也不移动或删除已暂存文件。这样每个 worker 可以独立闭环，
 又不会并发争写共享 checkpoint。worker 全部结束后，主 Agent 仍运行正式
 `polish-validate --file`（或全量 `polish-validate`）写入权威 checkpoint；只有该权威记录
-才可作为后续打包和翻译门禁。
+才可作为后续打包和翻译门禁。check-only 识别到 Markdown 外层 fence 或可修复的参考文献标题时，
+只审计内存中的规范化候选，不写回目标 Markdown；它也不清理临时文件、不写 partial ledger、
+验证报告或 checkpoint。formal 校验才应用规范化；写入后重新计算目标 SHA-256，并以实际落盘
+内容写入 validated 副本和 checkpoint。
 Markdown worker 的提示词还明确禁止修改 `pdf2epub/`、`tests/`、`docs/`、`glossaries/` 和项目
 配置。准备阶段会对这些受保护文件记录哈希；校验阶段发现 Worker 改动其中任何文件时，
 本轮会进入 `safety_blocked`，不会生成可恢复的内容 checkpoint，必须先由主 Agent 处理代码变更。

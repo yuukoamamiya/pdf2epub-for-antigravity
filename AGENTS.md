@@ -659,7 +659,7 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    `assigned_files` 写入 `polished_markdown/`，然后运行 `polish-validate`。
    每个 Worker 写完一个 assigned file 后，必须先运行只读自检
    `uv run pdf2epub -c <config> polish-validate --file <file> --check-only`；该命令只校验，
-   不写 checkpoint、不创建或清理 `validated/`，因此多个 Worker 可安全并发。自检不通过时
+   不规范化写回目标 Markdown、不写报告或 checkpoint、不创建或清理 `validated/`，因此多个 Worker 可安全并发。自检不通过时
    Worker 必须在原地修复并重跑。自检通过不等于完成：Worker 全部结束后，主 Agent 仍须运行
    正式的 `polish-validate --file`（或全量 `polish-validate`）写入权威 checkpoint。
    若启用第二套 OCR，对 OCR/混合型 PDF，前置 `ocr-correct` 通过校验后的字符、词语和符号视为权威；
