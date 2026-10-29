@@ -7,6 +7,7 @@ import pytest
 
 from pdf2epub.html_translation.builder import HTMLEpubPipeline
 from pdf2epub.refine.main import RefinedBreakdown
+from toc_review_test_support import install_toc_review_contract
 from pdf2epub.refine.subagent_workflow import (
     prepare_refine_subagent,
     validate_toc_tree_data,
@@ -16,6 +17,7 @@ from pdf2epub.refine.unit_splitter import split_markdown_unit
 from pdf2epub.entity_extractor import validate_entities
 from pdf2epub.entity_context import prepare_entity_subagent_task
 from pdf2epub.markdown_handoff import prepare_markdown_subagent
+from pdf2epub.workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION
 from pdf2epub.markdown_validation import (
     detect_bilingual_output,
     fix_reference_heading_mismatch,
@@ -1111,6 +1113,82 @@ def test_special_role_marker_audit_handles_repeated_years_after_header_removal()
     assert errors == []
 
 
+def test_special_role_numeric_audit_normalizes_only_contextual_roman_volume_part():
+    from pdf2epub.markdown_validation import _validate_special_role_markers
+
+    assert _validate_special_role_markers(
+        "Volume II\nPart IV", "第2卷\n第4部", "bibliography"
+    ) == []
+    assert _validate_special_role_markers(
+        "Volume II", "第3卷", "bibliography"
+    )
+    assert _validate_special_role_markers(
+        "Volume II", "第II卷", "bibliography"
+    ) == []
+    assert _validate_special_role_markers(
+        "Part II", "第2部", "bibliography"
+    ) == []
+    assert _validate_special_role_markers(
+        "Volume IIV", "第4卷", "bibliography"
+    )
+    assert _validate_special_role_markers(
+        "II", "II", "bibliography"
+    ) == []
+    assert _validate_special_role_markers(
+        "Volume I", "第I 章", "bibliography"
+    )
+    from pdf2epub.markdown_validation import _special_role_numeric_markers
+    assert _special_role_numeric_markers("第I个标题 / 10.1234/vol.II") == ["10.1234"]
+    assert _validate_special_role_markers(
+        "Author I wrote about Part II", "作者 I 写了关于第3部", "bibliography"
+    )
+
+
+def test_splitter_rebalances_small_tail_without_exceeding_budget():
+    blocks = [" ".join([f"block{i}"] * 20) for i in range(1, 16)]
+    text = "\n\n".join([*blocks, "tiny tail"])
+    result = split_markdown_unit(text, 100, "body", lambda value: len(value.split()))
+
+    assert "".join(result.parts) == text
+    assert result.strategy.endswith("+tail-rebalanced")
+    assert [len(part.split()) for part in result.parts] == [100, 100, 60, 42]
+    assert all(len(part.split()) <= 100 for part in result.parts)
+    assert all(len(part.encode("utf-8")) <= 30_000 for part in result.parts)
+
+
+def test_splitter_merges_tail_only_when_explicit_budget_allows_it():
+    blocks = [" ".join([f"block{i}"] * 20) for i in range(1, 16)]
+    text = "\n\n".join([*blocks, "tiny tail"])
+    result = split_markdown_unit(
+        text, 100, "body", lambda value: len(value.split()), budget_tokens=210
+    )
+
+    assert result.strategy.endswith("+tail-merged")
+    assert len(result.parts[-1].split()) == 102
+    assert "".join(result.parts) == text
+
+
+def test_splitter_keeps_unmergeable_footnote_and_index_continuations_safe():
+    text = "Alpha, 1\n\nAlpha *(continued)*\n\n" + "\n\n".join(
+        f"Entry {i}, {i}" for i in range(2, 12)
+    )
+    result = split_markdown_unit(text, 5, "index", lambda value: len(value.split()))
+
+    assert "".join(result.parts) == text
+    assert any("Alpha, 1\n\nAlpha *(continued)*" in part for part in result.parts)
+
+
+def test_splitter_keeps_footnote_reference_with_definition():
+    text = (
+        "Start " + "word " * 15 + "[^a].\n\n[^a]: " + "definition " * 5
+        + "\n\n" + "\n\n".join(f"block {index}" for index in range(30))
+    )
+    result = split_markdown_unit(text, 20, "notes", lambda value: len(value.split()))
+
+    assert "".join(result.parts) == text
+    assert any("[^a]." in part and "[^a]:" in part for part in result.parts)
+
+
 def test_markdown_validation_includes_structural_diff_summary(tmp_path: Path):
     from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
@@ -2024,7 +2102,7 @@ def test_extract_entities_uses_configured_language_and_selected_source_stage(
     (tmp_path / "output" / "Book" / "polish_validation.json").write_text(
         json.dumps(
             {
-                "schema_version": 2,
+                "schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION,
                 "task": "polish",
                 "scope": "full",
                 "all_passed": True,
@@ -2083,7 +2161,7 @@ def test_translate_toc_command_prepares_independent_json_task(tmp_path: Path, mo
     output_dir = tmp_path / "output" / "Book"
     output_dir.mkdir(parents=True)
     (output_dir / "toc_tree.json").write_text(
-        json.dumps({"book_title": "Book", "chapters": []}), encoding="utf-8"
+        json.dumps({"schema_version": 2, "book_title": "Book", "chapters": []}), encoding="utf-8"
     )
 
     result = translate_toc_command(
@@ -2096,7 +2174,7 @@ def test_translate_toc_command_prepares_independent_json_task(tmp_path: Path, mo
     )
     assert source["source_language"] == "German"
     assert source["target_language"] == "Chinese"
-    assert source["contract_version"] == 2
+    assert source["contract_version"] == 3
     assert source["output_file"] == "toc_tree_translated.json"
     assert source["result_file"] == "toc_translation_result.json"
 
@@ -2105,7 +2183,7 @@ def test_translate_task_integrates_toc_contract_into_main_manifest_and_prompt(tm
     output_dir = tmp_path / "output"
     output_dir.mkdir()
     (output_dir / "toc_tree.json").write_text(
-        json.dumps({"book_title": "Book", "chapters": []}), encoding="utf-8"
+        json.dumps({"schema_version": 2, "book_title": "Book", "chapters": []}), encoding="utf-8"
     )
     toc_paths = prepare_toc_translation_subagent(output_dir, "English", "Chinese")
     toc_template = json.loads(toc_paths["template"].read_text(encoding="utf-8"))
@@ -2157,7 +2235,7 @@ def test_translate_skip_entities_is_recorded_in_prompt_and_manifest(
     (output_dir / "polish_validation.json").write_text(
         json.dumps(
             {
-                "schema_version": 2,
+                "schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION,
                 "task": "polish",
                 "scope": "full",
                 "all_passed": True,
@@ -2172,11 +2250,16 @@ def test_translate_skip_entities_is_recorded_in_prompt_and_manifest(
         encoding="utf-8",
     )
     (output_dir / "toc_tree.json").write_text(
-        json.dumps({"book_title": "Book", "chapters": []}), encoding="utf-8"
+        json.dumps({"schema_version": 2, "book_title": "Book", "chapters": [{"node_id": "chapter-1", "title": "Unit", "binding_mode": "container_only", "children": []}]}), encoding="utf-8"
+    )
+    (output_dir / "ocr_markdown" / "tree_progress.json").write_text(
+        json.dumps({"units": [{"node_id": "chapter-1", "index_path": [1], "file": "chapter.md"}]}),
+        encoding="utf-8",
     )
     toc_paths = prepare_toc_translation_subagent(output_dir, "English", "Chinese")
     toc_template = json.loads(toc_paths["template"].read_text(encoding="utf-8"))
     toc_template["book_title"]["translated"] = "Book"
+    toc_template["entries"][0]["translated"] = "Unit"
     (output_dir / "toc_translation_result.json").write_text(
         json.dumps(toc_template, ensure_ascii=False), encoding="utf-8"
     )
@@ -2243,7 +2326,7 @@ def test_prepare_markdown_subagent_accepts_only_matching_validated_checkpoint(
     (tmp_path / "translate_validation.json").write_text(
         json.dumps(
             {
-                    "schema_version": 2,
+                    "schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION,
                 "valid_files": ["unit.md"],
                 "source_sha256": {
                     "unit.md": hashlib.sha256(source.read_bytes()).hexdigest()
@@ -2595,6 +2678,7 @@ def test_refine_local_splits_a_parent_when_children_cover_its_range(tmp_path: Pa
         }),
         encoding="utf-8",
     )
+    install_toc_review_contract(tmp_path)
     units = RefinedBreakdown(config={}, max_tokens=8000).process_from_toc(
         tmp_path / "input.pdf", tmp_path, "Book"
     )
@@ -2645,6 +2729,7 @@ def test_refine_local_does_not_merge_children_into_heading_only_parent(tmp_path:
         encoding="utf-8",
     )
 
+    install_toc_review_contract(tmp_path)
     units = RefinedBreakdown(config={}, max_tokens=8000).process_from_toc(
         tmp_path / "input.pdf", tmp_path, "Book"
     )
@@ -2682,14 +2767,14 @@ def test_refine_local_preserves_midpage_parent_and_previous_prefix(tmp_path: Pat
                         "end_page": 1,
                     },
                     {
-                        "title": "Frankfurt",
+                        "title": "3 Frankfurt",
                         "level": 1,
                         "start_page": 2,
                         "end_page": 2,
                         "boundary_info": {"start_line": 3},
                         "children": [
                             {
-                                "title": "Family tutor life and social relations",
+                                "title": "3.1 Family tutor life and social relations",
                                 "level": 2,
                                 "start_page": 2,
                                 "end_page": 2,
@@ -2704,6 +2789,7 @@ def test_refine_local_preserves_midpage_parent_and_previous_prefix(tmp_path: Pat
         encoding="utf-8",
     )
 
+    install_toc_review_contract(tmp_path)
     units = RefinedBreakdown(config={}, max_tokens=8000).process_from_toc(
         tmp_path / "input.pdf", tmp_path, "Book"
     )
@@ -2714,7 +2800,7 @@ def test_refine_local_preserves_midpage_parent_and_previous_prefix(tmp_path: Pat
     assert "The previous sentence continues." in previous
     assert "It ends here." in previous
     assert "3 Frankfurt" not in previous
-    assert first_child.startswith("3 Frankfurt\n3.1 Family tutor life")
+    assert first_child.startswith("# 3 Frankfurt\n\n## 3.1 Family tutor life")
     assert "The new section starts here." in first_child
 
 
@@ -2754,6 +2840,7 @@ def test_refine_local_keeps_explicit_previous_end_boundary(tmp_path: Path):
         encoding="utf-8",
     )
 
+    install_toc_review_contract(tmp_path)
     RefinedBreakdown(config={}, max_tokens=8000).process_from_toc(
         tmp_path / "input.pdf", tmp_path, "Book"
     )
@@ -2784,6 +2871,7 @@ def test_refine_local_splits_oversized_notes_into_entry_safe_parts(tmp_path: Pat
         encoding="utf-8",
     )
 
+    install_toc_review_contract(tmp_path)
     units = RefinedBreakdown(
         config={
             "refine": {
@@ -2830,6 +2918,7 @@ def test_refine_local_splits_oversized_body_and_preserves_images(tmp_path: Path)
         encoding="utf-8",
     )
 
+    install_toc_review_contract(tmp_path)
     units = RefinedBreakdown(
         config={
             "refine": {
@@ -2921,12 +3010,14 @@ def test_refine_local_does_not_reuse_checkpoint_after_toc_changes(tmp_path: Path
         "chapters": [{"title": "First", "level": 1, "start_page": 1, "end_page": 2}]
     }), encoding="utf-8")
     refiner = RefinedBreakdown(config={}, max_tokens=8000)
+    install_toc_review_contract(tmp_path)
     first = refiner.process_from_toc(tmp_path / "input.pdf", tmp_path, "Book", resume=False)
     assert first[0]["title"] == "First"
 
     toc_path.write_text(json.dumps({
         "chapters": [{"title": "Renamed", "level": 1, "start_page": 1, "end_page": 2}]
     }), encoding="utf-8")
+    install_toc_review_contract(tmp_path)
     second = refiner.process_from_toc(tmp_path / "input.pdf", tmp_path, "Book", resume=True)
     assert second[0]["title"] == "Renamed"
 
@@ -2946,25 +3037,52 @@ def test_refine_local_invalidates_legacy_page_merger_fingerprint(tmp_path: Path)
         encoding="utf-8",
     )
     refiner = RefinedBreakdown(config={}, max_tokens=8000)
+    install_toc_review_contract(tmp_path)
     refiner.process_from_toc(tmp_path / "input.pdf", tmp_path, "Book", resume=False)
 
     progress_path = tmp_path / "ocr_markdown" / "tree_progress.json"
     progress = json.loads(progress_path.read_text(encoding="utf-8"))
-    progress["fingerprint"].pop("page_merger_policy")
+    progress["fingerprint"]["page_merger_policy"] = "repeated-edge-header-folio-normalization-v2"
     progress_path.write_text(json.dumps(progress), encoding="utf-8")
     unit_path = tmp_path / "ocr_markdown" / "chapter_1.md"
     unit_path.write_text("Legacy stale output", encoding="utf-8")
 
+    install_toc_review_contract(tmp_path)
     refiner.process_from_toc(tmp_path / "input.pdf", tmp_path, "Book", resume=True)
+
+    assert unit_path.read_text(encoding="utf-8") == "Content"
+
+
+def test_refine_local_does_not_reuse_units_after_split_policy_changes(tmp_path: Path):
+    pages_dir = tmp_path / "pages"
+    pages_dir.mkdir()
+    (pages_dir / "page_001.md").write_text("Content", encoding="utf-8")
+    (tmp_path / "toc_tree.json").write_text(
+        json.dumps({"chapters": [{"title": "First", "level": 1, "start_page": 1, "end_page": 1}]}),
+        encoding="utf-8",
+    )
+    install_toc_review_contract(tmp_path)
+    RefinedBreakdown(config={}, max_tokens=8000).process_from_toc(
+        tmp_path / "input.pdf", tmp_path, "Book", resume=False
+    )
+    unit_path = tmp_path / "ocr_markdown" / "chapter_1.md"
+    unit_path.write_text("Stale split-policy output", encoding="utf-8")
+
+    changed_policy = RefinedBreakdown(
+        config={"subagent": {"batching": {"max_source_tokens": 100}}},
+        max_tokens=8000,
+    )
+    install_toc_review_contract(tmp_path)
+    changed_policy.process_from_toc(tmp_path / "input.pdf", tmp_path, "Book", resume=True)
 
     assert unit_path.read_text(encoding="utf-8") == "Content"
 
 
 def test_toc_validation_requires_in_place_translated_fields(tmp_path: Path):
     source = {
-        "schema_version": 1,
+        "schema_version": 2,
         "book_title": "Original",
-        "chapters": [{"title": "Chapter", "level": 1, "start_page": 1, "end_page": 2}],
+        "chapters": [{"node_id": "chapter-1", "title": "Chapter", "level": 1, "start_page": 1, "end_page": 2}],
     }
     target = {
         **source,
@@ -2972,29 +3090,29 @@ def test_toc_validation_requires_in_place_translated_fields(tmp_path: Path):
         "chapters": [{**source["chapters"][0], "title": "章节"}],
     }
     (tmp_path / "toc_translation_source.json").write_text(
-        json.dumps({"toc": source}), encoding="utf-8"
+        json.dumps({"contract_version": 2, "toc": source}), encoding="utf-8"
     )
-    (tmp_path / "toc_tree_translated.json").write_text(
-        json.dumps(target), encoding="utf-8"
-    )
+    (tmp_path / "toc_tree.json").write_text(json.dumps(source), encoding="utf-8")
+    (tmp_path / "toc_tree_translated.json").write_text(json.dumps(target), encoding="utf-8")
     report = validate_toc_translation_subagent(tmp_path)
-    assert report["valid"] is True
-    assert report["resolved_book_title"] == "译名"
+    assert report["valid"] is False
+    assert "unsupported TOC translation contract version" in report["errors"][0]
 
 
 def test_toc_result_is_merged_into_an_immutable_source_tree(tmp_path: Path):
     source = {
-        "schema_version": 4,
+        "schema_version": 2,
         "book_title": "Original",
         "publisher": "Keep exactly",
         "chapters": [
             {
+                "node_id": "chapter-1",
                 "title": "Chapter",
                 "level": 1,
                 "start_page": 1,
                 "end_page": 4,
                 "boundary_info": {"start_line": 2},
-                "children": [{"title": "Section", "level": 2, "start_page": 2}],
+                "children": [{"node_id": "chapter-1-section-1", "title": "Section", "level": 2, "start_page": 2}],
             }
         ],
     }
@@ -3010,6 +3128,7 @@ def test_toc_result_is_merged_into_an_immutable_source_tree(tmp_path: Path):
         "entries": [
             {
                 "path": item["path"],
+                "node_id": item["node_id"],
                 "original": item["original"],
                 "translated": translated,
             }
@@ -3039,7 +3158,7 @@ def test_toc_result_is_merged_into_an_immutable_source_tree(tmp_path: Path):
 
 def test_prepare_toc_translation_subagent_writes_clean_prompt(tmp_path: Path):
     (tmp_path / "toc_tree.json").write_text(
-        json.dumps({"book_title": "A Book", "chapters": []}),
+        json.dumps({"schema_version": 2, "book_title": "A Book", "chapters": []}),
         encoding="utf-8",
     )
 
@@ -3057,7 +3176,7 @@ def test_prepare_toc_translation_subagent_writes_clean_prompt(tmp_path: Path):
     assert 'f"Read' not in prompt
     assert 'f"in the same directory' not in prompt
     assert source["model"] == "configured-pro"
-    assert source["contract_version"] == 2
+    assert source["contract_version"] == 3
     assert source["result_file"] == "toc_translation_result.json"
     assert "configured-pro" in prompt
     assert template["book_title"]["original"] == "A Book"
@@ -3132,6 +3251,7 @@ def test_local_refine_generates_units_without_constructing_model(tmp_path: Path)
         config={"refine": {"max_tokens": 8000}},
         max_tokens=8000,
     )
+    install_toc_review_contract(tmp_path)
     units = refiner.process_from_toc(
         pdf_path=tmp_path / "input.pdf",
         output_dir=tmp_path,

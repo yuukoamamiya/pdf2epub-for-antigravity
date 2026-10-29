@@ -81,6 +81,11 @@ def _note_section_keys(text: str) -> List[str]:
     return keys
 
 
+def _is_math_or_formula_superscript(text: str, start: int) -> bool:
+    """Return True if <sup... starts immediately after a single letter variable (e.g. A^2, x^3)."""
+    return bool(re.search(r"(?:^|[^A-Za-z0-9])([A-Za-z])$", text[:start]))
+
+
 def validate_polish_footnote_normalization(
     source_text: str,
     target_text: str,
@@ -118,6 +123,8 @@ def validate_polish_footnote_normalization(
                 if any(a < match.end() and match.start() < b for a, b in occupied):
                     continue
                 if _is_note_definition_occurrence(source_text, match.start(), match.end(), note_ranges):
+                    continue
+                if _is_math_or_formula_superscript(source_text, match.start()):
                     continue
                 source_refs.append(key)
                 occupied.append((match.start(), match.end()))
@@ -161,6 +168,7 @@ def validate_polish_footnote_normalization(
         remaining = [
             match.group("key") for match in _HTML_SUP_RE.finditer(target_text)
             if match.group("key") in (expected_keys | set(source_refs))
+            and not _is_math_or_formula_superscript(target_text, match.start())
         ]
         if remaining:
             errors.append("numbered HTML <sup> footnote markers remain after polishing")

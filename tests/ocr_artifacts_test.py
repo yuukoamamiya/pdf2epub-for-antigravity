@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import pytest
 
 from pdf2epub.utils.ocr_artifacts import (
     clean_ocr_page_artifacts,
@@ -359,6 +360,59 @@ def test_page_header_can_confirm_mislabelled_repeated_section_header(
     assert result.count("XXVIII Introduction") == 1
     assert "Body on page 1." in result
     assert "Body on page 2." in result
+
+
+@pytest.mark.parametrize("merge_method", ["single", "nodes"])
+def test_real_toc_start_page_section_header_survives_page_header_confirmation(
+    tmp_path: Path, merge_method: str
+):
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    page_box = [0, 0, 1123, 1588]
+    page_data = (
+        (214, "Conclusion", "Section-Header"),
+        (216, "Conclusion", "Page-Header"),
+        (218, "Conclusion", "Section-Header"),
+    )
+    for page_number, heading, label in page_data:
+        (pages / f"page_{page_number:03d}.md").write_text(
+            f"## {heading}\n\nBody text on page {page_number}.", encoding="utf-8"
+        )
+        (pages / f"page_{page_number:03d}.ocr.json").write_text(
+            json.dumps({
+                "page_number": page_number,
+                "backend": "chandra",
+                "page_box": page_box,
+                "blocks": [
+                    {
+                        "order": 0,
+                        "label": label,
+                        "bbox": [125, 104, 497, 128],
+                        "html": f"<h2>{heading}</h2>",
+                    },
+                    {
+                        "order": 1,
+                        "label": "Text",
+                        "bbox": [127, 149, 873, 188],
+                        "html": f"<p>Body text on page {page_number}.</p>",
+                    },
+                ],
+            }),
+            encoding="utf-8",
+        )
+    toc = TOCNode("9. Conclusion", 1, 214, 218)
+    merger = PageMerger()
+    merger.set_toc_nodes([toc])
+
+    result = (
+        merger.merge_node_content(toc, pages)
+        if merge_method == "single"
+        else merger.merge_nodes_content([toc], pages)
+    )
+
+    assert result.count("Conclusion") == 2
+    assert result.count("## Conclusion") == 2
+    assert all(f"Body text on page {number}." in result for number in (214, 216, 218))
 
 
 def test_page_merger_applies_native_sidecar_furniture_cleanup(tmp_path: Path):

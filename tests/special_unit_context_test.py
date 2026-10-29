@@ -15,7 +15,7 @@ def _prepared(tmp_path: Path):
     source_dir = tmp_path / "polished_markdown"
     source_dir.mkdir()
     source = source_dir / "index.md"
-    source.write_text("Aufhebung; sublation", encoding="utf-8")
+    source.write_text("# Index\n\nAufhebung; sublation", encoding="utf-8")
     unit_dir = tmp_path / "translation_glossaries" / "unit_contexts"
     unit_dir.mkdir(parents=True)
     context_path = unit_dir / "index.json"
@@ -37,6 +37,14 @@ def _prepared(tmp_path: Path):
         encoding="utf-8",
     )
     context_hash = hashlib.sha256(context_path.read_bytes()).hexdigest()
+    _write_current_toc_context(
+        tmp_path,
+        source_dir=source_dir,
+        filename="index.md",
+        source_title="Index",
+        translated_title="Index",
+        node_id="index-node",
+    )
     manifest = {
         "task": "translate",
         "workflow": "antigravity-subagent",
@@ -45,14 +53,52 @@ def _prepared(tmp_path: Path):
         "source_sha256": {"index.md": hashlib.sha256(source.read_bytes()).hexdigest()},
         "unit_context_files": {"index.md": "translation_glossaries/unit_contexts/index.json"},
         "unit_context_sha256": {"index.md": context_hash},
-        "toc_heading_contexts": {
-            "index.md": {"toc_title": "Index", "binding_mode": "visible", "children": []}
-        },
+        "toc_heading_contexts": {},
     }
     (tmp_path / "translate_subagent_manifest.json").write_text(
         json.dumps(manifest), encoding="utf-8"
     )
+    manifest["toc_heading_contexts"] = _current_heading_contexts(tmp_path, source_dir)
+    (tmp_path / "translate_subagent_manifest.json").write_text(
+        json.dumps(manifest), encoding="utf-8"
+    )
     return source, context_path
+
+
+def _write_current_toc_context(
+    output: Path,
+    *,
+    source_dir: Path,
+    filename: str,
+    source_title: str,
+    translated_title: str,
+    node_id: str,
+):
+    from pdf2epub.toc_model import TOC_TREE_SCHEMA_VERSION
+
+    source_node = {"node_id": node_id, "title": source_title, "level": 1, "binding_mode": "visible"}
+    translated_node = {"node_id": node_id, "title": translated_title, "level": 1, "binding_mode": "visible"}
+    source_tree = {"schema_version": TOC_TREE_SCHEMA_VERSION, "chapters": [source_node]}
+    translated_tree = {
+        "schema_version": TOC_TREE_SCHEMA_VERSION,
+        "chapters": [translated_node],
+    }
+    (output / "toc_tree.json").write_text(json.dumps(source_tree), encoding="utf-8")
+    (output / "toc_tree_translated.json").write_text(
+        json.dumps(translated_tree), encoding="utf-8"
+    )
+    progress_dir = output / "ocr_markdown"
+    progress_dir.mkdir(parents=True, exist_ok=True)
+    (progress_dir / "tree_progress.json").write_text(
+        json.dumps({"units": [{"node_id": node_id, "index_path": [1], "file": filename}]}),
+        encoding="utf-8",
+    )
+
+
+def _current_heading_contexts(output: Path, source_dir: Path):
+    from pdf2epub.toc_translation_workflow import build_toc_heading_contexts
+
+    return build_toc_heading_contexts(output, source_dir=source_dir)
 
 
 def test_build_context_requires_prepare_manifest(tmp_path: Path):
@@ -87,7 +133,11 @@ def test_contract_stays_unit_scoped_across_unrelated_parent_and_toc_reprepare(tm
     }
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     toc_path = tmp_path / "toc_tree.json"
-    toc_path.write_text('{"unrelated":1}', encoding="utf-8")
+    toc_path.write_text(
+        json.dumps({"schema_version": 2, "book_title": "Old title", "chapters": [
+            {"node_id": "index-node", "title": "Index", "level": 1}
+        ]}), encoding="utf-8"
+    )
     first = build_special_unit_context(
         tmp_path, "index.md", "index", source_language="German", target_language="Chinese"
     )
@@ -99,7 +149,11 @@ def test_contract_stays_unit_scoped_across_unrelated_parent_and_toc_reprepare(tm
         entity_path.read_bytes()
     ).hexdigest()
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-    toc_path.write_text('{"unrelated":2}', encoding="utf-8")
+    toc_path.write_text(
+        json.dumps({"schema_version": 2, "book_title": "New title", "chapters": [
+            {"node_id": "index-node", "title": "Index", "level": 1}
+        ]}), encoding="utf-8"
+    )
     second = build_special_unit_context(
         tmp_path, "index.md", "index", source_language="German", target_language="Chinese"
     )
@@ -117,14 +171,24 @@ def test_contract_changes_with_this_units_heading_or_projection(tmp_path: Path):
         tmp_path, "index.md", "index", source_language="German", target_language="Chinese"
     )
 
-    manifest["toc_heading_contexts"]["index.md"]["toc_title"] = "Changed Index"
+    translated_toc_path = tmp_path / "toc_tree_translated.json"
+    translated_toc = json.loads(translated_toc_path.read_text(encoding="utf-8"))
+    translated_toc["chapters"][0]["title"] = "Changed Index"
+    translated_toc_path.write_text(json.dumps(translated_toc), encoding="utf-8")
+    manifest["toc_heading_contexts"] = _current_heading_contexts(
+        tmp_path, tmp_path / "polished_markdown"
+    )
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     changed_heading = build_special_unit_context(
         tmp_path, "index.md", "index", source_language="German", target_language="Chinese"
     )
     assert changed_heading["contract_sha256"] != baseline["contract_sha256"]
 
-    manifest["toc_heading_contexts"]["index.md"]["toc_title"] = "Index"
+    translated_toc["chapters"][0]["title"] = "Index"
+    translated_toc_path.write_text(json.dumps(translated_toc), encoding="utf-8")
+    manifest["toc_heading_contexts"] = _current_heading_contexts(
+        tmp_path, tmp_path / "polished_markdown"
+    )
     context_data = json.loads(context_path.read_text(encoding="utf-8"))
     context_data["entries"].append(
         {"kind": "domain", "source": "neue", "target": "新", "policy": "preferred"}
@@ -148,6 +212,15 @@ def test_empty_glossary_projection_survives_translate_prepare_and_special_prepar
     source_dir.mkdir(parents=True)
     source = source_dir / "index.md"
     source.write_text("# Index\n\nAlpha, 12\n", encoding="utf-8")
+    _write_current_toc_context(
+        output,
+        source_dir=source_dir,
+        filename="index.md",
+        source_title="Index",
+        translated_title="索引",
+        node_id="index-node",
+    )
+    current_headings = _current_heading_contexts(output, source_dir)
     sparse = build_unit_glossary_contexts(output, source_dir, {}, None, source_language="English")
     assert sparse == {}
     handoff = prepare_markdown_subagent(
@@ -159,9 +232,7 @@ def test_empty_glossary_projection_survives_translate_prepare_and_special_prepar
         "Chinese",
         config={},
         file_roles={"index.md": "index"},
-        heading_contexts={
-            "index.md": {"toc_title": "索引", "binding_mode": "visible", "children": []}
-        },
+        heading_contexts=current_headings,
         unit_context_files=sparse,
         controlled_files={"index.md": "index"},
     )
@@ -296,7 +367,7 @@ def test_build_context_rejects_changed_current_heading_binding(tmp_path: Path, m
     _prepared(tmp_path)
     (tmp_path / "toc_tree_translated.json").write_text("{}", encoding="utf-8")
     tree_dir = tmp_path / "ocr_markdown"
-    tree_dir.mkdir()
+    tree_dir.mkdir(exist_ok=True)
     (tree_dir / "tree_progress.json").write_text("{}", encoding="utf-8")
     monkeypatch.setattr(
         "pdf2epub.special_unit_context.build_toc_heading_contexts",
@@ -314,7 +385,7 @@ def test_build_context_rejects_missing_current_heading_binding(tmp_path: Path, m
     _prepared(tmp_path)
     (tmp_path / "toc_tree_translated.json").write_text("{}", encoding="utf-8")
     tree_dir = tmp_path / "ocr_markdown"
-    tree_dir.mkdir()
+    tree_dir.mkdir(exist_ok=True)
     (tree_dir / "tree_progress.json").write_text("{}", encoding="utf-8")
     monkeypatch.setattr(
         "pdf2epub.special_unit_context.build_toc_heading_contexts",

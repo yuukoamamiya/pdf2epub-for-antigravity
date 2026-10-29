@@ -9,11 +9,12 @@ import json
 import html
 from pathlib import Path
 import re
-from typing import Iterable, List, Optional, Set, Tuple
+from typing import Any, Iterable, List, Optional, Set, Tuple
 from loguru import logger
 
 from .toc_tree import TOCNode
-from .toc_heading_recovery import title_present_in_lines
+from .toc_heading_recovery import _iter_nodes, _titles_match, title_present_in_lines
+from ..toc_model import normalize_toc_source_label
 from .layout_evidence import normalized_bbox, text_from_block
 from ..utils.ocr_artifacts import (
     clean_ocr_page_artifacts,
@@ -22,6 +23,31 @@ from ..utils.ocr_artifacts import (
     remove_repeated_page_header,
     remove_native_page_furniture,
 )
+
+
+def _matches_protected_heading(value: str, titles: Iterable[str]) -> bool:
+    """Match a TOC title without conflating titles with different numbers."""
+    normalized = "".join(char for char in str(value or "").casefold() if char.isalnum())
+    digits = tuple(re.findall(r"\d+", str(value or "")))
+    if not normalized:
+        return False
+    matches = []
+    for title in titles:
+        title_text = str(title or "")
+        title_normalized = "".join(char for char in title_text.casefold() if char.isalnum())
+        if normalized == title_normalized:
+            matches.append((title_text, tuple(re.findall(r"\d+", title_text))))
+            continue
+        # Keep the existing exact-normalized variants (for example, an OCR
+        # "Chapter 2: Title" against a TOC "2. Title"), but require identical
+        # Arabic numbering so adjacent numbered headings cannot protect each other.
+        title_digits = tuple(re.findall(r"\d+", title_text))
+        if _titles_match(value, title_text) and (digits == title_digits or not digits or not title_digits):
+            matches.append((title_text, title_digits))
+    if len(matches) != 1:
+        return False
+    title_digits = matches[0][1]
+    return digits == title_digits or not digits or not title_digits
 
 _ROMAN_PAGE_LABEL = r"(?=[ivxlcdm])m{0,3}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3})"
 _PAGE_LABEL = rf"(?:\d{{1,4}}|{_ROMAN_PAGE_LABEL})"
@@ -176,6 +202,104 @@ class PageMerger:
         self._visual_running_header_cache: dict[Path, dict[int, list[str]]] = {}
         self._visual_sidecar_pages_cache: dict[Path, set[int]] = {}
         self._toc_heading_recoveries: dict[int, list[dict]] = {}
+        self._toc_start_page_titles: dict[int, set[str]] = {}
+        self._toc_nodes: list[TOCNode] = []
+
+    def set_toc_nodes(self, nodes: Any) -> None:
+        """Register TOC nodes so titles on their start pages are never stripped."""
+        start_page_titles: dict[int, set[str]] = {}
+        node_list = getattr(nodes, "chapters", None) if hasattr(nodes, "chapters") else nodes
+        if not isinstance(node_list, (list, tuple)):
+            node_list = [nodes] if nodes else []
+        self._toc_nodes = list(_iter_nodes(node_list))
+        for node in self._toc_nodes:
+            start_page = getattr(node, "start_page", None)
+            title = getattr(node, "title", None)
+            if start_page is not None and title:
+                try:
+                    start_page_titles.setdefault(int(start_page), set()).add(str(title))
+                except (TypeError, ValueError):
+                    pass
+        self._toc_start_page_titles = start_page_titles
+
+    def _materialize_reviewed_headings(
+        self, page_num: int, source_lines: list[str]
+    ) -> tuple[list[str], dict[int, int], dict[int, int]]:
+        """Render only validated TOC source regions as ATX headings.
+
+        Returns transformed lines, original-line to output-line positions, and
+        original exclusive-boundary to output offsets. Source files remain
+        untouched; inline markup and footnote references are retained.
+        """
+        regions = []
+        for node in self._toc_nodes:
+            if getattr(node, "start_page", None) != page_num:
+                continue
+            if getattr(node, "binding_mode", "visible") != "visible":
+                continue
+            node_id = str(getattr(node, "node_id", "") or "")
+            boundary = getattr(node, "boundary_info", None) or {}
+            start_line = boundary.get("start_line") if isinstance(boundary, dict) else None
+            if type(start_line) is not int or not 1 <= start_line <= len(source_lines) + 1:
+                continue
+            if node_id.startswith("layout-"):
+                level = getattr(node, "level", 1)
+                if type(level) is int and 1 <= level <= 6:
+                    regions.append((start_line, start_line, level, str(node.title), True))
+                continue
+            if start_line > len(source_lines):
+                continue
+            end_exclusive = boundary.get("heading_end_line", start_line + 1)
+            if type(end_exclusive) is not int or not start_line < end_exclusive <= len(source_lines) + 1:
+                continue
+            raw_region = source_lines[start_line - 1:end_exclusive - 1]
+            if not raw_region:
+                continue
+            label_lines = list(raw_region)
+            label_lines[0] = re.sub(r"^\s*#{1,6}\s*", "", label_lines[0])
+            if normalize_toc_source_label(" ".join(label_lines)) != normalize_toc_source_label(node.title):
+                continue
+            level = getattr(node, "level", 1)
+            if type(level) is not int or not 1 <= level <= 6:
+                continue
+            heading_text = " ".join(label_lines).strip()
+            regions.append((start_line, end_exclusive, level, heading_text, False))
+
+        by_start = {start: (end, level, title, layout_only) for start, end, level, title, layout_only in regions}
+        output: list[str] = []
+        line_positions: dict[int, int] = {}
+        boundary_positions: dict[int, int] = {1: 0}
+        line_no = 1
+        while line_no <= len(source_lines) + 1:
+            if line_no in by_start:
+                end_exclusive, level, title, layout_only = by_start[line_no]
+                if output and output[-1].strip():
+                    output.append("")
+                heading_position = len(output)
+                output.append(f"{'#' * level} {title}")
+                following_index = end_exclusive - 1 if not layout_only else line_no - 1
+                if (following_index < len(source_lines)
+                        and source_lines[following_index].strip()):
+                    output.append("")
+                boundary_positions[line_no] = heading_position
+                if not layout_only:
+                    for consumed in range(line_no, end_exclusive):
+                        line_positions[consumed] = heading_position
+                    line_no = end_exclusive
+                    boundary_positions[line_no] = len(output)
+                    continue
+                line_positions[line_no] = heading_position
+                if line_no > len(source_lines):
+                    break
+            if line_no not in by_start:
+                boundary_positions[line_no] = len(output)
+            line_positions.setdefault(line_no, len(output))
+            if line_no > len(source_lines):
+                break
+            output.append(source_lines[line_no - 1])
+            line_no += 1
+        boundary_positions[len(source_lines) + 1] = len(output)
+        return output, line_positions, boundary_positions
 
     @staticmethod
     def _evidence_pages_dir(pages_dir: Path) -> Path:
@@ -221,6 +345,22 @@ class PageMerger:
                 page_number = int(match.group(1))
             visual_sidecar_pages.add(page_number)
 
+            body_blocks = [
+                b
+                for b in (sidecar.get("blocks", []) or [])
+                if isinstance(b, dict)
+                and str(b.get("label") or "").strip().casefold()
+                in {"text", "paragraph", "list-group", "table"}
+            ]
+            min_body_y0 = min(
+                (
+                    normalized_bbox(b, sidecar)[1]
+                    for b in body_blocks
+                    if normalized_bbox(b, sidecar) is not None
+                ),
+                default=1.0,
+            )
+
             for block in sidecar.get("blocks", []) or []:
                 if not isinstance(block, dict):
                     continue
@@ -231,7 +371,7 @@ class PageMerger:
                 if bbox is None:
                     continue
                 _x0, y0, _x1, y1 = bbox
-                if y0 > 0.15 or y1 - y0 > 0.06:
+                if y0 > 0.15 or y1 - y0 > 0.06 or y0 >= min_body_y0:
                     continue
                 text = text_from_block(block)
                 signature = _running_header_signature(text)
@@ -265,14 +405,25 @@ class PageMerger:
         return page_number in self._visual_sidecar_pages_cache.get(evidence_dir, set())
 
     def _remove_visual_running_headers(
-        self, lines: list[str], pages_dir: Path, page_number: int
+        self,
+        lines: list[str],
+        pages_dir: Path,
+        page_number: int,
+        protected_titles: Optional[Iterable[str]] = None,
     ) -> list[str]:
         candidates = self._visual_running_headers(pages_dir).get(page_number, [])
         if not candidates:
             return lines
+        protected = set(self._toc_start_page_titles.get(page_number, set()))
+        if protected_titles:
+            protected.update(str(t).strip() for t in protected_titles if str(t).strip())
         result = list(lines)
         for header_text in candidates:
+            if _matches_protected_heading(header_text, protected):
+                continue
             for index, line in enumerate(result):
+                if _matches_protected_heading(line, protected):
+                    continue
                 matched, remainder = _remove_running_header_prefix(
                     line, header_text
                 )
@@ -314,6 +465,8 @@ class PageMerger:
         lines: list[str],
         fragment_start_line: int,
         fragment_end_line: int,
+        line_positions: Optional[dict[int, int]] = None,
+        fragment_start_offset: Optional[int] = None,
     ) -> list[str]:
         insertions = self._toc_heading_recoveries.get(page_num)
         if not insertions:
@@ -339,7 +492,10 @@ class PageMerger:
                         fragment_end_line,
                     )
                     continue
-                offset = start_line - fragment_start_line
+                if line_positions is not None and fragment_start_offset is not None:
+                    offset = line_positions.get(start_line, fragment_start_offset) - fragment_start_offset
+                else:
+                    offset = start_line - fragment_start_line
             else:
                 offset = 0
             positioned.append((offset, order, title, item))
@@ -421,14 +577,14 @@ class PageMerger:
                 continue
 
             page_content = page_file.read_text(encoding='utf-8')
-            lines = page_content.split('\n')
+            source_lines = page_content.split('\n')
 
             # Boundary line numbers are absolute within the original page.
             # Compute both offsets before slicing so a node that starts and
             # ends on one page does not apply end_line to an already-trimmed
             # list (which used to retain/drop the wrong lines).
             start_index = 0
-            end_index = len(lines)
+            end_index = len(source_lines)
             if page_num == node.start_page:
                 start_line = boundary.get('start_line')
                 if isinstance(start_line, int) and start_line > 1:
@@ -436,11 +592,13 @@ class PageMerger:
                     logger.debug(f"Node '{node.title}' starts at line {start_line}")
 
             # Handle last page - end at end_line if set, or at next_node's start_line
+            explicit_end_boundary = False
             if page_num == node.end_page:
                 end_line = boundary.get('end_line')
                 if isinstance(end_line, int):
                     # end_line is 1-indexed and exclusive.
                     end_index = min(end_index, end_line - 1)
+                    explicit_end_boundary = True
                     logger.debug(f"Node '{node.title}' ends at line {end_line}")
                 elif next_node and next_node.start_page == node.end_page:
                     # Next section starts on same page - cut before it
@@ -448,11 +606,30 @@ class PageMerger:
                     next_start_line = next_boundary.get('start_line')
                     if isinstance(next_start_line, int):
                         end_index = min(end_index, next_start_line - 1)
+                        explicit_end_boundary = True
                         logger.debug(f"Cutting before next section at line {next_start_line}")
 
+            original_start_index = start_index
+            original_end_index = end_index
+            lines, line_positions, boundary_positions = self._materialize_reviewed_headings(
+                page_num, source_lines
+            )
+            if page_num == node.start_page:
+                start_index = line_positions.get(start_index + 1, boundary_positions.get(start_index + 1, start_index))
+            else:
+                start_index = boundary_positions.get(start_index + 1, start_index)
+            if explicit_end_boundary:
+                # Explicit source cuts, including a next-node start, stay
+                # before a reviewed heading inserted at that position.
+                end_index = line_positions.get(
+                    end_index + 1,
+                    boundary_positions.get(end_index + 1, end_index),
+                )
+            else:
+                end_index = len(lines)
             lines = lines[start_index:end_index] if end_index >= start_index else []
-            fragment_start_line = start_index + 1
-            fragment_end_line = end_index
+            fragment_start_line = original_start_index + 1
+            fragment_end_line = original_end_index
 
             page_content = '\n'.join(lines)
             page_content = clean_ocr_page_artifacts(page_content)
@@ -471,8 +648,13 @@ class PageMerger:
                     item["kind"],
                 )
             lines = page_content.split('\n')
+            node_start_titles = [
+                getattr(n, "title", None)
+                for n in _iter_nodes([node])
+                if getattr(n, "start_page", None) == page_num and getattr(n, "title", None)
+            ]
             lines = self._remove_visual_running_headers(
-                lines, pages_dir, page_num
+                lines, pages_dir, page_num, protected_titles=node_start_titles
             )
             if self._has_visual_sidecar(pages_dir, page_num):
                 current_header = None
@@ -486,8 +668,10 @@ class PageMerger:
             lines = self._inject_toc_heading_recoveries(
                 page_num,
                 lines,
-                fragment_start_line,
-                fragment_end_line,
+                original_start_index + 1,
+                original_end_index,
+                line_positions=line_positions,
+                fragment_start_offset=start_index,
             )
             page_content = '\n'.join(lines)
             if page_content.strip():
@@ -537,11 +721,11 @@ class PageMerger:
                 continue
 
             page_content = page_file.read_text(encoding='utf-8')
-            lines = page_content.split('\n')
+            source_lines = page_content.split('\n')
 
             # Handle first page of first node
             start_index = 0
-            end_index = len(lines)
+            end_index = len(source_lines)
             if page_num == start_page:
                 start_line = first_boundary.get('start_line')
                 if isinstance(start_line, int) and start_line > 1:
@@ -549,19 +733,34 @@ class PageMerger:
 
             # Handle last page - apply the node boundary and then the next
             # unit boundary, both measured against the original page.
+            explicit_end_boundary = False
             if page_num == end_page:
                 end_line = first_boundary.get('end_line')
                 if isinstance(end_line, int):
                     end_index = min(end_index, end_line - 1)
+                    explicit_end_boundary = True
             if page_num == end_page and next_node and next_node.start_page == end_page:
                 next_boundary = next_node.boundary_info or {}
                 next_start_line = next_boundary.get('start_line')
                 if isinstance(next_start_line, int):
                     end_index = min(end_index, next_start_line - 1)
+                    explicit_end_boundary = True
 
+            original_start_index = start_index
+            original_end_index = end_index
+            lines, line_positions, boundary_positions = self._materialize_reviewed_headings(
+                page_num, source_lines
+            )
+            start_index = line_positions.get(
+                start_index + 1, boundary_positions.get(start_index + 1, start_index)
+            )
+            end_index = (
+                line_positions.get(end_index + 1, boundary_positions.get(end_index + 1, end_index))
+                if explicit_end_boundary else len(lines)
+            )
             lines = lines[start_index:end_index] if end_index >= start_index else []
-            fragment_start_line = start_index + 1
-            fragment_end_line = end_index
+            fragment_start_line = original_start_index + 1
+            fragment_end_line = original_end_index
 
             page_content = '\n'.join(lines)
             page_content = clean_ocr_page_artifacts(page_content)
@@ -580,8 +779,13 @@ class PageMerger:
                     item["kind"],
                 )
             lines = page_content.split('\n')
+            node_start_titles = [
+                getattr(n, "title", None)
+                for n in _iter_nodes(nodes)
+                if getattr(n, "start_page", None) == page_num and getattr(n, "title", None)
+            ]
             lines = self._remove_visual_running_headers(
-                lines, pages_dir, page_num
+                lines, pages_dir, page_num, protected_titles=node_start_titles
             )
             if self._has_visual_sidecar(pages_dir, page_num):
                 current_header = None
@@ -597,6 +801,8 @@ class PageMerger:
                 lines,
                 fragment_start_line,
                 fragment_end_line,
+                line_positions=line_positions,
+                fragment_start_offset=start_index,
             )
             page_content = '\n'.join(lines)
             if page_content.strip():
@@ -637,6 +843,8 @@ def _can_join_across_page(previous: str, following: str) -> bool:
     previous = str(previous or "").strip()
     following = str(following or "").strip()
     if not previous or not following or _looks_like_new_block(following):
+        return False
+    if re.search(r"(?:^|\n)\s*---\s*(?:\n|$)", previous):
         return False
     previous_last_line = next(
         (line.strip() for line in reversed(previous.splitlines()) if line.strip()),

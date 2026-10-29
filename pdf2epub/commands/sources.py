@@ -14,6 +14,7 @@ def _resolve_pdf_polish_source(output_dir: Path, config: dict | None = None):
     ``footnote-apply`` before ``polish`` to remove page-level note disruption.
     """
     output_dir = Path(output_dir)
+    _require_reviewed_ocr_anomalies(output_dir, config)
     normalized_dir = output_dir / "footnote_normalized"
     if footnote_normalization_is_current(output_dir, config=config):
         return normalized_dir, "footnote_normalized"
@@ -28,6 +29,7 @@ def _resolve_pdf_markdown_source(output_dir: Path, config: dict):
     polish gate before translation.
     """
     translation = config.get("translation", {}) or {}
+    _require_reviewed_ocr_anomalies(output_dir, config)
     requested_stage = str(translation.get("source_stage", "auto")).strip().lower()
     if requested_stage not in {"auto", "ocr", "polished", "native_text"}:
         raise ValueError(
@@ -56,6 +58,49 @@ def _resolve_pdf_markdown_source(output_dir: Path, config: dict):
     return ocr_dir, "ocr"
 
 
+def _require_reviewed_ocr_anomalies(output_dir: Path, config: dict | None) -> None:
+    """Prevent polished or translated stages bypassing pending raw-page anomalies."""
+    pages_dir = Path(output_dir) / "pages"
+    if not any(pages_dir.glob("page_*.md")):
+        return
+    try:
+        import json
+
+        probe = json.loads((Path(output_dir) / "pdf_text_probe.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        probe = {}
+    if probe.get("classification") == "native_text" and probe.get("recommendation") == "use_text_layer":
+        return
+    from pdf2epub.ocr_anomalies import scan_ocr_pages
+    from pdf2epub.ocr_correction import ocr_correction_is_current
+
+    anomaly_report = scan_ocr_pages(output_dir, persist=False)
+    anomalies = anomaly_report["review_required_files"]
+    if anomaly_report.get("scan_errors"):
+        raise ValueError("OCR anomaly scan could not read every raw page")
+    if anomalies and not ocr_correction_is_current(output_dir, config):
+        raise ValueError(
+            "OCR commentary anomaly requires visual review before polish or downstream use: "
+            + ", ".join(anomalies[:10])
+        )
+    if anomalies:
+        from pdf2epub.ocr_correction import corrected_page_dir
+        from pdf2epub.utils.fingerprints import pages_fingerprint
+
+        progress_path = Path(output_dir) / "ocr_markdown" / "tree_progress.json"
+        try:
+            import json
+
+            progress = json.loads(progress_path.read_text(encoding="utf-8"))
+            current_fingerprint = pages_fingerprint(corrected_page_dir(output_dir))
+            if progress.get("fingerprint", {}).get("pages_sha256") != current_fingerprint:
+                raise ValueError
+        except (OSError, ValueError, TypeError, AttributeError, json.JSONDecodeError):
+            raise ValueError(
+                "OCR anomaly correction is current but refined Markdown is stale; rerun refine-local before downstream use"
+            )
+
+
 def _polished_stage_is_current(
     output_dir: Path,
     polished_dir: Path,
@@ -78,5 +123,6 @@ def _polished_stage_is_current(
 __all__ = [
     "_resolve_pdf_polish_source",
     "_polished_stage_is_current",
+    "_require_reviewed_ocr_anomalies",
     "_resolve_pdf_markdown_source",
 ]

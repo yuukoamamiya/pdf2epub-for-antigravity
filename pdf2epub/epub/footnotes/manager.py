@@ -187,7 +187,6 @@ class FootnoteManager:
             self._chapter_files,
             no_colon_definition_chapters=self.no_colon_definition_chapters,
         )
-        self._drop_replaced_heading_references()
 
         # Determine style
         self.style = self.scanner.determine_style(self.force_global, self.auto_global)
@@ -389,83 +388,6 @@ class FootnoteManager:
         backref_link = f"{self.get_html_filename(source_chapter)}#{fnref_id}"
         return self._backref_html(backref_link, key)
 
-    def _drop_replaced_heading_references(self) -> bool:
-        """
-        Remove references from raw first headings that build_epub will replace.
-
-        build_epub replaces the first heading in the first part of each unit with
-        the TOC title before markdown conversion. A footnote marker present only
-        in that raw heading therefore never creates a fnref anchor in the final
-        HTML, and must not participate in occurrence mapping or backrefs.
-        """
-        if not self.epub_structure:
-            return False
-
-        suppressed_positions = set()
-
-        def walk(entries):
-            for entry in entries:
-                part_files = entry.get('part_files') or []
-                if not part_files and entry.get('file_path'):
-                    part_files = [entry['file_path']]
-
-                if part_files:
-                    first_part = Path(part_files[0])
-                    try:
-                        lines = first_part.read_text(encoding='utf-8').splitlines()
-                    except OSError:
-                        lines = []
-
-                    from pdf2epub.build_epub import find_replaced_heading_lines
-
-                    for line_idx in find_replaced_heading_lines(lines, entry.get('title', '')):
-                        line = lines[line_idx - 1]
-                        raw_keys = set(re.findall(r'\[\^([\w-]+)\](?!:)', line))
-                        title_keys = set(
-                            re.findall(
-                                r'\[\^([\w-]+)\](?!:)',
-                                entry.get('title', ''),
-                            )
-                        )
-                        for key in raw_keys - title_keys:
-                            suppressed_positions.add((first_part.stem, line_idx, key))
-
-                walk(entry.get('children', []))
-
-        walk(self.epub_structure)
-        if not suppressed_positions:
-            return False
-
-        removed = 0
-        for key in list(self.scanner.references.keys()):
-            kept_refs = []
-            for ref in self.scanner.references[key]:
-                if (ref.chapter, ref.line_num, key) in suppressed_positions:
-                    removed += 1
-                    continue
-                kept_refs.append(ref)
-
-            if kept_refs:
-                self.scanner.references[key] = kept_refs
-            else:
-                del self.scanner.references[key]
-
-        if not removed:
-            return False
-
-        chapter_references = {}
-        for key, refs in self.scanner.references.items():
-            for ref in refs:
-                chapter_references.setdefault(ref.chapter, set()).add(key)
-
-        self.scanner.chapter_references = chapter_references
-        self.scanner.reference_only_chapters = {
-            chapter for chapter in chapter_references
-            if not self.scanner.chapter_definitions.get(chapter)
-        }
-        logger.debug(f"Dropped {removed} footnote references from replaced first headings")
-        return True
-
     def _log_analysis_results(self) -> None:
         """Log the results of the footnote analysis."""
         if self.force_global or self.auto_global:
@@ -538,7 +460,6 @@ class FootnoteManager:
             self._chapter_files,
             no_colon_definition_chapters=self.no_colon_definition_chapters,
         )
-        self._drop_replaced_heading_references()
         self.style = self.scanner.determine_style(self.force_global, self.auto_global)
         self._build_style_mappings()
 

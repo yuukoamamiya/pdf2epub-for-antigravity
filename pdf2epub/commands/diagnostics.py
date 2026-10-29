@@ -214,13 +214,14 @@ def _pdf_stages(
         probe.get("classification") == "native_text"
         and probe.get("recommendation") == "use_text_layer"
     )
-    if native_text or not policy.requires_ocr_correction:
+    review_required = policy.requires_visual_ocr_review(output_dir)
+    if native_text or not review_required:
         stages.append(
             _status_record(
                 "ocr-correct",
                 "ocr-correct",
                 "skipped",
-                "not required for native-text PDF or single-OCR mode",
+                "not required for native-text PDF or single OCR without detected anomalies",
             )
         )
     else:
@@ -237,7 +238,7 @@ def _pdf_stages(
                 "passed" if current else "pending",
                 "visual OCR correction checkpoint is current"
                 if current
-                else "run ocr-correct, have the Subagent write corrections, then run ocr-correct-validate",
+                else "run ocr-correct for flagged pages, have the Subagent write corrections, then run ocr-correct-validate",
             )
         )
 

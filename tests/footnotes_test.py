@@ -3,7 +3,6 @@ from lxml import etree
 
 import pytest
 
-from pdf2epub.build_epub import process_chapter_content
 from pdf2epub.epub.footnotes import (
     FootnoteGraphError,
     FootnoteManager,
@@ -41,14 +40,8 @@ def _render(structure: list[dict], manager: FootnoteManager) -> dict[str, str]:
             part_files = entry.get("part_files") or []
             for part_index, part_file in enumerate(part_files, 1):
                 content = Path(part_file).read_text(encoding="utf-8")
-                processed = process_chapter_content(
-                    entry.get("title", entry["unit_id"]),
-                    entry.get("level", 1),
-                    content,
-                    is_first_part=(part_index == 1),
-                )
                 html = convert_markdown_to_html(
-                    processed,
+                    content,
                     "Book",
                     standalone=False,
                     footnote_manager=manager,
@@ -246,20 +239,13 @@ def test_page_note_keys_preserve_display_while_using_normalized_definition(
     assert report["forward_hrefs"] == 1
 
 
-def test_replaced_source_heading_markers_do_not_create_phantom_backlinks(
+def test_preserved_source_heading_markers_keep_footnote_backlinks(
     tmp_path: Path,
 ) -> None:
     body = tmp_path / "chapter_1.part1.md"
     notes = tmp_path / "chapter_1.part2.md"
-    body.write_text(
-        "# Raw title [^1] [^2]\n\n"
-        "Body [^1]. Local [^9].\n\n[^9]: Local definition.\n",
-        encoding="utf-8",
-    )
-    notes.write_text(
-        "[^1]: Body definition.\n\n[^2]: Replaced-heading definition.\n",
-        encoding="utf-8",
-    )
+    body.write_text("# Raw title [^1]\n\nBody prose.\n", encoding="utf-8")
+    notes.write_text("[^1]: Heading definition.\n", encoding="utf-8")
     structure = [
         {
             **_entry("chapter_1", body, notes),
@@ -269,10 +255,12 @@ def test_replaced_source_heading_markers_do_not_create_phantom_backlinks(
     ]
 
     manager = FootnoteManager(tmp_path, epub_structure=structure)
-    report = validate_footnote_graph(_render(structure, manager))
+    html_files = _render(structure, manager)
+    report = validate_footnote_graph(html_files)
 
-    assert report["forward_hrefs"] == 2
-    assert report["backref_hrefs"] == 2
+    assert '<h1 ' in html_files["chapter_1_part1.html"] and 'Raw title <sup' in html_files["chapter_1_part1.html"]
+    assert 'class="footnote-ref"' in html_files["chapter_1_part1.html"]
+    assert report["forward_hrefs"] == 1
     assert report["unlinked_sup_count"] == 0
 
 
@@ -435,7 +423,7 @@ def test_graph_inspection_allows_explicit_unlinked_reference() -> None:
     assert report["backref_broken_count"] == 0
 
 
-def test_replaced_source_heading_with_structural_prefix_suppresses_phantom_backlinks(
+def test_preserved_source_heading_with_structural_prefix_keeps_footnote_backlinks(
     tmp_path: Path,
 ) -> None:
     body = tmp_path / "chapter_1.part1.md"
@@ -459,10 +447,13 @@ def test_replaced_source_heading_with_structural_prefix_suppresses_phantom_backl
     ]
 
     manager = FootnoteManager(tmp_path, epub_structure=structure)
-    report = validate_footnote_graph(_render(structure, manager))
+    html_files = _render(structure, manager)
+    report = validate_footnote_graph(html_files)
 
-    assert report["forward_hrefs"] == 0
-    assert report["backref_hrefs"] == 0
+    assert 'Part I</h2>' in html_files["chapter_1_part1.html"]
+    assert 'class="footnote-ref"' in html_files["chapter_1_part1.html"]
+    assert report["forward_hrefs"] == 1
+    assert report["unlinked_sup_count"] == 0
     assert report["forward_broken_count"] == 0
     assert report["backref_broken_count"] == 0
     assert report["unlinked_sup_count"] == 0

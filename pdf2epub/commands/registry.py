@@ -209,11 +209,6 @@ def register_command_parsers(subparsers) -> None:
         default=None,
         help="Maximum tokens per unit (default: from config or 8000)",
     )
-    refine_prepare_parser.add_argument(
-        "--full-review",
-        action="store_true",
-        help="Skip the native-bookmark fast path and prepare the complete page review",
-    )
     refine_prepare_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.refine", "refine_prepare_command"))
 
     refine_local_parser = subparsers.add_parser(

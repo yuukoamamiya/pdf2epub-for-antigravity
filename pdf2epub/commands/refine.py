@@ -70,7 +70,6 @@ def refine_prepare_command(args):
         return 1
     refine_config = config.get("refine", {})
     max_tokens = args.max_tokens or refine_config.get("max_tokens", 8000)
-    full_review = bool(getattr(args, "full_review", False))
     try:
         paths = prepare_refine_subagent(
             output_dir,
@@ -78,7 +77,6 @@ def refine_prepare_command(args):
             max_tokens,
             config=config,
             pages_dir=pages_dir,
-            enable_fast_path=not full_review,
         )
     except Exception as exc:
         logger.error(f"Could not prepare refine task: {exc}")
@@ -86,27 +84,12 @@ def refine_prepare_command(args):
 
     logger.success(f"Wrote subagent prompt: {paths['prompt']}")
     logger.success(f"Wrote subagent manifest: {paths['manifest']}")
-    fast_path = paths.get("fast_path") or {}
-    if fast_path.get("status") == "eligible" and paths.get("fast_prompt"):
-        logger.success(f"Wrote TOC fast-path manifest: {paths['fast_manifest']}")
-        logger.success(f"Wrote TOC fast-path prompt: {paths['fast_prompt']}")
-        review_mode = fast_path.get("review_mode", "selective_review")
-        review_hint = (
-            "本次为少量异常的定向复核，只检查目录页、异常书签起始页及其前页；"
-            if review_mode == "targeted_review"
-            else "本次为高置信度选择性复核，检查目录页、书签起始页及其前页；"
-        )
-        logger.info(
-            f"请让工作区 Subagent 阅读 toc_fast_path_prompt.md。{review_hint}"
-            "同时使用 toc_line_evidence.json 核对原生 block、bbox 和 Markdown 行号，"
-            "按要求写入 toc_fast_path_decisions.json；确认通过后再写入 toc_tree.json。"
-            "若结果要求回退，请运行 refine-prepare --full-review，再使用完整 refine_subagent_prompt.md。"
-        )
-    else:
-        logger.info(
-            "TOC 快速路径未启用或未通过预检；请让工作区 Subagent 阅读 refine_subagent_prompt.md，"
-            "并在同一目录写入 toc_tree.json。"
-        )
+    logger.success(f"Wrote TOC candidate inventory: {paths['candidates']}")
+    logger.success(f"Wrote TOC review manifest: {paths['structure_review_manifest']}")
+    logger.info(
+        "请让工作区 Subagent 阅读 refine_subagent_prompt.md 和 toc_heading_candidates.json，"
+        "逐页复核并在同一目录写入 toc_tree.json 与 toc_structure_decisions.json。"
+    )
     logger.info(
         "完成后先运行 illustration-prepare（如有候选则交给工作区 Subagent，"
         "再运行 illustration-validate/illustration-apply），最后运行 pdf2epub refine-local。"
@@ -132,19 +115,6 @@ def refine_local_command(args):
     refine_config = config.get("refine", {})
     max_tokens = args.max_tokens or refine_config.get("max_tokens", 8000)
     try:
-        from pdf2epub.refine.toc_fast_path import validate_toc_fast_path_review
-
-        fast_report = validate_toc_fast_path_review(output_dir)
-        if not fast_report.get("valid"):
-            logger.error("TOC fast-path review did not pass; full review is required")
-            for error in fast_report.get("errors", [])[:10]:
-                logger.error(f"TOC fast-path: {error}")
-            full_prompt = fast_report.get("full_review_prompt")
-            if full_prompt:
-                logger.error(
-                    f"Run refine-prepare --full-review, then use {full_prompt}"
-                )
-            return 1
         refiner = RefinedBreakdown(
             config=config,
             max_tokens=max_tokens,

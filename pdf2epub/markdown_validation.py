@@ -281,10 +281,56 @@ def _special_role_numeric_markers(text: str) -> list[str]:
         r"\1",
         normalized,
     )
-    return [
-        re.sub(r"[‐‑‒–—]", "-", match.group(0))
+    markers = [
+        (match.start(), re.sub(r"[‐‑‒–—]", "-", match.group(0)))
         for match in _SPECIAL_ROLE_NUMERIC_MARKER_RE.finditer(normalized)
     ]
+    # Roman numerals are semantic only in explicit volume/part contexts. Bare
+    # I/II remains ordinary prose, initials, or an identifier and is ignored.
+    roman_context = re.compile(
+        r"(?:\b(?:vol(?:ume)?|part)\s*\.?\s*"
+        r"(?P<english_roman>M{0,3}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3}))\b"
+        r"|第\s*"
+        r"(?P<chinese_roman>M{0,3}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3}))(?=卷|部))",
+        re.IGNORECASE,
+    )
+
+    def roman_value(value: str) -> int:
+        values = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100, "D": 500, "M": 1000}
+        total = 0
+        previous = 0
+        for char in reversed(value.upper()):
+            number = values[char]
+            total += -number if number < previous else number
+            previous = max(previous, number)
+        return total
+
+    roman_scan_text = re.sub(
+        r"https?://\S+|\b\d{1,4}\.\d{3,9}/\S+|doi(?:\.org)?/\S+|`[^`]*`",
+        lambda match: " " * len(match.group(0)),
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    for match in roman_context.finditer(roman_scan_text):
+        roman = match.group("english_roman") or match.group("chinese_roman")
+        if roman:
+            value = roman_value(roman)
+            if value > 0 and _int_to_roman(value) == roman.upper():
+                markers.append((match.start(), str(value)))
+    return [value for _, value in sorted(markers)]
+
+
+def _int_to_roman(value: int) -> str:
+    """Return the canonical Roman spelling for the supported 1..3999 range."""
+    parts = []
+    for number, numeral in (
+        (1000, "M"), (900, "CM"), (500, "D"), (400, "CD"),
+        (100, "C"), (90, "XC"), (50, "L"), (40, "XL"),
+        (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I"),
+    ):
+        count, value = divmod(value, number)
+        parts.append(numeral * count)
+    return "".join(parts)
 
 
 def _validate_special_role_markers(
@@ -560,7 +606,7 @@ def _strip_trailing_references(text: str) -> str:
     total_lines = len(lines)
     if total_lines < 5:
         return text
-    start_search = int(total_lines * 0.3)
+    start_search = 1
     for i in range(start_search, total_lines):
         line = lines[i].strip()
         if not line:
@@ -569,9 +615,12 @@ def _strip_trailing_references(text: str) -> str:
             tail = "".join(lines[i:])
             tail_blocks = [b.strip() for b in tail.split("\n\n") if b.strip()]
             if len(tail_blocks) >= 2:
-                cite_re = re.compile(r"\(\d{4}[a-z]?\)|https?://|doi\.org", re.IGNORECASE)
+                cite_re = re.compile(
+                    r"\(\d{4}[a-z]?\)|https?://|doi\.org|\b(?:18|19|20)\d{2}[a-z]?\b",
+                    re.IGNORECASE,
+                )
                 cite_count = sum(1 for b in tail_blocks[1:] if cite_re.search(b))
-                if cite_count >= 1 and cite_count / max(1, len(tail_blocks) - 1) >= 0.5:
+                if cite_count >= 1 and cite_count / max(1, len(tail_blocks) - 1) >= 0.4:
                     return "".join(lines[:i])
             elif len(tail_blocks) == 1:
                 return "".join(lines[:i])

@@ -22,7 +22,7 @@ from .toc_tree import TOCNode
 
 
 SCHEMA_VERSION = 1
-FURNITURE_LABELS = frozenset({"Page-Header", "Page-Footer"})
+FURNITURE_LABELS = frozenset({"Page-Header", "Page-Footer", "Section-Header"})
 
 _CHAPTER_PREFIX_RE = re.compile(
     r"^\s*(?:chapter|kapitel|chapitre)\s+[0-9ivxlcdm]+[:.\-\s]*",

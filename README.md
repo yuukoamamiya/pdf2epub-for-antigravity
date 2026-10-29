@@ -26,6 +26,7 @@ Antigravity 工作区 Subagent 完成，本地程序负责文件整理、校验�
 - 彩页和整页插图：识别疑似整页插页，恢复被插图打断的句子；普通插图不会自动移位，
   插图说明文字也会保留。
 - PDF 翻译：术语表、目录翻译、按 TOC 顺序装箱的章节翻译任务、断点续传和逐层校验。
+- 目录导航锚点优先绑定精确标题；只容忍编号标点格式差异或唯一的缺编号标题匹配。
 - EPUB 高保真翻译：尽量保持原有 XHTML、图片、目录、元数据和导航结构。
 - EPUB 构建保持编号论述段落与实际列表的区分；脚注支持明确缩进的续段和多块 Markdown 内容。
 - 轻小说 EPUB 和 arXiv/TeX：提供独立的文本交接、校验和构建流程。
@@ -47,6 +48,10 @@ Antigravity 工作区 Subagent 完成，本地程序负责文件整理、校验�
 `recommendation` 始终是 `ocr_required`。旧版本生成的 `source_kind: native_text`
 sidecar 和 `use_text_layer` probe 仅作为旧产物兼容读取，用于恢复旧输出，不再由新运行
 产生。
+
+单 OCR 仍是默认模式。页面扫描会识别疑似 OCR 模型解说（例如声称文字太淡、无法转录），并将
+异常页及其源哈希写入 `ocr_anomaly_report.json`。只有异常页交给 `ocr-correct` 做页图复核；其他
+页作为未复核直通副本。该启发式只发复核信号，无法证明页面有错，最终以页图为准；不确定结果会阻断后续流程。
 
 当前默认主 OCR 是 Chandra。脚注阶段先使用 OCR sidecar 的 `bbox[3]`、页底相交比例、数字开头、
 块间距和连续编号推断页面级脚注区域；`Footnote` 标签不能单独绕过几何条件，纯数字页码会排除。
@@ -107,6 +112,8 @@ Chandra 是当前主 OCR，扫描、可搜索和混合 PDF 都使用视觉 OCR�
 - 目录、页面合并、脚注和插图决定分别有 manifest、prompt、decision 和 validation report；
   `refine-local` 还会写入 `toc_title_normalization.json`，记录目录标题页码清洗的证据，
   可以中断后从 pending 项恢复。
+- PDF 的已审阅 TOC 标题区域会在 `refine-local` 中物化为 Markdown 标题，再进入 polish；
+  行内格式和脚注引用保留，原始页面文件保持只读。
 - EPUB 公式采用 Unicode 优先、复杂公式使用 MathML 的方案；目前不要求安装 XeLaTeX、
   `dvisvgm` 或额外 SVG 工具链。MathML 已够用时不会引入更重的系统依赖。
 - EPUB 正文遵循标准 Markdown 换行语义：普通单换行不会变成额外硬换行，只有空行或显式
@@ -153,7 +160,7 @@ uv sync
 把书名、输入文件、OCR 后端和语言写入 `config.yaml`。翻译 PDF 的主流程是：
 
 ```text
-OCR → OCR 纠错（双 OCR 时）→ 目录/章节识别
+OCR → OCR 纠错（双 OCR 或检测到单 OCR 异常时）→ 目录/章节识别
 → 整页插图复核 → 页面合并
 → 脚注复核与章末归并 → Markdown 润色
 → 术语/目录/正文翻译 → 校验 → EPUB
@@ -166,6 +173,10 @@ OCR → OCR 纠错（双 OCR 时）→ 目录/章节识别
 完成 OCR、目录和章节整理、整页插图与脚注处理、润色、术语统一、翻译、校验和 EPUB 打包。
 所有结果写入项目文件；只有通过本地校验后才算完成。
 ```
+
+PDF TOC 节点使用显式唯一 `node_id`；结构位置和标题文字都不能替代节点身份。构建时根据章节进度
+与源 Markdown 确认标题属于哪个物理文件。HTML 目录与 NCX 共用同一份渲染后导航结果，并在打包前
+检查链接文件和标题锚点；缺失可见标题会阻止构建，纯容器节点则链接到其内容文件或首个内容后代。
 
 ### 3. 处理 EPUB
 
@@ -229,6 +240,11 @@ ocr-pages --resume
 → bash scripts/build_all_epubs.sh config.yaml
 ```
 
+`refine-prepare` 会输出页面/标题候选清单与结构审阅 manifest。工作区 Subagent 必须逐个处置候选、
+逐页记录视觉或文本证据覆盖，再提交 TOC 树和决定文件；漏审或证据过期会阻止 `refine-local`。
+当前 TOC 树使用 schema 2，每个节点都有唯一 `node_id` 和明确绑定状态。更新 TOC 后需重新准备
+并审阅整个结构。
+
 PDF Markdown translation can opt into controlled handling for strictly structured bibliography and index units:
 
 ```yaml
@@ -257,17 +273,7 @@ bash scripts/build_all_epubs.sh config.yaml
 `pipeline: epub_conversion` 不得使用 `--translated` 或 `--only-translated`，也不要使用本脚本。
 
 `translate-toc` 的工作区 Subagent 只写扁平的 `toc_translation_result.json`；本地
-`translate-toc-validate` 会从源 `toc_tree.json` 合并生成 `toc_tree_translated.json`。
-
-旧的原生文字运行在 `refine-prepare` 时仍可只读使用已有的原生 sidecar，检查 PDF 书签和前置目录页；若书签预检只有
-少量异常，会生成定向审查任务，只包含目录页、异常书签起始页及其前页；没有异常时则生成高置信度
-选择性审查任务，包含目录页、书签起始页及其前页。两种任务都会生成
-`toc_fast_path_prompt.md`、`toc_fast_path_manifest.json`、审阅图和只读的
-`toc_line_evidence.json`（原生 block、bbox、字体和 Markdown 行范围）。工作区 Subagent 仍负责
-视觉确认，并为页内起始章节写入 `boundary_info.start_line`。异常过多、证据不足或任何目录条目、
-书签页码、页内边界不确定，都应在决定文件中要求回退；随后运行 `refine-prepare --full-review`
-使用原有的全页 TOC 审查。`refine-local` 会校验快速路径的源哈希、页面集合、原生证据哈希、
-书签结构和边界行号，不会把本地书签草稿直接当成最终 TOC。
+`translate-toc-validate` 会从源 `toc_tree.json` 合并生成 `toc_tree_translated.json`。 TOC 树为 schema 2，要求唯一的显式 `node_id`；翻译合同为 contract 3。旧格式必须重新准备并审阅，不能直接恢复旧树或旧译文 TOC。
 
 若当前 TOC 明确标记第 1 页为封面，且该页是几乎无文字的全页图，
 `illustration-prepare` 可生成 `auto_resolved` 的封面决定；仍必须运行后续的

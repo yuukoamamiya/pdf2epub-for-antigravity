@@ -301,6 +301,8 @@ def validate_ocr_correction_reviews(
     )
     errors: list[Dict[str, str]] = []
     checked: list[str] = []
+    from pdf2epub.ocr_anomalies import detect_ocr_commentary, scan_ocr_pages
+    anomaly_names = set(scan_ocr_pages(output_dir, persist=False)["review_required_files"])
 
     for name in selected_names:
         if name not in all_source_names:
@@ -360,16 +362,37 @@ def validate_ocr_correction_reviews(
             source.read_text(encoding="utf-8"),
             target.read_text(encoding="utf-8"),
         )
-        if structure_errors:
+        is_anomaly = name in anomaly_names
+        target_text = target.read_text(encoding="utf-8")
+        if is_anomaly:
+            image_path = review_image_dir(output_dir) / f"{Path(name).stem}.png"
+            decision = record.get("anomaly_decision")
+            bound = {
+                "source_sha256": sha256_file(source),
+                "target_sha256": sha256_file(target),
+                "image_sha256": sha256_file(image_path) if image_path.is_file() else "",
+            }
+            if decision not in {"transcribed", "confirmed_source"} or any(
+                record.get(key) != value for key, value in bound.items()
+            ):
+                errors.append({"file": name, "reason": "anomaly decision is missing or not bound to current source, target, and image hashes"})
+                continue
+            if decision == "confirmed_source" and target.read_bytes() != source.read_bytes():
+                errors.append({"file": name, "reason": "confirmed_source decision must preserve the source page exactly"})
+                continue
+        if is_anomaly and record.get("anomaly_decision") != "confirmed_source" and detect_ocr_commentary(target_text):
+            errors.append({"file": name, "reason": "corrected page still contains OCR commentary"})
+            continue
+        if structure_errors and not is_anomaly:
             errors.extend({"file": name, "reason": reason} for reason in structure_errors)
             continue
         if recorded_source != source_stats or recorded_target != target_stats:
             errors.append({"file": name, "reason": "OCR review line counts do not match the files"})
             continue
-        if target_stats["line_count"] < source_stats["line_count"]:
+        if not is_anomaly and target_stats["line_count"] < source_stats["line_count"]:
             errors.append({"file": name, "reason": "corrected page has fewer total lines than raw OCR"})
             continue
-        if target_stats["nonempty_line_count"] < source_stats["nonempty_line_count"]:
+        if not is_anomaly and target_stats["nonempty_line_count"] < source_stats["nonempty_line_count"]:
             errors.append({"file": name, "reason": "corrected page has fewer non-empty lines than raw OCR"})
             continue
         checked.append(name)
@@ -397,8 +420,21 @@ def ocr_correction_is_current(
     config: Optional[Mapping[str, Any]] = None,
 ) -> bool:
     """Return whether validated corrections match the current raw OCR pages."""
+    single_ocr_anomalies = []
     if config is not None and not secondary_ocr_enabled(config):
-        return False
+        from pdf2epub.ocr_anomalies import scan_ocr_pages
+
+        single_ocr_anomalies = scan_ocr_pages(output_dir, persist=False)["review_required_files"]
+        if not single_ocr_anomalies:
+            return False
+    elif config is None:
+        recorded = _load_correction_report(output_dir)
+        if recorded.get("evidence_mode") == "single_ocr_anomaly_review":
+            from pdf2epub.ocr_anomalies import scan_ocr_pages
+
+            single_ocr_anomalies = scan_ocr_pages(output_dir, persist=False)["review_required_files"]
+            if set(recorded.get("anomaly_files", [])) != set(single_ocr_anomalies):
+                return False
     report = _load_correction_report(output_dir)
     if (
         report.get("schema_version") != OCR_CORRECTION_VALIDATION_SCHEMA_VERSION
@@ -434,10 +470,11 @@ def ocr_correction_is_current(
         ):
             return False
         review_files = review_required_files(output_dir)
+    elif single_ocr_anomalies:
+        review_files = single_ocr_anomalies
     elif consensus_manifest:
+        # Legacy callers without configuration retain old consensus behavior.
         if not consensus_manifest.get("complete"):
-            return False
-        if config is not None and not consensus_is_current(output_dir, config):
             return False
         review_files = review_required_files(output_dir)
     else:
@@ -481,6 +518,21 @@ def select_refinement_pages(
     ):
         return raw, "native_text"
     if config is not None and not secondary_ocr_enabled(config):
+        from pdf2epub.ocr_anomalies import scan_ocr_pages
+
+        anomaly_report = scan_ocr_pages(output_dir, persist=False)
+        if anomaly_report.get("scan_errors"):
+            raise ValueError("raw OCR pages could not all be scanned for anomalies")
+        anomalies = anomaly_report["review_required_files"]
+        if not anomalies:
+            return raw, "ocr"
+        if ocr_correction_is_current(output_dir, config=config):
+            return corrected_page_dir(output_dir), "ocr_corrected"
+        if require_correction:
+            raise ValueError(
+                "OCR commentary anomaly requires visual review; run ocr-correct and "
+                "ocr-correct-validate before refinement"
+            )
         return raw, "ocr"
     if ocr_correction_is_current(output_dir, config=config):
         return corrected_page_dir(output_dir), "ocr_corrected"

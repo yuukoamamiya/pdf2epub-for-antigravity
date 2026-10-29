@@ -119,6 +119,9 @@ def split_markdown_unit(
     target_tokens: int,
     role: str,
     estimate_tokens: Callable[[str], int],
+    *,
+    budget_tokens: int | None = None,
+    budget_bytes: int = 30_000,
 ) -> SplitMarkdownResult:
     """Split an oversized special unit while preserving source order.
 
@@ -130,6 +133,7 @@ def split_markdown_unit(
     """
     if target_tokens <= 0:
         raise ValueError("target_tokens must be positive")
+    budget_tokens = budget_tokens if budget_tokens and budget_tokens > 0 else target_tokens
     if estimate_tokens(text) <= target_tokens:
         return SplitMarkdownResult([text], "none")
 
@@ -180,4 +184,41 @@ def split_markdown_unit(
         parts.append("".join(current))
 
     strategy = "line-fallback" if used_line_fallback else "entry-boundary"
+    if len(parts) >= 2 and estimate_tokens(parts[-1]) < target_tokens * 0.15:
+        previous, tail = parts[-2], parts[-1]
+        joined = previous + tail
+        within_budget = (
+            estimate_tokens(joined) <= budget_tokens
+            and len(joined.encode("utf-8")) <= budget_bytes
+        )
+        if within_budget:
+            parts[-2:] = [joined]
+            strategy += "+tail-merged"
+        else:
+            # Rebuild just the final two parts from legal Markdown blocks and
+            # choose the most balanced boundary that respects both budgets.
+            atoms = _blocks(joined)
+            if role == "index":
+                atoms = _merge_index_continuations(atoms)
+            candidates = []
+            for boundary in range(1, len(atoms)):
+                left, right = "".join(atoms[:boundary]), "".join(atoms[boundary:])
+                if _unresolved_footnote_markers(atoms[:boundary], known_defs):
+                    continue
+                left_tokens, right_tokens = estimate_tokens(left), estimate_tokens(right)
+                if (
+                    max(left_tokens, right_tokens) <= budget_tokens
+                    and max(len(left.encode("utf-8")), len(right.encode("utf-8"))) <= budget_bytes
+                ):
+                    candidates.append((
+                        max(left_tokens, right_tokens),
+                        abs(left_tokens - right_tokens),
+                        boundary,
+                        left,
+                        right,
+                    ))
+            if candidates:
+                _, _, _, left, right = min(candidates)
+                parts[-2:] = [left, right]
+                strategy += "+tail-rebalanced"
     return SplitMarkdownResult(parts or [text], strategy)

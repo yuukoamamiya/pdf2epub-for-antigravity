@@ -7,6 +7,7 @@ from pdf2epub.refine.toc_heading_recovery import (
     toc_heading_recovery_fingerprint,
 )
 from pdf2epub.refine.toc_tree import TOCNode
+from toc_review_test_support import install_toc_review_contract
 
 
 def _write_page(pages_dir, number, markdown, html=None, sidecar=None):
@@ -309,6 +310,7 @@ def test_refined_breakdown_writes_report_and_checkpoint_fingerprint(tmp_path):
         encoding="utf-8",
     )
 
+    install_toc_review_contract(tmp_path)
     units = RefinedBreakdown(config={}, max_tokens=8000).process_from_toc(
         tmp_path / "input.pdf", tmp_path, "Book"
     )
@@ -324,7 +326,56 @@ def test_refined_breakdown_writes_report_and_checkpoint_fingerprint(tmp_path):
     )
     assert "toc_heading_recovery_sha256" in progress["fingerprint"]
     assert progress["fingerprint"]["page_merger_policy"] == (
-        "repeated-edge-header-folio-normalization-v2"
+        "reviewed-heading-materialization-v4"
     )
     content = (tmp_path / "ocr_markdown" / "chapter_1.md").read_text(encoding="utf-8")
     assert "## 8. Mobilized" in content
+
+
+def test_toc_start_page_title_survives_repeated_section_header_signature():
+    parent = TOCNode(title="Part II", level=1, start_page=1, end_page=2)
+    child = TOCNode(title="Section 2.1: Real heading", level=2, start_page=1, end_page=2)
+    parent.children = [child]
+    merger = PageMerger()
+    merger.set_toc_nodes([parent])
+    merger._visual_running_headers = lambda _pages: {1: ["Section 2.1: Real heading"], 2: ["Section 2.1: Real heading"]}
+
+    first = merger._remove_visual_running_headers(
+        ["## Section 2.1: Real heading", "Body starts here."], None, 1
+    )
+    later = merger._remove_visual_running_headers(
+        ["Section 2.1: Real heading", "More body."], None, 2
+    )
+
+    assert first == ["## Section 2.1: Real heading", "Body starts here."]
+    assert later == ["More body."]
+
+
+def test_toc_title_protection_keeps_number_identity_and_nested_scope():
+    parent = TOCNode(title="Part II", level=1, start_page=3, end_page=3)
+    parent.children = [TOCNode(title="Part 3", level=2, start_page=3, end_page=3)]
+    merger = PageMerger()
+    merger.set_toc_nodes([parent])
+    merger._visual_running_headers = lambda _pages: {3: ["Part 3"]}
+
+    result = merger._remove_visual_running_headers(
+        ["Part 3", "Body paragraph.", "## Notes to Chapter 2", "[^1]: note"],
+        None,
+        3,
+    )
+
+    assert result == ["Part 3", "Body paragraph.", "## Notes to Chapter 2", "[^1]: note"]
+
+
+def test_toc_title_protection_preserves_chinese_text_identity():
+    merger = PageMerger()
+    merger.set_toc_nodes([
+        TOCNode(title="5. 利润理论", level=2, start_page=9, end_page=9)
+    ])
+    merger._visual_running_headers = lambda _pages: {9: ["5. 商业周期"]}
+
+    result = merger._remove_visual_running_headers(
+        ["5. 商业周期", "正文内容。"], None, 9
+    )
+
+    assert result == ["正文内容。"]

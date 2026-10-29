@@ -3,6 +3,7 @@ from pathlib import Path
 
 from pdf2epub.refine.pagination import build_pagination_map
 from pdf2epub.refine.toc_sanitization import sanitize_toc_titles
+from toc_review_test_support import install_toc_review_contract
 
 
 def _write_page(pages: Path, number: int, text: str) -> None:
@@ -107,6 +108,7 @@ def test_refine_local_persists_toc_normalization_and_updates_toc_hash(
     )
     from pdf2epub.refine.main import RefinedBreakdown
 
+    install_toc_review_contract(tmp_path)
     RefinedBreakdown(config={}, max_tokens=8000).process_from_toc(
         tmp_path / "input.pdf",
         tmp_path,

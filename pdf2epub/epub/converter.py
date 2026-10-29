@@ -20,6 +20,21 @@ from loguru import logger
 from ..markdown_to_html import convert_markdown_to_html
 
 
+def visible_heading_text(value: str) -> str:
+    """Return heading text while ignoring generated footnote reference labels."""
+    import html as html_module
+
+    value = re.sub(
+        r'<sup\b(?=[^>]*\bid=["\'][^"\']+["\'])[^>]*>\s*<a\b(?=[^>]*class=["\'][^"\']*\bfootnote-ref\b[^"\']*["\'])[^>]*>.*?</a>\s*</sup>',
+        "",
+        value,
+        flags=re.I | re.S,
+    )
+    value = re.sub(r"<[^>]+>", "", value)
+    value = html_module.unescape(value)
+    return re.sub(r"\s+", " ", value).strip().lower()
+
+
 class ContentConverter:
     """Handles all content conversion and preparation for EPUB generation."""
 
@@ -743,6 +758,8 @@ class ContentConverter:
         *,
         heading_pattern: Optional[re.Pattern] = None,
         visible_heading=None,
+        source_occurrence: Optional[int] = None,
+        source_match_count: Optional[int] = None,
     ) -> Tuple[str, bool]:
         """Add one stable anchor and report whether a matching block was found.
 
@@ -759,29 +776,141 @@ class ContentConverter:
                 flags=re.IGNORECASE | re.DOTALL,
             )
         if visible_heading is None:
-            def visible_heading(value: str) -> str:
-                value = re.sub(r"<[^>]+>", "", value)
-                value = html_module.unescape(value)
-                return re.sub(r"\s+", " ", value).strip().lower()
+            visible_heading = visible_heading_text
 
         target_title = visible_heading(sub_title)
+        matches = self._subchapter_anchor_candidates(
+            html_content, target_title, heading_pattern, visible_heading
+        )
+        eligible = [(rank, match) for rank, match in matches if rank[0] < 3]
+        selected_match = None
+        if source_occurrence is not None or source_match_count is not None:
+            if (
+                not isinstance(source_occurrence, int)
+                or not isinstance(source_match_count, int)
+                or source_occurrence < 1
+                or source_match_count < source_occurrence
+                or len(eligible) != source_match_count
+            ):
+                return html_content, False
+            selected_rank = eligible[source_occurrence - 1][0]
+            if selected_rank[0] == 2 and any(rank[0] == 3 for rank, _ in matches):
+                return html_content, False
+            selected_match = eligible[source_occurrence - 1][1]
+        existing_ids = len(re.findall(rf'(?<![\w:-])id=["\']{re.escape(anchor_id)}["\']', html_content, re.I))
+        if existing_ids:
+            if existing_ids == 1 and (
+                (
+                    selected_match is not None
+                    and re.search(
+                        rf'(?<![\w:-])id=["\']{re.escape(anchor_id)}["\']',
+                        selected_match.group(2) + selected_match.group(3),
+                        re.I,
+                    )
+                )
+                or (selected_match is None and any(
+                re.search(
+                    rf'(?<![\w:-])id=["\']{re.escape(anchor_id)}["\']',
+                    match.group(2) + match.group(3),
+                    re.I,
+                )
+                and rank[0] < 3
+                for rank, match in matches
+                ))
+            ):
+                return html_content, True
+            return html_content, False
+        if not matches:
+            return html_content, False
+        if selected_match is not None:
+            match = selected_match
+        else:
+            best_rank = min(rank for rank, _ in matches)
+            if best_rank[0] >= 3:
+                return html_content, False
+            best = [match for rank, match in matches if rank == best_rank]
+            if len(best) != 1 or (best_rank[0] == 2 and any(rank[0] == 3 for rank, _ in matches)):
+                return html_content, False
+            match = best[0]
+        tag, attrs, inner = match.group(1), match.group(2), match.group(3)
+        # Keep author/source IDs intact; put the stable TOC target inside the
+        # matched block as a separate alias anchor.
+        replacement = f'<{tag}{attrs}><span id="{anchor_id}"></span>{inner}</{tag}>'
+        updated = html_content[:match.start()] + replacement + html_content[match.end():]
+        logger.debug(f"Added stable anchor #{anchor_id} to '{sub_title}'")
+        return updated, True
+
+    @staticmethod
+    def _subchapter_anchor_candidates(html_content, sub_title, heading_pattern, visible_heading):
+        """Collect exact, prefix-format-equivalent, and numberless candidates."""
+        prefix = re.compile(r"^\s*(\d+(?:[.:]\d+)*)(?:\s*[.):]|\s*[-–—])?\s+(.*)$")
+
+        def parse(value):
+            match = prefix.match(value)
+            if not match:
+                return (), value
+            return tuple(match.group(1).replace(":", ".").split(".")), match.group(2)
+
+        target = visible_heading(sub_title)
+        target_number, target_body = parse(target)
+        matches = []
         for match in heading_pattern.finditer(html_content):
-            heading_text = visible_heading(match.group(3))
-            similarity = difflib.SequenceMatcher(
-                None, target_title, heading_text
-            ).ratio()
-            if target_title != heading_text and similarity <= 0.8:
+            candidate = visible_heading(match.group(3))
+            candidate_number, candidate_body = parse(candidate)
+            tag_priority = 0 if match.group(1).lower().startswith("h") else 1
+            if candidate == target and candidate_number == target_number:
+                rank = (0, tag_priority)
+            elif (
+                target_number
+                and candidate_number
+                and target_number == candidate_number
+                and target_body == candidate_body
+            ):
+                rank = (1, tag_priority)
+            elif (
+                bool(target_number) != bool(candidate_number)
+                and target_body == candidate_body
+            ):
+                rank = (2, tag_priority)
+            elif target_body == candidate_body and target_number != candidate_number:
+                rank = (3, tag_priority)
+            else:
                 continue
-            tag, attrs, inner = match.group(1), match.group(2), match.group(3)
-            attrs = re.sub(
-                r"\s+id=\"[^\"]*\"", "", attrs, flags=re.IGNORECASE
-            )
-            replacement = f'<{tag} id="{anchor_id}"{attrs}>{inner}</{tag}>'
-            updated = (
-                html_content[:match.start()]
-                + replacement
-                + html_content[match.end():]
-            )
-            logger.debug(f"Added stable anchor #{anchor_id} to '{sub_title}'")
-            return updated, True
-        return html_content, False
+            matches.append((rank, match))
+        return matches
+
+    def _subchapter_anchor_match_rank(self, html_content: str, sub_title: str):
+        """Return the shared matcher rank and number of equal-rank candidates."""
+        import html as html_module
+
+        pattern = re.compile(r'<(h[1-6]|p)([^>]*)>(.*?)</\1>', re.I | re.S)
+
+        visible = visible_heading_text
+
+        matches = self._subchapter_anchor_candidates(html_content, sub_title, pattern, visible)
+        eligible = [(rank, match) for rank, match in matches if rank[0] < 3]
+        has_conflict = any(rank[0] == 3 for rank, _ in matches)
+        if not eligible:
+            return (99, 99), 0, has_conflict
+        rank = min(rank for rank, _ in eligible)
+        return (
+            rank,
+            sum(1 for candidate_rank, _ in eligible if candidate_rank == rank),
+            has_conflict,
+        )
+
+    def _has_subchapter_anchor(self, html_content: str, sub_title: str, anchor_id: str) -> bool:
+        """Check that one existing stable ID is attached to a matching title."""
+        import html as html_module
+
+        pattern = re.compile(r'<(h[1-6]|p)([^>]*)>(.*?)</\1>', re.I | re.S)
+
+        visible = visible_heading_text
+
+        matches = self._subchapter_anchor_candidates(html_content, sub_title, pattern, visible)
+        id_pattern = re.compile(rf'(?<![\w:-])id=["\']{re.escape(anchor_id)}["\']', re.I)
+        return sum(
+            len(id_pattern.findall(match.group(2) + match.group(3)))
+            for rank, match in matches
+            if rank[0] < 3
+        ) == 1

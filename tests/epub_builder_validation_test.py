@@ -7,12 +7,10 @@ from xml.etree import ElementTree as ET
 from pdf2epub.commands.pdf import _resolve_pdf_markdown_source
 from pdf2epub.build_epub import (
     add_subchapter_anchors_to_parts,
-    _embedded_subchapter_entries,
     flatten_toc_tree,
     build_epub_structure,
     load_refinement_part_order,
     generate_hierarchical_toc_html,
-    process_chapter_content,
     generate_hierarchical_toc_ncx,
     resolve_book_metadata,
     relocate_leading_page_carryover,
@@ -20,6 +18,13 @@ from pdf2epub.build_epub import (
 )
 from pdf2epub.epub.builder import EpubBuilder
 from pdf2epub.epub.converter import ContentConverter
+from pdf2epub.workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION
+
+
+def _set_navigation_binding(entries, mode):
+    for entry in entries:
+        entry["navigation_binding_mode"] = mode
+        _set_navigation_binding(entry.get("children") or [], mode)
 
 
 def test_refinement_checkpoint_controls_continuation_order(tmp_path: Path) -> None:
@@ -74,7 +79,9 @@ def test_ncx_and_opf_share_publication_identifier(tmp_path: Path) -> None:
     ncx_path = tmp_path / "toc.ncx"
     opf_path = tmp_path / "content.opf"
 
-    assert builder.create_toc_ncx({"chapters": []}, ncx_path)
+    assert generate_hierarchical_toc_ncx(
+        [], config.book_title, ncx_path, uid=builder.uid, language=config.language
+    )
     assert builder.create_content_opf(
         {"chapters": []},
         tmp_path,
@@ -128,8 +135,13 @@ def test_epub_builder_uses_reader_language_label(tmp_path: Path) -> None:
     ncx_path = tmp_path / "toc.ncx"
     html_path = tmp_path / "toc.html"
 
-    assert builder.create_toc_ncx({"chapters": []}, ncx_path)
-    assert builder.create_toc_html({"chapters": []}, html_path)
+    assert generate_hierarchical_toc_ncx(
+        [], builder.config.book_title, ncx_path, uid=builder.uid,
+        language=builder.config.language,
+    )
+    assert generate_hierarchical_toc_html(
+        [], builder.config.book_title, html_path, language=builder.config.language
+    )
     assert "<text>目录</text>" in ncx_path.read_text(encoding="utf-8")
     assert "<title>目录</title>" in html_path.read_text(encoding="utf-8")
 
@@ -163,9 +175,11 @@ def test_hierarchical_ncx_reuses_play_order_for_same_target(
     output_path = tmp_path / "toc.ncx"
     structure = [
         {
+            "node_id": "parent",
             "title": "Parent",
             "children": [
                 {
+                    "node_id": "child",
                     "title": "First child",
                     "unit_id": "chapter_1",
                     "file_path": tmp_path / "chapter_1.md",
@@ -174,6 +188,7 @@ def test_hierarchical_ncx_reuses_play_order_for_same_target(
             ],
         }
     ]
+    _set_navigation_binding(structure, "container_only")
 
     assert generate_hierarchical_toc_ncx(
         structure,
@@ -216,11 +231,13 @@ def test_epub_stylesheet_uses_a_valid_quote_string() -> None:
 def test_flatten_toc_tree_uses_in_place_translated_title_fields() -> None:
     structure = flatten_toc_tree(
         [{
+            "node_id": "translated-root",
             "title": "译名",
             "level": 1,
             "start_page": 1,
             "end_page": 2,
             "children": [{
+                "node_id": "translated-child",
                 "title": "子标题",
                 "level": 2,
                 "start_page": 1,
@@ -240,11 +257,13 @@ def test_toc_falls_back_to_parent_file_for_unresolved_child_anchor(
     parent_file.write_text("# Parent\n\n## Child\n", encoding="utf-8")
     structure = build_epub_structure(
         flatten_toc_tree([{
+            "node_id": "parent",
             "title": "Parent",
             "level": 1,
             "start_page": 1,
             "end_page": 2,
             "children": [{
+                "node_id": "child",
                 "title": "Child",
                 "level": 2,
                 "start_page": 1,
@@ -253,12 +272,13 @@ def test_toc_falls_back_to_parent_file_for_unresolved_child_anchor(
         }]),
         tmp_path,
     )
+    _set_navigation_binding(structure, "container_only")
     from pdf2epub.build_epub import generate_hierarchical_toc_html
     toc_path = tmp_path / "toc.html"
     assert generate_hierarchical_toc_html(structure, "Book", toc_path)
     toc = toc_path.read_text(encoding="utf-8")
     assert 'href="chapter_1.html"' in toc
-    assert 'href="chapter_1.html#toc-1-1"' not in toc
+    assert 'href="chapter_1.html#toc-parent-1"' not in toc
 
 
 def test_subchapter_anchor_supports_deep_headings_and_nested_markup() -> None:
@@ -294,6 +314,7 @@ def test_subchapter_anchor_searches_later_rendered_part_and_updates_navigation(
     assert locations == {"toc-1-2": "chapter_1_part2.html"}
 
     structure = [{
+        "node_id": "chapter",
         "title": "Chapter",
         "level": 1,
         "unit_id": "chapter_1",
@@ -304,21 +325,19 @@ def test_subchapter_anchor_searches_later_rendered_part_and_updates_navigation(
         ],
         "anchor": "toc-1",
         "children": [{
+            "node_id": "missing-child",
             "title": "Late child",
             "level": 2,
             "anchor": "toc-1-2",
             "children": [{
+                    "node_id": "nested-child",
                 "title": "Nested late child",
                 "level": 3,
                 "anchor": "toc-1-2-1",
             }],
         }],
     }]
-    embedded = _embedded_subchapter_entries(structure[0]["children"])
-    assert [entry["title"] for entry in embedded] == [
-        "Late child",
-        "Nested late child",
-    ]
+    _set_navigation_binding(structure, "container_only")
     toc_path = tmp_path / "toc.html"
     ncx_path = tmp_path / "toc.ncx"
     assert generate_hierarchical_toc_html(
@@ -345,6 +364,7 @@ def test_navigation_falls_back_to_parent_file_for_missing_child_anchor(
     tmp_path: Path,
 ) -> None:
     structure = [{
+        "node_id": "container",
         "title": "Chapter",
         "level": 1,
         "unit_id": "chapter_1",
@@ -355,11 +375,13 @@ def test_navigation_falls_back_to_parent_file_for_missing_child_anchor(
         ],
         "anchor": "toc-1",
         "children": [{
+            "node_id": "missing-parent",
             "title": "Missing child",
             "level": 2,
             "anchor": "missing-child",
         }],
     }]
+    _set_navigation_binding(structure, "container_only")
     toc_path = tmp_path / "toc.html"
     ncx_path = tmp_path / "toc.ncx"
     assert generate_hierarchical_toc_html(
@@ -386,14 +408,17 @@ def test_nested_entries_fall_back_to_first_descendant_file(
     tmp_path: Path,
 ) -> None:
     structure = [{
+        "node_id": "container",
         "title": "Container",
         "level": 1,
         "anchor": "missing-container",
         "children": [{
+            "node_id": "missing-parent",
             "title": "Missing parent",
             "level": 2,
             "anchor": "missing-parent",
             "children": [{
+                "node_id": "leaf",
                 "title": "Leaf",
                 "level": 3,
                 "unit_id": "chapter_2",
@@ -403,6 +428,7 @@ def test_nested_entries_fall_back_to_first_descendant_file(
             }],
         }],
     }]
+    _set_navigation_binding(structure, "container_only")
     toc_path = tmp_path / "toc.html"
     ncx_path = tmp_path / "toc.ncx"
     assert generate_hierarchical_toc_html(
@@ -427,31 +453,6 @@ def test_nested_entries_fall_back_to_first_descendant_file(
         assert f"#{anchor}" not in ncx
 
 
-def test_process_chapter_content_keeps_related_subsection_heading() -> None:
-    processed = process_chapter_content(
-        "第一部分附录",
-        1,
-        "# Appendices to Part One\n\n## A. 简要文献目录\n\nBody",
-        True,
-    )
-    assert "# 第一部分附录" in processed
-    assert "## A. 简要文献目录" in processed
-
-
-def test_process_chapter_content_keeps_structural_ancestor_heading() -> None:
-    processed = process_chapter_content(
-        "0 Stuttgart (1770–1788)",
-        2,
-        "# I Leben\n\n## 0 Stuttgart (1770–1788)\n\nChild body",
-        True,
-    )
-
-    assert processed.startswith(
-        "# I Leben\n\n## 0 Stuttgart (1770–1788)\n\nChild body"
-    )
-    assert processed.count("Child body") == 1
-
-
 def test_build_epub_structure_points_structural_parent_at_first_child(
     tmp_path: Path,
 ) -> None:
@@ -465,10 +466,12 @@ def test_build_epub_structure_points_structural_parent_at_first_child(
         flatten_toc_tree(
             [
                 {
+                    "node_id": "parent",
                     "title": "Parent",
                     "level": 1,
                     "children": [
                         {
+                            "node_id": "child",
                             "title": "Child",
                             "level": 2,
                         }
@@ -481,16 +484,17 @@ def test_build_epub_structure_points_structural_parent_at_first_child(
 
     assert "virtual_file_name" not in structure[0]
     assert structure[0]["children"][0]["file_path"].name == "chapter_1.1.md"
+    _set_navigation_binding(structure, "visible")
     toc_path = tmp_path / "toc.html"
     assert generate_hierarchical_toc_html(
         structure,
         "Book",
         toc_path,
-        anchor_locations={"toc-1-1": "chapter_1.1.html"},
+        anchor_locations={"toc-parent": "chapter_1.1.html", "toc-child": "chapter_1.1.html"},
     )
     toc = toc_path.read_text(encoding="utf-8")
-    assert 'href="chapter_1.1.html">Parent</a>' in toc
-    assert 'href="chapter_1.1.html#toc-1-1">Child</a>' in toc
+    assert 'href="chapter_1.1.html#toc-parent">Parent</a>' in toc
+    assert 'href="chapter_1.1.html#toc-child">Child</a>' in toc
 
 
 def test_toc_file_target_uses_unit_fragment(tmp_path: Path) -> None:
@@ -498,11 +502,13 @@ def test_toc_file_target_uses_unit_fragment(tmp_path: Path) -> None:
     chapter.write_text("# Parent\n\nBody", encoding="utf-8")
     structure = build_epub_structure(
         flatten_toc_tree([{
+            "node_id": "parent",
             "title": "Parent",
             "level": 1,
         }]),
         tmp_path,
     )
+    _set_navigation_binding(structure, "visible")
 
     toc_path = tmp_path / "toc.html"
     ncx_path = tmp_path / "toc.ncx"
@@ -510,18 +516,18 @@ def test_toc_file_target_uses_unit_fragment(tmp_path: Path) -> None:
         structure,
         "Book",
         toc_path,
-        anchor_locations={"toc-1": "chapter_1.html"},
+        anchor_locations={"toc-parent": "chapter_1.html"},
     )
     assert generate_hierarchical_toc_ncx(
         structure,
         "Book",
         ncx_path,
-        anchor_locations={"toc-1": "chapter_1.html"},
+        anchor_locations={"toc-parent": "chapter_1.html"},
     )
-    assert 'href="chapter_1.html#toc-1">Parent</a>' in toc_path.read_text(
+    assert 'href="chapter_1.html#toc-parent">Parent</a>' in toc_path.read_text(
         encoding="utf-8"
     )
-    assert 'src="text/chapter_1.html#toc-1"' in ncx_path.read_text(
+    assert 'src="text/chapter_1.html#toc-parent"' in ncx_path.read_text(
         encoding="utf-8"
     )
 
@@ -622,7 +628,7 @@ def test_pdf_source_stage_can_be_auto_selected_or_explicit(tmp_path: Path) -> No
     (tmp_path / "polish_validation.json").write_text(
         json.dumps(
                 {
-                    "schema_version": 2,
+                    "schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION,
                     "task": "polish",
                     "scope": "full",
                     "all_passed": True,
@@ -674,3 +680,118 @@ def test_book_metadata_prefers_explicit_values_and_ignores_unknown(tmp_path: Pat
         "author": "Explicit Author",
         "publisher": "Agent Publisher",
     }
+
+
+def test_subchapter_anchor_preserves_existing_id_and_prefers_exact_later_part():
+    converter = object.__new__(ContentConverter)
+    rendered = [
+        ("part1.html", '<h2 id="old">1: Introduction</h2>'),
+        ("part2.html", '<h2 id="existing">1. Introduction</h2>'),
+    ]
+    rendered, locations = add_subchapter_anchors_to_parts(
+        converter,
+        rendered,
+        chapter_index=1,
+        subchapter_info=[{"title": "1. Introduction", "anchor": "toc-1-1"}],
+    )
+
+    assert locations == {"toc-1-1": "part2.html"}
+    assert 'id="old"' in rendered[0][1]
+    assert 'id="existing"' in rendered[1][1]
+    assert 'id="toc-1-1"' in rendered[1][1]
+
+    formatted = [("part1.html", "<h2>2: 商业周期</h2>")]
+    rendered, locations = add_subchapter_anchors_to_parts(
+        converter, formatted, 1,
+        [{"title": "2. 商业周期", "anchor": "toc-1-2"}],
+    )
+    assert locations == {"toc-1-2": "part1.html"}
+
+
+def test_subchapter_anchor_requires_unique_unnumbered_fallback_and_avoids_duplicate_ids():
+    converter = object.__new__(ContentConverter)
+    ambiguous = [
+        ("part1.html", "<h2>Introduction</h2>"),
+        ("part2.html", "<h3>Introduction</h3>"),
+    ]
+    rendered, locations = add_subchapter_anchors_to_parts(
+        converter, ambiguous, 1,
+        [{"title": "Introduction", "anchor": "toc-1-1"}],
+    )
+    assert locations == {}
+
+    wrong_number = [("part1.html", "<h2>6. \u5546\u4e1a\u5468\u671f</h2>")]
+    rendered, locations = add_subchapter_anchors_to_parts(
+        converter, wrong_number, 1,
+        [{"title": "5. \u5546\u4e1a\u5468\u671f", "anchor": "toc-1-7"}],
+    )
+    assert locations == {}
+
+    missing_number = [("part1.html", "<h2>\u5546\u4e1a\u5468\u671f</h2>")]
+    rendered, locations = add_subchapter_anchors_to_parts(
+        converter, missing_number, 1,
+        [{"title": "5. \u5546\u4e1a\u5468\u671f", "anchor": "toc-1-2"}],
+    )
+    assert locations == {"toc-1-2": "part1.html"}
+    assert 'id="toc-1-2"' in rendered[0][1]
+    first_rendered = list(rendered)
+    rendered_again, locations_again = add_subchapter_anchors_to_parts(
+        converter, rendered, 1,
+        [{"title": "5. \u5546\u4e1a\u5468\u671f", "anchor": "toc-1-2"}],
+    )
+    assert locations_again == locations
+    assert rendered_again == first_rendered
+
+    conflicting = [
+        ("part1.html", "<h2>\u5546\u4e1a\u5468\u671f</h2>"),
+        ("part2.html", "<h2>6. \u5546\u4e1a\u5468\u671f</h2>"),
+    ]
+    rendered, locations = add_subchapter_anchors_to_parts(
+        converter, conflicting, 1,
+        [{"title": "5. \u5546\u4e1a\u5468\u671f", "anchor": "toc-1-4"}],
+    )
+    assert locations == {}
+
+    different_chinese = [("part1.html", "<h2>5. \u5546\u4e1a\u5468\u671f</h2>")]
+    rendered, locations = add_subchapter_anchors_to_parts(
+        converter, different_chinese, 1,
+        [{"title": "5. \u5229\u6da6\u7406\u8bba", "anchor": "toc-1-3"}],
+    )
+    assert locations == {}
+
+    punctuation = [("part1.html", "<h2>A+B</h2>")]
+    rendered, locations = add_subchapter_anchors_to_parts(
+        converter, punctuation, 1,
+        [{"title": "AB", "anchor": "toc-1-5"}],
+    )
+    assert locations == {}
+
+    data_id = [("part1.html", '<h2 data-id="toc-1-6">Introduction</h2>')]
+    rendered, locations = add_subchapter_anchors_to_parts(
+        converter, data_id, 1,
+        [{"title": "Introduction", "anchor": "toc-1-6"}],
+    )
+    assert locations == {"toc-1-6": "part1.html"}
+    assert rendered[0][1].count('<span id="toc-1-6">') == 1
+
+    already_anchored = [("part1.html", '<h2 id="toc-1-1">Introduction</h2>')]
+    rendered, locations = add_subchapter_anchors_to_parts(
+        converter, already_anchored, 1,
+        [{"title": "Introduction", "anchor": "toc-1-1"}],
+    )
+    assert locations == {"toc-1-1": "part1.html"}
+    assert rendered[0][1].count('id="toc-1-1"') == 1
+
+    misplaced = [("part1.html", '<h2 id="toc-1-8">Other title</h2><h2>Introduction</h2>')]
+    rendered, locations = add_subchapter_anchors_to_parts(
+        converter, misplaced, 1,
+        [{"title": "Introduction", "anchor": "toc-1-8"}],
+    )
+    assert locations == {}
+
+    duplicate = [("part1.html", '<h2 id="toc-1-9">Introduction</h2><p id="toc-1-9">Introduction</p>')]
+    rendered, locations = add_subchapter_anchors_to_parts(
+        converter, duplicate, 1,
+        [{"title": "Introduction", "anchor": "toc-1-9"}],
+    )
+    assert locations == {}

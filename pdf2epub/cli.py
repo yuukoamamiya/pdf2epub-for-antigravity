@@ -34,12 +34,11 @@ RECOMMENDED WORKFLOW / 推荐工作流 (uses toc_tree.json):
 
   # Complete pipeline for a PDF book:
   pdf2epub ocr-pages -i mybook.pdf   # Page-level OCR
-  # For visual OCR with ocr.secondary.enabled=true:
+  # For dual OCR, or single OCR when commentary anomalies are detected:
   pdf2epub ocr-correct
   # Antigravity Subagent writes ocr_corrected_pages/*.md
-  pdf2epub ocr-correct-validate       # Otherwise skip both correction commands
+  pdf2epub ocr-correct-validate       # Skip both commands when single OCR has no anomaly pages
   pdf2epub refine-prepare            # Prepare Subagent TOC analysis
-  # Native PDFs may use a selective visual TOC review; use --full-review on fallback.
   # Antigravity Subagent writes toc_tree.json
   pdf2epub illustration-prepare      # Candidate report; no Subagent if there are no candidates
   # Antigravity Subagent writes illustration_decisions.json when candidates exist
@@ -57,8 +56,8 @@ RECOMMENDED WORKFLOW / 推荐工作流 (uses toc_tree.json):
 
   # With translation:
   pdf2epub ocr-pages -i mybook.pdf
-  # Only for visual OCR when ocr.secondary.enabled is true:
-  pdf2epub ocr-correct                # Otherwise skip both correction commands
+  # For dual OCR, or single OCR when commentary anomalies are detected:
+  pdf2epub ocr-correct                # Skip both commands when single OCR has no anomaly pages
   # Antigravity Subagent writes ocr_corrected_pages/*.md
   pdf2epub ocr-correct-validate
   pdf2epub refine-prepare

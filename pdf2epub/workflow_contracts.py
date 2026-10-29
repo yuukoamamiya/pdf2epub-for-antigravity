@@ -18,7 +18,7 @@ from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 
 # Validation reports written before the review-warning gate was introduced
 # must not be reused as successful checkpoints.
-MARKDOWN_VALIDATION_SCHEMA_VERSION = 2
+MARKDOWN_VALIDATION_SCHEMA_VERSION = 3
 
 
 def sha256_file(path: Path) -> str:

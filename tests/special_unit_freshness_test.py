@@ -29,6 +29,10 @@ CONFIG = {
 }
 SOURCE_NAME = "index.md"
 HEADING_CONTEXT = {
+    "node_id": "index-node",
+    "anchor": "toc-index-node",
+    "parent_node_id": None,
+    "projection_version": 2,
     "toc_title": "索引",
     "binding_mode": "visible",
     "children": [],
@@ -47,18 +51,18 @@ def _setup(tmp_path: Path):
     source_dir.mkdir(parents=True)
     source = source_dir / SOURCE_NAME
     source.write_text("# Index\n\nAlpha, 12\n", encoding="utf-8")
-    _write_json(output / "toc_tree.json", {"chapters": [{"title": "Index", "children": []}]})
+    _write_json(output / "toc_tree.json", {"schema_version": 2, "chapters": [{"node_id": "index-node", "title": "Index", "children": []}]})
     _write_json(
         output / "toc_tree_translated.json",
-        {"chapters": [{"title": "索引", "children": []}]},
+        {"schema_version": 2, "chapters": [{"node_id": "index-node", "title": "索引", "children": []}]},
     )
     _write_json(
         output / "toc_translation_source.json",
-        {"toc": {"chapters": [{"title": "Index", "children": []}]}},
+        {"contract_version": 3, "toc": {"schema_version": 2, "chapters": [{"node_id": "index-node", "title": "Index", "children": []}]}},
     )
     _write_json(
         output / "ocr_markdown" / "tree_progress.json",
-        {"units": [{"index_path": [1], "file": SOURCE_NAME}]},
+        {"units": [{"index_path": [1], "node_id": "index-node", "file": SOURCE_NAME}]},
     )
 
     unit_context_path = output / "translation_glossaries" / "unit_contexts" / SOURCE_NAME.replace(".md", ".json")

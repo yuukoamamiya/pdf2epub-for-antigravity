@@ -53,6 +53,21 @@ _MOVED_ROLES = frozenset(
 _NON_MOVED_ROLES = frozenset({"body", "citation", "bibliography"})
 
 
+def _split_multi_sups(text: str) -> str:
+    """Split comma-separated superscript markers like <sup>52, 53</sup> into individual <sup> tags."""
+    def repl(m: re.Match) -> str:
+        inner = m.group(1)
+        m_symbol = re.fullmatch(r"([A-Za-z0-9_-]+)\s*(\\\*+|\*+|[†‡§]+)", inner.strip())
+        if m_symbol:
+            return f"<sup>{m_symbol.group(1)}</sup>{m_symbol.group(2)}"
+        parts = [p.strip() for p in re.split(r"[,;]\s*", inner) if p.strip()]
+        if len(parts) > 1 and all(re.fullmatch(r"[A-Za-z0-9_-]+", p) for p in parts):
+            return "".join(f"<sup>{p}</sup>" for p in parts)
+        return m.group(0)
+
+    return re.sub(r"<sup\b[^>]*>(.*?)</sup>", repl, text, flags=re.IGNORECASE | re.DOTALL)
+
+
 def _candidate_decisions(
     report: Mapping[str, Any],
     validation: Mapping[str, Any],
@@ -92,7 +107,7 @@ def _candidate_decisions(
         # deterministic rule.  Older handoffs sometimes repeated them as
         # ``body`` decisions; allowing that stale review output to override the
         # local result silently dropped valid page footnotes.
-        if address not in high_confidence_addresses:
+        if address not in high_confidence_addresses or item.get("role") == "footnote_continuation":
             decisions_by_address[address] = dict(item)
 
     for page_report in report.get("pages", []) or []:
@@ -400,7 +415,7 @@ def apply_footnote_normalization(
     try:
         records = _unit_records(output_dir)
         source_texts = {
-            record["name"]: (source_dir / record["name"]).read_text(encoding="utf-8")
+            record["name"]: _split_multi_sups((source_dir / record["name"]).read_text(encoding="utf-8"))
             for record in records
         }
         # Duplicate part entries refer to the same file only in malformed
@@ -616,6 +631,14 @@ def apply_footnote_normalization(
             notes_by_chapter[chapter_id].append(note)
         else:
             active_notes = active_by_chapter_key.get((chapter_id, key), [])
+            if not active_notes:
+                for earlier_record in reversed(records):
+                    if earlier_record["start_page"] <= page <= earlier_record["end_page"] or earlier_record["end_page"] == page - 1:
+                        earlier_cid = earlier_record["chapter_id"]
+                        if earlier_cid != chapter_id and (earlier_cid, key) in active_by_chapter_key:
+                            active_notes = active_by_chapter_key[(earlier_cid, key)]
+                            chapter_id = earlier_cid
+                            break
             if not active_notes:
                 errors.append(
                     f"{page}:{block_index}: continuation {key} has no earlier "

@@ -5,16 +5,28 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections import Counter
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 
 from .subagent_runtime import estimate_tokens, resolve_subagent_model
+from .toc_model import (
+    TOC_TREE_SCHEMA_VERSION,
+    iter_toc_nodes,
+    project_toc_ownership,
+    normalize_toc_source_label,
+    toc_node_anchor,
+    toc_node_id,
+    toc_nodes_by_id,
+    validate_toc_node_identities,
+    validate_toc_tree_correspondence,
+)
 from .workflow_contracts import atomic_write_json, atomic_write_text, relative_posix_path
 
 
-TOC_TRANSLATION_CONTRACT_VERSION = 2
+TOC_TRANSLATION_CONTRACT_VERSION = 3
 TOC_TRANSLATION_RESULT_SCHEMA_VERSION = 1
 
 
@@ -24,26 +36,16 @@ def _collect_title_entries(
     """Return the flat title contract and source nodes keyed by JSON path."""
     entries: list[dict[str, str]] = []
     nodes: dict[str, dict[str, Any]] = {}
-
-    def collect(items: Any, path: str) -> None:
-        if not isinstance(items, list):
-            return
-        for index, node in enumerate(items):
-            if not isinstance(node, dict):
-                continue
-            node_path = f"{path}[{index}]"
-            title = node.get("title", "")
-            entries.append(
-                {
-                    "path": node_path,
-                    "original": str(title) if title is not None else "",
-                    "translated": "",
-                }
-            )
-            nodes[node_path] = node
-            collect(node.get("children", []), f"{node_path}.children")
-
-    collect(source.get("chapters", []), "chapters")
+    for path, node in iter_toc_nodes(source.get("chapters", [])):
+        json_path = "chapters" + "".join(f"[{index - 1}]" for index in path)
+        title = node.get("title", "")
+        entries.append({
+            "path": json_path,
+            "node_id": toc_node_id(node, path),
+            "original": str(title) if title is not None else "",
+            "translated": "",
+        })
+        nodes[json_path] = dict(node)
     return entries, nodes
 
 
@@ -77,6 +79,11 @@ def prepare_toc_translation_subagent(
         raise ValueError(f"Invalid TOC source: {exc}") from exc
     if not isinstance(source, dict) or not isinstance(source.get("chapters"), list):
         raise ValueError("toc_tree.json must contain a chapters array")
+    if source.get("schema_version") != TOC_TREE_SCHEMA_VERSION or not isinstance(source.get("chapters"), list):
+        raise ValueError("unsupported toc_tree.json schema; rerun refine-prepare and TOC structure review")
+    identity_errors = validate_toc_node_identities(source["chapters"])
+    if identity_errors:
+        raise ValueError("invalid TOC identity contract: " + "; ".join(identity_errors))
 
     template = _translation_result_template(source)
     template_path = output_dir / "toc_translation_template.json"
@@ -233,6 +240,11 @@ def validate_toc_translation_subagent(
     source = source_contract.get("toc")
     if not isinstance(source, dict):
         return {"valid": False, "errors": ["TOC source must be a JSON object"]}
+    if source.get("schema_version") != TOC_TREE_SCHEMA_VERSION:
+        return {"valid": False, "errors": ["unsupported source TOC schema; rerun refine-prepare and structure review"]}
+    identity_errors = validate_toc_node_identities(source.get("chapters"))
+    if identity_errors:
+        return {"valid": False, "errors": ["invalid source TOC identity contract: " + "; ".join(identity_errors)]}
     expected_source_hash = source_contract.get("source_sha256")
     if expected_source_hash:
         current_source_path = output_dir / "toc_tree.json"
@@ -265,11 +277,13 @@ def validate_toc_translation_subagent(
     except (TypeError, ValueError):
         contract_version = 1
 
-    # Version 2 deliberately gives the Subagent a flat, title-only result.
+    # Version 3 gives the Subagent a flat title-and-identity result.
     # The immutable source tree is the only thing used to construct the final
     # artifact, so metadata cannot be accidentally dropped or rewritten by a
     # model copying the tree.
-    if contract_version >= TOC_TRANSLATION_CONTRACT_VERSION:
+    if contract_version != TOC_TRANSLATION_CONTRACT_VERSION:
+        return {"valid": False, "errors": [f"unsupported TOC translation contract version: {contract_version}; rerun translate-toc"], "contract_version": contract_version}
+    if contract_version == TOC_TRANSLATION_CONTRACT_VERSION:
         result_name = str(
             source_contract.get("result_file") or "toc_translation_result.json"
         )
@@ -356,6 +370,8 @@ def validate_toc_translation_subagent(
                     )
                 if str(item.get("original", "")) != expected["original"]:
                     errors.append(f"{path}.original does not match the source TOC")
+                if item.get("node_id") != expected["node_id"]:
+                    errors.append(f"{path}.node_id does not match the source TOC identity")
                 if not isinstance(item.get("translated"), str) or not item["translated"].strip():
                     errors.append(f"{path}.translated is missing or empty")
 
@@ -388,17 +404,9 @@ def validate_toc_translation_subagent(
         if "book_title" in source:
             merged["book_title"] = str(result_book_title["translated"])
 
-        def merge_titles(nodes: Any, path: str) -> None:
-            if not isinstance(nodes, list):
-                return
-            for index, node in enumerate(nodes):
-                if not isinstance(node, dict):
-                    continue
-                node_path = f"{path}[{index}]"
-                node["title"] = translated_by_path[node_path]
-                merge_titles(node.get("children", []), f"{node_path}.children")
-
-        merge_titles(merged.get("chapters", []), "chapters")
+        for path, node in iter_toc_nodes(merged.get("chapters", [])):
+            json_path = "chapters" + "".join(f"[{index - 1}]" for index in path)
+            node["title"] = translated_by_path[json_path]
         try:
             atomic_write_json(target_path, merged)
         except OSError as exc:
@@ -421,78 +429,6 @@ def validate_toc_translation_subagent(
             "merged_from_source": True,
         }
 
-    # Contract version 1 wrote the complete translated tree directly. Keep
-    # this read-only compatibility path so an interrupted older run can still
-    # be validated and resumed without silently accepting a different shape.
-    if not target_path.exists():
-        return {"valid": False, "errors": ["toc_tree_translated.json is missing"]}
-    try:
-        target = json.loads(target_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        return {"valid": False, "errors": [f"invalid translated TOC JSON: {exc}"]}
-    if not isinstance(target, dict):
-        return {"valid": False, "errors": ["translated TOC must be a JSON object"]}
-    if target.get("schema_version") != source.get("schema_version"):
-        errors.append("schema_version changed")
-    if "book_title" in source:
-        if not isinstance(target.get("book_title"), str) or not target["book_title"].strip():
-            errors.append("book_title is missing or empty")
-    for key, value in source.items():
-        if key in {"book_title", "chapters"}:
-            continue
-        if target.get(key) != value:
-            errors.append(f"top-level field {key!r} changed")
-
-    def compare_nodes(source_nodes: Any, target_nodes: Any, path: str) -> None:
-        if not isinstance(source_nodes, list) or not isinstance(target_nodes, list):
-            errors.append(f"{path} must remain an array")
-            return
-        if len(source_nodes) != len(target_nodes):
-            errors.append(f"{path} entry count changed")
-            return
-        for index, (source_node, target_node) in enumerate(zip(source_nodes, target_nodes)):
-            node_path = f"{path}[{index}]"
-            if not isinstance(source_node, dict) or not isinstance(target_node, dict):
-                errors.append(f"{node_path} must remain an object")
-                continue
-            if not isinstance(target_node.get("title"), str) or not target_node["title"].strip():
-                errors.append(f"{node_path}.title is missing or empty")
-            for key, value in source_node.items():
-                if key in {"title", "children"}:
-                    continue
-                if target_node.get(key) != value:
-                    errors.append(f"{node_path}.{key} changed")
-            compare_nodes(source_node.get("children", []), target_node.get("children", []), f"{node_path}.children")
-
-    compare_nodes(source.get("chapters", []), target.get("chapters", []), "chapters")
-    return {
-        "valid": not errors,
-        "errors": errors,
-        "contract_version": contract_version,
-        "resolved_book_title": target.get("book_title"),
-        "source": str(source_path),
-        "translated": str(target_path),
-    }
-
-
-def _source_contains_label(text: str, label: str) -> bool:
-    """Return whether a source unit visibly contains a TOC label."""
-    expected = _normalize_toc_heading_for_binding(label)
-    if not expected:
-        return False
-    expected_stripped = _normalize_toc_heading_for_binding(
-        re.sub(r"^\d+[\.\s、]+", "", label)
-    )
-    for line in str(text or "").splitlines():
-        value = line.strip()
-        if not value or value.startswith("```"):
-            continue
-        value = re.sub(r"^#{1,6}\s+", "", value)
-        value = re.sub(r"[*_`]+", "", value).strip()
-        norm = _normalize_toc_heading_for_binding(value)
-        if norm == expected or (expected_stripped and norm == expected_stripped):
-            return True
-    return False
 
 
 def build_toc_heading_contexts(
@@ -508,8 +444,10 @@ def build_toc_heading_contexts(
     toc_path = output_dir / "toc_tree_translated.json"
     source_toc_path = output_dir / "toc_tree.json"
     progress_path = output_dir / "ocr_markdown" / "tree_progress.json"
-    if not toc_path.is_file() or not progress_path.is_file():
-        return {}
+    if not toc_path.is_file() or not progress_path.is_file() or not source_toc_path.is_file():
+        raise ValueError("current source TOC, translated TOC, or tree_progress.json is missing; rerun TOC preparation")
+    if source_dir is None:
+        raise ValueError("source Markdown directory is required for current TOC ownership projection")
     try:
         toc = json.loads(toc_path.read_text(encoding="utf-8"))
         source_toc = (
@@ -518,158 +456,79 @@ def build_toc_heading_contexts(
             else {}
         )
         progress = json.loads(progress_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"could not read current TOC ownership inputs: {exc}") from exc
 
-    nodes: Dict[tuple[int, ...], Dict[str, Any]] = {}
-    source_nodes: Dict[tuple[int, ...], Dict[str, Any]] = {}
-
-    def visit(items: Any, prefix: tuple[int, ...] = ()) -> None:
-        if not isinstance(items, list):
-            return
-        for index, node in enumerate(items, 1):
-            if not isinstance(node, dict):
+    if not isinstance(toc, dict) or not isinstance(toc.get("chapters"), list):
+        raise ValueError("translated TOC must contain chapters; rerun translate-toc")
+    if not isinstance(source_toc, dict) or not isinstance(source_toc.get("chapters"), list):
+        raise ValueError("source toc_tree.json must contain chapters; rerun refine-prepare")
+    if source_toc.get("schema_version") != TOC_TREE_SCHEMA_VERSION:
+        raise ValueError("unsupported source TOC schema; rerun refine-prepare and TOC structure review")
+    if toc.get("schema_version") != TOC_TREE_SCHEMA_VERSION:
+        raise ValueError("unsupported translated TOC schema; rerun translate-toc")
+    try:
+        target_nodes = toc_nodes_by_id(toc)
+        source_nodes = toc_nodes_by_id(source_toc)
+    except ValueError as exc:
+        raise ValueError(f"invalid current TOC contract: {exc}") from exc
+    correspondence_errors = validate_toc_tree_correspondence(source_toc, toc)
+    if correspondence_errors:
+        raise ValueError("source/translated TOC correspondence failed: " + "; ".join(correspondence_errors))
+    # Physical paths locate files only. Logical matching uses node_id.
+    source_by_path = {path: node for _identity, (path, node) in source_nodes.items()}
+    source_paths_by_id = {identity: path for identity, (path, _node) in source_nodes.items()}
+    ownership = {}
+    physical_texts = {}
+    for progress_unit in progress.get("units", []):
+        if not isinstance(progress_unit, dict):
+            raise ValueError("tree_progress.json contains a malformed unit")
+        for filename in (progress_unit.get("part_files") or [progress_unit.get("file")]):
+            if not filename or str(filename) in physical_texts:
                 continue
-            path = prefix + (index,)
-            nodes[path] = node
-            visit(node.get("children", []), path)
-
-    visit(toc.get("chapters", []))
-
-    def visit_source(items: Any, prefix: tuple[int, ...] = ()) -> None:
-        if not isinstance(items, list):
-            return
-        for index, node in enumerate(items, 1):
-            if not isinstance(node, dict):
-                continue
-            path = prefix + (index,)
-            source_nodes[path] = node
-            visit_source(node.get("children", []), path)
-
-    visit_source(source_toc.get("chapters", []))
-    contexts: Dict[str, Dict[str, Any]] = {}
-    for unit in progress.get("units", []):
-        if not isinstance(unit, dict):
-            continue
-        index_path = tuple(int(value) for value in unit.get("index_path", []) if str(value).isdigit())
-        node = nodes.get(index_path)
-        if not node:
-            continue
-        source_node = source_nodes.get(index_path, {})
-        names = [
-            str(name)
-            for name in (unit.get("part_files") or [unit.get("file")])
-            if name
-        ]
-        if not names:
-            continue
-        source_title = str(source_node.get("title") or "").strip()
-        source_children = source_node.get("children", [])
-
-        def build_child_context(child_index: int, child: Mapping[str, Any]) -> Dict[str, str]:
-            return {
-                "title": str(child.get("title") or "").strip(),
-                "anchor": str(child.get("anchor") or f"toc-{index_path[0]}-{child_index}"),
-                "binding_mode": "visible",
-            }
-
-        def source_child_title(child_index: int) -> str:
-            if child_index - 1 >= len(source_children):
-                return ""
-            child_source = source_children[child_index - 1]
-            if not isinstance(child_source, dict):
-                return ""
-            return str(child_source.get("title") or "").strip()
-
-        if source_dir is None or len(names) == 1:
-            source_text_parts = []
-            if source_dir is not None:
-                for name in names:
-                    source_file = Path(source_dir) / name
-                    try:
-                        source_text_parts.append(source_file.read_text(encoding="utf-8"))
-                    except (OSError, UnicodeError):
-                        pass
-            source_text = "\n".join(source_text_parts)
-
-            children = []
-            for child_index, child in enumerate(node.get("children", []), 1):
-                if not isinstance(child, dict):
-                    continue
-                child_source_title = source_child_title(child_index)
-                child_context = build_child_context(child_index, child)
-                child_context["binding_mode"] = (
-                    "visible"
-                    if source_dir is None
-                    or not child_source_title
-                    or _source_contains_label(source_text, child_source_title)
-                    else "container_only"
-                )
-                children.append(child_context)
-            context = {
-                "toc_title": str(node.get("title") or "").strip(),
-                "children": [child for child in children if child["title"]],
-            }
-            # The EPUB builder supplies the parent TOC title as a package-level
-            # container when the source unit has no visible title (cover/image-only
-            # units and boundary fragments are common examples).  Requiring the
-            # Subagent to invent that title would violate the immutable Markdown
-            # heading contract.  Older callers without a source directory retain
-            # the conservative visible-title contract.
-            context["binding_mode"] = (
-                "visible"
-                if source_dir is None
-                or not source_node
-                or _source_contains_label(source_text, source_title)
-                else "container_only"
-            )
-            contexts[names[0]] = context
-            continue
-
-        # A split chapter has one physical part per continuation file.  Each
-        # part receives its own heading context so a scoped worker never needs
-        # to invent headings that belong to a different part.  A child is
-        # bound to the first part whose source text visibly contains its label;
-        # labels missing everywhere stay container-only on the first part, and
-        # the parent is visible only in the parts where its source title occurs.
-        part_texts: Dict[str, str] = {}
-        for name in names:
-            source_file = Path(source_dir) / name
             try:
-                part_texts[name] = source_file.read_text(encoding="utf-8")
-            except (OSError, UnicodeError):
-                part_texts[name] = ""
-        part_children: Dict[str, List[Dict[str, str]]] = {name: [] for name in names}
-        for child_index, child in enumerate(node.get("children", []), 1):
-            if not isinstance(child, dict):
+                physical_texts[str(filename)] = (Path(source_dir) / str(filename)).read_text(encoding="utf-8")
+            except (OSError, UnicodeError) as exc:
+                raise ValueError(f"missing source text for TOC owner {filename}: {exc}") from exc
+    ownership = project_toc_ownership(source_toc["chapters"], progress, physical_texts)
+    contexts: Dict[str, Dict[str, Any]] = {}
+    for filename, unit_projection in ownership.items():
+        identity = str(unit_projection["unit_node_id"])
+        source_path, source_node = source_nodes[identity]
+        target_path, target_node = target_nodes[identity]
+        if target_path != source_path:
+            raise ValueError(f"TOC structure drift for {identity}: source path {source_path}, translated path {target_path}")
+        child_contexts = []
+        for record in unit_projection["headings"]:
+            record_id = str(record["node_id"])
+            if record_id == identity:
                 continue
-            child_context = build_child_context(child_index, child)
-            if not child_context["title"]:
-                continue
-            child_source_title = source_child_title(child_index)
-            target_name = None
-            if child_source_title:
-                for name in names:
-                    if _source_contains_label(part_texts[name], child_source_title):
-                        target_name = name
-                        break
-            if target_name is None:
-                child_context["binding_mode"] = "container_only"
-                target_name = names[0]
-            part_children[target_name].append(child_context)
-
-        translated_title = str(node.get("title") or "").strip()
-        for name in names:
-            contexts[name] = {
-                "toc_title": translated_title,
-                "binding_mode": (
-                    "visible"
-                    if source_title
-                    and _source_contains_label(part_texts[name], source_title)
-                    else "container_only"
-                ),
-                "children": part_children[name],
-            }
+            pair = target_nodes.get(record_id)
+            if pair is None:
+                raise ValueError(f"ownership projection refers to unknown translated node_id {record_id}")
+            path, translated_node = pair
+            parent_id = toc_node_id(source_by_path[path[:-1]], path[:-1]) if len(path) > 1 else None
+            child_contexts.append({
+                "title": str(translated_node.get("title") or "").strip(),
+                "anchor": toc_node_anchor(translated_node, path),
+                "node_id": record_id,
+                "parent_node_id": parent_id,
+                "binding_mode": record["binding_mode"],
+                "structural_ancestor": bool(record.get("structural_ancestor")),
+                "source_occurrence": int(record.get("source_occurrence", 0)),
+                "source_match_count": int(record.get("source_match_count", 0)),
+                "source_occurrence": int(record.get("source_occurrence", 0)),
+                "source_match_count": int(record.get("source_match_count", 0)),
+            })
+        contexts[filename] = {
+            "toc_title": str(target_node.get("title") or "").strip(),
+            "node_id": identity,
+            "anchor": toc_node_anchor(target_node, target_path),
+            "parent_node_id": toc_node_id(source_by_path[source_path[:-1]], source_path[:-1]) if len(source_path) > 1 else None,
+            "projection_version": 2,
+            "binding_mode": unit_projection["binding_mode"],
+            "children": child_contexts,
+        }
     return contexts
 
 
@@ -780,27 +639,9 @@ def build_global_toc_outline(
     return "\n".join(chosen_lines)
 
 
-_TOC_OUTER_MARK_PAIRS = {
-    ("《", "》"),
-    ("〈", "〉"),
-    ("「", "」"),
-    ("『", "』"),
-    ("“", "”"),
-    ("‘", "’"),
-    ('"', '"'),
-    ("'", "'"),
-}
-
-
 def _normalize_toc_heading_for_binding(value: str) -> str:
     """Normalize harmless presentation differences without changing wording."""
-    normalized = re.sub(r"\s+", " ", str(value).strip())
-    normalized = re.sub(r"^[*_`]+|[*_`]+$", "", normalized).strip()
-    while len(normalized) >= 2 and (
-        normalized[0], normalized[-1]
-    ) in _TOC_OUTER_MARK_PAIRS:
-        normalized = normalized[1:-1].strip()
-    return normalized
+    return normalize_toc_source_label(value)
 
 
 def validate_toc_heading_bindings(
@@ -821,10 +662,8 @@ def validate_toc_heading_bindings(
     requested: Optional[List[str]] = None
     if only_files is not None:
         requested = list(dict.fromkeys(str(name) for name in only_files))
-    if not contexts and requested is None:
-        # Older completed runs predate the exact-heading contract. They remain
-        # readable, but new runs always carry this gate in their manifest.
-        return {"valid": True, "skipped": True, "errors": []}
+    if not isinstance(contexts, Mapping) or not contexts:
+        return {"valid": False, "errors": ["current TOC ownership projection is missing; rerun refine-prepare and translate"]}
     if requested is None and not isinstance(contexts, Mapping):
         contexts = {}
     target_dir = output_dir / "translated" / "validated"
@@ -840,35 +679,34 @@ def validate_toc_heading_bindings(
             continue
         context = contexts.get(name) if isinstance(contexts, Mapping) else None
         if context is None:
-            if requested is not None:
-                skipped.append({"file": name, "reason": "no_heading_context"})
+            errors.append(f"{name}: current TOC ownership context is missing")
             continue
+        if context.get("projection_version") != 2 or not context.get("node_id") or not context.get("anchor"):
+            errors.append(f"{name}: stale or incomplete TOC ownership context; rerun translate")
+            continue
+        # Validate each assigned physical unit against its own text. Sibling
+        # chapter files must never mask a missing/wrong-part heading.
         candidate_files = [target]
-        for group in manifest.get("chapter_groups", {}).values():
-            if str(name) in group:
-                candidate_files = [
-                    target_dir / str(f)
-                    for f in group
-                    if (target_dir / str(f)).is_file()
-                ]
-                break
 
-        candidates = set()
-        normalized_candidates = set()
+        candidates = Counter()
+        normalized_candidates = Counter()
         for cand_file in candidate_files:
             try:
                 lines = cand_file.read_text(encoding="utf-8").splitlines()
             except (OSError, UnicodeError) as exc:
                 errors.append(f"could not read translated heading source {cand_file.name}: {exc}")
                 continue
+            fenced = False
             for line in lines:
                 value = line.strip()
-                if not value or value.startswith("```"):
+                if value.startswith(("```", "~~~")):
+                    fenced = not fenced
+                    continue
+                if fenced or not value:
                     continue
                 value = re.sub(r"^#{1,6}\s+", "", value)
-                value = re.sub(r"[*_`]+", "", value).strip()
-                candidates.add(value)
-                normalized_candidates.add(_normalize_toc_heading_for_binding(value))
+                candidates[value] += 1
+                normalized_candidates[_normalize_toc_heading_for_binding(value)] += 1
 
         expected = []
         title = str(context.get("toc_title") or "").strip()
@@ -907,11 +745,16 @@ def validate_toc_heading_bindings(
             normalized_value = _normalize_toc_heading_for_binding(value)
             value_stripped = re.sub(r"^\d+[\.\s、]+", "", value).strip()
             norm_stripped = _normalize_toc_heading_for_binding(value_stripped)
-            match_mode = "exact" if value in candidates else None
-            if match_mode is None and normalized_value in normalized_candidates:
+            match_mode = "exact" if candidates[value] > 0 else None
+            if match_mode == "exact":
+                candidates[value] -= 1
+                normalized_candidates[_normalize_toc_heading_for_binding(value)] -= 1
+            if match_mode is None and normalized_candidates[normalized_value] > 0:
                 match_mode = "normalized"
-            elif match_mode is None and norm_stripped and norm_stripped in normalized_candidates:
+                normalized_candidates[normalized_value] -= 1
+            elif match_mode is None and norm_stripped and normalized_candidates[norm_stripped] > 0:
                 match_mode = "normalized"
+                normalized_candidates[norm_stripped] -= 1
             checked.append(
                 {
                     "file": name,

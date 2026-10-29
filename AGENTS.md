@@ -153,7 +153,7 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
 `compressed_units/` 内容之前，必须确认：
 
 - [ ] 已确定使用 PDF、EPUB、轻小说或 TeX 流程；
-- [ ] 若 `ocr.secondary.enabled: true`，已完成 `ocr-correct-validate`；若关闭第二套 OCR，已明确接受单 OCR 不做视觉纠错；
+- [ ] 若双 OCR 开启，已完成 `ocr-correct-validate`；单 OCR 发现解说异常时，已对异常页完成相同的校验；
 - [ ] 已运行本地准备命令并生成 manifest 和 Prompt；
 - [ ] 已打开工作区 Subagent，并把对应 Prompt/manifest 交给它；
 - [ ] 已明确本批次的 `pending_files` 或 `pending_units`；
@@ -206,7 +206,8 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
   `bibliography` 即使未超行数预算也不得与相邻章节合并。
   `index` 单元还受 `refine.oversized_unit_split.threshold_tokens_by_type` 与
   `target_tokens_by_type` 的条目级拆分阈值约束；不得用固定字母范围或词典回填替代
-  页码、层级和交叉引用校验。
+  页码、层级和交叉引用校验。极短尾片只可在硬 token/字节预算内并入前片；否则只在
+  合法块边界重平衡最后两片，不能突破当前章节目标预算来减少 worker 数。
 - `chapter_groups` 是语义分组，不等于 worker 数量。`pack_adjacent_chapters: true`
   时，运行时按 `chapter_groups` 的 TOC 顺序连续装箱；`max_chapters_per_worker` 默认
   为 3。普通相邻章节合并时使用 `max_packed_source_tokens`（默认是
@@ -269,7 +270,7 @@ Subagent 直接写文件 → 单文件校验 → 收集完成结果 → 下一�
 
 | 页面来源 | 配置 | 实际证据模式 | 处理方式 |
 |---|---|---|---|
-| 视觉 OCR | `ocr.secondary.enabled: false` | `single_ocr` | 使用 `pages/` 的主 OCR；忽略旧的 `ocr_consensus.json`，不运行 OCR 纠错。 |
+| 视觉 OCR | `ocr.secondary.enabled: false` | `single_ocr` | 正常页使用 `pages/` 主 OCR并忽略旧共识；检测到疑似 OCR 解说而非转录时，只把异常页交给现有 `ocr-correct` 视觉复核，其他页作为未复核直通副本。 |
 | 视觉 OCR | `ocr.secondary.enabled: true` | `two_ocr` | 必须配置 `ocr.secondary.backend`；`ocr-pages` 生成次 OCR 和当前共识报告，差异页进入 Subagent 复核。 |
 | 旧原生产物（legacy） | 无新配置入口 | 原生 PDF layout；报告兼容字段为 `single_ocr` | 仅用于读取旧运行：`pages/ocr_progress.json` 为 `native_text`、每页 sidecar 的 `source_kind` 为 `native_text`。不运行视觉 OCR、`ocr-correct` 或共识检查。 |
 
@@ -283,8 +284,9 @@ Subagent 直接写文件 → 单文件校验 → 收集完成结果 → 下一�
    不要把单纯的 sidecar 几何差异当成整页 OCR 错误。
 3. 运行 `ocr-correct`，只把 `action: visual_review` 对应的 `assigned_files` 交给工作区
    Subagent；Subagent 必须对照页图写入 `ocr_corrected_pages/` 和逐页 review JSON，再运行
-   `ocr-correct-validate`。不得让 Subagent 处理 `auto_accept` 页，也不得把次 OCR 文本直接
-   覆盖主 OCR。
+   `ocr-correct-validate`。双 OCR 只处理 `visual_review`；单 OCR 只处理 anomaly report 中的
+   异常页，不得把次 OCR 文本直接覆盖主 OCR。异常页输出须明确记录图像支持的转录或经图像确认的
+   原文例外；不确定时保持阻断。
 4. 只有 `ocr-correct-validate` 通过后，才继续 `refine-prepare` → 目录 Subagent 写
    `toc_tree.json` → `illustration-*` → `refine-local` → `footnote-*`。`footnote-prepare`
    依赖当前 `tree_progress.json`，不能在 `toc_tree.json`/`refine-local` 完成前提前运行。
@@ -379,13 +381,23 @@ PDF 正文 Prompt 还会从已验证的 `toc_tree_translated.json` 生成一个�
 TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引号做规范化容差；近义词或
 独立改译仍必须失败。worker Prompt 必须把当前文件的标题锚定清单置于 assigned 任务附近，
 要求对应的第一个匹配标题逐字使用 TOC 文本，但不强制其成为物理首行。
+当前 TOC 合同要求每个节点有唯一、显式的 `node_id`；数组路径只表示结构位置，标题文字不作身份。
+构建器通过 `tree_progress.json` 和源 Markdown 的共享 ownership projection 确定节点所属的物理文件
+及 `visible`/`container_only` 状态，并在对应 part 内放置可见标题锚点（包括实际出现在后代单元中的
+结构祖先）。可见标题缺少已绑定锚点时必须阻断 EPUB 构建；容器节点按合同落到所属内容文件或首个
+有内容的后代。TOC 更新后须重新完成结构审阅、翻译与校验，不迁移旧树或旧翻译结果。
+EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编号格式差异；编号只在一侧缺失时，
+仅当去编号后的标题正文精确且全书分片中唯一、没有不同编号冲突时才回退。模糊相似标题不绑定，
+原有 HTML `id` 保留。
   `toc_heading_contexts.binding_mode: container_only` 表示源单元没有可见 TOC 标签（例如
   纯图片封面或边界片段）；此时 EPUB 构建器负责章节容器标题，Subagent 不得在 Markdown
   中凭空新增标题或纯段落标签。续文分片仍保持原样，不生成“续”标题。大章节拆分时每个 part
   收到独立的 scoped context：子标题只下发到其源标题首次出现的 part，父标题只在可见的 part
   标记 `visible`；所有 part 都找不到源标题的子标题只挂到第一个 part 并标记 `container_only`。
-  构建时若这些子标题没有可见 Markdown 标题，TOC 层级保留，但导航回退到父单元文件或首个
-  含文件的后代，不得生成指向不存在锚点的 fragment。
+  `container_only` 节点不伪造 Markdown 标题锚点；TOC 层级保留，并导航到所属文件或首个有内容的
+  后代。`visible` 锚点必须出现在其投影指定的 part 中并落在对应标题上，缺失时构建阻断。
+  HTML TOC 与 NCX 在内容渲染后共用同一份已解析导航树；打包前核对目标文件、fragment 和
+  XHTML id。NCX depth 按实际逻辑层级计算，合成的目录入口不额外增加层级。
 
 ## 2. PDF 翻译流程（扫描/混合稿）
 
@@ -428,6 +440,10 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
 5. 执行 `refine-prepare`。然后打开工作区 Subagent，读取
    `output/<title>/refine_subagent_prompt.md`，视觉 OCR 使用经过校验的
    `ocr_corrected_pages/validated/`，旧原生运行使用 `pages/`，写入 `toc_tree.json`。
+   同时读取 `toc_heading_candidates.json` 与 `toc_structure_review_manifest.json`，只依据 manifest
+   允许的页面/图像/正文证据完成全页审阅；写入 `toc_structure_decisions.json`，为每页记录覆盖证据，
+   并为每个候选记录唯一处置。未决候选、缺失页审阅、节点起始位置与接受候选不一致都会阻断。
+   `toc_tree.json` 使用 schema 2，每个节点有稳定唯一 `node_id`；结构数组路径仅用于定位。
    Subagent 应从书名页/版权页提取作者和出版社，并按内容标注 `notes`、`bibliography`、
    `index`；版权页/CIP 页标注 `type: "copyright"`，其他明确的前置页（如献词、题词、
    前言）标注 `type: "frontmatter"`，仅在证据明确时才使用 `type: "cover"` 或
@@ -461,6 +477,10 @@ TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引
    本地程序校验页码范围、父子关系、兄弟节点重叠，并生成 `ocr_markdown/`。
    `toc_tree.json` 中的 `boundary_info.start_line`/`end_line` 是对应
    `page_XXX.md` 的 1-based 行号，其中 `start_line` 包含该行、`end_line` 不包含该行。
+   TOC schema 2 的每个可见标题还须由 Subagent 在 `boundary_info.heading_end_line` 标出标题区域的
+   exclusive 结束行；它与节点正文边界 `end_line` 是不同字段。`refine-local` 只将审阅确认且与
+   TOC 标题精确对应的源行区域物化为 Markdown 标题，再进入 polish；原区域内联标记和脚注引用保留，
+   不从相邻正文推断标题范围，也不改写原始 `pages/`。
    新章节从页面中部开始时，上一单元保留同页标题前的前缀；父标题和首个子标题同页时，
    两者都必须提供 `start_line`，本地步骤把父标题/导语放入首个子章节单元。
    `refine-local` 还会从当前页面生成 `pagination_map.json`，并以页码候选加起始页正文标题
@@ -770,6 +790,8 @@ Prompt、manifest 和 worker handoff。准备阶段会扫描译文和对应润�
   阻断条件；普通正文中的 `bilingual_warnings` 首次进入 `review_required` 并重新派发，
   同一文件复核后仍存在则进入 `human_review_required`，不再出现“打印 warning 后无事发生”的
   隐式继续。参考文献和索引仍按其专门规则校验。
+  `Volume II`、`Part IV` 等明确卷册语境的罗马数字按数值与阿拉伯数字比较；裸 `I`/`II`
+  不作为数字标记，不得凭空添加或改写卷册语义。
 
 ### 2.4 PDF 纯转换流程
 

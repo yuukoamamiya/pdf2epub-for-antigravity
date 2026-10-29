@@ -264,8 +264,8 @@ html-validate --file <同名文件>.md
 失效。正文 HTML 校验同样锁定源单元集合、源哈希和准备阶段的 `input.epub` 快照。
 
 第二套 OCR 的配置在配置加载阶段校验：`ocr.secondary.enabled: true` 时必须有
-`ocr.secondary.backend`。配置关闭第二套 OCR 时，流程直接跳过 `ocr-correct` 和
-`ocr-correct-validate`，CLI help 也会明确这一前置条件。
+`ocr.secondary.backend`。关闭第二套 OCR 时，正常页面跳过 `ocr-correct`；若异常报告列出疑似
+OCR 解说页，则仅对这些页面执行 `ocr-correct` 和 `ocr-correct-validate`。
 
 PDF 不再有页面来源配置；所有新运行都使用视觉 OCR。`pdf_text_probe` 只把
 `classification`/`detected_recommendation` 写入报告供审计，`recommendation` 始终是
@@ -324,8 +324,7 @@ ocr-pages
 
 ```text
 uv run pdf2epub -c config.yaml refine-prepare
-# 旧原生 PDF 若生成 toc_fast_path_prompt.md：工作区 Subagent 先做选定页面视觉确认
-# 否则/回退时：工作区 Subagent 阅读 refine_subagent_prompt.md 并写 toc_tree.json
+工作区 Subagent 阅读 refine_subagent_prompt.md 并按结构审阅合同写入 toc_tree.json
 uv run pdf2epub -c config.yaml illustration-prepare
 # 如果 manifest 为 pending_review：工作区 Subagent 写 illustration_decisions.json
 uv run pdf2epub -c config.yaml illustration-validate
@@ -341,36 +340,15 @@ uv run pdf2epub -c config.yaml footnote-apply
 `footnote-prepare` 必须后于 `refine-local`，因为脚注归并范围取自实际生成的
 `tree_progress.json` 单元，而不是抽象的顶层 TOC。
 
-### 旧原生 PDF 的 TOC 选择性视觉确认
-
-旧原生文字运行且存在可用 PDF 书签时，`refine-prepare` 会先运行一个保守的快速路径预检。
-本地只做证据筛选，不生成最终 `toc_tree.json`。预检没有书签页匹配异常时进入
-`selective_review`，选择印刷目录页、每个书签起始页、起始页前一页以及封面/版权页；只有少量
-匹配异常时进入 `targeted_review`，只选择印刷目录页、异常书签起始页及其前页和元数据页。异常
-超过阈值、审阅页过多或缺少目录证据时才直接要求完整审查。选定页面及其哈希写入
-`toc_fast_path_manifest.json`，视觉任务写入 `toc_fast_path_prompt.md`。
-
-旧原生 PDF 还会生成 `toc_line_evidence.json`，其中只保存书签起始页的 block、bbox、字体、页首/页中
-提示和原始 Markdown 行范围。它是给视觉任务定位证据的只读索引，不是本地结构判断，也不能替代
-页面图。快速路径校验会同时检查该索引和它引用的原生 sidecar 是否过期。
-
-快速路径 Subagent 必须先确认目录条目与书签的标题、层级、顺序和物理页码，再确认章节是否
-从页面中部开始。`targeted_review` 只要求对异常条目进行直接视觉复核，其余条目仍必须留下决定
-记录。中部起始必须在 `toc_fast_path_decisions.json` 中记录原始
-`page_XXX.md` 的 1-based `start_line`；父标题和首个子标题同页时两者都要记录。只有全部确认
-通过后才写入 `toc_tree.json`，且不得修改书签的标题、层级、页码或树结构。
-
-如果目录有漏项、书签指向不匹配、页面视觉证据不足或页内边界无法确定，Subagent 必须写入
-`status: fallback_required`，不要写快速路径的 `toc_tree.json`。此时运行：
-
-```text
-uv run pdf2epub -c config.yaml refine-prepare --full-review
-# 工作区 Subagent 阅读完整 refine_subagent_prompt.md 并写 toc_tree.json
-```
-
-`refine-local` 会重新核对快速路径的书签哈希、PDF 哈希、审阅页哈希、原生证据哈希、树结构和边界行号；
-任何过期、缺失或不一致都会阻断并要求完整审查。没有书签、没有可识别印刷目录页、不是旧
-旧原生文字运行或预检标题不匹配时，快速路径自动失效，仍使用原有全页 TOC Subagent 流程。
+`refine-prepare` 同时生成 schema 1 的 `toc_heading_candidates.json` 和
+`toc_structure_review_manifest.json`。前者按源哈希记录每页行数、候选清单及有限的版面事实；后者
+固定 OCR/页面证据模式，并列出允许读取的 PDF 页或页图。Subagent 为每个候选在
+`toc_structure_decisions.json` 中作唯一处置，为所有源页写 `page_coverage`（
+`reviewed: true` 和 `visual`/`page_text` 证据），并输出 schema 2 的 `toc_tree.json`。
+每个 TOC 节点需要唯一 `node_id`、明确的 `visible`/`container_only` 绑定；可见节点必须对应
+已接受的候选及其确切页/行，容器节点必须给出审阅理由。新增候选只能引用 allowlist 中精确的
+页、行和原文摘录。`unresolved`、候选漏审、任一页未覆盖或证据变更都会使 `refine-local` 失败；
+此时重新准备并完成整套审阅，不能复用旧树和旧决定。
 
 OCR 完成不是“有几个 `page_*.md` 文件”就算通过。`ocr_progress.json` 会记录源 PDF
 哈希、真实物理页数、已处理页、失败页、缺失页和空结果页；失败、缺页或未确认的空结果
@@ -405,15 +383,21 @@ manifest 状态为 `auto_resolved`，本地会生成带候选报告哈希的
 几何证据不一致时，候选页才会带上差异原因交给 Subagent；本地程序不会把次 OCR 直接覆盖到
 主 OCR Markdown。
 
-只有 `ocr.secondary.enabled: true` 时才执行 `ocr-correct`。本地程序会从原始 PDF 渲染一张
+双 OCR 开启时，`ocr-correct` 仅处理共识要求复核的页。单 OCR 也会扫描 OCR 页面是否包含
+疑似模型解说（例如声称页面太淡而无法转录）；报告 `ocr_anomaly_report.json` 保存页哈希和原因。
+有异常时，`ocr-correct` 只交接这些页，未标记页按未复核直通副本纳入完整校验。Subagent 必须
+以页图为准恢复实际印刷内容，混合页保留可辨识正文；不确定输出不能通过。异常决策须绑定源稿、
+目标稿和页图哈希。该启发式只发出复核信号，不自动删除或补写内容，且可能漏报或误报。
+
+本地程序会从原始 PDF 渲染一张
 与每个物理页对应的审阅图，并生成 `ocr-correct_worker_handoffs/`；工作区 Subagent 只能处理
 自己 manifest 的 `assigned_files`，对照同名页图修正有直接视觉证据的识别错误，结果写入
 `ocr_corrected_pages/`，并为每页写入 `ocr_correction_reviews/page_NNN.json`。随后运行
-`ocr-correct-validate`，它会检查 UTF-8、输出完整性、逐页审阅记录、行数不减少、Markdown
-结构标记和原始页哈希，并将通过的结果暂存到 `ocr_corrected_pages/validated/`。原始 `pages/`
-永不覆盖；纠错结果缺失、过期或未通过校验时，`refine-prepare` 和 `refine-local` 会阻断。
-第二套 OCR 关闭时直接使用主 OCR 的 `pages/`，不生成“已纠错”检查点；旧原生文字运行
-同样不适用该阶段。
+`ocr-correct-validate` 会检查 UTF-8、输出完整性、逐页审阅记录、结构和哈希，并将通过结果
+暂存到 `ocr_corrected_pages/validated/`。普通纠错仍保留结构非丢失要求；异常页允许经完整视觉
+复核重建文本，但仍拒绝不确定输出或残留模型解说。原始 `pages/` 永不覆盖。异常纠错缺失、过期
+或未通过校验时，`refine-prepare`、`refine-local` 和后续 polish/构建会阻断。无异常的单 OCR
+运行直接使用主 OCR 的 `pages/`，不生成纠错检查点；旧原生文字运行同样不适用该阶段。
 
 可选的双 OCR 配置可以在 `ocr-pages` 阶段启用一个不同于主 OCR 的已注册后端；同一个开关
 同时决定 OCR 纠错、脚注候选和整页插图候选使用单 OCR 还是双 OCR 证据：
@@ -442,8 +426,8 @@ Markdown 外层标记差异。行数、全局数字序列和脚注垂直范围�
 `ocr-correct_worker_handoffs/`。双 OCR 只是筛查，不把任一 OCR 结果当作绝对真值；两个引擎
 共同犯错由两层机制补充拦截：默认每 20 页抽查一页，并把内部文本密度显著低于相邻页的页面
 标记为风险页。这些信号只扩大视觉复核范围，不自动修改文本；它们仍不能证明两个 OCR 没有
-共同犯错。`ocr.secondary.enabled: false` 时不运行第二套 OCR，也不运行
-视觉 OCR 纠错，主 OCR 结果直接进入后续结构整理。
+共同犯错。`ocr.secondary.enabled: false` 时不运行第二套 OCR；正常页直接进入结构整理，异常报告
+列出的解说页必须先交给视觉 Subagent 复核。
 
 次 OCR 提供与主 OCR 形状兼容的 layout sidecar；脚注候选存在性或 layout 证据不一致会进入
 脚注 Subagent，不能仅凭次 OCR 文本或启发式标签自动改变页面结构。两套 OCR 一致仍只是通过
@@ -506,6 +490,9 @@ pipeline: epub_conversion
 - 校验页码范围、层级、父子包含关系和兄弟节点重叠；
 - 用本地 tokenizer 估算单元大小；
 - 用 `PageMerger` 合并页面并生成 `ocr_markdown/`；
+- 按 schema 2 TOC 决定中的 `boundary_info.start_line` 和 exclusive `heading_end_line`，
+  将已审阅且与节点标题精确对应的源区域物化为 Markdown 标题；该区域的行内标记和脚注引用保留，
+  不推断相邻正文的标题范围，原始 `pages/` 保持只读。此结构标题在后续 polish 前已写入合并稿；
 - 从证据目录 `pages/` 的 `page_NNN.html` 或 sidecar `raw_html` 恢复被视觉 OCR 误删的
   TOC 标题，把精确匹配结果在内存中注入页面合并，并写入 `toc_heading_recovery.json`；
   原始页面文件和当前正文来源（可能是 `ocr_corrected_pages/validated/`）保持不变；
@@ -875,6 +862,10 @@ MathML 是当前默认策略，因为它不增加系统级 TeX 依赖，已满�
 4,500 token 的目标大小，仍按完整索引条目/子条目边界切分；可在
 `refine.oversized_unit_split.threshold_tokens_by_type` 和
 `target_tokens_by_type` 中调整。不要用固定字母范围或词典回填替代条目级校验。
+拆分后若尾片小于目标的 15%，仅当合并后仍满足该单元目标 token 上限和有效单文件字节
+上限时才并入前片；否则尝试在合法块边界平衡最后两片，并继续保留脚注定义和索引续条约束。
+找不到安全边界时保留原拆分。该策略、预算和版本号写入 refine split policy 指纹，以避免
+旧拆分在 `--resume` 时复用。
 
 ## PDF 翻译的术语、注脚和目录
 
@@ -893,8 +884,8 @@ extract-entities-validate → check-ready → translate → translate-validate
 
 `polish` 在启用第二套 OCR 时只处理前置 OCR 纠错之后的换行、段落边界和块级结构；已通过
 `ocr-correct-validate` 的字符、词语和符号视为权威，不再进行 OCR 字符、拼写或措辞改写。
-若仍疑似有 OCR 错误，应退回 `ocr-correct`。关闭第二套 OCR 时跳过 `ocr-correct`，主 OCR
-结果直接进入 polish；polish 仍只处理结构，不应静默改写 OCR 字符。对旧原生矢量文本运行，polish 用于识别视觉换行与真实
+若仍疑似有 OCR 错误，应退回 `ocr-correct`。单 OCR 无异常时主 OCR 结果直接进入 polish；存在
+解说异常时须先校验异常页。polish 仍只处理结构，不应静默改写 OCR 字符。对旧原生矢量文本运行，polish 用于识别视觉换行与真实
 段落边界；旧原生文字稿也不得进行无依据的拼写或字形改写。`polish-validate` 还会对源稿和
 润色稿做忽略换行、Markdown 外层标记及已确认页边装饰的内容保真比较；正文 token 或数字
 标记大量丢失，或结构性空父标题下的子章节正文被重复复制时会阻断，而不是把不完整或
@@ -948,9 +939,14 @@ PDF 正文 Prompt 还会读取已验证的
 可见的子标题，父标题也只在该 part 可见时标记 `visible`；子标题按阅读顺序第一次出现的
 part 归属。源标题在所有 part 都缺失的子标题只挂到第一个 part 并标记 `container_only`，
 对应 worker 不得新增该标题，校验也会跳过它。
-当 `container_only` 或缺失的子标题在构建阶段找不到可见 Markdown 标题时，EPUB 构建器
-保留 TOC 层级，但导航回退到父单元文件或首个含文件的后代，不生成指向不存在锚点的
-fragment 链接。
+`container_only` 节点不伪造 Markdown 标题锚点；它保留 TOC 层级并导航到所属文件或首个有内容的
+后代。可见绑定必须在正确物理 part 中生成标题锚点，缺失或落在不同标题时构建失败。
+当前 TOC 节点必须携带显式唯一 `node_id`。构建时用源 TOC、`tree_progress.json` 和源 Markdown
+重建物理 ownership projection；不完整或身份不一致时阻断并要求重新准备、审阅和校验 TOC。
+投影为 `visible` 的标题会在其指定物理 part 中建立锚点，包含嵌在后代单元中的结构祖先；若
+可见绑定未能落到实际标题，构建失败。容器节点保持逻辑层级并落到所属文件或首个内容后代。
+HTML TOC 与 NCX 在正文渲染完成后共用同一个导航模型；打包前核对 XHTML heading、ID、文件和
+fragment。NCX depth 使用逻辑 TOC 实际深度，合成的目录入口不增加一级。
 
 跨语言的学派资料（例如德文术语表用于英文思想史书籍）必须单独配置在
 `translation.reference_glossaries`。候选报告会把它们标记为
@@ -973,8 +969,8 @@ translate-toc → translate-toc-validate
 只填写译后书名和标题。`translate-toc-validate` 再从当前且哈希匹配的 `toc_tree.json`
 合并生成 `toc_tree_translated.json`，因此 Subagent 不需要复制页码、层级、边界和 `type`
 等非标题字段。`status`/`doctor` 只验证这份结果而不物化合并文件；显式的
-`translate-toc-validate` 才会写入合并产物。旧版直接提交完整 `toc_tree_translated.json`
-的 contract v1 仍只为恢复历史任务保留兼容校验，新任务必须使用扁平 result 合同。
+`translate-toc-validate` 才会写入合并产物。当前源/译文树均使用 schema 2，翻译源合同使用
+contract 3；旧树必须重新结构审阅，旧翻译任务必须重新执行 TOC 准备和校验。
 
 翻译 Subagent 完成单个 PDF 单元后可以先做低成本闭环校验：
 
@@ -990,7 +986,7 @@ translate-validate --file chapter_5.3.2.md
 binding；所有目标文件存在后才运行该门禁。需要显式提前做不完整终审时使用
 `translate-validate --final`，打包前仍须完成不带 `--file` 的最终校验。
 
-参考文献和索引单元会额外进行离线数字标记校验，覆盖年份、版次、DOI/ISBN 片段、页码、页码范围和索引交叉引用；数字标记发生丢失、改写或重排时，校验会拒绝该单元。
+参考文献和索引单元会额外进行离线数字标记校验，覆盖年份、版次、DOI/ISBN 片段、页码、页码范围和索引交叉引用；数字标记发生丢失、改写或重排时，校验会拒绝该单元。明确卷册语境中的 `Volume II`、`Part IV` 会归一为相同数值后比较；裸罗马字母不参与数字审计，保留原文语义与位置。
 
 受控参考文献/索引模式是显式可选路径：在 PDF `translation` 配置中写入
 `special_units.bibliography: controlled` 和/或 `special_units.index: controlled`。普通

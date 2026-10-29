@@ -796,6 +796,11 @@ def normalize_endnotes(
     )
 
 
+_PHYSICAL_UNIT_EXPONENT_RE = re.compile(
+    r"(?:[a-zA-Z]/[a-zA-Z]+|\b(?:m|cm|mm|km|s|h|kg|g|ft|in))\s*$"
+)
+
+
 def validate_normalized_endnotes(
     source_texts: Mapping[str, str],
     file_roles: Mapping[str, str],
@@ -854,11 +859,14 @@ def validate_normalized_endnotes(
             for match in _HTML_SUP_RE.finditer(text)
             if match.group("key") in scoped_numbers
         ]
-        residual_scoped.extend(
-            match.group("value").translate(_UNICODE_DIGITS)
-            for match in _UNICODE_SUP_RE.finditer(text)
-            if match.group("value").translate(_UNICODE_DIGITS) in scoped_numbers
-        )
+        for match in _UNICODE_SUP_RE.finditer(text):
+            val = match.group("value").translate(_UNICODE_DIGITS)
+            if val in scoped_numbers:
+                if val in {"2", "3"}:
+                    prefix = text[max(0, match.start() - 10) : match.start()]
+                    if _PHYSICAL_UNIT_EXPONENT_RE.search(prefix):
+                        continue
+                residual_scoped.append(val)
         if residual_scoped:
             errors.append(
                 f"raw scoped endnote references remain in {name}: "

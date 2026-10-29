@@ -88,6 +88,11 @@ Subagent 合同层
 - `ocr_backends.py`：保留历史 VLLM chunk adapter；默认页面流程不依赖它。
 - `refine/pdf_evidence.py`：统一决定当前页面集合使用旧 `native_text` 版面证据、`single_ocr`
   还是 `two_ocr` 共识，并集中校验共识检查点；脚注和插图阶段不得各自重新解释这个选择。
+- `refine/toc_structure_review.py`：生成 `toc_heading_candidates.json` 和
+  `toc_structure_review_manifest.json`，固定源页、OCR/layout 证据与视觉证据 allowlist；验证
+  `toc_structure_decisions.json` 的逐候选处置、schema-2 节点身份/起始位置和逐页覆盖。
+  候选清单及决定分别使用 schema 1；TOC 树使用 schema 2。全页覆盖必须逐页标注
+  `reviewed: true` 及 `visual` 或 `page_text` 证据；`unresolved` 候选阻断 refine-local。
 - `refine/layout_evidence.py`：统一加载 layout sidecar、清理 block 文本和归一化 bbox；它只
   处理几何/文本证据，不包含脚注或插图的语义判断。
 - `pdf2epub/commands/refine.py`：编排 TOC、整页插图和脚注的结构闸门；`pdf2epub/refine/main.py`
@@ -119,12 +124,17 @@ PDF 精修的核心领域模块如下：
   中提取 `Page-Header`/`Page-Footer` 块，并在规范化后与 TOC 标题精确匹配；只用于恢复视觉
   OCR 误删的真实标题，不做模糊相似度匹配。旧 `native_text` sidecar、缺少证据、标题已存在和
   歧义匹配都写入 skipped。恢复映射供 `PageMerger` 在内存中注入，原始页面文件不变。
-- `refine/page_merger.py`：消费已验证的整页插图绑定，恢复“前页半句 → 插图页 → 后页续句”，
-  并把图片及说明放回连续正文之后；普通页面边界也会在前后均为未结束的正文块时保守拼接，
+- `refine/page_merger.py`：消费已验证的整页插图绑定，恢复“前页半句 → 插图页 → 后页续句”；
+  并在 polish 前按 schema 2 TOC 节点的 `boundary_info.start_line` 与 exclusive
+  `heading_end_line` 物化已审阅的可见标题区域；它仅接受规范化后精确匹配 TOC 标题的源行，
+  保留区域内联标记和脚注引用，不从相邻正文推断标题范围，也不修改 `pages/`。
+  图片及说明随后放回连续正文之后。普通页面边界也会在前后均为未结束的正文块时保守拼接，
   不把完整句子、标题、列表、脚注、图片或表格误合并。视觉 OCR sidecar 中跨至少两页、位于
   页顶的短 `Section-Header` 会按共享坐标归一化和去除有效阿拉伯/罗马页码前后缀后的重复文本作为页眉清除；`Chapter 1`、`Part II`、`Section 3` 等结构编号标题的尾号不作为页码清除。重复签名可由几何合格的 `Page-Header` 或 `Section-Header` 跨页共同确认，但此清理只删除重复的 `Section-Header`。单次出现或几何证据不足的标题保留；
   旧原生文字运行还会根据 page-point sidecar 在页边 5% 内确定性清除 DOI/孤立页码，并仅清除
-  跨页重复短页眉页脚；原始 `pages/`
+  跨页重复短页眉页脚；TOC 节点起始页的真实标题受精确文本和编号身份保护，嵌套节点同样
+  适用；其他页面上的重复页眉仍按候选逐行删除，不会整页豁免。该策略版本参与 refine
+  checkpoint，旧合并结果会在 `refine-local --resume` 时重建。原始 `pages/`
   不会被覆盖，sidecar 与页眉归一化策略版本都会参与 refine checkpoint 指纹，使合并规则更新后旧的 `ocr_markdown/` 通过 `refine-local --resume` 重建。
 - `refine/footnote_prepare.py`：只编排按页面 layout sidecar 生成脚注候选、结构排除和双 OCR
   比较，不负责页面扫描细节、区域策略、视觉证据或报告持久化；这些职责分别由
@@ -268,6 +278,11 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
 若用户要切换到单 OCR，必须明确关闭 `ocr.secondary.enabled` 后重新运行，旧的双 OCR 共识不会
 参与后续结构阶段。
 
+单 OCR 原始页会由 `ocr_anomalies.py` 扫描疑似模型解说，写入源页集合哈希和异常原因到
+`ocr_anomaly_report.json`。异常页进入现有视觉纠错 handoff，未异常页仅作未复核直通副本。校验
+要求异常决定绑定原始页、纠正稿和页图哈希；下游还要求纠正检查点与 `refine-local` 页面指纹当前。
+启发式只提供复核信号，不能推断正确转录，也可能漏报或误报。
+
 `local_credentials.py` 负责读取被 Git 忽略的本地凭据；各 OCR 后端不共享运行时状态。
 
 `commands/diagnostics.py` 提供只读的 `status` 和 `doctor`。`status` 根据当前输入哈希、阶段
@@ -327,17 +342,23 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
   prepare 阶段同时生成源合同和扁平模板；Subagent 只提交
   `toc_translation_result.json`，本地程序从当前且哈希匹配的不可变源树合并生成
   `toc_tree_translated.json`，再从已验证的译文 TOC 生成按 token 预算自适应的全书方向性轮廓。
-  `status`/`doctor` 调用只读校验，不物化合并文件；旧的 contract v1 完整树格式仅保留兼容
-  恢复路径。
+  `status`/`doctor` 调用只读校验，不物化合并文件；不匹配或旧版本合同必须重新准备并审阅 TOC。
+- `toc_model.py`：提供显式 `node_id` 身份、锚点和遍历合同；节点数组路径只用于定位结构，不能
+  代替身份。`project_toc_ownership()` 依据 TOC、`tree_progress.json` 和源 Markdown 为物理文件
+  确定节点所有权及 `visible`/`container_only` 绑定状态。
+- `toc_navigation.py`：在 HTML 内容完成渲染后，将逻辑 TOC 节点解析成唯一的不可变导航树。
+  HTML TOC 和 NCX 共用该模型与目标，不分别推测链接。打包前验证目标文件、fragment 和 XHTML
+  `id` 与标题落点；ownership projection 也驱动在实际所属 part 内放置可见结构祖先锚点。可见
+  绑定缺失时阻断，容器节点按 ownership 合同落到所属文件或首个内容后代。NCX depth 按逻辑
+  TOC 的真实层级计算，合成目录入口与 TOC 树同级。
 - TOC 标题绑定区分 `visible` 与 `container_only`：无可见源标签的纯图片/边界单元不要求
   worker 伪造 Markdown 标题，章节容器标题由 EPUB 构建器生成；可见子标题仍使用严格绑定。
   大章节拆成多个物理 part 时，`build_toc_heading_contexts` 为每个 part 生成独立 context：
   父标题只在源标题实际出现的 part 标记 `visible`，其余 part 标记 `container_only`；
   每个子标题按其源标题首次出现的 part 归属，源标题在所有 part 都缺失时只挂到第一个
   part 并标记 `container_only`，避免 scoped worker 收到其他分片的标题或凭空新增标题。
-  当 `container_only` 或缺失的子标题在生成的 Markdown 中找不到可见标题时，EPUB 构建器
-  保留 TOC 层级，但导航回退到父单元文件或首个含文件的后代，不生成指向不存在锚点的
-  fragment 链接。
+  `container_only` 节点不生成虚构的 Markdown 锚点；它保留 TOC 层级，并导航到所属文件或首个
+  含内容的后代。`visible` 节点的投影锚点缺失或落在不同标题时阻断构建。
 
 Subagent 合同已按职责拆分到上述具体模块，不再提供聚合式兼容门面。调用方应直接导入
 所属模块；移动公共函数时必须同步更新调用方、文档和契约测试。
@@ -828,6 +849,11 @@ EPUB 的“合并”只影响 Subagent 的工作上下文：`adjacent_chapter_di
 按文件提供术语条目，同时允许同一个 Subagent 维持相邻章节的风格连续；恢复和校验仍以
 `compressed_units/<name>.md` 与 `translated_compressed/<name>.md` 为粒度。这样不会因为
 共享 worker 而破坏 HTML 单元 1:1、目录 href/anchor 或构建时的文件映射。
+
+PDF EPUB 构建中的子章节锚点采用跨 HTML parts 的全局候选排序：精确文本优先，其次只规范化
+前导编号分隔符，再允许去编号正文精确且唯一的缺号回退；不同编号、标点差异和相似文本不会
+自动命中。标题块优先于段落，原 HTML `id` 保留，稳定锚点以独立别名插入。该构建定位规则不
+改变翻译阶段更严格的 TOC 标题绑定校验。
 
 ### 3.3 轻小说和 TeX 工作流
 

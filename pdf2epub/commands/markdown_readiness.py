@@ -94,6 +94,40 @@ def run_readiness_check(
         else "; ".join(ocr_report["errors"][:5]),
     )
 
+    from pdf2epub.ocr_anomalies import scan_ocr_pages
+
+    anomaly_report = scan_ocr_pages(output_dir)
+    current_probe = {}
+    try:
+        current_probe = json.loads(probe_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        pass
+    legacy_native_text = (
+        current_probe.get("classification") == "native_text"
+        and current_probe.get("recommendation") == "use_text_layer"
+    )
+    if legacy_native_text:
+        anomaly_report = {**anomaly_report, "review_required_files": [], "scan_errors": []}
+    anomaly_files = anomaly_report["review_required_files"]
+    anomaly_correction_ready = not anomaly_report.get("scan_errors") and (not anomaly_files or ocr_correction_is_current(
+        output_dir, config
+    ))
+    record(
+        "ocr_anomalies",
+        anomaly_correction_ready,
+        "no OCR commentary anomalies found"
+        if not anomaly_files and not anomaly_report.get("scan_errors")
+        else (
+            "anomaly pages have current visual review"
+            if anomaly_correction_ready
+            else (
+                "raw OCR pages could not all be scanned"
+                if anomaly_report.get("scan_errors")
+                else "OCR commentary requires visual review: " + ", ".join(anomaly_files[:10])
+            )
+        ),
+    )
+
     probe = {}
     try:
         value = json.loads(probe_path.read_text(encoding="utf-8"))
@@ -107,7 +141,8 @@ def run_readiness_check(
         probe.get("classification") == "native_text"
         and probe.get("recommendation") == "use_text_layer"
     )
-    correction_ready = native_text or not policy.requires_ocr_correction or ocr_correction_is_current(
+    correction_required = policy.requires_visual_ocr_review(output_dir)
+    correction_ready = native_text or not correction_required or ocr_correction_is_current(
         output_dir, config
     )
     record(
@@ -116,8 +151,8 @@ def run_readiness_check(
         "not applicable for a high-confidence native-text PDF"
         if native_text
         else (
-            "not required because secondary OCR consensus is disabled"
-            if not policy.requires_ocr_correction
+            "not required because neither dual-OCR consensus nor page anomalies require visual review"
+            if not correction_required
             else (
                 "validated visual OCR correction matches the current page set"
                 if correction_ready
@@ -125,7 +160,11 @@ def run_readiness_check(
             )
         ),
     )
-    pages_dir, _page_source_kind = select_refinement_pages(output_dir, config=config)
+    try:
+        pages_dir, _page_source_kind = select_refinement_pages(output_dir, config=config)
+    except ValueError as exc:
+        pages_dir = raw_pages_dir
+        record("ocr_page_source", False, str(exc))
 
     toc_path = output_dir / "toc_tree.json"
     toc_errors: list[str] = []
@@ -180,21 +219,30 @@ def run_readiness_check(
             ),
         )
 
-    source_dir, source_stage = _resolve_pdf_markdown_source(output_dir, config)
+    try:
+        source_dir, source_stage = _resolve_pdf_markdown_source(output_dir, config)
+    except ValueError as exc:
+        source_dir, source_stage = output_dir / "ocr_markdown", "blocked"
+        record("source_stage", False, str(exc))
     source_files = list(source_dir.glob("*.md")) if source_dir.is_dir() else []
     source_ready = bool(source_files)
     if source_stage == "polished":
-        polish_input_dir, _ = _resolve_pdf_polish_source(output_dir, config)
-        source_ready = source_ready and _polished_stage_is_current(
-            output_dir, source_dir, polish_input_dir
+        try:
+            polish_input_dir, _ = _resolve_pdf_polish_source(output_dir, config)
+            source_ready = source_ready and _polished_stage_is_current(
+                output_dir, source_dir, polish_input_dir
+            )
+        except ValueError as exc:
+            source_ready = False
+            record("source_stage", False, str(exc))
+    if "source_stage" not in checks:
+        record(
+            "source_stage",
+            source_ready,
+            f"{source_stage}: {len(source_files)} Markdown units"
+            if source_ready
+            else f"{source_stage} source is missing or not validated",
         )
-    record(
-        "source_stage",
-        source_ready,
-        f"{source_stage}: {len(source_files)} Markdown units"
-        if source_ready
-        else f"{source_stage} source is missing or not validated",
-    )
     if stage in {"translate", "package"} and policy.requires_polish:
         record(
             "polish_required",

@@ -30,6 +30,7 @@ from pdf2epub.toc_translation_workflow import (
 )
 from pdf2epub.utils.common import is_epub_conversion_pipeline
 from pdf2epub.validation_receipts import validation_receipt_is_current
+from pdf2epub.workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION
 
 
 def _make_native_pdf(path: Path, *, full_page_image: bool = False) -> None:
@@ -354,7 +355,8 @@ def test_continuation_toc_exemption_is_limited_to_nested_part_ancestor(
     progress_dir.mkdir(parents=True)
     (output_dir / "toc_tree.json").write_text(
         json.dumps(
-            {
+                {
+                    "schema_version": 2,
                 "chapters": [
                     {
                         "title": "IV Hegel in the philosophy history",
@@ -482,7 +484,7 @@ def test_resume_marks_completed_worker_handoffs_and_dispatches_nothing(
     (tmp_path / "translate_validation.json").write_text(
         json.dumps(
             {
-                "schema_version": 2,
+                "schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION,
                 "valid_files": ["unit_0.md", "unit_1.md"],
                 "source_sha256": source_hashes,
                 "target_sha256": target_hashes,
@@ -530,7 +532,7 @@ def test_validation_receipt_rejects_changed_staged_target(tmp_path: Path) -> Non
     report.write_text(
         json.dumps(
             {
-                "schema_version": 2,
+                "schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION,
                 "task": "translate",
                 "scope": "full",
                 "all_passed": True,
@@ -552,6 +554,31 @@ def test_validation_receipt_rejects_changed_staged_target(tmp_path: Path) -> Non
     assert not validation_receipt_is_current(
         report, source_dir, target_dir, task="translate"
     )
+
+
+def test_validation_receipt_rejects_legacy_schema_two_checkpoint(tmp_path: Path) -> None:
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    source = source_dir / "unit.md"
+    target = target_dir / "unit.md"
+    source.write_text("source", encoding="utf-8")
+    target.write_text("translated", encoding="utf-8")
+    report = tmp_path / "translate_validation.json"
+    report.write_text(
+        json.dumps({
+            "schema_version": 2,
+            "task": "translate",
+            "scope": "full",
+            "all_passed": True,
+            "source_sha256": {source.name: hashlib.sha256(source.read_bytes()).hexdigest()},
+            "target_sha256": {target.name: hashlib.sha256(target.read_bytes()).hexdigest()},
+        }),
+        encoding="utf-8",
+    )
+
+    assert not validation_receipt_is_current(report, source_dir, target_dir, task="translate")
 
 
 def test_continuation_worker_manifest_forbids_synthetic_opening_heading(
@@ -1094,7 +1121,7 @@ def test_resume_only_invalidates_units_with_changed_context(tmp_path: Path):
             "target_sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
         }
     (tmp_path / "translate_file_validation.json").write_text(
-        json.dumps({"schema_version": 2, "files": validation_records}), encoding="utf-8"
+        json.dumps({"schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION, "files": validation_records}), encoding="utf-8"
     )
 
     # Change only the projected context for a.md.  The external/full context
@@ -1208,6 +1235,15 @@ def _write_split_heading_fixture(
     source = tmp_path / "source"
     output.mkdir()
     source.mkdir()
+    source_toc.setdefault("schema_version", 2)
+    translated_toc.setdefault("schema_version", 2)
+    def attach_ids(source_nodes, translated_nodes, prefix="node"):
+        for index, (src, tgt) in enumerate(zip(source_nodes, translated_nodes), 1):
+            node_id = f"{prefix}-{index}"
+            src.setdefault("node_id", node_id)
+            tgt.setdefault("node_id", node_id)
+            attach_ids(src.get("children", []), tgt.get("children", []), node_id)
+    attach_ids(source_toc.get("chapters", []), translated_toc.get("chapters", []))
     (output / "toc_tree.json").write_text(
         json.dumps(source_toc, ensure_ascii=False), encoding="utf-8"
     )
@@ -1225,6 +1261,7 @@ def _write_split_heading_fixture(
                 "units": [
                     {
                         "index_path": [1],
+                        "node_id": source_toc["chapters"][0]["node_id"],
                         "file": filenames[0],
                         "part_files": filenames,
                     }
@@ -1245,14 +1282,18 @@ def _write_heading_manifest(output: Path, contexts: dict) -> None:
 
 def test_toc_heading_contexts_without_source_dir_use_first_unit_part(tmp_path: Path):
     output = tmp_path / "output"
+    source = tmp_path / "source"
     output.mkdir()
+    source.mkdir()
     (output / "toc_tree_translated.json").write_text(
         json.dumps(
             {
+                "schema_version": 2,
                 "chapters": [
                     {
+                        "node_id": "chapter-1",
                         "title": "Chapter",
-                        "children": [{"title": "Exact child", "anchor": "toc-1-1"}],
+                        "children": [{"node_id": "chapter-1-child-1", "title": "Exact child", "anchor": "toc-exact-child"}],
                     }
                 ]
             },
@@ -1262,11 +1303,16 @@ def test_toc_heading_contexts_without_source_dir_use_first_unit_part(tmp_path: P
     )
     progress_dir = output / "ocr_markdown"
     progress_dir.mkdir()
+    (output / "toc_tree.json").write_text(
+        json.dumps({"schema_version": 2, "chapters": [{"node_id": "chapter-1", "title": "Chapter", "children": [{"node_id": "chapter-1-child-1", "title": "Exact child"}]}]}),
+        encoding="utf-8",
+    )
     (progress_dir / "tree_progress.json").write_text(
         json.dumps(
             {
                 "units": [
                     {
+                        "node_id": "chapter-1",
                         "index_path": [1],
                         "file": "chapter_1.part1.md",
                         "part_files": ["chapter_1.part1.md", "chapter_1.part2.md"],
@@ -1276,10 +1322,12 @@ def test_toc_heading_contexts_without_source_dir_use_first_unit_part(tmp_path: P
         ),
         encoding="utf-8",
     )
+    (source / "chapter_1.part1.md").write_text("# Chapter\n\nExact child\n", encoding="utf-8")
+    (source / "chapter_1.part2.md").write_text("Continuation.\n", encoding="utf-8")
     (output / "translate_subagent_manifest.json").write_text(
         json.dumps(
             {
-                "toc_heading_contexts": build_toc_heading_contexts(output)
+                "toc_heading_contexts": build_toc_heading_contexts(output, source_dir=source)
             },
             ensure_ascii=False,
         ),
@@ -1290,12 +1338,13 @@ def test_toc_heading_contexts_without_source_dir_use_first_unit_part(tmp_path: P
     (validated / "chapter_1.part1.md").write_text(
         "# Chapter\n\nExact child\n", encoding="utf-8"
     )
+    (validated / "chapter_1.part2.md").write_text("Continuation.\n", encoding="utf-8")
 
-    contexts = build_toc_heading_contexts(output)
-    assert set(contexts) == {"chapter_1.part1.md"}
+    contexts = build_toc_heading_contexts(output, source_dir=source)
+    assert set(contexts) == {"chapter_1.part1.md", "chapter_1.part2.md"}
     assert contexts["chapter_1.part1.md"]["binding_mode"] == "visible"
     assert contexts["chapter_1.part1.md"]["children"] == [
-        {"title": "Exact child", "anchor": "toc-1-1", "binding_mode": "visible"}
+        {"title": "Exact child", "anchor": "toc-exact-child", "node_id": "chapter-1-child-1", "parent_node_id": "chapter-1", "binding_mode": "visible", "structural_ancestor": False, "source_occurrence": 1, "source_match_count": 1}
     ]
     assert validate_toc_heading_bindings(output)["valid"] is True
 
@@ -1337,12 +1386,12 @@ def test_toc_heading_contexts_split_children_by_physical_part(tmp_path: Path):
     assert contexts["chapter_1.part1.md"]["toc_title"] == "第一章"
     assert contexts["chapter_1.part1.md"]["binding_mode"] == "visible"
     assert contexts["chapter_1.part1.md"]["children"] == [
-        {"title": "子标题 A", "anchor": "toc-1-1", "binding_mode": "visible"}
+        {"title": "子标题 A", "anchor": "toc-1-1", "node_id": "node-1-1", "parent_node_id": "node-1", "binding_mode": "visible", "structural_ancestor": False, "source_occurrence": 1, "source_match_count": 1}
     ]
     assert contexts["chapter_1.part2.md"]["toc_title"] == "第一章"
     assert contexts["chapter_1.part2.md"]["binding_mode"] == "container_only"
     assert contexts["chapter_1.part2.md"]["children"] == [
-        {"title": "子标题 B", "anchor": "toc-1-2", "binding_mode": "visible"}
+        {"title": "子标题 B", "anchor": "toc-1-2", "node_id": "node-1-2", "parent_node_id": "node-1", "binding_mode": "visible", "structural_ancestor": False, "source_occurrence": 1, "source_match_count": 1}
     ]
 
 
@@ -1357,7 +1406,7 @@ def test_toc_heading_contexts_missing_child_stays_container_only(
                     "title": "Chapter",
                     "children": [
                         {"title": "Child A", "anchor": "toc-1-1"},
-                        {"title": "Missing child", "anchor": "toc-1-2"},
+                        {"title": "Missing child", "anchor": "toc-1-2", "binding_mode": "container_only"},
                     ],
                 }
             ]
@@ -1382,8 +1431,8 @@ def test_toc_heading_contexts_missing_child_stays_container_only(
     contexts = build_toc_heading_contexts(output, source_dir=source)
 
     assert contexts["chapter_1.part1.md"]["children"] == [
-        {"title": "子标题 A", "anchor": "toc-1-1", "binding_mode": "visible"},
-        {"title": "缺失子标题", "anchor": "toc-1-2", "binding_mode": "container_only"},
+        {"title": "子标题 A", "anchor": "toc-1-1", "node_id": "node-1-1", "parent_node_id": "node-1", "binding_mode": "visible", "structural_ancestor": False, "source_occurrence": 1, "source_match_count": 1},
+        {"title": "缺失子标题", "anchor": "toc-1-2", "node_id": "node-1-2", "parent_node_id": "node-1", "binding_mode": "container_only", "structural_ancestor": False, "source_occurrence": 0, "source_match_count": 0},
     ]
     assert contexts["chapter_1.part2.md"]["children"] == []
 
@@ -1463,13 +1512,14 @@ def test_image_only_unit_uses_package_only_toc_container(tmp_path: Path):
         "![cover](../images/cover.png)\n", encoding="utf-8"
     )
     toc = {
-        "chapters": [{"title": "Cover", "children": []}],
+        "schema_version": 2,
+        "chapters": [{"node_id": "cover", "title": "Cover", "binding_mode": "container_only", "children": []}],
     }
     (output / "toc_tree.json").write_text(
         json.dumps(toc, ensure_ascii=False), encoding="utf-8"
     )
     (output / "toc_tree_translated.json").write_text(
-        json.dumps({"chapters": [{"title": "封面", "children": []}]}, ensure_ascii=False),
+        json.dumps({"schema_version": 2, "chapters": [{"node_id": "cover", "title": "封面", "children": []}]}, ensure_ascii=False),
         encoding="utf-8",
     )
     progress_dir = output / "ocr_markdown"
@@ -1479,6 +1529,7 @@ def test_image_only_unit_uses_package_only_toc_container(tmp_path: Path):
             {
                 "units": [
                     {
+                        "node_id": "cover",
                         "index_path": [1],
                         "file": "chapter_1.md",
                         "part_files": ["chapter_1.md"],
@@ -1513,9 +1564,12 @@ def test_toc_heading_binding_allows_whitespace_and_outer_quote_variants(tmp_path
             {
                 "toc_heading_contexts": {
                     "chapter.md": {
+                        "node_id": "chapter-1",
+                        "anchor": "toc-chapter-1",
+                        "projection_version": 2,
                         "toc_title": "Chapter One",
                         "children": [
-                            {"title": "Exact Child", "anchor": "toc-1-1"}
+                            {"title": "Exact Child", "anchor": "toc-1-1", "node_id": "child-1"}
                         ],
                     }
                 }
@@ -1545,7 +1599,7 @@ def test_toc_heading_bindings_only_files_scope_ignores_other_units(
     _write_heading_manifest(
         output,
         {
-            "a.md": {"toc_title": "第一章", "binding_mode": "visible"},
+            "a.md": {"node_id": "a", "anchor": "toc-a", "projection_version": 2, "toc_title": "第一章", "binding_mode": "visible"},
         },
     )
     validated = output / "translated" / "validated"
@@ -1568,7 +1622,7 @@ def test_toc_heading_bindings_only_files_requires_target(tmp_path: Path):
     output.mkdir()
     _write_heading_manifest(
         output,
-        {"a.md": {"toc_title": "第一章", "binding_mode": "visible"}},
+        {"a.md": {"node_id": "a", "anchor": "toc-a", "projection_version": 2, "toc_title": "第一章", "binding_mode": "visible"}},
     )
 
     report = validate_toc_heading_bindings(output, only_files=["a.md"])
@@ -1586,7 +1640,7 @@ def test_toc_heading_bindings_only_files_skips_missing_context(
     output.mkdir()
     _write_heading_manifest(
         output,
-        {"b.md": {"toc_title": "第二章", "binding_mode": "visible"}},
+        {"b.md": {"node_id": "b", "anchor": "toc-b", "projection_version": 2, "toc_title": "第二章", "binding_mode": "visible"}},
     )
     validated = output / "translated" / "validated"
     validated.mkdir(parents=True)
@@ -1594,10 +1648,8 @@ def test_toc_heading_bindings_only_files_skips_missing_context(
 
     report = validate_toc_heading_bindings(output, only_files=["a.md"])
 
-    assert report["valid"] is True
-    assert report["skipped"] == [
-        {"file": "a.md", "reason": "no_heading_context"}
-    ]
+    assert report["valid"] is False
+    assert any("current TOC ownership context is missing" in error for error in report["errors"])
 
 
 def _write_single_file_heading_fixture(
@@ -1607,7 +1659,7 @@ def _write_single_file_heading_fixture(
     output.mkdir(parents=True)
     (output / "toc_tree_translated.json").write_text(
         json.dumps(
-            {"chapters": [{"title": "第一章", "children": []}]},
+            {"schema_version": 2, "chapters": [{"node_id": "chapter-1", "title": "第一章", "children": []}]},
             ensure_ascii=False,
         ),
         encoding="utf-8",
@@ -1619,6 +1671,7 @@ def _write_single_file_heading_fixture(
             {
                 "units": [
                     {
+                        "node_id": "chapter-1",
                         "index_path": [1],
                         "file": "chapter_1.part1.md",
                         "part_files": ["chapter_1.part1.md"],
@@ -1632,6 +1685,9 @@ def _write_single_file_heading_fixture(
         output,
         {
             "chapter_1.part1.md": {
+                "node_id": "chapter-1",
+                "anchor": "toc-chapter-1",
+                "projection_version": 2,
                 "toc_title": "第一章",
                 "binding_mode": "visible",
                 "children": [],

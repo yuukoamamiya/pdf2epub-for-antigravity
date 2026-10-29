@@ -23,9 +23,10 @@ _HTML_SUP_BLOCK_RE = re.compile(
     r"<sup\b[^>]*>.*?</sup>", re.IGNORECASE | re.DOTALL
 )
 _AUTO_LINK_RE = re.compile(
-    r"<(?P<url>(?:https?://|mailto:)[^<>\s]+)>", re.IGNORECASE
+    r"<+(?P<url>(?:https?://|mailto:)[^<>\s]+)>+", re.IGNORECASE
 )
 _SUPERSCRIPT_DIGITS = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789")
+_DIGITS_TO_SUPERSCRIPT = str.maketrans("0123456789", "⁰¹²³⁴⁵⁶⁷⁸⁹")
 _CIRCLED_CHARS = (
     "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
     "㉑㉒㉓㉔㉕㉖㉗㉘㉙㉚㉛㉜㉝㉞㉟"
@@ -174,17 +175,20 @@ def signature_with_map(value: str) -> tuple[str, list[int]]:
                 _append_url_signature(value, index, index + len(url), chars, positions)
                 index += len(url)
                 continue
-        if char == ">" and index > 0 and value[index - 1] not in " \n":
+        if char == ">":
             index += 1
             continue
         if char in "*_~`$":
             index += 1
             continue
         if char.isspace():
-            if chars and chars[-1] != " ":
+            if chars and chars[-1] not in " ([{<":
                 chars.append(" ")
                 positions.append(index)
         else:
+            if char in ".,;:!?)]}" and chars and chars[-1] == " ":
+                chars.pop()
+                positions.pop()
             chars.append(char)
             positions.append(index)
         index += 1
@@ -618,24 +622,24 @@ def marker_spans(source: str, key: str) -> list[tuple[int, int, str]]:
     def is_inside_html_sup(index: int) -> bool:
         return any(start <= index < end for start, end in html_sup_ranges)
 
-    def is_inside_definition_prefix(index: int) -> bool:
+    def is_inside_definition_line(index: int) -> bool:
         line_start = source.rfind("\n", 0, index) + 1
-        m = re.match(r"^\[\^[^\]\n]+\]\s*:\s*", source[line_start:])
-        return bool(m and index < line_start + len(m.group(0)))
+        return bool(re.match(r"^\[\^[^\]\n]+\]\s*:", source[line_start:]))
 
     for match in re.finditer(
         _HTML_SUP_RE_TEMPLATE.format(key=escaped),
         source,
         flags=re.IGNORECASE,
     ):
-        append_span(match.start(), match.end(), "sup")
+        if not is_inside_definition_line(match.start()):
+            append_span(match.start(), match.end(), "sup")
     for match in _MARKDOWN_REF_RE.finditer(source):
-        if match.group("key") == str(key) and not is_inside_definition_prefix(match.start()):
+        if match.group("key") == str(key) and not is_inside_definition_line(match.start()):
             append_span(match.start(), match.end(), "markdown")
-    superscript = str(key).translate(_SUPERSCRIPT_DIGITS)
+    superscript = str(key).translate(_DIGITS_TO_SUPERSCRIPT)
     if superscript != str(key):
         for match in re.finditer(re.escape(superscript), source):
-            if not is_inside_html_sup(match.start()) and not is_inside_definition_prefix(match.start()):
+            if not is_inside_html_sup(match.start()) and not is_inside_definition_line(match.start()):
                 append_span(match.start(), match.end(), "unicode_sup")
     if str(key) in _CIRCLED_DIGITS_MAP:
         circled = _CIRCLED_DIGITS_MAP[str(key)]
@@ -644,12 +648,13 @@ def marker_spans(source: str, key: str) -> list[tuple[int, int, str]]:
             source,
             flags=re.IGNORECASE,
         ):
-            append_span(match.start(), match.end(), "sup")
+            if not is_inside_definition_line(match.start()):
+                append_span(match.start(), match.end(), "sup")
         for match in re.finditer(re.escape(circled), source):
             idx = match.start()
             if idx == 0 or source[idx - 1] == "\n":
                 continue
-            if is_inside_html_sup(idx) or is_inside_definition_prefix(idx):
+            if is_inside_html_sup(idx) or is_inside_definition_line(idx):
                 continue
             append_span(match.start(), match.end(), "unicode_circled")
     return sorted(spans)
@@ -704,7 +709,7 @@ def strip_note_key(text: str, key: str | None) -> str:
             rf"<sup\b[^>]*>\s*{circled}\s*</sup>",
             circled,
         ])
-    superscript = str(key).translate(_SUPERSCRIPT_DIGITS)
+    superscript = str(key).translate(_DIGITS_TO_SUPERSCRIPT)
     if superscript != str(key):
         patterns.append(re.escape(superscript))
     joined = "|".join(patterns)

@@ -20,6 +20,7 @@ from .toc_heading_recovery import (
     toc_heading_recovery_fingerprint,
 )
 from .subagent_workflow import page_numbers, validate_toc_tree_data
+from .toc_structure_review import create_structure_review_snapshot, selected_page_source_kind, validate_structure_review
 from .pagination import build_pagination_map
 from .toc_sanitization import sanitize_toc_titles
 from .unit_splitter import split_markdown_unit
@@ -35,7 +36,7 @@ tokenizer = tiktoken.get_encoding("cl100k_base")
 
 
 REFINE_CHECKPOINT_SCHEMA = 7
-PAGE_MERGER_POLICY_VERSION = "repeated-edge-header-folio-normalization-v2"
+PAGE_MERGER_POLICY_VERSION = "reviewed-heading-materialization-v4"
 DEFAULT_OVERSIZED_SPLIT_THRESHOLD = 15_000
 DEFAULT_OVERSIZED_SPLIT_TARGET = 12_000
 DEFAULT_OVERSIZED_SPLIT_TYPES = ("all",)
@@ -101,6 +102,20 @@ class RefinedBreakdown:
         if not isinstance(split_config, dict):
             split_config = {}
         self.oversized_split_enabled = split_config.get("enabled", True) is not False
+        subagent_config = config.get("subagent", {})
+        batching = subagent_config.get("batching", {}) if isinstance(subagent_config, dict) else {}
+        if not isinstance(batching, dict):
+            batching = {}
+        configured_byte_budget = (
+            batching.get("single_file_max_bytes")
+        )
+        self.split_budget_bytes = min(
+            30_000, self._positive_int(configured_byte_budget, 30_000)
+        )
+        self.split_budget_tokens = self._positive_int(
+            batching.get("max_source_tokens"),
+            DEFAULT_OVERSIZED_SPLIT_TARGET,
+        )
         self.oversized_split_threshold = self._positive_int(
             split_config.get("threshold_tokens"), DEFAULT_OVERSIZED_SPLIT_THRESHOLD
         )
@@ -178,6 +193,9 @@ class RefinedBreakdown:
             "types": list(self.oversized_split_types),
             "threshold_tokens_by_type": self.oversized_split_thresholds_by_type,
             "target_tokens_by_type": self.oversized_split_targets_by_type,
+            "budget_tokens": self.split_budget_tokens,
+            "budget_bytes": self.split_budget_bytes,
+            "tail_balance_policy": "merge-or-rebalance-under-budget-v1",
         }
 
     def process_from_toc(
@@ -211,6 +229,25 @@ class RefinedBreakdown:
         except json.JSONDecodeError as exc:
             raise ValueError(f"Invalid TOC JSON: {exc}") from exc
 
+        review_manifest_path = output_dir / "toc_structure_review_manifest.json"
+        prepare_manifest_path = output_dir / "refine_subagent_manifest.json"
+        if not prepare_manifest_path.is_file() or not review_manifest_path.is_file():
+            raise ValueError(
+                "Modern TOC structure review is required; run refine-prepare and "
+                "complete toc_tree.json plus toc_structure_decisions.json"
+            )
+        try:
+            prepare_manifest = json.loads(prepare_manifest_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError("refine_subagent_manifest.json is invalid; rerun refine-prepare") from exc
+        if not isinstance(prepare_manifest, dict) or not isinstance(prepare_manifest.get("structure_review"), dict):
+            raise ValueError("TOC review contract is missing from refine_subagent_manifest.json; rerun refine-prepare")
+        try:
+            review_manifest = json.loads(review_manifest_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError("toc_structure_review_manifest.json is invalid; rerun refine-prepare") from exc
+        if prepare_manifest["structure_review"] != review_manifest:
+            raise ValueError("TOC structure review manifest differs from refine_subagent_manifest.json; rerun refine-prepare")
         errors = validate_toc_tree_data(toc_data, max(available), available)
         if errors:
             raise ValueError("Invalid subagent TOC: " + "; ".join(errors[:10]))
@@ -238,6 +275,22 @@ class RefinedBreakdown:
             raise ValueError(
                 "Invalid normalized TOC: " + "; ".join(normalized_errors[:10])
             )
+
+        # Recompute current source evidence without rewriting review artifacts.
+        # Validate after deterministic page-label sanitation so the reviewer
+        # can retain its source node identity while titles lose verified folios.
+        page_source_kind = selected_page_source_kind(output_dir, pages_dir)
+        expected_snapshot = create_structure_review_snapshot(
+            output_dir, pages_dir, page_source_kind,
+            output_dir / "outline_toc_draft.json",
+            output_dir / "input_original.pdf" if (output_dir / "input_original.pdf").is_file() else output_dir / "input.pdf",
+            self.config,
+        )
+        review_errors = validate_structure_review(
+            output_dir, normalized_toc_data, expected_snapshot=expected_snapshot
+        )
+        if review_errors:
+            raise ValueError("TOC structure review failed: " + "; ".join(review_errors[:10]))
         if normalization_report["changed_count"]:
             atomic_write_json(toc_tree_file, normalized_toc_data)
         toc_data = normalized_toc_data
@@ -276,6 +329,9 @@ class RefinedBreakdown:
             ),
             "split_policy": self.split_policy,
         }
+        source_fingerprint["toc_structure_decisions_sha256"] = hashlib.sha256(
+            (output_dir / "toc_structure_decisions.json").read_bytes()
+        ).hexdigest()
         return self._generate_units_from_tree(
             toc_tree,
             book_metadata,
@@ -309,6 +365,7 @@ class RefinedBreakdown:
             evidence_dir=output_dir / "pages",
         )
         self.page_merger.set_toc_heading_recoveries(recoveries)
+        self.page_merger.set_toc_nodes(toc_tree)
         recovery_report["toc_sha256"] = (source_fingerprint or {}).get("toc_sha256")
         recovery_report_path = output_dir / "toc_heading_recovery.json"
         try:
@@ -717,6 +774,8 @@ class RefinedBreakdown:
                     split_target,
                     role,
                     lambda value: len(tokenizer.encode(value)),
+                    budget_tokens=min(self.split_budget_tokens, split_target),
+                    budget_bytes=self.split_budget_bytes,
                 )
                 if should_split
                 else None
@@ -732,6 +791,7 @@ class RefinedBreakdown:
             # Create metadata
             metadata = {
                 'unit_id': unit['unit_id'],
+                'node_id': node.node_id,
                 'index_path': unit['index_path'],
                 'title': unit['title'],
                 'page_range': [unit['start_page'], unit['end_page']],

@@ -10,9 +10,7 @@ source for chapter structure and titles. This provides:
 
 import json
 import difflib
-import os
 import re
-import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
@@ -22,6 +20,14 @@ from .epub.builder import EpubBuilder, localized_toc_label
 from .epub.converter import ContentConverter
 from .utils.unit_id import generate_unit_id
 from .utils.pdf_utils import extract_cover_image
+from .toc_navigation import (
+    ResolvedNavigationNode,
+    navigation_depth,
+    resolve_navigation,
+    serialize_html_navigation,
+    serialize_ncx_navigation,
+    validate_navigation_rendering,
+)
 
 
 @dataclass
@@ -124,30 +130,6 @@ def load_toc_tree(path: Path) -> Dict:
         raise ValueError("toc_tree.json must contain 'chapters' array")
 
     return toc_tree
-
-
-def calculate_tree_depth(entries: List[Dict], current_depth: int = 1) -> int:
-    """
-    Calculate maximum depth of hierarchical structure.
-
-    Args:
-        entries: List of chapter/section entries
-        current_depth: Current depth level
-
-    Returns:
-        Maximum depth found in the tree
-    """
-    if not entries:
-        return current_depth - 1 if current_depth > 1 else 1
-
-    max_depth = current_depth
-    for entry in entries:
-        children = entry.get('children', [])
-        if children:
-            child_depth = calculate_tree_depth(children, current_depth + 1)
-            max_depth = max(max_depth, child_depth)
-
-    return max_depth
 
 
 def find_chapter_file(unit_id: str, markdown_dir: Path) -> Optional[Path]:
@@ -253,78 +235,6 @@ def find_part_files(
         return [base_file]
 
 
-def process_chapter_content(
-    toc_title: str,
-    toc_level: int,
-    markdown_content: str,
-    is_first_part: bool
-) -> str:
-    """
-    Process chapter content with correct title and heading levels.
-
-    Args:
-        toc_title: Title from toc_tree.json
-        toc_level: Level from toc_tree.json (2, 3, 4, ...)
-        markdown_content: Raw markdown content
-        is_first_part: True for base file or part1, False for part2+
-
-    Returns:
-        Processed markdown with correct title and heading levels
-    """
-    if not is_first_part:
-        # part2, part3... don't get chapter title, just relevel
-        return relevel_content(markdown_content, toc_level)
-
-    lines = markdown_content.split('\n')
-
-    # Generate heading with correct level
-    heading_prefix = '#' * toc_level
-    chapter_heading = f"{heading_prefix} {toc_title}"
-
-    # A leaf unit may carry structural ancestor headings in front of its own
-    # heading (for example ``# Part`` followed by ``## Section``). Keep those
-    # headings in the first child's document so navigating to the structural
-    # parent displays its title before the child section.
-    first_heading_idx = _find_first_heading(lines)
-    title_line_idx = _find_matching_heading(lines, toc_title)
-    has_structural_prefix = (
-        first_heading_idx is not None
-        and title_line_idx is not None
-        and title_line_idx != first_heading_idx
-        and _is_structural_heading_prefix(lines[:title_line_idx])
-    )
-
-    # Check for the current heading at the beginning of the unit.  If it is
-    # absent, the first heading is still the best authoritative replacement
-    # for ordinary units whose OCR/source heading uses another language.
-    if first_heading_idx is not None and title_line_idx is None:
-        title_line_idx = first_heading_idx
-
-    if title_line_idx is not None:
-        # Replace existing heading
-        lines[title_line_idx] = chapter_heading
-    else:
-        # Add heading at start
-        lines.insert(0, chapter_heading)
-        lines.insert(1, '')  # Blank line after heading
-        title_line_idx = 0
-
-    # Remove duplicate heading if present (OCR artifact)
-    _remove_duplicate_heading(lines, title_line_idx, toc_title)
-
-    # Relevel the current unit's descendants while leaving any structural
-    # ancestor prefix at its original levels.
-    if has_structural_prefix and title_line_idx is not None:
-        prefix = '\n'.join(lines[:title_line_idx])
-        unit_content = relevel_content(
-            '\n'.join(lines[title_line_idx:]), toc_level, skip_first=True
-        )
-        return f"{prefix}\n{unit_content}" if prefix else unit_content
-
-    # Relevel remaining headings
-    return relevel_content('\n'.join(lines), toc_level, skip_first=True)
-
-
 def add_subchapter_anchors_to_parts(
     converter: ContentConverter,
     rendered_parts: list[tuple[str, str]],
@@ -342,325 +252,77 @@ def add_subchapter_anchors_to_parts(
     for child_index, info in enumerate(subchapter_info, 1):
         title = str(info.get("title") or "")
         anchor = str(info.get("anchor") or f"toc-{chapter_index}-{child_index}")
-        found = False
-        for part_index, (filename, html_content) in enumerate(rendered_parts):
-            updated, found = converter._add_subchapter_anchor(
-                html_content,
+        anchor_id = anchor.lstrip("#")
+        existing = []
+        for filename, html_content in rendered_parts:
+            matches = list(re.finditer(
+                rf'(?<![\w:-])id=["\']{re.escape(anchor_id)}["\']', html_content, re.I
+            ))
+            existing.extend([filename] * len(matches))
+        if existing:
+            if len(existing) == 1 and converter._has_subchapter_anchor(
+                next(content for filename, content in rendered_parts if filename == existing[0]),
                 title,
-                anchor,
-            )
-            if not found:
+                anchor_id,
+            ):
+                locations[anchor_id] = existing[0]
+            else:
+                logger.warning(
+                    "Stable anchor #{} already exists outside a unique matching heading",
+                    anchor,
+                )
+            continue
+
+        source_occurrence = info.get("source_occurrence")
+        source_match_count = info.get("source_match_count")
+        if source_occurrence is not None or source_match_count is not None:
+            matches = []
+            for part_index, (_filename, html_content) in enumerate(rendered_parts):
+                updated, found = converter._add_subchapter_anchor(
+                    html_content,
+                    title,
+                    anchor_id,
+                    source_occurrence=source_occurrence,
+                    source_match_count=source_match_count,
+                )
+                if found:
+                    matches.append((part_index, updated))
+            if len(matches) == 1:
+                part_index, updated = matches[0]
+                filename, _old_content = rendered_parts[part_index]
+                rendered_parts[part_index] = (filename, updated)
+                locations[anchor_id] = filename
                 continue
-            rendered_parts[part_index] = (filename, updated)
-            locations[anchor.lstrip("#")] = filename
-            break
-        if not found:
+            logger.warning(
+                f"Could not uniquely bind source occurrence for stable anchor #{anchor}: '{title}'"
+            )
+            continue
+
+        candidates = []
+        for part_index, (_filename, html_content) in enumerate(rendered_parts):
+            rank, count, has_number_conflict = converter._subchapter_anchor_match_rank(html_content, title)
+            if count or has_number_conflict:
+                candidates.append((rank, part_index, count, has_number_conflict))
+        if candidates:
+            best_rank = min(rank for rank, _, _, _ in candidates)
+            best = [(index, count) for rank, index, count, _ in candidates if rank == best_rank]
+            has_conflict = any(conflict for _, _, _, conflict in candidates)
+        else:
+            best = []
+            has_conflict = False
+        if len(best) == 1 and best[0][1] == 1 and not (best_rank[0] == 2 and has_conflict):
+            part_index = best[0][0]
+            filename, html_content = rendered_parts[part_index]
+            updated, found = converter._add_subchapter_anchor(html_content, title, anchor_id)
+            if found:
+                rendered_parts[part_index] = (filename, updated)
+                locations[anchor_id] = filename
+                continue
+        if not best or len(best) != 1 or best[0][1] != 1 or (best_rank[0] == 2 and has_conflict):
             logger.warning(
                 f"Could not locate heading for stable anchor #{anchor}: '{title}'"
             )
     return rendered_parts, locations
-
-
-def _embedded_subchapter_entries(entries: list[dict]) -> list[dict]:
-    """Collect descendants that share the current unit's rendered HTML."""
-    result: list[dict] = []
-    for entry in entries:
-        if entry.get('file_path') or entry.get('virtual_file_name'):
-            # A real or virtual child has its own navigation target; its
-            # descendants must be resolved while processing that child.
-            continue
-        result.append(entry)
-        result.extend(_embedded_subchapter_entries(entry.get('children', [])))
-    return result
-
-
-def _find_first_heading(lines: list[str]) -> Optional[int]:
-    """Return the first Markdown heading line in a unit."""
-    for index, line in enumerate(lines):
-        if re.match(r"^\s*#+\s+", line):
-            return index
-    return None
-
-
-def _normalize_heading_text(value: str) -> str:
-    """Normalize heading text for conservative TOC-title matching."""
-    value = re.sub(r"^#+\s*", "", str(value or ""))
-    return re.sub(r"[^\w\u3400-\u9fff]+", "", value, flags=re.UNICODE).casefold()
-
-
-def _is_structural_heading_prefix(lines: list[str]) -> bool:
-    """Return whether a prefix contains only headings and whitespace."""
-    return all(not line.strip() or re.match(r"^\s*#+\s+", line) for line in lines)
-
-
-def _find_matching_heading(lines: list[str], toc_title: str) -> Optional[int]:
-    """Find the first heading matching the current TOC title."""
-    normalized_title = _normalize_heading_text(toc_title)
-    if not normalized_title:
-        return None
-    for index, line in enumerate(lines):
-        if not re.match(r"^\s*#+\s+", line):
-            continue
-        normalized_heading = _normalize_heading_text(line)
-        if normalized_heading == normalized_title:
-            return index
-        if difflib.SequenceMatcher(None, normalized_title, normalized_heading).ratio() >= 0.9:
-            return index
-    return None
-
-
-def find_replaced_heading_lines(lines: list[str], toc_title: str) -> list[int]:
-    """Return 1-indexed line numbers of headings replaced or pruned by process_chapter_content."""
-    first_heading_idx = _find_first_heading(lines)
-    title_line_idx = _find_matching_heading(lines, toc_title)
-    if (
-        first_heading_idx is not None
-        and title_line_idx is not None
-        and title_line_idx != first_heading_idx
-    ):
-        prefix = lines[:title_line_idx]
-        if _is_structural_heading_prefix(prefix):
-            return [
-                idx + 1
-                for idx in range(title_line_idx + 1)
-                if re.match(r"^\s*#+\s+", lines[idx])
-            ]
-
-    if title_line_idx is not None:
-        target_idx = title_line_idx
-    elif first_heading_idx is not None:
-        target_idx = first_heading_idx
-    else:
-        target_idx = None
-
-    if target_idx is not None:
-        return [target_idx + 1]
-    return []
-
-
-
-def _remove_duplicate_heading(lines: list, title_line_idx: int, toc_title: str):
-    """Remove duplicate heading that follows the chapter title.
-
-    OCR often produces a heading like "## Title" which duplicates the TOC title.
-    If we find a textually equivalent heading within the next few lines, remove it.
-
-    Semantic similarity is intentionally not used here.  A chapter title and its
-    first real subsection can be conceptually related (especially in translated
-    Chinese text), but they are still distinct headings.  Removing a subsection
-    at this stage also makes its EPUB TOC anchor impossible to create.
-    """
-    def normalize_heading(value: str) -> str:
-        return _normalize_heading_text(value)
-
-    normalized_title = normalize_heading(toc_title)
-    # Look in lines after the title (skip blank lines)
-    for i in range(title_line_idx + 1, min(title_line_idx + 5, len(lines))):
-        line = lines[i].strip()
-        if not line:
-            continue
-        if line.startswith('#'):
-            # Extract heading text (remove # prefix)
-            heading_text = re.sub(r'^#+\s*', '', line)
-            normalized_heading = normalize_heading(heading_text)
-            similarity = difflib.SequenceMatcher(
-                None, normalized_title, normalized_heading
-            ).ratio()
-            if normalized_title and (
-                normalized_title == normalized_heading
-                or similarity >= 0.9
-            ):
-                # Remove this duplicate heading
-                lines[i] = ''
-                logger.debug(
-                    f"Removed duplicate heading: '{heading_text}' "
-                    f"(text similarity: {similarity:.2f})"
-                )
-            break  # Only check the first heading after title
-
-
-# Lazy-loaded embedding model
-_embedding_model = None
-_HEADING_EMBEDDING_MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
-_HEADING_EMBEDDING_MIN_RAM_GB = 8.0
-
-
-def _get_total_memory_bytes() -> Optional[int]:
-    """Return total physical memory when the platform exposes it."""
-    if hasattr(os, "sysconf"):
-        try:
-            pages = os.sysconf("SC_PHYS_PAGES")
-            page_size = os.sysconf("SC_PAGE_SIZE")
-            if pages > 0 and page_size > 0:
-                return int(pages * page_size)
-        except (OSError, ValueError, TypeError):
-            pass
-
-    if sys.platform == "win32":
-        try:
-            import ctypes
-
-            class MEMORYSTATUSEX(ctypes.Structure):
-                _fields_ = [
-                    ("dwLength", ctypes.c_ulong),
-                    ("dwMemoryLoad", ctypes.c_ulong),
-                    ("ullTotalPhys", ctypes.c_ulonglong),
-                    ("ullAvailPhys", ctypes.c_ulonglong),
-                    ("ullTotalPageFile", ctypes.c_ulonglong),
-                    ("ullAvailPageFile", ctypes.c_ulonglong),
-                    ("ullTotalVirtual", ctypes.c_ulonglong),
-                    ("ullAvailVirtual", ctypes.c_ulonglong),
-                    ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
-                ]
-
-            memory_status = MEMORYSTATUSEX()
-            memory_status.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
-            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(memory_status)):
-                return int(memory_status.ullTotalPhys)
-        except Exception:
-            pass
-
-    return None
-
-
-def _embedding_disabled_by_env() -> Optional[bool]:
-    """Return an explicit env override for heading embeddings, if set."""
-    value = os.getenv("PDF2EPUB_HEADING_EMBEDDINGS")
-    if value is None:
-        value = os.getenv("PDF2EPUB_DISABLE_HEADING_EMBEDDINGS")
-        if value is None:
-            return None
-        return value.strip().lower() in {"1", "true", "yes", "on"}
-
-    normalized = value.strip().lower()
-    if normalized in {"0", "false", "no", "off", "difflib", "disabled"}:
-        return True
-    if normalized in {"1", "true", "yes", "on", "embedding", "enabled"}:
-        return False
-    logger.warning(
-        "Ignoring invalid PDF2EPUB_HEADING_EMBEDDINGS value "
-        f"{value!r}; expected enabled/disabled"
-    )
-    return None
-
-
-def _heading_embedding_min_ram_gb() -> float:
-    """Minimum total RAM required before loading sentence-transformer embeddings."""
-    value = os.getenv("PDF2EPUB_HEADING_EMBEDDING_MIN_RAM_GB")
-    if value is None:
-        return _HEADING_EMBEDDING_MIN_RAM_GB
-    try:
-        threshold = float(value)
-    except ValueError:
-        logger.warning(
-            "Ignoring invalid PDF2EPUB_HEADING_EMBEDDING_MIN_RAM_GB value "
-            f"{value!r}; using {_HEADING_EMBEDDING_MIN_RAM_GB:g}GB"
-        )
-        return _HEADING_EMBEDDING_MIN_RAM_GB
-    return max(0.0, threshold)
-
-
-def _should_use_heading_embeddings() -> bool:
-    """Decide whether heading deduplication should load the embedding model."""
-    disabled = _embedding_disabled_by_env()
-    if disabled is not None:
-        return not disabled
-
-    total_memory = _get_total_memory_bytes()
-    min_ram_gb = _heading_embedding_min_ram_gb()
-    if total_memory is None:
-        logger.debug(
-            "Could not detect total RAM; allowing heading embedding model load"
-        )
-        return True
-
-    total_gb = total_memory / (1024 ** 3)
-    if total_gb < min_ram_gb:
-        logger.info(
-            f"Total RAM is {total_gb:.1f}GB, below {min_ram_gb:.1f}GB threshold; "
-            "using difflib for heading deduplication"
-        )
-        return False
-    return True
-
-
-def _get_embedding_model():
-    """Lazy load the sentence transformer model."""
-    global _embedding_model
-    if _embedding_model is None:
-        if not _should_use_heading_embeddings():
-            _embedding_model = False
-            return _embedding_model
-        try:
-            from sentence_transformers import SentenceTransformer
-            # Small multilingual model (~120MB), but runtime imports may need much more RAM.
-            _embedding_model = SentenceTransformer(_HEADING_EMBEDDING_MODEL_NAME)
-            logger.debug("Loaded embedding model for heading deduplication")
-        except ImportError:
-            logger.warning("sentence-transformers not installed, falling back to text similarity")
-            _embedding_model = False  # Mark as unavailable
-    return _embedding_model
-
-
-def _compute_semantic_similarity(text1: str, text2: str) -> float:
-    """Compute semantic similarity between two texts using embeddings.
-
-    Falls back to text-based similarity if embeddings unavailable.
-    """
-    import difflib
-
-    model = _get_embedding_model()
-    if model is False:
-        # Fallback to text similarity
-        return difflib.SequenceMatcher(None, text1.lower(), text2.lower()).ratio()
-
-    try:
-        # Compute embeddings
-        embeddings = model.encode([text1, text2], convert_to_tensor=True)
-        # Cosine similarity
-        from sentence_transformers import util
-        similarity = util.cos_sim(embeddings[0], embeddings[1]).item()
-        return similarity
-    except Exception as e:
-        logger.warning(f"Embedding computation failed: {e}, falling back to text similarity")
-        return difflib.SequenceMatcher(None, text1.lower(), text2.lower()).ratio()
-
-
-def relevel_content(content: str, base_level: int, skip_first: bool = False) -> str:
-    """
-    Adjust heading levels so all content headings are below base_level.
-
-    For base_level=3, markdown headings become:
-    - # -> #### (base_level + 1)
-    - ## -> ##### (base_level + 2)
-    - etc.
-
-    Args:
-        content: Markdown content
-        base_level: The level of the chapter heading
-        skip_first: If True, don't relevel the first heading (it's the chapter title)
-
-    Returns:
-        Content with adjusted heading levels
-    """
-    lines = content.split('\n')
-    first_skipped = False
-
-    for i, line in enumerate(lines):
-        match = re.match(r'^(#+)\s', line)
-        if match:
-            if skip_first and not first_skipped:
-                first_skipped = True
-                continue
-
-            current_hashes = len(match.group(1))
-            # Content headings start at base_level + 1
-            new_level = base_level + current_hashes
-            # Cap at 6 (maximum markdown heading level)
-            new_level = min(new_level, 6)
-            lines[i] = '#' * new_level + line[current_hashes:]
-
-    return '\n'.join(lines)
 
 
 def has_notes_chapter(chapters: List[Dict]) -> bool:
@@ -735,11 +397,14 @@ def flatten_toc_tree(
         title = chapter.get('title', '')
         if use_translated_titles:
             title = chapter.get('title', '')
+        from .toc_model import toc_node_anchor, toc_node_id
+
         entry = {
             'title': title,
             'level': chapter.get('level', 1),
             'index_path': index_path,
-            'anchor': 'toc-' + '-'.join(str(value) for value in index_path),
+            'node_id': toc_node_id(chapter, tuple(index_path)),
+            'anchor': toc_node_anchor(chapter, tuple(index_path)),
             'start_page': chapter.get('start_page'),
             'end_page': chapter.get('end_page'),
         }
@@ -779,6 +444,8 @@ def build_epub_structure(
             'title': entry['title'],
             'level': entry['level'],
         }
+        if 'node_id' in entry:
+            result['node_id'] = entry['node_id']
         if 'type' in entry:
             result['type'] = entry['type']
         if 'anchor' in entry:
@@ -1128,153 +795,31 @@ def generate_hierarchical_toc_ncx(
     uid: Optional[str] = None,
     language: str = "en",
     anchor_locations: Optional[Dict[str, str]] = None,
+    resolved_navigation: Optional[Tuple[ResolvedNavigationNode, ...]] = None,
 ) -> bool:
-    """
-    Generate NCX TOC with unlimited hierarchy levels.
-
-    Args:
-        structure: Hierarchical structure from build_epub_structure
-        book_title: Book title
-        output_path: Path to save NCX file
-
-    Returns:
-        True if successful
-    """
+    """Write NCX using a resolved navigation tree (or resolve a legacy call)."""
     import html
     import uuid
 
-    uid = uid or str(uuid.uuid4())
+    nodes = resolved_navigation if resolved_navigation is not None else resolve_navigation(structure, anchor_locations)
     toc_label = localized_toc_label(language)
-    anchor_locations = anchor_locations or {}
-
-    # Calculate actual depth from structure (+1 for TOC entry)
-    toc_depth = calculate_tree_depth(structure) + 1
-
-    ncx = f"""<?xml version="1.0" encoding="UTF-8"?>
+    uid = uid or str(uuid.uuid4())
+    depth = max(1, navigation_depth(nodes))
+    content = f'''<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE ncx PUBLIC "-//NISO//DTD ncx 2005-1//EN" "http://www.daisy.org/z3986/2005/ncx-2005-1.dtd">
-<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
-    <head>
-        <meta name="dtb:uid" content="{uid}"/>
-        <meta name="dtb:depth" content="{toc_depth}"/>
-        <meta name="dtb:totalPageCount" content="0"/>
-        <meta name="dtb:maxPageNumber" content="0"/>
-    </head>
-    <docTitle>
-        <text>{html.escape(book_title)}</text>
-    </docTitle>
-    <navMap>
-        <navPoint id="navpoint-toc" playOrder="1">
-            <navLabel>
-                <text>{html.escape(toc_label)}</text>
-            </navLabel>
-            <content src="text/toc.html"/>
-        </navPoint>
-"""
-
-    nav_counter = [2]
-    next_play_order = [2]
-    href_play_orders = {"text/toc.html": 1}
-
-    def render_entry(entry: Dict, indent: int = 2, parent_href: str = "text/toc.html") -> str:
-        """Recursively render a nav entry and its children."""
-        result = ""
-        spaces = "    " * indent
-        title = html.escape(entry['title'])
-
-        # Determine the href
-        if entry.get('virtual_file_name'):
-            href = f"text/{entry['virtual_file_name']}"
-        elif 'file_path' in entry:
-            # Has content file
-            unit_id = entry.get('unit_id')
-            if unit_id:
-                # Check if this chapter has multiple parts
-                part_files = entry.get('part_files', [])
-                if len(part_files) > 1:
-                    href = f"text/{unit_id}_part1.html"
-                else:
-                    href = f"text/{unit_id}.html"
-            else:
-                href = parent_href  # Use parent's file
-            # A PDF page is not a sufficiently precise TOC target when a
-            # unit begins part-way through that page.  The builder adds the
-            # stable unit anchor to the actual heading below; keep the
-            # navigation link pointed at that heading rather than the file
-            # start.  Anchors that were never placed keep the file-level
-            # target so navigation never points at a missing fragment.
-            anchor = str(entry.get('anchor') or '').lstrip('#')
-            located_file = anchor_locations.get(anchor) if anchor else None
-            if located_file:
-                href = f"text/{located_file}#{anchor}"
-        else:
-            # No file, link to first child with file, or parent's file
-            href = find_first_child_href(entry, parent_href)
-            anchor = str(entry.get('anchor') or '').lstrip('#')
-            if anchor:
-                located_file = anchor_locations.get(anchor)
-                if located_file:
-                    href = f"text/{located_file}#{anchor}"
-
-        nav_id = f"navpoint-{nav_counter[0]}"
-        nav_counter[0] += 1
-        if href not in href_play_orders:
-            href_play_orders[href] = next_play_order[0]
-            next_play_order[0] += 1
-        play_order = href_play_orders[href]
-
-        result += f"""{spaces}<navPoint id="{nav_id}" playOrder="{play_order}">
-{spaces}    <navLabel>
-{spaces}        <text>{title}</text>
-{spaces}    </navLabel>
-{spaces}    <content src="{href}"/>
-"""
-
-        # Render children, passing current href as parent
-        if 'children' in entry:
-            for child in entry['children']:
-                result += render_entry(child, indent + 1, href)
-
-        result += f"{spaces}</navPoint>\n"
-        return result
-
-    def find_first_child_href(entry: Dict, parent_href: str = "text/toc.html") -> str:
-        """Find href of first descendant with a file, or fall back to parent."""
-        if entry.get('virtual_file_name'):
-            return f"text/{entry['virtual_file_name']}"
-        if 'file_path' in entry:
-            unit_id = entry.get('unit_id')
-            if unit_id:
-                # Check if this chapter has multiple parts
-                part_files = entry.get('part_files', [])
-                if len(part_files) > 1:
-                    return f"text/{unit_id}_part1.html"
-                else:
-                    return f"text/{unit_id}.html"
-            return parent_href
-        if 'children' in entry:
-            for child in entry['children']:
-                href = find_first_child_href(child, parent_href)
-                if href != "text/toc.html" and href != parent_href:
-                    return href
-        # No file found in this subtree, use parent's file
-        return parent_href
-
-    # Render all top-level entries
-    for entry in structure:
-        ncx += render_entry(entry)
-
-    ncx += """    </navMap>
-</ncx>"""
-
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1"><head>
+<meta name="dtb:uid" content="{html.escape(uid, quote=True)}"/><meta name="dtb:depth" content="{depth}"/>
+<meta name="dtb:totalPageCount" content="0"/><meta name="dtb:maxPageNumber" content="0"/></head>
+<docTitle><text>{html.escape(book_title)}</text></docTitle><navMap>
+<navPoint id="navpoint-toc" playOrder="1"><navLabel><text>{html.escape(toc_label)}</text></navLabel><content src="text/toc.html"/></navPoint>
+{serialize_ncx_navigation(nodes)}</navMap></ncx>'''
     try:
-        with open(output_path, 'w', encoding='utf-8') as f:
-            f.write(ncx)
+        Path(output_path).write_text(content, encoding="utf-8")
         logger.success(f"Created hierarchical NCX TOC: {output_path}")
         return True
-    except Exception as e:
-        logger.error(f"Failed to create NCX: {e}")
+    except Exception as exc:
+        logger.error(f"Failed to create NCX: {exc}")
         return False
-
 
 def generate_hierarchical_toc_html(
     structure: List[Dict],
@@ -1282,127 +827,27 @@ def generate_hierarchical_toc_html(
     output_path: Path,
     language: str = "en",
     anchor_locations: Optional[Dict[str, str]] = None,
+    resolved_navigation: Optional[Tuple[ResolvedNavigationNode, ...]] = None,
 ) -> bool:
-    """
-    Generate HTML TOC with unlimited hierarchy levels.
-
-    Args:
-        structure: Hierarchical structure from build_epub_structure
-        book_title: Book title
-        output_path: Path to save HTML file
-        language: Language code for HTML
-
-    Returns:
-        True if successful
-    """
+    """Write XHTML navigation from the same resolved model used for NCX."""
     import html
 
-    lang_class = f"lang-{language}"
+    nodes = resolved_navigation if resolved_navigation is not None else resolve_navigation(structure, anchor_locations)
     toc_label = localized_toc_label(language)
-    anchor_locations = anchor_locations or {}
-
-    toc_html = f"""<?xml version="1.0" encoding="UTF-8"?>
+    lang_class = f"lang-{language}"
+    content = f'''<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
-<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="{language}" lang="{language}">
-<head>
-    <title>{html.escape(toc_label)}</title>
-    <link rel="stylesheet" type="text/css" href="../stylesheet.css"/>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
-</head>
-<body class="{lang_class}">
-    <div class="toc">
-        <h1>{html.escape(toc_label)}</h1>
-"""
-
-    def render_entry(entry: Dict, level: int = 0, parent_href: str = "toc.html") -> str:
-        """Recursively render a TOC entry and its children."""
-        result = ""
-        indent = "            " + "    " * level
-
-        title = html.escape(entry['title'])
-
-        # Determine the href
-        if entry.get('virtual_file_name'):
-            href = entry['virtual_file_name']
-        elif 'file_path' in entry:
-            unit_id = entry.get('unit_id')
-            if unit_id:
-                # Check if this chapter has multiple parts
-                part_files = entry.get('part_files', [])
-                if len(part_files) > 1:
-                    href = f"{unit_id}_part1.html"
-                else:
-                    href = f"{unit_id}.html"
-            else:
-                href = parent_href  # Use parent's file
-            # See the NCX generator above: file-level targets are refined to
-            # the current unit's heading whenever a stable anchor exists.
-            # Unknown anchors keep the file-level target instead of emitting
-            # a fragment that the generated HTML does not contain.
-            anchor = str(entry.get('anchor') or '').lstrip('#')
-            located_file = anchor_locations.get(anchor) if anchor else None
-            if located_file:
-                href = f"{located_file}#{anchor}"
-        else:
-            # No file - link to first child with file, or parent's file
-            href = find_first_child_href_html(entry, parent_href)
-            anchor = str(entry.get('anchor') or '').lstrip('#')
-            if anchor:
-                located_file = anchor_locations.get(anchor)
-                if located_file:
-                    href = f"{located_file}#{anchor}"
-
-        result += f"{indent}<li>\n"
-        result += f"{indent}    <a href=\"{href}\">{title}</a>\n"
-
-        # Render children, passing current href as parent
-        if 'children' in entry and entry['children']:
-            result += f"{indent}    <ul>\n"
-            for child in entry['children']:
-                result += render_entry(child, level + 1, href)
-            result += f"{indent}    </ul>\n"
-
-        result += f"{indent}</li>\n"
-        return result
-
-    def find_first_child_href_html(entry: Dict, parent_href: str = "toc.html") -> str:
-        """Find href of first descendant with a file, or fall back to parent."""
-        if entry.get('virtual_file_name'):
-            return entry['virtual_file_name']
-        if 'file_path' in entry:
-            unit_id = entry.get('unit_id')
-            if unit_id:
-                # Check if this chapter has multiple parts
-                part_files = entry.get('part_files', [])
-                if len(part_files) > 1:
-                    return f"{unit_id}_part1.html"
-                else:
-                    return f"{unit_id}.html"
-            return parent_href
-        if 'children' in entry:
-            for child in entry['children']:
-                href = find_first_child_href_html(child, parent_href)
-                if href != "toc.html" and href != parent_href:
-                    return href
-        # No file found in this subtree, use parent's file
-        return parent_href
-
-    toc_html += "        <ul>\n"
-    for entry in structure:
-        toc_html += render_entry(entry)
-    toc_html += "        </ul>\n"
-
-    toc_html += """    </div>
-</body>
-</html>"""
-
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="{language}" lang="{language}"><head>
+<title>{html.escape(toc_label)}</title><link rel="stylesheet" type="text/css" href="../stylesheet.css"/>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8"/></head><body class="{lang_class}">
+<div class="toc"><h1>{html.escape(toc_label)}</h1><ul>
+{serialize_html_navigation(nodes)}</ul></div></body></html>'''
     try:
-        with open(output_path, 'w', encoding='utf-8') as f:
-            f.write(toc_html)
+        Path(output_path).write_text(content, encoding="utf-8")
         logger.success(f"Created hierarchical HTML TOC: {output_path}")
         return True
-    except Exception as e:
-        logger.error(f"Failed to create HTML TOC: {e}")
+    except Exception as exc:
+        logger.error(f"Failed to create HTML TOC: {exc}")
         return False
 
 
@@ -1462,7 +907,9 @@ def _load_build_toc(config: BuildEpubConfig) -> Tuple[Dict, Dict]:
     return original_toc_tree, toc_tree
 
 
-def _prepare_epub_structure(config: BuildEpubConfig, toc_tree: Dict) -> List[Dict]:
+def _prepare_epub_structure(
+    config: BuildEpubConfig, toc_tree: Dict, source_toc_tree: Optional[Dict] = None
+) -> List[Dict]:
     """Resolve TOC units to Markdown files and enforce endnote prerequisites."""
     toc_structure = flatten_toc_tree(
         toc_tree['chapters'],
@@ -1473,6 +920,90 @@ def _prepare_epub_structure(config: BuildEpubConfig, toc_tree: Dict) -> List[Dic
         config.markdown_dir,
         part_order=load_refinement_part_order(config.output_dir),
     )
+    if source_toc_tree is None:
+        raise ValueError("EPUB navigation requires the current source TOC ownership contract")
+    if source_toc_tree is not None:
+        from .toc_model import (
+            TOC_TREE_SCHEMA_VERSION,
+            project_toc_ownership,
+            validate_toc_tree_correspondence,
+        )
+
+        progress_path = config.output_dir / "ocr_markdown" / "tree_progress.json"
+        if not progress_path.is_file():
+            raise ValueError("EPUB navigation requires current tree_progress.json ownership")
+        if progress_path.is_file():
+            progress = json.loads(progress_path.read_text(encoding="utf-8"))
+            if source_toc_tree.get("schema_version") != TOC_TREE_SCHEMA_VERSION:
+                raise ValueError("Unsupported source TOC schema; rerun refine-prepare and structure review")
+            if toc_tree.get("schema_version") != TOC_TREE_SCHEMA_VERSION:
+                raise ValueError("Unsupported translated TOC schema; rerun translate-toc")
+            identity_errors = validate_toc_tree_correspondence(source_toc_tree, toc_tree)
+            if identity_errors:
+                raise ValueError("Invalid source/translated TOC correspondence: " + "; ".join(identity_errors))
+            source_texts = {}
+            missing_source_files = []
+            for unit in progress.get("units", []):
+                for name in unit.get("part_files") or [unit.get("file")]:
+                    if name:
+                        source_path = config.output_dir / "ocr_markdown" / str(name)
+                        if source_path.is_file():
+                            source_texts[str(name)] = source_path.read_text(encoding="utf-8")
+                        else:
+                            missing_source_files.append(str(name))
+            if missing_source_files:
+                raise ValueError(
+                    "TOC ownership source Markdown is missing: "
+                    + ", ".join(sorted(set(missing_source_files))[:10])
+                )
+            ownership = project_toc_ownership(
+                source_toc_tree.get("chapters", []), progress, source_texts
+            )
+            translated_nodes = {}
+
+            def index_translated(entries):
+                for item in entries:
+                    translated_nodes[item["node_id"]] = item
+                    index_translated(item.get("children") or [])
+
+            index_translated(epub_structure)
+            binding_modes = {}
+            anchors_by_source_file = {}
+            for projection in ownership.values():
+                for heading in projection.get("headings", []):
+                    identity = heading["node_id"]
+                    mode = heading.get("binding_mode")
+                    if mode not in {"visible", "container_only"}:
+                        raise ValueError(f"Invalid TOC ownership binding for {identity}: {mode}")
+                    if mode == "visible" or identity not in binding_modes:
+                        binding_modes[identity] = mode
+                    target_node = translated_nodes.get(identity)
+                    if target_node is None:
+                        raise ValueError(f"TOC ownership refers to unknown translated node: {identity}")
+                    owner = heading.get("owner_file")
+                    if not owner:
+                        raise ValueError(f"TOC ownership is missing physical file for {identity}")
+                    anchors_by_source_file.setdefault(str(owner), []).append({
+                        "node_id": identity,
+                        "title": target_node["title"],
+                        "anchor": target_node.get("anchor"),
+                        "source_occurrence": heading.get("source_occurrence"),
+                        "source_match_count": heading.get("source_match_count"),
+                    })
+
+            def apply_binding(entries):
+                for entry in entries:
+                    identity = entry.get("node_id")
+                    if identity not in binding_modes:
+                        raise ValueError(f"TOC node has no physical ownership projection: {identity}")
+                    entry["navigation_binding_mode"] = binding_modes[identity]
+                    entry["navigation_anchor_entries_by_part"] = {
+                        Path(name).name: anchors_by_source_file.get(Path(name).name, [])
+                        for name in (entry.get("part_files") or ([entry["file_path"]] if entry.get("file_path") else []))
+                    }
+                    apply_binding(entry.get("children") or [])
+
+            apply_binding(epub_structure)
     from .refine.footnote_options import resolve_footnote_options
 
     footnote_mode = resolve_footnote_options(config.config).mode
@@ -1573,19 +1104,16 @@ def _render_epub_content(
                     rendered_parts: list[tuple[str, str]] = []
 
                     for part_idx, part_file in enumerate(part_files):
-                        is_first_part = (part_idx == 0)
-
                         # Read markdown content
                         with open(part_file, 'r', encoding='utf-8') as f:
                             content = f.read()
 
                         # Process content with correct title and levels
-                        processed = process_chapter_content(
-                            entry['title'],
-                            entry['level'],
-                            content,
-                            is_first_part
-                        )
+                        # The validated Markdown and canonical ownership
+                        # projection are authoritative. Replacing the first
+                        # similar heading or pruning a duplicate by text can
+                        # erase a distinct accepted TOC node.
+                        processed = content
 
                         # Convert to HTML with full footnote and image support
                         # Use actual part file name for correct footnote linking
@@ -1599,76 +1127,37 @@ def _render_epub_content(
                             source_chapter=part_file_stem
                         )
 
-                        # Page-only TOC boundaries can leave the current
-                        # unit's heading after a short carry-over from the
-                        # preceding page/section.  Give the current entry a
-                        # stable fragment at its actual heading so navigation
-                        # lands on the semantic section start.
                         # Determine output filename using unit_id
                         if len(part_files) > 1:
                             html_filename = f"{unit_id}_part{part_idx + 1}.html"
                         else:
                             html_filename = f"{unit_id}.html"
 
-                        # Page-only TOC boundaries can leave the current
-                        # unit's heading after a short carry-over from the
-                        # preceding page/section.  Give the current entry a
-                        # stable fragment at its actual heading so navigation
-                        # lands on the semantic section start.
-                        if is_first_part and entry.get('anchor'):
-                            html_content, anchor_added = converter._add_subchapter_anchor(
-                                html_content,
-                                entry['title'],
-                                entry['anchor'],
-                            )
-                            if anchor_added:
-                                anchor_locations[
-                                    str(entry['anchor']).lstrip('#')
-                                ] = html_filename
-                            else:
-                                logger.warning(
-                                    f"Could not locate heading for stable anchor "
-                                    f"#{entry['anchor']}: '{entry['title']}'"
-                                )
-
                         rendered_parts.append((html_filename, html_content))
 
-                    # A child without its own Markdown unit is rendered inside
-                    # this logical unit.  Locate it across every generated
-                    # part, then bind its TOC anchor to that exact HTML file.
-                    child_entries = _embedded_subchapter_entries(
-                        entry.get('children', [])
-                    )
-                    if child_entries:
-                        try:
+                    # Place every canonical ownership-projected heading in
+                    # its source-assigned physical part, including visible
+                    # structural ancestors embedded in descendant units.
+                    for part_idx, part_file in enumerate(part_files):
+                        filename, html_content = rendered_parts[part_idx]
+                        anchors_for_part = entry.get("navigation_anchor_entries_by_part", {}).get(
+                            Path(part_file).name, []
+                        )
+                        if anchors_for_part:
                             from .chapter_identity import ChapterIdentity
 
                             identity = ChapterIdentity.parse(unit_id)
-                            chapter_index = (
-                                identity.index_path[0]
-                                if identity and identity.index_path
-                                else 0
+                            chapter_index = identity.index_path[0] if identity and identity.index_path else 0
+                            if not chapter_index:
+                                raise ValueError(f"Cannot derive chapter index for {unit_id}")
+                            anchored, locations = add_subchapter_anchors_to_parts(
+                                converter,
+                                [(filename, html_content)],
+                                chapter_index,
+                                anchors_for_part,
                             )
-                            if chapter_index:
-                                rendered_parts, child_locations = (
-                                    add_subchapter_anchors_to_parts(
-                                        converter,
-                                        rendered_parts,
-                                        chapter_index,
-                                        [
-                                            {
-                                                'title': child['title'],
-                                                'anchor': child.get('anchor'),
-                                            }
-                                            for child in child_entries
-                                        ],
-                                    )
-                                )
-                                anchor_locations.update(child_locations)
-                        except Exception as exc:
-                            logger.debug(
-                                f"Could not add subchapter anchors for {unit_id}: {exc}"
-                            )
+                            rendered_parts[part_idx] = anchored[0]
+                            anchor_locations.update(locations)
 
                     for html_filename, html_content in rendered_parts:
                         html_path = epub_dir / "text" / html_filename
@@ -1706,21 +1195,31 @@ def _render_epub_content(
 
     # Navigation is generated after conversion so child anchors can point to
     # the actual split part containing their heading rather than always part 1.
-    generate_hierarchical_toc_ncx(
+    resolved_navigation = resolve_navigation(
+        epub_structure,
+        anchor_locations,
+        generated_files=set(all_html_files),
+    )
+    validate_navigation_rendering(resolved_navigation, generated_html)
+    ncx_written = generate_hierarchical_toc_ncx(
         epub_structure,
         config.book_title,
         epub_dir / "toc.ncx",
         uid=builder.uid,
         language=language,
         anchor_locations=anchor_locations,
+        resolved_navigation=resolved_navigation,
     )
-    generate_hierarchical_toc_html(
+    html_toc_written = generate_hierarchical_toc_html(
         epub_structure,
         config.book_title,
         epub_dir / "text" / "toc.html",
         language,
         anchor_locations=anchor_locations,
+        resolved_navigation=resolved_navigation,
     )
+    if not ncx_written or not html_toc_written:
+        raise ValueError("Failed to serialize the resolved TOC navigation")
 
     footnote_report = validate_footnote_graph(generated_html)
     if auto_global and footnote_manager.definitions and footnote_report["unlinked_sup_count"]:
@@ -1811,7 +1310,7 @@ def build_epub(config: BuildEpubConfig) -> Path:
 
     original_toc_tree, toc_tree = _load_build_toc(config)
 
-    epub_structure = _prepare_epub_structure(config, toc_tree)
+    epub_structure = _prepare_epub_structure(config, toc_tree, original_toc_tree)
 
     epub_dir, image_mapping = _prepare_epub_staging(config)
 

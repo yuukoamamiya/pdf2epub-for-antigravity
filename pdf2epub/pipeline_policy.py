@@ -35,6 +35,27 @@ class PipelinePolicy:
         """Whether this is the language-neutral PDF-to-EPUB workflow."""
         return not self.requires_translation
 
+    def requires_visual_ocr_review(self, output_dir: Any = None) -> bool:
+        """Whether workflow policy or current raw pages require visual review."""
+        if output_dir is not None:
+            from pathlib import Path
+            import json
+
+            try:
+                probe = json.loads((Path(output_dir) / "pdf_text_probe.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError, TypeError):
+                probe = {}
+            if probe.get("classification") == "native_text" and probe.get("recommendation") == "use_text_layer":
+                return False
+        if self.requires_ocr_correction:
+            return True
+        if output_dir is None:
+            return False
+        from pdf2epub.ocr_anomalies import scan_ocr_pages
+
+        report = scan_ocr_pages(output_dir, persist=False)
+        return bool(report["review_required_files"] or report.get("scan_errors"))
+
     @classmethod
     def from_config(cls, config: Optional[Mapping[str, Any]]) -> "PipelinePolicy":
         """Build a policy from the nested YAML configuration.
