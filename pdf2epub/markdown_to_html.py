@@ -7,6 +7,7 @@ Uses python-markdown library with extensions for footnotes, tables, and other fe
 import html as html_module
 import re
 import secrets
+from html.parser import HTMLParser
 from typing import Optional
 from loguru import logger
 from .utils.logging_config import configure_logging
@@ -28,8 +29,6 @@ FOOTNOTE_SYNTAX_RE = re.compile(
 )
 ID_ATTRIBUTE_RE = re.compile(r'(\bid=")([^"]*)(")')
 FRAGMENT_HREF_RE = re.compile(r'(\bhref="[^"]*#)([^"]+)(")')
-OL_TAG_RE = re.compile(r"<ol(?P<attrs>[^>]*)>")
-OL_START_RE = re.compile(r'\sstart="([+-]?\d+)"')
 TABLE_RE = re.compile(r'(<table(?:\s[^>]*)?>.*?</table>)', re.DOTALL)
 TABLE_ROW_RE = re.compile(r'<tr(?:\s[^>]*)?>(.*?)</tr>', re.DOTALL)
 TABLE_CELL_RE = re.compile(r'<t[hd](?:\s[^>]*)?>', re.IGNORECASE)
@@ -103,6 +102,18 @@ ul, ol {
     margin: 1em 0;
     padding-left: 2em;
 }
+ol {
+    list-style: none;
+}
+ol li {
+    position: relative;
+}
+.epub-list-marker {
+    position: absolute;
+    left: -2em;
+    font-weight: 600;
+    font-size: 0.9em;
+}
 .footnote-def {
     margin: 0.8em 0 0;
     font-size: 0.9em;
@@ -112,15 +123,6 @@ ul, ol {
     margin: 0 0 0.65em;
     text-indent: 0;
     text-align: left;
-}
-ol.epub-continued-list {
-    list-style: none;
-}
-ol.epub-continued-list > li {
-    counter-increment: epub-list;
-}
-ol.epub-continued-list > li::before {
-    content: counter(epub-list, decimal-leading-zero) ".";
 }
 li {
     margin-bottom: 0.5em;
@@ -191,7 +193,7 @@ th {
 }
 .footnotes ol {
     padding-left: 1.5em;
-    list-style-type: decimal;
+    list-style: none;
 }
 .footnote-item {
     margin-bottom: 0.8em;
@@ -885,51 +887,122 @@ def _normalize_epub_ids(html: str) -> str:
 
 
 def _normalize_ordered_list_starts(html: str) -> str:
-    """Preserve non-one list numbering without XHTML 1.1's invalid start."""
+    """Materialize ordered-list markers without XHTML-invalid ``start`` attrs.
 
-    def replace_ol(match: re.Match) -> str:
-        attrs = match.group("attrs")
-        start_match = OL_START_RE.search(attrs)
-        if not start_match:
-            return match.group(0)
+    EPUB readers differ in CSS counter support. Explicit marker spans keep
+    regular, nested, and continued lists readable while preserving the XHTML
+    1.1-compatible list structure and all list item content.
+    """
+    line_offsets = [0]
+    line_offsets.extend(match.end() for match in re.finditer("\n", html))
+    edits: list[tuple[int, int, str]] = []
 
-        counter_value = int(start_match.group(1)) - 1
-        attrs = (
-            attrs[:start_match.start()]
-            + attrs[start_match.end():]
-        )
+    def absolute_offset(position: tuple[int, int]) -> int:
+        line, column = position
+        return line_offsets[line - 1] + column
 
-        class_match = re.search(r'\bclass="([^"]*)"', attrs)
-        if class_match:
-            classes = class_match.group(1).split()
-            if "epub-continued-list" not in classes:
-                classes.append("epub-continued-list")
-            attrs = (
-                attrs[:class_match.start(1)]
-                + " ".join(classes)
-                + attrs[class_match.end(1):]
-            )
-        else:
-            attrs += ' class="epub-continued-list"'
+    def attribute_spans(tag_text: str) -> list[tuple[str, int, int, int, int]]:
+        """Return tag attribute names and raw/full value spans."""
+        name_match = re.match(r"<\s*[^\s/>]+", tag_text)
+        if not name_match:
+            return []
+        result = []
+        index = name_match.end()
+        while index < len(tag_text):
+            whitespace_start = index
+            while index < len(tag_text) and tag_text[index].isspace():
+                index += 1
+            if index >= len(tag_text) or tag_text[index] in "/>":
+                break
+            name_start = index
+            while index < len(tag_text) and not tag_text[index].isspace() and tag_text[index] not in "=/>":
+                index += 1
+            name = tag_text[name_start:index].lower()
+            while index < len(tag_text) and tag_text[index].isspace():
+                index += 1
+            value_start = value_end = index
+            if index < len(tag_text) and tag_text[index] == "=":
+                index += 1
+                while index < len(tag_text) and tag_text[index].isspace():
+                    index += 1
+                if index < len(tag_text) and tag_text[index] in {'"', "'"}:
+                    quote = tag_text[index]
+                    value_start = index + 1
+                    index = value_start
+                    while index < len(tag_text) and tag_text[index] != quote:
+                        index += 1
+                    value_end = index
+                    index = min(len(tag_text), index + 1)
+                else:
+                    value_start = index
+                    while index < len(tag_text) and not tag_text[index].isspace() and tag_text[index] not in "/>":
+                        index += 1
+                    value_end = index
+            result.append((name, whitespace_start, index, value_start, value_end))
+        return result
 
-        reset = f"counter-reset: epub-list {counter_value};"
-        style_match = re.search(r'\bstyle="([^"]*)"', attrs)
-        if style_match:
-            style = style_match.group(1).strip()
-            if style and not style.endswith(";"):
-                style += ";"
-            style = f"{style} {reset}".strip()
-            attrs = (
-                attrs[:style_match.start(1)]
-                + style
-                + attrs[style_match.end(1):]
-            )
-        else:
-            attrs += f' style="{reset}"'
+    def rewrite_ol_tag(raw: str, attrs: list[tuple[str, str | None]], start: int) -> str:
+        spans = attribute_spans(raw)
+        start_attr = next((item for item in spans if item[0] == "start"), None)
+        updated = raw
+        if start_attr:
+            _name, attr_start, attr_end, _value_start, _value_end = start_attr
+            updated = updated[:attr_start] + updated[attr_end:]
+        if start == 1:
+            return updated
 
-        return f"<ol{attrs}>"
+        classes = next((value or "" for name, value in attrs if name.lower() == "class"), "")
+        class_tokens = classes.split()
+        if "epub-continued-list" not in class_tokens:
+            class_tokens.append("epub-continued-list")
+        class_value = " ".join(class_tokens)
+        class_attr = next((item for item in attribute_spans(updated) if item[0] == "class"), None)
+        if class_attr:
+            _name, attr_start, attr_end, _value_start, _value_end = class_attr
+            return updated[:attr_start] + f' class="{html_module.escape(class_value, quote=True)}"' + updated[attr_end:]
+        closing = updated.rfind(">")
+        return updated[:closing] + f' class="{html_module.escape(class_value, quote=True)}"' + updated[closing:]
 
-    return OL_TAG_RE.sub(replace_ol, html)
+    class OrderedListMarkerParser(HTMLParser):
+        def __init__(self) -> None:
+            super().__init__(convert_charrefs=False)
+            self.lists: list[tuple[str, int]] = []
+
+        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+            tag_start = absolute_offset(self.getpos())
+            raw = self.get_starttag_text()
+            if tag == "ol":
+                start_value = next((value for name, value in attrs if name.lower() == "start"), None)
+                try:
+                    start = int(start_value) if start_value is not None else 1
+                except ValueError:
+                    start = 1
+                if start_value is not None:
+                    rewritten = rewrite_ol_tag(raw, attrs, start)
+                    if rewritten != raw:
+                        edits.append((tag_start, tag_start + len(raw), rewritten))
+                self.lists.append(("ol", start - 1))
+                return
+
+            if tag == "ul":
+                self.lists.append(("ul", 0))
+            elif tag == "li" and self.lists and self.lists[-1][0] == "ol":
+                list_type, number = self.lists[-1]
+                number += 1
+                self.lists[-1] = (list_type, number)
+                offset = tag_start + len(raw)
+                edits.append((offset, offset, f'<span class="epub-list-marker">{number:02d}.</span>'))
+
+        def handle_endtag(self, tag: str) -> None:
+            if tag in {"ol", "ul"} and self.lists and self.lists[-1][0] == tag:
+                self.lists.pop()
+
+    parser = OrderedListMarkerParser()
+    parser.feed(html)
+    parser.close()
+    for start, end, replacement in sorted(edits, key=lambda item: item[0], reverse=True):
+        html = html[:start] + replacement + html[end:]
+    return html
 
 
 def _wrap_tables_for_scrolling(html: str) -> str:

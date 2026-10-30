@@ -378,6 +378,8 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
   void 元素仍是自闭合形式；输出的章节文档可由严格 XML parser 读取。
 - 连续的长编号论述由 polish handoff 要求保留为转义数字标记（如 `17\.`）的普通段落；真实枚举
   仍保留列表结构。translate handoff 和本地校验共同保证已转义标记不退化为有序列表。
+  EPUB 有序列表将编号写成 XHTML 列表项中的标记 span，保留嵌套结构和续号，同时避免依赖阅读器
+  对 CSS counter 的支持；XHTML 1.1 输出不需要 `ol start` 属性。
 - `batching_service.py`：公共拥有 batch 配置、token 估算、文件安全批次算法和 pending queue；
   worker 文件数的有效上限为 8。`markdown_handoff`、`page_furniture_repair`、HTML builder
   和 Markdown command 应依赖该服务，不应导入 `subagent_runtime` 的私有 batching helper。
@@ -973,8 +975,11 @@ HTML 构建还会把 NCX/nav 更新结果写入导航报告；已有导航文档
 两个 EPUB 构建路径都先在目标文件同目录写临时 ZIP，再用 `os.replace` 发布；ZIP 写入或
 完整性检查失败时异常向上传播并保留已有 EPUB。HTML 重建在发布前按配置运行 EPUBCheck，
 严格校验失败时也保留已有成品；warn 模式继续发布并记录告警。HTML packager 直接调用时
-同样采用临时文件和原子替换。最终成品通过固定夹具的 PyMuPDF 渲染回归测试，检查打包结果
-能否被阅读器引擎稳定打开。
+同样采用临时文件和原子替换。PDF Markdown 构建和 HTML 重建都通过 PyMuPDF 打开并实际渲染
+最终 EPUB；合成回归夹具覆盖中文长段落与标点、多段脚注及双向链接、跨页表格、普通编号段落
+与真实列表区分，以及嵌套 TOC 的 XHTML/NCX 锚点。检查包括可见文本、分页顺序、文本边界和
+导航目标，不依赖外部字体或固定像素金图。默认测试只写 pytest 临时目录；设置
+`PDF2EPUB_VISUAL_QA_DIR` 可额外导出最终合成 EPUB、各页 PNG 和联系表 PNG，供人工检查。
 
 EPUB 正文也使用 2.4 节的章节装箱器。`html-prepare` 先依据原始 TOC 生成
 `chapter_groups`，再让 `write_worker_handoffs()` 按 TOC 顺序装入 `worker_handoffs/`；

@@ -314,17 +314,14 @@ ul li::before {
 }
 
 ol {
-    counter-reset: item;
     list-style: none;
 }
 
 ol li {
-    counter-increment: item;
     position: relative;
 }
 
-ol li::before {
-    content: counter(item, decimal-leading-zero) ".";
+.epub-list-marker {
     position: absolute;
     left: -2em;
     font-weight: 600;
@@ -344,18 +341,6 @@ ol li::before {
     font-size: 0.5em;
     line-height: 1;
     white-space: nowrap;
-}
-
-ol.epub-continued-list {
-    counter-reset: epub-list;
-}
-
-ol.epub-continued-list > li {
-    counter-increment: epub-list;
-}
-
-ol.epub-continued-list > li::before {
-    content: counter(epub-list, decimal-leading-zero) ".";
 }
 
 li {
@@ -402,7 +387,7 @@ hr.dots::before { content: "• • •"; }
 }
 
 .toc h1::after {
-    content: none; /* Remove ornament from TOC title */
+    display: none; /* Suppress the title ornament in EPUB renderers */
 }
 
 .toc ul {
@@ -703,24 +688,18 @@ sup a {
 .footnote ol, 
 .footnotes ol {
     padding-left: 2em;
-    counter-reset: footnote;
     list-style: none;
 }
 
 .footnote li, 
 .footnotes li {
-    counter-increment: footnote;
     margin-bottom: 1em;
     position: relative;
 }
 
-.footnote li::before,
-.footnotes li::before {
-    content: counter(footnote) ".";
-    position: absolute;
+.footnote li > .epub-list-marker,
+.footnotes li > .epub-list-marker {
     left: -1.5em;
-    font-weight: 600;
-    font-size: 0.9em;
 }
 
 /* =================================
