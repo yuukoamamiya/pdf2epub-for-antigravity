@@ -6,6 +6,7 @@ import pytest
 from lxml import etree
 
 from pdf2epub.html_translation import builder as builder_module
+from pdf2epub.html_translation import package_resources
 from pdf2epub.html_translation.builder import (
     BuildConfig,
     HTMLEpubBuilder,
@@ -694,3 +695,80 @@ def test_epubcheck_strict_mode_requires_executable(
 
     with pytest.raises(RuntimeError, match="not installed"):
         builder._validate_output_epub()
+
+
+def test_html_packaging_is_atomic_and_keeps_epub_mimetype_rules(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content = tmp_path / "content"
+    content.mkdir()
+    (content / "mimetype").write_text("application/epub+zip", encoding="ascii")
+    (content / "chapter.xhtml").write_text("<html/>", encoding="utf-8")
+    output = tmp_path / "book.epub"
+    output.write_bytes(b"previous artifact")
+
+    original_write = package_resources.zipfile.ZipFile.write
+
+    def fail_after_mimetype(self, filename, arcname=None, *args, **kwargs):
+        if arcname == "chapter.xhtml":
+            raise OSError("injected packaging failure")
+        return original_write(self, filename, arcname, *args, **kwargs)
+
+    monkeypatch.setattr(package_resources.zipfile.ZipFile, "write", fail_after_mimetype)
+    with pytest.raises(OSError, match="injected packaging failure"):
+        package_resources.EPUBFilePackager(output, tmp_path).package_epub(content)
+    assert output.read_bytes() == b"previous artifact"
+    assert not list(tmp_path.glob(".book.epub.*.tmp"))
+
+    monkeypatch.setattr(package_resources.zipfile.ZipFile, "write", original_write)
+    package_resources.EPUBFilePackager(output, tmp_path).package_epub(content)
+    with package_resources.zipfile.ZipFile(output) as archive:
+        assert archive.namelist()[0] == "mimetype"
+        assert archive.getinfo("mimetype").compress_type == package_resources.zipfile.ZIP_STORED
+        assert archive.read("mimetype") == b"application/epub+zip"
+
+
+def test_strict_epubcheck_failure_preserves_existing_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    builder = _builder(tmp_path, epubcheck_mode="strict")
+    builder.output_path.write_bytes(b"previous artifact")
+
+    def extract(extract_dir: Path) -> None:
+        extract_dir.mkdir(parents=True)
+        (extract_dir / "mimetype").write_text("application/epub+zip", encoding="ascii")
+        (extract_dir / "chapter.xhtml").write_text("<html/>", encoding="utf-8")
+
+    monkeypatch.setattr(builder, "_extract_epub", extract)
+    monkeypatch.setattr(builder, "_replace_xhtml_files", lambda _extract_dir: 0)
+    monkeypatch.setattr(builder, "_validate_output_epub", lambda: (_ for _ in ()).throw(
+        ValueError("EPUBCheck failed")
+    ))
+
+    with pytest.raises(ValueError, match="EPUBCheck failed"):
+        builder.build()
+    assert builder.output_path.read_bytes() == b"previous artifact"
+    assert not list(tmp_path.glob(".output.epub.*.tmp.epub"))
+
+
+def test_html_replace_failure_preserves_existing_output_and_cleans_staging(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content = tmp_path / "content"
+    content.mkdir()
+    (content / "chapter.xhtml").write_text("<html/>", encoding="utf-8")
+    output = tmp_path / "book.epub"
+    output.write_bytes(b"previous artifact")
+    monkeypatch.setattr(
+        package_resources.os,
+        "replace",
+        lambda *_args: (_ for _ in ()).throw(OSError("injected replace failure")),
+    )
+
+    with pytest.raises(OSError, match="injected replace failure"):
+        package_resources.EPUBFilePackager(output, tmp_path).package_epub(content)
+    assert output.read_bytes() == b"previous artifact"
+    assert not list(tmp_path.glob(".book.epub.*.tmp"))

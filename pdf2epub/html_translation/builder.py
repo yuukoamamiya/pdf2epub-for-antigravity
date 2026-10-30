@@ -7,6 +7,7 @@ all other resources (CSS, fonts, images, metadata).
 
 import tempfile
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -155,10 +156,26 @@ class HTMLEpubBuilder:
             # Step 4: Normalize fragile source CSS before packaging
             self._normalize_css(extract_dir)
 
-            # Step 5: Repackage as EPUB
-            self._package_epub(extract_dir)
+            # Step 5: Package and validate beside the destination. Publish only
+            # after strict validation succeeds, preserving any prior artifact.
+            self.output_path.parent.mkdir(parents=True, exist_ok=True)
+            fd, staging_name = tempfile.mkstemp(
+                prefix=f".{self.output_path.name}.",
+                suffix=".tmp.epub",
+                dir=self.output_path.parent,
+            )
+            os.close(fd)
+            staging_path = Path(staging_name)
+            final_path = self.output_path
+            try:
+                self.output_path = staging_path
+                self._package_epub(extract_dir)
+                self._validate_output_epub()
+                os.replace(staging_path, final_path)
+            finally:
+                self.output_path = final_path
+                staging_path.unlink(missing_ok=True)
 
-        self._validate_output_epub()
         logger.info(f"Built EPUB: {self.output_path}")
         return self.output_path
 

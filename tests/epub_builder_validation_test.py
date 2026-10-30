@@ -1,11 +1,14 @@
 import hashlib
 import json
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 from xml.etree import ElementTree as ET
 
 from pdf2epub.commands.pdf import _resolve_pdf_markdown_source
 from pdf2epub.build_epub import (
+    BuildEpubConfig,
+    _package_epub,
     add_subchapter_anchors_to_parts,
     flatten_toc_tree,
     build_epub_structure,
@@ -98,6 +101,65 @@ def test_ncx_and_opf_share_publication_identifier(tmp_path: Path) -> None:
         ".//{http://purl.org/dc/elements/1.1/}identifier"
     ).text
     assert ncx_uid == opf_uid == builder.uid
+
+
+def test_create_epub_publishes_valid_archive_atomically(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source = tmp_path / "epub_source"
+    source.mkdir()
+    (source / "mimetype").write_text("application/epub+zip", encoding="ascii")
+    (source / "chapter.xhtml").write_text("<html/>", encoding="utf-8")
+    output = tmp_path / "book.epub"
+    output.write_bytes(b"previous artifact")
+    builder = EpubBuilder(SimpleNamespace(book_title="Book", author="Author", language="en"))
+
+    original_write = zipfile.ZipFile.write
+
+    def fail_during_archive(self, filename, arcname=None, *args, **kwargs):
+        if Path(filename).name == "chapter.xhtml":
+            raise OSError("injected packaging failure")
+        return original_write(self, filename, arcname, *args, **kwargs)
+
+    monkeypatch.setattr(zipfile.ZipFile, "write", fail_during_archive)
+    import pytest
+    with pytest.raises(OSError, match="injected packaging failure"):
+        builder.create_epub(source, output)
+    assert output.read_bytes() == b"previous artifact"
+    assert not list(tmp_path.glob(".book.epub.*.tmp"))
+
+    monkeypatch.setattr(zipfile.ZipFile, "write", original_write)
+    assert builder.create_epub(source, output) is True
+    with zipfile.ZipFile(output) as archive:
+        assert archive.namelist()[0] == "mimetype"
+        assert archive.getinfo("mimetype").compress_type == zipfile.ZIP_STORED
+        assert archive.read("mimetype") == b"application/epub+zip"
+        assert archive.testzip() is None
+
+
+def test_build_epub_propagates_false_create_result(tmp_path: Path) -> None:
+    import pytest
+
+    class FailedBuilder:
+        def create_content_opf(self, *_args, **_kwargs):
+            return True
+
+        def create_epub(self, *_args, **_kwargs):
+            return False
+
+    with pytest.raises(RuntimeError, match="Failed to create EPUB"):
+        _package_epub(
+            BuildEpubConfig(
+                book_title="Book",
+                output_dir=tmp_path,
+                markdown_dir=tmp_path,
+                toc_tree_path=tmp_path / "toc.json",
+            ),
+            tmp_path / "epub_build",
+            FailedBuilder(),
+            [],
+        )
 
 
 def test_hierarchical_toc_uses_reader_language_label(tmp_path: Path) -> None:

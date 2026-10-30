@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import re
+import os
 import shutil
 import subprocess
+import tempfile
 import zipfile
 from collections import Counter
 from pathlib import Path
@@ -167,7 +169,7 @@ class EPUBFilePackager:
 
         return normalized
 
-    def package_epub(self, content_dir: Path):
+    def package_epub(self, content_dir: Path, output_path: Path | None = None):
         """
         Package directory contents as EPUB.
 
@@ -175,36 +177,46 @@ class EPUBFilePackager:
         1. mimetype must be first file, stored uncompressed
         2. Other files use DEFLATE compression
         """
-        self.output_path.parent.mkdir(parents=True, exist_ok=True)
+        destination = Path(output_path) if output_path is not None else self.output_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary_name = tempfile.mkstemp(
+            prefix=f".{destination.name}.", suffix=".tmp", dir=destination.parent
+        )
+        os.close(fd)
+        temporary_path = Path(temporary_name)
 
-        with zipfile.ZipFile(self.output_path, 'w') as zf:
-            # 1. Write mimetype first, uncompressed
-            mimetype_path = content_dir / "mimetype"
-            if mimetype_path.exists():
-                zf.write(
-                    mimetype_path,
-                    "mimetype",
-                    compress_type=zipfile.ZIP_STORED
-                )
-            else:
-                # Create mimetype if missing
-                zf.writestr(
-                    "mimetype",
-                    "application/epub+zip",
-                    compress_type=zipfile.ZIP_STORED
-                )
-
-            # 2. Write all other files with compression
-            for file_path in content_dir.rglob("*"):
-                if file_path.is_file() and file_path.name != "mimetype":
-                    arcname = file_path.relative_to(content_dir).as_posix()
+        try:
+            with zipfile.ZipFile(temporary_path, 'w') as zf:
+                # 1. Write mimetype first, uncompressed
+                mimetype_path = content_dir / "mimetype"
+                if mimetype_path.exists():
                     zf.write(
-                        file_path,
-                        arcname,
-                        compress_type=zipfile.ZIP_DEFLATED
+                        mimetype_path,
+                        "mimetype",
+                        compress_type=zipfile.ZIP_STORED
+                    )
+                else:
+                    zf.writestr(
+                        "mimetype",
+                        "application/epub+zip",
+                        compress_type=zipfile.ZIP_STORED
                     )
 
-        logger.debug(f"Packaged EPUB to {self.output_path}")
+                # 2. Write all other files with compression
+                for file_path in content_dir.rglob("*"):
+                    if file_path.is_file() and file_path.name != "mimetype":
+                        arcname = file_path.relative_to(content_dir).as_posix()
+                        zf.write(
+                            file_path,
+                            arcname,
+                            compress_type=zipfile.ZIP_DEFLATED
+                        )
+            os.replace(temporary_path, destination)
+        except BaseException:
+            temporary_path.unlink(missing_ok=True)
+            raise
+
+        logger.debug(f"Packaged EPUB to {destination}")
 
 
 def validate_output_epub(output_path: Path, mode: str, executable_path: str | None = None) -> None:

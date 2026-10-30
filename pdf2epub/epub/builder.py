@@ -9,6 +9,7 @@ This module handles all EPUB-specific file generation including:
 
 import os
 import html
+import tempfile
 import uuid
 import zipfile
 from pathlib import Path
@@ -348,23 +349,40 @@ a { text-decoration: none; }
         Returns:
             True if successful
         """
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary_name = tempfile.mkstemp(
+            prefix=f".{output_path.name}.", suffix=".tmp", dir=output_path.parent
+        )
+        os.close(fd)
+        temporary_path = Path(temporary_name)
         try:
-            with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as epub:
-                # Add mimetype first (uncompressed as per EPUB spec)
+            with zipfile.ZipFile(temporary_path, "w", zipfile.ZIP_DEFLATED) as epub:
+                # Add mimetype first and uncompressed as required by EPUB.
                 mimetype_path = epub_dir / "mimetype"
                 if mimetype_path.exists():
                     epub.write(mimetype_path, "mimetype", compress_type=zipfile.ZIP_STORED)
-                
-                # Add all other files
-                for root, dirs, files in os.walk(epub_dir):
+                else:
+                    epub.writestr(
+                        "mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED
+                    )
+
+                for root, _dirs, files in os.walk(epub_dir):
                     for file in files:
-                        if file != "mimetype":  # Skip mimetype as we already added it
+                        if file != "mimetype":
                             file_path = Path(root) / file
                             arcname = file_path.relative_to(epub_dir)
                             epub.write(file_path, arcname)
-            
+
+            # Confirm the central directory and compressed data are readable
+            # before publishing the new archive.
+            with zipfile.ZipFile(temporary_path, "r") as epub:
+                bad_member = epub.testzip()
+                if bad_member is not None:
+                    raise zipfile.BadZipFile(f"Corrupt EPUB member: {bad_member}")
+            os.replace(temporary_path, output_path)
             logger.success(f"Created EPUB: {output_path}")
             return True
-        except Exception as e:
-            logger.error(f"Failed to create EPUB: {e}")
-            return False
+        except BaseException:
+            temporary_path.unlink(missing_ok=True)
+            raise
