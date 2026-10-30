@@ -381,8 +381,13 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
 - `batching_service.py`：公共拥有 batch 配置、token 估算、文件安全批次算法和 pending queue；
   worker 文件数的有效上限为 8。`markdown_handoff`、`page_furniture_repair`、HTML builder
   和 Markdown command 应依赖该服务，不应导入 `subagent_runtime` 的私有 batching helper。
-- `subagent_runtime.py`：负责模型选择、scoped worker handoff、章节装箱和 dispatch 合同。
-  它为旧调用保留必要的私有 helper 重导出，但新生产调用直接依赖 `batching_service.py`。
+- `subagent_runtime.py`：保留模型选择、handoff 生命周期与旧调用兼容入口；生产装箱、manifest
+  投影、提示词渲染和术语上下文各由下列窄服务拥有。它只为实际旧调用重导出必要 helper。
+- `worker_grouping.py`：纯 worker 分组和章节装箱；输入是父 manifest/queue 与额度，不读写文件。
+- `worker_manifest.py`：把一个 worker assignment 投影成最小 scoped manifest，不读取工作流状态。
+- `worker_prompt.py`：按显式 assignment/context 数据渲染 worker prompt 文本，不写文件。
+- `worker_glossary_context.py`：从已加载的单元条目纯构建紧凑术语上下文；运行时负责读取源上下文、
+  原子写入 worker context 并登记其哈希。
 - `html_translation/compressed_cache.py`：独立验证 EPUB 输入哈希、压缩 mapping、有效 translation
   parts 及行数预算，并写入/检查压缩提取 receipt；不导入 HTML pipeline/builder。builder 保留薄包装
   以兼容既有调用。
@@ -435,7 +440,7 @@ Subagent 实际读写哪些文件。两者不能互相替代。
   映射中的源文件补成单文件组。它同时计算源哈希、单元上下文哈希和 `pending_files`，
   所以装箱器不需要重新猜测哪些文件可用。
 
-`subagent_runtime._chapter_worker_groups()` 的处理顺序是固定的：先按 TOC 顺序读取待处理
+`worker_grouping._chapter_worker_groups()` 的处理顺序是固定的：先按 TOC 顺序读取待处理
 章节，对每个章节单独运行 `_recommended_batches()`；若章节需要多个批次，或任一文件超过
 字节/token 上限，就先冲刷当前短章节队列，再只在该章节内部生成 part worker。普通短章节
 才会进入连续装箱，单章节仍受 `max_source_tokens`、`max_files` 和单文件字节上限约束；
@@ -810,8 +815,12 @@ secondary-only 的 moved decision 必须包含：
 
 - `refine/footnote_handoff.py`：生成脚注 Subagent 的 manifest、Prompt 和按 refinement unit
   分片的稀疏上下文，并集中执行交接文件名和路径安全校验；不重新识别页面候选。
-- `refine/footnote_validation.py`：校验 Subagent 决策的 schema、候选地址、区域审计、当前
-  sidecar/共识哈希和续文来源，归一化后才允许 `footnote-apply` 消费；不修改原始 Markdown。
+- `refine/footnote_validation.py`：编排证据加载、纯决策审计与结果持久化；只有已验证结果才会
+  更新候选报告并写入稀疏 unit context，不修改原始 Markdown。
+- `refine/footnote_validation_evidence.py`：读取并核对当前页面来源/OCR 模式、配置脚注模式、
+  sidecar 哈希、双 OCR 共识和视觉审计 manifest；不规范化 Subagent 决策。
+- `refine/footnote_validation_audit.py`：纯校验必需候选地址、区域审计和兼容 flat/nested 决策，
+  归一化逐条决定并确认 continuation key 可追溯；不访问文件系统或写报告。
 - `refine/footnote_continuation.py`：评估跨页续文的版面/语义证据并汇总可审计信号；通过
   惰性候选构造回调复用候选逻辑，不直接决定脚注角色。
 - `refine/footnote_signals.py`：集中维护脚注/引用/页眉页脚标签、编号边界和上标解析，
@@ -854,7 +863,9 @@ PDF 结构阶段采用“共享证据、分离语义”的边界：
 | `footnote_windows.py` | 相邻页面 review window 的有序构造 | 续文角色判断、候选修改、Markdown 修改 |
 | `footnote_visual.py` | 整页/区域视觉证据和审计 manifest | 候选识别、脚注角色决定、Markdown 修改 |
 | `footnote_handoff.py` | 脚注 manifest、Prompt 和稀疏 unit context | 候选识别、决定校验、插图分类 |
-| `footnote_validation.py` | 决策合同、哈希 freshness 和角色归一化 | 候选识别、Markdown 修改、插图分类 |
+| `footnote_validation.py` | 编排证据读取、纯决策审计和验证结果持久化 | 候选识别、Markdown 修改、插图分类 |
+| `footnote_validation_evidence.py` | 配置/页面来源、哈希 freshness、共识和视觉 manifest 读取 | 决策角色归一化、Markdown 修改 |
+| `footnote_validation_audit.py` | 必需地址、区域/决定合同、continuation key 的纯审计 | 文件读取/写入、候选识别、Markdown 修改 |
 | `footnote_continuation.py` | 跨页续文版面/语义证据和汇总 | 连续区域发现、最终脚注角色、Markdown 修改、插图分类 |
 | `footnote_signals.py` | 共用标签、编号和上标识别信号 | 页面候选编排、Subagent 决策、Markdown 修改 |
 | `illustration_prepare.py` | 整页插图候选、图片复核窗口和页面角色 handoff | 脚注归并、章节末尾注释 |
