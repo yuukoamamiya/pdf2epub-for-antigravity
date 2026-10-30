@@ -67,24 +67,62 @@ def _load_html_book_context(args, operation: str):
 
 def _load_html_chapter_groups(pipeline, declared_files):
     """Group compressed EPUB units by top-level TOC entry."""
-    from pdf2epub.html_translation.toc_extractor import TOCExtractor
+    import json
 
-    files_by_stem = {}
+    from pdf2epub.html_translation.toc_extractor import TOCExtractor
+    from pdf2epub.html_translation.package_identity import validate_package_relative_path
+
+    files_by_package_path = {}
+    package_path_by_file = {}
     for name in declared_files:
         name = str(name)
-        stem = Path(name).stem
-        files_by_stem.setdefault(stem, []).append(name)
-        base_stem = re.sub(r"\.part\d+$", "", stem, flags=re.IGNORECASE)
-        files_by_stem.setdefault(base_stem, []).append(name)
+        base_stem = re.sub(r"\.part\d+$", "", Path(name).stem, flags=re.IGNORECASE)
+        mapping_path = pipeline.compressed_units_dir / f"{base_stem}.mapping.json"
+        try:
+            mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise ValueError(f"Cannot load package identity mapping {mapping_path.name}: {exc}") from exc
+        if not isinstance(mapping, dict) or not mapping.get("package_relative_path"):
+            raise ValueError(
+                f"Mapping {mapping_path.name} lacks package_relative_path; rerun html-prepare to refresh identity."
+            )
+        package_path = validate_package_relative_path(mapping.get("package_relative_path"))
+        package_path_by_file[name] = package_path
+        if package_path:
+            files_by_package_path.setdefault(package_path, []).append(name)
+
+    package_paths_by_basename = {}
+    for name, package_path in package_path_by_file.items():
+        if package_path:
+            package_paths_by_basename.setdefault(
+                PurePosixPath(package_path).name.casefold(), set()
+            ).add(package_path)
     groups = {}
     used = set()
 
-    def file_for_href(href):
-        path = str(href or "").split("#", 1)[0]
-        return list(dict.fromkeys(files_by_stem.get(PurePosixPath(path).stem, [])))
+    def file_for_entry(entry):
+        if hasattr(entry, "full_href"):
+            package_path = getattr(entry, "full_href", None)
+            if not package_path:
+                return []
+            try:
+                package_path = validate_package_relative_path(package_path)
+            except ValueError:
+                return []
+            return list(dict.fromkeys(files_by_package_path.get(package_path, [])))
+
+        # Compatibility for parser doubles predating full_href: use a unique
+        # exact member basename only when the source inventory makes it safe.
+        path = str(getattr(entry, "href", "") or "").split("#", 1)[0]
+        basename = PurePosixPath(path).name.casefold()
+        candidates = package_paths_by_basename.get(basename, set())
+        if len(candidates) != 1:
+            return []
+        package_path = next(iter(candidates))
+        return list(dict.fromkeys(files_by_package_path.get(package_path, [])))
 
     def collect(entry, names):
-        for name in file_for_href(getattr(entry, "href", "")):
+        for name in file_for_entry(entry):
             if name not in names:
                 names.append(name)
         for child in getattr(entry, "children", []) or []:

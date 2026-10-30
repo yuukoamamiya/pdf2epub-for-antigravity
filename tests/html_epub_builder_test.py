@@ -7,6 +7,7 @@ from lxml import etree
 
 from pdf2epub.html_translation import builder as builder_module
 from pdf2epub.html_translation import package_resources
+from pdf2epub.html_translation.package_identity import validate_package_relative_path
 from pdf2epub.html_translation.builder import (
     BuildConfig,
     HTMLEpubBuilder,
@@ -17,6 +18,23 @@ from pdf2epub.html_translation.builder import (
 
 OPF_NS = "http://www.idpf.org/2007/opf"
 DC_NS = "http://purl.org/dc/elements/1.1/"
+
+
+@pytest.mark.parametrize(
+    "package_path",
+    [
+        "../outside.xhtml",
+        "OEBPS/../../outside.xhtml",
+        "C:/absolute.xhtml",
+        "OEBPS\\chapter.xhtml",
+        "OEBPS/COM1.xhtml",
+        "OEBPS/chapter.xhtml.",
+        "OEBPS/chapter.xhtml ",
+    ],
+)
+def test_package_identity_rejects_unsafe_windows_or_traversal_paths(package_path: str) -> None:
+    with pytest.raises(ValueError):
+        validate_package_relative_path(package_path)
 
 
 def _builder(
@@ -63,6 +81,9 @@ def test_html_prepare_cache_and_split_inventory_are_resumable(tmp_path: Path) ->
     mapping = {
         "original_extension": ".xhtml",
         "translation_parts": ["Index.part1.md", "Index.part2.md"],
+        "mapping_schema_version": 2,
+        "package_relative_path": "OEBPS/Index.xhtml",
+        "legacy_unit_id": True,
     }
     (pipeline.compressed_units_dir / "Index.mapping.json").write_text(
         json.dumps(mapping), encoding="utf-8"
@@ -123,15 +144,13 @@ def test_html_prepare_splits_dense_compressed_units_into_mapping_parts(tmp_path:
 
     assert pipeline.extract_and_preprocess(target_language="Chinese") == 1
 
-    mapping = json.loads(
-        (pipeline.compressed_units_dir / "Index.mapping.json").read_text(
-            encoding="utf-8"
-        )
-    )
+    mapping_path = next(pipeline.compressed_units_dir.glob("*.mapping.json"))
+    base_stem = mapping_path.name[:-len(".mapping.json")]
+    mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
     assert mapping["translation_parts"] == [
-        "Index.part1.md",
-        "Index.part2.md",
-        "Index.part3.md",
+        f"{base_stem}.part1.md",
+        f"{base_stem}.part2.md",
+        f"{base_stem}.part3.md",
     ]
     assert pipeline.declared_translation_files() == mapping["translation_parts"]
     assert pipeline._compressed_cache_is_current(max_nonempty_lines=2) is True

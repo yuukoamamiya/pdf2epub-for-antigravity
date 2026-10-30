@@ -223,6 +223,8 @@ html-prepare → Subagent(entity extraction) → html-prepare → Subagent(book_
 首次执行 `html-prepare` 后，输出目录会包含：
 
 - `compressed_units/*.md`：正文翻译单元，每行对应一个结构单元；
+- 对应的 mapping 会记录 EPUB 内解码后的完整 `package_relative_path`，且翻译单元 ID 由完整路径确定；
+  相同 basename 的页面因此保持不同 handoff 单元和 TOC 章节归属。
 - `metadata_translation_source.json`：书名、目录、简介、版权说明等元数据输入；
 - `metadata_translation_prompt.md`：元数据翻译说明。
 - 默认还会生成 `entity_subagent_manifest.json` 和 `entity_subagent_prompt.md`，
@@ -238,6 +240,9 @@ Subagent 需要：
 1. 将每个正文单元写入 `translated_compressed/<同名>.md`；
 2. 保持正文行数、HTML 标签、属性、实体和容器不变；源行没有 `<div>` 时不得添加，`<i>` 必须保持原有数量和嵌套关系；
 3. 阅读 `metadata_translation_prompt.md`，在输出目录写入 `translated_metadata.json`。
+
+构建时按完整 package path 恢复 XHTML 文件和替换源页面。旧的扁平译文只有在 basename 唯一对应
+一个源页面时可兼容；多个页面同名时会在任何源页面被替换前阻断，不能根据顺序或目录猜测。
 
 首次运行 `html-prepare` 后，先执行 manifest 中的实体提取任务，再次运行
 `html-prepare`。第二次生成的正文和元数据提示词会同时挂载当前书实体表和所选

@@ -26,7 +26,8 @@ class TOCEntry:
         title: str,
         href: str,
         level: int = 1,
-        anchor: Optional[str] = None
+        anchor: Optional[str] = None,
+        full_href: Optional[str] = None,
     ):
         """
         Initialize a TOC entry.
@@ -41,6 +42,7 @@ class TOCEntry:
         self.href = href
         self.level = level
         self.anchor = anchor
+        self.full_href = full_href
         self.children: List[TOCEntry] = []
 
     def add_child(self, child: 'TOCEntry'):
@@ -54,6 +56,7 @@ class TOCEntry:
             'href': self.href,
             'level': self.level,
             'anchor': self.anchor,
+            'full_href': self.full_href,
             'children': [child.to_dict() for child in self.children]
         }
 
@@ -128,7 +131,8 @@ class TOCExtractor:
                 title=item.get('title', 'Untitled'),
                 href=href,
                 level=level,
-                anchor=anchor
+                anchor=anchor,
+                full_href=item.get('full_href'),
             )
 
             # Process children recursively
@@ -164,7 +168,8 @@ class TOCExtractor:
                 title=title,
                 href=href,
                 level=1,
-                anchor=None
+                anchor=None,
+                full_href=item.get('full_href'),
             )
             entries.append(entry)
             chapter_num += 1

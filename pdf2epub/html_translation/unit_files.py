@@ -4,9 +4,10 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Optional
 from loguru import logger
+from .package_identity import unit_id_for_package_path, validate_package_relative_path
 
 PART_FILE_RE = re.compile(r'^(.+)\.part(\d+)\.md$')
 
@@ -75,12 +76,29 @@ class HTMLUnitStore:
         merged_translated = merged_translated or {}
         merged_sources = self.merge_part_files_in_dir(self.workspace.compressed_units_dir)
         records = []
+        package_paths = set()
+        final_paths = set()
         for mapping_path in sorted(self.workspace.compressed_units_dir.glob("*.mapping.json")):
             base_stem = mapping_path.name[:-len(".mapping.json")]
             try:
                 mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
-            except json.JSONDecodeError:
-                mapping = {}
+            except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+                raise ValueError(f"Invalid compressed mapping {mapping_path.name}: {exc}") from exc
+            if not isinstance(mapping, dict):
+                raise ValueError(f"Compressed mapping must be an object: {mapping_path.name}")
+            package_path = None
+            if "package_relative_path" in mapping:
+                package_path = validate_package_relative_path(
+                    mapping.get("package_relative_path")
+                )
+                if not mapping.get("legacy_unit_id") and base_stem != unit_id_for_package_path(package_path):
+                    raise ValueError(
+                        f"Mapping identity does not match filename: {mapping_path.name}"
+                    )
+                folded_path = package_path.casefold()
+                if folded_path in package_paths:
+                    raise ValueError(f"Duplicate package-relative document path: {package_path}")
+                package_paths.add(folded_path)
             source_path = self.workspace.compressed_units_dir / f"{base_stem}.md"
             translated_path = self.workspace.translated_dir / f"{base_stem}.md"
             source_content = ""
@@ -98,6 +116,33 @@ class HTMLUnitStore:
                 translated_content = translated_path.read_text(encoding="utf-8")
                 translated_exists = True
             original_ext = mapping.get("original_extension", ".xhtml")
+            if not isinstance(original_ext, str) or original_ext.casefold() not in {
+                ".xhtml", ".html", ".htm"
+            }:
+                raise ValueError(
+                    f"Unsafe original_extension in mapping {mapping_path.name}: {original_ext!r}"
+                )
+            if package_path is not None:
+                if str(original_ext).casefold() != PurePosixPath(package_path).suffix.casefold():
+                    raise ValueError(
+                        f"Mapping extension differs from package path: {mapping_path.name}"
+                    )
+                final_path = self.workspace.final_dir.joinpath(*PurePosixPath(package_path).parts)
+            else:
+                # Legacy mapping compatibility: packager will resolve this
+                # basename only when it identifies one target in the EPUB.
+                final_path = self.workspace.final_dir / f"{base_stem}{original_ext}"
+            final_root = self.workspace.final_dir.resolve()
+            try:
+                final_path.resolve().relative_to(final_root)
+            except ValueError as exc:
+                raise ValueError(
+                    f"Reconstructed XHTML path escapes final directory: {final_path}"
+                ) from exc
+            folded_final = str(final_path.relative_to(self.workspace.final_dir)).replace("\\", "/").casefold()
+            if folded_final in final_paths:
+                raise ValueError(f"Multiple translation units reconstruct to the same path: {final_path}")
+            final_paths.add(folded_final)
             records.append({
                 "base_stem": base_stem,
                 "mapping_path": mapping_path,
@@ -107,7 +152,8 @@ class HTMLUnitStore:
                 "translated_path": translated_path,
                 "translated_content": translated_content,
                 "translated_exists": translated_exists,
-                "final_path": self.workspace.final_dir / f"{base_stem}{original_ext}",
+                "final_path": final_path,
+                "package_relative_path": package_path,
             })
         return records
 

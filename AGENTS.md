@@ -848,8 +848,12 @@ uv run pdf2epub -c config.yaml build-epub
    ```
 
    首次产物包括 `compressed_units/`、mapping、元数据输入/Prompt 和实体提取 Prompt。
-   `html-prepare` 会记录 `html_prepare_cache.json`；输入 EPUB、压缩单元和行数预算未变化
-   时，后续运行复用该缓存，只刷新实体/术语上下文和 worker handoff，不重复解包和压缩。
+   mapping 以 `package_relative_path` 记录 EPUB 内解码后的完整 ZIP 成员路径；翻译单元名由该完整路径
+   稳定生成，不能按 basename/stem 推断页面身份。`html-prepare` 会记录包含路径身份的缓存；旧缓存或
+   缺少路径身份的旧 mapping 不会直接复用。旧 mapping 只有在可唯一匹配当前 spine 页面时才迁移，
+   并保留其现有译文文件；无法唯一匹配时停止并提示处理，不删除或覆盖译文。
+   当前输入 EPUB、压缩单元和行数预算未变化时，后续运行复用该缓存，只刷新实体/术语上下文和 worker
+   handoff，不重复解包和压缩。
 4. 立即打开工作区 Subagent，读取实体 Prompt/manifest，写入 `translation_entities.json`；
    完成后再次运行 `html-prepare`，让正文和元数据任务挂载当前实体表及外部术语表。
    EPUB 实体提取默认排除 `Index`、`Bibliography`、`Copyright` 和 `Cover` 等确定性附录，
@@ -857,12 +861,16 @@ uv run pdf2epub -c config.yaml build-epub
    确实不需要实体表时才使用 `html-prepare --skip-entities`。
 5. 读取第二次生成的 `translate-html_subagent_prompt.md`、父级 manifest 和
    `worker_handoffs/`，打开每个 handoff 对应的工作区 Subagent，将同名译文写入
-   `translated_compressed/`。只处理 scoped manifest 的 `assigned_files`。
+   `translated_compressed/`。单元文件名是稳定身份标识但对 worker 属于 opaque ID；必须按
+   handoff 原名写译文，不重命名、不合并文件，也不得改 mapping。mapping 中的
+   `package_relative_path` 是构建器恢复到原 EPUB 成员的权威路径。只处理 scoped manifest 的
+   `assigned_files`。
    正文 worker 按 TOC 顺序把相邻短分支装入同一任务；合并任务使用 `files` 映射并按文件
    应用稀疏术语上下文，大分支拆分时使用 `shared_entries` 和 `local_entries`，不得读取
    或混用其他分支的上下文。不得把多个 HTML 单元合并成一个输出文件。
 6. EPUB 正文必须保持非空翻译单元 1:1 对齐；不得在单元内部增加换行；HTML 标签、属性、
    实体、占位符、`<div>` 容器、`<i>` 数量/顺序/嵌套必须原样保留。
+   章节分组按 mapping 中的完整 package path 与 TOC 的解析后目标路径匹配，不按文件名 stem 猜测。
 7. Subagent 按 `metadata_translation_prompt.md` 写入 `translated_metadata.json`：
    `original_title`、作者和出版社保留原文；译名写入 `translated_title`；目录顺序、href、
    anchor、level 不变；`translated_description` 和 `translated_rights` 保留为顶层字段。

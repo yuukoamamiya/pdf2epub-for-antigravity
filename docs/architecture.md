@@ -932,7 +932,10 @@ commands.novel → NovelExtractor（小说正文提取） + HTMLEpubPipeline met
   和 OPF 更新共享这些值操作。
 - `package_metadata.py`：把已校验的翻译元数据写入 OPF。`package_navigation.py` 更新 NCX/nav
   目标并记录组件状态、warning 和更新数。`package_resources.py` 负责 EPUB 解包、XHTML 替换、
-  CSS 归一化、ZIP 打包和输出校验。
+  CSS 归一化、ZIP 打包和输出校验；替换前会校验 ZIP 成员、完整 package path 映射和 Windows
+  casefold 冲突，扁平旧译文只在 basename 唯一时兼容。
+- `package_identity.py`：校验解码后的 package-relative ZIP 成员路径，并根据完整路径生成稳定、
+  Windows 文件名安全的翻译单元 ID。
 - `extraction.py`：准备 XHTML 压缩单元、mapping、分片和提取 cache，并触发单独的 metadata
   handoff 准备；它拥有源正文提取和压缩阶段。
 - `metadata_preparation.py`：生成 `metadata_translation_source.json` 与 prompt，并管理该任务
@@ -967,6 +970,13 @@ EPUB 正文也使用 2.4 节的章节装箱器。`html-prepare` 先依据原始 
 即使未超行数预算也会独立成批。
 大分支只能在自己的单元列表内拆分，不能和邻章拼接。元数据翻译始终是独立的
 `translated_metadata.json` 任务，不计入正文 worker 的章节装箱。
+
+HTML mapping 以 `package_relative_path` 记录解码一次后的完整 ZIP 成员路径；单元 ID 对完整路径
+做稳定区分，目录中的同 basename 页面以及同 stem 不同扩展名不会覆盖。TOC 章节装箱使用导航文档
+解析出的完整 package path。重建在 `final_xhtml/` 中保留 package-relative 目录，并生成路径身份清单，
+让替换阶段把译文写回唯一的原成员。mapping 缺少完整路径的旧产物只在当前 spine basename 唯一时
+迁移并复用旧单元名；迁移不改动 `translated_compressed/`，歧义或不支持的 Windows 路径会在解包、
+重建或替换前失败。缓存 schema 2 校验路径身份；旧缓存不会绕过新 mapping 合同。
 
 `html_prepare_cache.json` 记录输入 EPUB、当前压缩单元和行数预算的哈希。第二次运行
 `html-prepare` 在快照仍然有效时跳过 XHTML 解包、图片/CSS 重读和压缩，只重新生成实体、

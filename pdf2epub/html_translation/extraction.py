@@ -3,12 +3,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from pathlib import PurePosixPath
 from typing import Any, Callable, Mapping, Optional
 from loguru import logger
 
 from .compressed_cache import CompressedExtractionCache
 from .epub_parser import EPUBResourceNotFoundError
 from .unit_files import HTMLUnitStore, HTMLUnitWorkspace
+from .package_identity import MAPPING_SCHEMA_VERSION, unit_id_for_package_path, validate_package_relative_path
 from pdf2epub.batching_service import batching_config
 from pdf2epub.workflow_contracts import atomic_write_json
 from .metadata_values import make_json_safe
@@ -109,8 +111,82 @@ class HTMLExtractionPreparer:
             )
 
         extracted = 0
+        spine_items = list(self.parser.spine)
 
-        for item in self.parser.spine:
+        # A prior pre-identity workspace may contain pathless mappings whose
+        # translated files are user-authored. Reuse those unit names only when
+        # each mapping resolves to exactly one current spine member. Resolve
+        # the whole set before writing any files so ambiguous legacy state is
+        # left intact and fails with an actionable message.
+        existing_units_by_path = {}
+        legacy_unit_ids = set()
+        claimed_package_paths = set()
+        spine_paths = {}
+        for item in spine_items:
+            href = str(item.get("href", ""))
+            package_path = validate_package_relative_path(
+                item.get("full_href") or href.split("#", 1)[0]
+            )
+            folded = package_path.casefold()
+            if folded in spine_paths and spine_paths[folded] != package_path:
+                raise ValueError(
+                    f"EPUB contains package paths that collide on Windows: "
+                    f"{spine_paths[folded]!r} and {package_path!r}"
+                )
+            spine_paths[folded] = package_path
+
+        for mapping_path in sorted(self.compressed_units_dir.glob("*.mapping.json")):
+            try:
+                old_mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+                raise ValueError(f"Cannot safely resume invalid mapping {mapping_path.name}: {exc}") from exc
+            if not isinstance(old_mapping, dict):
+                raise ValueError(f"Cannot safely resume non-object mapping {mapping_path.name}")
+            legacy_stem = mapping_path.name[:-len(".mapping.json")]
+            mapped_path = old_mapping.get("package_relative_path")
+            if mapped_path:
+                package_path = validate_package_relative_path(mapped_path)
+                if package_path.casefold() not in spine_paths:
+                    raise ValueError(
+                        f"Mapping {mapping_path.name} targets a document no longer in the EPUB: {package_path}; "
+                        "preserve translations and resolve the stale mapping inventory before rerunning html-prepare."
+                    )
+                package_path = spine_paths[package_path.casefold()]
+                if not old_mapping.get("legacy_unit_id") and legacy_stem != unit_id_for_package_path(package_path):
+                    raise ValueError(f"Mapping identity does not match filename: {mapping_path.name}")
+            else:
+                old_extension = str(old_mapping.get("original_extension") or "").casefold()
+                candidates = []
+                for item in spine_items:
+                    authored_path = PurePosixPath(str(item.get("href", "")).split("#", 1)[0])
+                    package_path = validate_package_relative_path(
+                        item.get("full_href") or str(item.get("href", "")).split("#", 1)[0]
+                    )
+                    member_path = PurePosixPath(package_path)
+                    names = {authored_path.name.casefold(), member_path.name.casefold()}
+                    expected_name = f"{legacy_stem}{old_extension}".casefold()
+                    if expected_name in names:
+                        candidates.append(package_path)
+                candidates = list(dict.fromkeys(candidates))
+                if len(candidates) != 1:
+                    reason = "no current spine member" if not candidates else "multiple current spine members"
+                    raise ValueError(
+                        f"Legacy mapping {mapping_path.name} has no package path and matches {reason}; "
+                        "preserve the translated file, then resolve or move the stale mapping manually before rerunning html-prepare."
+                    )
+                package_path = candidates[0]
+            folded = package_path.casefold()
+            if folded in claimed_package_paths:
+                raise ValueError(
+                    f"Multiple mappings claim package path {package_path}; "
+                    "preserve translations and resolve the mapping inventory before rerunning html-prepare."
+                )
+            claimed_package_paths.add(folded)
+            existing_units_by_path[package_path] = legacy_stem
+            if old_mapping.get("legacy_unit_id") or not mapped_path:
+                legacy_unit_ids.add(legacy_stem)
+
+        for item in spine_items:
             href = item.get('href', '')
             if not href:
                 continue
@@ -136,15 +212,25 @@ class HTMLExtractionPreparer:
                 # source parts so each worker receives a bounded number of
                 # translation units.  The full mapping remains attached to the
                 # logical base file and is merged again only at build time.
-                href_path = Path(href)
-                file_stem = href_path.stem
-                original_extension = href_path.suffix  # .html or .xhtml
+                # The decoded full ZIP member path is the document identity.
+                # ``href`` fallback keeps lightweight parser test doubles and
+                # pre-contract custom parsers usable; EPUBParser always supplies
+                # full_href for local spine items.
+                package_path = item.get("full_href") or str(href).split("#", 1)[0]
+                package_path = validate_package_relative_path(package_path)
+                file_stem = existing_units_by_path.get(package_path) or unit_id_for_package_path(package_path)
+                legacy_file_stem = file_stem if file_stem in legacy_unit_ids else None
+                original_extension = Path(package_path).suffix
                 compressed_path = self.compressed_units_dir / f"{file_stem}.md"
                 compressed_path.write_text(compressed, encoding='utf-8')
 
                 # Save mapping for decompression (.mapping.json)
                 # Include original extension for correct output filename
                 mapping['original_extension'] = original_extension
+                mapping['mapping_schema_version'] = MAPPING_SCHEMA_VERSION
+                mapping['package_relative_path'] = package_path
+                if legacy_file_stem:
+                    mapping['legacy_unit_id'] = True
                 mapping_path = self.compressed_units_dir / f"{file_stem}.mapping.json"
                 # Serialize first, then write — prevents truncated files if
                 # json.dumps fails mid-serialization (e.g. non-serializable lxml objects)

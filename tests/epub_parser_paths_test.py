@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import zipfile
+import json
 from pathlib import Path
 
 import pytest
@@ -151,8 +152,11 @@ def test_extract_and_preprocess_reads_encoded_spine_uri_end_to_end(tmp_path: Pat
     pipeline = HTMLEpubPipeline(epub, tmp_path / "work", {})
     try:
         assert pipeline.extract_and_preprocess(target_language="Chinese") == 1
-        assert (pipeline.compressed_units_dir / "chapter%201.md").is_file()
-        assert (pipeline.compressed_units_dir / "chapter%201.mapping.json").is_file()
+        mapping_path = next(pipeline.compressed_units_dir.glob("*.mapping.json"))
+        mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
+        unit_stem = mapping_path.name[:-len(".mapping.json")]
+        assert mapping["package_relative_path"] == "OEBPS/Text/chapter 1.xhtml"
+        assert (pipeline.compressed_units_dir / f"{unit_stem}.md").is_file()
     finally:
         pipeline.parser._zf.close()
 

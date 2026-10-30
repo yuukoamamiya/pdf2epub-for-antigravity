@@ -182,6 +182,21 @@ class EPUBParser:
             raise ValueError(f"EPUB URI escapes the package root: {href!r}")
         return resolved
 
+    def _resolve_toc_href(self, toc_member: str, href: str) -> str:
+        """Resolve a navigation link against its NCX/NAV package member."""
+        parsed = urlsplit(href)
+        if parsed.scheme or parsed.netloc or parsed.path.startswith("/"):
+            raise ValueError(f"TOC link must be package-relative: {href!r}")
+        if not parsed.path:
+            return toc_member
+        decoded_path = _decode_package_uri_path(parsed.path)
+        resolved = posixpath.normpath(
+            posixpath.join(posixpath.dirname(toc_member), decoded_path)
+        )
+        if resolved in ("", ".", "..") or resolved.startswith("../"):
+            raise ValueError(f"TOC link escapes the package root: {href!r}")
+        return resolved
+
     @property
     def metadata(self) -> Dict:
         """
@@ -442,6 +457,7 @@ class EPUBParser:
                 entry = {
                     'title': title,
                     'href': href,
+                    'full_href': self._resolve_toc_href(ncx_item['full_href'], href),
                     'children': []
                 }
 
@@ -512,6 +528,9 @@ class EPUBParser:
                 entry = {
                     'title': ''.join(a.itertext()).strip(),
                     'href': a.get('href', ''),
+                    'full_href': self._resolve_toc_href(
+                        nav_item['full_href'], a.get('href', '')
+                    ),
                     'children': []
                 }
 

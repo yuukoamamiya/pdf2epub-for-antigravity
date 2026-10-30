@@ -7,6 +7,11 @@ from pathlib import Path
 from typing import Dict
 
 from pdf2epub.workflow_contracts import atomic_write_json
+from .package_identity import (
+    MAPPING_SCHEMA_VERSION,
+    unit_id_for_package_path,
+    validate_package_relative_path,
+)
 
 
 class CompressedExtractionCache:
@@ -24,6 +29,7 @@ class CompressedExtractionCache:
     def files(self) -> Dict[str, str]:
         """Hash mappings and active files, rejecting incomplete/unsafe mappings."""
         files: Dict[str, str] = {}
+        package_paths: set[str] = set()
         units_root = self.compressed_units_dir.resolve()
         for mapping_path in sorted(self.compressed_units_dir.glob("*.mapping.json")):
             try:
@@ -38,6 +44,17 @@ class CompressedExtractionCache:
                 raise ValueError(f"invalid compressed mapping: {mapping_path.name}") from exc
             if not isinstance(mapping, dict):
                 raise ValueError(f"compressed mapping must be an object: {mapping_path.name}")
+            if mapping.get("mapping_schema_version") != MAPPING_SCHEMA_VERSION:
+                raise ValueError(f"mapping identity schema is stale: {mapping_path.name}")
+            package_path = validate_package_relative_path(
+                mapping.get("package_relative_path")
+            )
+            if not mapping.get("legacy_unit_id") and stem != unit_id_for_package_path(package_path):
+                raise ValueError(f"mapping identity does not match filename: {mapping_path.name}")
+            folded_path = package_path.casefold()
+            if folded_path in package_paths:
+                raise ValueError(f"duplicate package path identity: {package_path}")
+            package_paths.add(folded_path)
             if "translation_parts" in mapping:
                 active_names = mapping["translation_parts"]
                 if not isinstance(active_names, list) or not active_names:
@@ -65,7 +82,7 @@ class CompressedExtractionCache:
             cache = json.loads(self.path.read_text(encoding="utf-8"))
             if not isinstance(cache, dict):
                 return False
-            if cache.get("schema_version") != 1:
+            if cache.get("schema_version") != 2:
                 return False
             if cache.get("input_epub_sha256") != hashlib.sha256(self.epub_path.read_bytes()).hexdigest():
                 return False
@@ -84,7 +101,7 @@ class CompressedExtractionCache:
         if not compressed_files:
             raise ValueError("cannot write compressed cache receipt without mapped files")
         atomic_write_json(self.path, {
-            "schema_version": 1,
+            "schema_version": 2,
             "input_epub_sha256": hashlib.sha256(self.epub_path.read_bytes()).hexdigest(),
             "max_nonempty_lines": int(max_nonempty_lines),
             "compressed_files": compressed_files,

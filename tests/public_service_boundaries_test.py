@@ -173,7 +173,12 @@ def test_compressed_cache_service_receipt_tracks_input_and_active_files(tmp_path
     (units / "part1.md").write_text("active", encoding="utf-8")
     (units / "unused.md").write_text("inactive", encoding="utf-8")
     (units / "unit.mapping.json").write_text(
-        json.dumps({"translation_parts": ["part1.md"]}), encoding="utf-8"
+        json.dumps({
+            "mapping_schema_version": 2,
+            "package_relative_path": "OEBPS/unit.xhtml",
+            "legacy_unit_id": True,
+            "translation_parts": ["part1.md"],
+        }), encoding="utf-8"
     )
     cache = CompressedExtractionCache(output, epub, units)
     cache.write(max_nonempty_lines=350)
@@ -207,7 +212,12 @@ def test_compressed_cache_service_fails_closed_for_corrupt_json_shapes(tmp_path)
             raise AssertionError("invalid mapping must not produce a receipt")
         assert not cache.path.exists()
 
-    mapping.write_text(json.dumps({"translation_parts": ["missing.md"]}), encoding="utf-8")
+    mapping.write_text(json.dumps({
+        "mapping_schema_version": 2,
+        "package_relative_path": "OEBPS/unit.xhtml",
+        "legacy_unit_id": True,
+        "translation_parts": ["missing.md"],
+    }), encoding="utf-8")
     assert not cache.is_current(max_nonempty_lines=350)
     try:
         cache.write(max_nonempty_lines=350)
@@ -232,7 +242,12 @@ def test_compressed_cache_service_rejects_escaping_active_paths(tmp_path):
     mapping = units / "unit.mapping.json"
     cache = CompressedExtractionCache(output, epub, units)
     for unsafe in ("../outside.md", str(outside.resolve())):
-        mapping.write_text(json.dumps({"translation_parts": [unsafe]}), encoding="utf-8")
+        mapping.write_text(json.dumps({
+            "mapping_schema_version": 2,
+            "package_relative_path": "OEBPS/unit.xhtml",
+            "legacy_unit_id": True,
+            "translation_parts": [unsafe],
+        }), encoding="utf-8")
         assert not cache.is_current(max_nonempty_lines=350)
         try:
             cache.files()
@@ -255,7 +270,12 @@ def test_compressed_cache_service_rejects_non_object_receipts_and_deleted_parts(
     active = units / "part1.md"
     active.write_text("active", encoding="utf-8")
     (units / "unit.mapping.json").write_text(
-        json.dumps({"translation_parts": ["part1.md"]}), encoding="utf-8"
+        json.dumps({
+            "mapping_schema_version": 2,
+            "package_relative_path": "OEBPS/unit.xhtml",
+            "legacy_unit_id": True,
+            "translation_parts": ["part1.md"],
+        }), encoding="utf-8"
     )
     cache = CompressedExtractionCache(output, epub, units)
     for invalid_receipt in ("[]", "null", '"text"'):

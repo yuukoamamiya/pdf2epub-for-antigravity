@@ -9,7 +9,9 @@ from typing import Any, Callable, Dict, Mapping, Optional
 from loguru import logger
 
 from pdf2epub.utils.paths import sanitize_filename
+from pdf2epub.workflow_contracts import atomic_write_json
 from .build_contracts import NavigationUpdateError
+from .package_identity import PACKAGE_PATH_MANIFEST
 
 
 @dataclass(frozen=True)
@@ -61,14 +63,17 @@ class HTMLReconstructor:
             logger.warning("Building partial EPUB because allow_partial=True")
 
         compressor = HTMLCompressor()
+        merged_parts = context.merge_parts()
+        if merged_parts:
+            logger.info(f"Merged {len(merged_parts)} split files")
+        records = context.logical_records(merged_parts)
+
         if context.final_dir.exists():
             shutil.rmtree(context.final_dir)
         context.final_dir.mkdir(parents=True, exist_ok=True)
 
-        merged_parts = context.merge_parts()
-        if merged_parts:
-            logger.info(f"Merged {len(merged_parts)} split files")
-        for record in context.logical_records(merged_parts):
+        package_path_bindings = []
+        for record in records:
             base_stem = record["base_stem"]
             if not record["translated_exists"]:
                 logger.warning(f"No translation found for {base_stem}")
@@ -76,8 +81,21 @@ class HTMLReconstructor:
             if base_stem in merged_parts:
                 logger.debug(f"Using merged content for {base_stem}")
             restored = compressor.decompress(record["translated_content"], record["mapping"])
+            record["final_path"].parent.mkdir(parents=True, exist_ok=True)
             record["final_path"].write_text(restored, encoding="utf-8")
+            if record.get("package_relative_path"):
+                package_path_bindings.append({
+                    "translated_path": record["final_path"].relative_to(context.final_dir).as_posix(),
+                    "package_relative_path": record["package_relative_path"],
+                })
             logger.debug(f"Decompressed: {base_stem}")
+
+        if package_path_bindings:
+            atomic_write_json(
+                context.final_dir / PACKAGE_PATH_MANIFEST,
+                {"schema_version": 1, "documents": package_path_bindings},
+                indent=2,
+            )
 
         metadata_path = context.output_dir / "translated_metadata.json"
         translated_metadata = None
