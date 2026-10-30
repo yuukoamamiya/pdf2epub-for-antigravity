@@ -6,7 +6,9 @@ from pdf2epub.refine.footnote_status import footnote_normalization_is_current
 from pdf2epub.validation_receipts import validation_receipt_is_current
 
 
-def _resolve_pdf_polish_source(output_dir: Path, config: dict | None = None):
+def _resolve_pdf_polish_source(
+    output_dir: Path, config: dict | None = None, ocr_evidence=None
+):
     """Choose the source that the PDF polish gate must inspect.
 
     A validated footnote-normalized stage is preferred when present.  The
@@ -14,14 +16,16 @@ def _resolve_pdf_polish_source(output_dir: Path, config: dict | None = None):
     ``footnote-apply`` before ``polish`` to remove page-level note disruption.
     """
     output_dir = Path(output_dir)
-    _require_reviewed_ocr_anomalies(output_dir, config)
+    _require_reviewed_ocr_anomalies(output_dir, config, ocr_evidence)
     normalized_dir = output_dir / "footnote_normalized"
     if footnote_normalization_is_current(output_dir, config=config):
         return normalized_dir, "footnote_normalized"
     return output_dir / "ocr_markdown", "ocr"
 
 
-def _resolve_pdf_markdown_source(output_dir: Path, config: dict):
+def _resolve_pdf_markdown_source(
+    output_dir: Path, config: dict, ocr_evidence=None
+):
     """Choose the Markdown stage shared by PDF workflows.
 
     Polished Markdown is the source for every new PDF workflow.  Legacy
@@ -29,7 +33,7 @@ def _resolve_pdf_markdown_source(output_dir: Path, config: dict):
     polish gate before translation.
     """
     translation = config.get("translation", {}) or {}
-    _require_reviewed_ocr_anomalies(output_dir, config)
+    _require_reviewed_ocr_anomalies(output_dir, config, ocr_evidence)
     requested_stage = str(translation.get("source_stage", "auto")).strip().lower()
     if requested_stage not in {"auto", "ocr", "polished", "native_text"}:
         raise ValueError(
@@ -37,7 +41,9 @@ def _resolve_pdf_markdown_source(output_dir: Path, config: dict):
         )
 
     polished_dir = output_dir / "polished_markdown" / "validated"
-    polish_input_dir, _polish_input_stage = _resolve_pdf_polish_source(output_dir, config)
+    polish_input_dir, _polish_input_stage = _resolve_pdf_polish_source(
+        output_dir, config, ocr_evidence
+    )
     ocr_dir = output_dir / "ocr_markdown"
     polished_available = _polished_stage_is_current(
         output_dir, polished_dir, polish_input_dir
@@ -58,7 +64,9 @@ def _resolve_pdf_markdown_source(output_dir: Path, config: dict):
     return ocr_dir, "ocr"
 
 
-def _require_reviewed_ocr_anomalies(output_dir: Path, config: dict | None) -> None:
+def _require_reviewed_ocr_anomalies(
+    output_dir: Path, config: dict | None, ocr_evidence=None
+) -> None:
     """Prevent polished or translated stages bypassing pending raw-page anomalies."""
     pages_dir = Path(output_dir) / "pages"
     if not any(pages_dir.glob("page_*.md")):
@@ -66,14 +74,18 @@ def _require_reviewed_ocr_anomalies(output_dir: Path, config: dict | None) -> No
     from pdf2epub.ocr_source import is_legacy_native_source
     if is_legacy_native_source(output_dir):
         return
-    from pdf2epub.ocr_anomalies import scan_ocr_pages
+    from pdf2epub.ocr_anomalies import evidence_report_for_output, scan_ocr_pages
     from pdf2epub.ocr_correction import ocr_correction_is_current
 
-    anomaly_report = scan_ocr_pages(output_dir, persist=False)
+    anomaly_report = evidence_report_for_output(ocr_evidence, output_dir)
+    if anomaly_report is None:
+        anomaly_report = scan_ocr_pages(output_dir, persist=False)
     anomalies = anomaly_report["review_required_files"]
     if anomaly_report.get("scan_errors"):
         raise ValueError("OCR anomaly scan could not read every raw page")
-    if anomalies and not ocr_correction_is_current(output_dir, config):
+    if anomalies and not ocr_correction_is_current(
+        output_dir, config, ocr_evidence=ocr_evidence
+    ):
         raise ValueError(
             "OCR commentary anomaly requires visual review before polish or downstream use: "
             + ", ".join(anomalies[:10])

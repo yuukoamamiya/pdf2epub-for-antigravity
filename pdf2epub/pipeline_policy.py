@@ -35,7 +35,9 @@ class PipelinePolicy:
         """Whether this is the language-neutral PDF-to-EPUB workflow."""
         return not self.requires_translation
 
-    def requires_visual_ocr_review(self, output_dir: Any = None) -> bool:
+    def requires_visual_ocr_review(
+        self, output_dir: Any = None, ocr_evidence=None
+    ) -> bool:
         """Whether workflow policy or current raw pages require visual review."""
         if output_dir is not None:
             from pdf2epub.ocr_source import is_legacy_native_source
@@ -46,9 +48,11 @@ class PipelinePolicy:
             return True
         if output_dir is None:
             return False
-        from pdf2epub.ocr_anomalies import scan_ocr_pages
+        from pdf2epub.ocr_anomalies import evidence_report_for_output, scan_ocr_pages
 
-        report = scan_ocr_pages(output_dir, persist=False)
+        report = evidence_report_for_output(ocr_evidence, output_dir)
+        if report is None:
+            report = scan_ocr_pages(output_dir, persist=False)
         return bool(report["review_required_files"] or report.get("scan_errors"))
 
     @classmethod

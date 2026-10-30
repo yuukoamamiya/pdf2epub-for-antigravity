@@ -96,9 +96,10 @@ def run_readiness_check(
         else "; ".join(ocr_report["errors"][:5]),
     )
 
-    from pdf2epub.ocr_anomalies import scan_ocr_pages
+    from pdf2epub.ocr_anomalies import scan_ocr_page_evidence
 
-    anomaly_report = scan_ocr_pages(output_dir)
+    ocr_evidence = scan_ocr_page_evidence(output_dir)
+    anomaly_report = ocr_evidence.report
     try:
         legacy_native_text = is_legacy_native_source(output_dir)
         source_error = None
@@ -109,9 +110,12 @@ def run_readiness_check(
     if legacy_native_text:
         anomaly_report = {**anomaly_report, "review_required_files": [], "scan_errors": []}
     anomaly_files = anomaly_report["review_required_files"]
-    anomaly_correction_ready = not anomaly_report.get("scan_errors") and (not anomaly_files or ocr_correction_is_current(
-        output_dir, config
-    ))
+    anomaly_correction_ready = not anomaly_report.get("scan_errors") and (
+        not anomaly_files
+        or ocr_correction_is_current(
+            output_dir, config, ocr_evidence=ocr_evidence
+        )
+    )
     record(
         "ocr_anomalies",
         anomaly_correction_ready,
@@ -130,13 +134,15 @@ def run_readiness_check(
 
     native_text = legacy_native_text
     try:
-        correction_required = policy.requires_visual_ocr_review(output_dir)
+        correction_required = policy.requires_visual_ocr_review(
+            output_dir, ocr_evidence
+        )
     except ValueError as exc:
         correction_required = True
         if source_error is None:
             record("ocr_page_source", False, str(exc))
     correction_ready = native_text or not correction_required or ocr_correction_is_current(
-        output_dir, config
+        output_dir, config, ocr_evidence=ocr_evidence
     )
     record(
         "ocr_correction",
@@ -154,7 +160,9 @@ def run_readiness_check(
         ),
     )
     try:
-        pages_dir, _page_source_kind = select_refinement_pages(output_dir, config=config)
+        pages_dir, _page_source_kind = select_refinement_pages(
+            output_dir, config=config, ocr_evidence=ocr_evidence
+        )
     except ValueError as exc:
         pages_dir = raw_pages_dir
         if source_error is None:
@@ -214,7 +222,9 @@ def run_readiness_check(
         )
 
     try:
-        source_dir, source_stage = _resolve_pdf_markdown_source(output_dir, config)
+        source_dir, source_stage = _resolve_pdf_markdown_source(
+            output_dir, config, ocr_evidence
+        )
     except ValueError as exc:
         source_dir, source_stage = output_dir / "ocr_markdown", "blocked"
         record("source_stage", False, str(exc))
@@ -222,7 +232,9 @@ def run_readiness_check(
     source_ready = bool(source_files)
     if source_stage == "polished":
         try:
-            polish_input_dir, _ = _resolve_pdf_polish_source(output_dir, config)
+            polish_input_dir, _ = _resolve_pdf_polish_source(
+                output_dir, config, ocr_evidence
+            )
             source_ready = source_ready and _polished_stage_is_current(
                 output_dir, source_dir, polish_input_dir
             )
@@ -384,7 +396,9 @@ def run_readiness_check(
     if stage == "package" and policy.requires_polish:
         polish_report_path = output_dir / "polish_validation.json"
         polish_dir = output_dir / "polished_markdown" / "validated"
-        polish_input_dir, _ = _resolve_pdf_polish_source(output_dir, config)
+        polish_input_dir, _ = _resolve_pdf_polish_source(
+            output_dir, config, ocr_evidence
+        )
         polish_ready = validation_receipt_is_current(
             polish_report_path,
             polish_input_dir,

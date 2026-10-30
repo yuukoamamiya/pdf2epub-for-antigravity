@@ -3,13 +3,38 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
-from pdf2epub.workflow_contracts import atomic_write_json, sha256_file
+from pdf2epub.workflow_contracts import atomic_write_json
 
 SCHEMA_VERSION = 1
+
+
+@dataclass(frozen=True)
+class OcrPageEvidence:
+    """One invocation's anomaly findings and raw-page hashes, bound to a book."""
+
+    output_dir: Path
+    report: dict[str, Any]
+
+    @property
+    def page_hashes(self) -> dict[str, str]:
+        return self.report["page_hashes"]
+
+
+def evidence_report_for_output(
+    evidence: OcrPageEvidence | None, output_dir: Path
+) -> Mapping[str, Any] | None:
+    """Return evidence only when it belongs to this output directory."""
+    if evidence is None:
+        return None
+    if Path(evidence.output_dir).resolve() != Path(output_dir).resolve():
+        raise ValueError("OCR page evidence belongs to a different output directory")
+    return evidence.report
 
 # Require a page/text/image reference together with a transcription failure or
 # an explicit description-of-content construction. These patterns deliberately
@@ -38,8 +63,10 @@ def detect_ocr_commentary(text: str) -> list[str]:
     return reasons
 
 
-def scan_ocr_pages(output_dir: Path, *, persist: bool = True) -> dict[str, Any]:
-    """Hash and scan every current raw page, including resumed checkpoints."""
+def scan_ocr_page_evidence(
+    output_dir: Path, *, persist: bool = True
+) -> OcrPageEvidence:
+    """Read, hash, and scan every current raw page once for this invocation."""
     output_dir = Path(output_dir)
     pages_dir = output_dir / "pages"
     pages = {}
@@ -49,8 +76,9 @@ def scan_ocr_pages(output_dir: Path, *, persist: bool = True) -> dict[str, Any]:
         if not path.is_file():
             continue
         try:
-            content = path.read_text(encoding="utf-8")
-            digest = sha256_file(path)
+            raw_content = path.read_bytes()
+            content = raw_content.decode("utf-8")
+            digest = hashlib.sha256(raw_content).hexdigest()
         except (OSError, UnicodeError) as exc:
             scan_errors.append({"file": path.name, "reason": f"page scan failed: {exc}"})
             continue
@@ -76,7 +104,22 @@ def scan_ocr_pages(output_dir: Path, *, persist: bool = True) -> dict[str, Any]:
     }
     if persist:
         atomic_write_json(output_dir / "ocr_anomaly_report.json", report)
-    return report
+    return OcrPageEvidence(output_dir.resolve(), report)
 
 
-__all__ = ["detect_ocr_commentary", "scan_ocr_pages", "SCHEMA_VERSION"]
+def scan_ocr_pages(output_dir: Path, *, persist: bool = True) -> dict[str, Any]:
+    """Hash and scan every current raw page, including resumed checkpoints.
+
+    Retains the original dictionary-returning API for standalone callers.
+    """
+    return scan_ocr_page_evidence(output_dir, persist=persist).report
+
+
+__all__ = [
+    "OcrPageEvidence",
+    "detect_ocr_commentary",
+    "evidence_report_for_output",
+    "scan_ocr_page_evidence",
+    "scan_ocr_pages",
+    "SCHEMA_VERSION",
+]

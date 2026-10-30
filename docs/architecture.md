@@ -120,6 +120,9 @@ Subagent 合同层
 - `markdown.py`：PDF Markdown 的 polish、translate、readiness 和 validation 编排。
 - readiness 对派生源稿使用显式依赖诊断：脚注归一化过期时只报告其哈希/证据根因，
   polish 与实体检查标记为 `blocked_by`，不把级联症状伪装成独立损坏。
+- 单次 readiness 检查创建新的原始 OCR 证据快照：每页字节只读取一次，同时解码文本并计算
+  SHA-256；异常结果和页面哈希显式传给同次检查中的 policy、纠错新鲜度与源稿选择。快照绑定
+  到输出目录，不使用跨命令或模块级缓存；独立调用这些 helper 时仍按原行为自行扫描。
 - `page_furniture.py`：已有 PDF 译文的页眉页脚修复交接和校验编排。
 - `entities.py`：生成和校验书内实体表 handoff。
 - `toc.py`：生成和校验独立的 PDF TOC 翻译 handoff。

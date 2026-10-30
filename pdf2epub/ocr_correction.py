@@ -96,6 +96,16 @@ def _page_hashes(directory: Path) -> Dict[str, str]:
     }
 
 
+def _raw_page_hashes(output_dir: Path, evidence=None) -> Dict[str, str]:
+    """Use this invocation's verified page snapshot when supplied."""
+    from pdf2epub.ocr_anomalies import evidence_report_for_output
+
+    report = evidence_report_for_output(evidence, output_dir)
+    if report is not None:
+        return dict(report.get("page_hashes") or {})
+    return _page_hashes(raw_page_dir(output_dir))
+
+
 def _atomic_write_bytes(path: Path, content: bytes) -> None:
     """Write binary output through a sibling temporary file."""
     target = Path(path)
@@ -279,6 +289,8 @@ def validate_ocr_correction_reviews(
     source_dir: Path,
     target_dir: Path,
     selected_files: Optional[Iterable[str]] = None,
+    *,
+    ocr_evidence=None,
 ) -> Dict[str, Any]:
     """Validate page-review evidence and reject content-line loss.
 
@@ -301,8 +313,27 @@ def validate_ocr_correction_reviews(
     )
     errors: list[Dict[str, str]] = []
     checked: list[str] = []
-    from pdf2epub.ocr_anomalies import detect_ocr_commentary, scan_ocr_pages
-    anomaly_names = set(scan_ocr_pages(output_dir, persist=False)["review_required_files"])
+    from pdf2epub.ocr_anomalies import (
+        detect_ocr_commentary,
+        evidence_report_for_output,
+        scan_ocr_pages,
+    )
+    evidence_report = evidence_report_for_output(ocr_evidence, output_dir)
+    anomaly_report = evidence_report or scan_ocr_pages(output_dir, persist=False)
+    if anomaly_report.get("scan_errors"):
+        return {
+            "schema_version": OCR_PAGE_REVIEW_SCHEMA_VERSION,
+            "valid": False,
+            "files_checked": [],
+            "errors": [
+                {
+                    "file": item.get("file", ""),
+                    "reason": "raw OCR pages could not all be scanned for anomalies",
+                }
+                for item in anomaly_report["scan_errors"]
+            ],
+        }
+    anomaly_names = set(anomaly_report["review_required_files"])
 
     for name in selected_names:
         if name not in all_source_names:
@@ -367,8 +398,9 @@ def validate_ocr_correction_reviews(
         if is_anomaly:
             image_path = review_image_dir(output_dir) / f"{Path(name).stem}.png"
             decision = record.get("anomaly_decision")
+            raw_page_hash = (anomaly_report.get("page_hashes") or {}).get(name)
             bound = {
-                "source_sha256": sha256_file(source),
+                "source_sha256": raw_page_hash or sha256_file(source),
                 "target_sha256": sha256_file(target),
                 "image_sha256": sha256_file(image_path) if image_path.is_file() else "",
             }
@@ -418,21 +450,34 @@ def validate_ocr_correction_reviews(
 def ocr_correction_is_current(
     output_dir: Path,
     config: Optional[Mapping[str, Any]] = None,
+    *,
+    ocr_evidence=None,
 ) -> bool:
     """Return whether validated corrections match the current raw OCR pages."""
     single_ocr_anomalies = []
-    if config is not None and not secondary_ocr_enabled(config):
-        from pdf2epub.ocr_anomalies import scan_ocr_pages
+    from pdf2epub.ocr_anomalies import evidence_report_for_output
 
-        single_ocr_anomalies = scan_ocr_pages(output_dir, persist=False)["review_required_files"]
+    evidence_report = evidence_report_for_output(ocr_evidence, output_dir)
+    if evidence_report is not None and evidence_report.get("scan_errors"):
+        return False
+    if config is not None and not secondary_ocr_enabled(config):
+        if evidence_report is not None:
+            single_ocr_anomalies = evidence_report["review_required_files"]
+        else:
+            from pdf2epub.ocr_anomalies import scan_ocr_pages
+
+            single_ocr_anomalies = scan_ocr_pages(output_dir, persist=False)["review_required_files"]
         if not single_ocr_anomalies:
             return False
     elif config is None:
         recorded = _load_correction_report(output_dir)
         if recorded.get("evidence_mode") == "single_ocr_anomaly_review":
-            from pdf2epub.ocr_anomalies import scan_ocr_pages
+            if evidence_report is not None:
+                single_ocr_anomalies = evidence_report["review_required_files"]
+            else:
+                from pdf2epub.ocr_anomalies import scan_ocr_pages
 
-            single_ocr_anomalies = scan_ocr_pages(output_dir, persist=False)["review_required_files"]
+                single_ocr_anomalies = scan_ocr_pages(output_dir, persist=False)["review_required_files"]
             if set(recorded.get("anomaly_files", [])) != set(single_ocr_anomalies):
                 return False
     report = _load_correction_report(output_dir)
@@ -449,7 +494,7 @@ def ocr_correction_is_current(
         return False
     if not isinstance(valid_files, list):
         return False
-    current = _page_hashes(raw_page_dir(output_dir))
+    current = _raw_page_hashes(output_dir, ocr_evidence)
     if not current or dict(source_hashes) != current or set(valid_files) != set(current):
         return False
     target_dir = corrected_page_dir(output_dir)
@@ -490,6 +535,7 @@ def ocr_correction_is_current(
         raw_page_dir(output_dir),
         target_dir,
         selected_files=review_files,
+        ocr_evidence=ocr_evidence,
     )["valid"] if review_files else True
 
 
@@ -498,6 +544,7 @@ def select_refinement_pages(
     *,
     require_correction: bool = False,
     config: Optional[Mapping[str, Any]] = None,
+    ocr_evidence=None,
 ) -> Tuple[Path, str]:
     """Select the page set for TOC/refinement and report its provenance."""
     output_dir = Path(output_dir)
@@ -507,15 +554,17 @@ def select_refinement_pages(
     if is_legacy_native_source(output_dir):
         return raw, "native_text"
     if config is not None and not secondary_ocr_enabled(config):
-        from pdf2epub.ocr_anomalies import scan_ocr_pages
+        from pdf2epub.ocr_anomalies import evidence_report_for_output, scan_ocr_pages
 
-        anomaly_report = scan_ocr_pages(output_dir, persist=False)
+        anomaly_report = evidence_report_for_output(ocr_evidence, output_dir)
+        if anomaly_report is None:
+            anomaly_report = scan_ocr_pages(output_dir, persist=False)
         if anomaly_report.get("scan_errors"):
             raise ValueError("raw OCR pages could not all be scanned for anomalies")
         anomalies = anomaly_report["review_required_files"]
         if not anomalies:
             return raw, "ocr"
-        if ocr_correction_is_current(output_dir, config=config):
+        if ocr_correction_is_current(output_dir, config=config, ocr_evidence=ocr_evidence):
             return corrected_page_dir(output_dir), "ocr_corrected"
         if require_correction:
             raise ValueError(
@@ -523,7 +572,7 @@ def select_refinement_pages(
                 "ocr-correct-validate before refinement"
             )
         return raw, "ocr"
-    if ocr_correction_is_current(output_dir, config=config):
+    if ocr_correction_is_current(output_dir, config=config, ocr_evidence=ocr_evidence):
         return corrected_page_dir(output_dir), "ocr_corrected"
     if require_correction:
         raise ValueError(
