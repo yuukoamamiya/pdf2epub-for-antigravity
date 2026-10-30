@@ -338,7 +338,24 @@ git -c http.proxy=http://127.0.0.1:10809 -c https.proxy=http://127.0.0.1:10809 p
 - 命令使用 Git Bash，不把复杂 Bash 语法丢给 PowerShell；
 - 复杂文本/JSON 操作用 Python，不用一次性 shell 拼接。
 
-### 5.5 “用户要求翻译/润色一本书”
+### 5.5 “生成可分享的 sanitized export”
+
+使用 `scripts/sanitize_output.sh` 从现有输出目录创建独立副本；该工具不会修改源目录或调用者当前目录中的文件：
+
+```text
+scripts/sanitize_output.sh [source_dir [destination_dir]]
+```
+
+默认源目录是当前目录下的 `output/`。省略目标目录时，工具会在源目录旁的
+`.work/sanitized-exports/` 下生成唯一的新目录。指定目标必须尚不存在，且与源目录不能相同或互为祖先；
+工具不会删除任何目录。源树内出现 symlink/junction 时会在写出前失败，避免把源树外的数据复制进导出。
+导出副本会排除 `.DS_Store`、`config.yaml`、`config_*.yaml`、`input.epub` 和
+`input_original.pdf`；其余二进制文件按原字节复制，指定 UTF-8 文本扩展名中的 API token、Bearer
+token、代理 URL 和本地路径会做脱敏。JSON/YAML 会解析后递归脱敏并重新序列化，保留结构和值类型；
+格式、空白和 YAML 注释可能规范化。已知敏感字段（如 API key、authorization、token、secret）的字符串值
+会整体替换为 `[REDACTED]`。调用者应分享生成的目标目录，并保留原始输出不变。
+
+### 5.6 “用户要求翻译/润色一本书”
 
 停止维护模式，转到 `AGENTS.md`：
 
