@@ -4,6 +4,7 @@ import json
 import importlib.util
 import shutil
 import subprocess
+import uuid
 from pathlib import Path
 
 import pytest
@@ -160,8 +161,8 @@ def test_generic_sensitive_json_values_are_redacted_recursively(tmp_path: Path) 
     source = tmp_path / "source"
     source.mkdir()
     plain_api_secret = "p" * 25
-    authorization_secret = "12345678-1234-1234-1234-123456789012"
-    token_secret = "plain-token-value"
+    authorization_secret = str(uuid.uuid4())
+    token_secret = f"synthetic-token-{uuid.uuid4().hex}"
     document = {
         "api_key": plain_api_secret,
         "nested": {
@@ -188,7 +189,7 @@ def test_generic_sensitive_json_values_are_redacted_recursively(tmp_path: Path) 
 def test_generic_sensitive_yaml_values_are_redacted_recursively(tmp_path: Path) -> None:
     source = tmp_path / "source"
     source.mkdir()
-    uuid_secret = "12345678-1234-1234-1234-123456789012"
+    uuid_secret = str(uuid.uuid4())
     (source / "secrets.yaml").write_text(
         "api-key: plain-api-secret-value\n"
         f"nested:\n  Authorization: {uuid_secret}\n"

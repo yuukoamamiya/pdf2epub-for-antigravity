@@ -248,6 +248,17 @@ uvx --from ruff==0.14.1 ruff check pdf2epub --select F821,F822,F823
 git diff --check
 ```
 
+可用一个本地入口按顺序运行以上整套检查，任何命令失败或缺失时都会停止并报告失败命令：
+
+```text
+uv run python scripts/check_maintenance.py
+```
+
+该脚本只使用标准库编排 pytest、workflow contract、固定版本 Ruff 和 `git diff --check`；
+它不启用 CI，也不增加项目依赖。视觉回归测试默认只使用 pytest 临时目录。若需保存合成
+EPUB 和页面/联系表 PNG 供人工检查，可显式设置 `PDF2EPUB_VISUAL_QA_DIR` 后运行对应测试；
+项目验收入口不设置该变量。
+
 文档专属任务通常只需运行 `git diff --check`；维护代码时按改动范围运行相关测试，必要时再运行
 全量测试。`scripts/check_workflow_contract.py` 和 Ruff 检查仍可手动运行，不代表启用了自动 CI。
 
