@@ -6,7 +6,7 @@ metadata:
   domain: Marxist political economy (English to Chinese)
   source_language: English
   target_language: Chinese
-  version: '2026-10-28'
+  version: '2026-10-31'
 entries:
 - id: absolute-surplus-value
   source: absolute surplus-value
@@ -1078,3 +1078,77 @@ entries:
   variants:
   - Weltanschauungsmarxismus
   note: 'How to Read Marx''s Capital: The simplified ideological doctrine of Marxism presented as a complete philosophical world system. 此处指将马克思主义简化为完整哲学世界体系的特定意识形态形态，不泛指马克思主义的世界观'
+- id: imperialism
+  source: imperialism
+  target: 帝国主义
+  policy: preferred
+  category: Political Economy
+  note: '马克思主义政治经济学中的帝国主义范畴。'
+- id: colonialism
+  source: colonialism
+  target: 殖民主义
+  policy: preferred
+  category: Political Economy / History
+  note: '指殖民统治及其政治、经济支配关系；与新殖民主义区分。'
+- id: neocolonialism
+  source: neocolonialism
+  target: 新殖民主义
+  variants:
+  - neo-colonialism
+  policy: preferred
+  category: Political Economy / History
+  note: '指正式殖民统治结束后，通过经济、政治等依附关系延续的支配形式。'
+- id: underdevelopment
+  source: underdevelopment
+  target: 不发达
+  policy: preferred
+  category: Dependency Theory / Political Economy
+  note: '依附理论语境中指由历史结构关系形成的不发达状态；“欠发达”“低度发展”为文献异译，非一般未开发。'
+- id: false-consciousness
+  source: false consciousness
+  target: 虚假意识
+  policy: preferred
+  category: Marxist / Critical Theory
+  note: '指遮蔽或误识社会关系的意识形式；不应将一切意识形态都等同于虚假意识。'
+- id: ideological-superstructure
+  source: ideological superstructure
+  target: 观念上层建筑
+  policy: preferred
+  category: Marxist Theory
+  note: '指社会经济基础之上的观念与意识形态层面；“意识形态上层建筑”“思想上层建筑”为异译，保留ideological限定。'
+- id: superstructure
+  source: superstructure
+  target: 上层建筑
+  policy: preferred
+  category: Marxist Theory
+  note: '指建立于经济基础之上的政治法律制度与意识形态形式。'
+- id: class-struggle
+  source: class struggle
+  target: 阶级斗争
+  policy: preferred
+  category: Marxist Theory
+  note: '指不同阶级之间围绕社会关系与利益展开的斗争。'
+- id: monopoly-capitalism
+  source: monopoly capitalism
+  target: 垄断资本主义
+  policy: preferred
+  category: Political Economy
+  note: '指垄断阶段的资本主义制度形态；不同于monopoly capital“垄断资本”。'
+- id: hegemony
+  source: hegemony
+  target: 领导权
+  policy: preferred
+  category: Gramscian Theory
+  note: '仅在葛兰西政治文化理论语境中首选“领导权”；“霸权”“文化领导权/文化霸权”为具体文献异译，不将cultural hegemony无条件并作变体。'
+- id: tertiary-sector
+  source: tertiary sector
+  target: 第三产业
+  policy: preferred
+  category: Economic Theory
+  note: '指以服务业为主的第三产业；不同于third sector“第三部门”。'
+- id: subsistence-economy
+  source: subsistence economy
+  target: 自给自足经济
+  policy: preferred
+  category: Political Economy / Economic Anthropology
+  note: '指主要为直接满足自身生计需要而组织的经济；“生计经济”为异译，不与subsistence、自然经济或自足性混同。'

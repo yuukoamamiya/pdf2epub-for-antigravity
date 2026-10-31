@@ -8,7 +8,7 @@ metadata:
   domain: Political economy of communication
   source_language: English
   target_language: Chinese
-  version: '2026-10-19'
+  version: '2026-10-31'
 entries:
 - id: audience-commodity
   source: audience commodity
@@ -322,3 +322,41 @@ entries:
   category: Critical Theory / Media Studies
   note: 硅谷将反主流文化自由想象与新自由主义市场崇拜混合的技术乌托邦意识形态；亦见“加利福尼亚意识形态”。
   policy: preferred
+- id: noble-savage
+  source: noble savage
+  target: 高贵的野蛮人
+  policy: preferred
+  category: Cultural Theory
+  note: '指殖民主义话语中将原住民理想化为“高贵野蛮人”的叙事母题。'
+- id: paternalism
+  source: paternalism
+  target: 家长主义
+  policy: preferred
+  category: Political / Cultural Theory
+  note: '指以保护或照料为名正当化对他者的监护与支配；“父爱主义”为异译。'
+- id: mass-culture
+  source: mass culture
+  target: 大众文化
+  policy: preferred
+  category: Cultural Theory
+  note: '指面向大众传播和消费的文化形态；不与popular culture或culture industry等同。'
+- id: disnification
+  source: Disnification
+  target: 迪士尼化
+  variants:
+  - Disneyfication
+  policy: preferred
+  category: Cultural Theory / Media Studies
+  note: '指迪士尼式文化生产与呈现机制的扩展；不与Disneyization无条件等同。'
+- id: consumerism
+  source: consumerism
+  target: 消费主义
+  policy: preferred
+  category: Cultural / Political Economy
+  note: '指将消费及商品占有塑造成生活目标或幸福标准的意识形态与社会取向。'
+- id: fair-use
+  source: fair use
+  target: 合理使用
+  policy: preferred
+  category: Copyright / Media Studies
+  note: '指版权法中满足法定条件的有限使用或侵权抗辩；具体范围取决于法域，不等同于fair dealing、免版权或任意复制。'

@@ -1,0 +1,768 @@
+{
+  "schema_version": 1,
+  "metadata": {
+    "report_date": "2026-10-31",
+    "title": "How to Read Donald Duck glossary additions",
+    "evidence_owner": "主代理实际提交查询及打开页面；子代理可据此转录记录，不声称其自己执行",
+    "review_scope": "Review and reuse of the 29 existing terms records only. No book body, translated text, HTML, or OCR was read in this pass. This is not a fresh whole-book term extraction or frequency audit.",
+    "source_entity_file": "output/How to Read Donald Duck/translation_entities.json",
+    "entity_term_records_reviewed": 29,
+    "dispositions": {
+      "added": 18,
+      "already_covered": 5,
+      "not_added_or_deferred": 6
+    },
+    "evidence_payload": "scratch/donald_duck_glossary_20261031/web_evidence.json",
+    "source_entity_sha256": "b261a1e36a70c975b2c173768d4cb7aa76d1906b6dc3c75ac5e0cc20e670479b"
+  },
+  "glossary_changes": {
+    "glossaries/political-economy-of-communication.yaml": {
+      "version": "2026-10-31",
+      "entries_before": 45,
+      "entries_after": 51,
+      "added_count": 6,
+      "added_ids": [
+        "noble-savage",
+        "paternalism",
+        "mass-culture",
+        "disnification",
+        "consumerism",
+        "fair-use"
+      ],
+      "sha256_before_crlf": "478d831e2ec2f5d72d3eb81be1b9e342c1d036fc425abe7d1b8be6e5bb5a5871",
+      "sha256_after_crlf": "5ae7988dde8f6920fb49cb910a6a45bee72703bed1010015fb67d5c7d7d58779"
+    },
+    "glossaries/marxist-political-economy-en-zh.yaml": {
+      "version": "2026-10-31",
+      "entries_before": 154,
+      "entries_after": 166,
+      "added_count": 12,
+      "added_ids": [
+        "imperialism",
+        "colonialism",
+        "neocolonialism",
+        "underdevelopment",
+        "false-consciousness",
+        "ideological-superstructure",
+        "superstructure",
+        "class-struggle",
+        "monopoly-capitalism",
+        "hegemony",
+        "tertiary-sector",
+        "subsistence-economy"
+      ],
+      "sha256_before_crlf": "e5f3425727d9310c3cf10d127c209f7d0f6617f618417f18d910330c38dcd160",
+      "sha256_after_crlf": "456a38c48e82f39dcb3dc250c1ee0a9ba3cdfbdfcea3d5cd7b1053ae1f09ce43"
+    }
+  },
+  "additions": [
+    {
+      "id": "imperialism",
+      "source": "imperialism",
+      "entity_json_location": {
+        "file": "output/How to Read Donald Duck/translation_entities.json",
+        "key": "terms",
+        "index": 2,
+        "ordinal": 3,
+        "json_pointer": "/terms/2"
+      },
+      "current_entity_translation": "帝国主义",
+      "recommended_translation": "帝国主义",
+      "glossary_file": "glossaries/marxist-political-economy-en-zh.yaml",
+      "policy": "preferred",
+      "category": "Political Economy",
+      "note": "马克思主义政治经济学中的帝国主义范畴。",
+      "variants": [],
+      "queries": [
+        "\"imperialism\" \"帝国主义\" 辞典"
+      ],
+      "evidence": [
+        {
+          "url": "https://dictionary.cambridge.org/us/dictionary/english-chinese-simplified/imperialism",
+          "title": "Cambridge英汉词典：imperialism",
+          "support": "直接列帝国主义及其用例。",
+          "access": "search_snippet",
+          "level": "词典、学术或机构来源"
+        }
+      ]
+    },
+    {
+      "id": "colonialism",
+      "source": "colonialism",
+      "entity_json_location": {
+        "file": "output/How to Read Donald Duck/translation_entities.json",
+        "key": "terms",
+        "index": 4,
+        "ordinal": 5,
+        "json_pointer": "/terms/4"
+      },
+      "current_entity_translation": "殖民主义",
+      "recommended_translation": "殖民主义",
+      "glossary_file": "glossaries/marxist-political-economy-en-zh.yaml",
+      "policy": "preferred",
+      "category": "Political Economy / History",
+      "note": "指殖民统治及其政治、经济支配关系；与新殖民主义区分。",
+      "variants": [],
+      "queries": [
+        "\"colonialism\" \"殖民主义\" Cambridge"
+      ],
+      "evidence": [
+        {
+          "url": "https://dictionary.cambridge.org/us/dictionary/english-chinese-simplified/colonialism",
+          "title": "Cambridge英汉词典：colonialism",
+          "support": "直接列殖民主义。",
+          "access": "search_snippet",
+          "level": "词典、学术或机构来源"
+        }
+      ]
+    },
+    {
+      "id": "neocolonialism",
+      "source": "neocolonialism",
+      "entity_json_location": {
+        "file": "output/How to Read Donald Duck/translation_entities.json",
+        "key": "terms",
+        "index": 3,
+        "ordinal": 4,
+        "json_pointer": "/terms/3"
+      },
+      "current_entity_translation": "新殖民主义",
+      "recommended_translation": "新殖民主义",
+      "glossary_file": "glossaries/marxist-political-economy-en-zh.yaml",
+      "policy": "preferred",
+      "category": "Political Economy / History",
+      "note": "指正式殖民统治结束后，通过经济、政治等依附关系延续的支配形式。",
+      "variants": [
+        "neo-colonialism"
+      ],
+      "queries": [
+        "\"neocolonialism\" \"新殖民主义\" 大学"
+      ],
+      "evidence": [
+        {
+          "url": "https://dictionary.cambridge.org/dictionary/english-chinese-simplified/neocolonialism",
+          "title": "Cambridge英汉词典：neocolonialism",
+          "support": "直接列新殖民主义。",
+          "access": "search_snippet",
+          "level": "词典、学术或机构来源"
+        }
+      ]
+    },
+    {
+      "id": "noble-savage",
+      "source": "noble savage",
+      "entity_json_location": {
+        "file": "output/How to Read Donald Duck/translation_entities.json",
+        "key": "terms",
+        "index": 5,
+        "ordinal": 6,
+        "json_pointer": "/terms/5"
+      },
+      "current_entity_translation": "高贵的野蛮人",
+      "recommended_translation": "高贵的野蛮人",
+      "glossary_file": "glossaries/political-economy-of-communication.yaml",
+      "policy": "preferred",
+      "category": "Cultural Theory",
+      "note": "指殖民主义话语中将原住民理想化为“高贵野蛮人”的叙事母题。",
+      "variants": [],
+      "queries": [
+        "\"noble savage\" \"高贵的野蛮人\" site:edu.cn",
+        "\"noble savage\" \"高贵的野蛮人\" 期刊"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.chinawriter.com.cn/n1/2022/0526/c404092-32430600.html",
+          "title": "古尔纳《赞赏沉默》中的多重叙事策略与主题意蕴",
+          "support": "中国作家网文章直接对照此文学形象的英中名称。",
+          "access": "opened",
+          "level": "词典、学术或机构来源"
+        }
+      ]
+    },
+    {
+      "id": "ideological-superstructure",
+      "source": "ideological superstructure",
+      "entity_json_location": {
+        "file": "output/How to Read Donald Duck/translation_entities.json",
+        "key": "terms",
+        "index": 6,
+        "ordinal": 7,
+        "json_pointer": "/terms/6"
+      },
+      "current_entity_translation": "意识形态上层建筑",
+      "recommended_translation": "观念上层建筑",
+      "glossary_file": "glossaries/marxist-political-economy-en-zh.yaml",
+      "policy": "preferred",
+      "category": "Marxist Theory",
+      "note": "指社会经济基础之上的观念与意识形态层面；“意识形态上层建筑”“思想上层建筑”为异译，保留ideological限定。",
+      "variants": [],
+      "queries": [
+        "\"观念上层建筑\" \"ideological superstructure\" 中国大百科"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.zgbk.com/ecph/words?ID=eA1sF&SiteID=1",
+          "title": "中国百科网：观念上层建筑",
+          "support": "页面标题与英文名称直接对应；正文提取有字符混淆，不据此引用定义。",
+          "access": "opened",
+          "level": "词典、学术或机构来源"
+        }
+      ]
+    },
+    {
+      "id": "false-consciousness",
+      "source": "false consciousness",
+      "entity_json_location": {
+        "file": "output/How to Read Donald Duck/translation_entities.json",
+        "key": "terms",
+        "index": 11,
+        "ordinal": 12,
+        "json_pointer": "/terms/11"
+      },
+      "current_entity_translation": "虚假意识",
+      "recommended_translation": "虚假意识",
+      "glossary_file": "glossaries/marxist-political-economy-en-zh.yaml",
+      "policy": "preferred",
+      "category": "Marxist / Critical Theory",
+      "note": "指遮蔽或误识社会关系的意识形式；不应将一切意识形态都等同于虚假意识。",
+      "variants": [],
+      "queries": [
+        "\"false consciousness\" \"虚假意识\" 马克思"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/dictionary-of-marxism/marxist.org-chinese-dictionary-of-marxism-F.htm",
+          "title": "马克思主义思想辞典：F",
+          "support": "条目明确列false consciousness与虚假意识。",
+          "access": "search_snippet",
+          "level": "词典、学术或机构来源"
+        }
+      ]
+    },
+    {
+      "id": "paternalism",
+      "source": "paternalism",
+      "entity_json_location": {
+        "file": "output/How to Read Donald Duck/translation_entities.json",
+        "key": "terms",
+        "index": 12,
+        "ordinal": 13,
+        "json_pointer": "/terms/12"
+      },
+      "current_entity_translation": "温情父权主义",
+      "recommended_translation": "家长主义",
+      "glossary_file": "glossaries/political-economy-of-communication.yaml",
+      "policy": "preferred",
+      "category": "Political / Cultural Theory",
+      "note": "指以保护或照料为名正当化对他者的监护与支配；“父爱主义”为异译。",
+      "variants": [],
+      "queries": [
+        "\"paternalism\" \"家长主义\" 大学"
+      ],
+      "evidence": [
+        {
+          "url": "https://cjs.fudan.edu.cn/info/1022/1105.htm",
+          "title": "孙笑侠、郭春镇：美国的法律家长主义理论与实践",
+          "support": "正文摘要明确家长主义对应Paternalism，并说明父爱主义异译；仅佐证词译，条目注释不移植法律专义。",
+          "access": "opened",
+          "level": "词典、学术或机构来源"
+        }
+      ]
+    },
+    {
+      "id": "underdevelopment",
+      "source": "underdevelopment",
+      "entity_json_location": {
+        "file": "output/How to Read Donald Duck/translation_entities.json",
+        "key": "terms",
+        "index": 13,
+        "ordinal": 14,
+        "json_pointer": "/terms/13"
+      },
+      "current_entity_translation": "不发达状态",
+      "recommended_translation": "不发达",
+      "glossary_file": "glossaries/marxist-political-economy-en-zh.yaml",
+      "policy": "preferred",
+      "category": "Dependency Theory / Political Economy",
+      "note": "依附理论语境中指由历史结构关系形成的不发达状态；“欠发达”“低度发展”为文献异译，非一般未开发。",
+      "variants": [],
+      "queries": [
+        "\"underdevelopment\" \"不发达\" 依附 理论"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.aisixiang.com/data/19203.html",
+          "title": "陈明明：“不发达”与“欠发达”：历史与结构",
+          "support": "作者讨论不发达、欠发达与underdevelopment等词的译名和依附理论语境。",
+          "access": "search_snippet",
+          "level": "词典、学术或机构来源"
+        }
+      ]
+    },
+    {
+      "id": "mass-culture",
+      "source": "mass culture",
+      "entity_json_location": {
+        "file": "output/How to Read Donald Duck/translation_entities.json",
+        "key": "terms",
+        "index": 16,
+        "ordinal": 17,
+        "json_pointer": "/terms/16"
+      },
+      "current_entity_translation": "大众文化",
+      "recommended_translation": "大众文化",
+      "glossary_file": "glossaries/political-economy-of-communication.yaml",
+      "policy": "preferred",
+      "category": "Cultural Theory",
+      "note": "指面向大众传播和消费的文化形态；不与popular culture或culture industry等同。",
+      "variants": [],
+      "queries": [
+        "\"mass culture\" \"大众文化\" 大学"
+      ],
+      "evidence": [
+        {
+          "url": "https://ptext.nju.edu.cn/info/1246/6895.htm",
+          "title": "阿多诺：文化工业再思考",
+          "support": "页面正文直接列mass culture与大众文化，并解释与culture industry的概念区别。",
+          "access": "opened",
+          "level": "词典、学术或机构来源"
+        }
+      ]
+    },
+    {
+      "id": "disnification",
+      "source": "Disnification",
+      "entity_json_location": {
+        "file": "output/How to Read Donald Duck/translation_entities.json",
+        "key": "terms",
+        "index": 19,
+        "ordinal": 20,
+        "json_pointer": "/terms/19"
+      },
+      "current_entity_translation": "迪士尼化",
+      "recommended_translation": "迪士尼化",
+      "glossary_file": "glossaries/political-economy-of-communication.yaml",
+      "policy": "preferred",
+      "category": "Cultural Theory / Media Studies",
+      "note": "指迪士尼式文化生产与呈现机制的扩展；不与Disneyization无条件等同。",
+      "variants": [
+        "Disneyfication"
+      ],
+      "queries": [
+        "\"Disnification\" 中文",
+        "\"Disnification\" \"Disneyfication\" \"Disneyization\""
+      ],
+      "evidence": [
+        {
+          "url": "https://aat.teldap.tw/AATFullDisplay/300262932",
+          "title": "AAT-Taiwan藝術與建築索引典：迪士尼化",
+          "support": "中文首选词为迪士尼化，英文首选Disneyfication，明确列非首选词Disnification。",
+          "access": "opened",
+          "level": "词典、学术或机构来源"
+        }
+      ]
+    },
+    {
+      "id": "hegemony",
+      "source": "hegemony",
+      "entity_json_location": {
+        "file": "output/How to Read Donald Duck/translation_entities.json",
+        "key": "terms",
+        "index": 27,
+        "ordinal": 28,
+        "json_pointer": "/terms/27"
+      },
+      "current_entity_translation": "文化霸权",
+      "recommended_translation": "领导权",
+      "glossary_file": "glossaries/marxist-political-economy-en-zh.yaml",
+      "policy": "preferred",
+      "category": "Gramscian Theory",
+      "note": "仅在葛兰西政治文化理论语境中首选“领导权”；“霸权”“文化领导权/文化霸权”为具体文献异译，不将cultural hegemony无条件并作变体。",
+      "variants": [],
+      "queries": [
+        "\"hegemony\" \"领导权\" site:marxists.org/chinese/dictionary-of-marxism",
+        "\"hegemony\" \"文化霸权\" 葛兰西 大学"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/dictionary-of-marxism/marxist.org-chinese-dictionary-of-marxism-H.htm",
+          "title": "马克思主义思想辞典：H",
+          "support": "条目领导权(hegemony)，并区分统治与以同意为基础的领导等用法。",
+          "access": "search_snippet",
+          "level": "词典、学术或机构来源"
+        },
+        {
+          "url": "https://jxyyj.ruc.edu.cn/CN/abstract/abstract12553.shtml",
+          "title": "如何理解葛兰西的领导权理论",
+          "support": "摘要直接给出领导权(hegemony)，说明霸权及文化霸权等异译，不能规定唯一译名。",
+          "access": "opened",
+          "level": "大学期刊"
+        }
+      ]
+    },
+    {
+      "id": "consumerism",
+      "source": "consumerism",
+      "entity_json_location": {
+        "file": "output/How to Read Donald Duck/translation_entities.json",
+        "key": "terms",
+        "index": 28,
+        "ordinal": 29,
+        "json_pointer": "/terms/28"
+      },
+      "current_entity_translation": "消费主义",
+      "recommended_translation": "消费主义",
+      "glossary_file": "glossaries/political-economy-of-communication.yaml",
+      "policy": "preferred",
+      "category": "Cultural / Political Economy",
+      "note": "指将消费及商品占有塑造成生活目标或幸福标准的意识形态与社会取向。",
+      "variants": [],
+      "queries": [
+        "\"consumerism\" \"消费主义\" 大学"
+      ],
+      "evidence": [
+        {
+          "url": "https://skxb.jsu.edu.cn/CN/10.13438/j.cnki.jdxb.2020.06.017",
+          "title": "吉首大学学报：消费主义的伦理困境及其超越",
+          "support": "同页中英标题直接对应消费主义与Consumerism。",
+          "access": "search_snippet",
+          "level": "词典、学术或机构来源"
+        }
+      ]
+    },
+    {
+      "id": "class-struggle",
+      "source": "class struggle",
+      "entity_json_location": {
+        "file": "output/How to Read Donald Duck/translation_entities.json",
+        "key": "terms",
+        "index": 21,
+        "ordinal": 22,
+        "json_pointer": "/terms/21"
+      },
+      "current_entity_translation": "阶级斗争",
+      "recommended_translation": "阶级斗争",
+      "glossary_file": "glossaries/marxist-political-economy-en-zh.yaml",
+      "policy": "preferred",
+      "category": "Marxist Theory",
+      "note": "指不同阶级之间围绕社会关系与利益展开的斗争。",
+      "variants": [],
+      "queries": [
+        "\"class struggle\" \"阶级斗争\" 思想辞典"
+      ],
+      "evidence": [
+        {
+          "url": "https://jxyyj.ruc.edu.cn/CN/abstract/abstract16156.shtml",
+          "title": "共产党宣言中阶级斗争理论的两种阐释路向与反思",
+          "support": "同页中英题名对应阶级斗争与Class Struggle。",
+          "access": "search_snippet",
+          "level": "词典、学术或机构来源"
+        }
+      ]
+    },
+    {
+      "id": "superstructure",
+      "source": "superstructure",
+      "entity_json_location": {
+        "file": "output/How to Read Donald Duck/translation_entities.json",
+        "key": "terms",
+        "index": 7,
+        "ordinal": 8,
+        "json_pointer": "/terms/7"
+      },
+      "current_entity_translation": "上层建筑",
+      "recommended_translation": "上层建筑",
+      "glossary_file": "glossaries/marxist-political-economy-en-zh.yaml",
+      "policy": "preferred",
+      "category": "Marxist Theory",
+      "note": "指建立于经济基础之上的政治法律制度与意识形态形式。",
+      "variants": [],
+      "queries": [
+        "\"superstructure\" \"上层建筑\" 马克思 思想辞典"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.marxists.org/chinese/dictionary-of-marxism/marxist.org-chinese-dictionary-of-marxism-S.htm",
+          "title": "马克思主义思想辞典：S",
+          "support": "条目直接列上层建筑(superstructure)。",
+          "access": "search_snippet",
+          "level": "词典、学术或机构来源"
+        }
+      ]
+    },
+    {
+      "id": "monopoly-capitalism",
+      "source": "monopoly capitalism",
+      "entity_json_location": {
+        "file": "output/How to Read Donald Duck/translation_entities.json",
+        "key": "terms",
+        "index": 26,
+        "ordinal": 27,
+        "json_pointer": "/terms/26"
+      },
+      "current_entity_translation": "垄断资本主义",
+      "recommended_translation": "垄断资本主义",
+      "glossary_file": "glossaries/marxist-political-economy-en-zh.yaml",
+      "policy": "preferred",
+      "category": "Political Economy",
+      "note": "指垄断阶段的资本主义制度形态；不同于monopoly capital“垄断资本”。",
+      "variants": [],
+      "queries": [
+        "\"monopoly capitalism\" \"垄断资本主义\" 大学"
+      ],
+      "evidence": [
+        {
+          "url": "https://jxyyj.ruc.edu.cn/CN/abstract/abstract15660.shtml",
+          "title": "卢卡奇垄断资本主义时期再生产理论探究",
+          "support": "同页中英题名对照垄断资本主义与Monopoly Capitalism。",
+          "access": "search_snippet",
+          "level": "词典、学术或机构来源"
+        }
+      ]
+    },
+    {
+      "id": "tertiary-sector",
+      "source": "tertiary sector",
+      "entity_json_location": {
+        "file": "output/How to Read Donald Duck/translation_entities.json",
+        "key": "terms",
+        "index": 24,
+        "ordinal": 25,
+        "json_pointer": "/terms/24"
+      },
+      "current_entity_translation": "第三产业",
+      "recommended_translation": "第三产业",
+      "glossary_file": "glossaries/marxist-political-economy-en-zh.yaml",
+      "policy": "preferred",
+      "category": "Economic Theory",
+      "note": "指以服务业为主的第三产业；不同于third sector“第三部门”。",
+      "variants": [],
+      "queries": [
+        "\"tertiary sector\" \"第三产业\" Cambridge"
+      ],
+      "evidence": [
+        {
+          "url": "https://dictionary.cambridge.org/dictionary/english-chinese-simplified/tertiary-sector",
+          "title": "Cambridge英汉词典：the tertiary sector",
+          "support": "直接列第三产业，释义为提供服务的经济部门。",
+          "access": "search_snippet",
+          "level": "词典、学术或机构来源"
+        }
+      ]
+    },
+    {
+      "id": "subsistence-economy",
+      "source": "subsistence economy",
+      "entity_json_location": {
+        "file": "output/How to Read Donald Duck/translation_entities.json",
+        "key": "terms",
+        "index": 25,
+        "ordinal": 26,
+        "json_pointer": "/terms/25"
+      },
+      "current_entity_translation": "自给自足经济",
+      "recommended_translation": "自给自足经济",
+      "glossary_file": "glossaries/marxist-political-economy-en-zh.yaml",
+      "policy": "preferred",
+      "category": "Political Economy / Economic Anthropology",
+      "note": "指主要为直接满足自身生计需要而组织的经济；“生计经济”为异译，不与subsistence、自然经济或自足性混同。",
+      "variants": [],
+      "queries": [
+        "\"subsistence economy\" \"自给自足经济\" Cambridge"
+      ],
+      "evidence": [
+        {
+          "url": "https://agrovoc.fao.org/browse/agrovoc/en/page/c_39c20dd9",
+          "title": "FAO AGROVOC：subsistence economies",
+          "support": "同一多语言概念列自给自足经济，并说明满足基本生计而非面向市场。",
+          "access": "opened",
+          "level": "词典、学术或机构来源"
+        }
+      ]
+    },
+    {
+      "id": "fair-use",
+      "source": "fair use",
+      "entity_json_location": {
+        "file": "output/How to Read Donald Duck/translation_entities.json",
+        "key": "terms",
+        "index": 18,
+        "ordinal": 19,
+        "json_pointer": "/terms/18"
+      },
+      "current_entity_translation": "合理使用",
+      "recommended_translation": "合理使用",
+      "glossary_file": "glossaries/political-economy-of-communication.yaml",
+      "policy": "preferred",
+      "category": "Copyright / Media Studies",
+      "note": "指版权法中满足法定条件的有限使用或侵权抗辩；具体范围取决于法域，不等同于fair dealing、免版权或任意复制。",
+      "variants": [],
+      "queries": [
+        "\"fair use\" \"合理使用\" site:wipo.int",
+        "\"fair use\" \"合理使用\" site:copyright.gov"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.wipo.int/edocs/mdocs/tk/zh/wipo_grtkf_ic_42/wipo_grtkf_ic_42_inf_7.pdf",
+          "title": "WIPO/GRTKF/IC/42/INF/7 中文术语表",
+          "support": "附件第25页以合理使用(fair use)为条目，讨论版权语境。",
+          "access": "search_snippet",
+          "level": "国际组织中文术语文件"
+        }
+      ]
+    }
+  ],
+  "corrected_prior_exclusions": [
+    {
+      "source": "class struggle",
+      "entity_json_location": {
+        "key": "terms",
+        "index": 21,
+        "ordinal": 22,
+        "json_pointer": "/terms/21"
+      },
+      "correction": "早先筛选误认为已有覆盖；现确认没有英文源词表项，已新增。"
+    },
+    {
+      "source": "superstructure",
+      "entity_json_location": {
+        "key": "terms",
+        "index": 7,
+        "ordinal": 8,
+        "json_pointer": "/terms/7"
+      },
+      "correction": "早先把德文Überbau当作覆盖；德中表不代表英文源词覆盖，已新增英文项。"
+    },
+    {
+      "source": "monopoly capitalism",
+      "entity_json_location": {
+        "key": "terms",
+        "index": 26,
+        "ordinal": 27,
+        "json_pointer": "/terms/26"
+      },
+      "correction": "早先因相近词monopoly capital而误排；二者分别为垄断资本主义与垄断资本，已新增。"
+    }
+  ],
+  "already_covered": [
+    {
+      "source": "cultural imperialism",
+      "entity_json_location": {
+        "key": "terms",
+        "index": 1,
+        "ordinal": 2,
+        "json_pointer": "/terms/1"
+      },
+      "reason": "已有英文源词覆盖：political-economy-of-communication.yaml:cultural-imperialism。"
+    },
+    {
+      "source": "commodity fetishism",
+      "entity_json_location": {
+        "key": "terms",
+        "index": 9,
+        "ordinal": 10,
+        "json_pointer": "/terms/9"
+      },
+      "reason": "已有英文源词覆盖：marxist-political-economy-en-zh.yaml:commodity-fetishism。"
+    },
+    {
+      "source": "alienation",
+      "entity_json_location": {
+        "key": "terms",
+        "index": 10,
+        "ordinal": 11,
+        "json_pointer": "/terms/10"
+      },
+      "reason": "已有英文源词覆盖：marxist-political-economy-en-zh.yaml:alienation。"
+    },
+    {
+      "source": "surplus value",
+      "entity_json_location": {
+        "key": "terms",
+        "index": 22,
+        "ordinal": 23,
+        "json_pointer": "/terms/22"
+      },
+      "reason": "已有英文源词覆盖：marxist-political-economy-en-zh.yaml:surplus-value。"
+    },
+    {
+      "source": "mode of production",
+      "entity_json_location": {
+        "key": "terms",
+        "index": 23,
+        "ordinal": 24,
+        "json_pointer": "/terms/23"
+      },
+      "reason": "已有英文源词覆盖：marxist-political-economy-en-zh.yaml:mode-of-production。"
+    }
+  ],
+  "not_added_or_deferred": [
+    {
+      "source": "duckology",
+      "entity_json_location": {
+        "key": "terms",
+        "index": 0,
+        "ordinal": 1,
+        "json_pointer": "/terms/0"
+      },
+      "reason": "书中特定讽刺造词，复用范围过窄。",
+      "status": "not_added"
+    },
+    {
+      "source": "Dollarfication",
+      "entity_json_location": {
+        "key": "terms",
+        "index": 20,
+        "ordinal": 21,
+        "json_pointer": "/terms/20"
+      },
+      "reason": "书中特定讽刺造词，不作为一般术语传播。",
+      "status": "not_added"
+    },
+    {
+      "source": "infantilism",
+      "entity_json_location": {
+        "key": "terms",
+        "index": 14,
+        "ordinal": 15,
+        "json_pointer": "/terms/14"
+      },
+      "reason": "普通词汇的书中特定批评用法，暂不作为专门表项。",
+      "status": "not_added"
+    },
+    {
+      "source": "innocence",
+      "entity_json_location": {
+        "key": "terms",
+        "index": 15,
+        "ordinal": 16,
+        "json_pointer": "/terms/15"
+      },
+      "reason": "书中特定概念化用法，需独立核实通行译名。",
+      "status": "not_added"
+    },
+    {
+      "source": "escapism",
+      "entity_json_location": {
+        "key": "terms",
+        "index": 17,
+        "ordinal": 18,
+        "json_pointer": "/terms/17"
+      },
+      "reason": "通用词汇，新增专门表项的优先级较低。",
+      "status": "not_added"
+    },
+    {
+      "source": "infrastructure",
+      "entity_json_location": {
+        "key": "terms",
+        "index": 8,
+        "ordinal": 9,
+        "json_pointer": "/terms/8"
+      },
+      "reason": "普通“基础设施”与理论基础两义可能混淆，暂缓固定匹配；这不表示实体译文“经济基础”有误。",
+      "status": "deferred"
+    }
+  ],
+  "language_pair_note": "German-to-Chinese Überbau is not coverage for an English-source glossary entry superstructure or ideological superstructure."
+}
