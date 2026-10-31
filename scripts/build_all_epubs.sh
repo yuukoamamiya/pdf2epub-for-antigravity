@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # build_all_epubs.sh — Build every EPUB variant for a translated PDF project.
 #
-# Applies to pipeline: translation. Both builds are mandatory and produce two
-# artifacts:
+# Optional convenience for pipeline: translation, after translated validation,
+# to rebuild both formal artifacts. The default workflow builds and inspects
+# the original-language EPUB before translation, then builds only the translated
+# EPUB after translation validation. This helper reproduces both builds:
 #   1. build-epub                   -> original-language EPUB under the formal book title
 #   2. build-epub --only-translated -> translated EPUB under the translated title
-# No English _en.epub is generated. To also produce the English _en.epub, use
-# `build-epub --translated` instead of `--only-translated` (three artifacts:
-# formal-title original, English _en.epub, and translated EPUB).
+# No English _en.epub is generated. To produce an additional English _en.epub,
+# run `build-epub --translated`; that command generates the English _en.epub and
+# translated EPUB, but not the formal-title original. A three-artifact delivery
+# therefore also requires the formal-title original built earlier.
 # Do not use this script for pipeline: epub_conversion; that mode rejects
 # --translated and --only-translated and only needs a single build-epub.
 #

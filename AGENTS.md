@@ -359,8 +359,9 @@ ocr-pages
 EPUB、轻小说和 TeX 流程不使用这一 PDF 润色阶段。
 
 PDF 的具体循环为：`ocr-pages →（若启用第二套 OCR：ocr-correct → ocr-correct-validate）→ refine-prepare → illustration-prepare →（有候选时交给 Subagent）→ illustration-validate → illustration-apply → refine-local → footnote-prepare →（有待复核时交给 Subagent）→ footnote-validate → footnote-apply → polish → polish-validate`。
-随后执行 `extract-entities → translate-toc → translate-toc-validate → translate →
-translate-validate → build-epub`。可搜索但由扫描图像叠加 OCR 文字层的 PDF 仍必须重新
+随后先执行 `build-epub` 并检查原语言 EPUB 的目录、段落、脚注和插图排版，再执行
+`extract-entities → translate-toc → translate-toc-validate → translate →
+translate-validate → build-epub --only-translated`。可搜索但由扫描图像叠加 OCR 文字层的 PDF 仍必须重新
 视觉 OCR。
 
 PDF 纯转换模式使用 `pipeline: epub_conversion`（兼容别名
@@ -674,6 +675,10 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    正文数字、标题编号、日期、引用、脚注、参考文献和索引中的页码不得删除。
    润色不得把普通粗体、罗马数字、编号或序数上标升级成 Markdown 标题；已确认的
    `<sup>N</sup>` 注脚才可规范化为 `[^N]`。
+   全量 polish 校验通过后，运行 `uv run pdf2epub -c config.yaml build-epub` 构建原语言正式书名 EPUB，
+   并检查目录、段落、脚注和插图排版。翻译继续读取当前 `polished_markdown/validated/`，不重新从 EPUB
+   提取；若检查发现源稿问题，按既有 Subagent 流程修复，重新 polish-validate 并重建原稿，再准备或恢复
+   翻译，按当前哈希和校验结果重处理失效项。
   当前 TOC 标签会作为 polish 的保护证据；唯一出现且与 TOC 标签相同的源行被删除时，
   必须进入 `review_required`，不能仅因该行位于页首就自动视为页眉。已登记的 TOC
   Part/Chapter **Markdown 标题行**在页边装饰检测中豁免，例如 `# PART I`、`## PART II`
@@ -704,14 +709,8 @@ Bibliography 仅翻译标题，条目正文
 边界、无法精确确认的交叉引用必须回退普通 `translate`，不得按年份/DOI猜测边界或让实体表代替
 索引翻译。apply 后仍须执行单文件及全量 `translate-validate`。该模式不替代 PDF 的强制 polish gate。
 
-实体表尚未存在时，确认上一步 `polish-validate` 已通过，再执行以下结构门禁；此时不得
-翻译：
-
-```text
-uv run pdf2epub -c config.yaml check-ready --stage translate --skip-entities
-```
-
-然后：
+原语言 EPUB 检查通过后，按以下顺序准备实体、翻译目录和正文；实体提取前不运行
+`check-ready`。此处的结构完整门禁在 TOC 翻译校验后执行；此时不得提前开始正文翻译。
 
 1. 执行 `extract-entities`，立即打开工作区 Subagent，读取生成的 Prompt 和 manifest，
    写入 `translation_entities.json`。
@@ -751,29 +750,31 @@ uv run pdf2epub -c config.yaml check-ready --stage translate --skip-entities
    Subagent；首次 `review_required` 也重新派发。若报告出现 `human_review_required`，必须暂停
    并询问人工，不能继续自动重试。只有完成复核后才可显式使用
    `translate-validate --allow-review-warnings` 放行。
-10. 执行打包。翻译流程必须同时构建两个产物：使用正式书名的原稿英文 EPUB 和使用译名的
-   译文 EPUB。推荐一次运行：
+10. `translate-validate` 通过后，执行 `build-epub --only-translated` 构建使用译名的译文 EPUB。
+   原语言 EPUB 已在翻译准备前构建并检查。若需在翻译验收后从当前产物一次重建两个正式版本，
+   可选运行便利脚本：
 
    ```text
    bash scripts/build_all_epubs.sh config.yaml
    ```
 
-   等价于依次执行：
+   该可选脚本依次执行：
 
    ```text
    uv run pdf2epub -c config.yaml build-epub
    uv run pdf2epub -c config.yaml build-epub --only-translated
    ```
 
-   第一条生成使用正式书名的原稿英文 EPUB；第二条只生成使用译名的译文 EPUB，不生成
-   英文 `_en.epub`。需要英文 `_en.epub` 时可改用 `build-epub --translated`，它是可选
-   的三产物模式：正式书名的原稿英文 EPUB、英文 `_en.epub` 和使用译名的译文 EPUB；
+   第一条重建使用正式书名的原稿英文 EPUB；第二条只生成使用译名的译文 EPUB，不生成
+   英文 `_en.epub`。需要额外英文 `_en.epub` 时可改用 `build-epub --translated`，它生成
+   英文 `_en.epub` 和使用译名的译文 EPUB，不会生成正式书名的原稿 EPUB；要交付三种产物，
+   必须已有此前构建的正式书名原稿 EPUB。
    英文版失败时不会中止，仍会继续尝试译文版。`--only-translated`（别名
    `--target-only`）不触发英文 `_en.epub`，与 `--translated` 同时出现时以
    `--only-translated` 为准，但仍要求当前有效的 polish 和 translate checkpoint。任一
-   请求的构建失败时命令最终返回非 0，已成功的产物保留。第一条命令不可省略，否则会缺少
-   正式书名的原稿英文版。只运行 `build-epub` 不带 `--translated` 或
-   `--only-translated` 会缺少译文 EPUB，不得视为完成打包。
+   请求的构建失败时命令最终返回非 0，已成功的产物保留。单独运行
+   `build-epub --only-translated` 只构建译文 EPUB；若原稿尚未构建或已过期，应先重建并检查原稿。
+   只运行不带目标参数的 `build-epub` 会缺少译文 EPUB，不得视为翻译流程完成打包。
    `pipeline: epub_conversion` 不得使用本脚本，也不得使用 `--translated` 或
    `--only-translated`，只运行一次 `build-epub`。
 

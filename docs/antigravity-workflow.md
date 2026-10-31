@@ -480,12 +480,18 @@ Markdown 外层标记差异。行数、全局数字序列和脚注垂直范围�
 `ocr_consensus.json`；双 OCR 模式若共识报告、主/次 sidecar 或配置已变化，会阻断旧的
 候选决定，必须重新准备。
 
-翻译模式在 polish 之后继续：
+翻译模式在 polish 之后先构建并检查原语言 EPUB，再继续翻译：
 
 ```text
-extract-entities → extract-entities-validate → translate-toc → translate-toc-validate
-  → translate（worker_handoffs/）→ translate-validate → build-epub --translated
+build-epub（原语言正式书名 EPUB）→ 检查目录/段落/脚注/插图排版
+→ extract-entities → extract-entities-validate → translate-toc → translate-toc-validate
+  → translate（worker_handoffs/）→ translate-validate → build-epub --only-translated
 ```
+
+原稿 EPUB 和翻译都使用当前通过 `polish-validate` 的 `polished_markdown/validated/`；翻译不从 EPUB 提取。
+检查发现源稿问题时，按原有 Subagent 流程修复，重新 polish-validate 并重建原稿，再准备或恢复翻译；
+按当前哈希和校验结果重处理失效项。翻译校验通过后默认只构建译文 EPUB。
+`scripts/build_all_epubs.sh` 是可选的翻译验收后两版本重建工具，不是默认流程最后一步。
 
 纯转换模式使用 `pipeline: epub_conversion`（兼容 `mode: ocr_to_epub`），跳过所有
 翻译专属步骤：
@@ -931,12 +937,14 @@ MathML 是当前默认策略，因为它不增加系统级 TeX 依赖，已满�
 安全检查 OCR 中 Notes/注释章节的 `<sup>N</sup>` 注脚迁移为 `[^N]` 和
 `[^N]: ...`；数学、表格和序数上标不会按注脚处理。
 
-启用第二套 OCR 时，PDF 正文翻译前必须按以下顺序运行（实体表尚未存在时使用第一条的
-`--skip-entities`；实体表完成后再次运行不带该选项的门禁）：
+启用第二套 OCR 时，PDF 正文翻译前必须按以下顺序运行。原语言 EPUB 检查通过后先准备实体和翻译 TOC；
+完整 `check-ready --stage translate` 在 `translate-toc-validate` 之后运行。若明确选择跳过实体，
+只在 TOC 已校验后的 readiness 检查中使用 `--skip-entities`，不要在实体提取前运行该门禁：
 
 ```text
-ocr-pages → ocr-correct → ocr-correct-validate → polish → polish-validate → check-ready --skip-entities → extract-entities →
-extract-entities-validate → check-ready → translate → translate-validate
+ocr-pages → ocr-correct → ocr-correct-validate → polish → polish-validate →
+build-epub（原语言正式书名 EPUB）→ 检查目录/段落/脚注/插图排版 → extract-entities →
+extract-entities-validate → translate-toc → translate-toc-validate → check-ready → translate → translate-validate → build-epub --only-translated
 ```
 
 `polish` 在启用第二套 OCR 时只处理前置 OCR 纠错之后的换行、段落边界和块级结构；已通过

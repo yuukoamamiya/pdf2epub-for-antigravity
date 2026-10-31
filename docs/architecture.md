@@ -533,15 +533,21 @@ worker 自检通过不代表 checkpoint 已建立。check-only 即使识别出 M
 validated 副本和 checkpoint 以该内容为准。后续打包和翻译门禁只认主 Agent 的权威校验记录。
 
 翻译分支：
+build-epub（原语言正式书名 EPUB）→ 检查目录/段落/脚注/插图排版
 extract-entities + 工作区 Subagent + extract-entities-validate
   → translation_entities.json
-translate-toc + 工作区 Subagent + translate-toc-validate
+translate-toc + 工作区 Subagent + translate-toc-validate → check-ready --stage translate
   → toc_translation_result.json →（本地合并）toc_tree_translated.json
 translate + 按 TOC 顺序装箱的 worker_handoffs + 工作区 Subagent
   （相邻短章节可合并；超大章节只在章节内部拆分；Prompt 另含预算化的全书 TOC 方向性轮廓）
   → translated/
 translate-validate → translate_validation.json（retry_required 自动返工；持续 review 升级人工）
-build-epub --translated → 英文 _en.epub + 最终译文 EPUB
+build-epub --only-translated → 最终译文 EPUB
+
+默认 PDF 翻译流程先从当前 `polished_markdown/validated/` 构建原语言 EPUB 并检查版面；翻译继续读取
+同一份 Markdown，不重新提取 EPUB。若源稿存在问题，按原有 Subagent 流程修复、重新 polish-validate
+并重建原稿，再准备或恢复翻译；按当前哈希和校验结果重处理失效项。`scripts/build_all_epubs.sh` 是
+翻译验收后的可选两版本重建工具。
 
 `build-epub --translated` 是双语构建：先尝试英文 `_en.epub`，再构建译文；英文构建失败时
 记录 `[English Build Failed]` 并继续尝试译文，译文失败记录 `[Translated Build Failed]`，
@@ -550,6 +556,9 @@ build-epub --translated → 英文 _en.epub + 最终译文 EPUB
 它不触发英文 `_en.epub`；与 `--translated` 同时出现时以 `--only-translated` 为准，但仍
 要求当前有效的 polish 和 translate checkpoint。`pipeline: epub_conversion` 拒绝这两个
 译文构建开关。
+
+`build-epub --translated` 只生成英文 `_en.epub` 和译文 EPUB，不生成正式书名的原稿；如需三种产物，
+正式书名原稿必须已由先前的 `build-epub` 构建。
 
 翻译流程中，若 `translate_validation.json` 对当前 `polished_markdown/validated/` 和
 `translated/validated/` 仍为 current，而 `build-epub` 未带 `--translated`，命令只打印警告

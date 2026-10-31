@@ -247,11 +247,16 @@ ocr-pages --resume
 → footnote-prepare → [有待复核时 Subagent 写 footnote_decisions.json]
 → footnote-validate → footnote-apply
 → polish → Subagent 写 polished_markdown/ → polish-validate
+→ build-epub → 检查原语言 EPUB 的目录、段落、脚注与插图排版
 → extract-entities → extract-entities-validate
 → translate-toc → translate-toc-validate
 → check-ready --stage translate → translate → translate-validate
-→ bash scripts/build_all_epubs.sh config.yaml
+→ build-epub --only-translated
 ```
+
+原稿 EPUB 使用当前已验证的 `polished_markdown/validated/` 构建；翻译也直接以这份 Markdown 为源，
+不会从 EPUB 提取翻译。若排版检查发现源稿问题，按原有 Subagent 流程修复并重新通过
+`polish-validate`，再重建原稿 EPUB 后准备或恢复翻译，并按当前哈希和校验结果重处理失效项。
 
 `refine-prepare` 会输出页面/标题候选清单与结构审阅 manifest。工作区 Subagent 必须逐个处置候选、
 逐页记录视觉或文本证据覆盖，再提交 TOC 树和决定文件；漏审或证据过期会阻止 `refine-local`。
@@ -269,16 +274,16 @@ translation:
 
 After the normal `uv run pdf2epub -c config.yaml translate` preparation, eligible files are listed in `special_pending_files` and excluded from ordinary workers. For each one, run `uv run pdf2epub -c config.yaml special-unit-prepare --kind bibliography --file <unit.md>` (or `--kind index`), have the workspace Subagent complete its JSON result, then run `special-unit-apply` with the same arguments. Run `translate-validate --file <unit.md>` and the full `translate-validate` afterward. Mixed or ambiguous units stay on the ordinary translation path.
 
-翻译流程必须同时构建两个产物：正式书名的原稿英文 EPUB 和使用译名的译文 EPUB。推荐一次运行：
+翻译验收后的可选两版本重建工具：
 
 ```text
 bash scripts/build_all_epubs.sh config.yaml
 ```
 
-该脚本等价于依次执行 `build-epub` 和 `build-epub --only-translated`。前者生成使用正式
-书名的原稿英文 EPUB；后者只生成使用译名的译文 EPUB，不生成英文 `_en.epub`。需要英文
-`_en.epub` 时可改用 `build-epub --translated`，这是可选的三产物模式：正式书名的原稿
-英文 EPUB、英文 `_en.epub` 和使用译名的译文 EPUB；英文 `_en.epub` 失败时会记录
+默认流程已在翻译前构建并检查原稿；原稿已过期时先重建。该脚本依次执行 `build-epub` 和
+`build-epub --only-translated`。前者生成使用正式书名的原稿英文 EPUB；后者只生成使用译名的译文 EPUB，不生成英文 `_en.epub`。需要英文
+`_en.epub` 时可改用 `build-epub --translated`；它生成英文 `_en.epub` 和使用译名的译文 EPUB，
+不生成正式书名的原稿 EPUB，因此三种产物还需要此前已构建的正式书名原稿。英文 `_en.epub` 失败时会记录
 `[English Build Failed]` 并继续尝试译文版。任一请求的构建失败时最终返回非 0，已成功
 的产物保留。`build-epub --only-translated`（别名 `--target-only`）不触发英文
 `_en.epub`；与 `--translated` 同时出现时以 `--only-translated` 为准，但仍要求当前有效
@@ -323,11 +328,11 @@ output/<配置书名>/<安全化译名>.epub          # 译文，使用译名
 output/<配置书名>/<安全化书名>_en.epub       # 英文版（可选，仅 --translated 生成）
 ```
 
-翻译流程运行 `bash scripts/build_all_epubs.sh config.yaml` 后会得到前两个版本：第一条
-`build-epub` 生成正式书名的原稿英文 EPUB；第二条 `build-epub --only-translated` 只生成
-译文 EPUB，不生成英文 `_en.epub`。两个命令都需要执行，否则会缺少其中一个产物。若还需
-英文 `_en.epub`，使用三产物模式 `build-epub --translated`；`--only-translated`（别名
-`--target-only`）只构建译文版。
+默认翻译流程先构建并检查正式书名的原稿英文 EPUB，翻译验收后运行
+`build-epub --only-translated` 生成译文 EPUB。`bash scripts/build_all_epubs.sh config.yaml` 是可选的
+两版本重建工具。若还需英文 `_en.epub`，可用 `build-epub --translated` 生成英文 `_en.epub` 和译文；
+它不会生成正式书名的原稿 EPUB，因此三种产物还需要此前已构建的正式书名原稿。`--only-translated`
+（别名 `--target-only`）只构建译文版。
 
 PDF 的 `build-epub` 默认使用书名生成 EPUB 文件名：Windows 禁止的半角字符、控制字符
 和路径分隔符会替换为 `_`，首尾空格/句点会去除，保留设备名会加前缀，文件名最长为
