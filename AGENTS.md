@@ -236,6 +236,13 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
   正式目标；校验器会清理遗留临时文件，并把无效/半截目标移到 `scratch/<task>/invalid_outputs/`
   供恢复诊断。`--resume` 重建 handoff 时，所有 assigned 文件均已有当前校验 checkpoint 的旧
   handoff 标记为 `completed`，源哈希已变化的旧 handoff 标记为 `superseded`，不得再次派发。
+- 父级 manifest 可提供 `dispatch_plan`，按波次给出 `worker_ids`、`max_concurrency` 和
+  `reason`（`ordinary`、`large_units` 或 `extreme_unit`）；handoff 的 `dispatch_wave`、
+  `dispatch_wave_max_concurrency` 和 `dispatch_wave_reason` 是派发提示。按波次顺序执行，
+  完成本波后再开始下一波。`subagent.batching.max_concurrency`（有效上限 6）是全局上限；
+  普通波使用配置额度，含达到大单元阈值的文件时并发上限为 2，达到极大单元阈值时该单元
+  独占并发 1。元数据任务也占用同一波额度，不能与极大单元波重叠。这只是本地调度建议，
+  不会启动模型或强制 IDE 的实际并发信号量，派发前仍需确认当前 Subagent 活动状态。
 - 不删除源文件、输出目录或已有中间结果。额度中断或失败时先校验，再使用原命令的
   `--resume`，只处理 pending 项。
 - 新 manifest 的 `--resume` 按单元比较 `unit_context_sha256` 和该单元的精确 TOC 上下文；
@@ -854,16 +861,18 @@ uv run pdf2epub -c config.yaml build-epub
    缺少路径身份的旧 mapping 不会直接复用。旧 mapping 只有在可唯一匹配当前 spine 页面时才迁移，
    并保留其现有译文文件；无法唯一匹配时停止并提示处理，不删除或覆盖译文。
    当前输入 EPUB、压缩单元和行数预算未变化时，后续运行复用该缓存，只刷新实体/术语上下文和 worker
-   handoff，不重复解包和压缩。
+   handoff，不重复解包和压缩。新提取的密集单元按连续的完整非空行平衡拆为不超过
+   `max_nonempty_lines`（默认 350）的
+   `.partN.md`；不得拆开 HTML 标签行或段落行，顺序和 mapping 必须保留。升级时已属当前的提取缓存
+   保持原样，不因新拆分算法重新分片。
 4. 立即打开工作区 Subagent，读取实体 Prompt/manifest，写入 `translation_entities.json`；
    完成后再次运行 `html-prepare`，让正文和元数据任务挂载当前实体表及外部术语表。
    EPUB 实体提取默认排除 `Index`、`Bibliography`、`Copyright` 和 `Cover` 等确定性附录，
    其余正文章节仍按 manifest 逐文件读取。
    确实不需要实体表时才使用 `html-prepare --skip-entities`。
-   确认实体表当前并重新运行 `html-prepare` 后，在 manifest 的有效并发额度允许时可并行派发 metadata 与正文 handoff；
-   metadata 计入当前 manifest 的 `effective_max_concurrency` 总上限（该值不超过
-   `max_concurrency`）。每个 handoff 完成并验收后，空闲 worker 可接收
-   下一个新 scoped handoff，且每次只处理其 `assigned_files`。
+   确认实体表当前并重新运行 `html-prepare` 后，按父级 manifest 的 `dispatch_plan` 顺序派发；
+   一波完成后再开始下一波。metadata 占用同一波的并发名额。波次额度是本地操作提示，不会启动
+   模型或强制 IDE 信号量；每个 worker 仍只处理其 `assigned_files`。
 5. 读取第二次生成的 `translate-html_subagent_prompt.md`、父级 manifest 和
    `translate-html_worker_handoffs/`，打开每个 handoff 对应的工作区 Subagent，将同名译文写入
    `translated_compressed/`。单元文件名是稳定身份标识但对 worker 属于 opaque ID；必须按
@@ -890,7 +899,9 @@ uv run pdf2epub -c config.yaml build-epub
 
    如果构建报告出现导航更新 warning，暂停并检查报告；确认可以接受后，才可显式使用
    `build-html-epub --allow-navigation-warnings` 放行。不要默认放行 warning。完成后运行
-   项目的最终 EPUB 渲染回归测试。
+   项目的最终 EPUB 渲染回归测试。EPUBCheck 是外部 Java 工具；安装官方 W3C EPUBCheck
+   发布版本并通过 PATH 或 `html_translation.epubcheck_path` 指定可执行文件。`warn` 模式找不到工具时
+   只记录跳过信息，不代表校验通过；`strict` 模式找不到工具会失败。
 
 ## 4. 轻小说 EPUB 流程
 

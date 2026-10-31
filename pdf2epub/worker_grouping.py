@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Mapping
+from typing import Any, Dict, List, Mapping, Optional
 
 from .batching_service import (
     DEFAULT_BATCH_MAX_FILES, DEFAULT_BATCH_MAX_SOURCE_TOKENS,
@@ -10,9 +10,100 @@ from .batching_service import (
     DEFAULT_PACKED_SOURCE_TOKEN_MULTIPLIER, DEFAULT_PACK_ADJACENT_CHAPTERS,
     DEFAULT_MAX_CHAPTERS_PER_WORKER, DEFAULT_MAX_TINY_CHAPTERS_PER_WORKER,
     DEFAULT_TINY_CHAPTER_MAX_TOKENS, MAX_BATCH_FILES, MAX_ACTIVE_SUBAGENTS,
+    DEFAULT_BATCH_MAX_CONCURRENCY,
+    DEFAULT_LARGE_FILE_TOKEN_THRESHOLD, DEFAULT_EXTREME_FILE_TOKEN_THRESHOLD,
     positive_int, recommended_batches,
 )
 from .document_roles import infer_translation_file_role
+
+
+def _plan_dispatch_waves(
+    groups: List[Dict[str, Any]],
+    file_stats: Mapping[str, Mapping[str, Any]],
+    batching: Mapping[str, Any],
+) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], int]:
+    """Annotate worker groups with ordered operator dispatch waves.
+
+    Severity is based on each group's largest individual file, not its total
+    assigned tokens. The returned groups are copies and the plan has no runtime
+    semaphore semantics; it is an explicit scheduling contract for operators.
+    """
+    configured_cap = min(
+        MAX_ACTIVE_SUBAGENTS,
+        positive_int(batching.get("max_concurrency"), DEFAULT_BATCH_MAX_CONCURRENCY),
+    )
+    large_threshold = positive_int(
+        batching.get("large_file_token_threshold"),
+        DEFAULT_LARGE_FILE_TOKEN_THRESHOLD,
+    )
+    extreme_threshold = positive_int(
+        batching.get("extreme_file_token_threshold"),
+        DEFAULT_EXTREME_FILE_TOKEN_THRESHOLD,
+    )
+    planned_groups = [dict(group) for group in groups]
+
+    def severity(group: Mapping[str, Any]) -> str:
+        largest_file = max(
+            (
+                int((file_stats.get(name, {}) or {}).get("estimated_tokens", 0))
+                for name in group.get("files", [])
+            ),
+            default=0,
+        )
+        if largest_file >= extreme_threshold:
+            return "extreme_unit"
+        if largest_file >= large_threshold:
+            return "large_units"
+        return "ordinary"
+
+    plan: List[Dict[str, Any]] = []
+    wave_groups: List[Dict[str, Any]] = []
+    wave_severity: Optional[str] = None
+
+    def finish_wave() -> None:
+        nonlocal wave_groups, wave_severity
+        if not wave_groups or wave_severity is None:
+            return
+        wave_number = len(plan) + 1
+        cap = (
+            1 if wave_severity == "extreme_unit"
+            else min(2, configured_cap) if wave_severity == "large_units"
+            else configured_cap
+        )
+        worker_ids = []
+        for group in wave_groups:
+            group["dispatch_wave"] = wave_number
+            group["dispatch_wave_max_concurrency"] = cap
+            group["dispatch_wave_reason"] = wave_severity
+            worker_ids.append(group["worker_id"])
+        plan.append(
+            {
+                "wave": wave_number,
+                "worker_ids": worker_ids,
+                "max_concurrency": cap,
+                "reason": wave_severity,
+            }
+        )
+        wave_groups = []
+        wave_severity = None
+
+    for group in planned_groups:
+        kind = severity(group)
+        if kind == "extreme_unit":
+            finish_wave()
+            wave_severity = kind
+            wave_groups = [group]
+            finish_wave()
+            continue
+        cap = min(2, configured_cap) if kind == "large_units" else configured_cap
+        if wave_groups and (wave_severity != kind or len(wave_groups) >= cap):
+            finish_wave()
+        wave_severity = kind
+        wave_groups.append(group)
+        if len(wave_groups) >= cap:
+            finish_wave()
+    finish_wave()
+    return planned_groups, plan, configured_cap
 
 def _balanced_worker_groups(
     queue: List[Dict[str, Any]],

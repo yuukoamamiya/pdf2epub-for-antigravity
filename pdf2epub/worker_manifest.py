@@ -37,6 +37,7 @@ def _worker_manifest_projection(
         "batching",
         "effective_max_concurrency",
         "concurrency_reason",
+        "dispatch_contract",
         "global_toc_outline_sha256",
         "skipped_context_files",
         "visual_review_dir",
@@ -77,6 +78,13 @@ def _worker_manifest_projection(
             "toc_owner": False,
         }
     )
+    for key in (
+        "dispatch_wave",
+        "dispatch_wave_max_concurrency",
+        "dispatch_wave_reason",
+    ):
+        if key in group:
+            projected[key] = group[key]
 
     for key in (
         "source_sha256",

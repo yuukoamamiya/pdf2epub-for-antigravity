@@ -297,6 +297,21 @@ def render_worker_prompt(
         + special_role_instruction
         + self_validation_instruction
         + (
+            "\n\n## Operator dispatch schedule\n\n"
+            f"This worker is in wave {scoped.get('dispatch_wave')} of the ordered "
+            "dispatch plan. The wave cap is "
+            f"{scoped.get('dispatch_wave_max_concurrency')} active workers "
+            f"({scoped.get('dispatch_wave_reason')}). The parent manifest's "
+            "`dispatch_plan` is an operator scheduling contract; it does not "
+            "start or limit model sessions automatically. Finish this entire "
+            "wave before starting the next, and count special-unit workers "
+            "and separate metadata workers against the same wave cap. A metadata "
+            "worker may use an available ordinary/large-wave slot, but must not "
+            "run during an `extreme_unit` wave.\n"
+            if scoped.get("dispatch_wave") is not None
+            else ""
+        )
+        + (
             f"\n\n## Assigned chapter task: {worker_id}\n\n"
             if chapter_mode
             else f"\n\n## Assigned worker: {worker_id}\n\n"

@@ -37,6 +37,7 @@ from .subagent_dispatch import (
 from .worker_grouping import (
     _worker_groups,
     _chapter_worker_groups,
+    _plan_dispatch_waves,
 )
 from .worker_manifest import _worker_manifest_projection
 from .worker_prompt import render_worker_prompt
@@ -332,16 +333,34 @@ def write_worker_handoffs(
     if not isinstance(queue, list):
         return []
     batching = manifest.get("batching", {})
-    max_workers = manifest.get(
-        "effective_max_concurrency",
-        batching.get("max_concurrency", DEFAULT_BATCH_MAX_CONCURRENCY),
+    if not isinstance(batching, Mapping):
+        batching = {}
+    normalized_batching = batching_config(
+        {"subagent": {"batching": dict(batching)}}
     )
+    max_workers = normalized_batching["max_concurrency"]
     chapter_mode = isinstance(manifest.get("chapter_groups"), Mapping)
     groups = (
         _chapter_worker_groups(manifest)
         if chapter_mode
         else _worker_groups(queue, max_workers)
     )
+    file_stats = manifest.get("file_stats", {})
+    if not isinstance(file_stats, Mapping):
+        file_stats = {}
+    groups, dispatch_plan, configured_cap = _plan_dispatch_waves(
+        groups, file_stats, normalized_batching
+    )
+
+    manifest["effective_max_concurrency"] = configured_cap
+    manifest["concurrency_reason"] = "ordered_dispatch_plan"
+    manifest["dispatch_contract"] = (
+        "Operator scheduling only: dispatch workers in ordered waves and do not "
+        "exceed each wave's max_concurrency. Count separate metadata workers "
+        "against the active wave cap; never run metadata during an extreme_unit "
+        "wave. This manifest does not start models or enforce a runtime semaphore."
+    )
+    manifest["dispatch_plan"] = dispatch_plan
     handoff_dir = output_dir / (
         handoff_dir_name or ("worker_handoffs" if task == "translate" else f"{task}_worker_handoffs")
     )
@@ -505,6 +524,11 @@ def write_worker_handoffs(
             ):
                 if prior.get(key) is not None:
                     entry[key] = prior[key]
+        entry["dispatch_wave"] = group["dispatch_wave"]
+        entry["dispatch_wave_max_concurrency"] = group[
+            "dispatch_wave_max_concurrency"
+        ]
+        entry["dispatch_wave_reason"] = group["dispatch_wave_reason"]
         handoffs.append(entry)
         worker_queue.append(dict(entry))
     current_assignments = {str(item.get("assignment_sha256") or "") for item in handoffs}

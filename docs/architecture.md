@@ -453,9 +453,19 @@ Subagent 实际读写哪些文件。两者不能互相替代。
 屏障；这保证恢复时不会把两个原本不相邻的章节拼到一起。这个过程只合并 worker 的文件
 清单和上下文，不把源 Markdown/HTML 物理拼接。
 
-并发配置的默认值保持保守；`max_concurrency` 只决定交接提示和本地 worker 分组的上限，
-不会绕过模型或 IDE 的额度。运行时硬上限为 6；存在大文件时仍会按文件规模自动降低有效并发。
+并发配置的默认值保持保守；`max_concurrency` 是配置和调度的全局上限（运行时硬上限 6），
+不会绕过模型或 IDE 的额度。只有 dispatch wave 的并发额度会按最大单个文件大小降低，
+不按 worker 聚合 token 或字节总量降低全局上限。
 索引、参考文献和需要内部拆分的章节继续保持语义隔离，不因提高并发而跨章节合批。
+
+最终 worker handoff 还可按 wave 生成父级 `dispatch_plan`（`wave`、`worker_ids`、
+`max_concurrency`、`reason`），并在每个 handoff 写入 `dispatch_wave`、
+`dispatch_wave_max_concurrency` 和 `dispatch_wave_reason`。配置并发是全局上限（最多 6）；普通
+波使用配置值；按最大单文件的 `estimated_tokens`，达到 `large_file_token_threshold`
+（默认 12,000 tokens）时 worker 波限为 2，达到 `extreme_file_token_threshold`
+（默认 24,000 tokens）时该单元独占波限为 1。
+metadata 也占同一波额度，且不与极大单元波重叠。该计划供本地操作员依序派发、完结当前波后再启
+下一波；它不启动模型，也不实现 IDE 的实际并发信号量。
 
 `polish` 复用同一个装箱器，但普通章节的文件预算取 `polish_max_files`（默认
 `min(max_files, 4)`，硬上限 8）。准备阶段从 `file_roles` 识别 `index`、
@@ -966,8 +976,15 @@ commands.novel → NovelExtractor（小说正文提取） + HTMLEpubPipeline met
 - `metadata_preparation.py`：生成 `metadata_translation_source.json` 与 prompt，并管理该任务
   使用的上下文；`metadata_validation.py`：独立检查翻译元数据字段、来源 hash 和拒答信号。
 - `translation_validation.py`：按单文件或全量检查翻译单元、metadata、标签和角色内容，写入
-  文件校验 ledger/checkpoint。通过现有 `validate_translated_units()` 入口可单独运行该阶段，
+  schema 3 文件校验 ledger/checkpoint。无版本号 legacy translate-html ledger 仅在有效性检查通过，
+  且源、目标和逐单元上下文均当前时兼容复用；安全检查仍照常执行。通过现有
+  `validate_translated_units()` 入口可单独运行该阶段，
   不会因此重新提取源 XHTML。
+  完整报告按文件写入 `resume_contexts`，ledger 每条记录的 `resume_context` 保存校验时的语言和
+  单元术语/TOC 上下文（仅在缺少单元上下文时回退全局上下文）。恢复比较收据绑定的上下文与当前值，
+  不只比较最近准备 manifest。上下文变化导致旧版无绑定检查点失效时，父级 manifest 的
+  `html_invalidated_checkpoints` 持久化其 fingerprint，防止重复 prepare 重新接受陈旧收据；当前校验
+  通过后清除对应记录。
 - `unit_files.py`：维护映射合同中的翻译文件 inventory、part 排序/合并与逻辑单元记录。
   `reporting.py`：汇总阶段和导航状态，写翻译报告。
 - `reconstruction.py`：按现有 mapping 恢复最终 XHTML，执行构建前校验门禁，读取已翻译 metadata，
@@ -981,6 +998,9 @@ schema。
 HTML 单元要求非空内容一一对应；标签、属性、实体、容器和嵌套关系由本地校验器检查。
 HTML 构建还会把 NCX/nav 更新结果写入导航报告；已有导航文档更新失败时默认阻断打包，
 只有显式确认参数才能放行。EPUB 只提供其中一种导航格式时，另一种记录为缺失而不是异常。
+EPUBCheck 是外部 Java 工具，需安装官方 W3C EPUBCheck 发布版本，并经 PATH 或
+`html_translation.epubcheck_path` 提供；warn 模式缺工具时记录跳过（不代表验证成功），strict
+模式缺工具时失败。
 两个 EPUB 构建路径都先在目标文件同目录写临时 ZIP，再用 `os.replace` 发布；ZIP 写入或
 完整性检查失败时异常向上传播并保留已有 EPUB。HTML 重建在发布前按配置运行 EPUBCheck，
 严格校验失败时也保留已有成品；warn 模式继续发布并记录告警。HTML packager 直接调用时
@@ -994,8 +1014,9 @@ EPUB 正文也使用 2.4 节的章节装箱器。`html-prepare` 先依据原始 
 `chapter_groups`，再让 `write_worker_handoffs()` 按 TOC 顺序装入
 `translate-html_worker_handoffs/`；
 默认允许相邻短分支共享一个 worker，超过文件数、token、单文件字节数、非空行数或章节数
-上限时封箱。默认 `max_nonempty_lines` 为 350；超过该值的 EPUB 压缩单元会在准备阶段
-生成有序 `.partN.md`，并在最终恢复时按原 mapping 合并。`Index` 和 `Bibliography`
+上限时封箱。默认 `max_nonempty_lines` 为 350；超过该值的 EPUB 压缩单元会按连续、平衡的完整非空行
+生成有序 `.partN.md`，不拆开标签行或段落行，并在最终恢复时按原 mapping 合并。升级时已属当前的提取缓存
+保留既有分片，不重新拆分或重排。`Index` 和 `Bibliography`
 即使未超行数预算也会独立成批。
 大分支只能在自己的单元列表内拆分，不能和邻章拼接。元数据翻译始终是独立的
 `translated_metadata.json` 任务，不计入正文 worker 的章节装箱。

@@ -62,6 +62,9 @@ PDF 原语言版和译文版都以通过润色验收的 Markdown 为源。原稿
 PDF 和 EPUB 的结果通常位于 `output/<书名>/`：PDF 翻译生成原语言 EPUB 和译文 EPUB，PDF 只转换时生成原语言 EPUB，
 EPUB 翻译生成译文 EPUB。
 
+高保真 EPUB 重建可配置外部 EPUBCheck。需安装官方 W3C EPUBCheck Java 发布版本，并通过 PATH 或
+`html_translation.epubcheck_path` 指定；warn 模式缺少工具时会记录跳过，不代表检查通过，strict 模式会失败。
+
 ## 文档
 
 - [AGENTS.md](AGENTS.md)：完整操作步骤与限制。

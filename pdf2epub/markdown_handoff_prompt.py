@@ -189,9 +189,16 @@ Batching guidance:
 - Index and bibliography units are isolated from adjacent chapters; an index
   above the line budget is split into ordered parts so those parts can be
   processed independently and merged only for final validation/building.
-{polish_batch_note}- Keep at most {identity.effective_max_concurrency} Subagent tasks active at once
-  for this hand-off (configured ceiling: {batching['max_concurrency']}; reason:
-  {identity.concurrency_reason}).
+{polish_batch_note}- Treat `effective_max_concurrency` as the configured upper bound. Follow the
+  ordered `dispatch_plan` waves in the manifest and do not exceed each wave's
+  `max_concurrency`. The plan uses the largest individual file in each worker,
+  not the worker's aggregate token estimate; extreme units run alone. Finish a
+  wave before starting the next, and count every worker, including special-unit
+  and separate metadata workers, against its wave cap. A metadata worker may use
+  an available ordinary/large-wave slot but must never run during an
+  `extreme_unit` wave. If no `dispatch_plan` is present yet, use
+  `effective_max_concurrency` until worker hand-offs are generated. This is an
+  operator scheduling contract and does not automatically start or limit models.
 - When `chapter_groups` is present, adjacent top-level chapter groups may be
   packed into one Subagent task when `pack_adjacent_chapters` is enabled. A
   packed task contains at most {batching['max_chapters_per_worker']} ordinary

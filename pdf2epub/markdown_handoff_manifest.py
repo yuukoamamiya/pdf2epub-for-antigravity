@@ -134,6 +134,10 @@ def build_markdown_manifest(data: ManifestBuild) -> dict[str, Any]:
         manifest["chapter_groups"] = {
             chapter_id: list(names) for chapter_id, names in context.chapter_groups.items()
         }
+    if resume.html_invalidated_checkpoints:
+        manifest["html_invalidated_checkpoints"] = dict(
+            resume.html_invalidated_checkpoints
+        )
     if context.prompt_context_files is not None:
         prompt_context = dict(context.prompt_context_files)
         manifest["prompt_context_files"] = prompt_context

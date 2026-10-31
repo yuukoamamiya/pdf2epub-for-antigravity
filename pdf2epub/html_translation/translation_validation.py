@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 from pdf2epub.document_roles import infer_translation_file_role, is_density_exempt_role
 from pdf2epub.glossary import validate_translation_context
@@ -15,9 +15,13 @@ from pdf2epub.markdown_validation import target_language_ratio_check
 from pdf2epub.special_role_audit import validate_special_role_markers
 from pdf2epub.subagent_safety import detect_refusal
 from pdf2epub.workflow_contracts import atomic_write_json
+from pdf2epub.workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION
 from .validation import nonempty_lines, tag_mismatch_count
 from .metadata_validation import HTMLMetadataValidator, MetadataValidationWorkspace
 from .unit_files import HTMLUnitStore, HTMLUnitWorkspace
+
+
+HTML_FILE_VALIDATION_SCHEMA_VERSION = MARKDOWN_VALIDATION_SCHEMA_VERSION
 
 
 def validate_file_name(file_name: Optional[str]) -> Optional[str]:
@@ -35,6 +39,26 @@ def validate_file_name(file_name: Optional[str]) -> Optional[str]:
             "file_name must be a direct .md filename inside compressed_units"
         )
     return requested
+
+
+def _resume_context_snapshot(manifest: Mapping[str, Any], file_name: str) -> Dict[str, Any]:
+    """Capture only the context projection needed to validate this unit on resume."""
+    snapshot: Dict[str, Any] = {
+        "context_sha256": dict(manifest.get("context_sha256", {}))
+        if isinstance(manifest.get("context_sha256"), dict)
+        else {},
+        "unit_context_sha256": {},
+        "toc_heading_contexts": {},
+        "source_language": manifest.get("source_language"),
+        "target_language": manifest.get("target_language"),
+    }
+    unit_hashes = manifest.get("unit_context_sha256", {})
+    if isinstance(unit_hashes, dict) and file_name in unit_hashes:
+        snapshot["unit_context_sha256"][file_name] = unit_hashes[file_name]
+    heading_contexts = manifest.get("toc_heading_contexts", {})
+    if isinstance(heading_contexts, dict) and file_name in heading_contexts:
+        snapshot["toc_heading_contexts"][file_name] = heading_contexts[file_name]
+    return snapshot
 
 
 @dataclass(frozen=True)
@@ -210,6 +234,10 @@ class HTMLTranslationValidator:
         source_sha256 = {}
         target_sha256 = {}
         target_language_audits: Dict[str, Dict[str, Any]] = {}
+        resume_contexts = {
+            name: _resume_context_snapshot(manifest, name)
+            for name in declared_names
+        }
         special_role_groups: Dict[str, Dict[str, Any]] = {}
         target_language = (
             (getattr(self, "config", {}) or {}).get("translation", {}) or {}
@@ -354,6 +382,8 @@ class HTMLTranslationValidator:
         )
 
         return {
+            "schema_version": HTML_FILE_VALIDATION_SCHEMA_VERSION,
+            "task": "translate-html",
             "scope": scope,
             "file": requested_file,
             "total": total,
@@ -365,6 +395,11 @@ class HTMLTranslationValidator:
             "valid_files": valid_files,
             "source_sha256": source_sha256,
             "target_sha256": target_sha256,
+            "resume_contexts": {
+                name: resume_contexts[name]
+                for name in source_sha256
+                if name in resume_contexts
+            },
             "source_snapshot": source_snapshot,
             "target_language_audits": target_language_audits,
             "target_language_blocked": sorted(
@@ -396,15 +431,28 @@ class HTMLTranslationValidator:
         for name in report.get("files_checked", [report.get("file")]):
             if not name:
                 continue
+            report_passed = bool(
+                report.get("all_passed")
+                and report.get("source_snapshot", {}).get("valid", False)
+                and not report.get("safety_blocked")
+            )
             records[str(name)] = {
-                "valid": str(name) in report.get("valid_files", []) and not report.get("missing"),
+                "valid": report_passed
+                and str(name) in report.get("valid_files", [])
+                and not report.get("missing"),
                 "source_sha256": report.get("source_sha256", {}).get(str(name)),
                 "target_sha256": report.get("target_sha256", {}).get(str(name)),
+                "resume_context": report.get("resume_contexts", {}).get(str(name)),
                 "validated_at": datetime.now(timezone.utc).isoformat(),
                 "invalid": [item for item in report.get("invalid", []) if item.get("file") == str(name)],
                 "safety_blocked": str(name) in report.get("safety_blocked", []),
             }
         atomic_write_json(
             path,
-            {"task": "translate-html", "scope": "file-checkpoints", "files": records},
+            {
+                "schema_version": HTML_FILE_VALIDATION_SCHEMA_VERSION,
+                "task": "translate-html",
+                "scope": "file-checkpoints",
+                "files": records,
+            },
         )

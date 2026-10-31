@@ -94,6 +94,14 @@ index 条目 1:1、书目逐条、notes 标记和 CIP/版权页短行标识符�
 术语上下文只注入一次；相邻章节合并 worker 使用按
 文件分区的直接上下文；大章节拆分时使用 `shared_entries` 和当前分片的 `local_entries`。
 
+父级 worker manifest 可附带 `dispatch_plan`，按波次列出 `worker_ids`、`max_concurrency` 和
+`reason`（`ordinary`、`large_units`、`extreme_unit`）；worker handoff 对应记录
+`dispatch_wave`、`dispatch_wave_max_concurrency` 和 `dispatch_wave_reason`。操作时顺序完成每一波
+再开始下一波：配置并发（有效上限 6）是全局上限，普通波使用配置额度；按最大单文件大小，
+达到 `large_file_token_threshold`（默认 12,000 tokens）时 worker 波限为 2，达到
+`extreme_file_token_threshold`（默认 24,000 tokens）时该单元独占额度 1。metadata 与正文共用波次额度，不能和极大单元波重叠。
+该计划只是本地操作员调度建议，不会启动模型或强制 IDE 实际信号量；每次派发仍需检查当前活动状态。
+
 polish worker 的 scoped prompt 会在 assigned task 前给出只读自检命令：
 `uv run pdf2epub -c <config_path> polish-validate --file <assigned_file> --check-only`。
 manifest 记录当前 hand-off 的 `config_path`（POSIX `/` 分隔）；若旧 manifest 没有该字段，
@@ -249,10 +257,9 @@ Subagent 需要：
 外部领域术语表，并生成 `translate-html_subagent_manifest.json`。确实不需要当前
 书实体表时，才使用
 `html-prepare --skip-entities`；外部领域术语表仍会继续生效。
-确认实体表当前并重新运行 `html-prepare` 后，在 manifest 的有效并发额度允许时可并行派发 metadata 与正文 handoff；
-metadata 计入当前 manifest 的 `effective_max_concurrency` 总上限（该值不超过
-`max_concurrency`）。每个 handoff 完成并验收后，空闲 worker 可接收
-下一个新 scoped handoff，且每次只处理其 `assigned_files`。
+确认实体表当前并重新运行 `html-prepare` 后，按父级 manifest 的 `dispatch_plan` 顺序派发；
+完成当前波后再开始下一波。metadata 占用同一波的并发名额；该计划只是本地操作提示，不会启动
+模型或强制 IDE 信号量。每个 handoff 仍只处理其 `assigned_files`。
 
 写完单个文件后，可以立即运行：
 
@@ -290,6 +297,16 @@ PDF 不再有页面来源配置；所有新运行都使用视觉 OCR。`pdf_text
 必须区分处理：前者在仅有 EPUB 2 或 EPUB 3 导航时属于正常记录，后者必须先人工检查再决定
 是否使用 `--allow-navigation-warnings`。放行 warning 不会替代 `html-validate` 或
 `epubcheck` 门禁。
+
+HTML validation ledger 使用 schema 3；仅当无版本号的旧 translate-html ledger 通过有效性检查，
+且源、目标与逐单元上下文均保持当前时，才可继续复用。安全检查不会因兼容复用而跳过。
+完整校验报告按文件写入 `resume_contexts`，ledger 每条记录的 `resume_context` 记录校验时的源/目标
+语言和单元术语、TOC 上下文；仅当缺少单元上下文时才回退全局上下文。恢复比较校验收据绑定的上下文，
+不只比较最近准备 manifest。因上下文变化拒绝的旧版无绑定检查点，其 fingerprint 会留在父级 manifest
+的 `html_invalidated_checkpoints` 中，防止重复 prepare 把陈旧收据重新认作完成；当前校验通过后清除该记录。
+EPUBCheck 是外部 Java 工具，需安装官方 W3C EPUBCheck 发布版本，并通过 PATH 或
+`html_translation.epubcheck_path` 提供可执行文件；warn 模式缺工具只记录跳过，不是校验成功，
+strict 模式缺工具会失败。
 
 项目测试还会构造一个固定 EPUB，经过真实的最终打包路径后交给 PyMuPDF 渲染，比较页数、
 文本版心和像素签名，并验证重复渲染稳定。这是本地阅读器引擎级别的回归，不等同于所有

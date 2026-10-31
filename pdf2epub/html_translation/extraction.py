@@ -16,6 +16,55 @@ from pdf2epub.workflow_contracts import atomic_write_json
 from .metadata_values import make_json_safe
 
 
+def _balanced_line_parts(lines: list[str], max_lines: int) -> list[list[str]]:
+    """Partition whole compressed lines into the least number of balanced parts."""
+    if max_lines < 1:
+        raise ValueError("max_lines must be positive")
+    if not lines:
+        return []
+    part_count = (len(lines) + max_lines - 1) // max_lines
+    weights = [len(line.encode("utf-8")) for line in lines]
+    low = max(max(weights), (sum(weights) + part_count - 1) // part_count)
+    high = sum(weights)
+
+    def needed_parts(limit: int) -> int:
+        count = 1
+        size = 0
+        line_count = 0
+        for weight in weights:
+            if size + weight > limit or line_count >= max_lines:
+                count += 1
+                size = 0
+                line_count = 0
+            size += weight
+            line_count += 1
+        return count
+
+    while low < high:
+        middle = (low + high) // 2
+        if needed_parts(middle) <= part_count:
+            high = middle
+        else:
+            low = middle + 1
+
+    parts: list[list[str]] = []
+    current: list[str] = []
+    current_size = 0
+    for line, weight in zip(lines, weights):
+        if current and (
+            current_size + weight > low
+            or len(current) >= max_lines
+        ):
+            parts.append(current)
+            current = []
+            current_size = 0
+        current.append(line)
+        current_size += weight
+    if current:
+        parts.append(current)
+    return parts
+
+
 @dataclass(frozen=True)
 class ExtractionWorkspace:
     epub_path: Path
@@ -239,19 +288,15 @@ class HTMLExtractionPreparer:
                 ]
                 if len(nonempty_lines) > batching["max_nonempty_lines"]:
                     part_names = []
-                    for part_index in range(
-                        0, len(nonempty_lines), batching["max_nonempty_lines"]
-                    ):
+                    balanced_parts = _balanced_line_parts(
+                        nonempty_lines, batching["max_nonempty_lines"]
+                    )
+                    for part_index, part_lines in enumerate(balanced_parts):
                         part_name = (
-                            f"{file_stem}.part{part_index // batching['max_nonempty_lines'] + 1}.md"
+                            f"{file_stem}.part{part_index + 1}.md"
                         )
                         (self.compressed_units_dir / part_name).write_text(
-                            "\n".join(
-                                nonempty_lines[
-                                    part_index : part_index + batching["max_nonempty_lines"]
-                                ]
-                            )
-                            + "\n",
+                            "\n".join(part_lines) + "\n",
                             encoding="utf-8",
                         )
                         part_names.append(part_name)
