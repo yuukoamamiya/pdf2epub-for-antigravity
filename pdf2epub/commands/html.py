@@ -20,6 +20,15 @@ from pdf2epub.utils.input_paths import resolve_book_input_path
 from pdf2epub.utils.logging_config import configure_logging
 
 
+HTML_BODY_SELF_VALIDATION_RULE = (
+    "【Self-Validation】: After writing each assigned target file (including every assigned `.partN.md` file), "
+    "run `uv run pdf2epub -c <same-config> html-validate --file <filename>` from the repository root. "
+    "Only report that file complete when the command exits with code 0. Validate only files in this "
+    "worker's `assigned_files`; do not run full-book validation. The main agent runs full-book "
+    "`html-validate` after all body parts and metadata are complete."
+)
+
+
 def _load_html_book_context(args, operation: str):
     """Resolve the EPUB, title, output directory, and operation logging once."""
     config = load_config(args.config)
@@ -301,7 +310,7 @@ def _prepare_html_command(args):
                 "【Italic Tag 1:1 Preservation】: Preserve the exact count, order, and nesting of `<i>...</i>` tags. Example: `<i>Gidra</i>` may become `<i>《基多拉》（Gidra）</i>`, and `<i>A, B</i>` may become `<i>《甲》、《乙》</i>`; in both cases it remains one `<i>` pair, never two pairs or none.",
                 "【Entity Preservation】: Copy protected entities and anchors literally, including `&amp;`, `&lt;`, `&gt;`, `<a/>`, and other self-closing or placeholder tokens. Translate surrounding text only; never replace an entity with its prose meaning.",
                 "【Direct File Writing】: Write output directly to the designated target file without markdown code fences.",
-                "【Self-Validation】: After writing each target file, run `uv run pdf2epub -c <same-config> html-validate --file <filename>` from the repository root. Only report that file complete when the command exits with code 0; this single-file check does not replace the final full-book html-validate.",
+                HTML_BODY_SELF_VALIDATION_RULE,
                 *glossary_bundle.rules,
             ),
             config=config,
@@ -352,7 +361,8 @@ def _prepare_html_command(args):
         logger.info(f"Output: {output_dir / 'compressed_units'}")
         logger.info(f"Body Subagent prompt: {body_paths['prompt']}")
         if worker_handoffs:
-            logger.info(f"Worker handoffs: {output_dir / 'worker_handoffs'}")
+            handoff_dir = Path(output_dir) / worker_handoffs[0]["manifest"]
+            logger.info(f"Worker handoffs: {handoff_dir.parent}")
         logger.info(
             "Recommended models: body/metadata are declared in their manifests "
             "and default to the configured translation model."

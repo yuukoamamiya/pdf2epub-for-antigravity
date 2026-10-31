@@ -982,7 +982,8 @@ HTML 构建还会把 NCX/nav 更新结果写入导航报告；已有导航文档
 `PDF2EPUB_VISUAL_QA_DIR` 可额外导出最终合成 EPUB、各页 PNG 和联系表 PNG，供人工检查。
 
 EPUB 正文也使用 2.4 节的章节装箱器。`html-prepare` 先依据原始 TOC 生成
-`chapter_groups`，再让 `write_worker_handoffs()` 按 TOC 顺序装入 `worker_handoffs/`；
+`chapter_groups`，再让 `write_worker_handoffs()` 按 TOC 顺序装入
+`translate-html_worker_handoffs/`；
 默认允许相邻短分支共享一个 worker，超过文件数、token、单文件字节数、非空行数或章节数
 上限时封箱。默认 `max_nonempty_lines` 为 350；超过该值的 EPUB 压缩单元会在准备阶段
 生成有序 `.partN.md`，并在最终恢复时按原 mapping 合并。`Index` 和 `Bibliography`

@@ -249,6 +249,10 @@ Subagent 需要：
 外部领域术语表，并生成 `translate-html_subagent_manifest.json`。确实不需要当前
 书实体表时，才使用
 `html-prepare --skip-entities`；外部领域术语表仍会继续生效。
+确认实体表当前并重新运行 `html-prepare` 后，在 manifest 的有效并发额度允许时可并行派发 metadata 与正文 handoff；
+metadata 计入当前 manifest 的 `effective_max_concurrency` 总上限（该值不超过
+`max_concurrency`）。每个 handoff 完成并验收后，空闲 worker 可接收
+下一个新 scoped handoff，且每次只处理其 `assigned_files`。
 
 写完单个文件后，可以立即运行：
 
@@ -256,8 +260,9 @@ Subagent 需要：
 html-validate --file <同名文件>.md
 ```
 
-单文件模式只检查该文件，不检查元数据和全书完整性；最终打包前仍须运行不带
-`--file` 的全量校验。
+正文 worker 只对 `assigned_files` 中的单元（包括 `.partN.md`）运行 `html-validate --file <同名文件>.md`；
+单文件模式不检查元数据和全书完整性。主代理等全部正文单元/分片和 `translated_metadata.json` 完成后，
+运行不带 `--file` 的全量校验，再打包。
 
 元数据规则：书名、目录、简介和版权说明可以翻译；作者名和出版社必须原样复制。`html-validate` 会检查元数据结构、目录顺序、链接锚点以及作者/出版社是否被修改。校验不通过时，`build-html-epub` 默认拒绝打包。
 打包阶段如果已有 NCX 或 nav 导航文档更新失败，也会默认拒绝生成 EPUB，并把导航文件、错误和阻断状态写入

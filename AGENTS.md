@@ -859,8 +859,12 @@ uv run pdf2epub -c config.yaml build-epub
    EPUB 实体提取默认排除 `Index`、`Bibliography`、`Copyright` 和 `Cover` 等确定性附录，
    其余正文章节仍按 manifest 逐文件读取。
    确实不需要实体表时才使用 `html-prepare --skip-entities`。
+   确认实体表当前并重新运行 `html-prepare` 后，在 manifest 的有效并发额度允许时可并行派发 metadata 与正文 handoff；
+   metadata 计入当前 manifest 的 `effective_max_concurrency` 总上限（该值不超过
+   `max_concurrency`）。每个 handoff 完成并验收后，空闲 worker 可接收
+   下一个新 scoped handoff，且每次只处理其 `assigned_files`。
 5. 读取第二次生成的 `translate-html_subagent_prompt.md`、父级 manifest 和
-   `worker_handoffs/`，打开每个 handoff 对应的工作区 Subagent，将同名译文写入
+   `translate-html_worker_handoffs/`，打开每个 handoff 对应的工作区 Subagent，将同名译文写入
    `translated_compressed/`。单元文件名是稳定身份标识但对 worker 属于 opaque ID；必须按
    handoff 原名写译文，不重命名、不合并文件，也不得改 mapping。mapping 中的
    `package_relative_path` 是构建器恢复到原 EPUB 成员的权威路径。只处理 scoped manifest 的
@@ -874,7 +878,9 @@ uv run pdf2epub -c config.yaml build-epub
 7. Subagent 按 `metadata_translation_prompt.md` 写入 `translated_metadata.json`：
    `original_title`、作者和出版社保留原文；译名写入 `translated_title`；目录顺序、href、
    anchor、level 不变；`translated_description` 和 `translated_rights` 保留为顶层字段。
-8. 每个文件可运行 `html-validate --file <文件名>`，全部完成后运行全量 `html-validate`。
+8. 正文 worker 只对自己 `assigned_files` 中的文件（包括 `.partN.md`）运行
+   `html-validate --file <文件名>`，退出码为 0 才报告完成，不运行全书校验。正文分片和
+   `translated_metadata.json` 全部完成后，由主代理运行全量 `html-validate`。
 9. 全量通过后执行：
 
    ```text

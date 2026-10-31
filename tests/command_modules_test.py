@@ -109,6 +109,68 @@ def test_polish_validate_parser_accepts_single_file_checkpoint():
     assert args.file == "chapter_8.5.md"
 
 
+def test_html_prepare_logs_generated_handoff_directory_and_scopes_validation_prompt(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    import pdf2epub.glossary as glossary
+    import pdf2epub.html_translation as html_translation
+
+    output_dir = tmp_path / "output"
+    compressed = output_dir / "compressed_units"
+    translated = output_dir / "translated_compressed"
+    compressed.mkdir(parents=True)
+    translated.mkdir()
+    (compressed / "chapter.part1.md").write_text("<p>Source</p>", encoding="utf-8")
+    (compressed / "chapter.mapping.json").write_text(
+        json.dumps({"translation_parts": ["chapter.part1.md"]}), encoding="utf-8"
+    )
+    input_epub = output_dir / "input.epub"
+    input_epub.write_bytes(b"synthetic epub")
+    config = {"translation": {"require_entities": False, "target_language": "Chinese"}}
+
+    class Pipeline:
+        source_language = "English"
+        book_title = "HTML fixture"
+        compressed_units_dir = compressed
+        translated_dir = translated
+
+        def __init__(self, **_kwargs):
+            pass
+
+        @staticmethod
+        def declared_translation_files():
+            return ["chapter.part1.md"]
+
+        @staticmethod
+        def translation_file_roles(_files):
+            return {}
+
+    monkeypatch.setattr(html_commands, "_load_html_book_context", lambda *_: (config, "HTML fixture", output_dir, input_epub))
+    monkeypatch.setattr("pdf2epub.utils.ebook_converter.needs_conversion", lambda _path: False)
+    monkeypatch.setattr(html_translation, "HTMLEpubPipeline", Pipeline)
+    monkeypatch.setattr(html_commands, "entity_context_is_current", lambda *_: False)
+    monkeypatch.setattr(html_commands, "_load_html_chapter_groups", lambda *_: {})
+    monkeypatch.setattr(glossary, "load_selected_glossaries", lambda *_: SimpleNamespace(context_files={}, rules=()))
+    monkeypatch.setattr(glossary, "build_unit_glossary_contexts", lambda *_args, **_kwargs: {})
+    logs = []
+    monkeypatch.setattr(html_commands.logger, "info", lambda message: logs.append(str(message)))
+
+    result = html_commands._prepare_html_command(SimpleNamespace(
+        config=str(tmp_path / "config.yaml"), skip_extract=True, skip_entities=True,
+        source_language=None, target_language=None, resume=False,
+    ))
+
+    assert result == 0
+    generated_manifests = list((output_dir / "translate-html_worker_handoffs").glob("translate-html_subagent_manifest_*.json"))
+    assert generated_manifests
+    logged_directory = next(line.removeprefix("Worker handoffs: ") for line in logs if line.startswith("Worker handoffs:"))
+    assert Path(logged_directory) == output_dir / "translate-html_worker_handoffs"
+    generated_prompts = list((output_dir / "translate-html_worker_handoffs").glob("translate-html_subagent_prompt_*.md"))
+    prompt = generated_prompts[0].read_text(encoding="utf-8")
+    assert "assigned `.partN.md` file" in prompt
+    assert "only files in this worker's `assigned_files`" in prompt
+    assert "do not run full-book validation" in prompt
+
+
 def test_polish_validate_parser_accepts_check_only():
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command")

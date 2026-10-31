@@ -135,6 +135,13 @@ Chandra 是当前主 OCR，扫描、可搜索和混合 PDF 都使用视觉 OCR�
 
 TeX 运行目录会核验源快照的输入身份、输入内容指纹和文件树摘要后再恢复；输入切换或旧快照无法验证时会明确失败并保留原目录。
 
+EPUB 高保真翻译在实体提取完成并重新运行 `html-prepare` 后，可在 manifest 的有效并发额度允许时
+并行处理元数据和正文 handoff；每个 worker 只处理自己 handoff 中列出的文件。
+
+HTML EPUB 构建可选运行标准 EPUBCheck：默认 `html_translation.epubcheck_mode: warn`；严格验收时设为
+`strict`，并确保 `epubcheck` 在 `PATH` 中，或通过 `epubcheck_path` 指定可执行启动器。内置对齐检查
+不能替代 EPUBCheck。
+
 PDF 纯转换模式仍必须经过 OCR、结构整理和 polish；它只跳过实体、目录翻译和正文翻译，
 不会把“未整理的 OCR 文本”直接打包。
 

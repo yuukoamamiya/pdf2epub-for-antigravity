@@ -44,6 +44,111 @@ def test_file_scope_validator_checks_one_unit_without_metadata_or_packaging(tmp_
     assert result["metadata"]["skipped"] is True
 
 
+def test_full_html_validation_keeps_metadata_checks_after_special_marker_error(tmp_path, monkeypatch):
+    import hashlib
+    import pdf2epub.html_translation.translation_validation as validation
+    from pdf2epub.html_translation.translation_validation import (
+        HTMLTranslationValidator,
+        HTMLValidationWorkspace,
+    )
+
+    units = tmp_path / "compressed_units"
+    translated = tmp_path / "translated_compressed"
+    units.mkdir()
+    translated.mkdir()
+    source = "Reference 1"
+    target = "参考文献 2"
+    (units / "bibliography.md").write_text(source, encoding="utf-8")
+    (translated / "bibliography.md").write_text(target, encoding="utf-8")
+    (units / "bibliography.mapping.json").write_text(
+        json.dumps({"translation_parts": ["bibliography.md"]}), encoding="utf-8"
+    )
+    input_epub = tmp_path / "input.epub"
+    input_epub.write_bytes(b"synthetic epub")
+    (tmp_path / "translate-html_subagent_manifest.json").write_text(
+        json.dumps({
+            "files": ["bibliography.md"],
+            "file_roles": {"bibliography.md": "bibliography"},
+            "source_sha256": {
+                "bibliography.md": hashlib.sha256(source.encode()).hexdigest()
+            },
+            "input_epub_sha256": hashlib.sha256(input_epub.read_bytes()).hexdigest(),
+        }), encoding="utf-8"
+    )
+    validator = HTMLTranslationValidator(
+        HTMLValidationWorkspace(tmp_path, units, translated, {"translation": {"target_language": "Chinese"}})
+    )
+    calls = []
+    monkeypatch.setattr(validator, "validate_translated_metadata", lambda: calls.append("metadata") or {"valid": False})
+    monkeypatch.setattr(validation, "validate_translation_context", lambda *_: calls.append("context") or {"valid": False})
+
+    result = validator.validate()
+
+    assert calls == ["metadata", "context"]
+    assert result["scope"] == "book"
+    assert "numeric marker mismatch" in result["invalid"][0]["reason"]
+    assert result["metadata"]["valid"] is False
+    assert result["translation_context"]["valid"] is False
+    assert result["all_passed"] is False
+    assert result["book_complete"] is False
+
+
+def test_html_split_unit_file_scope_and_book_completeness(tmp_path, monkeypatch):
+    import hashlib
+    import pdf2epub.html_translation.translation_validation as validation
+    from pdf2epub.html_translation.translation_validation import (
+        HTMLTranslationValidator,
+        HTMLValidationWorkspace,
+    )
+
+    units = tmp_path / "compressed_units"
+    translated = tmp_path / "translated_compressed"
+    units.mkdir()
+    translated.mkdir()
+    names = ["Notes.part1.md", "Notes.part2.md"]
+    sources = ["Reference 2020", "Reference 2021"]
+    for name, source in zip(names, sources):
+        (units / name).write_text(source, encoding="utf-8")
+    (units / "Notes.mapping.json").write_text(
+        json.dumps({"translation_parts": names}), encoding="utf-8"
+    )
+    input_epub = tmp_path / "input.epub"
+    input_epub.write_bytes(b"synthetic epub")
+    manifest = {
+        "files": names,
+        "file_roles": {name: "notes" for name in names},
+        "source_sha256": {
+            name: hashlib.sha256(source.encode()).hexdigest()
+            for name, source in zip(names, sources)
+        },
+        "input_epub_sha256": hashlib.sha256(input_epub.read_bytes()).hexdigest(),
+    }
+    manifest_path = tmp_path / "translate-html_subagent_manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    (translated / names[0]).write_text("参考文献 2020", encoding="utf-8")
+    validator = HTMLTranslationValidator(
+        HTMLValidationWorkspace(tmp_path, units, translated, {"translation": {"target_language": "Chinese"}})
+    )
+    monkeypatch.setattr(validator, "validate_translated_metadata", lambda: {"valid": True})
+    monkeypatch.setattr(validation, "validate_translation_context", lambda *_: {"valid": True})
+
+    part_result = validator.validate(names[0])
+    incomplete_book = validator.validate()
+    assert part_result["all_passed"] is True
+    assert part_result["metadata"]["skipped"] is True
+    assert incomplete_book["all_passed"] is False
+    assert names[1] in incomplete_book["missing"]
+
+    (translated / names[1]).write_text("参考文献 2021", encoding="utf-8")
+    complete_book = validator.validate()
+    assert complete_book["all_passed"] is True
+
+    (translated / names[1]).write_text("参考文献 2022", encoding="utf-8")
+    marker_failure = validator.validate()
+    assert marker_failure["all_passed"] is False
+    assert any("numeric marker mismatch" in item["reason"] for item in marker_failure["invalid"])
+
+
 def test_metadata_updater_changes_opf_without_unit_workspace(tmp_path):
     from pdf2epub.html_translation.build_contracts import BuildConfig
     from pdf2epub.html_translation.package_metadata import (

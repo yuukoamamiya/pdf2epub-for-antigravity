@@ -316,9 +316,9 @@ class HTMLTranslationValidator:
                 role,
             )
             if marker_errors:
-                file_name = group["files"][0]
+                marker_file_name = group["files"][0]
                 invalid.extend(
-                    {"file": file_name, "reason": error}
+                    {"file": marker_file_name, "reason": error}
                     for error in marker_errors
                 )
                 for name in group["files"]:

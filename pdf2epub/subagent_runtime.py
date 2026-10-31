@@ -317,11 +317,10 @@ def write_worker_handoffs(
 ) -> List[Dict[str, Any]]:
     """Create scoped worker handoffs.
 
-    Handoff names are task-scoped.  Translation keeps the historical
-    ``worker_handoffs`` directory, while other Markdown tasks (currently
-    ``polish``) get an explicit directory such as
-    ``polish_worker_handoffs``.  This prevents a polishing worker from being
-    mistaken for a translation worker when both stages exist in one output.
+    Handoff names are task-scoped.  The legacy ``translate`` task uses
+    ``worker_handoffs``; named tasks such as ``translate-html`` use
+    ``<task>_worker_handoffs``.  Callers should use returned paths as the
+    authority for the generated directory name.
     """
     output_dir = Path(output_dir)
     manifest_path = Path(manifest_path)
