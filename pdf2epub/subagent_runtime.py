@@ -40,7 +40,11 @@ from .worker_grouping import (
     _plan_dispatch_waves,
 )
 from .worker_manifest import _worker_manifest_projection
-from .worker_prompt import DISPATCH_OPERATOR_CONTRACT, render_worker_prompt
+from .worker_prompt import (
+    DISPATCH_OPERATOR_CONTRACT,
+    render_dispatch_operator_prompt,
+    render_worker_prompt,
+)
 from .worker_glossary_context import build_worker_glossary_context
 
 DEFAULT_TRANSLATION_MODEL = "gemini-3.1-pro-preview"
@@ -349,7 +353,12 @@ def write_worker_handoffs(
     if not isinstance(file_stats, Mapping):
         file_stats = {}
     groups, dispatch_plan, configured_cap = _plan_dispatch_waves(
-        groups, file_stats, normalized_batching
+        groups,
+        file_stats,
+        normalized_batching,
+        strategy=(
+            "ordinary_before_large" if task == "translate-html" else "source_order"
+        ),
     )
 
     manifest["effective_max_concurrency"] = configured_cap
@@ -548,6 +557,21 @@ def write_worker_handoffs(
     manifest["worker_queue"] = worker_queue
     manifest["worker_handoffs"] = handoffs
     manifest["retired_worker_handoffs"] = list(retired_by_assignment.values())
+    if task == "translate-html":
+        guide_path = output_dir / "translate-html_dispatch_prompt.md"
+        manifest["dispatch_strategy"] = "ordinary_before_large_with_extreme_barriers"
+        manifest["dispatch_operator_prompt"] = relative_posix_path(
+            guide_path, output_dir
+        )
+        atomic_write_text(
+            guide_path,
+            render_dispatch_operator_prompt(
+                task=task,
+                manifest_path=relative_posix_path(manifest_path, output_dir),
+                handoffs=handoffs,
+                dispatch_plan=dispatch_plan,
+            ),
+        )
     atomic_write_json(manifest_path, manifest)
     return handoffs
 

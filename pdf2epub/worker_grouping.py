@@ -21,6 +21,8 @@ def _plan_dispatch_waves(
     groups: List[Dict[str, Any]],
     file_stats: Mapping[str, Mapping[str, Any]],
     batching: Mapping[str, Any],
+    *,
+    strategy: str = "source_order",
 ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], int]:
     """Annotate worker groups with ordered operator dispatch waves.
 
@@ -56,6 +58,37 @@ def _plan_dispatch_waves(
             return "large_units"
         return "ordinary"
 
+    # HTML translation can keep ordinary IDE slots busy while avoiding an
+    # ordinary/large alternation that would otherwise create many singleton
+    # waves. Extreme units remain hard ordering barriers. Keep the returned
+    # group list in its original order; only dispatch annotations and plan
+    # order follow this scheduling view.
+    scheduling_groups = planned_groups
+    if strategy == "ordinary_before_large":
+        scheduling_groups = []
+        segment: List[Dict[str, Any]] = []
+
+        def flush_segment() -> None:
+            if not segment:
+                return
+            scheduling_groups.extend(
+                group for group in segment if severity(group) == "ordinary"
+            )
+            scheduling_groups.extend(
+                group for group in segment if severity(group) == "large_units"
+            )
+            segment.clear()
+
+        for group in planned_groups:
+            if severity(group) == "extreme_unit":
+                flush_segment()
+                scheduling_groups.append(group)
+            else:
+                segment.append(group)
+        flush_segment()
+    elif strategy != "source_order":
+        raise ValueError(f"Unknown dispatch strategy: {strategy}")
+
     plan: List[Dict[str, Any]] = []
     wave_groups: List[Dict[str, Any]] = []
     wave_severity: Optional[str] = None
@@ -87,7 +120,7 @@ def _plan_dispatch_waves(
         wave_groups = []
         wave_severity = None
 
-    for group in planned_groups:
+    for group in scheduling_groups:
         kind = severity(group)
         if kind == "extreme_unit":
             finish_wave()

@@ -13,7 +13,8 @@ Antigravity 工作区 Agent 负责翻译和需要语义判断的内容，本地 
 | arXiv 或本地 TeX | 翻译 TeX 源文件并通过编译校验 | 校验后的 TeX 工程 |
 
 工作流支持恢复中断任务，并可使用术语表帮助统一译名。PDF 新运行都使用视觉 OCR；EPUB 和 TeX
-流程不需要 OCR。
+流程不需要 OCR。`html-prepare` 会生成主 Agent 专用的 EPUB worker 派发清单，列出所有波次的
+scoped prompt/manifest 入口；CLI 打印首波入口。该清单只描述计划，不会自动启动 Subagent。
 
 ## 快速开始
 

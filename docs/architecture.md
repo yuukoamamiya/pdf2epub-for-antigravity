@@ -482,6 +482,13 @@ metadata 也占同一波额度，且不与极大单元波重叠。父级 `dispat
 终止再释放 lease；恢复时检查真实活动会话，避免重复派发或误释放活跃 lease。lease API 继续负责原子
 claim/renew/release，但不强制 IDE session 生命周期，也不启动模型或实现 IDE 实际并发信号量。
 
+HTML EPUB handoff 使用专属 `ordinary_before_large_with_extreme_barriers` 调度策略：在每个
+extreme worker 边界内，ordinary worker 按原相对顺序先装波，large worker 再按原相对顺序装波；
+worker 列表、ID、assigned files 和 assignment digest 不因调度重排而改变。此策略不影响 PDF
+translate/polish。`translate-html_dispatch_prompt.md` 是主 Agent 专用静态操作清单，父 manifest
+记录相对路径和策略名；它不属于任何 scoped worker handoff。CLI 打印首波 scoped 入口，清单列出
+所有波次的入口。
+
 `polish` 复用同一个装箱器，但普通章节的文件预算取 `polish_max_files`（默认
 `min(max_files, 4)`，硬上限 8）。准备阶段从 `file_roles` 识别 `index`、
 `bibliography`、`notes`、`author_notes`、`toc`、`catalog`、`ad`、`copyright`、

@@ -144,6 +144,89 @@ def _polish_special_role_instruction(
     )
 
 
+def render_dispatch_operator_prompt(
+    *,
+    task: str,
+    manifest_path: str,
+    handoffs: List[Mapping[str, Any]],
+    dispatch_plan: List[Mapping[str, Any]],
+) -> str:
+    """Render a main-agent-only dispatch guide from persisted handoffs."""
+    lines = [
+        f"# {task} dispatch guide (main agent only)",
+        "",
+        f"Parent manifest: `{manifest_path}`",
+        "",
+        "This guide is for the main agent. Do not give it to a worker. Each worker gets only its own scoped manifest and prompt.",
+        "",
+        DISPATCH_OPERATOR_CONTRACT,
+        "",
+        "Before resuming, inspect actual active Subagent conversations and the dispatch lease. Do not reopen assignments marked assigned/running or active_same_assignment; reconnect/review that exact assignment and wait. A conflict blocks opening a new worker until resolved. If any extreme_unit assignment is actually active, do not start an ordinary or large wave beside it. Static status is not proof that a conversation has started or ended.",
+        "Retry only the failed worker's assigned_files. Preserve assignment identity only when the source and context assignment is unchanged; changed source/context produces a new assignment and supersedes the old one. Keep metadata within the same wave cap and never overlap it with an extreme_unit wave.",
+        "",
+        "## Waves",
+        "",
+    ]
+    handoffs_by_id = {str(item.get("worker_id")): item for item in handoffs}
+    for wave in dispatch_plan:
+        wave_number = wave.get("wave")
+        lines.append(
+            f"### Wave {wave_number}: {wave.get('reason')} (cap {wave.get('max_concurrency')})"
+        )
+        lines.append("")
+        for worker_id in wave.get("worker_ids", []):
+            item = handoffs_by_id.get(str(worker_id), {})
+            assigned = ", ".join(
+                f"`{name}`" for name in item.get("assigned_files", [])
+            )
+            lines.append(
+                f"- `{worker_id}` — status `{item.get('status', 'unknown')}`, "
+                f"lease `{item.get('dispatch_status', 'unknown')}`, files: {assigned}"
+            )
+            lines.append(f"  - Prompt: `{item.get('prompt', '')}`")
+            lines.append(f"  - Manifest: `{item.get('manifest', '')}`")
+        lines.append("")
+    first_wave = dispatch_plan[0] if dispatch_plan else {}
+    first_ids = list(first_wave.get("worker_ids", []))
+    eligible_ids = [
+        worker_id
+        for worker_id in first_ids
+        if (handoffs_by_id.get(str(worker_id), {}).get("status") == "pending")
+        and (
+            handoffs_by_id.get(str(worker_id), {}).get("dispatch_status")
+            == "available"
+        )
+    ]
+    if eligible_ids:
+        lines.extend(
+            [
+                "## First wave action",
+                "",
+                f"Potentially start these {len(eligible_ids)} pending assignments from Wave 1 only after checking actual conversations, leases, and available IDE slots. Open eligible independent worker conversations together up to the remaining wave cap, then wait. Account for active workers and metadata against that cap. Do not send the parent prompt/manifest to one worker as a substitute for scoped assignments.",
+                "",
+            ]
+        )
+    elif first_ids:
+        lines.extend(
+            [
+                "## First wave action",
+                "",
+                "No Wave 1 assignment is currently both pending and lease-available. Review or wait on assigned/running/active_same_assignment work; resolve any conflict before opening a worker. Recheck real active conversations and leases before dispatch.",
+                "",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "## No pending body workers",
+                "",
+                "There are no pending body assignments in this plan. Do not create or rerun body workers. Process only metadata that is still pending, then run full HTML validation.",
+                "",
+            ]
+        )
+    return "\n".join(lines)
+
+
 def render_worker_prompt(
     *,
     task: str,

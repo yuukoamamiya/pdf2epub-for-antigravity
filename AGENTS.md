@@ -878,8 +878,15 @@ uv run pdf2epub -c config.yaml build-epub
    其余正文章节仍按 manifest 逐文件读取。
    确实不需要实体表时才使用 `html-prepare --skip-entities`。
    确认实体表当前并重新运行 `html-prepare` 后，按父级 manifest 的 `dispatch_plan` 顺序派发；
-   一波完成后再开始下一波。metadata 占用同一波的并发名额。波次额度是本地操作提示，不会启动
-   模型或强制 IDE 信号量；每个 worker 仍只处理其 `assigned_files`。
+   主 Agent 读取 manifest 关联的 `translate-html_dispatch_prompt.md` 派发清单。清单列出每波
+   scoped prompt/manifest。先核实真实活动会话和 lease，扣除活跃 worker 与 metadata 占用的波次额度，
+   再按剩余 wave cap 与 IDE 槽位同时打开首波 eligible 独立 worker，并等待结果。`active_same_assignment`/assigned/running
+   需要接回或等待，conflict 需先解决；实际 extreme worker 活跃时不启动普通波。无待处理正文时
+   不重派正文，只检查仍 pending 的 metadata 并完成全量校验。一波完成后再开始下一波。
+   metadata 占用同一波的并发名额。波次额度是本地静态操作提示，不会启动模型或强制 IDE 信号量；
+   每个 worker 仍只处理其 `assigned_files`。translate-html 在每个 extreme worker 边界内将
+   ordinary worker 稳定收集并按配置 cap 装波，再将 large worker 稳定收集并按 `min(2, cap)` 装波；
+   extreme worker 仍独占，assignment、worker id 和文件顺序不变。PDF translate/polish 继续按原顺序规划。
 5. 读取第二次生成的 `translate-html_subagent_prompt.md`、父级 manifest 和
    `translate-html_worker_handoffs/`，打开每个 handoff 对应的工作区 Subagent，将同名译文写入
    `translated_compressed/`。单元文件名是稳定身份标识但对 worker 属于 opaque ID；必须按

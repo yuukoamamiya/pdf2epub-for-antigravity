@@ -12,6 +12,7 @@ def _prepared(
     *,
     chapters: bool = True,
     max_source_tokens: int = 10_000,
+    task: str = "translate",
 ):
     source = tmp_path / "source"
     target = tmp_path / "target"
@@ -26,7 +27,7 @@ def _prepared(
     )
     paths = prepare_markdown_subagent(
         tmp_path,
-        "translate",
+        task,
         source,
         target,
         "English",
@@ -169,6 +170,294 @@ def test_dispatch_severity_uses_largest_file_not_worker_aggregate():
         }
     ]
     assert groups[0]["dispatch_wave_max_concurrency"] == 4
+
+
+def test_html_dispatch_packs_alternating_kinds_without_changing_group_identity():
+    groups = [
+        {"worker_id": f"worker_{index:03d}", "files": [f"u{index}.md"]}
+        for index in range(1, 25)
+    ]
+    stats = {
+        f"u{index}.md": {"estimated_tokens": 50 if index % 2 else 150}
+        for index in range(1, 25)
+    }
+    original = [dict(group) for group in groups]
+    planned, waves, cap = _plan_dispatch_waves(
+        groups,
+        stats,
+        {
+            "max_concurrency": 4,
+            "large_file_token_threshold": 100,
+            "extreme_file_token_threshold": 400,
+        },
+        strategy="ordinary_before_large",
+    )
+    _, source_order_waves, _ = _plan_dispatch_waves(
+        groups,
+        stats,
+        {
+            "max_concurrency": 4,
+            "large_file_token_threshold": 100,
+            "extreme_file_token_threshold": 400,
+        },
+    )
+
+    assert [(item["worker_id"], item["files"]) for item in planned] == [
+        (item["worker_id"], item["files"]) for item in original
+    ]
+    assert cap == 4
+    assert {worker for wave in waves for worker in wave["worker_ids"]} == {
+        worker for wave in source_order_waves for worker in wave["worker_ids"]
+    }
+    assert len(source_order_waves) == 24
+    assert [wave["reason"] for wave in source_order_waves] == [
+        "ordinary" if index % 2 else "large_units" for index in range(1, 25)
+    ]
+    assert len(waves) == 9
+    assert not any(len(wave["worker_ids"]) == 1 for wave in waves)
+    assert [wave["reason"] for wave in waves] == ["ordinary"] * 3 + [
+        "large_units"
+    ] * 6
+    assert [worker for wave in waves for worker in wave["worker_ids"]] == [
+        f"worker_{index:03d}" for index in range(1, 25, 2)
+    ] + [f"worker_{index:03d}" for index in range(2, 25, 2)]
+
+
+def test_write_worker_handoffs_applies_repacking_only_to_html_and_keeps_assignments(
+    tmp_path: Path,
+):
+    def build_inventory(root: Path, task: str):
+        names = {f"unit_{index:02d}.md": 20 for index in range(1, 25)}
+        paths = _prepared(root, names, task=task)
+        manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+        manifest["file_stats"] = {
+            name: {
+                **(manifest["file_stats"].get(name, {}) or {}),
+                "estimated_tokens": 50 if index % 2 else 150,
+            }
+            for index, name in enumerate(names, start=1)
+        }
+        paths["manifest"].write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        return paths
+
+    html_root = tmp_path / "html"
+    markdown_root = tmp_path / "markdown"
+    html_root.mkdir()
+    markdown_root.mkdir()
+    html_paths = build_inventory(html_root, "translate-html")
+    html_handoffs = write_worker_handoffs(
+        html_root, html_paths["manifest"], html_paths["prompt"]
+    )
+    html_manifest = json.loads(html_paths["manifest"].read_text(encoding="utf-8"))
+    html_plan = html_manifest["dispatch_plan"]
+
+    assert len(html_handoffs) == 24
+    assert len(html_plan) == 9
+    assert [wave["reason"] for wave in html_plan] == ["ordinary"] * 3 + [
+        "large_units"
+    ] * 6
+    assert not any(len(wave["worker_ids"]) == 1 for wave in html_plan)
+    assert [item["worker_id"] for item in html_handoffs] == [
+        f"chapter_unit_{index:02d}_part_001" for index in range(1, 25)
+    ]
+    assert [item["assigned_files"] for item in html_handoffs] == [
+        [f"unit_{index:02d}.md"] for index in range(1, 25)
+    ]
+    wave_by_worker = {
+        worker_id: wave
+        for wave in html_plan
+        for worker_id in wave["worker_ids"]
+    }
+    for item in html_handoffs:
+        wave = wave_by_worker[item["worker_id"]]
+        scoped = json.loads((html_root / item["manifest"]).read_text(encoding="utf-8"))
+        assert scoped["dispatch_wave"] == wave["wave"] == item["dispatch_wave"]
+        assert scoped["dispatch_wave_max_concurrency"] == wave["max_concurrency"]
+        assert scoped["dispatch_wave_reason"] == wave["reason"]
+    guide = (html_root / html_manifest["dispatch_operator_prompt"]).read_text(
+        encoding="utf-8"
+    )
+    for item in html_handoffs:
+        assert item["prompt"] in guide
+        assert item["manifest"] in guide
+
+    html_assignments = {
+        item["worker_id"]: (item["assigned_files"], item["assignment_sha256"])
+        for item in html_handoffs
+    }
+    regenerated_html_handoffs = write_worker_handoffs(
+        html_root, html_paths["manifest"], html_paths["prompt"]
+    )
+    assert {
+        item["worker_id"]: (item["assigned_files"], item["assignment_sha256"])
+        for item in regenerated_html_handoffs
+    } == html_assignments
+
+    markdown_paths = build_inventory(markdown_root, "translate")
+    markdown_handoffs = write_worker_handoffs(
+        markdown_root, markdown_paths["manifest"], markdown_paths["prompt"]
+    )
+    markdown_manifest = json.loads(
+        markdown_paths["manifest"].read_text(encoding="utf-8")
+    )
+    assert [wave["reason"] for wave in markdown_manifest["dispatch_plan"]] == [
+        "ordinary" if index % 2 else "large_units" for index in range(1, 25)
+    ]
+    assert len(markdown_manifest["dispatch_plan"]) == 24
+    assert [item["worker_id"] for item in markdown_handoffs] == [
+        f"chapter_unit_{index:02d}_part_001" for index in range(1, 25)
+    ]
+    assert [item["assigned_files"] for item in markdown_handoffs] == [
+        [f"unit_{index:02d}.md"] for index in range(1, 25)
+    ]
+
+
+def test_html_dispatch_keeps_extreme_barriers_and_cap_one_honest():
+    groups = [
+        {"worker_id": f"worker_{index:03d}", "files": [f"u{index}.md"]}
+        for index in range(1, 7)
+    ]
+    stats = {
+        "u1.md": {"estimated_tokens": 50},
+        "u2.md": {"estimated_tokens": 150},
+        "u3.md": {"estimated_tokens": 500},
+        "u4.md": {"estimated_tokens": 50},
+        "u5.md": {"estimated_tokens": 150},
+        "u6.md": {"estimated_tokens": 50},
+    }
+    _, waves, _ = _plan_dispatch_waves(
+        groups,
+        stats,
+        {"max_concurrency": 4, "large_file_token_threshold": 100, "extreme_file_token_threshold": 400},
+        strategy="ordinary_before_large",
+    )
+    assert [wave["worker_ids"] for wave in waves] == [
+        ["worker_001"], ["worker_002"], ["worker_003"], ["worker_004", "worker_006"], ["worker_005"]
+    ]
+    assert waves[2]["reason"] == "extreme_unit"
+
+    _, cap_one_waves, cap = _plan_dispatch_waves(
+        groups[:3], stats,
+        {"max_concurrency": 1, "large_file_token_threshold": 100, "extreme_file_token_threshold": 400},
+        strategy="ordinary_before_large",
+    )
+    assert cap == 1
+    assert all(wave["max_concurrency"] == 1 for wave in cap_one_waves)
+
+
+def test_html_dispatch_guide_does_not_mark_active_lease_as_fresh(tmp_path: Path):
+    from pdf2epub.subagent_dispatch import claim_dispatch_lease
+    from pdf2epub.subagent_runtime import dispatch_lease_path
+
+    paths = _prepared(tmp_path, {f"unit_{index}.md": 20 for index in range(4)})
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    manifest["task"] = "translate-html"
+    paths["manifest"].write_text(json.dumps(manifest), encoding="utf-8")
+    handoffs = write_worker_handoffs(tmp_path, paths["manifest"], paths["prompt"])
+    assert handoffs
+    lease_path = dispatch_lease_path(tmp_path, "translate-html")
+    first = handoffs[0]
+    claim_dispatch_lease(
+        lease_path,
+        task="translate-html",
+        assignment_sha256=first["assignment_sha256"],
+        worker_id=first["worker_id"],
+        assigned_files=first["assigned_files"],
+        owner_id="fixture-owner",
+        conversation_id="fixture-active-conversation",
+    )
+    second = handoffs[1]
+    claim_dispatch_lease(
+        lease_path,
+        task="other-task",
+        assignment_sha256="conflicting-assignment",
+        worker_id="other-worker",
+        assigned_files=second["assigned_files"],
+        owner_id="other-owner",
+        conversation_id="fixture-conflicting-conversation",
+    )
+
+    refreshed = write_worker_handoffs(tmp_path, paths["manifest"], paths["prompt"])
+    updated = next(item for item in refreshed if item["worker_id"] == first["worker_id"])
+    parent = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    guide = (tmp_path / parent["dispatch_operator_prompt"]).read_text(encoding="utf-8")
+    scoped = json.loads((tmp_path / updated["manifest"]).read_text(encoding="utf-8"))
+
+    assert updated["assignment_sha256"] == first["assignment_sha256"]
+    assert updated["dispatch_status"] == "active_same_assignment"
+    conflicting = next(item for item in refreshed if item["worker_id"] == second["worker_id"])
+    assert conflicting["dispatch_status"] == "conflict"
+    assert "lease `active_same_assignment`" in guide
+    assert "lease `conflict`" in guide
+    assert "A conflict blocks opening a new worker" in guide
+    assert "Potentially start these 2 pending assignments" in guide
+    assert "No Wave 1 assignment is currently both pending and lease-available" not in guide
+    assert "dispatch_plan" not in scoped
+    assert "dispatch_operator_prompt" not in scoped
+    assert "translate-html_dispatch_prompt.md" not in (tmp_path / updated["prompt"]).read_text(encoding="utf-8")
+
+
+def test_html_dispatch_guide_waits_when_every_first_wave_assignment_is_active(
+    tmp_path: Path,
+):
+    from pdf2epub.subagent_dispatch import claim_dispatch_lease
+    from pdf2epub.subagent_runtime import dispatch_lease_path
+
+    paths = _prepared(tmp_path, {f"unit_{index}.md": 20 for index in range(4)})
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    manifest["task"] = "translate-html"
+    paths["manifest"].write_text(json.dumps(manifest), encoding="utf-8")
+    handoffs = write_worker_handoffs(tmp_path, paths["manifest"], paths["prompt"])
+    lease_path = dispatch_lease_path(tmp_path, "translate-html")
+    for index, item in enumerate(handoffs):
+        claim_dispatch_lease(
+            lease_path,
+            task="translate-html",
+            assignment_sha256=item["assignment_sha256"],
+            worker_id=item["worker_id"],
+            assigned_files=item["assigned_files"],
+            owner_id=f"fixture-owner-{index}",
+            conversation_id=f"fixture-conversation-{index}",
+        )
+
+    write_worker_handoffs(tmp_path, paths["manifest"], paths["prompt"])
+    parent = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    guide = (tmp_path / parent["dispatch_operator_prompt"]).read_text(encoding="utf-8")
+
+    assert "No Wave 1 assignment is currently both pending and lease-available" in guide
+    assert "Review or wait on assigned/running/active_same_assignment work" in guide
+    assert "No pending body workers" not in guide
+    assert "Potentially start these" not in guide
+
+
+def test_html_dispatch_guide_handles_one_or_zero_pending_workers(tmp_path: Path):
+    paths = _prepared(tmp_path, {f"unit_{index}.md": 20 for index in range(3)})
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    manifest["task"] = "translate-html"
+    manifest["pending_files"] = ["unit_1.md"]
+    manifest["batch_queue"] = [
+        batch for batch in manifest["batch_queue"] if "unit_1.md" in batch["files"]
+    ]
+    paths["manifest"].write_text(json.dumps(manifest), encoding="utf-8")
+
+    handoffs = write_worker_handoffs(tmp_path, paths["manifest"], paths["prompt"])
+    parent = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    guide = (tmp_path / parent["dispatch_operator_prompt"]).read_text(encoding="utf-8")
+    assert len(handoffs) == 1
+    assert "Potentially start these 1 pending assignments" in guide
+
+    parent["pending_files"] = []
+    parent["batch_queue"] = []
+    paths["manifest"].write_text(json.dumps(parent), encoding="utf-8")
+    assert write_worker_handoffs(tmp_path, paths["manifest"], paths["prompt"]) == []
+    zero_manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    zero_guide = (tmp_path / zero_manifest["dispatch_operator_prompt"]).read_text(
+        encoding="utf-8"
+    )
+    assert "No pending body workers" in zero_guide
+    assert "Process only metadata that is still pending" in zero_guide
 
 
 def test_small_title_and_chapter_remain_packable_under_existing_budgets(tmp_path: Path):

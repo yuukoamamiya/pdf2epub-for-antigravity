@@ -169,6 +169,18 @@ def test_html_prepare_logs_generated_handoff_directory_and_scopes_validation_pro
     assert "assigned `.partN.md` file" in prompt
     assert "only files in this worker's `assigned_files`" in prompt
     assert "do not run full-book validation" in prompt
+    parent_manifest = json.loads(
+        (output_dir / "translate-html_subagent_manifest.json").read_text(encoding="utf-8")
+    )
+    guide_path = output_dir / parent_manifest["dispatch_operator_prompt"]
+    guide = guide_path.read_text(encoding="utf-8")
+    assert parent_manifest["dispatch_strategy"] == "ordinary_before_large_with_extreme_barriers"
+    assert "main agent only" in guide
+    assert "Wave 1" in guide
+    assert "scoped prompt" in " ".join(logs).lower()
+    assert "dispatch guide (static plan; does not start workers)" in " ".join(logs)
+    assert "independent worker conversations" in guide
+    assert "translate-html_dispatch_prompt.md" in " ".join(logs)
 
 
 def test_polish_validate_parser_accepts_check_only():

@@ -356,6 +356,11 @@ def _prepare_html_command(args):
         worker_handoffs = write_worker_handoffs(
             output_dir, body_paths["manifest"], body_paths["prompt"]
         )
+        dispatch_manifest = json.loads(
+            Path(body_paths["manifest"]).read_text(encoding="utf-8")
+        )
+        dispatch_plan = dispatch_manifest.get("dispatch_plan", [])
+        dispatch_guide = dispatch_manifest.get("dispatch_operator_prompt")
 
         logger.success("EPUB HTML preparation complete")
         logger.info(f"Output: {output_dir / 'compressed_units'}")
@@ -364,10 +369,48 @@ def _prepare_html_command(args):
             handoff_dir = Path(output_dir) / worker_handoffs[0]["manifest"]
             logger.info(f"Worker handoffs: {handoff_dir.parent}")
         logger.info(
+            "translate-html dispatch plan: "
+            f"{len(worker_handoffs)} workers, {len(dispatch_plan)} waves"
+        )
+        if dispatch_plan:
+            first_wave = dispatch_plan[0]
+            logger.info(
+                "First wave: "
+                f"{len(first_wave.get('worker_ids', []))} workers, "
+                f"cap {first_wave.get('max_concurrency')} "
+                f"({first_wave.get('reason')})"
+            )
+            for item in worker_handoffs:
+                if item.get("dispatch_wave") != first_wave.get("wave"):
+                    continue
+                logger.info(
+                    f"First-wave {item['worker_id']} scoped prompt: "
+                    f"{Path(output_dir) / item['prompt']}"
+                )
+                logger.info(
+                    f"First-wave {item['worker_id']} scoped manifest: "
+                    f"{Path(output_dir) / item['manifest']}"
+                )
+        if dispatch_guide:
+            logger.info(
+                "Main-agent dispatch guide (static plan; does not start workers): "
+                f"{Path(output_dir) / dispatch_guide}"
+            )
+        logger.info(
             "Recommended models: body/metadata are declared in their manifests "
             "and default to the configured translation model."
         )
-        logger.info("Next step: use the Subagent, then run html-validate and build-html-epub")
+        if worker_handoffs:
+            logger.info(
+                "Next step: follow the dispatch guide and open eligible scoped "
+                "worker Subagents independently, then run html-validate and "
+                "build-html-epub"
+            )
+        else:
+            logger.info(
+                "Next step: do not start body workers; process only still-pending "
+                "metadata, then run html-validate and build-html-epub"
+            )
         return 0
 
     except Exception as e:

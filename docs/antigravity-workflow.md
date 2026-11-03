@@ -109,6 +109,16 @@ worker 会话。整波完成且主 Agent 验收后才开始下一波。完成后
 先检查真实活动会话以避免重复派发，不得盲目释放活跃 lease。lease API 继续提供原子 claim/renew/release，
 不强制绑定 IDE session 生命周期。
 
+`translate-html` 按原 worker 顺序保留 assignment 身份，只调整 dispatch wave：每个 extreme
+worker 是不可跨越的边界；边界内 ordinary workers 稳定收集后按配置 cap 装波，large workers
+随后稳定收集并按 `min(2, cap)` 装波。`max_concurrency: 1` 仍逐个派发。父 manifest 的
+`dispatch_strategy` 记录该策略，并关联主 Agent 专用 `translate-html_dispatch_prompt.md`；此清单
+列出波次及 scoped handoff 路径，不得交给 worker，也不复制到 scoped manifest。CLI 报告计划 worker
+数、波数、首波规模/cap 和 scoped 入口。它只生成静态计划，不表示已启动会话或确认 IDE 槽位。
+恢复时先核实会话与 lease：assigned/running/active_same_assignment 应接回或等待，conflict 先解决；
+实际 extreme 活跃时不得启动普通波。没有 pending 正文时不重派正文，只处理仍 pending 的 metadata
+并完成全量校验。PDF translate/polish 保持 source-order 规划。
+
 polish worker 的 scoped prompt 会在 assigned task 前给出只读自检命令：
 `uv run pdf2epub -c <config_path> polish-validate --file <assigned_file> --check-only`。
 manifest 记录当前 hand-off 的 `config_path`（POSIX `/` 分隔）；若旧 manifest 没有该字段，
