@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import markdown
 import pytest
 
 from pdf2epub.html_translation.builder import HTMLEpubPipeline
@@ -1623,6 +1624,65 @@ def test_polish_structure_audit_flags_visual_line_paragraph_fragmentation():
     assert audit["explicit_hard_break_count"] == 0
 
 
+def test_polish_structure_audit_treats_numbered_annotation_entries_as_lists():
+    bare_notes = "# Essay\n\n## Anmerkungen\n\n" + "\n\n".join(
+        f"{index} G. Author, Werk." for index in range(1, 10)
+    )
+    numbered_list = "# Essay\n\n## Anmerkungen\n\n" + "\n\n".join(
+        f"{index}. G. Author, Werk." for index in range(1, 10)
+    )
+
+    assert polish_structure_audit(bare_notes, bare_notes)["status"] == "review"
+    audit = polish_structure_audit(numbered_list, numbered_list)
+    assert audit["status"] == "ok"
+    assert audit["candidate_block_count"] == 0
+
+
+def test_polish_structure_audit_excludes_shared_parser_footnote_continuations():
+    notes = "## Anmerkungen\n\n" + "\n\n".join(
+        f"[^fnc-u1-{index}]: G. Author.\n\n    W. Other, continuation."
+        for index in range(1, 10)
+    )
+    rendered = markdown.markdown(notes, extensions=["footnotes"])
+    list_item = rendered.split('<li id="fn:fnc-u1-1">', 1)[1].split("</li>", 1)[0]
+    assert "G. Author." in list_item
+    assert "W. Other, continuation." in list_item
+
+    audit = polish_structure_audit(notes, notes)
+    assert audit["status"] == "ok"
+    assert audit["candidate_block_count"] == 0
+
+
+def test_polish_structure_audit_does_not_exempt_unindented_notes_prose():
+    definitions = "\n\n".join(
+        f"[^fnc-u1-{index}]: G. Author.\n\n    W. Other, continuation."
+        for index in range(1, 10)
+    )
+    ordinary_prose = "\n\n".join(
+        f"Unindented short prose line {index}." for index in range(1, 9)
+    )
+    notes = f"## Anmerkungen\n\n{definitions}\n\n{ordinary_prose}"
+
+    audit = polish_structure_audit(notes, notes)
+
+    assert audit["status"] == "review"
+    assert audit["candidate_block_count"] == 8
+
+
+def test_polish_structure_audit_does_not_misclassify_numbered_prose_as_list():
+    paragraphs = "\n\n".join(
+        f"{index}\\. This is a complete and deliberately long ordinary prose paragraph "
+        "whose escaped source number must remain part of its prose structure."
+        for index in range(1, 10)
+    )
+
+    audit = polish_structure_audit(paragraphs, paragraphs)
+
+    assert audit["status"] == "ok"
+    assert audit["candidate_block_count"] == 9
+    assert audit["single_line_block_count"] == 9
+
+
 def test_polish_validation_review_gates_fragmented_ordinary_prose(tmp_path: Path):
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"
@@ -1687,6 +1747,8 @@ def test_polish_prompt_explains_line_structure_audit_and_exceptions(tmp_path: Pa
         "English",
     )
     prompt = paths["prompt"].read_text(encoding="utf-8")
+    handoffs = write_worker_handoffs(tmp_path, paths["manifest"], paths["prompt"])
+    scoped_prompt = (tmp_path / handoffs[0]["prompt"]).read_text(encoding="utf-8")
 
     assert "ordinary prose" in prompt
     assert "poetry" in prompt
@@ -1696,6 +1758,11 @@ def test_polish_prompt_explains_line_structure_audit_and_exceptions(tmp_path: Pa
     assert "Never attach following body prose to a heading" in prompt
     assert "indent every continuation line, continuation paragraph, table, formula, or quotation block" in prompt
     assert "Preserve blank lines between note paragraphs" in prompt
+    for rendered_prompt in (prompt, scoped_prompt):
+        assert "clearly numbered short annotations/endnote entries" in rendered_prompt
+        assert "Do not add a number to an author-name line or continuation" in rendered_prompt
+        assert "do not convert them to colliding `[^N]` definitions" in rendered_prompt
+        assert "Never create list or footnote structure solely to silence the paragraph-fragmentation audit" in rendered_prompt
 
 
 def test_polish_footnote_normalization_accepts_verified_legacy_notes():

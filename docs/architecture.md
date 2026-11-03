@@ -264,6 +264,13 @@ TOC 中标记为
 `pdf2epub/epub/footnotes/keys.py` 的 `display_footnote_key()` 统一把内部 key 还原为读者
 显示由内部 key 解码；集中尾注中的数字/圈号别名可规范化为数字，去重后缀不会显示；scanner、链接和锚点仍使用真实 key。
 
+EPUB 构建的链接作用域独立于页面脚注候选模式：存在 Notes 单元时，即使有效
+`footnote_mode` 为 `footnotes`，也启用跨文件链接映射。映射保留所有源定义，优先使用同一
+结构局部 scope 内的定义；单一局部定义可由该 scope 多次引用共享。只有没有局部目标时才尝试
+真正集中的定义，不能把另一局部 scope 的同号注释当作目标。任何 Markdown 脚注引用未链接时构建失败；
+图检查 API 仍保留未链接引用报告供审计。
+父结构 scope 的归组按脚注 key 分别推断；某个 key 的跨分支链接不会提升并吞并其他 key 下自含的兄弟分支。
+
 集中尾注定义边界的手递合同位于 `endnote_review.py`：
 `footnote_subagent_manifest.json` 增加 `endnote_ambiguity_count`、`endnote_ambiguities`、
 `endnote_decision_file` 和 `endnote_definition_file`；`status` 在页面复核或尾注歧义任一
@@ -378,6 +385,9 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
   void 元素仍是自闭合形式；输出的章节文档可由严格 XML parser 读取。
 - 连续的长编号论述由 polish handoff 要求保留为转义数字标记（如 `17\.`）的普通段落；真实枚举
   仍保留列表结构。translate handoff 和本地校验共同保证已转义标记不退化为有序列表。
+  短注释只有在编号与独立条目边界明确时才规整为有序列表，不给可能续接前条的作者名补号；
+  polish 结构审计复用 `footnote_markdown.py` 识别定义和缩进续段，只从碎片统计中排除这些结构行，
+  不豁免后续未缩进正文。没有显式作用域映射时，不把多章重复注号改造成冲突的同名脚注定义。
   EPUB 有序列表将编号写成 XHTML 列表项中的标记 span，保留嵌套结构和续号，同时避免依赖阅读器
   对 CSS counter 的支持；XHTML 1.1 输出不需要 `ol start` 属性。
 - `batching_service.py`：公共拥有 batch 配置、token 估算、文件安全批次算法和 pending queue；
@@ -410,7 +420,7 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
   `id` 与标题落点；ownership projection 也驱动在实际所属 part 内放置可见结构祖先锚点。可见
   绑定缺失时阻断，容器节点按 ownership 合同落到所属文件或首个内容后代。NCX depth 按逻辑
   TOC 的真实层级计算，合成目录入口与 TOC 树同级。
-- TOC 标题绑定区分 `visible` 与 `container_only`：无可见源标签的纯图片/边界单元不要求
+- TOC 源标题计数、分片 occurrence 分配和 HTML 锚点匹配在各自清理 Markdown/HTML 标记后，共用 `toc_title_match_key()` 做连续空白归一化和 Unicode `lower()`；不使用 `casefold()`，因此 `Straße` 不会被当作 `STRASSE`。该运行时匹配规则不放宽译文与 TOC 的逐字标题绑定。TOC 标题绑定区分 `visible` 与 `container_only`：无可见源标签的纯图片/边界单元不要求
   worker 伪造 Markdown 标题，章节容器标题由 EPUB 构建器生成；可见子标题仍使用严格绑定。
   大章节拆成多个物理 part 时，`build_toc_heading_contexts` 为每个 part 生成独立 context：
   父标题只在源标题实际出现的 part 标记 `visible`，其余 part 标记 `container_only`；
@@ -464,8 +474,13 @@ Subagent 实际读写哪些文件。两者不能互相替代。
 波使用配置值；按最大单文件的 `estimated_tokens`，达到 `large_file_token_threshold`
 （默认 12,000 tokens）时 worker 波限为 2，达到 `extreme_file_token_threshold`
 （默认 24,000 tokens）时该单元独占波限为 1。
-metadata 也占同一波额度，且不与极大单元波重叠。该计划供本地操作员依序派发、完结当前波后再启
-下一波；它不启动模型，也不实现 IDE 的实际并发信号量。
+metadata 也占同一波额度，且不与极大单元波重叠。父级 `dispatch_contract` 与每个 scoped prompt
+共用 `worker_prompt.py` 的单一操作员合同。不同 assignment 使用独立新会话；同一 assignment 的修复
+重试可保留原会话。同波必须按可用 IDE 槽位和 wave cap 并发派发独立 worker；有空槽时不得通过旧会话
+串行排队，容量不足才分批并如实报告实际峰值。整波完成且主 Agent 验收后才进入下一波。普通波不超过
+配置额度，large wave 不超过 2，extreme wave 不超过 1。合同不授权 worker 调度其他 worker。完成后主 Agent 保留结果/审计记录，确认会话
+终止再释放 lease；恢复时检查真实活动会话，避免重复派发或误释放活跃 lease。lease API 继续负责原子
+claim/renew/release，但不强制 IDE session 生命周期，也不启动模型或实现 IDE 实际并发信号量。
 
 `polish` 复用同一个装箱器，但普通章节的文件预算取 `polish_max_files`（默认
 `min(max_files, 4)`，硬上限 8）。准备阶段从 `file_roles` 识别 `index`、

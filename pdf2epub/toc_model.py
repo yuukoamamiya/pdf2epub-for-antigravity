@@ -159,8 +159,13 @@ def normalize_toc_source_label(value: str) -> str:
     return value
 
 
+def toc_title_match_key(value: str) -> str:
+    """Normalize whitespace and case for already-cleaned source or HTML labels."""
+    return re.sub(r"\s+", " ", str(value)).strip().lower()
+
+
 def _title_occurrences(text: str, title: str) -> int:
-    expected = normalize_toc_source_label(title)
+    expected = toc_title_match_key(normalize_toc_source_label(title))
     if not expected:
         return False
     count = 0
@@ -170,7 +175,7 @@ def _title_occurrences(text: str, title: str) -> int:
     def count_block(lines: list[str]) -> int:
         if not lines:
             return 0
-        joined = normalize_toc_source_label(" ".join(lines))
+        joined = toc_title_match_key(normalize_toc_source_label(" ".join(lines)))
         if joined == expected and len(lines) > 1:
             wrappers = ("<strong>", "<em>", "<b>", "<i>", "**", "__", "*", "_")
             raw = " ".join(lines).strip()
@@ -178,7 +183,7 @@ def _title_occurrences(text: str, title: str) -> int:
                 {"<strong>": "</strong>", "<em>": "</em>", "<b>": "</b>", "<i>": "</i>"}.get(wrapper, wrapper)
             ) for wrapper in wrappers):
                 return 1
-        return sum(normalize_toc_source_label(line) == expected for line in lines)
+        return sum(toc_title_match_key(normalize_toc_source_label(line)) == expected for line in lines)
 
     for line in str(text or "").splitlines():
         line = line.strip()
@@ -302,7 +307,7 @@ def project_toc_ownership(
         texts = texts_by_path[unit_path]
         node_id = toc_node_id(node, path)
         source_title = str(node.get("title") or "")
-        normalized_title = normalize_toc_source_label(source_title)
+        normalized_title = toc_title_match_key(normalize_toc_source_label(source_title))
         match_counts = {name: _title_occurrences(texts[name], source_title) for name in names}
         match = None
         occurrence = None

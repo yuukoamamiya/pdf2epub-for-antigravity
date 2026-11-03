@@ -1222,18 +1222,13 @@ def _render_epub_content(
         raise ValueError("Failed to serialize the resolved TOC navigation")
 
     footnote_report = validate_footnote_graph(generated_html)
-    if auto_global and footnote_manager.definitions and footnote_report["unlinked_sup_count"]:
+    if footnote_report["unlinked_sup_count"]:
         raise ValueError(
-            "Global footnote graph contains unlinked references: "
+            "Footnote graph contains unlinked references: "
             + "; ".join(
                 f"{filename}#{sup_id}"
                 for filename, sup_id, _text in footnote_report["unlinked_samples"][:10]
             )
-        )
-    if footnote_report["unlinked_sup_count"]:
-        logger.warning(
-            f"Kept {footnote_report['unlinked_sup_count']} ambiguous footnote "
-            "reference(s) visible but unlinked"
         )
     logger.info(
         "Validated footnote graph: "
@@ -1350,6 +1345,9 @@ def build_epub(config: BuildEpubConfig) -> Path:
 
     # Initialize FootnoteManager after cleanup so scanned refs/defs match the
     # markdown that will actually be converted.
+    # footnote_mode controls page-footnote candidate handling. A notes unit
+    # still enables cross-file linking in the built EPUB, even when the book
+    # also contains page footnotes.
     auto_global = has_notes_chapter(toc_tree.get('chapters', []))
     if auto_global:
         logger.info("Detected notes chapter, enabling global footnote mode")

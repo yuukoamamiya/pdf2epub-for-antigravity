@@ -18,6 +18,7 @@ import pymupdf as fitz
 from loguru import logger
 
 from ..markdown_to_html import convert_markdown_to_html
+from ..toc_model import toc_title_match_key
 
 
 def visible_heading_text(value: str) -> str:
@@ -32,7 +33,7 @@ def visible_heading_text(value: str) -> str:
     )
     value = re.sub(r"<[^>]+>", "", value)
     value = html_module.unescape(value)
-    return re.sub(r"\s+", " ", value).strip().lower()
+    return toc_title_match_key(re.sub(r"\s+", " ", value).strip())
 
 
 class ContentConverter:
@@ -733,7 +734,7 @@ class ContentConverter:
         def visible_heading(value: str) -> str:
             value = re.sub(r"<[^>]+>", "", value)
             value = html_module.unescape(value)
-            return re.sub(r"\s+", " ", value).strip().lower()
+            return toc_title_match_key(re.sub(r"\s+", " ", value).strip())
 
         for _j, sub_title, anchor_id in subchapters:
             html_content, anchor_added = self._add_subchapter_anchor(

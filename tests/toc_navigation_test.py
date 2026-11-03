@@ -197,7 +197,7 @@ def test_real_epub_renderer_places_ancestor_and_split_heading_anchors(tmp_path):
     source_dir.mkdir(parents=True)
     markdown_dir.mkdir()
     source_parts = {
-        "chapter_1.1.part1.md": "# Parent\n\n## Child\n\nChild body.\n",
+        "chapter_1.1.part1.md": "# DIALEKTIK DER WERTFORM\n\n## Dialektik der Wertform\n\nChild body.\n",
         "chapter_1.1.part2.md": "### Grandchild\n\nGrandchild body.\n",
     }
     for name, text in source_parts.items():
@@ -208,8 +208,8 @@ def test_real_epub_renderer_places_ancestor_and_split_heading_anchors(tmp_path):
                                "part_files": list(source_parts)}]}), encoding="utf-8"
     )
     tree = {"schema_version": TOC_TREE_SCHEMA_VERSION, "book_title": "Book", "chapters": [
-        {"node_id": "parent", "title": "Parent", "level": 1, "binding_mode": "visible", "children": [
-            {"node_id": "child", "title": "Child", "level": 2, "binding_mode": "visible", "children": [
+        {"node_id": "parent", "title": "DIALEKTIK DER WERTFORM", "level": 1, "binding_mode": "visible", "children": [
+            {"node_id": "child", "title": "Dialektik der Wertform", "level": 2, "binding_mode": "visible", "children": [
                 {"node_id": "grandchild", "title": "Grandchild", "level": 3, "binding_mode": "visible"}
             ]}
         ]}

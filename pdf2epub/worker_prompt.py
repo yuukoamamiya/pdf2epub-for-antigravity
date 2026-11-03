@@ -6,6 +6,31 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 from .batching_service import POLISH_ISOLATED_ROLES
 
+
+DISPATCH_OPERATOR_CONTRACT = (
+    "Operator scheduling only: every distinct worker assignment must start in a "
+    "fresh Subagent conversation. Dispatch distinct workers in the same wave "
+    "concurrently up to the available IDE capacity and the wave cap; do not "
+    "serialize them through an old conversation while IDE slots are available. "
+    "Only when available IDE capacity is below the wave cap may the wave be "
+    "split into smaller concurrent groups. Finish every worker in the wave and "
+    "have the main agent accept the results before starting the next wave. "
+    "Report the actual peak concurrency; do not claim unused slots. "
+    "Never send a new assignment or later wave to an old worker conversation to "
+    "queue work or accumulate context. A repair retry for the same assignment "
+    "may keep its original conversation. Count separate metadata workers "
+    "against the same wave cap; metadata may use ordinary/large-unit capacity, "
+    "but never run metadata during an extreme_unit wave. Never exceed the "
+    "configured global cap "
+    "(at most 6), large-unit cap (at most 2), or extreme-unit cap (1). "
+    "On completion, the main agent "
+    "must retain results and audit records, confirm the conversation has ended, "
+    "then release its dispatch lease. On recovery, inspect actual active "
+    "conversations before redispatch; do not release a lease for a live worker. "
+    "This is an operator contract, not worker authority to schedule other workers; "
+    "it does not start models or enforce an IDE semaphore."
+)
+
 POLISH_ROLE_EMPHASIS = {
     "index": (
         "Index entries must remain 1:1 with the source. Never merge wrapped "
@@ -302,12 +327,8 @@ def render_worker_prompt(
             "dispatch plan. The wave cap is "
             f"{scoped.get('dispatch_wave_max_concurrency')} active workers "
             f"({scoped.get('dispatch_wave_reason')}). The parent manifest's "
-            "`dispatch_plan` is an operator scheduling contract; it does not "
-            "start or limit model sessions automatically. Finish this entire "
-            "wave before starting the next, and count special-unit workers "
-            "and separate metadata workers against the same wave cap. A metadata "
-            "worker may use an available ordinary/large-wave slot, but must not "
-            "run during an `extreme_unit` wave.\n"
+            "`dispatch_plan` is an operator scheduling contract. "
+            f"{DISPATCH_OPERATOR_CONTRACT}\n"
             if scoped.get("dispatch_wave") is not None
             else ""
         )

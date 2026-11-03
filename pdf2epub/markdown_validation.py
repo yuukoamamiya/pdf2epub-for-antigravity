@@ -17,6 +17,7 @@ from .document_roles import (
     is_density_exempt_role,
     is_front_matter_text,
 )
+from .footnote_markdown import collect_footnote_definition_blocks
 from .page_furniture_rules import candidate_for_line
 from .utils.ocr_artifacts import clean_ocr_page_artifacts
 
@@ -64,10 +65,15 @@ _POLISH_HORIZONTAL_RULE_RE = re.compile(r"^\s*(?:\*\s*){3,}$|^\s*(?:-\s*){3,}$|^
 
 
 def _polish_markdown_blocks(text: str) -> list[list[str]]:
-    """Split Markdown into blank-line blocks for the polish structure audit."""
+    """Split Markdown into blocks, excluding shared-parser footnote structure."""
     blocks: list[list[str]] = []
     current: list[str] = []
-    for line in clean_ocr_page_artifacts(str(text or "")).splitlines():
+    lines = clean_ocr_page_artifacts(str(text or "")).splitlines()
+    definitions, consumed = collect_footnote_definition_blocks(lines)
+    footnote_structure_lines = consumed | set(definitions)
+    for index, line in enumerate(lines):
+        if index in footnote_structure_lines:
+            line = ""
         if line.strip():
             current.append(line)
         elif current:

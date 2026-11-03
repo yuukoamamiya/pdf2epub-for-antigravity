@@ -100,7 +100,14 @@ index 条目 1:1、书目逐条、notes 标记和 CIP/版权页短行标识符�
 再开始下一波：配置并发（有效上限 6）是全局上限，普通波使用配置额度；按最大单文件大小，
 达到 `large_file_token_threshold`（默认 12,000 tokens）时 worker 波限为 2，达到
 `extreme_file_token_threshold`（默认 24,000 tokens）时该单元独占额度 1。metadata 与正文共用波次额度，不能和极大单元波重叠。
-该计划只是本地操作员调度建议，不会启动模型或强制 IDE 实际信号量；每次派发仍需检查当前活动状态。
+该计划是操作员合同，不会启动模型或强制 IDE 实际信号量，也不授权 worker 调度其他 worker。每个
+不同 assignment 必须使用独立的新工作区 Subagent 会话；同一 assignment 的修复重试可保留原会话。
+同波必须按可用 IDE 槽位和 wave cap 并发派发独立 worker；有空槽时不得通过旧会话串行排队。只有
+可用容量低于 wave cap 时才允许分批，并须记录实际峰值、如实报告，不要求占满 4 个槽位。普通波
+不超过配置额度，大单元波不超过 2，极大单元波不超过 1。禁止把新 assignment 或后续 wave 顺延到旧
+worker 会话。整波完成且主 Agent 验收后才开始下一波。完成后主 Agent 保留结果和审计记录，确认会话终止再调用 `release_dispatch_lease()`；恢复时
+先检查真实活动会话以避免重复派发，不得盲目释放活跃 lease。lease API 继续提供原子 claim/renew/release，
+不强制绑定 IDE session 生命周期。
 
 polish worker 的 scoped prompt 会在 assigned task 前给出只读自检命令：
 `uv run pdf2epub -c <config_path> polish-validate --file <assigned_file> --check-only`。
@@ -131,7 +138,8 @@ assignment 时只保留旧的 `assigned`/`running` lease 元数据；它是文�
 不等于 IDE 已确认存在对应会话。实际派发前仍必须检查当前工作区 Subagent 列表，确认没有
 相同 `assigned_files` 的活动任务；不同源哈希或不同分配会生成新的 assignment，不能复用旧 lease。
 调度器可通过 `subagent_dispatch.py` 的 `claim_dispatch_lease()`、
-`renew_dispatch_lease()` 和 `release_dispatch_lease()` 完成原子认领、续租和释放；发现
+`renew_dispatch_lease()` 和 `release_dispatch_lease()` 完成原子认领、续租和释放；lease 仅用于
+协调和审计，不能替代对真实活动会话的检查。发现
 `already_active` 或 `conflict` 时必须停止派发，而不是覆盖旧 handoff。
 
 元数据是单个 `translated_metadata.json`，必须整体是合法 JSON；如果额度中断留下半个文件，校验会拒绝它，下一次 Subagent 会完整重写。
@@ -585,6 +593,13 @@ pipeline: epub_conversion
 <a id="pdf-footnote-and-endnote-contract"></a>
 ## PDF 脚注与尾注合同
 
+EPUB 构建时，页面脚注候选模式与链接作用域分别处理：存在 Notes 单元就启用跨文件链接，即使
+`footnote_mode` 为 `footnotes`。构建保留全部 Markdown 定义，优先在同一结构局部 scope 内匹配；
+同一 scope 的单一定义可被重复引用共享。跨 scope 回退只针对真正集中的定义，不能借用其他局部
+scope 的同号定义。任何 Markdown 脚注引用在 EPUB 中未链接都会阻断构建；图检查 API 仍会报告
+未链接引用供审计。
+结构父 scope 的跨分支归组逐 key 计算；一个 key 的引用/定义缺口不会把另一个 key 下自含的兄弟分支并入该 scope。
+
 对于所有 PDF，在 `refine-local` 后、`polish` 前运行 `footnote-prepare`。扫描 PDF 使用
 OCR layout sidecar；旧原生文字运行在旧版本的 `ocr-pages` 阶段生成带 PDF 坐标、文本块和字体
 元数据的 native layout sidecar。两种来源在本地使用不同的候选筛选器，但都按页面内实际顺序
@@ -974,6 +989,10 @@ extract-entities-validate → translate-toc → translate-toc-validate → check
 重复的润色稿交给后续翻译。普通正文段落内部不得为了视觉排版新增换行；EPUB 渲染默认把
 单换行视为软换行，只有空行或显式 `<br />` 才形成段落/硬换行。父标题可以没有正文，但必须只
 保留标题本身；子章节正文只出现一次并归属于最近的子标题。
+短注释在编号与条目边界明确时可规整为有序列表；可能续接前条的作者名或续文不补号。已有
+Markdown 脚注定义的缩进续段保留在同一条目下；结构审计复用共享定义解析器排除定义和续段，
+但仍检查其后的未缩进普通正文。没有显式作用域映射时，不把多章重复注号改成同名脚注定义，
+也不得为消除碎片警告凭空构造列表/脚注结构；边界证据不足时交由 review。
 PDF 翻译、实体提取和打包都必须以当前且通过 `polish-validate` 的
 `polished_markdown/validated/` 为源稿；如果润色稿缺失、校验失败或与当前源稿不匹配，
 本地门禁会拒绝继续。

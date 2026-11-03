@@ -258,15 +258,14 @@ class FootnoteManager:
             )
         elif self.style == FootnoteStyle.GLOBAL:
             self.primary_definition_chapters = set()
-            # If force_global or auto_global, identify primary definition chapters
-            if self.force_global or self.auto_global:
-                self.primary_definition_chapters = self.scanner.identify_primary_definition_chapters()
-                if self.auto_global and self.no_colon_definition_chapters:
-                    typed_note_definition_chapters = {
-                        chapter for chapter in self.no_colon_definition_chapters
-                        if chapter in self.scanner.definition_chapters
-                    }
-                    self.primary_definition_chapters.update(typed_note_definition_chapters)
+            # Explicit Notes units identify centralized candidates. Do not
+            # infer global ownership from the chapter with the largest count:
+            # global style is a linking capability, not a definition filter.
+            if self.auto_global and self.no_colon_definition_chapters:
+                self.primary_definition_chapters = {
+                    chapter for chapter in self.no_colon_definition_chapters
+                    if chapter in self.scanner.definition_chapters
+                }
 
             # Build occurrence mapping for all global styles
             self.mapper.build_occurrence_mapping(
@@ -347,8 +346,8 @@ class FootnoteManager:
         occurrence = binding.get("definition_occurrence_in_file") or 1
 
         if self.style == FootnoteStyle.LOCAL:
-            base_chapter = self.get_local_group_id(definition_stem)
-            local_mapping = self.mapper.local_occurrence_mapping.get(base_chapter)
+            base_chapter = self.get_local_group_id(definition_stem, key)
+            local_mapping = self.mapper.local_occurrence_mapping.get((key, base_chapter))
             if local_mapping:
                 mapped = local_mapping.get("definition_positions", {}).get(
                     (key, definition_stem, definition_line)
@@ -493,16 +492,13 @@ class FootnoteManager:
         """
         return self.mapper._chapter_sort_key(chapter_name)
 
-    def get_local_group_id(self, source_chapter: str) -> str:
-        """Return the logical local footnote scope for a markdown stem."""
-        return self.mapper.get_local_group_for_part(source_chapter)
+    def get_local_group_id(self, source_chapter: str, key: str = "") -> str:
+        """Return the logical local footnote scope for a markdown stem/key."""
+        return self.mapper.get_local_group_for_part(source_chapter, key)
 
     def is_definition_chapter(self, source_chapter: str) -> bool:
         """Return whether definitions in this source should be rendered."""
-        if self.style == FootnoteStyle.LOCAL:
-            return True
-        if self.primary_definition_chapters:
-            return source_chapter in self.primary_definition_chapters
+        # Global mode changes cross-file linking, not definition ownership.
         return source_chapter in self.definition_chapters
 
     def get_definition_html(
@@ -549,10 +545,10 @@ class FootnoteManager:
                 self._boundary_backref_html(boundary_binding),
             )
 
-        base_chapter = self.get_local_group_id(source_chapter)
-        local_mapping = self.mapper.local_occurrence_mapping.get(base_chapter)
+        base_chapter = self.get_local_group_id(source_chapter, key)
+        local_mapping = self.mapper.local_occurrence_mapping.get((key, base_chapter))
         is_multi_part = bool(
-            local_mapping and len(self.mapper.local_chapter_groups.get(base_chapter, [])) > 1
+            local_mapping and len(self.mapper.get_local_chapter_group(base_chapter, key)) > 1
         )
 
         if is_multi_part:
@@ -800,13 +796,13 @@ class FootnoteManager:
             )
 
         if self.style == FootnoteStyle.LOCAL:
-            base_chapter = self.get_local_group_id(source_chapter)
+            base_chapter = self.get_local_group_id(source_chapter, key)
             # Check if this is a structural multi-file scope.
             if (
-                base_chapter in self.mapper.local_occurrence_mapping
-                and len(self.mapper.local_chapter_groups.get(base_chapter, [])) > 1
+                (key, base_chapter) in self.mapper.local_occurrence_mapping
+                and len(self.mapper.get_local_chapter_group(base_chapter, key)) > 1
             ):
-                chapter_mapping = self.mapper.local_occurrence_mapping[base_chapter]
+                chapter_mapping = self.mapper.local_occurrence_mapping[(key, base_chapter)]
                 occurrence_num = None
                 if occurrence_in_file is not None:
                     occurrence_num = chapter_mapping['reference_occurrence_in_file'].get(

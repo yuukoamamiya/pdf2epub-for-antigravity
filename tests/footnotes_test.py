@@ -165,6 +165,38 @@ def test_repeated_refs_share_one_local_definition_across_parts(
     assert report["unlinked_sup_count"] == 0
 
 
+@pytest.mark.parametrize("auto_global", [False, True])
+def test_same_line_repeated_refs_share_one_cross_part_definition(
+    tmp_path: Path, auto_global: bool
+) -> None:
+    first = tmp_path / "chapter_1.part1.md"
+    second = tmp_path / "chapter_1.part2.md"
+    first.write_text("One [^1]. Two [^1]. Three [^1].\n", encoding="utf-8")
+    second.write_text("[^1]: One shared definition.\n", encoding="utf-8")
+    structure = [_entry("chapter_1", first, second)]
+
+    manager = FootnoteManager(
+        tmp_path, auto_global=auto_global, epub_structure=structure
+    )
+    rendered = _render(structure, manager)
+    report = validate_footnote_graph(rendered)
+
+    refs = etree.HTML(rendered["chapter_1_part1.html"]).xpath(
+        '//a[@class="footnote-ref"]/@href'
+    )
+    backlinks = etree.HTML(rendered["chapter_1_part2.html"]).xpath(
+        '//a[@class="footnote-backref"]/@href'
+    )
+    assert len(refs) == 3
+    assert len(set(refs)) == 1
+    assert refs[0].startswith("chapter_1_part2.html#fn-")
+    assert len(backlinks) == 3
+    assert all(href.startswith("chapter_1_part1.html#fnref-") for href in backlinks)
+    assert report["forward_hrefs"] == 3
+    assert report["backref_hrefs"] == 3
+    assert report["unlinked_sup_count"] == 0
+
+
 def test_repeated_refs_share_one_local_definition_in_one_file(tmp_path: Path) -> None:
     chapter = tmp_path / "chapter_1.md"
     chapter.write_text(
@@ -201,6 +233,105 @@ def test_repeated_refs_share_one_global_notes_definition(tmp_path: Path) -> None
     assert report["unlinked_sup_count"] == 0
 
 
+def test_auto_global_keeps_repeated_local_definitions_in_each_chapter(tmp_path: Path) -> None:
+    first = tmp_path / "chapter_1.md"
+    second = tmp_path / "chapter_2.md"
+    first.write_text("First [^1]. Again [^1].\n\n[^1]: Article A.\n", encoding="utf-8")
+    second.write_text("Second [^1].\n\n[^1]: Article B.\n", encoding="utf-8")
+    structure = [_entry("chapter_1", first), _entry("chapter_2", second, entry_type="notes")]
+
+    manager = FootnoteManager(tmp_path, auto_global=True, epub_structure=structure)
+    rendered = _render(structure, manager)
+    report = validate_footnote_graph(rendered)
+
+    assert report["forward_hrefs"] == 3
+    assert report["backref_hrefs"] == 3
+    assert report["unlinked_sup_count"] == 0
+    assert 'href="chapter_1.html#fn-1-1"' in rendered["chapter_1.html"]
+    assert 'href="chapter_2.html#fn-1-2"' in rendered["chapter_2.html"]
+    assert rendered["chapter_1.html"].count('href="chapter_1.html#fn-1-1"') >= 2
+
+
+def test_auto_global_without_typed_notes_does_not_borrow_other_local_definitions(
+    tmp_path: Path,
+) -> None:
+    first = tmp_path / "chapter_1.md"
+    second = tmp_path / "chapter_2.md"
+    third = tmp_path / "chapter_3.md"
+    first.write_text("A [^1].\n\n[^1]: A definition.\n", encoding="utf-8")
+    second.write_text("B [^1].\n\n[^1]: B definition.\n", encoding="utf-8")
+    third.write_text("C [^1].\n", encoding="utf-8")
+    structure = [_entry(f"chapter_{i}", path) for i, path in enumerate(
+        (first, second, third), start=1
+    )]
+
+    manager = FootnoteManager(tmp_path, auto_global=True, epub_structure=structure)
+    rendered = _render(structure, manager)
+    report = validate_footnote_graph(rendered)
+
+    assert report["forward_hrefs"] == 2
+    assert report["unlinked_sup_count"] == 1
+
+
+def test_auto_global_does_not_borrow_nested_local_notes_from_other_scope(tmp_path: Path) -> None:
+    first = tmp_path / "chapter_1.md"
+    local_notes = tmp_path / "chapter_1_notes.md"
+    second = tmp_path / "chapter_2.md"
+    first.write_text("Local [^1].\n", encoding="utf-8")
+    local_notes.write_text("[^1]: Local endnote.\n", encoding="utf-8")
+    second.write_text("Unmatched [^1].\n", encoding="utf-8")
+    structure = [
+        _entry("chapter_1", first, children=[_entry("chapter_1_notes", local_notes, entry_type="notes")]),
+        _entry("chapter_2", second),
+    ]
+
+    manager = FootnoteManager(tmp_path, auto_global=True, epub_structure=structure)
+    rendered = _render(structure, manager)
+    report = validate_footnote_graph(rendered)
+
+    assert report["forward_hrefs"] == 1
+    assert report["unlinked_sup_count"] == 1
+
+
+def test_auto_global_does_not_borrow_self_contained_typed_notes(tmp_path: Path) -> None:
+    notes = tmp_path / "chapter_1_notes.md"
+    unrelated = tmp_path / "chapter_2.md"
+    notes.write_text("Own [^1].\n\n[^1]: Notes-local definition.\n", encoding="utf-8")
+    unrelated.write_text("Unmatched [^1].\n", encoding="utf-8")
+    structure = [
+        _entry("chapter_1_notes", notes, entry_type="notes"),
+        _entry("chapter_2", unrelated),
+    ]
+
+    manager = FootnoteManager(tmp_path, auto_global=True, epub_structure=structure)
+    report = validate_footnote_graph(_render(structure, manager))
+
+    assert report["forward_hrefs"] == 1
+    assert report["unlinked_sup_count"] == 1
+
+
+def test_local_multiple_definitions_do_not_silently_absorb_extra_refs(tmp_path: Path) -> None:
+    first = tmp_path / "chapter_1.part1.md"
+    second = tmp_path / "chapter_1.part2.md"
+    notes = tmp_path / "chapter_2.md"
+    first.write_text("One [^1]. Two [^1].\n", encoding="utf-8")
+    second.write_text("Three [^1].\n\n[^1]: Definition A.\n\n[^1]: Definition B.\n", encoding="utf-8")
+    notes.write_text("[^2]: Central definition.\n", encoding="utf-8")
+    structure = [
+        _entry("chapter_1", first, second),
+        _entry("chapter_2", notes, entry_type="notes"),
+    ]
+
+    manager = FootnoteManager(tmp_path, auto_global=True, epub_structure=structure)
+    rendered = _render(structure, manager)
+    report = validate_footnote_graph(rendered)
+
+    assert report["forward_hrefs"] == 2
+    assert report["unlinked_sup_count"] == 1
+    assert 'href="chapter_1_part2.html#fn-1-1"' in rendered["chapter_1_part1.html"]
+    assert 'href="chapter_1_part2.html#fn-1-2"' in rendered["chapter_1_part1.html"]
+
+
 def test_page_note_aliases_share_occurrence_ids_and_backlinks(tmp_path: Path) -> None:
     body = tmp_path / "chapter_1.md"
     notes = tmp_path / "chapter_2.md"
@@ -220,6 +351,149 @@ def test_page_note_aliases_share_occurrence_ids_and_backlinks(tmp_path: Path) ->
     assert report["forward_hrefs"] == 2
     assert report["backref_hrefs"] == 2
     assert report["backref_broken_count"] == 0
+
+
+@pytest.mark.parametrize("auto_global", [False, True])
+def test_self_contained_collection_branch_does_not_absorb_sibling_definition(
+    tmp_path: Path, auto_global: bool
+) -> None:
+    article_a = tmp_path / "article_a.md"
+    article_b = tmp_path / "article_b.md"
+    article_a.write_text(
+        "A [^1]. Again [^1].\n\n[^1]: Local A.\n", encoding="utf-8"
+    )
+    article_b.write_text("[^1]: Independent orphan B.\n", encoding="utf-8")
+    structure = [_entry("collection", children=[
+        _entry("article_a", article_a),
+        _entry("article_b", article_b),
+    ])]
+
+    manager = FootnoteManager(
+        tmp_path, auto_global=auto_global, epub_structure=structure
+    )
+    rendered = _render(structure, manager)
+    report = validate_footnote_graph(rendered)
+    index = ContentAddressIndex.from_structure(structure)
+    groups, part_to_group = index.build_local_groups(
+        manager.references, manager.definitions
+    )
+
+    assert part_to_group[article_a.stem] == article_a.stem
+    assert part_to_group[article_b.stem] == article_b.stem
+    assert "collection" not in groups or set(groups["collection"]) != {
+        article_a.stem, article_b.stem
+    }
+    assert rendered["article_a.html"].count('href="article_a.html#fn-1') == 2
+    assert 'href="article_b.html#fn-1' not in rendered["article_a.html"]
+    assert 'href="article_a.html#fnref-article_a-1"' in rendered["article_a.html"]
+    assert 'href="article_a.html#fnref-article_a-1-2"' in rendered["article_a.html"]
+    assert report["forward_hrefs"] == 2
+    assert report["backref_hrefs"] == 2
+
+
+@pytest.mark.parametrize("auto_global", [False, True])
+def test_collection_scope_inference_is_isolated_per_footnote_key(
+    tmp_path: Path, auto_global: bool
+) -> None:
+    article_a = tmp_path / "article_a.md"
+    article_b = tmp_path / "article_b.md"
+    article_a.write_text(
+        "A [^1]. Again [^1]. Central [^2].\n\n[^1]: A local.\n",
+        encoding="utf-8",
+    )
+    article_b.write_text(
+        "B [^1].\n\n[^1]: B local.\n\n[^2]: Central note.\n",
+        encoding="utf-8",
+    )
+    structure = [_entry("collection", children=[
+        _entry("article_a", article_a),
+        _entry("article_b", article_b, entry_type="notes"),
+    ])]
+
+    manager = FootnoteManager(
+        tmp_path, auto_global=auto_global, epub_structure=structure
+    )
+    rendered = _render(structure, manager)
+    report = validate_footnote_graph(rendered)
+    html_a = etree.HTML(rendered["article_a.html"])
+    html_b = etree.HTML(rendered["article_b.html"])
+    refs_a = [
+        ("".join(anchor.itertext()), anchor.get("href"))
+        for anchor in html_a.xpath('//a[@class="footnote-ref"]')
+    ]
+    refs_b = [
+        ("".join(anchor.itertext()), anchor.get("href"))
+        for anchor in html_b.xpath('//a[@class="footnote-ref"]')
+    ]
+
+    a_key1 = [href for text, href in refs_a if "[1]" in text]
+    a_key2 = [href for text, href in refs_a if "[2]" in text]
+    b_key1 = [href for text, href in refs_b if "[1]" in text]
+    assert len(a_key1) == 2 and a_key1[0] == a_key1[1]
+    assert a_key1[0].startswith("article_a.html#fn-")
+    assert len(a_key2) == 1 and a_key2[0].startswith("article_b.html#fn-")
+    assert len(b_key1) == 1 and b_key1[0].startswith("article_b.html#fn-")
+
+    def backlinks_for(content: str, document) -> list[str]:
+        definition = next(
+            node for node in document.xpath('//div[contains(@class, "footnote-def")]')
+            if content in "".join(node.itertext())
+        )
+        return definition.xpath('.//a[@class="footnote-backref"]/@href')
+
+    assert len(backlinks_for("A local.", html_a)) == 2
+    assert len(backlinks_for("B local.", html_b)) == 1
+    assert backlinks_for("Central note.", html_b) == [
+        f"article_a.html#{html_a.xpath('//sup[.//a[contains(., \"[2]\")]]/@id')[0]}"
+    ]
+    assert report["forward_hrefs"] == 4
+    assert report["backref_hrefs"] == 4
+    assert report["unlinked_sup_count"] == 0
+
+
+@pytest.mark.parametrize("auto_global", [False, True])
+def test_cross_branch_scope_keeps_self_contained_sibling_local(
+    tmp_path: Path, auto_global: bool
+) -> None:
+    self_contained = tmp_path / "article_c.md"
+    body = tmp_path / "article_a.md"
+    notes = tmp_path / "article_b.md"
+    self_contained.write_text(
+        "Own [^1]. Again [^1].\n\n[^1]: Own C.\n", encoding="utf-8"
+    )
+    body.write_text("Body A [^1].\n", encoding="utf-8")
+    notes.write_text("[^1]: Central B.\n", encoding="utf-8")
+    structure = [_entry("collection", children=[
+        _entry("article_c", self_contained),
+        _entry("article_a", body),
+        _entry("article_b", notes, entry_type="notes"),
+    ])]
+
+    manager = FootnoteManager(
+        tmp_path, auto_global=auto_global, epub_structure=structure
+    )
+    rendered = _render(structure, manager)
+    report = validate_footnote_graph(rendered)
+    key_groups = manager.mapper.local_chapter_groups_by_key["1"]
+    key_part_to_group = manager.mapper.local_part_to_group_by_key["1"]
+    html_c = etree.HTML(rendered["article_c.html"])
+    html_a = etree.HTML(rendered["article_a.html"])
+    refs_c = html_c.xpath('//a[@class="footnote-ref"]/@href')
+    refs_a = html_a.xpath('//a[@class="footnote-ref"]/@href')
+
+    assert key_part_to_group[self_contained.stem] == self_contained.stem
+    assert key_part_to_group[body.stem] == "collection"
+    assert key_part_to_group[notes.stem] == "collection"
+    assert set(key_groups["collection"]) == {body.stem, notes.stem}
+    assert len(refs_c) == 2 and refs_c[0] == refs_c[1]
+    assert refs_c[0].startswith("article_c.html#fn-")
+    assert len(refs_a) == 1 and refs_a[0].startswith("article_b.html#fn-")
+    assert 'href="article_c.html#fnref-article_c-1"' in rendered["article_c.html"]
+    assert 'href="article_c.html#fnref-article_c-1-2"' in rendered["article_c.html"]
+    assert 'href="article_a.html#fnref-article_a-1"' in rendered["article_b.html"]
+    assert report["forward_hrefs"] == 3
+    assert report["backref_hrefs"] == 3
+    assert report["unlinked_sup_count"] == 0
 
 
 def test_refine_boundary_stitcher_links_one_safe_adjacent_reference(tmp_path: Path):

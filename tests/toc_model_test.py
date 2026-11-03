@@ -9,6 +9,7 @@ from pdf2epub.toc_model import (
     validate_toc_tree_correspondence,
 )
 import json
+import pytest
 
 from pdf2epub.toc_translation_workflow import build_toc_heading_contexts
 
@@ -181,6 +182,45 @@ def test_same_title_parent_and_child_reserve_separate_source_occurrences():
         ("parent", 1, 2),
         ("child", 2, 2),
     ]
+
+
+def test_case_only_parent_child_titles_share_occurrence_key_but_sharp_s_is_distinct():
+    chapters = [{"node_id": "parent", "title": "DIALEKTIK DER WERTFORM", "children": [
+        {"node_id": "child", "title": "Dialektik der Wertform"},
+    ]}]
+    projection = project_toc_ownership(
+        chapters,
+        {"units": [{"node_id": "parent", "index_path": [1], "file": "unit.md"}]},
+        {"unit.md": "# DIALEKTIK DER WERTFORM\n\n# Dialektik der Wertform"},
+    )
+    assert [(row["node_id"], row["source_occurrence"], row["source_match_count"])
+            for row in projection["unit.md"]["headings"]] == [
+        ("parent", 1, 2), ("child", 2, 2),
+    ]
+
+    with pytest.raises(ValueError, match="visible TOC node sharp"):
+        project_toc_ownership(
+            [{"node_id": "sharp", "title": "Straße"}],
+            {"units": [{"node_id": "sharp", "index_path": [1], "file": "unit.md"}]},
+            {"unit.md": "# STRASSE"},
+        )
+
+
+def test_sharp_s_and_ss_titles_bind_independently_in_source_and_html():
+    from pdf2epub.epub.converter import visible_heading_text
+
+    projection = project_toc_ownership(
+        [{"node_id": "root", "title": "Container", "children": [
+            {"node_id": "sharp", "title": "Straße"},
+            {"node_id": "ss", "title": "STRASSE"},
+        ]}],
+        {"units": [{"node_id": "root", "index_path": [1], "file": "unit.md"}]},
+        {"unit.md": "# Container\n\n# Straße\n\n# STRASSE"},
+    )
+    rows = projection["unit.md"]["headings"][1:]
+    assert [(row["node_id"], row["source_occurrence"], row["source_match_count"])
+            for row in rows] == [("sharp", 1, 1), ("ss", 1, 1)]
+    assert visible_heading_text("Straße") != visible_heading_text("STRASSE")
 
 
 def test_source_projection_preserves_identifier_underscores_and_ignores_fenced_code():

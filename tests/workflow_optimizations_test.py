@@ -358,6 +358,60 @@ def test_worker_handoffs_balance_pending_batches_and_keep_files_disjoint(tmp_pat
     assert scoped["dispatch_lease_file"] == "translate_dispatch_leases.json"
     scoped_prompt = (tmp_path / handoffs[0]["prompt"]).read_text(encoding="utf-8")
     assert "--check-only" not in scoped_prompt
+    contract = manifest["dispatch_contract"]
+    for required in (
+        "fresh Subagent conversation",
+        "repair retry for the same assignment",
+        "Dispatch distinct workers in the same wave concurrently",
+        "do not serialize them through an old conversation while IDE slots are available",
+        "Only when available IDE capacity is below the wave cap",
+        "report the actual peak concurrency",
+        "confirm the conversation has ended",
+        "do not release a lease for a live worker",
+        "not worker authority to schedule other workers",
+    ):
+        assert required.casefold() in contract.casefold()
+    for item in handoffs:
+        worker_prompt = (tmp_path / item["prompt"]).read_text(encoding="utf-8")
+        assert "fresh Subagent conversation" in worker_prompt
+        assert "report the actual peak concurrency" in worker_prompt.casefold()
+        assert "repair retry for the same assignment" in worker_prompt
+
+    # Exercise an ordinary multi-worker wave followed by an isolated extreme
+    # unit wave, and verify that scoped workers receive the operator contract
+    # without inheriting the parent's full dispatch plan.
+    assert len(handoffs) == 3
+    first_wave_files = set(handoffs[0]["files"] + handoffs[1]["files"])
+    extreme_files = set(handoffs[2]["files"])
+    manifest["file_stats"] = {
+        name: {
+            **(manifest.get("file_stats", {}).get(name, {}) or {}),
+            "estimated_tokens": 100 if name in first_wave_files else 25_000,
+        }
+        for item in handoffs
+        for name in item["files"]
+    }
+    paths["manifest"].write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    rescheduled = write_worker_handoffs(tmp_path, paths["manifest"], paths["prompt"])
+    rescheduled_manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    assert [wave["reason"] for wave in rescheduled_manifest["dispatch_plan"]] == [
+        "ordinary",
+        "extreme_unit",
+    ]
+    assert len(rescheduled_manifest["dispatch_plan"][0]["worker_ids"]) == 2
+    assert set(rescheduled[2]["files"]) == extreme_files
+    for item in rescheduled:
+        scoped_manifest = json.loads((tmp_path / item["manifest"]).read_text(encoding="utf-8"))
+        assert "dispatch_plan" not in scoped_manifest
+        assert scoped_manifest["dispatch_wave"] == item["dispatch_wave"]
+        assert scoped_manifest["dispatch_wave_max_concurrency"] == item[
+            "dispatch_wave_max_concurrency"
+        ]
+        assert scoped_manifest["dispatch_wave_reason"] == item["dispatch_wave_reason"]
+        worker_prompt = (tmp_path / item["prompt"]).read_text(encoding="utf-8")
+        assert "not worker authority to schedule other workers" in worker_prompt
 
 
 def test_worker_handoff_regeneration_preserves_exact_active_assignment(tmp_path: Path):

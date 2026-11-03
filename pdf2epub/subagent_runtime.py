@@ -40,7 +40,7 @@ from .worker_grouping import (
     _plan_dispatch_waves,
 )
 from .worker_manifest import _worker_manifest_projection
-from .worker_prompt import render_worker_prompt
+from .worker_prompt import DISPATCH_OPERATOR_CONTRACT, render_worker_prompt
 from .worker_glossary_context import build_worker_glossary_context
 
 DEFAULT_TRANSLATION_MODEL = "gemini-3.1-pro-preview"
@@ -354,12 +354,7 @@ def write_worker_handoffs(
 
     manifest["effective_max_concurrency"] = configured_cap
     manifest["concurrency_reason"] = "ordered_dispatch_plan"
-    manifest["dispatch_contract"] = (
-        "Operator scheduling only: dispatch workers in ordered waves and do not "
-        "exceed each wave's max_concurrency. Count separate metadata workers "
-        "against the active wave cap; never run metadata during an extreme_unit "
-        "wave. This manifest does not start models or enforce a runtime semaphore."
-    )
+    manifest["dispatch_contract"] = DISPATCH_OPERATOR_CONTRACT
     manifest["dispatch_plan"] = dispatch_plan
     handoff_dir = output_dir / (
         handoff_dir_name or ("worker_handoffs" if task == "translate" else f"{task}_worker_handoffs")

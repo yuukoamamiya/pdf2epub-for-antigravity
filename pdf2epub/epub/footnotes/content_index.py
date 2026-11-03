@@ -243,10 +243,23 @@ class ContentAddressIndex:
 
             branch_balances: Dict[str, Counter] = {}
             for branch, stems in branch_stems.items():
-                balance = Counter()
+                branch_refs = Counter()
+                branch_defs = Counter()
                 for stem in stems:
-                    balance.update(refs_by_source.get(stem, Counter()))
-                    balance.subtract(defs_by_source.get(stem, Counter()))
+                    branch_refs.update(refs_by_source.get(stem, Counter()))
+                    branch_defs.update(defs_by_source.get(stem, Counter()))
+                balance = Counter()
+                for key in branch_refs.keys() | branch_defs.keys():
+                    # A branch that owns a definition for a referenced key is
+                    # self-contained: one local definition can serve repeated
+                    # references, and duplicate definitions must not recruit
+                    # a sibling's definition to absorb an overage.
+                    if branch_refs[key] and branch_defs[key]:
+                        continue
+                    if branch_refs[key]:
+                        balance[key] = branch_refs[key]
+                    elif branch_defs[key]:
+                        balance[key] = -branch_defs[key]
                 branch_balances[branch] = balance
 
             keys = {
@@ -254,16 +267,30 @@ class ContentAddressIndex:
                 for balance in branch_balances.values()
                 for key in balance
             }
-            crosses_boundary = any(
-                any(balance[key] > 0 for balance in branch_balances.values())
+            crossing_keys = {
+                key for key in keys
+                if any(balance[key] > 0 for balance in branch_balances.values())
                 and any(balance[key] < 0 for balance in branch_balances.values())
-                for key in keys
-            )
-            if not crosses_boundary:
+            }
+            if not crossing_keys:
                 continue
 
-            groups[unit_id] = descendant_stems
-            for stem in descendant_stems:
+            # Promote only branches that contribute an unmatched reference or
+            # definition for a key that crosses this parent. A self-contained
+            # sibling stays in its own scope even when other branches need to
+            # share a parent scope for a different note.
+            participating_branches = {
+                branch for branch, balance in branch_balances.items()
+                if any(balance[key] for key in crossing_keys)
+            }
+            participating_stems = [
+                stem
+                for branch, stems in branch_stems.items()
+                if branch in participating_branches
+                for stem in stems
+            ]
+            groups[unit_id] = participating_stems
+            for stem in participating_stems:
                 part_to_group[stem] = unit_id
 
         return groups, part_to_group

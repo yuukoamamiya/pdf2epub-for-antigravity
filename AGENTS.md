@@ -238,11 +238,14 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
   handoff 标记为 `completed`，源哈希已变化的旧 handoff 标记为 `superseded`，不得再次派发。
 - 父级 manifest 可提供 `dispatch_plan`，按波次给出 `worker_ids`、`max_concurrency` 和
   `reason`（`ordinary`、`large_units` 或 `extreme_unit`）；handoff 的 `dispatch_wave`、
-  `dispatch_wave_max_concurrency` 和 `dispatch_wave_reason` 是派发提示。按波次顺序执行，
-  完成本波后再开始下一波。`subagent.batching.max_concurrency`（有效上限 6）是全局上限；
-  普通波使用配置额度，含达到大单元阈值的文件时并发上限为 2，达到极大单元阈值时该单元
-  独占并发 1。元数据任务也占用同一波额度，不能与极大单元波重叠。这只是本地调度建议，
-  不会启动模型或强制 IDE 的实际并发信号量，派发前仍需确认当前 Subagent 活动状态。
+  `dispatch_wave_max_concurrency` 和 `dispatch_wave_reason` 是派发提示。每个不同 assignment
+  使用独立的新工作区 Subagent 会话；同一 assignment 的修复重试可保留原会话。同波必须按可用 IDE
+  槽位和 wave cap 并发派发独立 worker；有空槽时不得改用旧会话串行排队。只有可用容量低于 wave cap
+  时才分批派发，并如实记录实际峰值；完成整波且主 Agent 验收后才能开始下一波。禁止把新 assignment
+  或后续 wave 顺延到旧 worker 会话。`subagent.batching.max_concurrency`（有效上限 6）是全局上限；
+  普通波不超过配置额度，大单元波不超过 2，极大单元波不超过 1。元数据任务也占用同一波额度，不能与极大单元波重叠。这是操作员合同，不会启动模型
+  或强制 IDE 的实际并发信号量，也不授权 worker 调度其他 worker。主 Agent 完成后保留结果和审计记录，
+  确认会话终止再调用 `release_dispatch_lease`；恢复时检查真实活动会话，避免重复派发，也不得盲目释放活跃 lease。
 - 不删除源文件、输出目录或已有中间结果。额度中断或失败时先校验，再使用原命令的
   `--resume`，只处理 pending 项。
 - 新 manifest 的 `--resume` 按单元比较 `unit_context_sha256` 和该单元的精确 TOC 上下文；
@@ -357,7 +360,7 @@ ocr-pages
 `refine-local` 的页面合并器会保守地拼接跨页未完的普通正文；完整句子、标题、列表、脚注、
 图片和表格仍保持块边界。Markdown→XHTML 默认遵循标准 Markdown 语义：单换行是软换行，
 空行才创建新段落；只有显式 `<br />` 才生成硬换行。
-正文若由连续的长编号段落组成，应依据上下文确认它们是普通论述后将数字标记转义为 `17\.`，使每段保留原编号且输出为普通段落；真实枚举仍用 Markdown 列表。`translate` 必须保留源稿中已转义的编号标记和顺序，校验会核对这些标记。
+正文若由连续的长编号段落组成，应依据上下文确认它们是普通论述后将数字标记转义为 `17\.`，使每段保留原编号且输出为普通段落；真实枚举仍用 Markdown 列表。明确编号的短注释可在一条编号对应一条注释时规整为有序列表；不得给可能续接前条的作者名/续文补号。已有 Markdown 脚注定义及其缩进续段必须留在原定义下；多章重复编号且没有明确作用域映射时不得改造成同名 `[^N]` 定义，证据不足应报告复核，不能为了通过段落碎片审计凭空造列表或脚注结构。`translate` 必须保留源稿中已转义的编号标记和顺序，校验会核对这些标记。
 视觉 OCR sidecar 若在页顶将跨页重复的 `Section-Header` 标为章节标题，页面合并器会按共享坐标归一化和去除印刷页码后的重复文本识别页眉；只处理至少出现在两页的短块，正文位置的真实标题保留。润色交接还要求标题保持独立，不得把后续正文拼入标题。
 `polish-validate` 还会报告高置信度的残留页码/页边行；这些候选默认进入
 `review_required`；首次出现时必须先让 Subagent 重新判断，复核后仍存在则升级为
@@ -389,7 +392,9 @@ PDF 正文 Prompt 还会从已验证的 `toc_tree_translated.json` 生成一个�
 自适应压缩，不固定保留某几个标题级别。该轮廓只用于理解全书主题推进，当前章节的
 精确 `toc_heading_contexts` 才是可见标题和措辞的权威来源；完整 TOC 不得重复注入每个章节。
 TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引号做规范化容差；近义词或
-独立改译仍必须失败。worker Prompt 必须把当前文件的标题锚定清单置于 assigned 任务附近，
+独立改译仍必须失败。源 ownership 标题计数、分片 occurrence 分配和 HTML 锚点匹配在各自完成
+标记清理后统一使用 Unicode `lower()` 与连续空白归一化，不使用 `casefold()` 扩大等价关系；
+这不放宽译文与 TOC 的逐字标题绑定。worker Prompt 必须把当前文件的标题锚定清单置于 assigned 任务附近，
 要求对应的第一个匹配标题逐字使用 TOC 文本，但不强制其成为物理首行。
 当前 TOC 合同要求每个节点有唯一、显式的 `node_id`；数组路径只表示结构位置，标题文字不作身份。
 构建器通过 `tree_progress.json` 和源 Markdown 的共享 ownership projection 确定节点所属的物理文件
@@ -520,6 +525,8 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    `endnotes_only`），本地按 effective mode 执行。只有确认该书是集中尾注而非页底脚注时，才可考虑
    `disabled`；确认尾注存在本身不等于应禁用，通常由 `auto` 判为 `endnotes_only`。`disabled` 会同时
    关闭脚注处理和尾注归一化；仅在确认是纯尾注且用户明确不需要任何脚注/尾注处理时才设置。
+   EPUB 构建中的链接作用域独立于该页面候选模式：Notes 单元仍启用跨文件链接；局部定义按结构 scope
+   优先匹配，缺少目标时不得借用其他局部 scope 的同号定义。Markdown 脚注引用在构建产物中未链接时会阻断构建。
    不得为省步骤或规避校验而关闭。也可在配置中显式固定 `footnotes` / `endnotes_only` / `disabled`，
    显式值始终覆盖 TOC 判断。TOC 中标记为
    `toc`、`notes`、`bibliography`、`index`、`author_notes`、`catalog`、`ad`、
