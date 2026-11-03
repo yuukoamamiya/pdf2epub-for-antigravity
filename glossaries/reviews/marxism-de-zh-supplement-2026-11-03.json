@@ -1,0 +1,1516 @@
+{
+  "date": "2026-11-03",
+  "glossary": "glossaries/marxism.yaml",
+  "decision": "Adopt 20 German concepts; defer Arbeiterbewegungsmarxismus due to unverified Chinese usage. Add de forms to seven existing English concept IDs. Set real-abstraction preferred Chinese to 真实抽象 and retain 现实抽象 as a variant; policy remains preferred.",
+  "adopted": [
+    {
+      "source": "Staatsableitung",
+      "concept_id": "marxism:state-derivation",
+      "preferred_zh": "国家衍生",
+      "queries": [
+        "Staatsableitung 国家推导 国家派生 马克思主义 中文",
+        "‘国家推导’ 马克思主义 国家形式 Staatsableitung",
+        "Staatsableitungsdebatte 国家推导争论 中文 国家派生论",
+        "‘国家派生’ 国家理论 Staatsableitung 德国马克思主义"
+      ],
+      "sources": [
+        {
+          "title": "李乾坤：资产阶级国家形式的拜物教批判",
+          "url": "https://ptextold.nju.edu.cn/8c/3b/c13164a560187/page.htm",
+          "publisher_or_author": "南京大学实践与文本；李乾坤",
+          "evidence_type": "学术研究文章",
+          "access": "full_text",
+          "short_evidence": "字面 URL 打开南京大学全文；正文直接写“国家衍生（Staatsableitung）论争”，并解释“衍生”兼有“推论”含义。",
+          "supports": "国家衍生"
+        },
+        {
+          "title": "西德的国家衍生争论：马克思主义国家理论视域下的经济与政治关系",
+          "url": "https://ptext.nju.edu.cn/info/1348/9314.htm",
+          "publisher_or_author": "南京大学实践与文本；Elmar Altvater 中文译介",
+          "evidence_type": "学术论文译介",
+          "access": "full_text",
+          "short_evidence": "字面 URL 打开全文；文章标题为“西德的国家衍生争论”，译者按直接称其为“国家衍生争论”。",
+          "supports": "国家衍生争论"
+        },
+        {
+          "title": "找回国家理论研究的政治经济学路径：对赫希国家理论的批判性探讨",
+          "url": "https://www.aisixiang.com/data/147556.html",
+          "publisher_or_author": "朱宝清；爱思想学术平台",
+          "evidence_type": "学术研究文章",
+          "access": "search_snippet",
+          "short_evidence": "摘要称德国‘国家衍生’辩论，并附英文 State Derivation Debate。",
+          "supports": "国家衍生"
+        }
+      ],
+      "book_evidence": {
+        "source": "Staatsableitung",
+        "suggested_zh": "国家推导",
+        "file": "chapter_7.1.2.md",
+        "source_excerpt": "Staatsableitungsversuchen",
+        "translated_excerpt": "国家推导尝试",
+        "role": "body"
+      }
+    },
+    {
+      "source": "Staatsableitungsdebatte",
+      "concept_id": "marxism:state-derivation-debate",
+      "preferred_zh": "国家衍生争论",
+      "queries": [
+        "Staatsableitung 国家推导 国家派生 马克思主义 中文",
+        "‘国家推导’ 马克思主义 国家形式 Staatsableitung",
+        "Staatsableitungsdebatte 国家推导争论 中文 国家派生论",
+        "‘国家派生’ 国家理论 Staatsableitung 德国马克思主义"
+      ],
+      "sources": [
+        {
+          "title": "西德的国家衍生争论：马克思主义国家理论视域下的经济与政治关系",
+          "url": "https://ptext.nju.edu.cn/info/1348/9314.htm",
+          "publisher_or_author": "南京大学实践与文本；Elmar Altvater 中文译介",
+          "evidence_type": "学术论文译介",
+          "access": "full_text",
+          "short_evidence": "字面 URL 打开全文；文章标题为“西德的国家衍生争论”，译者按直接称其为“国家衍生争论”。",
+          "supports": "国家衍生争论"
+        },
+        {
+          "title": "李乾坤：资产阶级国家形式的拜物教批判",
+          "url": "https://ptextold.nju.edu.cn/8c/3b/c13164a560187/page.htm",
+          "publisher_or_author": "南京大学实践与文本；李乾坤",
+          "evidence_type": "学术研究文章",
+          "access": "full_text",
+          "short_evidence": "字面 URL 打开南京大学全文；正文直接写“国家衍生（Staatsableitung）论争”，并解释“衍生”兼有“推论”含义。",
+          "supports": "国家衍生论争"
+        }
+      ],
+      "book_evidence": {
+        "source": "Staatsableitungsdebatte",
+        "suggested_zh": "国家推导争论",
+        "file": "chapter_7.1.1.part1.md",
+        "source_excerpt": "Staatsableitungsdebatte als zweiter wesentlicher Strang",
+        "translated_excerpt": "所谓国家推导争论堪称联邦德国新马克思阅读的第二条主要脉络",
+        "role": "body"
+      }
+    },
+    {
+      "source": "Rechtsform",
+      "concept_id": "marxism:legal-form",
+      "preferred_zh": "法律形式",
+      "queries": [
+        "‘Rechtsform’ ‘法律形式’ 马克思主义 法律形式 价值形式",
+        "Rechtsform Marxism Chinese translation 法权形式 法律形式",
+        "‘法律形式’ ‘Rechtsform’ 商品形式 帕舒卡尼斯",
+        "Rechtsform Rechtsformanalyse Chinese 法律形式 法权形式"
+      ],
+      "sources": [
+        {
+          "title": "马克思价值形式理论研究的历史演进与当代展望",
+          "url": "https://ptext.nju.edu.cn/info/1348/9207.htm",
+          "publisher_or_author": "南京大学实践与文本；李乾坤",
+          "evidence_type": "学术论文",
+          "access": "full_text",
+          "short_evidence": "字面 URL 打开南京大学全文；正文讨论商品形式、法律形式、国家形式之间的关系，并明确采用“法律形式”“国家形式”。",
+          "supports": "法律形式"
+        },
+        {
+          "title": "马克思主义与法律",
+          "url": "https://libm.nwupl.edu.cn/bookInfo_01h0024876.html",
+          "publisher_or_author": "西北政法大学图书馆；Hugh Collins 中译本书目",
+          "evidence_type": "学术译著目录",
+          "access": "full_text",
+          "short_evidence": "中译本目录章节名为‘法律形式’。",
+          "supports": "法律形式"
+        },
+        {
+          "title": "法的一般理论与马克思主义",
+          "url": "https://www.cp.com.cn/book/c375abe8-4.html",
+          "publisher_or_author": "商务印书馆",
+          "evidence_type": "学术译著出版社介绍",
+          "access": "search_snippet",
+          "short_evidence": "出版社介绍使用‘法的形式’讨论商品形式的对应关系。",
+          "supports": "法的形式"
+        }
+      ],
+      "book_evidence": {
+        "source": "Rechtsform",
+        "suggested_zh": "法律形式",
+        "file": "chapter_7.3.part3.md",
+        "source_excerpt": "Bestimmung der bürgerlichen Rechtsform",
+        "translated_excerpt": "界定资产阶级法律形式",
+        "role": "body"
+      }
+    },
+    {
+      "source": "Staatsform",
+      "concept_id": "marxism:state-form",
+      "preferred_zh": "国家形式",
+      "queries": [
+        "Staatsform 国家形式 Staatsform 中文 马克思 国家形式",
+        "‘国家形式’ ‘Staatsform’ 马克思主义 国家衍生",
+        "马克思 列宁 ‘新的国家形式’ 政治形式 国家形式 中文",
+        "Staatsform government form state form Chinese Marxism"
+      ],
+      "sources": [
+        {
+          "title": "马克思价值形式理论研究的历史演进与当代展望",
+          "url": "https://ptext.nju.edu.cn/info/1348/9207.htm",
+          "publisher_or_author": "南京大学实践与文本；李乾坤",
+          "evidence_type": "学术论文",
+          "access": "full_text",
+          "short_evidence": "字面 URL 打开南京大学全文；正文讨论商品形式、法律形式、国家形式之间的关系，并明确采用“法律形式”“国家形式”。",
+          "supports": "国家形式"
+        },
+        {
+          "title": "《列宁全集》中文第二版中一些译名译语是怎样确定的",
+          "url": "https://www.dswxyjy.org.cn/n1/2019/0617/c427184-31157654.html",
+          "publisher_or_author": "中共中央党史和文献研究院网站",
+          "evidence_type": "经典著作翻译研究",
+          "access": "full_text",
+          "short_evidence": "讨论‘国家形式’与‘政治形式’、‘管理形式’等译语及其差异。",
+          "supports": "国家形式；需看概念范围"
+        }
+      ],
+      "book_evidence": {
+        "source": "Staatsform",
+        "suggested_zh": "国家形式",
+        "file": "chapter_7.1.1.part2.md",
+        "source_excerpt": "der jedesmaligen spezifischen Staatsform",
+        "translated_excerpt": "任何时候的特定的国家形式",
+        "role": "body"
+      }
+    },
+    {
+      "source": "Formanalyse",
+      "concept_id": "marxism:form-analysis",
+      "preferred_zh": "形式分析",
+      "queries": [
+        "Formanalyse Marx Chinese translation 形式分析 价值形式分析 德国新马克思阅读",
+        "‘形式分析’ ‘Formanalyse’ 马克思主义",
+        "Formanalyse Marx value-form analysis Chinese 形式分析 价值形式分析",
+        "‘形式分析’ 德国新马克思阅读 价值形式 国家形式"
+      ],
+      "sources": [
+        {
+          "title": "价值形式、国家形式与资本主义社会结构——基于德国新马克思阅读的探讨",
+          "url": "https://iis.sass.org.cn/2020/0707/c3862a85685/page.htm",
+          "publisher_or_author": "上海社会科学院",
+          "evidence_type": "学术研究文章",
+          "access": "full_text",
+          "short_evidence": "字面 URL 打开上海社会科学院页面全文/摘要；摘要用“形式分析的独特视角”，并另用“价值形式分析”指具体方法。",
+          "supports": "形式分析"
+        },
+        {
+          "title": "马克思价值形式理论研究的历史演进与当代展望",
+          "url": "https://ptext.nju.edu.cn/info/1348/9207.htm",
+          "publisher_or_author": "南京大学实践与文本；李乾坤",
+          "evidence_type": "学术论文",
+          "access": "full_text",
+          "short_evidence": "正文持续使用‘价值形式分析’作为特定方法名称。",
+          "supports": "价值形式分析"
+        },
+        {
+          "title": "索恩-雷特尔：商品形式与思维形式",
+          "url": "https://ptextold.nju.edu.cn/7c/e5/c13395a556261/page.htm",
+          "publisher_or_author": "南京大学马克思主义社会理论研究中心选载；阿尔弗雷德·索恩-雷特尔，谢永康、侯振武译，南京大学出版社2015年版",
+          "evidence_type": "学术译著节选",
+          "access": "full_text",
+          "short_evidence": "全文直接出现“交换抽象的形式分析(Formanalyse)”；页内书目信息列出2015年中译本及译者。",
+          "supports": "形式分析(Formanalyse)"
+        }
+      ],
+      "book_evidence": {
+        "source": "Formanalyse",
+        "suggested_zh": "形式分析",
+        "file": "chapter_6.2.2.part4.md",
+        "source_excerpt": "Marx' Formanalyse",
+        "translated_excerpt": "马克思的形式分析",
+        "role": "body"
+      }
+    },
+    {
+      "source": "Formbestimmung",
+      "concept_id": "marxism:form-determination",
+      "preferred_zh": "形式规定",
+      "queries": [
+        "Formbestimmung 形式规定 形式规定性 马克思主义",
+        "‘形式规定’ ‘Formbestimmung’ 商品形式 马克思",
+        "Formbestimmung Marx form determination Chinese 形式规定性",
+        "‘经济范畴’ ‘形式规定’ 马克思 规定性 Formbestimmung"
+      ],
+      "sources": [
+        {
+          "title": "经济范畴规定性的哲学辨析",
+          "url": "https://jxyyj.ruc.edu.cn/CN/abstract/abstract13989.shtml",
+          "publisher_or_author": "《教学与研究》；王峰明，清华大学马克思主义研究中心",
+          "evidence_type": "学术期刊论文摘要",
+          "access": "full_text",
+          "short_evidence": "字面 URL 核验全文页眉与引文信息：刊物为《教学与研究》2006年第7期；摘要明确称马克思的经济范畴是一种“形式规定”。",
+          "supports": "形式规定"
+        },
+        {
+          "title": "伊萨克·鲁宾：生产力与生产关系",
+          "url": "https://ptext.nju.edu.cn/info/1165/93083.htm",
+          "publisher_or_author": "南京大学实践与文本；Isaak Rubin 中文译介",
+          "evidence_type": "学术著作译介",
+          "access": "search_snippet",
+          "short_evidence": "摘要将 Formbestimmtheit 标为‘形式规定性’。",
+          "supports": "形式规定性；提供形态对照"
+        }
+      ],
+      "book_evidence": {
+        "source": "Formbestimmung",
+        "suggested_zh": "形式规定",
+        "file": "chapter_5.part1.md",
+        "source_excerpt": "kapitalistischen Formbestimmungen",
+        "translated_excerpt": "资本主义形式规定",
+        "role": "body"
+      }
+    },
+    {
+      "source": "prämonetäre Werttheorie",
+      "concept_id": "marxism:premonetary-theory-of-value",
+      "preferred_zh": "前货币价值论",
+      "queries": [
+        "prämonetäre Werttheorie 前货币价值论 前货币价值理论",
+        "‘前货币价值理论’ 马克思 价值形式 货币理论 Backhaus",
+        "‘货币前价值理论’ Werttheorie 马克思",
+        "pre-monetary theory of value Marx Chinese 前货币 价值理论"
+      ],
+      "sources": [
+        {
+          "title": "金融衍生品的社会哲学——对马克思价值形式分析和货币理论当代意义的探讨",
+          "url": "https://ptextold.nju.edu.cn/33/d7/c13164a603095/page.htm",
+          "publisher_or_author": "南京大学实践与文本；李乾坤",
+          "evidence_type": "学术论文",
+          "access": "full_text",
+          "short_evidence": "字面 URL 打开全文；正文段落明确将此前及正统马克思主义价值理论称作“前货币的价值论”，并与“货币价值论（monetäre Werttheorie）”对举。",
+          "supports": "前货币的价值论"
+        },
+        {
+          "title": "Monetäre Werttheorie. Geld und Krise bei Marx",
+          "url": "https://www.prokla.de/index.php/PROKLA/en/article/view/741",
+          "publisher_or_author": "PROKLA: Journal of Critical Social Science",
+          "evidence_type": "德文学术期刊论文条目",
+          "access": "search_snippet",
+          "short_evidence": "条目呈现与之相关的 monetäre Werttheorie（货币价值理论）议题。",
+          "supports": "货币价值论（德语术语）"
+        },
+        {
+          "title": "Prämonetäre Werttheorie",
+          "url": "https://de.wikipedia.org/wiki/Pr%C3%A4monet%C3%A4re_Werttheorie",
+          "publisher_or_author": "德文 Wikipedia（仅辅助概念边界）",
+          "evidence_type": "百科概念说明",
+          "access": "search_snippet",
+          "short_evidence": "将标签用于把货币视为外在且不本质的资本主义解释。",
+          "supports": "语境，不作为译名权威"
+        }
+      ],
+      "book_evidence": {
+        "source": "prämonetäre Werttheorie",
+        "suggested_zh": "前货币价值论",
+        "file": "chapter_6.2.1.part1.md",
+        "source_excerpt": "eine prämonetäre Werttheorie",
+        "translated_excerpt": "一种前货币价值论",
+        "role": "body"
+      }
+    },
+    {
+      "source": "Klassenbewusstsein",
+      "concept_id": "marxism:class-consciousness",
+      "preferred_zh": "阶级意识",
+      "queries": [
+        "Klassenbewusstsein 阶级意识 马克思主义 中文学术",
+        "\"阶级意识\" \"class consciousness\" 中文 期刊 马克思主义"
+      ],
+      "sources": [
+        {
+          "title": "马克思主义阶级意识理论的发展及其现实意义",
+          "url": "https://ir.pku.edu.cn/handle/20.500.11897/636427",
+          "publisher_or_author": "北京大学机构知识库",
+          "evidence_type": "academic repository record / abstract",
+          "access": "search_snippet",
+          "short_evidence": "Title and abstract use 阶级意识 for the Marxist concept and connect it to movement from class-in-itself to class-for-itself.",
+          "supports": "Established Chinese rendering and conceptual scope."
+        },
+        {
+          "title": "卢卡奇阶级意识理论的内在逻辑及其当代意义论析",
+          "url": "https://assf.cbpt.cnki.net/portal/journal/portal/client/paper/02320a0d75b9081c46be1802fed8782c",
+          "publisher_or_author": "鞍山师范学院学报",
+          "evidence_type": "academic journal article / bilingual abstract",
+          "access": "search_snippet",
+          "short_evidence": "Chinese title uses 阶级意识; English keywords explicitly give Class consciousness.",
+          "supports": "Direct bilingual term correspondence in specialist scholarship."
+        },
+        {
+          "title": "中国与韩国社会阶级意识的比较研究",
+          "url": "https://shxyj.ajcass.com/Admin/UploadFile/20130926008/2015-08-25/Issue/44s2bomm.pdf",
+          "publisher_or_author": "社会学研究 / 中国社会科学院",
+          "evidence_type": "academic journal article",
+          "access": "search_snippet",
+          "short_evidence": "The article explicitly glosses 阶级意识 as class consciousness.",
+          "supports": "Independent social-science usage."
+        }
+      ],
+      "book_evidence": {
+        "source": "Klassenbewusstsein",
+        "suggested_zh": "阶级意识",
+        "file": "chapter_8.1.md",
+        "source_excerpt": "das vom Marxismus unterstellte Klassenbewusstsein",
+        "translated_excerpt": "马克思主义所假定的阶级意识",
+        "role": "body"
+      }
+    },
+    {
+      "source": "Klassenantagonismus",
+      "concept_id": "marxism:class-antagonism",
+      "preferred_zh": "阶级对抗",
+      "queries": [
+        "Klassenantagonismus 阶级对抗 阶级对立 中文 马克思",
+        "\"阶级对立\" \"class antagonism\" 中文 翻译 马克思",
+        "\"阶级对抗\" \"class antagonism\" 马克思 中文"
+      ],
+      "sources": [
+        {
+          "title": "贫困如何产生：马克思与黑格尔的认知差异——从《法哲学讲义》到《哲学的贫困》",
+          "url": "https://jxyyj.ruc.edu.cn/CN/Y2021/V55/I11/66",
+          "publisher_or_author": "教学与研究（中国人民大学）",
+          "evidence_type": "academic journal record / bilingual abstract",
+          "access": "search_snippet",
+          "short_evidence": "Chinese 阶级对抗 is paired with English class antagonism in the abstract.",
+          "supports": "Direct bilingual support for initial target."
+        },
+        {
+          "title": "03.0093 阶级对立 / class antagonism",
+          "url": "https://www.cnterm.cn/news/tzgg/202503/P020250909521438793386.pdf",
+          "publisher_or_author": "全国科学技术名词审定委员会相关术语材料",
+          "evidence_type": "terminology list / PDF",
+          "access": "search_snippet",
+          "short_evidence": "Lists 阶级对立 as the Chinese equivalent of class antagonism.",
+          "supports": "Established alternative; warns against treating 阶级对抗 as the only accepted form."
+        },
+        {
+          "title": "《共产党宣言》中文首译本用了什么底本",
+          "url": "https://www.chinawriter.com.cn/n1/2020/0710/c419387-31778621.html",
+          "publisher_or_author": "中国作家网; historical translation discussion",
+          "evidence_type": "scholarly-historical article",
+          "access": "search_snippet",
+          "short_evidence": "Discusses a Chinese rendering of the English class antagonism passage as 阶级对抗.",
+          "supports": "Classic translation context for the initial target."
+        }
+      ],
+      "book_evidence": {
+        "source": "Klassenantagonismus",
+        "suggested_zh": "阶级对抗",
+        "file": "chapter_7.1.3.md",
+        "source_excerpt": "revolutionären Gehalts des Klassenantagonismus",
+        "translated_excerpt": "阶级对抗具有潜在革命内涵",
+        "role": "body"
+      }
+    },
+    {
+      "source": "Ideologiekritik",
+      "concept_id": "marxism:ideology-critique",
+      "preferred_zh": "意识形态批判",
+      "queries": [
+        "Ideologiekritik 意识形态批判 中文 学术 马克思",
+        "意识形态批判 Ideologiekritik 马克思 期刊 中文"
+      ],
+      "sources": [
+        {
+          "title": "《〈黑格尔法哲学批判〉导言》中意识形态批判的内在逻辑",
+          "url": "https://ir.pku.edu.cn/handle/20.500.11897/644930",
+          "publisher_or_author": "北京大学机构知识库",
+          "evidence_type": "academic repository record / abstract",
+          "access": "search_snippet",
+          "short_evidence": "Title and abstract explicitly describe Marx's work as 意识形态批判成果.",
+          "supports": "Established direct Chinese rendering in Marx scholarship."
+        },
+        {
+          "title": "马克思意识形态批判的向度和问题域",
+          "url": "https://cnki.istiz.org.cn/kcms/detail/detail.aspx?dbcode=CJFD&dbname=CJFD2004&filename=HNSK200401002",
+          "publisher_or_author": "中国期刊全文数据库",
+          "evidence_type": "academic journal abstract",
+          "access": "search_snippet",
+          "short_evidence": "Uses 马克思的意识形态批判理论 as the central term and concept.",
+          "supports": "Independent journal usage."
+        },
+        {
+          "title": "马克思与意识形态批判的三重维度",
+          "url": "https://www.xuebao.snnu.edu.cn/info/1072/8641.htm",
+          "publisher_or_author": "陕西师范大学学报期刊社",
+          "evidence_type": "university journal article",
+          "access": "search_snippet",
+          "short_evidence": "Uses 意识形态批判 for Marx's critique across philosophical, sociological, and literary dimensions.",
+          "supports": "Specialist institutional usage and conceptual scope."
+        }
+      ],
+      "book_evidence": {
+        "source": "Ideologiekritik",
+        "suggested_zh": "意识形态批判",
+        "file": "chapter_6.2.3.md",
+        "source_excerpt": "Forschung als Ideologiekritik",
+        "translated_excerpt": "作为意识形态批判的研究",
+        "role": "body"
+      }
+    },
+    {
+      "source": "strukturaler Marxismus",
+      "concept_id": "marxism:structural-marxism",
+      "preferred_zh": "结构主义马克思主义",
+      "queries": [
+        "strukturaler Marxismus 结构主义马克思主义 结构马克思主义 中文 学术",
+        "结构马克思主义 结构主义的马克思主义 Althusser 中文 学术 期刊"
+      ],
+      "sources": [
+        {
+          "title": "结构主义与马克思主义",
+          "url": "https://jxyyj.ruc.edu.cn/CN/abstract/abstract10816.shtml",
+          "publisher_or_author": "教学与研究（中国人民大学）",
+          "evidence_type": "academic journal record / abstract snippet; open attempt hit redirect loop",
+          "access": "blocked",
+          "short_evidence": "Search excerpt calls the current a “结构主义的马克思主义” and contrasts it with existentialist Marxism; page open failed due redirect loop.",
+          "supports": "Direct established alternative spelling; the opened-page limitation is explicit."
+        },
+        {
+          "title": "结构主义的马克思主义",
+          "url": "https://ptext.nju.edu.cn/info/1224/4445.htm",
+          "publisher_or_author": "南京大学实践与文本",
+          "evidence_type": "university-hosted specialist article",
+          "access": "full_text",
+          "short_evidence": "Uses 结构主义的马克思主义 for the theory associated with the second generation of the New Left and discusses its structuralist turn.",
+          "supports": "Strong direct support for established Chinese school name."
+        },
+        {
+          "title": "超越“二元困境”——马克思的社会结构分析及其方法论特征",
+          "url": "https://xbzs.ecnu.edu.cn/CN/html/201304014.htm",
+          "publisher_or_author": "华东师范大学学报（哲学社会科学版）",
+          "evidence_type": "academic journal article",
+          "access": "full_text",
+          "short_evidence": "Distinguishes Althusser-represented 结构马克思主义理论 from Marx's own social-structure analysis.",
+          "supports": "Terminological variant and a caution against conflating the school with structural analysis generally."
+        }
+      ],
+      "book_evidence": {
+        "source": "strukturaler Marxismus",
+        "suggested_zh": "结构主义马克思主义",
+        "file": "chapter_6.1.part2.md",
+        "source_excerpt": "Einfluss des französischen strukturalen Marxismus",
+        "translated_excerpt": "法国结构主义马克思主义的影响",
+        "note": "8 stem hits; inflected form strukturalen Marxismus.",
+        "role": "body"
+      },
+      "confirmed_same_concept_zh_variants": [
+        "结构主义的马克思主义",
+        "结构马克思主义"
+      ]
+    },
+    {
+      "source": "analytischer Marxismus",
+      "concept_id": "marxism:analytical-marxism",
+      "preferred_zh": "分析马克思主义",
+      "queries": [
+        "analytischer Marxismus 分析马克思主义 分析的马克思主义 中文 学术",
+        "分析的马克思主义 分析马克思主义 analytical Marxism 中国 学术"
+      ],
+      "sources": [
+        {
+          "title": "“正义”的思想谱系及其当代构建——从马克思到分析的马克思主义",
+          "url": "https://xsyk.cbpt.cnki.net/portal/journal/portal/client/paper/08a9419d5ccc4cbff5e6765691efa929",
+          "publisher_or_author": "学术月刊 / 武汉大学哲学学院作者",
+          "evidence_type": "academic journal article / bilingual abstract",
+          "access": "full_text",
+          "short_evidence": "Literal-URL open returned the matching 学术月刊 record, article title, keyword, and English abstract pairing 分析的马克思主义 with Analytical Marxism.",
+          "supports": "Direct correspondence and an established scholarly form."
+        },
+        {
+          "title": "分析马克思主义重思历史唯物主义",
+          "url": "https://marxism.ssap.com.cn/skwx_marxism/LiteratureDetail.aspx?ID=5916",
+          "publisher_or_author": "社会科学文献出版社 / 马克思主义研究数据库",
+          "evidence_type": "scholarly book chapter / hosted excerpt",
+          "access": "full_text",
+          "short_evidence": "Literal-URL open returned the matching Social Sciences Academic Press entry and its explicit equivalence “分析马克思主义，亦即‘分析的马克思主义’（analytical Marxism）”.",
+          "supports": "Confirms both variants denote the same current."
+        },
+        {
+          "title": "马克思经济哲学语境中的“分析的马克思主义”",
+          "url": "https://www.cssn.cn/zx/mkszyzx/202210/t20221027_5555168.shtml",
+          "publisher_or_author": "中国社会科学网; article from《马克思主义与现实》",
+          "evidence_type": "scholarly journal article",
+          "access": "full_text",
+          "short_evidence": "Literal-URL open returned the matching CSSN article and shows 分析的马克思主义 in the title, abstract, and keywords.",
+          "supports": "Independent academic usage and scope."
+        }
+      ],
+      "book_evidence": {
+        "source": "analytischer Marxismus",
+        "suggested_zh": "分析马克思主义",
+        "file": "chapter_6.2.2.part3.md",
+        "source_excerpt": "im Stile des analytischen Marxismus",
+        "translated_excerpt": "以分析马克思主义的风格",
+        "note": "Inflected form analytischen Marxismus.",
+        "additional_surface_forms": [
+          {
+            "book": "Marx im Westen",
+            "file": "chapter_6.2.2.part2.md",
+            "role": "body",
+            "surface_form": "analytische Marxismus"
+          },
+          {
+            "book": "Marx im Westen",
+            "file": "chapter_6.2.2.part3.md",
+            "role": "body",
+            "surface_form": "analytischen Marxismus"
+          }
+        ],
+        "role": "body"
+      },
+      "confirmed_same_concept_zh_variants": [
+        "分析的马克思主义"
+      ]
+    },
+    {
+      "source": "Neoklassik",
+      "concept_id": "marxism:neoclassical-economics",
+      "preferred_zh": "新古典经济学",
+      "queries": [
+        "Neoklassik 新古典经济学 中文 德语 Neoklassik 学术",
+        "Neoklassik \"新古典经济学\" 中文 术语",
+        "新古典经济学 新古典主义经济学 同义 经济学 期刊",
+        "\"新古典经济学\" \"Neoklassik\"",
+        "site:wirtschaftslexikon.gabler.de Neoklassik Neoklassizismus Wirtschaft",
+        "新古典经济学 经济学 流派 中国 社会科学"
+      ],
+      "sources": [
+        {
+          "title": "本文所称“新古典经济学”指……（西安财经大学学报文章）",
+          "url": "https://sxgy.cbpt.cnki.net/portal/journal/portal/client/paper/9a2b970c97be99df91bd6a3072195a8e",
+          "publisher_or_author": "西安财经大学学报",
+          "evidence_type": "academic journal article",
+          "access": "search_snippet",
+          "short_evidence": "Defines 新古典经济学 as a distinct economic school and explicitly excludes several neighboring schools.",
+          "supports": "Strong Chinese disciplinary usage and scope."
+        },
+        {
+          "title": "经济学基本问题与当代经济学思想谱系——三大经济学范式的思想本质与相互关系",
+          "url": "https://qks.shufe.edu.cn/J/CJYJ/Article/Details/A160824001012/CN",
+          "publisher_or_author": "财经研究 / 上海财经大学期刊社",
+          "evidence_type": "academic journal article",
+          "access": "search_snippet",
+          "short_evidence": "Uses 新古典主义经济学 for the school/paradigm arising from marginalist equilibrium analysis.",
+          "supports": "Established alternative in Chinese economics scholarship."
+        },
+        {
+          "title": "马克思经济哲学语境中的“分析的马克思主义”",
+          "url": "https://www.cssn.cn/zx/mkszyzx/202210/t20221027_5555168.shtml",
+          "publisher_or_author": "中国社会科学网; article from《马克思主义与现实》",
+          "evidence_type": "scholarly journal article",
+          "access": "full_text",
+          "short_evidence": "Chinese academic text refers to 新古典主义经济学 methods and their use by analytical Marxists.",
+          "supports": "A specialist Chinese humanities/social-science usage in the relevant discourse."
+        },
+        {
+          "title": "Revision von Solow",
+          "url": "https://wirtschaftslexikon.gabler.de/definition/solow-46772/version-173096",
+          "publisher_or_author": "Gabler Wirtschaftslexikon; Prof. Dr. Artur Woll, Universität Siegen",
+          "evidence_type": "expert economics dictionary entry",
+          "access": "full_text",
+          "short_evidence": "Identifies Solow as founder of neoclassical growth theory (neoklassische Wachstumstheorie).",
+          "supports": "German-side economic sense, though not a direct lexical headword for Neoklassik."
+        }
+      ],
+      "book_evidence": {
+        "book": "Die Wissenschaft vom Wert",
+        "file": "chapter_5.1.part1.md",
+        "role": "body",
+        "surface_form": "Neoklassik"
+      },
+      "confirmed_same_concept_zh_variants": [
+        "新古典主义经济学"
+      ]
+    },
+    {
+      "source": "Marginalismus",
+      "concept_id": "marxism:marginalism",
+      "preferred_zh": "边际主义",
+      "queries": [
+        "Marginalismus 边际主义 德语 中国 经济学 学术",
+        "\"Marginalismus\" \"边际主义\"",
+        "Marginalismus 边际主义 deutsch"
+      ],
+      "sources": [
+        {
+          "title": "经济学中的边际主义：历史的批判的研究",
+          "url": "https://www.cp.com.cn/book/32cb4249-9.html",
+          "publisher_or_author": "商务印书馆；晏智杰",
+          "evidence_type": "出版社书目",
+          "access": "full_text",
+          "short_evidence": "书名直接采用‘边际主义’",
+          "supports": "中文经济思想史术语。"
+        },
+        {
+          "title": "经济学的边际革命：说明和评价",
+          "url": "https://www.cp.com.cn/book/777ab05c-2.html",
+          "publisher_or_author": "商务印书馆",
+          "evidence_type": "出版社书目",
+          "access": "search_snippet",
+          "short_evidence": "简介讨论‘边际主义’起源",
+          "supports": "独立出版物的中文用法。"
+        }
+      ],
+      "book_evidence": {
+        "book": "Die Wissenschaft vom Wert",
+        "file": "chapter_4.1.md",
+        "role": "body",
+        "surface_form": "Marginalismus"
+      }
+    },
+    {
+      "source": "Junghegelianer",
+      "concept_id": "marxism:young-hegelians",
+      "preferred_zh": "青年黑格尔派",
+      "queries": [
+        "Junghegelianer 青年黑格尔派 德语 中国 哲学 学术",
+        "\"Junghegelianer\" \"青年黑格尔派\"",
+        "Junghegelianer \"青年黑格尔主义者\" 青年黑格尔派 中文 学术"
+      ],
+      "sources": [
+        {
+          "title": "青年黑格尔派的解体：四个叙述框架",
+          "url": "https://cssn.cn/zx/wgzx/202210/t20221027_5555391.shtml",
+          "publisher_or_author": "中国社会科学网；吴猛",
+          "evidence_type": "思想史学术文章",
+          "access": "full_text",
+          "short_evidence": "题名及正文称‘青年黑格尔派’",
+          "supports": "中文学术运动名。"
+        },
+        {
+          "title": "Junghegelianismus",
+          "url": "https://www.schwabeonline.ch/schwabe-xaveropp/elibrary/start.xav?start=%2F%2F%2A%5B%40attr_id%3D%27verw.junghegelianismus%27+and+%40outline_id%3D%27hwph_verw.junghegelianismus%27%5D",
+          "publisher_or_author": "Historisches Wörterbuch der Philosophie online / Schwabe",
+          "evidence_type": "哲学史词典",
+          "access": "full_text",
+          "short_evidence": "定义提及年轻追随者及其运动",
+          "supports": "德语概念是人群/运动。"
+        },
+        {
+          "title": "Junghegelianer",
+          "url": "https://www.spektrum.de/lexikon/philosophie/junghegelianer/1022",
+          "publisher_or_author": "Metzler Lexikon Philosophie / Spektrum",
+          "evidence_type": "哲学词典",
+          "access": "search_snippet",
+          "short_evidence": "区分 Althegelianer 与 Junghegelianer",
+          "supports": "佐证其学派成员分类。"
+        }
+      ],
+      "book_evidence": {
+        "book": "Die Wissenschaft vom Wert",
+        "file": "chapter_6.1.part1.md",
+        "role": "body",
+        "surface_form": "Junghegelianer"
+      }
+    },
+    {
+      "source": "Vulgärökonomie",
+      "concept_id": "marxism:vulgar-economics",
+      "preferred_zh": "庸俗经济学",
+      "queries": [
+        "Vulgärökonomie 庸俗经济学 德语 中文 马克思 学术",
+        "\"Vulgärökonomie\" \"庸俗经济学\"",
+        "Vulgärökonomie \"庸俗经济学\" 中文翻译 马克思"
+      ],
+      "sources": [
+        {
+          "title": "马克思主义思想辞典：V",
+          "url": "https://www.marxists.org/chinese/dictionary-of-marxism/marxist.org-chinese-dictionary-of-marxism-V.htm",
+          "publisher_or_author": "Tom Bottomore 等编；中文译本",
+          "evidence_type": "学术辞典",
+          "access": "full_text",
+          "short_evidence": "词条用‘庸俗经济学’释义",
+          "supports": "直接支持目标译名。"
+        },
+        {
+          "title": "收入及其源泉。庸俗政治经济学",
+          "url": "https://www.marxists.org/chinese/marx-engels/26-3/040.htm",
+          "publisher_or_author": "马克思；《马克思恩格斯全集》中文译文",
+          "evidence_type": "经典译本",
+          "access": "search_snippet",
+          "short_evidence": "章节标题为‘庸俗政治经济学’",
+          "supports": "说明扩展形式使用。"
+        },
+        {
+          "title": "Theorien über den Mehrwert",
+          "url": "https://www.marxists.org/deutsch/archiv/marx-engels/1863/tumw/standard/index.htm",
+          "publisher_or_author": "Karl Marx",
+          "evidence_type": "德文经典原文",
+          "access": "search_snippet",
+          "short_evidence": "章节标题含 Vulgärökonomie",
+          "supports": "核验原文词形。"
+        }
+      ],
+      "book_evidence": {
+        "book": "Die Wissenschaft vom Wert",
+        "file": "chapter_4.1.md",
+        "role": "body",
+        "surface_form": "Vulgärökonomie"
+      }
+    },
+    {
+      "source": "Frankfurter Schule",
+      "concept_id": "marxism:frankfurt-school",
+      "preferred_zh": "法兰克福学派",
+      "queries": [
+        "\"Frankfurter Schule\" \"法兰克福学派\" 德语 中文",
+        "Frankfurter Schule 法兰克福学派 中文 出版 社会学",
+        "Frankfurter Schule \"法兰克福学派\" 学术期刊"
+      ],
+      "sources": [
+        {
+          "title": "法兰克福学派的历史演变及其在中国的发展",
+          "url": "https://www.cssn.cn/zx/wgzx/202606/t20260617_6054432.shtml",
+          "publisher_or_author": "中国社会科学网",
+          "evidence_type": "专题学术文章",
+          "access": "full_text",
+          "short_evidence": "直接并列法兰克福学派（Frankfurter Schule）",
+          "supports": "直接中德对照。"
+        },
+        {
+          "title": "法兰克福学派的中国形式与问题",
+          "url": "https://clc.shisu.edu.cn/CN/Y2021/V0/I4/18",
+          "publisher_or_author": "上海外国语大学期刊平台",
+          "evidence_type": "学术期刊文章",
+          "access": "search_snippet",
+          "short_evidence": "题名使用‘法兰克福学派’",
+          "supports": "独立高校期刊用法。"
+        },
+        {
+          "title": "Übersetzungsförderung 2009–2019",
+          "url": "https://www.goethe.de/resources/files/pdf333/veroeffentlichungen-2009-bis-2019201920192019.pdf",
+          "publisher_or_author": "Goethe-Institut",
+          "evidence_type": "出版目录",
+          "access": "search_snippet",
+          "short_evidence": "Geschichte der Frankfurter Schule 对应《法兰克福学派史》",
+          "supports": "中德图书题名对应。"
+        }
+      ],
+      "book_evidence": {
+        "book": "Die Wissenschaft vom Wert",
+        "file": "chapter_4.1.md",
+        "role": "body",
+        "surface_form": "Frankfurter Schule"
+      }
+    },
+    {
+      "source": "Neoricardianismus",
+      "concept_id": "marxism:neo-ricardianism",
+      "preferred_zh": "新李嘉图主义",
+      "queries": [
+        "Neoricardianismus 新李嘉图主义 新李嘉图学派 德语 中文 学术",
+        "\"Neoricardianismus\" \"新李嘉图主义\"",
+        "\"新李嘉图主义\" 斯拉法 学术期刊",
+        "\"新李嘉图学派\" \"新李嘉图主义\" 斯拉法 中文"
+      ],
+      "sources": [
+        {
+          "title": "回归马克思——价值转形理论的新发展",
+          "url": "https://ces.xmu.edu.cn/CN/10.%2019365/%20j.%20issn1000-4181.%202019.%2002.%2001",
+          "publisher_or_author": "厦门大学《中国经济问题》（China Economic Studies）",
+          "evidence_type": "经济学期刊论文摘要",
+          "access": "full_text",
+          "short_evidence": "摘要以新李嘉图主义指鲍特基维茨—斯拉法传统",
+          "supports": "译名及理论范围。"
+        },
+        {
+          "title": "中国人民大学学报相关期刊页面",
+          "url": "https://xuebao.ruc.edu.cn/CN/volumn/volumn_1173.shtml",
+          "publisher_or_author": "中国人民大学学报",
+          "evidence_type": "期刊页面",
+          "access": "search_snippet",
+          "short_evidence": "以‘新李嘉图主义’称斯拉法—马克思模式",
+          "supports": "独立期刊相同译法。"
+        },
+        {
+          "title": "马克思主义传统的危机理论",
+          "url": "https://www.marxists.org/chinese/reference-books/simon-clarke-1994/02.htm",
+          "publisher_or_author": "Simon Clarke；中文译本",
+          "evidence_type": "政治经济学著作译本",
+          "access": "search_snippet",
+          "short_evidence": "neo-Ricardian 译作‘新李嘉图主义’",
+          "supports": "相邻英语概念译例。"
+        }
+      ],
+      "book_evidence": {
+        "book": "Die Wissenschaft vom Wert",
+        "file": "chapter_7.3.2.3.md",
+        "role": "body",
+        "surface_form": "Neoricardianismus"
+      }
+    },
+    {
+      "source": "Physiokratie",
+      "concept_id": "marxism:physiocracy",
+      "preferred_zh": "重农主义",
+      "queries": [
+        "Physiokratie 重农学派 重农主义 德语 中文 学术",
+        "\"Physiokratie\" \"重农学派\"",
+        "Physiokratie Definition Physiokraten wirtschaftslehre Duden",
+        "Physiokratie 重农学派 重农主义 Physiocracy 中国经济思想史"
+      ],
+      "sources": [
+        {
+          "title": "Physiokratie",
+          "url": "https://www.bpb.de/kurz-knapp/lexika/lexikon-der-wirtschaft/20287/physiokratie/",
+          "publisher_or_author": "德国联邦政治教育中心 bpb，《经济词典》",
+          "evidence_type": "德语经济词典",
+          "access": "full_text",
+          "short_evidence": "定义谈理论及其代表者",
+          "supports": "德语词意偏向理论/学说。"
+        },
+        {
+          "title": "Physiokratie (STW Thesaurus for Economics)",
+          "url": "https://zbw.eu/stw/version/latest/descriptor/16741-6/about",
+          "publisher_or_author": "ZBW – Leibniz Information Centre for Economics",
+          "evidence_type": "经济学主题词表",
+          "access": "search_snippet",
+          "short_evidence": "关联 Physiokraten 和 Physiocratic theory",
+          "supports": "区分理论名与代表群体。"
+        },
+        {
+          "title": "近代中国知识界对法国重农学派及其学说的传播与认识",
+          "url": "https://cnki.istiz.org.cn/kcms/detail/detail.aspx?dbcode=CMFD&dbname=CMFD2026&filename=1025397155.nh",
+          "publisher_or_author": "中国知网学位论文数据库",
+          "evidence_type": "学位论文中英文摘要",
+          "access": "search_snippet",
+          "short_evidence": "分别使用‘重农学派’和‘重农主义学说’",
+          "supports": "中文研究将人群和学说分开。"
+        },
+        {
+          "title": "中国古代的重农思想和法国的重农主义",
+          "url": "https://ccj.pku.edu.cn/article/info?aid=301292261",
+          "publisher_or_author": "北京大学期刊平台",
+          "evidence_type": "学术论文",
+          "access": "search_snippet",
+          "short_evidence": "题名用‘法国的重农主义’",
+          "supports": "学说名称的中文用法。"
+        }
+      ],
+      "book_evidence": {
+        "book": "Die Wissenschaft vom Wert",
+        "file": "chapter_5.1.part1.md",
+        "role": "body",
+        "surface_form": "Physiokratie"
+      }
+    },
+    {
+      "source": "Ricardianische Sozialisten",
+      "concept_id": "marxism:ricardian-socialists",
+      "preferred_zh": "李嘉图派社会主义者",
+      "queries": [
+        "\"Ricardianische Sozialisten\" \"李嘉图派社会主义者\"",
+        "\"Ricardian socialists\" \"李嘉图社会主义\" 中文",
+        "\"Ricardian socialism\" \"李嘉图派社会主义\"",
+        "李嘉图社会主义者 李嘉图派社会主义者 李嘉图学派 区别"
+      ],
+      "sources": [
+        {
+          "title": "李嘉图派社会主义者：关于马克思之前的英国早期社会主义",
+          "url": "https://www.sg.pku.edu.cn/wzsy/syxzhd/1201900zfglxyx1316744.htm",
+          "publisher_or_author": "北京大学政府管理学院；政治思想研究中心论坛",
+          "evidence_type": "大学学术活动说明",
+          "access": "search_snippet",
+          "short_evidence": "列出霍吉斯金、汤普森、格雷、布雷等代表人物",
+          "supports": "确认目标是特定早期社会主义者群体。"
+        },
+        {
+          "title": "第八届中日哲学论坛会议纪要",
+          "url": "https://www.phil.tsinghua.edu.cn/info/1037/2232.htm",
+          "publisher_or_author": "清华大学哲学系",
+          "evidence_type": "大学学术论坛纪要",
+          "access": "full_text",
+          "short_evidence": "报告题名含 Ricardian Socialists 并谈早期英国社会主义者",
+          "supports": "另一学术场合界定同一历史群体。"
+        },
+        {
+          "title": "李嘉图派社会主义的‘政治经济学批判’路径",
+          "url": "https://www.qikan.com.cn/article/93d620240303.html",
+          "publisher_or_author": "《传承》2024年第3期；龙源期刊网",
+          "evidence_type": "期刊论文摘要",
+          "access": "search_snippet",
+          "short_evidence": "摘要区分‘李嘉图派社会主义’和‘李嘉图派社会主义者’",
+          "supports": "直接区分学说与人群；文章全文需要付费。"
+        }
+      ],
+      "book_evidence": {
+        "book": "Die Wissenschaft vom Wert",
+        "file": "chapter_5.1.part3.md",
+        "role": "body",
+        "surface_form": "ricardianische Sozialisten"
+      }
+    }
+  ],
+  "deferred": {
+    "source": "Arbeiterbewegungsmarxismus",
+    "initial_target": "工人运动马克思主义",
+    "queries": [
+      "Arbeiterbewegungsmarxismus 工人运动马克思主义 中文",
+      "Arbeiterbewegungsmarxismus Marxismus Arbeiterbewegung German",
+      "Arbeiterbewegungsmarxismus \"工人运动\" Marxism 中文",
+      "\"工人运动马克思主义\"",
+      "\"工人运动的马克思主义\" Marx",
+      "\"工人运动型马克思主义\""
+    ],
+    "status": "unverified",
+    "preferred_zh": "工人运动马克思主义",
+    "alternatives": [
+      "工人运动型马克思主义（解释性译法）",
+      "传统工人运动马克思主义（仅在上下文明示为传统形态时）"
+    ],
+    "reason": "德语理论原文支持此复合词及其批判性用法；本次检索尚未找到足以确认中文通行译名的可靠用例。“工人运动马克思主义”保留为书内候选译法。",
+    "scope_note": "Often polemical in German value-critique / Neue Marx-Lektüre discussions; not a neutral umbrella for Marxism connected with labor movements.",
+    "sources": [
+      {
+        "title": "Struktur, Handlung, Herrschaft",
+        "url": "https://www.linksnet.de/artikel/32741",
+        "publisher_or_author": "Linksnet; scholarly discussion",
+        "evidence_type": "academic article / specialist discussion",
+        "access": "full_text",
+        "short_evidence": "Literal-URL open returned matching Linksnet title and article body; author/article byline is John Lütten in Z. Zeitschrift Marxistische Erneuerung. Passage describes the worker-movement/class-struggle Marxism being demarcated from.",
+        "supports": "Meaning and polemical distinction; supports retaining the label while translating literally."
+      },
+      {
+        "title": "Vom Verwesen der Arbeit",
+        "url": "https://www.krisis.org/1999/vom-verwesen-der-arbeit/",
+        "publisher_or_author": "Krisis; Franz Schandl",
+        "evidence_type": "primary theoretical essay",
+        "access": "full_text",
+        "short_evidence": "Literal-URL open returned the matching Krisis essay by Franz Schandl; the term appears in the section on the workers’ movement as a movement for work and is explicitly used critically.",
+        "supports": "Contextual and evaluative register; cautions against presenting it as neutral established school name."
+      }
+    ],
+    "suggested_policy": "hold_for_usage_evidence",
+    "book_evidence": {
+      "source_book": "Marx im Westen",
+      "file": "chapter_8.1.md",
+      "role": "body",
+      "surface_form": "Arbeiterbewegungsmarxismus",
+      "decision": "Keep deferred because external Chinese usage is unverified."
+    }
+  },
+  "existing_updates": [
+    {
+      "concept_id": "marxist-political-economy-en-zh:new-marx-reading",
+      "active_update": {
+        "de": {
+          "preferred": "Neue Marx-Lektüre"
+        },
+        "move": "Neue Marx-Lektüre"
+      },
+      "before": {
+        "terms": {
+          "en": {
+            "preferred": "New Marx Reading",
+            "variants": [
+              "Neue Marx-Lektüre",
+              "new reading of Marx"
+            ]
+          },
+          "zh-Hans": {
+            "preferred": "新马克思阅读",
+            "policy": "preferred"
+          }
+        },
+        "note": "How to Read Marx's Capital: A German post-1965 strand of Marxist scholarship re-reading Capital through its dialectical method and critique of traditional Marxism."
+      },
+      "after": {
+        "terms": {
+          "en": {
+            "preferred": "New Marx Reading",
+            "variants": [
+              "new reading of Marx"
+            ]
+          },
+          "de": {
+            "preferred": "Neue Marx-Lektüre"
+          },
+          "zh-Hans": {
+            "preferred": "新马克思阅读",
+            "policy": "preferred"
+          }
+        },
+        "note": "How to Read Marx's Capital: A German post-1965 strand of Marxist scholarship re-reading Capital through its dialectical method and critique of traditional Marxism."
+      },
+      "book_evidence": {
+        "source_book": "Marx im Westen",
+        "forms": [
+          {
+            "file": "chapter_6.1.part1.md",
+            "role": "body",
+            "surface_form": "neue Marx-Lektüre"
+          }
+        ]
+      },
+      "historical_original_record_unchanged": true,
+      "original_record": {
+        "id": "new-marx-reading",
+        "source": "New Marx Reading",
+        "target": "新马克思阅读",
+        "policy": "preferred",
+        "variants": [
+          "Neue Marx-Lektüre",
+          "new reading of Marx"
+        ],
+        "note": "How to Read Marx's Capital: A German post-1965 strand of Marxist scholarship re-reading Capital through its dialectical method and critique of traditional Marxism."
+      }
+    },
+    {
+      "concept_id": "marxist-political-economy-en-zh:labour-theory-of-value",
+      "active_update": {
+        "de": {
+          "preferred": "Arbeitswerttheorie",
+          "variants": [
+            "Arbeitswertlehre"
+          ]
+        }
+      },
+      "before": {
+        "terms": {
+          "en": {
+            "preferred": "labour theory of value"
+          },
+          "zh-Hans": {
+            "preferred": "劳动价值论",
+            "policy": "preferred"
+          }
+        },
+        "note": "Political Economy of Money and Finance: 政治经济学基础理论，主张商品价值由生产该商品所需的社会必要劳动时间决定"
+      },
+      "after": {
+        "terms": {
+          "en": {
+            "preferred": "labour theory of value"
+          },
+          "de": {
+            "preferred": "Arbeitswerttheorie",
+            "variants": [
+              "Arbeitswertlehre"
+            ]
+          },
+          "zh-Hans": {
+            "preferred": "劳动价值论",
+            "policy": "preferred"
+          }
+        },
+        "note": "Political Economy of Money and Finance: 政治经济学基础理论，主张商品价值由生产该商品所需的社会必要劳动时间决定"
+      },
+      "book_evidence": {
+        "source_book": "Marx im Westen",
+        "forms": [
+          {
+            "file": "chapter_6.1.part4.md",
+            "role": "body",
+            "surface_form": "Arbeitswerttheorie"
+          },
+          {
+            "file": "chapter_6.2.2.part1.md",
+            "role": "body",
+            "surface_form": "Arbeitswertlehre"
+          }
+        ]
+      },
+      "historical_original_record_unchanged": true,
+      "original_record": {
+        "id": "labour-theory-of-value",
+        "source": "labour theory of value",
+        "target": "劳动价值论",
+        "policy": "preferred",
+        "category": "value theory",
+        "note": "Political Economy of Money and Finance: 政治经济学基础理论，主张商品价值由生产该商品所需的社会必要劳动时间决定"
+      }
+    },
+    {
+      "concept_id": "marxist-political-economy-en-zh:commodity-fetishism",
+      "active_update": {
+        "de": {
+          "preferred": "Warenfetischismus"
+        }
+      },
+      "before": {
+        "terms": {
+          "en": {
+            "preferred": "commodity fetishism",
+            "variants": [
+              "fetishism of commodities"
+            ]
+          },
+          "zh-Hans": {
+            "preferred": "商品拜物教",
+            "policy": "preferred"
+          }
+        },
+        "note": "How to Read Marx's Capital: The social phenomenon where social relations between producers take on the mystical form of relations between things. commodity fetish 在某些句子中指拜物化的商品对象；需依句法和引文传统处理，不与 commodity fetishism 无条件等同"
+      },
+      "after": {
+        "terms": {
+          "en": {
+            "preferred": "commodity fetishism",
+            "variants": [
+              "fetishism of commodities"
+            ]
+          },
+          "de": {
+            "preferred": "Warenfetischismus"
+          },
+          "zh-Hans": {
+            "preferred": "商品拜物教",
+            "policy": "preferred"
+          }
+        },
+        "note": "How to Read Marx's Capital: The social phenomenon where social relations between producers take on the mystical form of relations between things. commodity fetish 在某些句子中指拜物化的商品对象；需依句法和引文传统处理，不与 commodity fetishism 无条件等同"
+      },
+      "book_evidence": {
+        "source_book": "Marx im Westen",
+        "forms": [
+          {
+            "file": "chapter_7.2.2.md",
+            "role": "body",
+            "surface_form": "Warenfetischismus"
+          }
+        ]
+      },
+      "historical_original_record_unchanged": true,
+      "original_record": {
+        "id": "commodity-fetishism",
+        "source": "commodity fetishism",
+        "target": "商品拜物教",
+        "policy": "preferred",
+        "variants": [
+          "fetishism of commodities"
+        ],
+        "note": "How to Read Marx's Capital: The social phenomenon where social relations between producers take on the mystical form of relations between things. commodity fetish 在某些句子中指拜物化的商品对象；需依句法和引文传统处理，不与 commodity fetishism 无条件等同"
+      }
+    },
+    {
+      "concept_id": "marxist-political-economy-en-zh:real-abstraction",
+      "active_update": {
+        "de": {
+          "preferred": "Realabstraktion",
+          "variants": [
+            "reale Abstraktion"
+          ]
+        },
+        "zh": "真实抽象"
+      },
+      "before": {
+        "terms": {
+          "en": {
+            "preferred": "real abstraction",
+            "variants": [
+              "Realabstraktion"
+            ]
+          },
+          "zh-Hans": {
+            "preferred": "现实抽象",
+            "policy": "preferred"
+          }
+        },
+        "note": "How to Read Marx's Capital: An abstraction taking place not in thought, but objectively in social practice (exchange). 本词条采用学术文献中常见的“现实抽象”；“真实抽象”亦有实际用例，作为异译保留"
+      },
+      "after": {
+        "terms": {
+          "en": {
+            "preferred": "real abstraction"
+          },
+          "de": {
+            "preferred": "Realabstraktion",
+            "variants": [
+              "reale Abstraktion"
+            ]
+          },
+          "zh-Hans": {
+            "preferred": "真实抽象",
+            "policy": "preferred",
+            "variants": [
+              "现实抽象"
+            ]
+          }
+        },
+        "note": "How to Read Marx's Capital: An abstraction taking place not in thought, but objectively in social practice (exchange). “真实抽象”与“现实抽象”均有直接学术用例，尤其索恩－雷特尔研究；依作者与文献语境选择，通用术语表保留两种译法，不宣称唯一通行译名"
+      },
+      "book_evidence": {
+        "source_book": "Marx im Westen",
+        "forms": [
+          {
+            "file": "chapter_6.1.part5.md",
+            "role": "body",
+            "surface_form": "Realabstraktion"
+          }
+        ]
+      },
+      "historical_original_record_unchanged": true,
+      "original_record": {
+        "id": "real-abstraction",
+        "source": "real abstraction",
+        "target": "现实抽象",
+        "policy": "preferred",
+        "variants": [
+          "Realabstraktion"
+        ],
+        "note": "How to Read Marx's Capital: An abstraction taking place not in thought, but objectively in social practice (exchange). 本词条采用学术文献中常见的“现实抽象”；“真实抽象”亦有实际用例，作为异译保留"
+      }
+    },
+    {
+      "concept_id": "marxist-political-economy-en-zh:traditional-marxism",
+      "active_update": {
+        "de": {
+          "preferred": "traditioneller Marxismus"
+        }
+      },
+      "before": {
+        "terms": {
+          "en": {
+            "preferred": "traditional Marxism"
+          },
+          "zh-Hans": {
+            "preferred": "传统马克思主义",
+            "policy": "preferred"
+          }
+        },
+        "note": "How to Read Marx's Capital: The historical, often dogmatic interpretation of Marx's thought shaped by the Second and Third Internationals. 此处指受第二、第三国际传统影响的特定马克思主义解释传统；作为学派标签时边界会随作者和研究语境变化"
+      },
+      "after": {
+        "terms": {
+          "en": {
+            "preferred": "traditional Marxism"
+          },
+          "de": {
+            "preferred": "traditioneller Marxismus"
+          },
+          "zh-Hans": {
+            "preferred": "传统马克思主义",
+            "policy": "preferred"
+          }
+        },
+        "note": "How to Read Marx's Capital: The historical, often dogmatic interpretation of Marx's thought shaped by the Second and Third Internationals. 此处指受第二、第三国际传统影响的特定马克思主义解释传统；作为学派标签时边界会随作者和研究语境变化"
+      },
+      "book_evidence": {
+        "source_book": "Marx im Westen",
+        "forms": [
+          {
+            "file": "chapter_5.part1.md",
+            "role": "body",
+            "surface_form": "traditionsmarxistischen Paradigma"
+          }
+        ]
+      },
+      "historical_original_record_unchanged": true,
+      "original_record": {
+        "id": "traditional-marxism",
+        "source": "traditional Marxism",
+        "target": "传统马克思主义",
+        "policy": "preferred",
+        "note": "How to Read Marx's Capital: The historical, often dogmatic interpretation of Marx's thought shaped by the Second and Third Internationals. 此处指受第二、第三国际传统影响的特定马克思主义解释传统；作为学派标签时边界会随作者和研究语境变化"
+      }
+    },
+    {
+      "concept_id": "marxist-political-economy-en-zh:class-struggle",
+      "active_update": {
+        "de": {
+          "preferred": "Klassenkampf"
+        }
+      },
+      "before": {
+        "terms": {
+          "en": {
+            "preferred": "class struggle"
+          },
+          "zh-Hans": {
+            "preferred": "阶级斗争",
+            "policy": "preferred"
+          }
+        },
+        "note": "指不同阶级之间围绕社会关系与利益展开的斗争。"
+      },
+      "after": {
+        "terms": {
+          "en": {
+            "preferred": "class struggle"
+          },
+          "de": {
+            "preferred": "Klassenkampf"
+          },
+          "zh-Hans": {
+            "preferred": "阶级斗争",
+            "policy": "preferred"
+          }
+        },
+        "note": "指不同阶级之间围绕社会关系与利益展开的斗争。"
+      },
+      "book_evidence": {
+        "source_book": "Marx im Westen",
+        "forms": [
+          {
+            "file": "chapter_7.1.1.part1.md",
+            "role": "body",
+            "surface_form": "Klassenkampf"
+          }
+        ]
+      },
+      "historical_original_record_unchanged": true,
+      "original_record": {
+        "id": "class-struggle",
+        "source": "class struggle",
+        "target": "阶级斗争",
+        "policy": "preferred",
+        "category": "Marxist Theory",
+        "note": "指不同阶级之间围绕社会关系与利益展开的斗争。"
+      }
+    },
+    {
+      "concept_id": "marxist-political-economy-en-zh:classical-political-economy",
+      "active_update": {
+        "de": {
+          "preferred": "Klassische Nationalökonomie",
+          "variants": [
+            "klassische politische Ökonomie"
+          ]
+        }
+      },
+      "before": {
+        "terms": {
+          "en": {
+            "preferred": "classical political economy"
+          },
+          "zh-Hans": {
+            "preferred": "古典政治经济学",
+            "policy": "preferred"
+          }
+        },
+        "note": "How to Read Marx's Capital: The school of political economy founded by Petty, Smith, and Ricardo that investigated the real relations of capitalist production. “classical economy”曾作历史简称，但在现代语境存在歧义，不作为无条件同义变体"
+      },
+      "after": {
+        "terms": {
+          "en": {
+            "preferred": "classical political economy"
+          },
+          "de": {
+            "preferred": "Klassische Nationalökonomie",
+            "variants": [
+              "klassische politische Ökonomie"
+            ]
+          },
+          "zh-Hans": {
+            "preferred": "古典政治经济学",
+            "policy": "preferred"
+          }
+        },
+        "note": "How to Read Marx's Capital: The school of political economy founded by Petty, Smith, and Ricardo that investigated the real relations of capitalist production. “classical economy”曾作历史简称，但在现代语境存在歧义，不作为无条件同义变体"
+      },
+      "book_evidence": {
+        "source_book": "Die Wissenschaft vom Wert",
+        "forms": [
+          {
+            "file": "chapter_5.1.part1.md",
+            "role": "body",
+            "surface_form": "klassische politische Ökonomie"
+          }
+        ]
+      },
+      "historical_original_record_unchanged": true,
+      "original_record": {
+        "id": "classical-political-economy",
+        "source": "classical political economy",
+        "target": "古典政治经济学",
+        "policy": "preferred",
+        "note": "How to Read Marx's Capital: The school of political economy founded by Petty, Smith, and Ricardo that investigated the real relations of capitalist production. “classical economy”曾作历史简称，但在现代语境存在歧义，不作为无条件同义变体"
+      }
+    }
+  ],
+  "real_abstraction": {
+    "source": "Realabstraktion / real abstraction",
+    "initial_target": "现实抽象（现表首选）",
+    "status": "contextual",
+    "preferred_zh": null,
+    "alternatives": [
+      "真实抽象",
+      "现实抽象",
+      "真实的抽象",
+      "现实的抽象"
+    ],
+    "queries": [
+      "索恩 雷特尔 真实抽象 现实抽象 精神劳动 体力劳动",
+      "Sohn-Rethel Realabstraktion 真实抽象 译",
+      "索恩-雷特尔 真实的抽象 王新生 出版",
+      "\"索恩\" \"真实抽象\"",
+      "\"Realabstraktion\" \"真实抽象\"",
+      "\"索恩-雷特尔\" \"真实的抽象\"",
+      "\"脑力劳动与体力劳动\" \"真实抽象\"",
+      "\"真实的抽象\" \"谢永康\"",
+      "\"真实的抽象\" \"张一兵\" \"周嘉昕\"",
+      "\"真实抽象\" \"谢永康\" 索恩"
+    ],
+    "reason": "真实抽象和现实抽象均有明确的中文学术用例，而且都直接用于索恩－雷特尔。现有证据不足以断言一个是唯一通行译名，也不足以把“真实抽象”降为不规范或仅为个别书稿用法。此前无条件坚持现表首选的建议撤回。",
+    "recommendation": "在已用“真实抽象”的书稿与索恩－雷特尔讨论中可以保持该译法；通用术语表应记录两种译名及参考文献、引用来源和语境，采用 preferred 而非 fixed。本次仅核查，不自动改表。",
+    "limitation": "未逐页核验《脑力劳动与体力劳动》2015年中译本；下列研究论文和会议资料证明实际学术用例，不等同于该译本页码的逐字核验。",
+    "sources": [
+      {
+        "title": "张盾：马克思《资本论》中的辩证法",
+        "url": "https://pftheory.jlu.edu.cn/__local/C/6A/4E/A03E5AB602CCA9C0D124B736F33_A1D3EA37_18FA88.pdf",
+        "publisher_or_author": "吉林大学托管《哲学研究》论文；张盾",
+        "evidence_type": "学术期刊论文全文PDF",
+        "access": "full_text",
+        "short_evidence": "论文直接以真实抽象讨论资本的抽象过程，并明确联系索恩－雷特尔的贡献。",
+        "supports": "真实抽象为有学术根据的译法"
+      },
+      {
+        "title": "数字时代的马克思主义与抽象概念｜第四届“面向奇点的政治学研究”学术研讨会成功举办",
+        "url": "https://polis.ecnu.edu.cn/en/a/1393",
+        "publisher_or_author": "华东师范大学政治与国际关系学院",
+        "evidence_type": "大学学术会议报道",
+        "access": "full_text",
+        "short_evidence": "2024年会议主题论坛名称直接把真实抽象与索恩－雷特尔并列。",
+        "supports": "真实抽象在当代索恩－雷特尔讨论中有明确用例"
+      },
+      {
+        "title": "张一兵：“发现”康德先天观念综合与商品交换关系现实抽象的关联",
+        "url": "https://ptext.nju.edu.cn/info/1143/1910.htm",
+        "publisher_or_author": "南京大学马克思主义社会理论研究中心；张一兵",
+        "evidence_type": "学术研究文章全文",
+        "access": "full_text",
+        "short_evidence": "索恩－雷特尔专题研究明确采用现实抽象，并并列 Realabstraktion。",
+        "supports": "现实抽象也是有直接学术依据的译法"
+      },
+      {
+        "title": "周嘉昕：索恩－雷特尔“现实抽象”的三重维度",
+        "url": "https://ptextold.nju.edu.cn/ce/53/c12201a249427/page.htm",
+        "publisher_or_author": "南京大学马克思主义社会理论研究中心；周嘉昕",
+        "evidence_type": "学术论文转载全文",
+        "access": "full_text",
+        "short_evidence": "题名、关键词和正文把现实抽象直接用于索恩－雷特尔。",
+        "supports": "现实抽象并非只用于与索恩－雷特尔无关的其他语境"
+      },
+      {
+        "title": "《现代哲学》2016年第4期：周嘉昕索恩－雷特尔专题论文",
+        "url": "https://mphilosophy.sysu.edu.cn/sites/default/files/2020-06/%E7%8E%B0%E4%BB%A3%E5%93%B2%E5%AD%A62016%E7%AC%AC4%E6%9C%9F.pdf",
+        "publisher_or_author": "《现代哲学》；周嘉昕",
+        "evidence_type": "期刊PDF检索摘要",
+        "access": "search_snippet",
+        "short_evidence": "检索摘要显示作者说明在特定文章语境选择现实抽象，而非真实的抽象。",
+        "supports": "译名选择涉及作者语境，不能据单篇论文裁定唯一译法；PDF直接打开403"
+      }
+    ]
+  },
+  "applied_status": {
+    "new_concepts_added": 20,
+    "existing_concepts_updated": 7,
+    "total_concepts_after": 306,
+    "all_original_records_preserved": true
+  },
+  "book_evidence_policy": "Book evidence records only title, relative source filename, and a short source-form excerpt; no full passages or absolute local paths.",
+  "review_id": "marxism-de-zh-supplement-2026-11-03",
+  "method_and_evidence": {
+    "book_review_basis": "For each term, this record identifies the source book, relative Markdown file, body role, and actual surface form. TOC and bibliography-only hits are not counted as body evidence. External query strings, URLs, access state, source type, and research summaries are embedded below.",
+    "external_research_basis": "Each candidate was searched individually; exact query strings, URLs, access state, evidence type, and short research summaries are embedded in this tracked JSON.",
+    "candidate_review_counts": {
+      "adopted_new_concepts": 20,
+      "deferred_unverified": 1,
+      "existing_concept_updates": 7
+    }
+  }
+}

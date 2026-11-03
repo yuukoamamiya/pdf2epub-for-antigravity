@@ -320,6 +320,10 @@ entries:
   terms:
     en:
       preferred: classical political economy
+    de:
+      preferred: Klassische Nationalökonomie
+      variants:
+      - klassische politische Ökonomie
     zh-Hans:
       preferred: 古典政治经济学
       policy: preferred
@@ -335,6 +339,10 @@ entries:
       policy: preferred
       note: 'How to Read Marx''s Capital: The school of political economy founded by Petty, Smith, and Ricardo that investigated
         the real relations of capitalist production. “classical economy”曾作历史简称，但在现代语境存在歧义，不作为无条件同义变体'
+    review_history:
+    - date: '2026-11-03'
+      review: glossaries/reviews/marxism-de-zh-supplement-2026-11-03.json
+      active_update: {"de":{"preferred":"Klassische Nationalökonomie","variants":["klassische politische Ökonomie"]}}
 - id: marxist-political-economy-en-zh:coin
   terms:
     en:
@@ -417,6 +425,8 @@ entries:
       preferred: commodity fetishism
       variants:
       - fetishism of commodities
+    de:
+      preferred: Warenfetischismus
     zh-Hans:
       preferred: 商品拜物教
       policy: preferred
@@ -434,6 +444,10 @@ entries:
       - fetishism of commodities
       note: 'How to Read Marx''s Capital: The social phenomenon where social relations between producers take on the mystical
         form of relations between things. commodity fetish 在某些句子中指拜物化的商品对象；需依句法和引文传统处理，不与 commodity fetishism 无条件等同'
+    review_history:
+    - date: '2026-11-03'
+      review: glossaries/reviews/marxism-de-zh-supplement-2026-11-03.json
+      active_update: {"de":{"preferred":"Warenfetischismus"}}
 - id: marxist-political-economy-en-zh:complex-labor
   terms:
     en:
@@ -1417,6 +1431,10 @@ entries:
   terms:
     en:
       preferred: labour theory of value
+    de:
+      preferred: Arbeitswerttheorie
+      variants:
+      - Arbeitswertlehre
     zh-Hans:
       preferred: 劳动价值论
       policy: preferred
@@ -1432,6 +1450,10 @@ entries:
       policy: preferred
       category: value theory
       note: 'Political Economy of Money and Finance: 政治经济学基础理论，主张商品价值由生产该商品所需的社会必要劳动时间决定'
+    review_history:
+    - date: '2026-11-03'
+      review: glossaries/reviews/marxism-de-zh-supplement-2026-11-03.json
+      active_update: {"de":{"preferred":"Arbeitswerttheorie","variants":["Arbeitswertlehre"]}}
 - id: marxist-political-economy-en-zh:lender-of-last-resort
   terms:
     en:
@@ -2030,8 +2052,9 @@ entries:
     en:
       preferred: New Marx Reading
       variants:
-      - Neue Marx-Lektüre
       - new reading of Marx
+    de:
+      preferred: Neue Marx-Lektüre
     zh-Hans:
       preferred: 新马克思阅读
       policy: preferred
@@ -2050,6 +2073,10 @@ entries:
       - new reading of Marx
       note: 'How to Read Marx''s Capital: A German post-1965 strand of Marxist scholarship re-reading Capital through its
         dialectical method and critique of traditional Marxism.'
+    review_history:
+    - date: '2026-11-03'
+      review: glossaries/reviews/marxism-de-zh-supplement-2026-11-03.json
+      active_update: {"de":{"preferred":"Neue Marx-Lektüre"},"move":"Neue Marx-Lektüre"}
 - id: marxist-political-economy-en-zh:nexus-rerum
   terms:
     en:
@@ -2434,13 +2461,17 @@ entries:
   terms:
     en:
       preferred: real abstraction
+    de:
+      preferred: Realabstraktion
       variants:
-      - Realabstraktion
+      - reale Abstraktion
     zh-Hans:
-      preferred: 现实抽象
+      preferred: 真实抽象
       policy: preferred
+      variants:
+      - 现实抽象
   note: 'How to Read Marx''s Capital: An abstraction taking place not in thought, but objectively in social practice (exchange).
-    本词条采用学术文献中常见的“现实抽象”；“真实抽象”亦有实际用例，作为异译保留'
+    “真实抽象”与“现实抽象”均有直接学术用例，尤其索恩－雷特尔研究；依作者与文献语境选择，通用术语表保留两种译法，不宣称唯一通行译名'
   provenance:
     source_table: marxist-political-economy-en-zh.yaml
     source_id: real-abstraction
@@ -2453,6 +2484,10 @@ entries:
       - Realabstraktion
       note: 'How to Read Marx''s Capital: An abstraction taking place not in thought, but objectively in social practice (exchange).
         本词条采用学术文献中常见的“现实抽象”；“真实抽象”亦有实际用例，作为异译保留'
+    review_history:
+    - date: '2026-11-03'
+      review: glossaries/reviews/marxism-de-zh-supplement-2026-11-03.json
+      active_update: {"de":{"preferred":"Realabstraktion","variants":["reale Abstraktion"]},"zh":"真实抽象"}
 - id: marxist-political-economy-en-zh:real-bills-doctrine
   terms:
     en:
@@ -2975,6 +3010,8 @@ entries:
   terms:
     en:
       preferred: traditional Marxism
+    de:
+      preferred: traditioneller Marxismus
     zh-Hans:
       preferred: 传统马克思主义
       policy: preferred
@@ -2990,6 +3027,10 @@ entries:
       policy: preferred
       note: 'How to Read Marx''s Capital: The historical, often dogmatic interpretation of Marx''s thought shaped by the Second
         and Third Internationals. 此处指受第二、第三国际传统影响的特定马克思主义解释传统；作为学派标签时边界会随作者和研究语境变化'
+    review_history:
+    - date: '2026-11-03'
+      review: glossaries/reviews/marxism-de-zh-supplement-2026-11-03.json
+      active_update: {"de":{"preferred":"traditioneller Marxismus"}}
 - id: marxist-political-economy-en-zh:transformation-of-money-into-capital
   terms:
     en:
@@ -3426,6 +3467,8 @@ entries:
   terms:
     en:
       preferred: class struggle
+    de:
+      preferred: Klassenkampf
     zh-Hans:
       preferred: 阶级斗争
       policy: preferred
@@ -3441,6 +3484,10 @@ entries:
       policy: preferred
       category: Marxist Theory
       note: 指不同阶级之间围绕社会关系与利益展开的斗争。
+    review_history:
+    - date: '2026-11-03'
+      review: glossaries/reviews/marxism-de-zh-supplement-2026-11-03.json
+      active_update: {"de":{"preferred":"Klassenkampf"}}
 - id: marxist-political-economy-en-zh:monopoly-capitalism
   terms:
     en:
@@ -5954,3 +6001,776 @@ entries:
       policy: preferred
       category: Krisentheorie
       note: 'Die Wissenschaft vom Wert: Periodisches Überangebot von Waren im Verhältnis zur zahlungsfähigen Nachfrage'
+- id: marxism:state-derivation
+  terms:
+    de:
+      preferred: Staatsableitung
+    zh-Hans:
+      preferred: 国家衍生
+      policy: preferred
+  note: 指从资本主义生产关系/资本逻辑说明国家政治形式的特定理论方案。文献中也见“国家推导”“国家派生”，按具体作者和上下文采用。
+  provenance:
+    source_book:
+      book: Marx im Westen
+      file: chapter_7.1.2.md
+      body_form: Staatsableitungsversuchen
+      role: body
+    web_review:
+      status: change_suggested
+      queries:
+      - Staatsableitung 国家推导 国家派生 马克思主义 中文
+      - ‘国家推导’ 马克思主义 国家形式 Staatsableitung
+      - Staatsableitungsdebatte 国家推导争论 中文 国家派生论
+      - ‘国家派生’ 国家理论 Staatsableitung 德国马克思主义
+      decision: 中文相关研究直接将 Staatsableitung 对译为‘国家衍生’，称该领域为国家衍生论争。‘推导’可用于一般逻辑推演，但这批检索到的学术用法更支持‘衍生’。
+      sources:
+      - title: 李乾坤：资产阶级国家形式的拜物教批判
+        url: https://ptextold.nju.edu.cn/8c/3b/c13164a560187/page.htm
+        access: full_text
+        evidence_type: 学术研究文章
+        short_evidence: 字面 URL 打开南京大学全文；正文直接写“国家衍生（Staatsableitung）论争”，并解释“衍生”兼有“推论”含义。
+      - title: 西德的国家衍生争论：马克思主义国家理论视域下的经济与政治关系
+        url: https://ptext.nju.edu.cn/info/1348/9314.htm
+        access: full_text
+        evidence_type: 学术论文译介
+        short_evidence: 字面 URL 打开全文；文章标题为“西德的国家衍生争论”，译者按直接称其为“国家衍生争论”。
+      - title: 找回国家理论研究的政治经济学路径：对赫希国家理论的批判性探讨
+        url: https://www.aisixiang.com/data/147556.html
+        access: search_snippet
+        evidence_type: 学术研究文章
+        short_evidence: 摘要称德国‘国家衍生’辩论，并附英文 State Derivation Debate。
+- id: marxism:state-derivation-debate
+  terms:
+    de:
+      preferred: Staatsableitungsdebatte
+    zh-Hans:
+      preferred: 国家衍生争论
+      policy: preferred
+  note: 特指20世纪70年代西德马克思主义国家理论讨论。
+  provenance:
+    source_book:
+      book: Marx im Westen
+      file: chapter_7.1.1.part1.md
+      body_form: Staatsableitungsdebatte als zweiter wesentlicher Strang
+      role: body
+    web_review:
+      status: change_suggested
+      queries:
+      - Staatsableitung 国家推导 国家派生 马克思主义 中文
+      - ‘国家推导’ 马克思主义 国家形式 Staatsableitung
+      - Staatsableitungsdebatte 国家推导争论 中文 国家派生论
+      - ‘国家派生’ 国家理论 Staatsableitung 德国马克思主义
+      decision: 中文学术文章标题直接用‘西德的国家衍生争论’，摘要以 Staatsableitungdebatte 标明德语词。相关研究也用‘国家衍生辩论’。
+      sources:
+      - title: 西德的国家衍生争论：马克思主义国家理论视域下的经济与政治关系
+        url: https://ptext.nju.edu.cn/info/1348/9314.htm
+        access: full_text
+        evidence_type: 学术论文译介
+        short_evidence: 字面 URL 打开全文；文章标题为“西德的国家衍生争论”，译者按直接称其为“国家衍生争论”。
+      - title: 李乾坤：资产阶级国家形式的拜物教批判
+        url: https://ptextold.nju.edu.cn/8c/3b/c13164a560187/page.htm
+        access: full_text
+        evidence_type: 学术研究文章
+        short_evidence: 字面 URL 打开南京大学全文；正文直接写“国家衍生（Staatsableitung）论争”，并解释“衍生”兼有“推论”含义。
+- id: marxism:legal-form
+  terms:
+    de:
+      preferred: Rechtsform
+      variants:
+      - Rechtsformen
+    zh-Hans:
+      preferred: 法律形式
+      policy: preferred
+  note: 常用译名为“法律形式”。“法的形式”“法权形式”见于特定作者或强调法权关系的上下文，不能一律替换。
+  provenance:
+    source_book:
+      book: Marx im Westen
+      file: chapter_7.3.part3.md
+      body_form: Bestimmung der bürgerlichen Rechtsform
+      role: body
+    web_review:
+      status: confirmed
+      queries:
+      - ‘Rechtsform’ ‘法律形式’ 马克思主义 法律形式 价值形式
+      - Rechtsform Marxism Chinese translation 法权形式 法律形式
+      - ‘法律形式’ ‘Rechtsform’ 商品形式 帕舒卡尼斯
+      - Rechtsform Rechtsformanalyse Chinese 法律形式 法权形式
+      decision: 价值形式/商品形式相关研究明确使用‘法律形式’。‘法权形式’也可见，但更可能强调权利或法权关系；应依 Recht 在原文中的具体含义选择。
+      sources:
+      - title: 马克思价值形式理论研究的历史演进与当代展望
+        url: https://ptext.nju.edu.cn/info/1348/9207.htm
+        access: full_text
+        evidence_type: 学术论文
+        short_evidence: 字面 URL 打开南京大学全文；正文讨论商品形式、法律形式、国家形式之间的关系，并明确采用“法律形式”“国家形式”。
+      - title: 马克思主义与法律
+        url: https://libm.nwupl.edu.cn/bookInfo_01h0024876.html
+        access: full_text
+        evidence_type: 学术译著目录
+        short_evidence: 中译本目录章节名为‘法律形式’。
+      - title: 法的一般理论与马克思主义
+        url: https://www.cp.com.cn/book/c375abe8-4.html
+        access: search_snippet
+        evidence_type: 学术译著出版社介绍
+        short_evidence: 出版社介绍使用‘法的形式’讨论商品形式的对应关系。
+- id: marxism:state-form
+  terms:
+    de:
+      preferred: Staatsform
+      variants:
+      - Staatsformen
+    zh-Hans:
+      preferred: 国家形式
+      policy: preferred
+  note: 国家衍生理论中的 Staatsform 通常指国家的社会政治形式，不限政府组织形式。“国家形态”可见于不同语境，依原文判断。
+  provenance:
+    source_book:
+      book: Marx im Westen
+      file: chapter_7.1.1.part2.md
+      body_form: der jedesmaligen spezifischen Staatsform
+      role: body
+    web_review:
+      status: confirmed
+      queries:
+      - Staatsform 国家形式 Staatsform 中文 马克思 国家形式
+      - ‘国家形式’ ‘Staatsform’ 马克思主义 国家衍生
+      - 马克思 列宁 ‘新的国家形式’ 政治形式 国家形式 中文
+      - Staatsform government form state form Chinese Marxism
+      decision: 中文价值形式研究明确使用‘国家形式’；经典著作译名研究也记录该译语与政治形式、管理形式等并存。狭义‘政体’可能缩窄概念。
+      sources:
+      - title: 马克思价值形式理论研究的历史演进与当代展望
+        url: https://ptext.nju.edu.cn/info/1348/9207.htm
+        access: full_text
+        evidence_type: 学术论文
+        short_evidence: 字面 URL 打开南京大学全文；正文讨论商品形式、法律形式、国家形式之间的关系，并明确采用“法律形式”“国家形式”。
+      - title: 《列宁全集》中文第二版中一些译名译语是怎样确定的
+        url: https://www.dswxyjy.org.cn/n1/2019/0617/c427184-31157654.html
+        access: full_text
+        evidence_type: 经典著作翻译研究
+        short_evidence: 讨论‘国家形式’与‘政治形式’、‘管理形式’等译语及其差异。
+- id: marxism:form-analysis
+  terms:
+    de:
+      preferred: Formanalyse
+    zh-Hans:
+      preferred: 形式分析
+      policy: preferred
+  note: 不与 Wertformanalyse（价值形式分析）合并；仅按原文具体复合词处理。
+  provenance:
+    source_book:
+      book: Marx im Westen
+      file: chapter_6.2.2.part4.md
+      body_form: Marx' Formanalyse
+      role: body
+    web_review:
+      status: contextual
+      queries:
+      - Formanalyse Marx Chinese translation 形式分析 价值形式分析 德国新马克思阅读
+      - ‘形式分析’ ‘Formanalyse’ 马克思主义
+      - Formanalyse Marx value-form analysis Chinese 形式分析 价值形式分析
+      - ‘形式分析’ 德国新马克思阅读 价值形式 国家形式
+      decision: 中文研究确实用‘形式分析’描述新马克思阅读的视角；具体的 Wertformanalyse 则惯用‘价值形式分析’，不能混为一词。
+      sources:
+      - title: 价值形式、国家形式与资本主义社会结构——基于德国新马克思阅读的探讨
+        url: https://iis.sass.org.cn/2020/0707/c3862a85685/page.htm
+        access: full_text
+        evidence_type: 学术研究文章
+        short_evidence: 字面 URL 打开上海社会科学院页面全文/摘要；摘要用“形式分析的独特视角”，并另用“价值形式分析”指具体方法。
+      - title: 马克思价值形式理论研究的历史演进与当代展望
+        url: https://ptext.nju.edu.cn/info/1348/9207.htm
+        access: full_text
+        evidence_type: 学术论文
+        short_evidence: 正文持续使用‘价值形式分析’作为特定方法名称。
+      - title: 索恩-雷特尔：商品形式与思维形式
+        url: https://ptextold.nju.edu.cn/7c/e5/c13395a556261/page.htm
+        access: full_text
+        evidence_type: 学术译著节选
+        short_evidence: 全文直接出现“交换抽象的形式分析(Formanalyse)”；页内书目信息列出2015年中译本及译者。
+- id: marxism:form-determination
+  terms:
+    de:
+      preferred: Formbestimmung
+      variants:
+      - Formbestimmungen
+    zh-Hans:
+      preferred: 形式规定
+      policy: preferred
+  note: 与 Formbestimmtheit（形式规定性）区分。
+  provenance:
+    source_book:
+      book: Marx im Westen
+      file: chapter_5.part1.md
+      body_form: kapitalistischen Formbestimmungen
+      role: body
+    web_review:
+      status: contextual
+      queries:
+      - Formbestimmung 形式规定 形式规定性 马克思主义
+      - ‘形式规定’ ‘Formbestimmung’ 商品形式 马克思
+      - Formbestimmung Marx form determination Chinese 形式规定性
+      - ‘经济范畴’ ‘形式规定’ 马克思 规定性 Formbestimmung
+      decision: 中文马克思主义哲学论文明确称经济范畴为‘形式规定’；另一译介对相近但形态不同的 Formbestimmtheit 用‘形式规定性’。须保留词形区别。
+      sources:
+      - title: 经济范畴规定性的哲学辨析
+        url: https://jxyyj.ruc.edu.cn/CN/abstract/abstract13989.shtml
+        access: full_text
+        evidence_type: 学术期刊论文摘要
+        short_evidence: 字面 URL 核验全文页眉与引文信息：刊物为《教学与研究》2006年第7期；摘要明确称马克思的经济范畴是一种“形式规定”。
+      - title: 伊萨克·鲁宾：生产力与生产关系
+        url: https://ptext.nju.edu.cn/info/1165/93083.htm
+        access: search_snippet
+        evidence_type: 学术著作译介
+        short_evidence: 摘要将 Formbestimmtheit 标为‘形式规定性’。
+- id: marxism:premonetary-theory-of-value
+  terms:
+    de:
+      preferred: prämonetäre Werttheorie
+    zh-Hans:
+      preferred: 前货币价值论
+      policy: preferred
+  note: 指把价值与货币作理论分离的解释，不能简单解释为历史上货币产生以前的价值理论。
+  provenance:
+    source_book:
+      book: Marx im Westen
+      file: chapter_6.2.1.part1.md
+      body_form: eine prämonetäre Werttheorie
+      role: body
+    web_review:
+      status: contextual
+      queries:
+      - prämonetäre Werttheorie 前货币价值论 前货币价值理论
+      - ‘前货币价值理论’ 马克思 价值形式 货币理论 Backhaus
+      - ‘货币前价值理论’ Werttheorie 马克思
+      - pre-monetary theory of value Marx Chinese 前货币 价值理论
+      decision: 已打开的中文研究明确采用“前货币的价值论”。“前货币价值论”是同一措辞的紧缩形式；仅凭一个用例多一个“的”字，不足以要求改译为“前货币价值理论”。
+      sources:
+      - title: 金融衍生品的社会哲学——对马克思价值形式分析和货币理论当代意义的探讨
+        url: https://ptextold.nju.edu.cn/33/d7/c13164a603095/page.htm
+        access: full_text
+        evidence_type: 学术论文
+        short_evidence: 字面 URL 打开全文；正文段落明确将此前及正统马克思主义价值理论称作“前货币的价值论”，并与“货币价值论（monetäre Werttheorie）”对举。
+      - title: Monetäre Werttheorie. Geld und Krise bei Marx
+        url: https://www.prokla.de/index.php/PROKLA/en/article/view/741
+        access: search_snippet
+        evidence_type: 德文学术期刊论文条目
+        short_evidence: 条目呈现与之相关的 monetäre Werttheorie（货币价值理论）议题。
+      - title: Prämonetäre Werttheorie
+        url: https://de.wikipedia.org/wiki/Pr%C3%A4monet%C3%A4re_Werttheorie
+        access: search_snippet
+        evidence_type: 百科概念说明
+        short_evidence: 将标签用于把货币视为外在且不本质的资本主义解释。
+- id: marxism:class-consciousness
+  terms:
+    de:
+      preferred: Klassenbewusstsein
+    zh-Hans:
+      preferred: 阶级意识
+      policy: preferred
+  note: 保留阶级位置或阶级行动与阶级意识的区分。“阶级自觉”限于强调觉醒或自觉形成过程的语境。
+  provenance:
+    source_book:
+      book: Marx im Westen
+      file: chapter_8.1.md
+      body_form: das vom Marxismus unterstellte Klassenbewusstsein
+      role: body
+    web_review:
+      status: confirmed
+      queries:
+      - Klassenbewusstsein 阶级意识 马克思主义 中文学术
+      - '"阶级意识" "class consciousness" 中文 期刊 马克思主义'
+      decision: 中文学术题名与中英摘要直接把“阶级意识”对应为 class consciousness，并用于卢卡奇和马克思主义语境。
+      sources:
+      - title: 马克思主义阶级意识理论的发展及其现实意义
+        url: https://ir.pku.edu.cn/handle/20.500.11897/636427
+        access: search_snippet
+        evidence_type: academic repository record / abstract
+        short_evidence: Title and abstract use 阶级意识 for the Marxist concept and connect it to movement from class-in-itself
+          to class-for-itself.
+      - title: 卢卡奇阶级意识理论的内在逻辑及其当代意义论析
+        url: https://assf.cbpt.cnki.net/portal/journal/portal/client/paper/02320a0d75b9081c46be1802fed8782c
+        access: search_snippet
+        evidence_type: academic journal article / bilingual abstract
+        short_evidence: Chinese title uses 阶级意识; English keywords explicitly give Class consciousness.
+      - title: 中国与韩国社会阶级意识的比较研究
+        url: https://shxyj.ajcass.com/Admin/UploadFile/20130926008/2015-08-25/Issue/44s2bomm.pdf
+        access: search_snippet
+        evidence_type: academic journal article
+        short_evidence: The article explicitly glosses 阶级意识 as class consciousness.
+- id: marxism:class-antagonism
+  terms:
+    de:
+      preferred: Klassenantagonismus
+    zh-Hans:
+      preferred: 阶级对抗
+      policy: preferred
+  note: “阶级对立”用于已有文献及引文表达，不作无条件替换。
+  provenance:
+    source_book:
+      book: Marx im Westen
+      file: chapter_7.1.3.md
+      body_form: revolutionären Gehalts des Klassenantagonismus
+      role: body
+    web_review:
+      status: confirmed
+      queries:
+      - Klassenantagonismus 阶级对抗 阶级对立 中文 马克思
+      - '"阶级对立" "class antagonism" 中文 翻译 马克思'
+      - '"阶级对抗" "class antagonism" 马克思 中文'
+      decision: “阶级对抗”有马克思主义学术语境及《共产党宣言》译文中的直接对应；“阶级对立”也被专业术语表直接列为 class antagonism。二者均可成立，前者更显化 antagonism 的对抗性，不能在全书中机械统一而忽略语义力度。
+      sources:
+      - title: 贫困如何产生：马克思与黑格尔的认知差异——从《法哲学讲义》到《哲学的贫困》
+        url: https://jxyyj.ruc.edu.cn/CN/Y2021/V55/I11/66
+        access: search_snippet
+        evidence_type: academic journal record / bilingual abstract
+        short_evidence: Chinese 阶级对抗 is paired with English class antagonism in the abstract.
+      - title: 03.0093 阶级对立 / class antagonism
+        url: https://www.cnterm.cn/news/tzgg/202503/P020250909521438793386.pdf
+        access: search_snippet
+        evidence_type: terminology list / PDF
+        short_evidence: Lists 阶级对立 as the Chinese equivalent of class antagonism.
+      - title: 《共产党宣言》中文首译本用了什么底本
+        url: https://www.chinawriter.com.cn/n1/2020/0710/c419387-31778621.html
+        access: search_snippet
+        evidence_type: scholarly-historical article
+        short_evidence: Discusses a Chinese rendering of the English class antagonism passage as 阶级对抗.
+- id: marxism:ideology-critique
+  terms:
+    de:
+      preferred: Ideologiekritik
+    zh-Hans:
+      preferred: 意识形态批判
+      policy: preferred
+  note: 指意识形态批判这一理论操作，区别于对意识形态作描述性研究。
+  provenance:
+    source_book:
+      book: Marx im Westen
+      file: chapter_6.2.3.md
+      body_form: Forschung als Ideologiekritik
+      role: body
+    web_review:
+      status: confirmed
+      queries:
+      - Ideologiekritik 意识形态批判 中文 学术 马克思
+      - 意识形态批判 Ideologiekritik 马克思 期刊 中文
+      decision: 中文高校知识库和学术期刊直接使用“意识形态批判”作为马克思理论领域的术语。不可泛化成 Ideologiekritik 的任意 ideology critique 或“意识形态研究”；此处概念保留批判性。
+      sources:
+      - title: 《〈黑格尔法哲学批判〉导言》中意识形态批判的内在逻辑
+        url: https://ir.pku.edu.cn/handle/20.500.11897/644930
+        access: search_snippet
+        evidence_type: academic repository record / abstract
+        short_evidence: Title and abstract explicitly describe Marx's work as 意识形态批判成果.
+      - title: 马克思意识形态批判的向度和问题域
+        url: https://cnki.istiz.org.cn/kcms/detail/detail.aspx?dbcode=CJFD&dbname=CJFD2004&filename=HNSK200401002
+        access: search_snippet
+        evidence_type: academic journal abstract
+        short_evidence: Uses 马克思的意识形态批判理论 as the central term and concept.
+      - title: 马克思与意识形态批判的三重维度
+        url: https://www.xuebao.snnu.edu.cn/info/1072/8641.htm
+        access: search_snippet
+        evidence_type: university journal article
+        short_evidence: Uses 意识形态批判 for Marx's critique across philosophical, sociological, and literary dimensions.
+- id: marxism:structural-marxism
+  terms:
+    de:
+      preferred: strukturaler Marxismus
+      variants:
+      - strukturalen Marxismus
+    zh-Hans:
+      preferred: 结构主义马克思主义
+      policy: preferred
+      variants:
+      - 结构主义的马克思主义
+      - 结构马克思主义
+  note: 指阿尔都塞及相关论争中的理论思潮；“结构马克思主义”是部分文献用法。与马克思本人的结构分析区分。
+  provenance:
+    source_book:
+      book: Marx im Westen
+      file: chapter_6.1.part2.md
+      body_form: Einfluss des französischen strukturalen Marxismus
+      role: body
+    web_review:
+      status: confirmed
+      queries:
+      - strukturaler Marxismus 结构主义马克思主义 结构马克思主义 中文 学术
+      - 结构马克思主义 结构主义的马克思主义 Althusser 中文 学术 期刊
+      decision: 中文学术文献直接使用“结构主义的马克思主义”作为流派名，也出现“结构马克思主义”。所给“结构主义马克思主义”可读且可用；需依上下文明确指阿尔都塞相关流派，而非泛指结构主义方法与马克思主义的任意结合。
+      sources:
+      - title: 结构主义与马克思主义
+        url: https://jxyyj.ruc.edu.cn/CN/abstract/abstract10816.shtml
+        access: blocked
+        evidence_type: academic journal record / abstract snippet; open attempt hit redirect loop
+        short_evidence: Search excerpt calls the current a “结构主义的马克思主义” and contrasts it with existentialist Marxism; page
+          open failed due redirect loop.
+      - title: 结构主义的马克思主义
+        url: https://ptext.nju.edu.cn/info/1224/4445.htm
+        access: full_text
+        evidence_type: university-hosted specialist article
+        short_evidence: Uses 结构主义的马克思主义 for the theory associated with the second generation of the New Left and discusses
+          its structuralist turn.
+      - title: 超越“二元困境”——马克思的社会结构分析及其方法论特征
+        url: https://xbzs.ecnu.edu.cn/CN/html/201304014.htm
+        access: full_text
+        evidence_type: academic journal article
+        short_evidence: Distinguishes Althusser-represented 结构马克思主义理论 from Marx's own social-structure analysis.
+- id: marxism:analytical-marxism
+  terms:
+    de:
+      preferred: analytischer Marxismus
+      variants:
+      - analytischen Marxismus
+      - analytische Marxismus
+    zh-Hans:
+      preferred: 分析马克思主义
+      policy: preferred
+      variants:
+      - 分析的马克思主义
+  note: 指20世纪后期英美马克思主义思潮，不指一般分析方法。
+  provenance:
+    source_book:
+      book: Marx im Westen
+      file: chapter_6.2.2.part3.md
+      body_form: im Stile des analytischen Marxismus
+      additional_surface_forms:
+      - file: chapter_6.2.2.part2.md
+        role: body
+        surface_form: analytische Marxismus
+      - file: chapter_6.2.2.part3.md
+        role: body
+        surface_form: analytischen Marxismus
+      role: body
+    web_review:
+      status: confirmed
+      queries:
+      - analytischer Marxismus 分析马克思主义 分析的马克思主义 中文 学术
+      - 分析的马克思主义 分析马克思主义 analytical Marxism 中国 学术
+      decision: 'Both forms are attested in Chinese specialist literature and explicitly treated as equivalent: a Social Sciences
+        Academic Press chapter writes “分析马克思主义，亦即‘分析的马克思主义’（analytical Marxism）”. An academic journal article independently
+        uses 分析的马克思主义 in its Chinese title/abstract paired with Analytical Marxism. The evidence confirms both, but does not
+        establish one as more prevalent; retain the current term unless the surrounding text or house style favors the alternative.'
+      sources:
+      - title: “正义”的思想谱系及其当代构建——从马克思到分析的马克思主义
+        url: https://xsyk.cbpt.cnki.net/portal/journal/portal/client/paper/08a9419d5ccc4cbff5e6765691efa929
+        access: full_text
+        evidence_type: academic journal article / bilingual abstract
+        short_evidence: Literal-URL open returned the matching 学术月刊 record, article title, keyword, and English abstract pairing
+          分析的马克思主义 with Analytical Marxism.
+      - title: 分析马克思主义重思历史唯物主义
+        url: https://marxism.ssap.com.cn/skwx_marxism/LiteratureDetail.aspx?ID=5916
+        access: full_text
+        evidence_type: scholarly book chapter / hosted excerpt
+        short_evidence: Literal-URL open returned the matching Social Sciences Academic Press entry and its explicit equivalence
+          “分析马克思主义，亦即‘分析的马克思主义’（analytical Marxism）”.
+      - title: 马克思经济哲学语境中的“分析的马克思主义”
+        url: https://www.cssn.cn/zx/mkszyzx/202210/t20221027_5555168.shtml
+        access: full_text
+        evidence_type: scholarly journal article
+        short_evidence: Literal-URL open returned the matching CSSN article and shows 分析的马克思主义 in the title, abstract, and
+          keywords.
+- id: marxism:neoclassical-economics
+  terms:
+    de:
+      preferred: Neoklassik
+    zh-Hans:
+      preferred: 新古典经济学
+      policy: preferred
+      variants:
+      - 新古典主义经济学
+  note: 指经济学学派；不与新古典艺术、建筑、音乐或 Neokeynesianismus 混同。
+  provenance:
+    source_book:
+      book: Die Wissenschaft vom Wert
+      file: chapter_5.1.part1.md
+      role: body
+      surface_form: Neoklassik
+    web_review:
+      status: contextual
+      queries:
+      - Neoklassik 新古典经济学 中文 德语 Neoklassik 学术
+      - Neoklassik "新古典经济学" 中文 术语
+      - 新古典经济学 新古典主义经济学 同义 经济学 期刊
+      - '"新古典经济学" "Neoklassik"'
+      - site:wirtschaftslexikon.gabler.de Neoklassik Neoklassizismus Wirtschaft
+      - 新古典经济学 经济学 流派 中国 社会科学
+      decision: 中文经济学专业文献明确以“新古典经济学”命名这一理论流派，并给出其与凯恩斯主义、新古典综合学派等相区别的定义。德语来源中 Neoklassik/ neoklassisch 指向经济学中的新古典取向，但本次没有找到足以逐字双语对照的权威词典条目，因此此结论是基于德语经济学用法和中文专业名称的语境推断。
+      sources:
+      - title: 本文所称“新古典经济学”指……（西安财经大学学报文章）
+        url: https://sxgy.cbpt.cnki.net/portal/journal/portal/client/paper/9a2b970c97be99df91bd6a3072195a8e
+        access: search_snippet
+        evidence_type: academic journal article
+        short_evidence: Defines 新古典经济学 as a distinct economic school and explicitly excludes several neighboring schools.
+      - title: 经济学基本问题与当代经济学思想谱系——三大经济学范式的思想本质与相互关系
+        url: https://qks.shufe.edu.cn/J/CJYJ/Article/Details/A160824001012/CN
+        access: search_snippet
+        evidence_type: academic journal article
+        short_evidence: Uses 新古典主义经济学 for the school/paradigm arising from marginalist equilibrium analysis.
+      - title: 马克思经济哲学语境中的“分析的马克思主义”
+        url: https://www.cssn.cn/zx/mkszyzx/202210/t20221027_5555168.shtml
+        access: full_text
+        evidence_type: scholarly journal article
+        short_evidence: Chinese academic text refers to 新古典主义经济学 methods and their use by analytical Marxists.
+      - title: Revision von Solow
+        url: https://wirtschaftslexikon.gabler.de/definition/solow-46772/version-173096
+        access: full_text
+        evidence_type: expert economics dictionary entry
+        short_evidence: Identifies Solow as founder of neoclassical growth theory (neoklassische Wachstumstheorie).
+- id: marxism:marginalism
+  terms:
+    de:
+      preferred: Marginalismus
+    zh-Hans:
+      preferred: 边际主义
+      policy: preferred
+  note: 指边际革命及其理论传统；边际分析法不是自动同义词。
+  provenance:
+    source_book:
+      book: Die Wissenschaft vom Wert
+      file: chapter_4.1.md
+      role: body
+      surface_form: Marginalismus
+    web_review:
+      status: confirmed
+      queries:
+      - Marginalismus 边际主义 德语 中国 经济学 学术
+      - '"Marginalismus" "边际主义"'
+      - Marginalismus 边际主义 deutsch
+      decision: 商务印书馆经济思想史著作以‘边际主义’命名该理论传统，另一本边际革命研究也采用此词。证据确认中文术语成熟，但未找到将德语与中文同列的权威双语词条；不以搜索量推断常见程度。
+      sources:
+      - title: 经济学中的边际主义：历史的批判的研究
+        url: https://www.cp.com.cn/book/32cb4249-9.html
+        access: full_text
+        evidence_type: 出版社书目
+        short_evidence: 书名直接采用‘边际主义’
+      - title: 经济学的边际革命：说明和评价
+        url: https://www.cp.com.cn/book/777ab05c-2.html
+        access: search_snippet
+        evidence_type: 出版社书目
+        short_evidence: 简介讨论‘边际主义’起源
+- id: marxism:young-hegelians
+  terms:
+    de:
+      preferred: Junghegelianer
+    zh-Hans:
+      preferred: 青年黑格尔派
+      policy: preferred
+  note: 指青年黑格尔派人群/运动，不指年轻时期的黑格尔。
+  provenance:
+    source_book:
+      book: Die Wissenschaft vom Wert
+      file: chapter_6.1.part1.md
+      role: body
+      surface_form: Junghegelianer
+    web_review:
+      status: confirmed
+      queries:
+      - Junghegelianer 青年黑格尔派 德语 中国 哲学 学术
+      - '"Junghegelianer" "青年黑格尔派"'
+      - Junghegelianer "青年黑格尔主义者" 青年黑格尔派 中文 学术
+      decision: 中国社会科学网和中文哲学期刊将其作为历史思想运动名称；德语哲学词典将 Junghegelianer 指为较年轻一代黑格尔追随者及相关运动。
+      sources:
+      - title: 青年黑格尔派的解体：四个叙述框架
+        url: https://cssn.cn/zx/wgzx/202210/t20221027_5555391.shtml
+        access: full_text
+        evidence_type: 思想史学术文章
+        short_evidence: 题名及正文称‘青年黑格尔派’
+      - title: Junghegelianismus
+        url: https://www.schwabeonline.ch/schwabe-xaveropp/elibrary/start.xav?start=%2F%2F%2A%5B%40attr_id%3D%27verw.junghegelianismus%27+and+%40outline_id%3D%27hwph_verw.junghegelianismus%27%5D
+        access: full_text
+        evidence_type: 哲学史词典
+        short_evidence: 定义提及年轻追随者及其运动
+      - title: Junghegelianer
+        url: https://www.spektrum.de/lexikon/philosophie/junghegelianer/1022
+        access: search_snippet
+        evidence_type: 哲学词典
+        short_evidence: 区分 Althegelianer 与 Junghegelianer
+- id: marxism:vulgar-economics
+  terms:
+    de:
+      preferred: Vulgärökonomie
+    zh-Hans:
+      preferred: 庸俗经济学
+      policy: preferred
+  note: 保留批判语气；完整形式“庸俗政治经济学”依上下文使用。
+  provenance:
+    source_book:
+      book: Die Wissenschaft vom Wert
+      file: chapter_4.1.md
+      role: body
+      surface_form: Vulgärökonomie
+    web_review:
+      status: confirmed
+      queries:
+      - Vulgärökonomie 庸俗经济学 德语 中文 马克思 学术
+      - '"Vulgärökonomie" "庸俗经济学"'
+      - Vulgärökonomie "庸俗经济学" 中文翻译 马克思
+      decision: 马克思主义辞典和中文马克思恩格斯译本使用‘庸俗经济学/庸俗政治经济学’；德国原文《剩余价值理论》使用 Vulgärökonomie。此词在马克思政治经济学批判中是评价性分类。
+      sources:
+      - title: 马克思主义思想辞典：V
+        url: https://www.marxists.org/chinese/dictionary-of-marxism/marxist.org-chinese-dictionary-of-marxism-V.htm
+        access: full_text
+        evidence_type: 学术辞典
+        short_evidence: 词条用‘庸俗经济学’释义
+      - title: 收入及其源泉。庸俗政治经济学
+        url: https://www.marxists.org/chinese/marx-engels/26-3/040.htm
+        access: search_snippet
+        evidence_type: 经典译本
+        short_evidence: 章节标题为‘庸俗政治经济学’
+      - title: Theorien über den Mehrwert
+        url: https://www.marxists.org/deutsch/archiv/marx-engels/1863/tumw/standard/index.htm
+        access: search_snippet
+        evidence_type: 德文经典原文
+        short_evidence: 章节标题含 Vulgärökonomie
+- id: marxism:frankfurt-school
+  terms:
+    de:
+      preferred: Frankfurter Schule
+    zh-Hans:
+      preferred: 法兰克福学派
+      policy: preferred
+  note: 指学术群体/思想传统，不与批判理论完全等同。
+  provenance:
+    source_book:
+      book: Die Wissenschaft vom Wert
+      file: chapter_4.1.md
+      role: body
+      surface_form: Frankfurter Schule
+    web_review:
+      status: confirmed
+      queries:
+      - '"Frankfurter Schule" "法兰克福学派" 德语 中文'
+      - Frankfurter Schule 法兰克福学派 中文 出版 社会学
+      - Frankfurter Schule "法兰克福学派" 学术期刊
+      decision: 中国社会科学网直接并列 Frankfurter Schule 与‘法兰克福学派’；高校期刊和德国歌德学院出版目录也采用该中文名称。
+      sources:
+      - title: 法兰克福学派的历史演变及其在中国的发展
+        url: https://www.cssn.cn/zx/wgzx/202606/t20260617_6054432.shtml
+        access: full_text
+        evidence_type: 专题学术文章
+        short_evidence: 直接并列法兰克福学派（Frankfurter Schule）
+      - title: 法兰克福学派的中国形式与问题
+        url: https://clc.shisu.edu.cn/CN/Y2021/V0/I4/18
+        access: search_snippet
+        evidence_type: 学术期刊文章
+        short_evidence: 题名使用‘法兰克福学派’
+      - title: Übersetzungsförderung 2009–2019
+        url: https://www.goethe.de/resources/files/pdf333/veroeffentlichungen-2009-bis-2019201920192019.pdf
+        access: search_snippet
+        evidence_type: 出版目录
+        short_evidence: Geschichte der Frankfurter Schule 对应《法兰克福学派史》
+- id: marxism:neo-ricardianism
+  terms:
+    de:
+      preferred: Neoricardianismus
+    zh-Hans:
+      preferred: 新李嘉图主义
+      policy: preferred
+  note: 学说用“新李嘉图主义”；指人群/学派时可用“新李嘉图学派”，不与新剑桥学派或斯拉法经济学自动等同。
+  provenance:
+    source_book:
+      book: Die Wissenschaft vom Wert
+      file: chapter_7.3.2.3.md
+      role: body
+      surface_form: Neoricardianismus
+    web_review:
+      status: confirmed
+      queries:
+      - Neoricardianismus 新李嘉图主义 新李嘉图学派 德语 中文 学术
+      - '"Neoricardianismus" "新李嘉图主义"'
+      - '"新李嘉图主义" 斯拉法 学术期刊'
+      - '"新李嘉图学派" "新李嘉图主义" 斯拉法 中文'
+      decision: 厦门大学经济学院期刊文章以‘新李嘉图主义’指鲍特基维茨—斯拉法传统；中国人民大学学报也使用该译名。作为 doctrine/理论传统的译名，初拟项成立。
+      sources:
+      - title: 回归马克思——价值转形理论的新发展
+        url: https://ces.xmu.edu.cn/CN/10.%2019365/%20j.%20issn1000-4181.%202019.%2002.%2001
+        access: full_text
+        evidence_type: 经济学期刊论文摘要
+        short_evidence: 摘要以新李嘉图主义指鲍特基维茨—斯拉法传统
+      - title: 中国人民大学学报相关期刊页面
+        url: https://xuebao.ruc.edu.cn/CN/volumn/volumn_1173.shtml
+        access: search_snippet
+        evidence_type: 期刊页面
+        short_evidence: 以‘新李嘉图主义’称斯拉法—马克思模式
+      - title: 马克思主义传统的危机理论
+        url: https://www.marxists.org/chinese/reference-books/simon-clarke-1994/02.htm
+        access: search_snippet
+        evidence_type: 政治经济学著作译本
+        short_evidence: neo-Ricardian 译作‘新李嘉图主义’
+- id: marxism:physiocracy
+  terms:
+    de:
+      preferred: Physiokratie
+    zh-Hans:
+      preferred: 重农主义
+      policy: preferred
+  note: “重农学派”仅在原文明确指学派或群体时使用，不设为无条件别名。
+  provenance:
+    source_book:
+      book: Die Wissenschaft vom Wert
+      file: chapter_5.1.part1.md
+      role: body
+      surface_form: Physiokratie
+    web_review:
+      status: contextual
+      queries:
+      - Physiokratie 重农学派 重农主义 德语 中文 学术
+      - '"Physiokratie" "重农学派"'
+      - Physiokratie Definition Physiokraten wirtschaftslehre Duden
+      - Physiokratie 重农学派 重农主义 Physiocracy 中国经济思想史
+      decision: 德国联邦政治教育中心的经济词条把 Physiokratie 用于18世纪理论体系；ZBW经济学主题词表将 Physiokratie 与 Physiokraten、Physiocratic theory 建立关联。中文学术文献区分‘重农主义’和‘重农学派’。故原拟译仅在语义转喻为学派时合适；独立理论名建议用重农主义。
+      sources:
+      - title: Physiokratie
+        url: https://www.bpb.de/kurz-knapp/lexika/lexikon-der-wirtschaft/20287/physiokratie/
+        access: full_text
+        evidence_type: 德语经济词典
+        short_evidence: 定义谈理论及其代表者
+      - title: Physiokratie (STW Thesaurus for Economics)
+        url: https://zbw.eu/stw/version/latest/descriptor/16741-6/about
+        access: search_snippet
+        evidence_type: 经济学主题词表
+        short_evidence: 关联 Physiokraten 和 Physiocratic theory
+      - title: 近代中国知识界对法国重农学派及其学说的传播与认识
+        url: https://cnki.istiz.org.cn/kcms/detail/detail.aspx?dbcode=CMFD&dbname=CMFD2026&filename=1025397155.nh
+        access: search_snippet
+        evidence_type: 学位论文中英文摘要
+        short_evidence: 分别使用‘重农学派’和‘重农主义学说’
+      - title: 中国古代的重农思想和法国的重农主义
+        url: https://ccj.pku.edu.cn/article/info?aid=301292261
+        access: search_snippet
+        evidence_type: 学术论文
+        short_evidence: 题名用‘法国的重农主义’
+- id: marxism:ricardian-socialists
+  terms:
+    de:
+      preferred: Ricardianische Sozialisten
+    zh-Hans:
+      preferred: 李嘉图派社会主义者
+      policy: preferred
+  note: 指历史人物群体，不等于学说“李嘉图社会主义”或更广泛的李嘉图学派。
+  provenance:
+    source_book:
+      book: Die Wissenschaft vom Wert
+      file: chapter_5.1.part3.md
+      role: body
+      surface_form: ricardianische Sozialisten
+    web_review:
+      status: confirmed
+      queries:
+      - '"Ricardianische Sozialisten" "李嘉图派社会主义者"'
+      - '"Ricardian socialists" "李嘉图社会主义" 中文'
+      - '"Ricardian socialism" "李嘉图派社会主义"'
+      - 李嘉图社会主义者 李嘉图派社会主义者 李嘉图学派 区别
+      decision: 北京大学政府管理学院专题讲座直接以‘李嘉图派社会主义者’命名马克思之前的英国早期社会主义者并列代表人物；清华大学学术论坛也将 Ricardian Socialists 作为这群历史人物的研究标签。原拟译保留复数人群意义。
+      sources:
+      - title: 李嘉图派社会主义者：关于马克思之前的英国早期社会主义
+        url: https://www.sg.pku.edu.cn/wzsy/syxzhd/1201900zfglxyx1316744.htm
+        access: search_snippet
+        evidence_type: 大学学术活动说明
+        short_evidence: 列出霍吉斯金、汤普森、格雷、布雷等代表人物
+      - title: 第八届中日哲学论坛会议纪要
+        url: https://www.phil.tsinghua.edu.cn/info/1037/2232.htm
+        access: full_text
+        evidence_type: 大学学术论坛纪要
+        short_evidence: 报告题名含 Ricardian Socialists 并谈早期英国社会主义者
+      - title: 李嘉图派社会主义的‘政治经济学批判’路径
+        url: https://www.qikan.com.cn/article/93d620240303.html
+        access: search_snippet
+        evidence_type: 期刊论文摘要
+        short_evidence: 摘要区分‘李嘉图派社会主义’和‘李嘉图派社会主义者’
