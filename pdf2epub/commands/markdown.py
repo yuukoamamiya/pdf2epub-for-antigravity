@@ -231,12 +231,11 @@ def _prepare_pdf_markdown_task(args, task: str):
             glossary_bundle.context_files if glossary_bundle else {},
             None if skip_entities else entity_path,
             source_language=source_language,
+            target_language=target_language,
         )
-        prompt_context_files = {
-            name: path
-            for name, path in context_files.items()
-            if str(name).startswith("reference_glossary_")
-        }
+        # Native glossary snapshots are audit inputs; workers receive only
+        # per-unit projections through unit_context_files.
+        prompt_context_files = {}
     try:
         controlled_files = {}
         if task == "translate":

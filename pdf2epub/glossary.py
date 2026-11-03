@@ -116,26 +116,8 @@ def _matchable_source_text(text: str) -> str:
     return value
 
 
-def _language_alias_forms(
-    value: Any,
-    source_language: Optional[str],
-) -> List[str]:
-    """Return explicitly declared cross-language aliases for one language."""
-    if not source_language or not isinstance(value, Mapping):
-        return []
-    target_key = _language_key(source_language)
-    forms: List[str] = []
-    for language, aliases in value.items():
-        if _language_key(language) == target_key:
-            forms.extend(_optional_match_forms(aliases))
-    return forms
-
-
 def _term_forms(
     entry: Mapping[str, Any],
-    *,
-    source_language: Optional[str] = None,
-    include_cross_language: bool = False,
 ) -> List[str]:
     """Return all source forms that can identify one context entry."""
     original = entry.get("source") or entry.get("original") or ""
@@ -144,12 +126,6 @@ def _term_forms(
         *_optional_match_forms(entry.get("variants")),
         *_optional_match_forms(entry.get("aliases")),
     ]
-    if include_cross_language:
-        forms.extend(
-            _language_alias_forms(
-                entry.get("aliases_by_language"), source_language
-            )
-        )
     result = []
     seen = set()
     for form in forms:
@@ -204,7 +180,9 @@ def _as_string_list(value: Any, field: str, entry_index: int) -> List[str]:
         raise GlossaryError(f"entries[{entry_index}].{field} must be a string or array")
     result = []
     for item in values:
-        item = _clean(item)
+        if not isinstance(item, str):
+            raise GlossaryError(f"entries[{entry_index}].{field} items must be strings")
+        item = item.strip()
         if item and item not in result:
             result.append(item)
     return result
@@ -214,121 +192,143 @@ def normalize_glossary(data: Any, source_path: Optional[Path] = None) -> Dict[st
     """Validate and normalize a user glossary into the versioned schema."""
     if not isinstance(data, dict):
         raise GlossaryError("glossary must contain an object")
-    if data.get("schema_version", 1) != 1:
-        raise GlossaryError("glossary schema_version must be 1")
+    version = data.get("schema_version")
+    if version == 2:
+        return _normalize_v2_glossary(data, source_path)
+    raise GlossaryError("glossary schema_version must be 2; legacy flat glossaries are unsupported")
 
+def _canonical_language(value: Any) -> str:
+    if not isinstance(value, str):
+        raise GlossaryError("language keys must be strings")
+    display_key = _language_key(value)
+    if display_key in {"english", "german", "french", "japanese", "chinese"}:
+        return {
+            "english": "en",
+            "german": "de",
+            "french": "fr",
+            "japanese": "ja",
+            "chinese": "zh-Hans",
+        }[display_key]
+    if not value.strip() or any(char.isspace() for char in value.strip()):
+        raise GlossaryError(f"invalid language key {value!r}")
+    value = "-".join(part.lower() for part in value.strip().replace("_", "-").split("-") if part)
+    key = _language_key(value)
+    if value.split("-", 1)[0] in {"en", "de", "fr"}:
+        return value.split("-", 1)[0]
+    if key == "chinese" or value == "zh" or value == "zh-cn" or value == "zh-hans":
+        return "zh-Hans"
+    if value == "zh-tw" or value == "zh-hant":
+        return "zh-Hant"
+    return value
+
+
+def _normalize_v2_glossary(data: Mapping[str, Any], source_path: Optional[Path]) -> Dict[str, Any]:
     metadata = data.get("metadata") or {}
-    if not isinstance(metadata, dict):
+    if not isinstance(metadata, Mapping):
         raise GlossaryError("glossary metadata must be an object")
-    name = _clean(metadata.get("name") or metadata.get("id"))
-    if not name and source_path:
-        name = source_path.stem
-    if not name:
-        raise GlossaryError("glossary metadata.name is required")
-
+    for field_name in ("id", "name", "domain", "version"):
+        if field_name in metadata and not isinstance(metadata[field_name], str):
+            raise GlossaryError(f"metadata.{field_name} must be a string")
+    for field_name in ("id", "name", "domain", "version"):
+        value = metadata.get(field_name)
+        if not isinstance(value, str) or not value.strip():
+            raise GlossaryError(f"glossary metadata.{field_name} is required and must be a non-empty string")
+    name = metadata["name"].strip()
     entries = data.get("entries")
     if not isinstance(entries, list):
         raise GlossaryError("glossary entries must be an array")
+    ids, normalized = set(), []
+    for i, raw in enumerate(entries):
+        if not isinstance(raw, Mapping):
+            raise GlossaryError(f"entries[{i}] must be an object")
+        misplaced = {"source", "target", "policy", "variants", "aliases", "aliases_by_language"}.intersection(raw)
+        if misplaced:
+            raise GlossaryError(f"entries[{i}] has fields outside terms: {', '.join(sorted(misplaced))}")
+        if not isinstance(raw.get("id"), str):
+            raise GlossaryError(f"entries[{i}].id must be a string")
+        ident = raw["id"].strip()
+        terms = raw.get("terms")
+        if not ident or ident in ids:
+            raise GlossaryError(f"entries[{i}].id is required and must be unique")
+        ids.add(ident)
+        if not isinstance(terms, Mapping) or not terms:
+            raise GlossaryError(f"entries[{i}].terms must be a non-empty object")
+        canonical = {}
+        for lang, term in terms.items():
+            code = _canonical_language(lang)
+            if not code or code in canonical:
+                raise GlossaryError(f"entries[{i}] has duplicate canonical language key {code!r}")
+            if not isinstance(term, Mapping) or not isinstance(term.get("preferred"), str) or not term["preferred"].strip():
+                raise GlossaryError(f"entries[{i}].terms[{lang!r}].preferred is required")
+            item = {"preferred": term["preferred"].strip()}
+            for field_name in ("variants", "aliases"):
+                if field_name in term:
+                    item[field_name] = _as_string_list(term[field_name], field_name, i)
+            if "policy" in term:
+                policy = term["policy"]
+                if not isinstance(policy, str) or policy not in POLICIES:
+                    raise GlossaryError(f"entries[{i}].terms[{lang!r}].policy must be fixed or preferred")
+                item["policy"] = policy
+            if "allow_short" in term:
+                if not isinstance(term["allow_short"], bool):
+                    raise GlossaryError(f"entries[{i}].terms[{lang!r}].allow_short must be a boolean")
+                item["allow_short"] = term["allow_short"]
+            canonical[code] = item
+        entry = {"id": ident, "terms": canonical}
+        for field_name in ("note", "category", "scope"):
+            if field_name in raw:
+                if not isinstance(raw[field_name], str):
+                    raise GlossaryError(f"entries[{i}].{field_name} must be a string")
+                entry[field_name] = raw[field_name]
+        for field_name in ("provenance", "legacy_unclassified_forms"):
+            if field_name in raw:
+                value = raw[field_name]
+                if field_name == "provenance" and not isinstance(value, Mapping):
+                    raise GlossaryError(f"entries[{i}].provenance must be an object")
+                if field_name == "legacy_unclassified_forms" and (not isinstance(value, list) or not all(isinstance(v, str) for v in value)):
+                    raise GlossaryError(f"entries[{i}].legacy_unclassified_forms must be an array of strings")
+                entry[field_name] = value
+        normalized.append(entry)
+    required_metadata = {key: metadata[key].strip() for key in ("id", "name", "domain", "version")}
+    normalized_metadata = dict(metadata)
+    normalized_metadata.update(required_metadata)
+    result = dict(data)
+    result.update({"schema_version": 2, "metadata": normalized_metadata, "entries": normalized})
+    return result
 
-    normalized_entries: List[Dict[str, Any]] = []
+
+def project_glossary(glossary: Mapping[str, Any], source_language: str, target_language: str, reference: bool = False) -> Dict[str, Any]:
+    """Project native concepts onto one language pair for runtime consumers."""
+    if glossary.get("schema_version") != 2:
+        raise GlossaryError("runtime projection requires a native schema_version 2 glossary")
+    source, target = _canonical_language(source_language), _canonical_language(target_language)
+    entries = []
+    for concept in glossary.get("entries", []):
+        terms = concept.get("terms", {})
+        src, dst = terms.get(source), terms.get(target)
+        if not src or not dst: continue
+        item = {"id": concept["id"], "source": src["preferred"], "target": dst["preferred"], "policy": dst.get("policy", DEFAULT_POLICY)}
+        if reference:
+            item["kind"] = "reference"
+        for key in ("variants", "aliases", "allow_short"):
+            if key in src: item[key] = src[key]
+        for key in ("note", "category", "scope"):
+            if concept.get(key): item[key] = concept[key]
+        entries.append(item)
     seen: Dict[str, str] = {}
-    for index, raw in enumerate(entries):
-        if not isinstance(raw, dict):
-            raise GlossaryError(f"entries[{index}] must be an object")
-        source = _clean(raw.get("source") or raw.get("original"))
-        target = _clean(raw.get("target") or raw.get("suggested_translation"))
-        if not source or not target:
-            raise GlossaryError(
-                f"entries[{index}] requires non-empty source and target fields"
-            )
-        policy = _clean(raw.get("policy") or DEFAULT_POLICY).lower()
-        if policy not in POLICIES:
-            raise GlossaryError(
-                f"entries[{index}].policy must be one of: {', '.join(sorted(POLICIES))}"
-            )
-        variants = _as_string_list(raw.get("variants"), "variants", index)
-        aliases = _as_string_list(raw.get("aliases"), "aliases", index)
-        aliases_by_language_raw = raw.get("aliases_by_language")
-        if aliases_by_language_raw is None:
-            # Accept the earlier experimental name but emit one stable field.
-            aliases_by_language_raw = raw.get("cross_language_aliases")
-        aliases_by_language: Dict[str, List[str]] = {}
-        if aliases_by_language_raw is not None:
-            if not isinstance(aliases_by_language_raw, Mapping):
-                raise GlossaryError(
-                    f"entries[{index}].aliases_by_language must be an object"
-                )
-            for language, values in aliases_by_language_raw.items():
-                language_name = _clean(language)
-                if not language_name:
-                    raise GlossaryError(
-                        f"entries[{index}].aliases_by_language has an empty language key"
-                    )
-                aliases_by_language[language_name] = _as_string_list(
-                    values, f"aliases_by_language[{language_name!r}]", index
-                )
-        forms = [source, *variants, *aliases]
-        for form in forms:
-            key = _normal_form(form)
+    for entry in entries:
+        for form in [entry["source"], *entry.get("variants", []), *entry.get("aliases", [])]:
+            key = _normalize_match_text(form)
             previous = seen.get(key)
-            if previous is not None and previous != target:
+            if previous is not None and previous != entry["target"]:
                 raise GlossaryError(
-                    f"conflicting translations for source form {form!r}: "
-                    f"{previous!r} vs {target!r}"
+                    f"ambiguous conflicting source form {form!r} for "
+                    f"{source_language} → {target_language}"
                 )
-            seen[key] = target
-        language_seen: Dict[tuple[str, str], str] = {}
-        for language, language_forms in aliases_by_language.items():
-            language_key = _language_key(language)
-            for form in language_forms:
-                key = (language_key, _normal_form(form))
-                previous = language_seen.get(key)
-                if previous is not None and previous != target:
-                    raise GlossaryError(
-                        f"conflicting translations for cross-language source form {form!r}: "
-                        f"{previous!r} vs {target!r}"
-                    )
-                language_seen[key] = target
-
-        item: Dict[str, Any] = {
-            "source": source,
-            "target": target,
-            "policy": policy,
-        }
-        if "allow_short" in raw:
-            if not isinstance(raw["allow_short"], bool):
-                raise GlossaryError(
-                    f"entries[{index}].allow_short must be a boolean"
-                )
-            if raw["allow_short"]:
-                item["allow_short"] = True
-        if variants:
-            item["variants"] = variants
-        if aliases:
-            item["aliases"] = aliases
-        if aliases_by_language:
-            item["aliases_by_language"] = aliases_by_language
-        for field in ("id", "category", "note", "scope"):
-            value = _clean(raw.get(field))
-            if value:
-                item[field] = value
-        normalized_entries.append(item)
-
-    normalized_metadata: Dict[str, Any] = {
-        "name": name,
-        "domain": _clean(metadata.get("domain")),
-        "source_language": _clean(metadata.get("source_language")),
-        "target_language": _clean(metadata.get("target_language")),
-        "version": _clean(metadata.get("version")),
-    }
-    normalized_metadata = {
-        key: value for key, value in normalized_metadata.items() if value
-    }
-    return {
-        "schema_version": 1,
-        "metadata": normalized_metadata,
-        "entries": normalized_entries,
-    }
+            seen[key] = entry["target"]
+    metadata = dict(glossary.get("metadata", {}))
+    metadata["projection"] = {"source_language": source, "target_language": target}
+    return {"schema_version": 1, "metadata": metadata, "entries": entries}
 
 
 def load_glossary(path: Path) -> Dict[str, Any]:
@@ -356,26 +356,16 @@ def validate_glossary_languages(
     target_language: str,
 ) -> List[str]:
     """Return language compatibility warnings/errors for a glossary."""
-    metadata = glossary.get("metadata", {})
-    errors = []
-    glossary_source = metadata.get("source_language")
-    glossary_target = metadata.get("target_language")
-    if glossary_source and _language_key(glossary_source) != _language_key(source_language):
-        errors.append(
-            f"source language mismatch: glossary={glossary_source!r}, "
-            f"translation={source_language!r}"
-        )
-    if glossary_target and _language_key(glossary_target) != _language_key(target_language):
-        errors.append(
-            f"target language mismatch: glossary={glossary_target!r}, "
-            f"translation={target_language!r}"
-        )
-    return errors
+    source, target = _canonical_language(source_language), _canonical_language(target_language)
+    if not any(source in e.get("terms", {}) and target in e.get("terms", {}) for e in glossary.get("entries", [])):
+        return [f"glossary has no concepts supporting language pair {source_language!r} → {target_language!r}"]
+    return []
 
 
 def validate_reference_glossary_languages(
     glossary: Mapping[str, Any],
     target_language: str,
+    source_language: Optional[str] = None,
 ) -> List[str]:
     """Validate a glossary that is explicitly selected as reference-only.
 
@@ -384,14 +374,9 @@ def validate_reference_glossary_languages(
     This keeps cross-language conceptual references opt-in without weakening
     the strict language contract for authoritative glossaries.
     """
-    metadata = glossary.get("metadata", {})
-    glossary_target = metadata.get("target_language")
-    if glossary_target and _language_key(glossary_target) != _language_key(target_language):
-        return [
-            f"target language mismatch: glossary={glossary_target!r}, "
-            f"translation={target_language!r}"
-        ]
-    return []
+    if source_language is None:
+        raise GlossaryError("reference glossary validation requires source_language")
+    return validate_glossary_languages(glossary, source_language, target_language)
 
 
 @dataclass(frozen=True)
@@ -442,14 +427,12 @@ def discover_glossary_candidates(
                 glossary, source_language, target_language
             )
             reference_errors = validate_reference_glossary_languages(
-                glossary, target_language
+                glossary, target_language, source_language
             )
-            for field_name in ("domain", "source_language", "target_language"):
-                if not _clean(metadata.get(field_name)):
-                    errors.append(f"metadata.{field_name} is missing")
-            for field_name in ("domain", "target_language"):
-                if not _clean(metadata.get(field_name)):
-                    reference_errors.append(f"metadata.{field_name} is missing")
+            if glossary.get("schema_version") == 2:
+                pair_count = len(project_glossary(glossary, source_language, target_language)["entries"])
+                if pair_count == 0:
+                    reference_errors.append("no concepts support the requested source/target pair")
             reference_reason = ""
             if not reference_errors and errors:
                 reference_reason = (
@@ -465,6 +448,8 @@ def discover_glossary_candidates(
                     "target_language": metadata.get("target_language"),
                     "version": metadata.get("version"),
                     "entries": len(glossary.get("entries", [])),
+                    "language_pair_entries": (len(project_glossary(glossary, source_language, target_language)["entries"]) if glossary.get("schema_version") == 2 else len(glossary.get("entries", []))),
+                    "languages": sorted({language for entry in glossary.get("entries", []) for language in entry.get("terms", {})}) if glossary.get("schema_version") == 2 else [],
                     "eligible": not errors,
                     "errors": errors,
                     "reference_eligible": not reference_errors,
@@ -531,21 +516,12 @@ def _entry_match_kind(entry: Mapping[str, Any], form: str) -> str:
         for value in _optional_match_forms(entry.get("variants"))
     }:
         return "variant"
-    for aliases in (entry.get("aliases_by_language") or {}).values():
-        if normalized in {
-            _normalize_match_text(value)
-            for value in _optional_match_forms(aliases)
-        }:
-            return "cross_language_alias"
     return "alias"
 
 
 def _select_matching_entries(
     text: str,
     entries: List[Dict[str, Any]],
-    *,
-    source_language: Optional[str] = None,
-    include_cross_language: bool = False,
 ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Select entries and return selected plus suppressed hit audit trails."""
     normalized_text = _normalize_match_text(_matchable_source_text(text))
@@ -553,8 +529,6 @@ def _select_matching_entries(
     for index, entry in enumerate(entries):
         for form in _term_forms(
             entry,
-            source_language=source_language,
-            include_cross_language=include_cross_language,
         ):
             normalized_form = _normalize_match_text(form)
             for match in _find_term_matches(
@@ -673,6 +647,7 @@ def build_unit_glossary_contexts(
     glossary_context_files: Mapping[str, Path],
     entity_path: Optional[Path] = None,
     source_language: Optional[str] = None,
+    target_language: Optional[str] = "Chinese",
 ) -> Dict[str, Path]:
     """Write compact, per-unit terminology contexts.
 
@@ -695,6 +670,7 @@ def build_unit_glossary_contexts(
             glossary = load_glossary(path)
         except GlossaryError:
             continue
+        glossary = project_glossary(glossary, source_language or "English", target_language or "Chinese", reference=str(name).startswith("reference_"))
         for entry in glossary["entries"]:
             kind = "reference" if str(name).startswith("reference_") else "domain"
             domain_entries.append({"kind": kind, **entry})
@@ -754,12 +730,14 @@ def build_unit_glossary_contexts(
         selected, hits, suppressed_hits = _select_matching_entries(
             text,
             candidates,
-            source_language=source_language,
-            include_cross_language=True,
         )
         context = {
             "schema_version": 1,
             "source_file": source.name,
+            "language_pair": {
+                "source": _canonical_language(source_language or "English"),
+                "target": _canonical_language(target_language or "Chinese"),
+            },
             "entries": selected,
             "selection": "normalized_exact_source_form_match_with_reference_aliases",
         }
@@ -793,6 +771,8 @@ def build_metadata_glossary_context(
     output_dir: Path,
     context_files: Mapping[str, Path],
     source_text: str,
+    source_language: Optional[str] = None,
+    target_language: Optional[str] = "Chinese",
 ) -> Optional[Path]:
     """Write a small terminology context for EPUB metadata translation.
 
@@ -806,13 +786,15 @@ def build_metadata_glossary_context(
     for name, path in context_files.items():
         if not Path(path).is_file():
             continue
-        if str(name).startswith("domain_glossary_"):
+        if str(name).startswith("domain_glossary_") or str(name).startswith("reference_glossary_"):
             try:
                 glossary = load_glossary(path)
             except GlossaryError:
                 continue
+            reference = str(name).startswith("reference_")
+            glossary = project_glossary(glossary, source_language or "English", target_language or "Chinese", reference=reference)
             for entry in glossary["entries"]:
-                candidates.append({"kind": "domain", **entry})
+                candidates.append({"kind": "reference" if reference else "domain", **entry})
         elif str(name) == "translation_entities":
             try:
                 data = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -855,6 +837,10 @@ def build_metadata_glossary_context(
     context = {
         "schema_version": 1,
         "purpose": "metadata_translation",
+        "language_pair": {
+            "source": _canonical_language(source_language or "English"),
+            "target": _canonical_language(target_language or "Chinese"),
+        },
         "entries": selected,
         "selection": "exact_source_form_match",
     }
@@ -941,7 +927,7 @@ def load_selected_glossaries(
     names: List[str] = []
     total_entries = 0
     seen_sources: Dict[str, str] = {}
-    seen_reference_aliases: Dict[tuple[str, str], str] = {}
+    seen_reference_sources: Dict[str, str] = {}
     source_files: Dict[str, Path] = {}
     source_sha256: Dict[str, str] = {}
     metadata_by_context: Dict[str, Dict[str, Any]] = {}
@@ -973,14 +959,17 @@ def load_selected_glossaries(
             language_errors = (
                 validate_glossary_languages(glossary, source_language, target_language)
                 if kind == "authoritative"
-                else validate_reference_glossary_languages(glossary, target_language)
+                else validate_reference_glossary_languages(glossary, target_language, source_language)
             )
             if language_errors:
                 raise GlossaryError(
                     f"glossary {source_path.name}: " + "; ".join(language_errors)
                 )
+            projected = project_glossary(
+                glossary, source_language, target_language, reference=(kind == "reference")
+            )
             metadata = glossary["metadata"]
-            glossary_id = configured_id or _clean(metadata.get("name")) or source_path.stem
+            glossary_id = configured_id or _clean(metadata.get("id"))
             safe_id = sanitize_filename(glossary_id) or f"glossary_{index:03d}"
             snapshot_name = (
                 f"reference_{safe_id}.json" if kind == "reference" else f"{safe_id}.json"
@@ -1016,10 +1005,10 @@ def load_selected_glossaries(
             )
             if kind == "authoritative":
                 names.append(glossary_id)
-                total_entries += len(glossary["entries"])
-                for entry in glossary["entries"]:
+                total_entries += len(projected["entries"])
+                for entry in projected["entries"]:
                     for form in [entry["source"], *entry.get("variants", []), *entry.get("aliases", [])]:
-                        key = _normal_form(form)
+                        key = _normalize_match_text(form)
                         previous = seen_sources.get(key)
                         if previous is not None and previous != entry["target"]:
                             raise GlossaryError(
@@ -1028,22 +1017,16 @@ def load_selected_glossaries(
                             )
                         seen_sources[key] = entry["target"]
             else:
-                for entry in glossary["entries"]:
-                    for language, aliases in (
-                        entry.get("aliases_by_language", {}) or {}
-                    ).items():
-                        language_key = _language_key(language)
-                        for form in aliases:
-                            key = (language_key, _normal_form(form))
-                            previous = seen_reference_aliases.get(key)
-                            if previous is not None and previous != entry["target"]:
-                                raise GlossaryError(
-                                    "conflicting reference translations for "
-                                    f"{language} source form {form!r}: "
-                                    f"{previous!r} vs {entry['target']!r}"
-                                )
-                            seen_reference_aliases[key] = entry["target"]
-
+                for entry in projected["entries"]:
+                    for form in [entry["source"], *entry.get("variants", []), *entry.get("aliases", [])]:
+                        key = _normalize_match_text(form)
+                        previous = seen_reference_sources.get(key)
+                        if previous is not None and previous != entry["target"]:
+                            raise GlossaryError(
+                                f"selected reference glossaries conflict for source form {form!r}: "
+                                f"{previous!r} vs {entry['target']!r}"
+                            )
+                        seen_reference_sources[key] = entry["target"]
     rules = [
         "Selected domain glossaries are read-only authoritative terminology context; never modify them.",
         "Apply glossary entries to prose, titles, TOC labels, descriptions, and other translatable metadata.",
@@ -1059,7 +1042,7 @@ def load_selected_glossaries(
                 "Reference-only glossaries are read-only background material; never modify the original files or their snapshots.",
                 "Reference-only glossaries do not establish terminology precedence and must never override an authoritative glossary or book-specific entity.",
                 "Consult reference-only glossaries for conceptual correspondences and established target-language names when relevant, especially across source languages; do not mechanically apply a reference entry when the source text does not support the correspondence.",
-                "In a unit terminology context, entries with kind=reference are sparse conceptual hints matched through an explicitly declared aliases_by_language mapping. They are not fixed translations and never override domain or book-specific entries.",
+                "Reference entries are sparse concepts projected through the requested source and target languages; they are never fixed translations and never override domain or book-specific entries.",
                 "Do not add inferred variants, translations, or corrections back into any glossary file. If a reference is ambiguous, use normal translation judgment and keep the glossary unchanged.",
             ]
         )
@@ -1117,6 +1100,16 @@ def validate_translation_context(
     except (OSError, json.JSONDecodeError) as exc:
         return {"valid": False, "errors": [f"invalid translation manifest: {exc}"]}
 
+    # The manifest captures CLI overrides and is the language contract consumed
+    # by this prepared task. Configuration values are the fallback when the
+    # manifest does not carry an explicit pair.
+    source_language = (
+        manifest.get("source_language") or source_language or "English"
+    )
+    target_language = (
+        manifest.get("target_language") or target_language or "Simplified Chinese"
+    )
+
     root = Path(output_dir).resolve()
     context_files = manifest.get("context_files", {}) or {}
     context_hashes = manifest.get("context_sha256", {}) or {}
@@ -1154,20 +1147,24 @@ def validate_translation_context(
                         )
                     )
                 glossary_names.append(glossary["metadata"]["name"])
-                glossary_entries += len(glossary["entries"])
+                glossary_entries += len(
+                    project_glossary(glossary, source_language, target_language)["entries"]
+                )
             except GlossaryError as exc:
                 errors.append(str(exc))
         elif str(name).startswith("reference_glossary_"):
             try:
                 glossary = load_glossary(path)
-                if target_language:
+                if target_language and source_language:
                     errors.extend(
                         validate_reference_glossary_languages(
-                            glossary, target_language
+                            glossary, target_language, source_language
                         )
                     )
                 reference_names.append(glossary["metadata"]["name"])
-                reference_entries += len(glossary["entries"])
+                reference_entries += len(
+                    project_glossary(glossary, source_language, target_language)["entries"]
+                )
             except GlossaryError as exc:
                 errors.append(str(exc))
 

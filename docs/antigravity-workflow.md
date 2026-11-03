@@ -1042,6 +1042,19 @@ polish handoff 会附带源语言 TOC 标签保护清单。唯一出现且匹配
 产生冲突时，准备阶段会拒绝继续。翻译任务会先为每个源单元生成精简术语上下文，再由
 worker handoff 按 TOC 顺序装箱；普通单章节使用章节级 `entries`，相邻短章节使用按文件
 分区的直接上下文，大章节拆分使用 `shared_entries`/`local_entries`，完整快照只保留作审计。
+外部表使用 schema 2 多语言概念格式。顶层包含 `schema_version: 2` 及
+`metadata.id/name/domain/version`；每个 entry 有稳定 `id`
+和 `terms`，其语言键可为 `en`、`de`、`fr`、`zh-Hans`，语言值按需包含
+`preferred`、`variants`、`aliases`、`policy` 和 `allow_short`。按当前配置的源语言与目标语言
+直接选取对应两端；部分概念可不含某个语言，缺少直接词形时不作跨语言推断。法语或德语
+只要配置的语言对有直接词形，即可作为权威表使用，无须降为 reference glossary。游戏术语
+应保留具体子域（如电子游戏、桌游或博彩）以避免不同规则体系的概念混并。改名后的术语表
+不提供旧路径别名；已有本地配置须更新到当前文件路径，程序不会猜测替代文件。
+当前合并表路径对应关系如下：`marxist-political-economy-en-zh.yaml` 和
+`marxist-theory-de-zh.yaml` → `marxism.yaml`；`lacanian-psychoanalysis-en-zh.yaml` →
+`psychoanalysis.yaml`；`political-economy-of-communication.yaml` → `communication.yaml`；
+`crpg-common-zh-cn.yaml` 和 `nintendo-common-zh-cn.yaml` → `games.yaml`。
+`german-classical-philosophy.yaml` 保持原名。
 PDF 正文 Prompt 还会读取已验证的
 `toc_tree_translated.json`，生成一个方向性全书 TOC 轮廓。轮廓按实际 TOC 的深度、分支规模
 和 `global_toc_tokens` 预算自适应压缩，不固定规定保留几级标题；它只帮助理解全书结构，
@@ -1062,11 +1075,11 @@ fragment。NCX depth 使用逻辑 TOC 实际深度，合成的目录入口不增
 跨语言的学派资料（例如德文术语表用于英文思想史书籍）必须单独配置在
 `translation.reference_glossaries`。候选报告会把它们标记为
 `reference_eligible`，但不会自动选择；用户明确选择后，Subagent 只能读取其
-`reference_glossary_*` 快照，用于概念对照和既有目标语定名参考，不能覆盖正式术语表，
-也不能修改原始 YAML、快照或生成自动修订版。
-需要从英文正文命中德文概念时，在条目中声明
-`aliases_by_language: {English: [sublation]}`。这些命中只进入当前单元的
-`kind: reference` 稀疏上下文，不参与 fixed/preferred/entity 优先级。
+`reference_glossary_*` 快照只用于审计。正文和元数据 worker 收到的是按当前语言对筛选的
+稀疏 reference 上下文，用于概念对照和既有目标语定名参考，不能覆盖正式术语表，也不能修改
+原始 YAML 或快照。需要从英文正文命中德文概念时，在多语言条目的 `terms.en.aliases` 中明确
+声明英文源文形式（如 `sublation`）；不根据德语或法语词形推断英文等价词。命中只作为
+`kind: reference` 使用，不参与 fixed/preferred/entity 优先级。
 
 目录翻译保持独立的 JSON 合同，可使用：
 

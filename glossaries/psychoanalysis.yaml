@@ -1,0 +1,4119 @@
+schema_version: 2
+metadata:
+  id: psychoanalysis
+  name: Psychoanalysis
+  domain: psychoanalysis
+  version: '2026-11-03'
+entries:
+- id: lacanian-psychoanalysis-en-zh:absence
+  terms:
+    en:
+      preferred: absence
+    fr:
+      preferred: absence
+    zh-Hans:
+      preferred: 缺位
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: absence
+    original_record:
+      id: absence
+      source: absence
+      target: 缺位
+      aliases_by_language:
+        French:
+        - absence
+      policy: fixed
+- id: lacanian-psychoanalysis-en-zh:anxiety
+  terms:
+    en:
+      preferred: anxiety
+    fr:
+      preferred: angoisse
+    zh-Hans:
+      preferred: 焦虑
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: anxiety
+    original_record:
+      id: anxiety
+      source: anxiety
+      target: 焦虑
+      variants:
+      - angoisse
+      - Angst
+      aliases_by_language:
+        French:
+        - angoisse
+      policy: fixed
+    legacy_unclassified_forms:
+    - angoisse
+    - Angst
+- id: lacanian-psychoanalysis-en-zh:aphanisis
+  terms:
+    en:
+      preferred: aphanisis
+    zh-Hans:
+      preferred: 消失
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: aphanisis
+    original_record:
+      id: aphanisis
+      source: aphanisis
+      target: 消失
+      policy: fixed
+- id: lacanian-psychoanalysis-en-zh:art
+  terms:
+    en:
+      preferred: art
+    fr:
+      preferred: art
+    zh-Hans:
+      preferred: 艺术
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: art
+    original_record:
+      id: art
+      source: art
+      target: 艺术
+      aliases_by_language:
+        French:
+        - art
+      policy: fixed
+- id: lacanian-psychoanalysis-en-zh:autonomous-ego
+  terms:
+    en:
+      preferred: autonomous ego
+    zh-Hans:
+      preferred: 自主的自我
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: autonomous-ego
+    original_record:
+      id: autonomous-ego
+      source: autonomous ego
+      target: 自主的自我
+      policy: fixed
+- id: lacanian-psychoanalysis-en-zh:act
+  terms:
+    en:
+      preferred: act
+    fr:
+      preferred: acte
+    zh-Hans:
+      preferred: 行动
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: act
+    original_record:
+      id: act
+      source: act
+      target: 行动
+      variants:
+      - acte
+      aliases_by_language:
+        French:
+        - acte
+      policy: fixed
+    legacy_unclassified_forms:
+    - acte
+- id: lacanian-psychoanalysis-en-zh:acting-out
+  terms:
+    en:
+      preferred: acting out
+    zh-Hans:
+      preferred: 行动搬演
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: acting-out
+    original_record:
+      id: acting-out
+      source: acting out
+      target: 行动搬演
+      variants:
+      - Agieren
+      policy: fixed
+    legacy_unclassified_forms:
+    - Agieren
+- id: lacanian-psychoanalysis-en-zh:affect
+  terms:
+    en:
+      preferred: affect
+    fr:
+      preferred: affect
+    zh-Hans:
+      preferred: 情感
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: affect
+    original_record:
+      id: affect
+      source: affect
+      target: 情感
+      variants:
+      - Affekt
+      aliases_by_language:
+        French:
+        - affect
+      policy: fixed
+    legacy_unclassified_forms:
+    - Affekt
+- id: lacanian-psychoanalysis-en-zh:aggressivity
+  terms:
+    en:
+      preferred: aggressivity
+    fr:
+      preferred: agressivité
+    zh-Hans:
+      preferred: 侵凌性
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: aggressivity
+    original_record:
+      id: aggressivity
+      source: aggressivity
+      target: 侵凌性
+      variants:
+      - agressivité
+      aliases_by_language:
+        French:
+        - agressivité
+      policy: fixed
+    legacy_unclassified_forms:
+    - agressivité
+- id: lacanian-psychoanalysis-en-zh:algebra
+  terms:
+    en:
+      preferred: algebra
+    fr:
+      preferred: algèbre
+    zh-Hans:
+      preferred: 代数学
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: algebra
+    original_record:
+      id: algebra
+      source: algebra
+      target: 代数学
+      variants:
+      - algèbre
+      aliases_by_language:
+        French:
+        - algèbre
+      policy: fixed
+    legacy_unclassified_forms:
+    - algèbre
+- id: lacanian-psychoanalysis-en-zh:alienation
+  terms:
+    en:
+      preferred: alienation
+    fr:
+      preferred: aliénation
+    zh-Hans:
+      preferred: 异化
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: alienation
+    original_record:
+      id: alienation
+      source: alienation
+      target: 异化
+      variants:
+      - aliénation
+      - Entfremdung
+      aliases_by_language:
+        French:
+        - aliénation
+      policy: fixed
+    legacy_unclassified_forms:
+    - aliénation
+    - Entfremdung
+- id: lacanian-psychoanalysis-en-zh:bar
+  terms:
+    en:
+      preferred: bar
+    fr:
+      preferred: barre
+    zh-Hans:
+      preferred: 杠
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: bar
+    original_record:
+      id: bar
+      source: bar
+      target: 杠
+      variants:
+      - barre
+      aliases_by_language:
+        French:
+        - barre
+      policy: fixed
+    legacy_unclassified_forms:
+    - barre
+- id: lacanian-psychoanalysis-en-zh:beautiful-soul
+  terms:
+    en:
+      preferred: beautiful soul
+    fr:
+      preferred: belle âme
+    zh-Hans:
+      preferred: 美的灵魂
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: beautiful-soul
+    original_record:
+      id: beautiful-soul
+      source: beautiful soul
+      target: 美的灵魂
+      variants:
+      - belle âme
+      - schöne Seele
+      aliases_by_language:
+        French:
+        - belle âme
+      policy: fixed
+    legacy_unclassified_forms:
+    - belle âme
+    - schöne Seele
+- id: lacanian-psychoanalysis-en-zh:being
+  terms:
+    en:
+      preferred: being
+    fr:
+      preferred: être
+    zh-Hans:
+      preferred: 存在
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: being
+    original_record:
+      id: being
+      source: being
+      target: 存在
+      variants:
+      - être
+      - Sein
+      aliases_by_language:
+        French:
+        - être
+      policy: fixed
+    legacy_unclassified_forms:
+    - être
+    - Sein
+- id: lacanian-psychoanalysis-en-zh:bejahung
+  terms:
+    en:
+      preferred: Bejahung
+    zh-Hans:
+      preferred: 肯定
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: bejahung
+    original_record:
+      id: bejahung
+      source: Bejahung
+      target: 肯定
+      policy: fixed
+- id: lacanian-psychoanalysis-en-zh:biology
+  terms:
+    en:
+      preferred: biology
+    fr:
+      preferred: biologie
+    zh-Hans:
+      preferred: 生物学
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: biology
+    original_record:
+      id: biology
+      source: biology
+      target: 生物学
+      variants:
+      - biologie
+      aliases_by_language:
+        French:
+        - biologie
+      policy: fixed
+    legacy_unclassified_forms:
+    - biologie
+- id: lacanian-psychoanalysis-en-zh:borromean-knot
+  terms:
+    en:
+      preferred: Borromean knot
+    fr:
+      preferred: nœud borroméen
+    zh-Hans:
+      preferred: 博洛米结
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: borromean-knot
+    original_record:
+      id: borromean-knot
+      source: Borromean knot
+      target: 博洛米结
+      variants:
+      - nœud borroméen
+      aliases_by_language:
+        French:
+        - nœud borroméen
+      policy: fixed
+    legacy_unclassified_forms:
+    - nœud borroméen
+- id: lacanian-psychoanalysis-en-zh:captation
+  terms:
+    en:
+      preferred: captation
+    fr:
+      preferred: captation
+    zh-Hans:
+      preferred: 捕获
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: captation
+    original_record:
+      id: captation
+      source: captation
+      target: 捕获
+      aliases_by_language:
+        French:
+        - captation
+      policy: fixed
+- id: lacanian-psychoanalysis-en-zh:counterpart
+  terms:
+    en:
+      preferred: counterpart
+    fr:
+      preferred: semblable
+    zh-Hans:
+      preferred: 相似者
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: counterpart
+    original_record:
+      id: counterpart
+      source: counterpart
+      target: 相似者
+      variants:
+      - semblable
+      aliases_by_language:
+        French:
+        - semblable
+      policy: fixed
+    legacy_unclassified_forms:
+    - semblable
+- id: lacanian-psychoanalysis-en-zh:contertransference
+  terms:
+    en:
+      preferred: contertransference
+    fr:
+      preferred: contre-transfert
+    zh-Hans:
+      preferred: 反转移
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: contertransference
+    original_record:
+      id: contertransference
+      source: contertransference
+      target: 反转移
+      variants:
+      - contre-transfert
+      aliases_by_language:
+        French:
+        - contre-transfert
+      policy: fixed
+    legacy_unclassified_forms:
+    - contre-transfert
+- id: lacanian-psychoanalysis-en-zh:cartel
+  terms:
+    en:
+      preferred: cartel
+    fr:
+      preferred: cartel
+    zh-Hans:
+      preferred: 卡特尔
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: cartel
+    original_record:
+      id: cartel
+      source: cartel
+      target: 卡特尔
+      aliases_by_language:
+        French:
+        - cartel
+      policy: fixed
+- id: lacanian-psychoanalysis-en-zh:castration-complex
+  terms:
+    en:
+      preferred: castration complex
+    fr:
+      preferred: complexe de castration
+    zh-Hans:
+      preferred: 阉割情结
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: castration-complex
+    original_record:
+      id: castration-complex
+      source: castration complex
+      target: 阉割情结
+      variants:
+      - complexe de castration
+      aliases_by_language:
+        French:
+        - complexe de castration
+      policy: fixed
+    legacy_unclassified_forms:
+    - complexe de castration
+- id: lacanian-psychoanalysis-en-zh:cause
+  terms:
+    en:
+      preferred: cause
+    fr:
+      preferred: cause
+    zh-Hans:
+      preferred: 原因/事业
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: cause
+    original_record:
+      id: cause
+      source: cause
+      target: 原因/事业
+      aliases_by_language:
+        French:
+        - cause
+      policy: fixed
+- id: lacanian-psychoanalysis-en-zh:chance
+  terms:
+    en:
+      preferred: chance
+    fr:
+      preferred: chance
+    zh-Hans:
+      preferred: 偶然
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: chance
+    original_record:
+      id: chance
+      source: chance
+      target: 偶然
+      aliases_by_language:
+        French:
+        - chance
+      policy: fixed
+- id: lacanian-psychoanalysis-en-zh:code
+  terms:
+    en:
+      preferred: code
+    fr:
+      preferred: code
+    zh-Hans:
+      preferred: 编码
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: code
+    original_record:
+      id: code
+      source: code
+      target: 编码
+      aliases_by_language:
+        French:
+        - code
+      policy: fixed
+- id: lacanian-psychoanalysis-en-zh:cogito
+  terms:
+    en:
+      preferred: cogito
+    zh-Hans:
+      preferred: 我思
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: cogito
+    original_record:
+      id: cogito
+      source: cogito
+      target: 我思
+      policy: fixed
+- id: lacanian-psychoanalysis-en-zh:communication
+  terms:
+    en:
+      preferred: communication
+    fr:
+      preferred: communication
+    zh-Hans:
+      preferred: 交流
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: communication
+    original_record:
+      id: communication
+      source: communication
+      target: 交流
+      aliases_by_language:
+        French:
+        - communication
+      policy: fixed
+- id: lacanian-psychoanalysis-en-zh:complex
+  terms:
+    en:
+      preferred: complex
+    fr:
+      preferred: complexe
+    zh-Hans:
+      preferred: 情结
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: complex
+    original_record:
+      id: complex
+      source: complex
+      target: 情结
+      variants:
+      - complexe
+      - Komplex
+      aliases_by_language:
+        French:
+        - complexe
+      policy: fixed
+    legacy_unclassified_forms:
+    - complexe
+    - Komplex
+- id: lacanian-psychoanalysis-en-zh:disavowal
+  terms:
+    en:
+      preferred: disavowal
+    fr:
+      preferred: déni
+    zh-Hans:
+      preferred: 拒认
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: disavowal
+    original_record:
+      id: disavowal
+      source: disavowal
+      target: 拒认
+      variants:
+      - déni
+      - Verleugnung
+      aliases_by_language:
+        French:
+        - déni
+      policy: fixed
+    legacy_unclassified_forms:
+    - déni
+    - Verleugnung
+- id: lacanian-psychoanalysis-en-zh:discourse
+  terms:
+    en:
+      preferred: discourse
+    fr:
+      preferred: discours
+    zh-Hans:
+      preferred: 话语
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: discourse
+    original_record:
+      id: discourse
+      source: discourse
+      target: 话语
+      variants:
+      - discours
+      aliases_by_language:
+        French:
+        - discours
+      policy: fixed
+    legacy_unclassified_forms:
+    - discours
+- id: lacanian-psychoanalysis-en-zh:drive
+  terms:
+    en:
+      preferred: drive
+    fr:
+      preferred: pulsion
+    zh-Hans:
+      preferred: 冲动
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: drive
+    original_record:
+      id: drive
+      source: drive
+      target: 冲动
+      variants:
+      - pulsion
+      - Trieb
+      aliases_by_language:
+        French:
+        - pulsion
+      policy: fixed
+    legacy_unclassified_forms:
+    - pulsion
+    - Trieb
+- id: lacanian-psychoanalysis-en-zh:dual-relation
+  terms:
+    en:
+      preferred: dual relation
+    fr:
+      preferred: relation duelle
+    zh-Hans:
+      preferred: 二元关系
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: dual-relation
+    original_record:
+      id: dual-relation
+      source: dual relation
+      target: 二元关系
+      variants:
+      - relation duelle
+      aliases_by_language:
+        French:
+        - relation duelle
+      policy: fixed
+    legacy_unclassified_forms:
+    - relation duelle
+- id: lacanian-psychoanalysis-en-zh:death-drive
+  terms:
+    en:
+      preferred: death drive
+    fr:
+      preferred: pulsion de mort
+    zh-Hans:
+      preferred: 死亡冲动
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: death-drive
+    original_record:
+      id: death-drive
+      source: death drive
+      target: 死亡冲动
+      variants:
+      - pulsion de mort
+      - Todestriebe
+      aliases_by_language:
+        French:
+        - pulsion de mort
+      policy: fixed
+    legacy_unclassified_forms:
+    - pulsion de mort
+    - Todestriebe
+- id: lacanian-psychoanalysis-en-zh:defence
+  terms:
+    en:
+      preferred: defence
+    fr:
+      preferred: défense
+    zh-Hans:
+      preferred: 防御
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: defence
+    original_record:
+      id: defence
+      source: defence
+      target: 防御
+      variants:
+      - défense
+      - Abwehr
+      aliases_by_language:
+        French:
+        - défense
+      policy: fixed
+    legacy_unclassified_forms:
+    - défense
+    - Abwehr
+- id: lacanian-psychoanalysis-en-zh:delusion
+  terms:
+    en:
+      preferred: delusion
+    fr:
+      preferred: délire
+    zh-Hans:
+      preferred: 妄想
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: delusion
+    original_record:
+      id: delusion
+      source: delusion
+      target: 妄想
+      variants:
+      - délire
+      aliases_by_language:
+        French:
+        - délire
+      policy: fixed
+    legacy_unclassified_forms:
+    - délire
+- id: lacanian-psychoanalysis-en-zh:demand
+  terms:
+    en:
+      preferred: demand
+    fr:
+      preferred: demande
+    zh-Hans:
+      preferred: 要求/请求
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: demand
+    original_record:
+      id: demand
+      source: demand
+      target: 要求/请求
+      variants:
+      - demande
+      aliases_by_language:
+        French:
+        - demande
+      policy: fixed
+    legacy_unclassified_forms:
+    - demande
+- id: lacanian-psychoanalysis-en-zh:desire
+  terms:
+    en:
+      preferred: desire
+    fr:
+      preferred: désir
+    zh-Hans:
+      preferred: 欲望
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: desire
+    original_record:
+      id: desire
+      source: desire
+      target: 欲望
+      variants:
+      - désir
+      - Wunsch
+      - Begierde
+      aliases_by_language:
+        French:
+        - désir
+      policy: fixed
+    legacy_unclassified_forms:
+    - désir
+    - Wunsch
+    - Begierde
+- id: lacanian-psychoanalysis-en-zh:desire-of-the-analyst
+  terms:
+    en:
+      preferred: desire of the analyst
+    fr:
+      preferred: désir de l’analyste
+    zh-Hans:
+      preferred: 分析家的欲望
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: desire-of-the-analyst
+    original_record:
+      id: desire-of-the-analyst
+      source: desire of the analyst
+      target: 分析家的欲望
+      variants:
+      - désir de l’analyste
+      aliases_by_language:
+        French:
+        - désir de l’analyste
+      policy: fixed
+    legacy_unclassified_forms:
+    - désir de l’analyste
+- id: lacanian-psychoanalysis-en-zh:development
+  terms:
+    en:
+      preferred: development
+    fr:
+      preferred: développement
+    zh-Hans:
+      preferred: 发展
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: development
+    original_record:
+      id: development
+      source: development
+      target: 发展
+      variants:
+      - développement
+      aliases_by_language:
+        French:
+        - développement
+      policy: fixed
+    legacy_unclassified_forms:
+    - développement
+- id: lacanian-psychoanalysis-en-zh:dialectic
+  terms:
+    en:
+      preferred: dialectic
+    fr:
+      preferred: dialectique
+    zh-Hans:
+      preferred: 辩证法
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: dialectic
+    original_record:
+      id: dialectic
+      source: dialectic
+      target: 辩证法
+      variants:
+      - dialectique
+      aliases_by_language:
+        French:
+        - dialectique
+      policy: fixed
+    legacy_unclassified_forms:
+    - dialectique
+- id: lacanian-psychoanalysis-en-zh:ego
+  terms:
+    en:
+      preferred: ego
+    fr:
+      preferred: moi
+    zh-Hans:
+      preferred: 自我
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: ego
+    original_record:
+      id: ego
+      source: ego
+      target: 自我
+      variants:
+      - moi
+      - Ich
+      aliases_by_language:
+        French:
+        - moi
+      policy: fixed
+    legacy_unclassified_forms:
+    - moi
+    - Ich
+- id: lacanian-psychoanalysis-en-zh:ego-ideal
+  terms:
+    en:
+      preferred: ego-ideal
+    fr:
+      preferred: idéal du moi
+    zh-Hans:
+      preferred: 自我理想
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: ego-ideal
+    original_record:
+      id: ego-ideal
+      source: ego-ideal
+      target: 自我理想
+      variants:
+      - idéal du moi
+      - Ich-ideal
+      aliases_by_language:
+        French:
+        - idéal du moi
+      policy: fixed
+    legacy_unclassified_forms:
+    - idéal du moi
+    - Ich-ideal
+- id: lacanian-psychoanalysis-en-zh:ego-psychology
+  terms:
+    en:
+      preferred: ego-psychology
+    fr:
+      preferred: psychologie du moi
+    zh-Hans:
+      preferred: 自我心理学
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: ego-psychology
+    original_record:
+      id: ego-psychology
+      source: ego-psychology
+      target: 自我心理学
+      variants:
+      - psychologie du moi
+      aliases_by_language:
+        French:
+        - psychologie du moi
+      policy: fixed
+    legacy_unclassified_forms:
+    - psychologie du moi
+- id: lacanian-psychoanalysis-en-zh:end-of-analysis
+  terms:
+    en:
+      preferred: end of analysis
+    fr:
+      preferred: fin d’analyse
+    zh-Hans:
+      preferred: 分析的结束
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: end-of-analysis
+    original_record:
+      id: end-of-analysis
+      source: end of analysis
+      target: 分析的结束
+      variants:
+      - fin d’analyse
+      aliases_by_language:
+        French:
+        - fin d’analyse
+      policy: fixed
+    legacy_unclassified_forms:
+    - fin d’analyse
+- id: lacanian-psychoanalysis-en-zh:enunciation
+  terms:
+    en:
+      preferred: enunciation
+    fr:
+      preferred: énonciation
+    zh-Hans:
+      preferred: 能述
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: enunciation
+    original_record:
+      id: enunciation
+      source: enunciation
+      target: 能述
+      variants:
+      - énonciation
+      aliases_by_language:
+        French:
+        - énonciation
+      policy: fixed
+    legacy_unclassified_forms:
+    - énonciation
+- id: lacanian-psychoanalysis-en-zh:ethics
+  terms:
+    en:
+      preferred: ethics
+    fr:
+      preferred: éthique
+    zh-Hans:
+      preferred: 伦理学
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: ethics
+    original_record:
+      id: ethics
+      source: ethics
+      target: 伦理学
+      variants:
+      - éthique
+      aliases_by_language:
+        French:
+        - éthique
+      policy: fixed
+    legacy_unclassified_forms:
+    - éthique
+- id: lacanian-psychoanalysis-en-zh:existence
+  terms:
+    en:
+      preferred: existence
+    fr:
+      preferred: existence
+    zh-Hans:
+      preferred: 存在/实存
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: existence
+    original_record:
+      id: existence
+      source: existence
+      target: 存在/实存
+      variants:
+      - Existenz
+      aliases_by_language:
+        French:
+        - existence
+      policy: fixed
+    legacy_unclassified_forms:
+    - Existenz
+- id: lacanian-psychoanalysis-en-zh:extimacy
+  terms:
+    en:
+      preferred: extimacy
+    fr:
+      preferred: extimité
+    zh-Hans:
+      preferred: 外心性/外密性
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: extimacy
+    original_record:
+      id: extimacy
+      source: extimacy
+      target: 外心性/外密性
+      variants:
+      - extimité
+      aliases_by_language:
+        French:
+        - extimité
+      policy: fixed
+    legacy_unclassified_forms:
+    - extimité
+- id: lacanian-psychoanalysis-en-zh:factor-c
+  terms:
+    en:
+      preferred: factor c
+    fr:
+      preferred: facteur c
+    zh-Hans:
+      preferred: c 因素
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: factor-c
+    original_record:
+      id: factor-c
+      source: factor c
+      target: c 因素
+      variants:
+      - facteur c
+      aliases_by_language:
+        French:
+        - facteur c
+      policy: fixed
+    legacy_unclassified_forms:
+    - facteur c
+- id: lacanian-psychoanalysis-en-zh:frustration
+  terms:
+    en:
+      preferred: frustration
+    fr:
+      preferred: frustration
+    zh-Hans:
+      preferred: 挫折
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: frustration
+    original_record:
+      id: frustration
+      source: frustration
+      target: 挫折
+      variants:
+      - Versagung
+      aliases_by_language:
+        French:
+        - frustration
+      policy: fixed
+    legacy_unclassified_forms:
+    - Versagung
+- id: lacanian-psychoanalysis-en-zh:fantasy
+  terms:
+    en:
+      preferred: fantasy
+    fr:
+      preferred: fantasmé
+    zh-Hans:
+      preferred: 幻想
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: fantasy
+    original_record:
+      id: fantasy
+      source: fantasy
+      target: 幻想
+      variants:
+      - fantasmé
+      aliases_by_language:
+        French:
+        - fantasmé
+      policy: fixed
+    legacy_unclassified_forms:
+    - fantasmé
+- id: lacanian-psychoanalysis-en-zh:father
+  terms:
+    en:
+      preferred: father
+    fr:
+      preferred: père
+    zh-Hans:
+      preferred: 父亲
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: father
+    original_record:
+      id: father
+      source: father
+      target: 父亲
+      variants:
+      - père
+      aliases_by_language:
+        French:
+        - père
+      policy: fixed
+    legacy_unclassified_forms:
+    - père
+- id: lacanian-psychoanalysis-en-zh:fetishism
+  terms:
+    en:
+      preferred: fetishism
+    fr:
+      preferred: fétichisme
+    zh-Hans:
+      preferred: 恋物癖
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: fetishism
+    original_record:
+      id: fetishism
+      source: fetishism
+      target: 恋物癖
+      variants:
+      - fétichisme
+      - Fetischismus
+      aliases_by_language:
+        French:
+        - fétichisme
+      policy: fixed
+    legacy_unclassified_forms:
+    - fétichisme
+    - Fetischismus
+- id: lacanian-psychoanalysis-en-zh:foreclosure
+  terms:
+    en:
+      preferred: foreclosure
+    fr:
+      preferred: forclusion
+    zh-Hans:
+      preferred: 排除/除权
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: foreclosure
+    original_record:
+      id: foreclosure
+      source: foreclosure
+      target: 排除/除权
+      variants:
+      - forclusion
+      - Verwerfung
+      aliases_by_language:
+        French:
+        - forclusion
+      policy: fixed
+    legacy_unclassified_forms:
+    - forclusion
+    - Verwerfung
+- id: lacanian-psychoanalysis-en-zh:founding-speech
+  terms:
+    en:
+      preferred: founding speech
+    fr:
+      preferred: parole fondant
+    zh-Hans:
+      preferred: 基底言语
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: founding-speech
+    original_record:
+      id: founding-speech
+      source: founding speech
+      target: 基底言语
+      variants:
+      - parole fondant
+      aliases_by_language:
+        French:
+        - parole fondant
+      policy: fixed
+    legacy_unclassified_forms:
+    - parole fondant
+- id: lacanian-psychoanalysis-en-zh:fragmented-body
+  terms:
+    en:
+      preferred: fragmented body
+    fr:
+      preferred: corps morcelé
+    zh-Hans:
+      preferred: 碎裂的身体
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: fragmented-body
+    original_record:
+      id: fragmented-body
+      source: fragmented body
+      target: 碎裂的身体
+      variants:
+      - corps morcelé
+      aliases_by_language:
+        French:
+        - corps morcelé
+      policy: fixed
+    legacy_unclassified_forms:
+    - corps morcelé
+- id: lacanian-psychoanalysis-en-zh:freud-return-to
+  terms:
+    en:
+      preferred: Freud, return to
+    fr:
+      preferred: Freud, retour à
+    zh-Hans:
+      preferred: 回到弗洛伊德
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: freud-return-to
+    original_record:
+      id: freud-return-to
+      source: Freud, return to
+      target: 回到弗洛伊德
+      variants:
+      - Freud, retour à
+      aliases_by_language:
+        French:
+        - Freud, retour à
+      policy: fixed
+    legacy_unclassified_forms:
+    - Freud, retour à
+- id: lacanian-psychoanalysis-en-zh:gap
+  terms:
+    en:
+      preferred: gap
+    fr:
+      preferred: béance
+    zh-Hans:
+      preferred: 缺口
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: gap
+    original_record:
+      id: gap
+      source: gap
+      target: 缺口
+      variants:
+      - béance
+      aliases_by_language:
+        French:
+        - béance
+      policy: fixed
+    legacy_unclassified_forms:
+    - béance
+- id: lacanian-psychoanalysis-en-zh:gaze
+  terms:
+    en:
+      preferred: gaze
+    fr:
+      preferred: regard
+    zh-Hans:
+      preferred: 目光
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: gaze
+    original_record:
+      id: gaze
+      source: gaze
+      target: 目光
+      variants:
+      - regard
+      aliases_by_language:
+        French:
+        - regard
+      policy: fixed
+    legacy_unclassified_forms:
+    - regard
+- id: lacanian-psychoanalysis-en-zh:genital
+  terms:
+    en:
+      preferred: genital
+    fr:
+      preferred: génital
+    zh-Hans:
+      preferred: 生殖
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: genital
+    original_record:
+      id: genital
+      source: genital
+      target: 生殖
+      variants:
+      - génital
+      aliases_by_language:
+        French:
+        - génital
+      policy: fixed
+    legacy_unclassified_forms:
+    - génital
+- id: lacanian-psychoanalysis-en-zh:gestalt
+  terms:
+    en:
+      preferred: Gestalt
+    zh-Hans:
+      preferred: 格式塔
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: gestalt
+    original_record:
+      id: gestalt
+      source: Gestalt
+      target: 格式塔
+      policy: fixed
+- id: lacanian-psychoanalysis-en-zh:graph-of-desire
+  terms:
+    en:
+      preferred: graph of desire
+    fr:
+      preferred: graphe du désir
+    zh-Hans:
+      preferred: 欲望图解
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: graph-of-desire
+    original_record:
+      id: graph-of-desire
+      source: graph of desire
+      target: 欲望图解
+      variants:
+      - graphe du désir
+      aliases_by_language:
+        French:
+        - graphe du désir
+      policy: fixed
+    legacy_unclassified_forms:
+    - graphe du désir
+- id: lacanian-psychoanalysis-en-zh:hallucination
+  terms:
+    en:
+      preferred: hallucination
+    fr:
+      preferred: hallucination
+    zh-Hans:
+      preferred: 幻觉
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: hallucination
+    original_record:
+      id: hallucination
+      source: hallucination
+      target: 幻觉
+      aliases_by_language:
+        French:
+        - hallucination
+      policy: fixed
+- id: lacanian-psychoanalysis-en-zh:helplessness
+  terms:
+    en:
+      preferred: helplessness
+    fr:
+      preferred: détresse
+    zh-Hans:
+      preferred: 无助
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: helplessness
+    original_record:
+      id: helplessness
+      source: helplessness
+      target: 无助
+      variants:
+      - détresse
+      - Hilflosigkeit
+      aliases_by_language:
+        French:
+        - détresse
+      policy: fixed
+    legacy_unclassified_forms:
+    - détresse
+    - Hilflosigkeit
+- id: lacanian-psychoanalysis-en-zh:hysteria
+  terms:
+    en:
+      preferred: hysteria
+    fr:
+      preferred: hystérie
+    zh-Hans:
+      preferred: 癔症
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: hysteria
+    original_record:
+      id: hysteria
+      source: hysteria
+      target: 癔症
+      variants:
+      - hystérie
+      - Hysterie
+      aliases_by_language:
+        French:
+        - hystérie
+      policy: fixed
+    legacy_unclassified_forms:
+    - hystérie
+    - Hysterie
+- id: lacanian-psychoanalysis-en-zh:id
+  terms:
+    en:
+      preferred: id
+    fr:
+      preferred: ça
+    zh-Hans:
+      preferred: 它/它我
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: id
+    original_record:
+      id: id
+      source: id
+      target: 它/它我
+      variants:
+      - ça
+      - das Es
+      aliases_by_language:
+        French:
+        - ça
+      policy: fixed
+    legacy_unclassified_forms:
+    - ça
+    - das Es
+- id: lacanian-psychoanalysis-en-zh:introjection
+  terms:
+    en:
+      preferred: introjection
+    fr:
+      preferred: introjection
+    zh-Hans:
+      preferred: 内摄
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: introjection
+    original_record:
+      id: introjection
+      source: introjection
+      target: 内摄
+      variants:
+      - Introjektion
+      aliases_by_language:
+        French:
+        - introjection
+      policy: fixed
+    legacy_unclassified_forms:
+    - Introjektion
+- id: lacanian-psychoanalysis-en-zh:inversion
+  terms:
+    en:
+      preferred: inversion
+    fr:
+      preferred: inversion
+    zh-Hans:
+      preferred: 颠倒
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: inversion
+    original_record:
+      id: inversion
+      source: inversion
+      target: 颠倒
+      aliases_by_language:
+        French:
+        - inversion
+      policy: fixed
+- id: lacanian-psychoanalysis-en-zh:identification
+  terms:
+    en:
+      preferred: identification
+    fr:
+      preferred: identification
+    zh-Hans:
+      preferred: 认同
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: identification
+    original_record:
+      id: identification
+      source: identification
+      target: 认同
+      variants:
+      - Identifizierung
+      aliases_by_language:
+        French:
+        - identification
+      policy: fixed
+    legacy_unclassified_forms:
+    - Identifizierung
+- id: lacanian-psychoanalysis-en-zh:imaginary
+  terms:
+    en:
+      preferred: imaginary
+    fr:
+      preferred: imaginaire
+    zh-Hans:
+      preferred: 想象界
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: imaginary
+    original_record:
+      id: imaginary
+      source: imaginary
+      target: 想象界
+      variants:
+      - imaginaire
+      aliases_by_language:
+        French:
+        - imaginaire
+      policy: fixed
+    legacy_unclassified_forms:
+    - imaginaire
+- id: lacanian-psychoanalysis-en-zh:imago
+  terms:
+    en:
+      preferred: imago
+    zh-Hans:
+      preferred: 意象
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: imago
+    original_record:
+      id: imago
+      source: imago
+      target: 意象
+      policy: fixed
+- id: lacanian-psychoanalysis-en-zh:index
+  terms:
+    en:
+      preferred: index
+    fr:
+      preferred: index
+    zh-Hans:
+      preferred: 指示符
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: index
+    original_record:
+      id: index
+      source: index
+      target: 指示符
+      aliases_by_language:
+        French:
+        - index
+      policy: fixed
+- id: lacanian-psychoanalysis-en-zh:instinct
+  terms:
+    en:
+      preferred: instinct
+    fr:
+      preferred: instinct
+    zh-Hans:
+      preferred: 本能
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: instinct
+    original_record:
+      id: instinct
+      source: instinct
+      target: 本能
+      variants:
+      - Instinkt
+      aliases_by_language:
+        French:
+        - instinct
+      policy: fixed
+    legacy_unclassified_forms:
+    - Instinkt
+- id: lacanian-psychoanalysis-en-zh:international-psycho-analytical-association
+  terms:
+    en:
+      preferred: International Psycho-Analytical Association
+    zh-Hans:
+      preferred: 国际精神分析协会
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: international-psycho-analytical-association
+    original_record:
+      id: international-psycho-analytical-association
+      source: International Psycho-Analytical Association
+      target: 国际精神分析协会
+      policy: fixed
+- id: lacanian-psychoanalysis-en-zh:interpretation
+  terms:
+    en:
+      preferred: interpretation
+    fr:
+      preferred: interprétation
+    zh-Hans:
+      preferred: 解释
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: interpretation
+    original_record:
+      id: interpretation
+      source: interpretation
+      target: 解释
+      variants:
+      - interprétation
+      aliases_by_language:
+        French:
+        - interprétation
+      policy: fixed
+    legacy_unclassified_forms:
+    - interprétation
+- id: lacanian-psychoanalysis-en-zh:intersubjectivity
+  terms:
+    en:
+      preferred: intersubjectivity
+    fr:
+      preferred: intersubjectivité
+    zh-Hans:
+      preferred: 主体间性
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: intersubjectivity
+    original_record:
+      id: intersubjectivity
+      source: intersubjectivity
+      target: 主体间性
+      variants:
+      - intersubjectivité
+      aliases_by_language:
+        French:
+        - intersubjectivité
+      policy: fixed
+    legacy_unclassified_forms:
+    - intersubjectivité
+- id: lacanian-psychoanalysis-en-zh:jouissance
+  terms:
+    en:
+      preferred: jouissance
+    fr:
+      preferred: jouissance
+    zh-Hans:
+      preferred: 享乐
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: jouissance
+    original_record:
+      id: jouissance
+      source: jouissance
+      target: 享乐
+      aliases_by_language:
+        French:
+        - jouissance
+      policy: fixed
+- id: lacanian-psychoanalysis-en-zh:kleinian-psychoanalysis
+  terms:
+    en:
+      preferred: Kleinian psychoanalysis
+    zh-Hans:
+      preferred: 克莱因派精神分析
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: kleinian-psychoanalysis
+    original_record:
+      id: kleinian-psychoanalysis
+      source: Kleinian psychoanalysis
+      target: 克莱因派精神分析
+      policy: fixed
+- id: lacanian-psychoanalysis-en-zh:knowledge
+  terms:
+    en:
+      preferred: knowledge
+    fr:
+      preferred: connaissance
+    zh-Hans:
+      preferred: 认识/知识
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: knowledge
+    original_record:
+      id: knowledge
+      source: knowledge
+      target: 认识/知识
+      variants:
+      - connaissance
+      - savoir
+      aliases_by_language:
+        French:
+        - connaissance
+        - savoir
+      policy: fixed
+    legacy_unclassified_forms:
+    - connaissance
+    - savoir
+- id: lacanian-psychoanalysis-en-zh:lack
+  terms:
+    en:
+      preferred: lack
+    fr:
+      preferred: manque
+    zh-Hans:
+      preferred: 缺失
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: lack
+    original_record:
+      id: lack
+      source: lack
+      target: 缺失
+      variants:
+      - manque
+      aliases_by_language:
+        French:
+        - manque
+      policy: fixed
+    legacy_unclassified_forms:
+    - manque
+- id: lacanian-psychoanalysis-en-zh:language
+  terms:
+    en:
+      preferred: language
+    fr:
+      preferred: langue
+    zh-Hans:
+      preferred: 语言
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: language
+    original_record:
+      id: language
+      source: language
+      target: 语言
+      variants:
+      - langue
+      - langage
+      aliases_by_language:
+        French:
+        - langue
+        - langage
+      policy: fixed
+    legacy_unclassified_forms:
+    - langue
+    - langage
+- id: lacanian-psychoanalysis-en-zh:law
+  terms:
+    en:
+      preferred: law
+    fr:
+      preferred: loi
+    zh-Hans:
+      preferred: 法则
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: law
+    original_record:
+      id: law
+      source: law
+      target: 法则
+      variants:
+      - loi
+      aliases_by_language:
+        French:
+        - loi
+      policy: fixed
+    legacy_unclassified_forms:
+    - loi
+- id: lacanian-psychoanalysis-en-zh:letter
+  terms:
+    en:
+      preferred: letter
+    fr:
+      preferred: lettre
+    zh-Hans:
+      preferred: 字符
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: letter
+    original_record:
+      id: letter
+      source: letter
+      target: 字符
+      variants:
+      - lettre
+      aliases_by_language:
+        French:
+        - lettre
+      policy: fixed
+    legacy_unclassified_forms:
+    - lettre
+- id: lacanian-psychoanalysis-en-zh:libido
+  terms:
+    en:
+      preferred: libido
+    fr:
+      preferred: libido
+    zh-Hans:
+      preferred: 力比多
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: libido
+    original_record:
+      id: libido
+      source: libido
+      target: 力比多
+      aliases_by_language:
+        French:
+        - libido
+      policy: fixed
+- id: lacanian-psychoanalysis-en-zh:linguistics
+  terms:
+    en:
+      preferred: linguistics
+    fr:
+      preferred: linguistique
+    zh-Hans:
+      preferred: 语言学
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: linguistics
+    original_record:
+      id: linguistics
+      source: linguistics
+      target: 语言学
+      variants:
+      - linguistique
+      aliases_by_language:
+        French:
+        - linguistique
+      policy: fixed
+    legacy_unclassified_forms:
+    - linguistique
+- id: lacanian-psychoanalysis-en-zh:love
+  terms:
+    en:
+      preferred: love
+    fr:
+      preferred: amour
+    zh-Hans:
+      preferred: 爱
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: love
+    original_record:
+      id: love
+      source: love
+      target: 爱
+      variants:
+      - amour
+      aliases_by_language:
+        French:
+        - amour
+      policy: fixed
+    legacy_unclassified_forms:
+    - amour
+- id: lacanian-psychoanalysis-en-zh:lure
+  terms:
+    en:
+      preferred: lure
+    fr:
+      preferred: leurre
+    zh-Hans:
+      preferred: 引诱
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: lure
+    original_record:
+      id: lure
+      source: lure
+      target: 引诱
+      variants:
+      - leurre
+      aliases_by_language:
+        French:
+        - leurre
+      policy: fixed
+    legacy_unclassified_forms:
+    - leurre
+- id: lacanian-psychoanalysis-en-zh:madness
+  terms:
+    en:
+      preferred: madness
+    fr:
+      preferred: folie
+    zh-Hans:
+      preferred: 疯癫
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: madness
+    original_record:
+      id: madness
+      source: madness
+      target: 疯癫
+      variants:
+      - folie
+      aliases_by_language:
+        French:
+        - folie
+      policy: fixed
+    legacy_unclassified_forms:
+    - folie
+- id: lacanian-psychoanalysis-en-zh:metonymy
+  terms:
+    en:
+      preferred: metonymy
+    fr:
+      preferred: métonymie
+    zh-Hans:
+      preferred: 换喻
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: metonymy
+    original_record:
+      id: metonymy
+      source: metonymy
+      target: 换喻
+      variants:
+      - métonymie
+      aliases_by_language:
+        French:
+        - métonymie
+      policy: fixed
+    legacy_unclassified_forms:
+    - métonymie
+- id: lacanian-psychoanalysis-en-zh:mirror-stage
+  terms:
+    en:
+      preferred: mirror stage
+    fr:
+      preferred: stade du miroir
+    zh-Hans:
+      preferred: 镜子阶段
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: mirror-stage
+    original_record:
+      id: mirror-stage
+      source: mirror stage
+      target: 镜子阶段
+      variants:
+      - stade du miroir
+      aliases_by_language:
+        French:
+        - stade du miroir
+      policy: fixed
+    legacy_unclassified_forms:
+    - stade du miroir
+- id: lacanian-psychoanalysis-en-zh:moebius-strip
+  terms:
+    en:
+      preferred: moebius strip
+    fr:
+      preferred: bande de moebius
+    zh-Hans:
+      preferred: 莫比乌斯带
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: moebius-strip
+    original_record:
+      id: moebius-strip
+      source: moebius strip
+      target: 莫比乌斯带
+      variants:
+      - bande de moebius
+      aliases_by_language:
+        French:
+        - bande de moebius
+      policy: fixed
+    legacy_unclassified_forms:
+    - bande de moebius
+- id: lacanian-psychoanalysis-en-zh:mother
+  terms:
+    en:
+      preferred: mother
+    fr:
+      preferred: mère
+    zh-Hans:
+      preferred: 母亲
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: mother
+    original_record:
+      id: mother
+      source: mother
+      target: 母亲
+      variants:
+      - mère
+      aliases_by_language:
+        French:
+        - mère
+      policy: fixed
+    legacy_unclassified_forms:
+    - mère
+- id: lacanian-psychoanalysis-en-zh:master
+  terms:
+    en:
+      preferred: master
+    fr:
+      preferred: maître
+    zh-Hans:
+      preferred: 主人
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: master
+    original_record:
+      id: master
+      source: master
+      target: 主人
+      variants:
+      - maître
+      aliases_by_language:
+        French:
+        - maître
+      policy: fixed
+    legacy_unclassified_forms:
+    - maître
+- id: lacanian-psychoanalysis-en-zh:materialism
+  terms:
+    en:
+      preferred: materialism
+    fr:
+      preferred: matérialisme
+    zh-Hans:
+      preferred: 唯物主义
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: materialism
+    original_record:
+      id: materialism
+      source: materialism
+      target: 唯物主义
+      variants:
+      - matérialisme
+      aliases_by_language:
+        French:
+        - matérialisme
+      policy: fixed
+    legacy_unclassified_forms:
+    - matérialisme
+- id: lacanian-psychoanalysis-en-zh:mathematics
+  terms:
+    en:
+      preferred: mathematics
+    fr:
+      preferred: mathématiques
+    zh-Hans:
+      preferred: 数学
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: mathematics
+    original_record:
+      id: mathematics
+      source: mathematics
+      target: 数学
+      variants:
+      - mathématiques
+      aliases_by_language:
+        French:
+        - mathématiques
+      policy: fixed
+    legacy_unclassified_forms:
+    - mathématiques
+- id: lacanian-psychoanalysis-en-zh:matheme
+  terms:
+    en:
+      preferred: matheme
+    fr:
+      preferred: mathème
+    zh-Hans:
+      preferred: 数元/数学型
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: matheme
+    original_record:
+      id: matheme
+      source: matheme
+      target: 数元/数学型
+      variants:
+      - mathème
+      aliases_by_language:
+        French:
+        - mathème
+      policy: fixed
+    legacy_unclassified_forms:
+    - mathème
+- id: lacanian-psychoanalysis-en-zh:meconnaissance
+  terms:
+    en:
+      preferred: méconnaissance
+    fr:
+      preferred: méconnaissance
+    zh-Hans:
+      preferred: 误认
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: meconnaissance
+    original_record:
+      id: meconnaissance
+      source: méconnaissance
+      target: 误认
+      aliases_by_language:
+        French:
+        - méconnaissance
+      policy: fixed
+- id: lacanian-psychoanalysis-en-zh:memory
+  terms:
+    en:
+      preferred: memory
+    fr:
+      preferred: mémoire
+    zh-Hans:
+      preferred: 记忆
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: memory
+    original_record:
+      id: memory
+      source: memory
+      target: 记忆
+      variants:
+      - mémoire
+      aliases_by_language:
+        French:
+        - mémoire
+      policy: fixed
+    legacy_unclassified_forms:
+    - mémoire
+- id: lacanian-psychoanalysis-en-zh:metalanguage
+  terms:
+    en:
+      preferred: metalanguage
+    fr:
+      preferred: métalangage
+    zh-Hans:
+      preferred: 元语言
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: metalanguage
+    original_record:
+      id: metalanguage
+      source: metalanguage
+      target: 元语言
+      variants:
+      - métalangage
+      aliases_by_language:
+        French:
+        - métalangage
+      policy: fixed
+    legacy_unclassified_forms:
+    - métalangage
+- id: lacanian-psychoanalysis-en-zh:metaphor
+  terms:
+    en:
+      preferred: metaphor
+    fr:
+      preferred: métaphore
+    zh-Hans:
+      preferred: 隐喻
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: metaphor
+    original_record:
+      id: metaphor
+      source: metaphor
+      target: 隐喻
+      variants:
+      - métaphore
+      aliases_by_language:
+        French:
+        - métaphore
+      policy: fixed
+    legacy_unclassified_forms:
+    - métaphore
+- id: lacanian-psychoanalysis-en-zh:name-of-the-father
+  terms:
+    en:
+      preferred: Name-of-the-Father
+    fr:
+      preferred: Nom-du-père ①
+    zh-Hans:
+      preferred: 父亲的名义
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: name-of-the-father
+    original_record:
+      id: name-of-the-father
+      source: Name-of-the-Father
+      target: 父亲的名义
+      variants:
+      - Nom-du-père ①
+      aliases_by_language:
+        French:
+        - Nom-du-père ①
+      policy: fixed
+    legacy_unclassified_forms:
+    - Nom-du-père ①
+- id: lacanian-psychoanalysis-en-zh:narcissism
+  terms:
+    en:
+      preferred: narcissism
+    fr:
+      preferred: narcissisme
+    zh-Hans:
+      preferred: 自恋
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: narcissism
+    original_record:
+      id: narcissism
+      source: narcissism
+      target: 自恋
+      variants:
+      - narcissisme
+      - Narzissmus
+      aliases_by_language:
+        French:
+        - narcissisme
+      policy: fixed
+    legacy_unclassified_forms:
+    - narcissisme
+    - Narzissmus
+- id: lacanian-psychoanalysis-en-zh:nature
+  terms:
+    en:
+      preferred: nature
+    fr:
+      preferred: nature
+    zh-Hans:
+      preferred: 自然
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: nature
+    original_record:
+      id: nature
+      source: nature
+      target: 自然
+      aliases_by_language:
+        French:
+        - nature
+      policy: fixed
+- id: lacanian-psychoanalysis-en-zh:need
+  terms:
+    en:
+      preferred: need
+    fr:
+      preferred: besoin
+    zh-Hans:
+      preferred: 需要
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: need
+    original_record:
+      id: need
+      source: need
+      target: 需要
+      variants:
+      - besoin
+      aliases_by_language:
+        French:
+        - besoin
+      policy: fixed
+    legacy_unclassified_forms:
+    - besoin
+- id: lacanian-psychoanalysis-en-zh:negation
+  terms:
+    en:
+      preferred: negation
+    fr:
+      preferred: dénégation
+    zh-Hans:
+      preferred: 否定
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: negation
+    original_record:
+      id: negation
+      source: negation
+      target: 否定
+      variants:
+      - dénégation
+      - Verneinung
+      aliases_by_language:
+        French:
+        - dénégation
+      policy: fixed
+    legacy_unclassified_forms:
+    - dénégation
+    - Verneinung
+- id: lacanian-psychoanalysis-en-zh:neurosis
+  terms:
+    en:
+      preferred: neurosis
+    fr:
+      preferred: névrose
+    zh-Hans:
+      preferred: 神经症
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: neurosis
+    original_record:
+      id: neurosis
+      source: neurosis
+      target: 神经症
+      variants:
+      - névrose
+      - Neurose
+      aliases_by_language:
+        French:
+        - névrose
+      policy: fixed
+    legacy_unclassified_forms:
+    - névrose
+    - Neurose
+- id: lacanian-psychoanalysis-en-zh:object-relations-theory
+  terms:
+    en:
+      preferred: object-relations theory
+    fr:
+      preferred: théorie du relation d’objet
+    zh-Hans:
+      preferred: 对象关系理论
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: object-relations-theory
+    original_record:
+      id: object-relations-theory
+      source: object-relations theory
+      target: 对象关系理论
+      variants:
+      - théorie du relation d’objet
+      aliases_by_language:
+        French:
+        - théorie du relation d’objet
+      policy: fixed
+    legacy_unclassified_forms:
+    - théorie du relation d’objet
+- id: lacanian-psychoanalysis-en-zh:objet-petit-a
+  terms:
+    en:
+      preferred: objet petit a
+    fr:
+      preferred: objet petit a
+    zh-Hans:
+      preferred: 对象小 a
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: objet-petit-a
+    original_record:
+      id: objet-petit-a
+      source: objet petit a
+      target: 对象小 a
+      aliases_by_language:
+        French:
+        - objet petit a
+      policy: fixed
+- id: lacanian-psychoanalysis-en-zh:obsessional-neurosis
+  terms:
+    en:
+      preferred: obsessional neurosis
+    fr:
+      preferred: névrose obsessionnelle
+    zh-Hans:
+      preferred: 强迫型神经症
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: obsessional-neurosis
+    original_record:
+      id: obsessional-neurosis
+      source: obsessional neurosis
+      target: 强迫型神经症
+      variants:
+      - névrose obsessionnelle
+      aliases_by_language:
+        French:
+        - névrose obsessionnelle
+      policy: fixed
+    legacy_unclassified_forms:
+    - névrose obsessionnelle
+- id: lacanian-psychoanalysis-en-zh:oedipus-complex
+  terms:
+    en:
+      preferred: Oedipus complex
+    fr:
+      preferred: complexe d’Œdipe
+    zh-Hans:
+      preferred: 俄狄浦斯情结
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: oedipus-complex
+    original_record:
+      id: oedipus-complex
+      source: Oedipus complex
+      target: 俄狄浦斯情结
+      variants:
+      - complexe d’Œdipe
+      - Ödipuskomplex
+      aliases_by_language:
+        French:
+        - complexe d’Œdipe
+      policy: fixed
+    legacy_unclassified_forms:
+    - complexe d’Œdipe
+    - Ödipuskomplex
+- id: lacanian-psychoanalysis-en-zh:optical-model
+  terms:
+    en:
+      preferred: optical model
+    fr:
+      preferred: modèle optique
+    zh-Hans:
+      preferred: 光学模型
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: optical-model
+    original_record:
+      id: optical-model
+      source: optical model
+      target: 光学模型
+      variants:
+      - modèle optique
+      aliases_by_language:
+        French:
+        - modèle optique
+      policy: fixed
+    legacy_unclassified_forms:
+    - modèle optique
+- id: lacanian-psychoanalysis-en-zh:order
+  terms:
+    en:
+      preferred: order
+    fr:
+      preferred: ordre
+    zh-Hans:
+      preferred: 秩序
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: order
+    original_record:
+      id: order
+      source: order
+      target: 秩序
+      variants:
+      - ordre
+      aliases_by_language:
+        French:
+        - ordre
+      policy: fixed
+    legacy_unclassified_forms:
+    - ordre
+- id: lacanian-psychoanalysis-en-zh:other
+  terms:
+    en:
+      preferred: other
+    fr:
+      preferred: autre
+    zh-Hans:
+      preferred: 小他者/大他者
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: other
+    original_record:
+      id: other
+      source: other
+      target: 小他者/大他者
+      variants:
+      - Other
+      - autre
+      - Autre
+      aliases_by_language:
+        French:
+        - autre
+        - Autre
+      policy: fixed
+    legacy_unclassified_forms:
+    - Other
+    - autre
+    - Autre
+- id: lacanian-psychoanalysis-en-zh:pleasure-principle
+  terms:
+    en:
+      preferred: pleasure principle
+    fr:
+      preferred: principe de plaisir
+    zh-Hans:
+      preferred: 快乐原则
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: pleasure-principle
+    original_record:
+      id: pleasure-principle
+      source: pleasure principle
+      target: 快乐原则
+      variants:
+      - principe de plaisir
+      - Lustprinzip
+      aliases_by_language:
+        French:
+        - principe de plaisir
+      policy: fixed
+    legacy_unclassified_forms:
+    - principe de plaisir
+    - Lustprinzip
+- id: lacanian-psychoanalysis-en-zh:point-de-capiton
+  terms:
+    en:
+      preferred: point de capiton
+    fr:
+      preferred: point de capiton
+    zh-Hans:
+      preferred: 结扣点
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: point-de-capiton
+    original_record:
+      id: point-de-capiton
+      source: point de capiton
+      target: 结扣点
+      aliases_by_language:
+        French:
+        - point de capiton
+      policy: fixed
+- id: lacanian-psychoanalysis-en-zh:preoedipal-phase
+  terms:
+    en:
+      preferred: preoedipal phase
+    fr:
+      preferred: stade préœdipien
+    zh-Hans:
+      preferred: 前俄狄浦斯期
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: preoedipal-phase
+    original_record:
+      id: preoedipal-phase
+      source: preoedipal phase
+      target: 前俄狄浦斯期
+      variants:
+      - stade préœdipien
+      aliases_by_language:
+        French:
+        - stade préœdipien
+      policy: fixed
+    legacy_unclassified_forms:
+    - stade préœdipien
+- id: lacanian-psychoanalysis-en-zh:privation
+  terms:
+    en:
+      preferred: privation
+    fr:
+      preferred: privation
+    zh-Hans:
+      preferred: 剥夺
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: privation
+    original_record:
+      id: privation
+      source: privation
+      target: 剥夺
+      aliases_by_language:
+        French:
+        - privation
+      policy: fixed
+- id: lacanian-psychoanalysis-en-zh:progress
+  terms:
+    en:
+      preferred: progress
+    fr:
+      preferred: progrès
+    zh-Hans:
+      preferred: 进展
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: progress
+    original_record:
+      id: progress
+      source: progress
+      target: 进展
+      variants:
+      - progrès
+      aliases_by_language:
+        French:
+        - progrès
+      policy: fixed
+    legacy_unclassified_forms:
+    - progrès
+- id: lacanian-psychoanalysis-en-zh:projection
+  terms:
+    en:
+      preferred: projection
+    fr:
+      preferred: projection
+    zh-Hans:
+      preferred: 投射
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: projection
+    original_record:
+      id: projection
+      source: projection
+      target: 投射
+      variants:
+      - Projektion
+      aliases_by_language:
+        French:
+        - projection
+      policy: fixed
+    legacy_unclassified_forms:
+    - Projektion
+- id: lacanian-psychoanalysis-en-zh:psychoanalysis
+  terms:
+    en:
+      preferred: psychoanalysis
+    fr:
+      preferred: psychanalyser
+    zh-Hans:
+      preferred: 精神分析
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: psychoanalysis
+    original_record:
+      id: psychoanalysis
+      source: psychoanalysis
+      target: 精神分析
+      variants:
+      - psychanalyser
+      - Psychoanalyse
+      aliases_by_language:
+        French:
+        - psychanalyser
+      policy: fixed
+    legacy_unclassified_forms:
+    - psychanalyser
+    - Psychoanalyse
+- id: lacanian-psychoanalysis-en-zh:psychology
+  terms:
+    en:
+      preferred: psychology
+    fr:
+      preferred: psychologie
+    zh-Hans:
+      preferred: 心理学
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: psychology
+    original_record:
+      id: psychology
+      source: psychology
+      target: 心理学
+      variants:
+      - psychologie
+      aliases_by_language:
+        French:
+        - psychologie
+      policy: fixed
+    legacy_unclassified_forms:
+    - psychologie
+- id: lacanian-psychoanalysis-en-zh:psychosis
+  terms:
+    en:
+      preferred: psychosis
+    fr:
+      preferred: psychose
+    zh-Hans:
+      preferred: 精神病
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: psychosis
+    original_record:
+      id: psychosis
+      source: psychosis
+      target: 精神病
+      variants:
+      - psychose
+      - Psychose
+      aliases_by_language:
+        French:
+        - psychose
+      policy: fixed
+    legacy_unclassified_forms:
+    - psychose
+    - Psychose
+- id: lacanian-psychoanalysis-en-zh:punctuation
+  terms:
+    en:
+      preferred: punctuation
+    fr:
+      preferred: punctuation
+    zh-Hans:
+      preferred: 标点
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: punctuation
+    original_record:
+      id: punctuation
+      source: punctuation
+      target: 标点
+      aliases_by_language:
+        French:
+        - punctuation
+      policy: fixed
+- id: lacanian-psychoanalysis-en-zh:part-object
+  terms:
+    en:
+      preferred: part-object
+    fr:
+      preferred: objet partiel
+    zh-Hans:
+      preferred: 部分对象
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: part-object
+    original_record:
+      id: part-object
+      source: part-object
+      target: 部分对象
+      variants:
+      - objet partiel
+      - Partialobjekt
+      aliases_by_language:
+        French:
+        - objet partiel
+      policy: fixed
+    legacy_unclassified_forms:
+    - objet partiel
+    - Partialobjekt
+- id: lacanian-psychoanalysis-en-zh:passage-to-the-act
+  terms:
+    en:
+      preferred: passage to the act
+    fr:
+      preferred: passage à l’act
+    zh-Hans:
+      preferred: 行动宣泄
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: passage-to-the-act
+    original_record:
+      id: passage-to-the-act
+      source: passage to the act
+      target: 行动宣泄
+      variants:
+      - passage à l’act
+      aliases_by_language:
+        French:
+        - passage à l’act
+      policy: fixed
+    legacy_unclassified_forms:
+    - passage à l’act
+- id: lacanian-psychoanalysis-en-zh:paternal-metaphor
+  terms:
+    en:
+      preferred: paternal metaphor
+    fr:
+      preferred: métaphore paternelle
+    zh-Hans:
+      preferred: 父性隐喻
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: paternal-metaphor
+    original_record:
+      id: paternal-metaphor
+      source: paternal metaphor
+      target: 父性隐喻
+      variants:
+      - métaphore paternelle
+      aliases_by_language:
+        French:
+        - métaphore paternelle
+      policy: fixed
+    legacy_unclassified_forms:
+    - métaphore paternelle
+- id: lacanian-psychoanalysis-en-zh:perversion
+  terms:
+    en:
+      preferred: perversion
+    fr:
+      preferred: perversion
+    zh-Hans:
+      preferred: 性倒错
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: perversion
+    original_record:
+      id: perversion
+      source: perversion
+      target: 性倒错
+      variants:
+      - Perversion
+      aliases_by_language:
+        French:
+        - perversion
+      policy: fixed
+    legacy_unclassified_forms:
+    - Perversion
+- id: lacanian-psychoanalysis-en-zh:phallus
+  terms:
+    en:
+      preferred: phallus
+    fr:
+      preferred: phallus
+    zh-Hans:
+      preferred: 阳具
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: phallus
+    original_record:
+      id: phallus
+      source: phallus
+      target: 阳具
+      variants:
+      - Phallus
+      aliases_by_language:
+        French:
+        - phallus
+      policy: fixed
+    legacy_unclassified_forms:
+    - Phallus
+- id: lacanian-psychoanalysis-en-zh:philosophy
+  terms:
+    en:
+      preferred: philosophy
+    fr:
+      preferred: philosophie
+    zh-Hans:
+      preferred: 哲学
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: philosophy
+    original_record:
+      id: philosophy
+      source: philosophy
+      target: 哲学
+      variants:
+      - philosophie
+      aliases_by_language:
+        French:
+        - philosophie
+      policy: fixed
+    legacy_unclassified_forms:
+    - philosophie
+- id: lacanian-psychoanalysis-en-zh:phobia
+  terms:
+    en:
+      preferred: phobia
+    fr:
+      preferred: phobie
+    zh-Hans:
+      preferred: 恐怖症
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: phobia
+    original_record:
+      id: phobia
+      source: phobia
+      target: 恐怖症
+      variants:
+      - phobie
+      aliases_by_language:
+        French:
+        - phobie
+      policy: fixed
+    legacy_unclassified_forms:
+    - phobie
+- id: lacanian-psychoanalysis-en-zh:quaternary
+  terms:
+    en:
+      preferred: quaternary
+    fr:
+      preferred: quaternaire
+    zh-Hans:
+      preferred: 四元组
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: quaternary
+    original_record:
+      id: quaternary
+      source: quaternary
+      target: 四元组
+      variants:
+      - quaternaire
+      aliases_by_language:
+        French:
+        - quaternaire
+      policy: fixed
+    legacy_unclassified_forms:
+    - quaternaire
+- id: lacanian-psychoanalysis-en-zh:real
+  terms:
+    en:
+      preferred: real
+    fr:
+      preferred: réal
+    zh-Hans:
+      preferred: 实在界
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: real
+    original_record:
+      id: real
+      source: real
+      target: 实在界
+      variants:
+      - réal
+      aliases_by_language:
+        French:
+        - réal
+      policy: fixed
+    legacy_unclassified_forms:
+    - réal
+- id: lacanian-psychoanalysis-en-zh:reality-principle
+  terms:
+    en:
+      preferred: reality principle
+    fr:
+      preferred: principe de réalité
+    zh-Hans:
+      preferred: 现实原则
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: reality-principle
+    original_record:
+      id: reality-principle
+      source: reality principle
+      target: 现实原则
+      variants:
+      - principe de réalité
+      - Realitätsprinzip
+      aliases_by_language:
+        French:
+        - principe de réalité
+      policy: fixed
+    legacy_unclassified_forms:
+    - principe de réalité
+    - Realitätsprinzip
+- id: lacanian-psychoanalysis-en-zh:recollection
+  terms:
+    en:
+      preferred: recollection
+    fr:
+      preferred: remémoration
+    zh-Hans:
+      preferred: 回忆
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: recollection
+    original_record:
+      id: recollection
+      source: recollection
+      target: 回忆
+      variants:
+      - remémoration
+      aliases_by_language:
+        French:
+        - remémoration
+      policy: fixed
+    legacy_unclassified_forms:
+    - remémoration
+- id: lacanian-psychoanalysis-en-zh:regression
+  terms:
+    en:
+      preferred: regression
+    fr:
+      preferred: régression
+    zh-Hans:
+      preferred: 退行
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: regression
+    original_record:
+      id: regression
+      source: regression
+      target: 退行
+      variants:
+      - régression
+      - Regression
+      aliases_by_language:
+        French:
+        - régression
+      policy: fixed
+    legacy_unclassified_forms:
+    - régression
+    - Regression
+- id: lacanian-psychoanalysis-en-zh:religion
+  terms:
+    en:
+      preferred: religion
+    fr:
+      preferred: religion
+    zh-Hans:
+      preferred: 宗教
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: religion
+    original_record:
+      id: religion
+      source: religion
+      target: 宗教
+      aliases_by_language:
+        French:
+        - religion
+      policy: fixed
+- id: lacanian-psychoanalysis-en-zh:repetition
+  terms:
+    en:
+      preferred: repetition
+    fr:
+      preferred: répétition
+    zh-Hans:
+      preferred: 重复
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: repetition
+    original_record:
+      id: repetition
+      source: repetition
+      target: 重复
+      variants:
+      - répétition
+      aliases_by_language:
+        French:
+        - répétition
+      policy: fixed
+    legacy_unclassified_forms:
+    - répétition
+- id: lacanian-psychoanalysis-en-zh:repression
+  terms:
+    en:
+      preferred: repression
+    fr:
+      preferred: refoulement
+    zh-Hans:
+      preferred: 压抑
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: repression
+    original_record:
+      id: repression
+      source: repression
+      target: 压抑
+      variants:
+      - refoulement
+      - Verdrängung
+      aliases_by_language:
+        French:
+        - refoulement
+      policy: fixed
+    legacy_unclassified_forms:
+    - refoulement
+    - Verdrängung
+- id: lacanian-psychoanalysis-en-zh:resistance
+  terms:
+    en:
+      preferred: resistance
+    fr:
+      preferred: résistance
+    zh-Hans:
+      preferred: 阻抗
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: resistance
+    original_record:
+      id: resistance
+      source: resistance
+      target: 阻抗
+      variants:
+      - résistance
+      - Widerstand
+      aliases_by_language:
+        French:
+        - résistance
+      policy: fixed
+    legacy_unclassified_forms:
+    - résistance
+    - Widerstand
+- id: lacanian-psychoanalysis-en-zh:sadism
+  terms:
+    en:
+      preferred: sadism
+    fr:
+      preferred: sadisme
+    zh-Hans:
+      preferred: 施虐狂/受虐狂
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: sadism
+    original_record:
+      id: sadism
+      source: sadism
+      target: 施虐狂/受虐狂
+      variants:
+      - masochism
+      - sadisme
+      - masochisme
+      aliases_by_language:
+        French:
+        - sadisme
+        - masochisme
+      policy: fixed
+    legacy_unclassified_forms:
+    - masochism
+    - sadisme
+    - masochisme
+- id: lacanian-psychoanalysis-en-zh:shifter
+  terms:
+    en:
+      preferred: shifter
+    zh-Hans:
+      preferred: 转换词
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: shifter
+    original_record:
+      id: shifter
+      source: shifter
+      target: 转换词
+      policy: fixed
+- id: lacanian-psychoanalysis-en-zh:sign
+  terms:
+    en:
+      preferred: sign
+    fr:
+      preferred: signé
+    zh-Hans:
+      preferred: 符号
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: sign
+    original_record:
+      id: sign
+      source: sign
+      target: 符号
+      variants:
+      - signé
+      aliases_by_language:
+        French:
+        - signé
+      policy: fixed
+    legacy_unclassified_forms:
+    - signé
+- id: lacanian-psychoanalysis-en-zh:signified
+  terms:
+    en:
+      preferred: signified
+    fr:
+      preferred: signifié
+    zh-Hans:
+      preferred: 所指
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: signified
+    original_record:
+      id: signified
+      source: signified
+      target: 所指
+      variants:
+      - signifié
+      aliases_by_language:
+        French:
+        - signifié
+      policy: fixed
+    legacy_unclassified_forms:
+    - signifié
+- id: lacanian-psychoanalysis-en-zh:signifier
+  terms:
+    en:
+      preferred: signifier
+    fr:
+      preferred: signifiant
+    zh-Hans:
+      preferred: 能指
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: signifier
+    original_record:
+      id: signifier
+      source: signifier
+      target: 能指
+      variants:
+      - signifiant
+      aliases_by_language:
+        French:
+        - signifiant
+      policy: fixed
+    legacy_unclassified_forms:
+    - signifiant
+- id: lacanian-psychoanalysis-en-zh:signifying-chain
+  terms:
+    en:
+      preferred: signifying chain
+    fr:
+      preferred: chaîne signifiante
+    zh-Hans:
+      preferred: 能指链条
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: signifying-chain
+    original_record:
+      id: signifying-chain
+      source: signifying chain
+      target: 能指链条
+      variants:
+      - chaîne signifiante
+      - chaîne du signifiant
+      aliases_by_language:
+        French:
+        - chaîne signifiante
+        - chaîne du signifiant
+      policy: fixed
+    legacy_unclassified_forms:
+    - chaîne signifiante
+    - chaîne du signifiant
+- id: lacanian-psychoanalysis-en-zh:sinthome
+  terms:
+    en:
+      preferred: sinthome
+    fr:
+      preferred: sinthome
+    zh-Hans:
+      preferred: 圣状
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: sinthome
+    original_record:
+      id: sinthome
+      source: sinthome
+      target: 圣状
+      aliases_by_language:
+        French:
+        - sinthome
+      policy: fixed
+- id: lacanian-psychoanalysis-en-zh:slip
+  terms:
+    en:
+      preferred: slip
+    fr:
+      preferred: glisser[动词]
+    zh-Hans:
+      preferred: 滑动
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: slip
+    original_record:
+      id: slip
+      source: slip
+      target: 滑动
+      variants:
+      - glisser[动词]
+      - glissement[名词]
+      aliases_by_language:
+        French:
+        - glisser[动词]
+        - glissement[名词]
+      policy: fixed
+    legacy_unclassified_forms:
+    - glisser[动词]
+    - glissement[名词]
+- id: lacanian-psychoanalysis-en-zh:specular-image
+  terms:
+    en:
+      preferred: specular image
+    fr:
+      preferred: image spéculaire
+    zh-Hans:
+      preferred: 镜像
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: specular-image
+    original_record:
+      id: specular-image
+      source: specular image
+      target: 镜像
+      variants:
+      - image spéculaire
+      aliases_by_language:
+        French:
+        - image spéculaire
+      policy: fixed
+    legacy_unclassified_forms:
+    - image spéculaire
+- id: lacanian-psychoanalysis-en-zh:speech
+  terms:
+    en:
+      preferred: speech
+    fr:
+      preferred: parole
+    zh-Hans:
+      preferred: 言语
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: speech
+    original_record:
+      id: speech
+      source: speech
+      target: 言语
+      variants:
+      - parole
+      aliases_by_language:
+        French:
+        - parole
+      policy: fixed
+    legacy_unclassified_forms:
+    - parole
+- id: lacanian-psychoanalysis-en-zh:scene
+  terms:
+    en:
+      preferred: scene
+    fr:
+      preferred: scène
+    zh-Hans:
+      preferred: 场景
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: scene
+    original_record:
+      id: scene
+      source: scene
+      target: 场景
+      variants:
+      - scène
+      aliases_by_language:
+        French:
+        - scène
+      policy: fixed
+    legacy_unclassified_forms:
+    - scène
+- id: lacanian-psychoanalysis-en-zh:split
+  terms:
+    en:
+      preferred: split
+    fr:
+      preferred: refente
+    zh-Hans:
+      preferred: 分裂
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: split
+    original_record:
+      id: split
+      source: split
+      target: 分裂
+      variants:
+      - refente
+      aliases_by_language:
+        French:
+        - refente
+      policy: fixed
+    legacy_unclassified_forms:
+    - refente
+- id: lacanian-psychoanalysis-en-zh:structure
+  terms:
+    en:
+      preferred: structure
+    fr:
+      preferred: structure
+    zh-Hans:
+      preferred: 结构
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: structure
+    original_record:
+      id: structure
+      source: structure
+      target: 结构
+      aliases_by_language:
+        French:
+        - structure
+      policy: fixed
+- id: lacanian-psychoanalysis-en-zh:subject
+  terms:
+    en:
+      preferred: subject
+    fr:
+      preferred: sujet
+    zh-Hans:
+      preferred: 主体
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: subject
+    original_record:
+      id: subject
+      source: subject
+      target: 主体
+      variants:
+      - sujet
+      aliases_by_language:
+        French:
+        - sujet
+      policy: fixed
+    legacy_unclassified_forms:
+    - sujet
+- id: lacanian-psychoanalysis-en-zh:subject-supposed-to-know
+  terms:
+    en:
+      preferred: subject supposed to know
+    fr:
+      preferred: sujet supposé savoir
+    zh-Hans:
+      preferred: 假设知道的主体
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: subject-supposed-to-know
+    original_record:
+      id: subject-supposed-to-know
+      source: subject supposed to know
+      target: 假设知道的主体
+      variants:
+      - sujet supposé savoir
+      aliases_by_language:
+        French:
+        - sujet supposé savoir
+      policy: fixed
+    legacy_unclassified_forms:
+    - sujet supposé savoir
+- id: lacanian-psychoanalysis-en-zh:sublimation
+  terms:
+    en:
+      preferred: sublimation
+    fr:
+      preferred: sublimation
+    zh-Hans:
+      preferred: 升华
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: sublimation
+    original_record:
+      id: sublimation
+      source: sublimation
+      target: 升华
+      variants:
+      - Sublimierung
+      aliases_by_language:
+        French:
+        - sublimation
+      policy: fixed
+    legacy_unclassified_forms:
+    - Sublimierung
+- id: lacanian-psychoanalysis-en-zh:suggestion
+  terms:
+    en:
+      preferred: suggestion
+    fr:
+      preferred: suggestion
+    zh-Hans:
+      preferred: 暗示
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: suggestion
+    original_record:
+      id: suggestion
+      source: suggestion
+      target: 暗示
+      aliases_by_language:
+        French:
+        - suggestion
+      policy: fixed
+- id: lacanian-psychoanalysis-en-zh:superego
+  terms:
+    en:
+      preferred: superego
+    fr:
+      preferred: surmoi
+    zh-Hans:
+      preferred: 超我
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: superego
+    original_record:
+      id: superego
+      source: superego
+      target: 超我
+      variants:
+      - surmoi
+      - Über-Ich
+      aliases_by_language:
+        French:
+        - surmoi
+      policy: fixed
+    legacy_unclassified_forms:
+    - surmoi
+    - Über-Ich
+- id: lacanian-psychoanalysis-en-zh:symbolic
+  terms:
+    en:
+      preferred: symbolic
+    fr:
+      preferred: symbolique
+    zh-Hans:
+      preferred: 象征界
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: symbolic
+    original_record:
+      id: symbolic
+      source: symbolic
+      target: 象征界
+      variants:
+      - symbolique
+      aliases_by_language:
+        French:
+        - symbolique
+      policy: fixed
+    legacy_unclassified_forms:
+    - symbolique
+- id: lacanian-psychoanalysis-en-zh:symptom
+  terms:
+    en:
+      preferred: symptom
+    fr:
+      preferred: symptôme
+    zh-Hans:
+      preferred: 症状
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: symptom
+    original_record:
+      id: symptom
+      source: symptom
+      target: 症状
+      variants:
+      - symptôme
+      aliases_by_language:
+        French:
+        - symptôme
+      policy: fixed
+    legacy_unclassified_forms:
+    - symptôme
+- id: lacanian-psychoanalysis-en-zh:schema-l
+  terms:
+    en:
+      preferred: schema L
+    fr:
+      preferred: schéma L
+    zh-Hans:
+      preferred: L图式
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: schema-l
+    original_record:
+      id: schema-l
+      source: schema L
+      target: L图式
+      variants:
+      - schéma L
+      aliases_by_language:
+        French:
+        - schéma L
+      policy: fixed
+    legacy_unclassified_forms:
+    - schéma L
+- id: lacanian-psychoanalysis-en-zh:school
+  terms:
+    en:
+      preferred: school
+    fr:
+      preferred: école
+    zh-Hans:
+      preferred: 学派
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: school
+    original_record:
+      id: school
+      source: school
+      target: 学派
+      variants:
+      - école
+      aliases_by_language:
+        French:
+        - école
+      policy: fixed
+    legacy_unclassified_forms:
+    - école
+- id: lacanian-psychoanalysis-en-zh:science
+  terms:
+    en:
+      preferred: science
+    fr:
+      preferred: science
+    zh-Hans:
+      preferred: 科学
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: science
+    original_record:
+      id: science
+      source: science
+      target: 科学
+      variants:
+      - Wissenschaft
+      aliases_by_language:
+        French:
+        - science
+      policy: fixed
+    legacy_unclassified_forms:
+    - Wissenschaft
+- id: lacanian-psychoanalysis-en-zh:semblance
+  terms:
+    en:
+      preferred: semblance
+    fr:
+      preferred: semblant
+    zh-Hans:
+      preferred: 假相
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: semblance
+    original_record:
+      id: semblance
+      source: semblance
+      target: 假相
+      variants:
+      - semblant
+      aliases_by_language:
+        French:
+        - semblant
+      policy: fixed
+    legacy_unclassified_forms:
+    - semblant
+- id: lacanian-psychoanalysis-en-zh:seminar
+  terms:
+    en:
+      preferred: seminar
+    fr:
+      preferred: séminaire
+    zh-Hans:
+      preferred: 研讨班
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: seminar
+    original_record:
+      id: seminar
+      source: seminar
+      target: 研讨班
+      variants:
+      - séminaire
+      aliases_by_language:
+        French:
+        - séminaire
+      policy: fixed
+    legacy_unclassified_forms:
+    - séminaire
+- id: lacanian-psychoanalysis-en-zh:sexual-relationship
+  terms:
+    en:
+      preferred: sexual relationship
+    fr:
+      preferred: rapport sexuel
+    zh-Hans:
+      preferred: 性别关系
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: sexual-relationship
+    original_record:
+      id: sexual-relationship
+      source: sexual relationship
+      target: 性别关系
+      variants:
+      - rapport sexuel
+      aliases_by_language:
+        French:
+        - rapport sexuel
+      policy: fixed
+    legacy_unclassified_forms:
+    - rapport sexuel
+- id: lacanian-psychoanalysis-en-zh:thing
+  terms:
+    en:
+      preferred: Thing
+    fr:
+      preferred: chose
+    zh-Hans:
+      preferred: 原物/大写之物
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: thing
+    original_record:
+      id: thing
+      source: Thing
+      target: 原物/大写之物
+      variants:
+      - chose
+      - das Ding
+      aliases_by_language:
+        French:
+        - chose
+      policy: fixed
+    legacy_unclassified_forms:
+    - chose
+    - das Ding
+- id: lacanian-psychoanalysis-en-zh:time
+  terms:
+    en:
+      preferred: time
+    fr:
+      preferred: temps
+    zh-Hans:
+      preferred: 时间
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: time
+    original_record:
+      id: time
+      source: time
+      target: 时间
+      variants:
+      - temps
+      aliases_by_language:
+        French:
+        - temps
+      policy: fixed
+    legacy_unclassified_forms:
+    - temps
+- id: lacanian-psychoanalysis-en-zh:topology
+  terms:
+    en:
+      preferred: topology
+    fr:
+      preferred: topologie
+    zh-Hans:
+      preferred: 拓扑学
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: topology
+    original_record:
+      id: topology
+      source: topology
+      target: 拓扑学
+      variants:
+      - topologie
+      aliases_by_language:
+        French:
+        - topologie
+      policy: fixed
+    legacy_unclassified_forms:
+    - topologie
+- id: lacanian-psychoanalysis-en-zh:torus
+  terms:
+    en:
+      preferred: torus
+    fr:
+      preferred: tore
+    zh-Hans:
+      preferred: 圆环面
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: torus
+    original_record:
+      id: torus
+      source: torus
+      target: 圆环面
+      variants:
+      - tore
+      aliases_by_language:
+        French:
+        - tore
+      policy: fixed
+    legacy_unclassified_forms:
+    - tore
+- id: lacanian-psychoanalysis-en-zh:transference
+  terms:
+    en:
+      preferred: transference
+    fr:
+      preferred: transfert
+    zh-Hans:
+      preferred: 转移
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: transference
+    original_record:
+      id: transference
+      source: transference
+      target: 转移
+      variants:
+      - transfert
+      - Übertragung
+      aliases_by_language:
+        French:
+        - transfert
+      policy: fixed
+    legacy_unclassified_forms:
+    - transfert
+    - Übertragung
+- id: lacanian-psychoanalysis-en-zh:transitivism
+  terms:
+    en:
+      preferred: transitivism
+    fr:
+      preferred: transitivisme
+    zh-Hans:
+      preferred: 互易感觉
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: transitivism
+    original_record:
+      id: transitivism
+      source: transitivism
+      target: 互易感觉
+      variants:
+      - transitivisme
+      aliases_by_language:
+        French:
+        - transitivisme
+      policy: fixed
+    legacy_unclassified_forms:
+    - transitivisme
+- id: lacanian-psychoanalysis-en-zh:treatment
+  terms:
+    en:
+      preferred: treatment
+    fr:
+      preferred: cure
+    zh-Hans:
+      preferred: 治疗
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: treatment
+    original_record:
+      id: treatment
+      source: treatment
+      target: 治疗
+      variants:
+      - cure
+      aliases_by_language:
+        French:
+        - cure
+      policy: fixed
+    legacy_unclassified_forms:
+    - cure
+- id: lacanian-psychoanalysis-en-zh:truth
+  terms:
+    en:
+      preferred: truth
+    fr:
+      preferred: vérité
+    zh-Hans:
+      preferred: 真理
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: truth
+    original_record:
+      id: truth
+      source: truth
+      target: 真理
+      variants:
+      - vérité
+      aliases_by_language:
+        French:
+        - vérité
+      policy: fixed
+    legacy_unclassified_forms:
+    - vérité
+- id: lacanian-psychoanalysis-en-zh:unconscious
+  terms:
+    en:
+      preferred: unconscious
+    fr:
+      preferred: inconscient
+    zh-Hans:
+      preferred: 无意识
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: unconscious
+    original_record:
+      id: unconscious
+      source: unconscious
+      target: 无意识
+      variants:
+      - inconscient
+      - das Unbewußte
+      aliases_by_language:
+        French:
+        - inconscient
+      policy: fixed
+    legacy_unclassified_forms:
+    - inconscient
+    - das Unbewußte
+- id: lacanian-psychoanalysis-en-zh:woman
+  terms:
+    en:
+      preferred: woman
+    fr:
+      preferred: femme
+    zh-Hans:
+      preferred: 女人
+      policy: fixed
+  provenance:
+    source_table: lacanian-psychoanalysis-en-zh.yaml
+    source_id: woman
+    original_record:
+      id: woman
+      source: woman
+      target: 女人
+      variants:
+      - femme
+      aliases_by_language:
+        French:
+        - femme
+      policy: fixed
+    legacy_unclassified_forms:
+    - femme

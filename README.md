@@ -16,6 +16,10 @@ Antigravity 工作区 Agent 负责翻译和需要语义判断的内容，本地 
 流程不需要 OCR。`html-prepare` 会生成主 Agent 专用的 EPUB worker 派发清单，列出所有波次的
 scoped prompt/manifest 入口；CLI 打印首波入口。该清单只描述计划，不会自动启动 Subagent。
 
+外部术语表使用 schema 2 多语言概念格式，按配置的源语言与目标语言直接匹配词条；缺少某一
+语言时不会从其他语言推导译法。查看
+[`docs/antigravity-workflow.md`](docs/antigravity-workflow.md) 了解字段和选择流程。
+
 ## 快速开始
 
 ### 准备环境

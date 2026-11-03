@@ -318,17 +318,16 @@ def _prepare_html_command(args):
             context_files=context_files or None,
             skipped_context_files=skipped_context_files,
             file_roles=pipeline.translation_file_roles(declared_files),
-            prompt_context_files={
-                name: path
-                for name, path in context_files.items()
-                if str(name).startswith("reference_glossary_")
-            },
+            # Native glossary snapshots remain audit-only; workers receive
+            # per-unit projected terms through unit_context_files.
+            prompt_context_files={},
             unit_context_files=build_unit_glossary_contexts(
                 output_dir,
                 output_dir / "compressed_units",
                 glossary_bundle.context_files,
                 None if skip_entities else entity_path,
                 source_language=source_language,
+                target_language=target_language,
             ),
             declared_files=declared_files,
             chapter_groups=_load_html_chapter_groups(pipeline, declared_files),

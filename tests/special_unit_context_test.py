@@ -276,19 +276,19 @@ def test_term_candidates_are_suggestions_and_respect_authority(tmp_path: Path):
     assert [item["ambiguous"] for item in conflict] == [True, True, False, False]
 
 
-def test_term_candidates_use_word_boundaries_and_label_exact_aliases():
+def test_term_candidates_use_word_boundaries_and_projected_source_aliases():
     context = {
         "language": {"source": "English", "target": "Chinese"},
         "entries": [
             {"kind": "domain", "source": "art", "target": "艺术", "policy": "fixed"},
             {"kind": "domain", "source": "term", "target": "术语", "policy": "preferred", "aliases": ["concept"]},
-            {"kind": "reference", "source": "Begriff", "target": "概念", "aliases_by_language": {"English": ["concept"]}},
+            {"kind": "reference", "source": "concept", "target": "概念"},
         ],
     }
     assert term_candidates("art", context)[0]["match_type"] == "exact_source"
     assert term_candidates("cart", context) == []
     alias = term_candidates("concept", context)
-    assert {item["match_type"] for item in alias} == {"exact_alias", "exact_cross_language_alias"}
+    assert {item["match_type"] for item in alias} == {"exact_alias", "exact_source"}
     assert not any(item["ambiguous"] for item in alias)
 
     list_source = term_candidates(

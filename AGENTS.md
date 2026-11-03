@@ -172,6 +172,10 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
   多个候选或领域不清时先询问用户。跨语言但相关的表只能由用户明确写入
   `translation.reference_glossaries`，作为只读参考，不参与正式术语优先级。忽略
   `*.example.*`、README 和 `output/` 快照。
+- 正式外部术语表必须使用 schema 2 多语言概念条目。每个概念按 `terms` 中明确提供的
+  源/目标语言直接投影；不得从德语、法语等中间语言推断缺失译法，也不要求整表声明固定的
+  源/目标语言。旧配置中的术语表路径需要用户更新为当前文件名；程序不会自动迁移或按文件名
+  猜测替代文件。
 - 术语优先级固定为：外部领域表 `fixed` > 外部领域表 `preferred` > 当前书实体表；
   短语优先于其组成部分。若出现无法按此规则解释的冲突，停止翻译并报告，不要临时造译法。
 - 术语准备完成后，检查 `output/<title>/glossary_selection.json`：它记录本次是否明确
@@ -182,11 +186,11 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
   相邻短章节合并时改用按文件分区的直接上下文，超大章节拆分时使用跨多个分片的
   `shared_entries` 加当前分片的 `local_entries`。不得把不同顶层章节的术语上下文混用。
   完整快照只用于审计和冲突复核，不能修改。没有外部表时也要尊重记录的
-  `explicit_none`/`unconfigured` 状态，不得自行加载目录中的术语表。参考术语表快照
+  `explicit_none`/`unconfigured` 状态，不得自行加载目录中的术语表。参考表快照
   使用 `reference_glossary_*` 名称，不能覆盖权威术语表，也不得反向写回原文件。
-  参考表若要为英文正文提供德文概念提示，必须在条目中使用带语言标记的
-  `aliases_by_language`（例如 `English: [sublation]`）；命中的条目只作为
-  `kind: reference` 的稀疏背景提示，不改变正式术语优先级。
+  需要让不同源语言正文命中参考概念时，应在对应源语言项（如 `terms.en.aliases`）中
+  明确写入该源文形式；只生成当前源/目标语言对命中的 `kind: reference` 稀疏提示。
+  正文和元数据 worker 都不得直接读取完整原生参考表快照。
 - `translate`、`polish`、`refine`、`extract-entities`、`translate-toc` 只准备交接或
   执行本地处理；命令成功不代表正文已经完成。
 - `polish` 会按 `subagent.batching.max_concurrency` 生成
@@ -855,7 +859,7 @@ uv run pdf2epub -c config.yaml build-epub
    源语言和目标语言。外部术语表按第 1 节规则选择。
 2. 如需选择外部术语表，先执行 `uv run pdf2epub -c config_epub.yaml glossary-candidates`，
    查看候选报告后再明确写入 `translation.glossaries`；跨语言参考表明确写入
-   `translation.reference_glossaries`，只能作为只读参考。
+   `translation.reference_glossaries`，只能作为只读参考，并由当前源/目标语言词形投影为稀疏上下文。
 3. 执行：
 
    ```text

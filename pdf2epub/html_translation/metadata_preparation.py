@@ -125,19 +125,11 @@ class MetadataTranslationPreparer:
                 self.output_dir,
                 context_files,
                 metadata_text,
+                source_language=self.source_language,
+                target_language=target_language,
             )
             if compact_context:
                 metadata_context_files["metadata_glossary"] = compact_context
-            # Reference-only glossaries intentionally remain available to the
-            # metadata task because their conceptual correspondences cannot be
-            # selected reliably by exact source-form matching.
-            metadata_context_files.update(
-                {
-                    str(name): Path(path)
-                    for name, path in context_files.items()
-                    if str(name).startswith("reference_glossary_")
-                }
-            )
             metadata_audit_context_files = {
                 str(name): Path(path) for name, path in context_files.items()
             }
@@ -209,12 +201,11 @@ Rules:
    not prose, so do not translate or otherwise rewrite them.
 8. If `{source_filename}` contains a `translation_context` object, read every
    listed operational context file before translating. Treat all files as
-   read-only. Apply authoritative terminology from `metadata_glossary` to the
-   title, TOC, description, and rights. Files named `reference_glossary_*`
-   are background conceptual references only: they do not override
-   authoritative terminology, and you must not modify them or write inferred
-   entries back to them. Any `translation_audit_context` is for provenance
-   only; do not load it unless the operational context has an explicit gap.
+   read-only. Apply `kind: domain` terminology from `metadata_glossary` to the
+   title, TOC, description, and rights. Entries marked `kind: reference` are
+   sparse conceptual hints only and never override authoritative terminology.
+   Any `translation_audit_context` is for provenance only; do not load it to
+   obtain additional terms.
 9. Return valid JSON only. Do not wrap it in Markdown fences or add commentary.
    If the model refuses a field, do not put the refusal text into the JSON;
    report the blocked metadata task instead.

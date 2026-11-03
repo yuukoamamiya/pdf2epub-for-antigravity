@@ -1,0 +1,1064 @@
+schema_version: 2
+metadata:
+  id: communication
+  name: Communication
+  domain: communication
+  version: '2026-11-03'
+entries:
+- id: political-economy-of-communication:audience-commodity
+  terms:
+    en:
+      preferred: audience commodity
+    zh-Hans:
+      preferred: 受众商品
+      policy: preferred
+  note: 达拉斯·斯麦思传播政治经济学的核心概念：广告支持型媒介将被组织和测量的受众注意力、观看时间及其相关特征作为商品出售给广告主。
+  category: Political Economy of Communication
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: audience-commodity
+    original_record:
+      id: audience-commodity
+      source: audience commodity
+      target: 受众商品
+      category: Political Economy of Communication
+      note: 达拉斯·斯麦思传播政治经济学的核心概念：广告支持型媒介将被组织和测量的受众注意力、观看时间及其相关特征作为商品出售给广告主。
+      policy: preferred
+- id: political-economy-of-communication:audience-labour
+  terms:
+    en:
+      preferred: audience labour
+      variants:
+      - audience labor
+    zh-Hans:
+      preferred: 受众劳动
+      policy: preferred
+  note: 传播政治经济学中对受众媒介使用活动的称呼，强调受众的观看、参与和注意力如何被纳入媒介商品化过程。
+  category: Political Economy of Communication
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: audience-labour
+    original_record:
+      id: audience-labour
+      source: audience labour
+      variants:
+      - audience labor
+      target: 受众劳动
+      category: Political Economy of Communication
+      note: 传播政治经济学中对受众媒介使用活动的称呼，强调受众的观看、参与和注意力如何被纳入媒介商品化过程。
+      policy: preferred
+- id: political-economy-of-communication:audience-power
+  terms:
+    en:
+      preferred: audience-power
+      variants:
+      - audience power
+    zh-Hans:
+      preferred: 受众力
+      policy: preferred
+  note: 杰哈利与利万特关于受众作为媒介生产要素的理论术语，指受众被商业媒介组织、动员并投入观看活动的能力。
+  category: Political Economy of Communication
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: audience-power
+    original_record:
+      id: audience-power
+      source: audience-power
+      variants:
+      - audience power
+      target: 受众力
+      category: Political Economy of Communication
+      note: 杰哈利与利万特关于受众作为媒介生产要素的理论术语，指受众被商业媒介组织、动员并投入观看活动的能力。
+      policy: preferred
+- id: political-economy-of-communication:watching-power
+  terms:
+    en:
+      preferred: watching-power
+      variants:
+      - watching power
+    zh-Hans:
+      preferred: 观看力
+      policy: preferred
+  note: 指受众进行观看、从而为商业媒介提供可售观看时间的能力；是“受众商品”理论中与观看活动相关的核心术语。
+  category: Political Economy of Communication
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: watching-power
+    original_record:
+      id: watching-power
+      source: watching-power
+      variants:
+      - watching power
+      target: 观看力
+      category: Political Economy of Communication
+      note: 指受众进行观看、从而为商业媒介提供可售观看时间的能力；是“受众商品”理论中与观看活动相关的核心术语。
+      policy: preferred
+- id: political-economy-of-communication:necessary-watching-time
+  terms:
+    en:
+      preferred: necessary watching time
+    zh-Hans:
+      preferred: 必要观看时间
+      policy: preferred
+  note: 杰哈利与利万特理论中的观看时间部分：用于补偿媒介节目生产成本的观看时间。
+  category: Political Economy of Communication
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: necessary-watching-time
+    original_record:
+      id: necessary-watching-time
+      source: necessary watching time
+      target: 必要观看时间
+      category: Political Economy of Communication
+      note: 杰哈利与利万特理论中的观看时间部分：用于补偿媒介节目生产成本的观看时间。
+      policy: preferred
+- id: political-economy-of-communication:surplus-watching-time
+  terms:
+    en:
+      preferred: surplus watching time
+    zh-Hans:
+      preferred: 剩余观看时间
+      policy: preferred
+  note: 超出必要观看时间、主要通过观看广告而为商业媒介带来额外价值的观看时间。
+  category: Political Economy of Communication
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: surplus-watching-time
+    original_record:
+      id: surplus-watching-time
+      source: surplus watching time
+      target: 剩余观看时间
+      category: Political Economy of Communication
+      note: 超出必要观看时间、主要通过观看广告而为商业媒介带来额外价值的观看时间。
+      policy: preferred
+- id: political-economy-of-communication:watching-as-working
+  terms:
+    en:
+      preferred: watching as working
+      variants:
+      - watching as labour
+      - watching as labor
+    zh-Hans:
+      preferred: 观看即工作
+      policy: preferred
+  note: 杰哈利与利万特关于商业电视观看活动的核心命题；中文学术译名采用《观看即工作：受众意识的价值增殖》的正式题名。
+  category: Political Economy of Communication
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: watching-as-working
+    original_record:
+      id: watching-as-working
+      source: watching as working
+      variants:
+      - watching as labour
+      - watching as labor
+      target: 观看即工作
+      category: Political Economy of Communication
+      note: 杰哈利与利万特关于商业电视观看活动的核心命题；中文学术译名采用《观看即工作：受众意识的价值增殖》的正式题名。
+      policy: preferred
+- id: political-economy-of-communication:commercial-media
+  terms:
+    en:
+      preferred: commercial media
+    zh-Hans:
+      preferred: 商业媒体
+      policy: preferred
+  note: 以广告、受众商品或其他商业收入为主要运行基础的媒介组织和媒介系统。
+  category: Political Economy of Communication
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: commercial-media
+    original_record:
+      id: commercial-media
+      source: commercial media
+      target: 商业媒体
+      category: Political Economy of Communication
+      note: 以广告、受众商品或其他商业收入为主要运行基础的媒介组织和媒介系统。
+      policy: preferred
+- id: political-economy-of-communication:broadcasting
+  terms:
+    en:
+      preferred: broadcasting
+    zh-Hans:
+      preferred: 广播
+      policy: preferred
+  note: 面向广泛大众进行点对面传播的广播形态；在本书语境中与 narrowcasting（窄播）相对。
+  category: Media Industry / Political Economy of Communication
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: broadcasting
+    original_record:
+      id: broadcasting
+      source: broadcasting
+      target: 广播
+      category: Media Industry / Political Economy of Communication
+      note: 面向广泛大众进行点对面传播的广播形态；在本书语境中与 narrowcasting（窄播）相对。
+      policy: preferred
+- id: political-economy-of-communication:narrowcasting
+  terms:
+    en:
+      preferred: narrowcasting
+    zh-Hans:
+      preferred: 窄播
+      policy: preferred
+  note: 面向特定、细分受众进行的定向传播形态；在媒介经营中通常与受众细分和广告市场定位相联系。
+  category: Media Industry / Political Economy of Communication
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: narrowcasting
+    original_record:
+      id: narrowcasting
+      source: narrowcasting
+      target: 窄播
+      category: Media Industry / Political Economy of Communication
+      note: 面向特定、细分受众进行的定向传播形态；在媒介经营中通常与受众细分和广告市场定位相联系。
+      policy: preferred
+- id: political-economy-of-communication:ratings
+  terms:
+    en:
+      preferred: ratings
+    zh-Hans:
+      preferred: 收视率
+      policy: preferred
+  note: 电视媒介语境下特定时段或节目收看人数占总体推及人口的比例，是广告定价和媒介竞争的重要指标。
+  category: Media Economics / Audience Measurement
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: ratings
+    original_record:
+      id: ratings
+      source: ratings
+      target: 收视率
+      category: Media Economics / Audience Measurement
+      note: 电视媒介语境下特定时段或节目收看人数占总体推及人口的比例，是广告定价和媒介竞争的重要指标。
+      policy: preferred
+- id: political-economy-of-communication:psychographics
+  terms:
+    en:
+      preferred: psychographics
+    zh-Hans:
+      preferred: 心理统计学
+      policy: preferred
+  note: 依据受众的生活方式、价值观、兴趣、态度和个性等心理变量进行的受众分析或细分。
+  category: Audience Research / Advertising
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: psychographics
+    original_record:
+      id: psychographics
+      source: psychographics
+      target: 心理统计学
+      category: Audience Research / Advertising
+      note: 依据受众的生活方式、价值观、兴趣、态度和个性等心理变量进行的受众分析或细分。
+      policy: preferred
+- id: political-economy-of-communication:demographics
+  terms:
+    en:
+      preferred: demographics
+    zh-Hans:
+      preferred: 人口统计学
+      policy: preferred
+  note: 依据年龄、性别、收入、教育程度等人口统计变量描述或细分受众。
+  category: Audience Research / Advertising
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: demographics
+    original_record:
+      id: demographics
+      source: demographics
+      target: 人口统计学
+      category: Audience Research / Advertising
+      note: 依据年龄、性别、收入、教育程度等人口统计变量描述或细分受众。
+      policy: preferred
+- id: political-economy-of-communication:market-segmentation
+  terms:
+    en:
+      preferred: market segmentation
+    zh-Hans:
+      preferred: 市场细分
+      policy: preferred
+  note: 依据消费者或受众的需求、特征和行为，将整体市场划分为若干细分群体的营销与媒介经营方法。
+  category: Media Economics / Advertising
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: market-segmentation
+    original_record:
+      id: market-segmentation
+      source: market segmentation
+      target: 市场细分
+      category: Media Economics / Advertising
+      note: 依据消费者或受众的需求、特征和行为，将整体市场划分为若干细分群体的营销与媒介经营方法。
+      policy: preferred
+- id: political-economy-of-communication:codes-of-advertising
+  terms:
+    en:
+      preferred: codes of advertising
+      variants:
+      - The Codes of Advertising
+    zh-Hans:
+      preferred: 广告符码
+      policy: preferred
+  note: 苏特·杰哈利著作 The Codes of Advertising 的正式中文书名，也是本书讨论广告如何组织商品意义与受众关系的核心概念。
+  category: Advertising / Political Economy of Communication
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: codes-of-advertising
+    original_record:
+      id: codes-of-advertising
+      source: codes of advertising
+      variants:
+      - The Codes of Advertising
+      target: 广告符码
+      category: Advertising / Political Economy of Communication
+      note: 苏特·杰哈利著作 The Codes of Advertising 的正式中文书名，也是本书讨论广告如何组织商品意义与受众关系的核心概念。
+      policy: preferred
+- id: political-economy-of-communication:informationalized-capitalism
+  terms:
+    en:
+      preferred: informationalized capitalism
+      variants:
+      - informational capitalism
+    zh-Hans:
+      preferred: 信息化资本主义
+      policy: preferred
+  note: 丹·席勒的核心理论范畴：资本主义市场逻辑与商品化机制全面渗透并重塑信息、通信网络与知识生产的历史性发展阶段。
+  category: Political Economy of Communication
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: informationalized-capitalism
+    original_record:
+      id: informationalized-capitalism
+      source: informationalized capitalism
+      variants:
+      - informational capitalism
+      target: 信息化资本主义
+      category: Political Economy of Communication
+      note: 丹·席勒的核心理论范畴：资本主义市场逻辑与商品化机制全面渗透并重塑信息、通信网络与知识生产的历史性发展阶段。
+      policy: preferred
+- id: political-economy-of-communication:information-commodification
+  terms:
+    en:
+      preferred: information commodification
+      variants:
+      - commodification of information
+    zh-Hans:
+      preferred: 信息商品化
+      policy: preferred
+  note: 资本通过法律、技术与制度屏障，把社会共享的知识、符号、数据和文化创造转化为专有营利商品的演进过程。
+  category: Political Economy of Communication
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: information-commodification
+    original_record:
+      id: information-commodification
+      source: information commodification
+      variants:
+      - commodification of information
+      target: 信息商品化
+      category: Political Economy of Communication
+      note: 资本通过法律、技术与制度屏障，把社会共享的知识、符号、数据和文化创造转化为专有营利商品的演进过程。
+      policy: preferred
+- id: political-economy-of-communication:information-society
+  terms:
+    en:
+      preferred: information society
+    zh-Hans:
+      preferred: 信息社会
+      policy: preferred
+  note: 以信息和知识为核心资源的后工业阶段论述；传播政治经济学通常强调其与资本主义商品化逻辑的连续性而非断裂。
+  category: Social Theory / Political Economy of Communication
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: information-society
+    original_record:
+      id: information-society
+      source: information society
+      target: 信息社会
+      category: Social Theory / Political Economy of Communication
+      note: 以信息和知识为核心资源的后工业阶段论述；传播政治经济学通常强调其与资本主义商品化逻辑的连续性而非断裂。
+      policy: preferred
+- id: political-economy-of-communication:digital-capitalism
+  terms:
+    en:
+      preferred: digital capitalism
+    zh-Hans:
+      preferred: 数字资本主义
+      policy: preferred
+  note: 丹·席勒使用的范畴：计算机网络并非脱离现实的中立空间，而是全球资本扩张与市场网络重构的前沿。
+  category: Political Economy of Communication
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: digital-capitalism
+    original_record:
+      id: digital-capitalism
+      source: digital capitalism
+      target: 数字资本主义
+      category: Political Economy of Communication
+      note: 丹·席勒使用的范畴：计算机网络并非脱离现实的中立空间，而是全球资本扩张与市场网络重构的前沿。
+      policy: preferred
+- id: political-economy-of-communication:culture-industry
+  terms:
+    en:
+      preferred: culture industry
+    zh-Hans:
+      preferred: 文化工业
+      policy: preferred
+  note: 阿多诺与霍克海默提出的批判概念，指高度标准化、商业化与集中化的文化生产机制。
+  category: Critical Theory / Media Studies
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: culture-industry
+    original_record:
+      id: culture-industry
+      source: culture industry
+      target: 文化工业
+      category: Critical Theory / Media Studies
+      note: 阿多诺与霍克海默提出的批判概念，指高度标准化、商业化与集中化的文化生产机制。
+      policy: preferred
+- id: political-economy-of-communication:intellectual-property
+  terms:
+    en:
+      preferred: intellectual property
+      variants:
+      - intellectual property rights
+      - IPR
+    zh-Hans:
+      preferred: 知识产权
+      policy: preferred
+  note: 包括专利、版权与商标在内的专有权利体系，是把公共知识与非物质产品圈围为私有商品的关键制度工具。
+  category: Law / Political Economy of Communication
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: intellectual-property
+    original_record:
+      id: intellectual-property
+      source: intellectual property
+      variants:
+      - intellectual property rights
+      - IPR
+      target: 知识产权
+      category: Law / Political Economy of Communication
+      note: 包括专利、版权与商标在内的专有权利体系，是把公共知识与非物质产品圈围为私有商品的关键制度工具。
+      policy: preferred
+- id: political-economy-of-communication:media-convergence
+  terms:
+    en:
+      preferred: media convergence
+    zh-Hans:
+      preferred: 媒介融合
+      policy: preferred
+  note: 数字化条件下电信、计算机网络与大众传媒在技术平台、产业所有权和内容分发上的整合。
+  category: Communication Technology / Media Policy
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: media-convergence
+    original_record:
+      id: media-convergence
+      source: media convergence
+      target: 媒介融合
+      category: Communication Technology / Media Policy
+      note: 数字化条件下电信、计算机网络与大众传媒在技术平台、产业所有权和内容分发上的整合。
+      policy: preferred
+- id: political-economy-of-communication:digital-divide
+  terms:
+    en:
+      preferred: digital divide
+    zh-Hans:
+      preferred: 数字鸿沟
+      policy: preferred
+  note: 不同社会群体、阶级、性别和地区在获取与使用信息通信技术及网络资源方面的结构性不平等。
+  category: Information Policy / Political Economy of Communication
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: digital-divide
+    original_record:
+      id: digital-divide
+      source: digital divide
+      target: 数字鸿沟
+      category: Information Policy / Political Economy of Communication
+      note: 不同社会群体、阶级、性别和地区在获取与使用信息通信技术及网络资源方面的结构性不平等。
+      policy: preferred
+- id: political-economy-of-communication:cultural-imperialism
+  terms:
+    en:
+      preferred: cultural imperialism
+    zh-Hans:
+      preferred: 文化帝国主义
+      policy: preferred
+  note: 赫伯特·席勒等学者提出的批判概念，指核心资本主义国家借助媒介垄断向外围国家输出商业消费主义与文化依赖。
+  category: Critical Communication Studies
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: cultural-imperialism
+    original_record:
+      id: cultural-imperialism
+      source: cultural imperialism
+      target: 文化帝国主义
+      category: Critical Communication Studies
+      note: 赫伯特·席勒等学者提出的批判概念，指核心资本主义国家借助媒介垄断向外围国家输出商业消费主义与文化依赖。
+      policy: preferred
+- id: political-economy-of-communication:public-service-broadcasting
+  terms:
+    en:
+      preferred: public-service broadcasting
+      variants:
+      - public service broadcasting
+    zh-Hans:
+      preferred: 公共服务广播
+      policy: preferred
+  note: 以公共利益、公民文化和民主讨论为宗旨，独立于商业广告与政党私利的公共媒介制度。
+  category: Media Policy / Political Economy of Communication
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: public-service-broadcasting
+    original_record:
+      id: public-service-broadcasting
+      source: public-service broadcasting
+      variants:
+      - public service broadcasting
+      target: 公共服务广播
+      category: Media Policy / Political Economy of Communication
+      note: 以公共利益、公民文化和民主讨论为宗旨，独立于商业广告与政党私利的公共媒介制度。
+      policy: preferred
+- id: political-economy-of-communication:product-placement
+  terms:
+    en:
+      preferred: product placement
+    zh-Hans:
+      preferred: 植入式广告
+      policy: preferred
+  note: 把特定品牌、商品或服务嵌入电影、电视剧或游戏叙事中的隐性广告形式。
+  category: Advertising / Media Economics
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: product-placement
+    original_record:
+      id: product-placement
+      source: product placement
+      target: 植入式广告
+      category: Advertising / Media Economics
+      note: 把特定品牌、商品或服务嵌入电影、电视剧或游戏叙事中的隐性广告形式。
+      policy: preferred
+- id: political-economy-of-communication:deregulation
+  terms:
+    en:
+      preferred: deregulation
+    zh-Hans:
+      preferred: 放松管制
+      policy: preferred
+  note: 新自由主义政策取向：削减国家对电信、媒体等关键公共事业的准入、定价与公用事业义务限制。
+  category: Media Policy / Political Economy of Communication
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: deregulation
+    original_record:
+      id: deregulation
+      source: deregulation
+      target: 放松管制
+      category: Media Policy / Political Economy of Communication
+      note: 新自由主义政策取向：削减国家对电信、媒体等关键公共事业的准入、定价与公用事业义务限制。
+      policy: preferred
+- id: political-economy-of-communication:free-flow-of-information
+  terms:
+    en:
+      preferred: free flow of information
+      variants:
+      - free flow of information doctrine
+    zh-Hans:
+      preferred: 信息自由流动
+      policy: preferred
+  note: 二战后美国推动的国际传播主张，常被批评为跨国媒介和通讯社的全球扩张提供合法性。
+  category: International Communication / Political Economy of Communication
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: free-flow-of-information
+    original_record:
+      id: free-flow-of-information
+      source: free flow of information
+      variants:
+      - free flow of information doctrine
+      target: 信息自由流动
+      category: International Communication / Political Economy of Communication
+      note: 二战后美国推动的国际传播主张，常被批评为跨国媒介和通讯社的全球扩张提供合法性。
+      policy: preferred
+- id: political-economy-of-communication:monopoly-capital
+  terms:
+    en:
+      preferred: monopoly capital
+    zh-Hans:
+      preferred: 垄断资本
+      policy: preferred
+  note: 巴兰与斯威齐的范畴：现代资本主义由少数巨型寡头企业支配市场与剩余吸收的结构性特征。
+  category: Marxist Political Economy / Media Studies
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: monopoly-capital
+    original_record:
+      id: monopoly-capital
+      source: monopoly capital
+      target: 垄断资本
+      category: Marxist Political Economy / Media Studies
+      note: 巴兰与斯威齐的范畴：现代资本主义由少数巨型寡头企业支配市场与剩余吸收的结构性特征。
+      policy: preferred
+- id: political-economy-of-communication:telecommunications-policy
+  terms:
+    en:
+      preferred: telecommunications policy
+    zh-Hans:
+      preferred: 电信政策
+      policy: preferred
+  note: 国家关于电信网络建设、频谱划分、市场准入、反垄断与互联互通的制度安排和法律规则。
+  category: Telecommunications / Public Policy
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: telecommunications-policy
+    original_record:
+      id: telecommunications-policy
+      source: telecommunications policy
+      target: 电信政策
+      category: Telecommunications / Public Policy
+      note: 国家关于电信网络建设、频谱划分、市场准入、反垄断与互联互通的制度安排和法律规则。
+      policy: preferred
+- id: political-economy-of-communication:private-line
+  terms:
+    en:
+      preferred: private line
+      variants:
+      - private-wire
+    zh-Hans:
+      preferred: 专用线路
+      policy: preferred
+  note: 企业或特定机构租用、专供内部封闭通信使用的点对点专线。
+  category: Telecommunications / Political Economy of Communication
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: private-line
+    original_record:
+      id: private-line
+      source: private line
+      variants:
+      - private-wire
+      target: 专用线路
+      category: Telecommunications / Political Economy of Communication
+      note: 企业或特定机构租用、专供内部封闭通信使用的点对点专线。
+      policy: preferred
+- id: political-economy-of-communication:transnationalization
+  terms:
+    en:
+      preferred: transnationalization
+      variants:
+      - transnationalisation
+    zh-Hans:
+      preferred: 跨国化
+      policy: preferred
+  note: 媒介与文化资本跨越民族国家边界，通过跨国并购、合资和全球分销网络扩展资本循环的过程。
+  category: Global Political Economy / Media Studies
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: transnationalization
+    original_record:
+      id: transnationalization
+      source: transnationalization
+      variants:
+      - transnationalisation
+      target: 跨国化
+      category: Global Political Economy / Media Studies
+      note: 媒介与文化资本跨越民族国家边界，通过跨国并购、合资和全球分销网络扩展资本循环的过程。
+      policy: preferred
+- id: political-economy-of-communication:public-good
+  terms:
+    en:
+      preferred: public good
+      variants:
+      - public goods
+    zh-Hans:
+      preferred: 公共品
+      policy: preferred
+  note: 具有非排他性和非竞争性消费特征的产品或服务；信息常被讨论为具有公共品特征，但资本通过法律制造稀缺性以实现商品化。
+  category: Economics / Information Policy
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: public-good
+    original_record:
+      id: public-good
+      source: public good
+      variants:
+      - public goods
+      target: 公共品
+      category: Economics / Information Policy
+      note: 具有非排他性和非竞争性消费特征的产品或服务；信息常被讨论为具有公共品特征，但资本通过法律制造稀缺性以实现商品化。
+      policy: preferred
+- id: political-economy-of-communication:information-work
+  terms:
+    en:
+      preferred: information work
+      variants:
+      - information labor
+      - information labour
+    zh-Hans:
+      preferred: 信息劳动
+      policy: preferred
+  note: 以产生、处理、编码、传输和解释符号、数据及思想为内容的劳动形态。
+  category: Sociology of Work / Political Economy of Communication
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: information-work
+    original_record:
+      id: information-work
+      source: information work
+      variants:
+      - information labor
+      - information labour
+      target: 信息劳动
+      category: Sociology of Work / Political Economy of Communication
+      note: 以产生、处理、编码、传输和解释符号、数据及思想为内容的劳动形态。
+      policy: preferred
+- id: political-economy-of-communication:cultural-diversity
+  terms:
+    en:
+      preferred: cultural diversity
+    zh-Hans:
+      preferred: 文化多样性
+      policy: preferred
+  note: 各民族与社群文化表现形式的总和；常作为反抗跨国文化垄断与全球同质化的政策依据。
+  category: Cultural Policy / International Communication
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: cultural-diversity
+    original_record:
+      id: cultural-diversity
+      source: cultural diversity
+      target: 文化多样性
+      category: Cultural Policy / International Communication
+      note: 各民族与社群文化表现形式的总和；常作为反抗跨国文化垄断与全球同质化的政策依据。
+      policy: preferred
+- id: political-economy-of-communication:communicative-capitalism
+  terms:
+    en:
+      preferred: communicative capitalism
+    zh-Hans:
+      preferred: 传播资本主义
+      policy: preferred
+  note: 指网络交互、意见表达和传播活动本身被商品化并纳入资本循环的理论范畴；中文文献亦见“交往资本主义”，本表采用“传播资本主义”。
+  category: Political Economy of Communication
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: communicative-capitalism
+    original_record:
+      id: communicative-capitalism
+      source: communicative capitalism
+      target: 传播资本主义
+      category: Political Economy of Communication
+      note: 指网络交互、意见表达和传播活动本身被商品化并纳入资本循环的理论范畴；中文文献亦见“交往资本主义”，本表采用“传播资本主义”。
+      policy: preferred
+- id: political-economy-of-communication:free-labor
+  terms:
+    en:
+      preferred: free labor
+      variants:
+      - free labour
+    zh-Hans:
+      preferred: 无偿劳动
+      policy: preferred
+  note: 用户、玩家和网络受众在自愿或享受状态下提供的无偿内容、数据与注意力生产；中文文献亦见“免费劳动”，本表采用“无偿劳动”。
+  category: Digital Labour / Political Economy of Communication
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: free-labor
+    original_record:
+      id: free-labor
+      source: free labor
+      variants:
+      - free labour
+      target: 无偿劳动
+      category: Digital Labour / Political Economy of Communication
+      note: 用户、玩家和网络受众在自愿或享受状态下提供的无偿内容、数据与注意力生产；中文文献亦见“免费劳动”，本表采用“无偿劳动”。
+      policy: preferred
+- id: political-economy-of-communication:information-exceptionalism
+  terms:
+    en:
+      preferred: information exceptionalism
+    zh-Hans:
+      preferred: 信息例外主义
+      policy: preferred
+  note: 认为信息因零边际成本等特性而脱离一般资本积累规律的理论假定；亦译“信息例外论”。
+  category: Information Political Economy
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: information-exceptionalism
+    original_record:
+      id: information-exceptionalism
+      source: information exceptionalism
+      target: 信息例外主义
+      category: Information Political Economy
+      note: 认为信息因零边际成本等特性而脱离一般资本积累规律的理论假定；亦译“信息例外论”。
+      policy: preferred
+- id: political-economy-of-communication:digital-labour
+  terms:
+    en:
+      preferred: digital labour
+      variants:
+      - digital labor
+    zh-Hans:
+      preferred: 数字劳动
+      policy: preferred
+  note: 在数字媒体、平台和信息通信技术环境下生产或加工信息与数据的劳动，包含受薪与无偿形态。
+  category: Political Economy of Communication / Digital Labour
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: digital-labour
+    original_record:
+      id: digital-labour
+      source: digital labour
+      variants:
+      - digital labor
+      target: 数字劳动
+      category: Political Economy of Communication / Digital Labour
+      note: 在数字媒体、平台和信息通信技术环境下生产或加工信息与数据的劳动，包含受薪与无偿形态。
+      policy: preferred
+- id: political-economy-of-communication:copyleft
+  terms:
+    en:
+      preferred: copyleft
+    zh-Hans:
+      preferred: copyleft
+      policy: preferred
+  note: 利用版权法反向保障使用者自由、要求衍生作品按同许可分发的机制；中文文献常译“著佐权”“版权左”，本表按编辑决定保留原词。
+  category: Information Politics / Law
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: copyleft
+    original_record:
+      id: copyleft
+      source: copyleft
+      target: copyleft
+      category: Information Politics / Law
+      note: 利用版权法反向保障使用者自由、要求衍生作品按同许可分发的机制；中文文献常译“著佐权”“版权左”，本表按编辑决定保留原词。
+      policy: preferred
+- id: political-economy-of-communication:public-domain
+  terms:
+    en:
+      preferred: public domain
+    zh-Hans:
+      preferred: 公有领域
+      policy: preferred
+  note: 不受专有版权或专利保护、任何人可自由使用的知识空间，是信息公地与知识产权边界的关键概念。
+  category: Information Politics / Law
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: public-domain
+    original_record:
+      id: public-domain
+      source: public domain
+      target: 公有领域
+      category: Information Politics / Law
+      note: 不受专有版权或专利保护、任何人可自由使用的知识空间，是信息公地与知识产权边界的关键概念。
+      policy: preferred
+- id: political-economy-of-communication:digital-commons
+  terms:
+    en:
+      preferred: digital commons
+      variants:
+      - digital common
+    zh-Hans:
+      preferred: 数字公地
+      policy: preferred
+  note: 数字网络空间中由社群协同创造、维护并向所有人开放的信息、知识、软件与文化资源池。
+  category: Information Politics
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: digital-commons
+    original_record:
+      id: digital-commons
+      source: digital commons
+      variants:
+      - digital common
+      target: 数字公地
+      category: Information Politics
+      note: 数字网络空间中由社群协同创造、维护并向所有人开放的信息、知识、软件与文化资源池。
+      policy: preferred
+- id: political-economy-of-communication:political-economy-of-communication
+  terms:
+    en:
+      preferred: political economy of communication
+    zh-Hans:
+      preferred: 传播政治经济学
+      policy: preferred
+  note: 从生产、流通、所有权集中和阶级权力结构出发批判性考察媒介、电信与信息系统的学术范式。
+  category: Communication Studies
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: political-economy-of-communication
+    original_record:
+      id: political-economy-of-communication
+      source: political economy of communication
+      target: 传播政治经济学
+      category: Communication Studies
+      note: 从生产、流通、所有权集中和阶级权力结构出发批判性考察媒介、电信与信息系统的学术范式。
+      policy: preferred
+- id: political-economy-of-communication:playbour
+  terms:
+    en:
+      preferred: playbour
+      variants:
+      - playbor
+      - play-bour
+    zh-Hans:
+      preferred: 玩工
+      policy: preferred
+  note: 指游戏或游玩与劳动边界模糊、玩家的创造性游玩被平台无偿抽取价值的现象；亦见“游玩劳动”等译法，本表采用“玩工”。
+  category: Digital Labour
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: playbour
+    original_record:
+      id: playbour
+      source: playbour
+      variants:
+      - playbor
+      - play-bour
+      target: 玩工
+      category: Digital Labour
+      note: 指游戏或游玩与劳动边界模糊、玩家的创造性游玩被平台无偿抽取价值的现象；亦见“游玩劳动”等译法，本表采用“玩工”。
+      policy: preferred
+- id: political-economy-of-communication:californian-ideology
+  terms:
+    en:
+      preferred: Californian ideology
+      variants:
+      - the Californian ideology
+    zh-Hans:
+      preferred: 加州意识形态
+      policy: preferred
+  note: 硅谷将反主流文化自由想象与新自由主义市场崇拜混合的技术乌托邦意识形态；亦见“加利福尼亚意识形态”。
+  category: Critical Theory / Media Studies
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: californian-ideology
+    original_record:
+      id: californian-ideology
+      source: Californian ideology
+      variants:
+      - the Californian ideology
+      target: 加州意识形态
+      category: Critical Theory / Media Studies
+      note: 硅谷将反主流文化自由想象与新自由主义市场崇拜混合的技术乌托邦意识形态；亦见“加利福尼亚意识形态”。
+      policy: preferred
+- id: political-economy-of-communication:noble-savage
+  terms:
+    en:
+      preferred: noble savage
+    zh-Hans:
+      preferred: 高贵的野蛮人
+      policy: preferred
+  note: 指殖民主义话语中将原住民理想化为“高贵野蛮人”的叙事母题。
+  category: Cultural Theory
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: noble-savage
+    original_record:
+      id: noble-savage
+      source: noble savage
+      target: 高贵的野蛮人
+      policy: preferred
+      category: Cultural Theory
+      note: 指殖民主义话语中将原住民理想化为“高贵野蛮人”的叙事母题。
+- id: political-economy-of-communication:paternalism
+  terms:
+    en:
+      preferred: paternalism
+    zh-Hans:
+      preferred: 家长主义
+      policy: preferred
+  note: 指以保护或照料为名正当化对他者的监护与支配；“父爱主义”为异译。
+  category: Political / Cultural Theory
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: paternalism
+    original_record:
+      id: paternalism
+      source: paternalism
+      target: 家长主义
+      policy: preferred
+      category: Political / Cultural Theory
+      note: 指以保护或照料为名正当化对他者的监护与支配；“父爱主义”为异译。
+- id: political-economy-of-communication:mass-culture
+  terms:
+    en:
+      preferred: mass culture
+    zh-Hans:
+      preferred: 大众文化
+      policy: preferred
+  note: 指面向大众传播和消费的文化形态；不与popular culture或culture industry等同。
+  category: Cultural Theory
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: mass-culture
+    original_record:
+      id: mass-culture
+      source: mass culture
+      target: 大众文化
+      policy: preferred
+      category: Cultural Theory
+      note: 指面向大众传播和消费的文化形态；不与popular culture或culture industry等同。
+- id: political-economy-of-communication:disnification
+  terms:
+    en:
+      preferred: Disnification
+      variants:
+      - Disneyfication
+    zh-Hans:
+      preferred: 迪士尼化
+      policy: preferred
+  note: 指迪士尼式文化生产与呈现机制的扩展；不与Disneyization无条件等同。
+  category: Cultural Theory / Media Studies
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: disnification
+    original_record:
+      id: disnification
+      source: Disnification
+      target: 迪士尼化
+      variants:
+      - Disneyfication
+      policy: preferred
+      category: Cultural Theory / Media Studies
+      note: 指迪士尼式文化生产与呈现机制的扩展；不与Disneyization无条件等同。
+- id: political-economy-of-communication:consumerism
+  terms:
+    en:
+      preferred: consumerism
+    zh-Hans:
+      preferred: 消费主义
+      policy: preferred
+  note: 指将消费及商品占有塑造成生活目标或幸福标准的意识形态与社会取向。
+  category: Cultural / Political Economy
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: consumerism
+    original_record:
+      id: consumerism
+      source: consumerism
+      target: 消费主义
+      policy: preferred
+      category: Cultural / Political Economy
+      note: 指将消费及商品占有塑造成生活目标或幸福标准的意识形态与社会取向。
+- id: political-economy-of-communication:fair-use
+  terms:
+    en:
+      preferred: fair use
+    zh-Hans:
+      preferred: 合理使用
+      policy: preferred
+  note: 指版权法中满足法定条件的有限使用或侵权抗辩；具体范围取决于法域，不等同于fair dealing、免版权或任意复制。
+  category: Copyright / Media Studies
+  provenance:
+    source_table: political-economy-of-communication.yaml
+    source_id: fair-use
+    original_record:
+      id: fair-use
+      source: fair use
+      target: 合理使用
+      policy: preferred
+      category: Copyright / Media Studies
+      note: 指版权法中满足法定条件的有限使用或侵权抗辩；具体范围取决于法域，不等同于fair dealing、免版权或任意复制。

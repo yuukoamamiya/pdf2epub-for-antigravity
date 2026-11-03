@@ -265,7 +265,10 @@ def term_candidates(term: str, context: Mapping[str, Any]) -> list[dict[str, Any
         target = str(targets[0])
         if not source or not target:
             continue
-        forms = _term_forms(entry, include_cross_language=True, source_language=(context.get("language") or {}).get("source"))
+        # Worker contexts are already projected to the configured source and
+        # target languages. Only the projected source, variants, and aliases
+        # are matchable; do not infer forms from other native languages.
+        forms = _term_forms(entry)
         forms.extend(str(form) for form in sources if str(form).strip())
         forms = list(dict.fromkeys(forms))
         exact_form_types = {}
@@ -279,12 +282,6 @@ def term_candidates(term: str, context: Mapping[str, Any]) -> list[dict[str, Any
                     match_type = "exact_source"
                 elif normalized_form in {_normalize_match_text(v) for v in entry.get("variants", []) or []}:
                     match_type = "exact_variant"
-                elif normalized_form in {
-                    _normalize_match_text(v)
-                    for values in (entry.get("aliases_by_language") or {}).values()
-                    for v in (values if isinstance(values, list) else [values])
-                }:
-                    match_type = "exact_cross_language_alias"
                 else:
                     match_type = "exact_alias"
                 exact_form_types[normalized_form] = match_type
