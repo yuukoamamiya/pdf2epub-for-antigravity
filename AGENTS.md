@@ -531,6 +531,10 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    关闭脚注处理和尾注归一化；仅在确认是纯尾注且用户明确不需要任何脚注/尾注处理时才设置。
    EPUB 构建中的链接作用域独立于该页面候选模式：Notes 单元仍启用跨文件链接；局部定义按结构 scope
    优先匹配，缺少目标时不得借用其他局部 scope 的同号定义。Markdown 脚注引用在构建产物中未链接时会阻断构建。
+   EPUB 验收按构建前每个源文件/引用 occurrence 的预期映射，对照实际 XHTML 引用和定义目的地；
+   引用全部消失、没有链接或跳到错误定义都阻断。另有保守的 legacy 复核：未链接的数字 `<sup>N</sup>`
+   位于同一文件的水平分隔线之前，且分隔线后有编号匹配的 `N.`/`N)` 行时阻断构建并要求结构复核；
+   不自动改写正文。扫描排除代码/注释和已链接标记，并用启发式排除部分变量上标；不做通用公式解析。
    不得为省步骤或规避校验而关闭。也可在配置中显式固定 `footnotes` / `endnotes_only` / `disabled`，
    显式值始终覆盖 TOC 判断。TOC 中标记为
    `toc`、`notes`、`bibliography`、`index`、`author_notes`、`catalog`、`ad`、
@@ -585,8 +589,8 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    uv run pdf2epub -c config.yaml footnote-apply
    ```
 
-   当前脚注 prepare/decision validation 使用 schema 2；尾注边界歧义及其决定仍是独立 schema 1，
-   normalization 使用 schema 5。旧 normalization schema 1–4 或旧 prepare/decision schema 不能复用：
+   当前脚注 prepare/decision validation 使用 schema 3；尾注边界歧义及其决定仍是独立 schema 1，
+   normalization 使用 schema 6。旧 normalization schema 1–5 或旧 prepare/decision schema 不能复用：
    重新执行 prepare，只派发新 manifest 的 pending 项，再 validate/apply；无需重新 OCR。apply 会重建
    `footnote_normalized/` 和成功 checkpoint，需保留旧派生版本时先备份。
 
@@ -618,6 +622,15 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    `suspected_missed_count` 不再只是报告警告：达到回溯审计条件的漏检块会成为 `audit_candidates`，
    必须由视觉任务确认。默认使用 `footnotes.auto_accept: true`，只把异常区域交给 Subagent；需要
    全部候选复核时再设置 `false` 或运行 `footnote-prepare --review-all`。
+   如果最后一个明确标注的物理脚注候选（包括 review-all 产生的 review 项）以断词连字符结束，且下一张实际 PDF 页没有可追溯的续文候选，
+   `footnote-prepare` 会将前后两页加入 `continuation_reviews` 并提供两页图像。Subagent 必须
+   明确记录图像支持的 `truncated_source_exception`、`confirmed_not_a_footnote` 或从下一页图像恢复出的续文；普通
+   `footnote_start` 决定不能代替该结论。PDF 末页也会检查最后一个物理脚注，但只允许确认
+   原文截断/合法连字符，不允许从不存在的后页恢复续文。缺少页图、续文键或显式结果时，
+   `footnote-validate` 和 `footnote-apply` 均阻断。
+   显式 `footnotes.mode: disabled` 仍覆盖 TOC 决定；若 TOC 标记页底脚注，prepare、validate、
+   apply 会在机器报告和 CLI 中警告本次关闭页脚注自动提取/链接创建；既有 Markdown 脚注链接仍可能构建。若 TOC 标记集中尾注，警告会说明
+   Markdown 尾注链接仍可能生成；`auto` 或无冲突时不产生该警告。
    Subagent 必须输出区域级审计和其中每个 review block 的角色，在脚注、引用、参考文献、普通正文和
    不确定项之间作出决定；区域或 block 使用 `review_required` 时校验阻断。原生上标引用在 `pages/`
    中保留为 `<sup>…</sup>`，后续只有确认存在对应脚注定义时才转换为 `[^N]`。

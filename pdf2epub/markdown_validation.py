@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import difflib
+import html
 import math
 import re
 from collections import Counter
@@ -280,9 +281,11 @@ _validate_special_role_markers = validate_special_role_markers
 
 def validate_footnote_markers(source_text: str, target_text: str) -> list[str]:
     """Require translated Markdown to preserve exact footnote marker syntax."""
+    source_visible = _mask_markdown_code_and_comments(source_text)
+    target_visible = _mask_markdown_code_and_comments(target_text)
     marker_re = re.compile(r"\[\^([A-Za-z0-9_-]+)\]")
-    source_markers = [match.group(1) for match in marker_re.finditer(source_text)]
-    target_markers = [match.group(1) for match in marker_re.finditer(target_text)]
+    source_markers = [match.group(1) for match in marker_re.finditer(source_visible)]
+    target_markers = [match.group(1) for match in marker_re.finditer(target_visible)]
     if source_markers != target_markers:
         return [
             "translate footnote marker mismatch: "
@@ -294,27 +297,88 @@ def validate_footnote_markers(source_text: str, target_text: str) -> list[str]:
             target_sup_count = len(
                 re.findall(
                     rf"<sup\b[^>]*>\s*{escaped}\s*</sup>",
-                    target_text,
+                    target_visible,
                     flags=re.IGNORECASE,
                 )
             )
             source_sup_count = len(
                 re.findall(
                     rf"<sup\b[^>]*>\s*{escaped}\s*</sup>",
-                    source_text,
+                    source_visible,
                     flags=re.IGNORECASE,
                 )
             )
             if target_sup_count > source_sup_count or re.search(
                 rf"\[(?:注|note)\s*{escaped}\]",
-                target_text,
+                target_visible,
                 flags=re.IGNORECASE,
             ):
                 return [
                     f"translate footnote marker {key} changed from Markdown "
                     "[^N] syntax to an alternate notation"
                 ]
+
+    source_superscripts = _raw_superscript_markers(source_visible)
+    target_superscripts = _raw_superscript_markers(target_visible)
+    if source_superscripts != target_superscripts:
+        return [
+            "translate superscript marker mismatch: "
+            f"source={source_superscripts!r}, target={target_superscripts!r}"
+        ]
     return []
+
+
+def _mask_markdown_code_and_comments(text: str) -> str:
+    """Blank code and HTML comments while preserving offsets and line breaks."""
+    chars = list(str(text or ""))
+    lines = str(text or "").splitlines(keepends=True)
+    offset = 0
+    fence_char: str | None = None
+    fence_size = 0
+    for line in lines:
+        match = re.match(r"^\s{0,3}(`{3,}|~{3,})", line)
+        if fence_char is not None:
+            _blank_preserving_newlines(chars, offset, offset + len(line))
+            if match and match.group(1)[0] == fence_char and len(match.group(1)) >= fence_size:
+                fence_char = None
+                fence_size = 0
+        elif match:
+            fence_char = match.group(1)[0]
+            fence_size = len(match.group(1))
+            _blank_preserving_newlines(chars, offset, offset + len(line))
+        else:
+            for code in re.finditer(r"(`+)(?!`)(.+?)\1(?!`)", line):
+                _blank_preserving_newlines(
+                    chars, offset + code.start(), offset + code.end()
+                )
+        offset += len(line)
+
+    masked = "".join(chars)
+    # Comments and literal HTML code blocks cannot contribute markers either.
+    for pattern in (
+        r"<!--.*?-->",
+        r"<(?:pre|code)\b[^>]*>.*?</(?:pre|code)\s*>",
+    ):
+        masked_chars = list(masked)
+        for match in re.finditer(pattern, masked, flags=re.IGNORECASE | re.DOTALL):
+            _blank_preserving_newlines(masked_chars, match.start(), match.end())
+        masked = "".join(masked_chars)
+    return masked
+
+
+def _blank_preserving_newlines(chars: list[str], start: int, end: int) -> None:
+    for index in range(start, min(end, len(chars))):
+        if chars[index] not in "\r\n":
+            chars[index] = " "
+
+
+def _raw_superscript_markers(text: str) -> list[str]:
+    """Capture raw sup contents without assigning citation/math semantics."""
+    markers = []
+    for match in re.finditer(r"<sup\b[^>]*>(.*?)</sup\s*>", text, re.IGNORECASE | re.DOTALL):
+        content = re.sub(r"<[^>]*>", "", match.group(1))
+        markers.append(re.sub(r"\s+", " ", html.unescape(content)).strip())
+    return markers
 
 
 def fix_reference_heading_mismatch(

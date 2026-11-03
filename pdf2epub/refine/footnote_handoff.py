@@ -58,6 +58,10 @@ def _write_unit_contexts(
             item for item in cross_windows
             if any(start_page <= int(page) <= end_page for page in item.get("pages", []))
         ]
+        continuation_reviews = [
+            item for item in report.get("continuation_reviews", [])
+            if any(start_page <= int(page) <= end_page for page in item.get("pages", []))
+        ]
         context = {
             "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
             "task": "footnote-prepare",
@@ -65,6 +69,7 @@ def _write_unit_contexts(
             "page_range": [start_page, end_page],
             "pages": pages,
             "cross_page_windows": windows,
+            "continuation_reviews": continuation_reviews,
             "decisions": [
                 item
                 for item in report.get("decisions", [])
@@ -186,7 +191,8 @@ def prepare_footnote_subagent(
     report["endnote_definition_ambiguities_sha256"] = sha256_file(ambiguity_path)
     atomic_write_json(output_dir / "footnote_candidates.json", report)
     page_review_required = (
-        bool(report["review_required"]) and report["footnote_mode"] != "disabled"
+        (bool(report["review_required"]) or bool(report.get("continuation_reviews")))
+        and report["footnote_mode"] != "disabled"
     )
     manifest = {
         "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
@@ -197,6 +203,7 @@ def prepare_footnote_subagent(
         "footnote_mode": report["footnote_mode"],
         "configured_footnote_mode": report.get("configured_footnote_mode"),
         "footnote_mode_source": report.get("footnote_mode_source"),
+        "warnings": report.get("warnings", []),
         "candidate_report": "footnote_candidates.json",
         "review_pages": report["review_pages"],
         "high_confidence_candidate_count": report["high_confidence_candidate_count"],
@@ -219,6 +226,7 @@ def prepare_footnote_subagent(
         "native_max_font_ratio": report["native_max_font_ratio"],
         "native_font_profile": report.get("native_font_profile", {}),
         "cross_page_window_count": len(report["cross_page_windows"]),
+        "continuation_reviews": report.get("continuation_reviews", []),
         "consensus_visual_review_pages": report["consensus_visual_review_pages"],
         "unit_context_files": unit_context_files,
         "decision_file": (
@@ -322,8 +330,46 @@ def prepare_footnote_subagent(
         "will refuse to guess between repeated markers.\n\n"
         "Do not reread or rewrite the whole book.\n"
     )
+    if report.get("continuation_reviews"):
+        continuation_task_lines = []
+        for task in report.get("continuation_reviews", []) or []:
+            if not isinstance(task, Mapping):
+                continue
+            source_note = task.get("source_note", {})
+            image_paths = ", ".join(
+                f"page {page}: `{image.get('path')}`"
+                for page, image in (task.get("visual_files", {}) or {}).items()
+                if isinstance(image, Mapping) and image.get("path")
+            )
+            continuation_task_lines.append(
+                f"- `{task.get('task_id')}` source page {source_note.get('page')}, "
+                f"key `{source_note.get('key')}`, ending `{source_note.get('text_ending')}`; "
+                f"review pages {task.get('pages')}: {image_paths or 'required image unavailable'}"
+            )
+        prompt += (
+            "\n\n## Missing continuation review tasks\n\n"
+            "For each `continuation_reviews` task, open every listed full-page image. "
+            "Review only the exact source note and every listed page. Add exactly one object "
+            "per task to `continuation_reviews` in `footnote_decisions.json`, keyed by the exact "
+            "`task_id`. Use `outcome: truncated_source_exception` only when the page image shows "
+            "the source itself ends there or the hyphen is intentional, or `confirmed_not_a_footnote` "
+            "when the image shows the candidate is ordinary body text. Explain the image evidence "
+            "in `reason`. Use `outcome: recovered_continuation` only when the next page "
+            "image visibly contains the missing continuation; include the exact visible text and "
+            "the existing note `key`. Never infer text from context or OCR alone. Each record must "
+            "include `evidence_pages` listing every task page. A task on the final physical PDF page "
+            "can only be `truncated_source_exception` or `confirmed_not_a_footnote`. No ordinary block decision clears "
+            "this task.\n\nTasks and exact image paths:\n"
+            + "\n".join(continuation_task_lines)
+            + "\n"
+        )
     if report["footnote_mode"] == "disabled":
         prompt = _no_review_prompt(book_title, report)
+        if report.get("warnings"):
+            prompt += "\nConfigured mode warning: " + " ".join(
+                str(item.get("message")) for item in report["warnings"]
+                if isinstance(item, Mapping) and item.get("message")
+            ) + "\n"
     elif page_review_required:
         if ambiguity_count:
             prompt += _endnote_ambiguity_section(ambiguity_count)

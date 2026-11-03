@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
-from ..workflow_contracts import atomic_write_json
+from ..workflow_contracts import atomic_write_json, sha256_file
 from .endnote_review import (
     load_endnote_definition_ambiguities,
     validate_endnote_definition_decisions,
@@ -24,6 +24,7 @@ from .footnote_validation_evidence import (
     load_visual_audit_manifest,
     validate_candidate_evidence,
 )
+from .footnote_continuation_review import validate_continuation_review_decisions
 
 
 def _endnote_definition_result(output_dir: Path) -> dict[str, Any]:
@@ -75,13 +76,15 @@ def _persist_result(
     *,
     validated_decisions: bool = False,
 ) -> dict[str, Any]:
-    atomic_write_json(output_dir / "footnote_decision_validation.json", result)
     if validated_decisions:
         updated_report = dict(report)
         updated_report["decisions"] = result["decisions"]
         updated_report["decisions_status"] = "validated"
         atomic_write_json(report_path, updated_report)
         _write_footnote_unit_contexts(output_dir, updated_report)
+    if report_path.is_file():
+        result["candidate_report_sha256"] = sha256_file(report_path)
+    atomic_write_json(output_dir / "footnote_decision_validation.json", result)
     return result
 
 
@@ -131,6 +134,7 @@ def validate_footnote_decisions(
         "footnote_mode": evidence["footnote_mode"],
         "configured_footnote_mode": evidence["configured_footnote_mode"],
         "footnote_mode_source": evidence["footnote_mode_source"],
+        "warnings": list(report.get("warnings", [])),
     }
     if errors:
         result = {
@@ -144,13 +148,15 @@ def validate_footnote_decisions(
         return _persist_result(output_dir, report_path, report, result)
 
     required = required_review_addresses(report)
-    if not required:
+    continuation_tasks = report.get("continuation_reviews", [])
+    if not required and not continuation_tasks:
         result = {
             **base_fields,
             "valid": True,
             "status": "no_subagent_review_required",
             "errors": [],
             "decisions": [],
+            "continuation_reviews": [],
         }
         _attach_endnote_result(result, endnote_result)
         return _persist_result(
@@ -206,6 +212,12 @@ def validate_footnote_decisions(
         for page, source, block in missing
     )
     errors.extend(validate_continuation_traceability(candidates, normalized))
+    continuation_decisions, continuation_errors = validate_continuation_review_decisions(
+        output_dir,
+        continuation_tasks,
+        decisions_data.get("continuation_reviews") if isinstance(decisions_data, dict) else None,
+    )
+    errors.extend(continuation_errors)
 
     if human_review_required:
         status = "human_review_required"
@@ -221,6 +233,7 @@ def validate_footnote_decisions(
         "human_review_required": human_review_required,
         "region_audits": sorted(region_ids),
         "decisions": normalized,
+        "continuation_reviews": continuation_decisions,
     }
     _attach_endnote_result(result, endnote_result)
     return _persist_result(

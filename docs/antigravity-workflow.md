@@ -608,6 +608,11 @@ EPUB 构建时，页面脚注候选模式与链接作用域分别处理：存在
 同一 scope 的单一定义可被重复引用共享。跨 scope 回退只针对真正集中的定义，不能借用其他局部
 scope 的同号定义。任何 Markdown 脚注引用在 EPUB 中未链接都会阻断构建；图检查 API 仍会报告
 未链接引用供审计。
+链接验收把构建前每个源文件中识别出的引用 occurrence（源 XHTML、`reference_id`、key、occurrence）
+绑定到明确的定义 XHTML 和 `target_id`，逐项核对最终链接目的地。即使渲染后引用全部消失、图为空，
+或链接指向错误定义也会失败。另有保守的 legacy 复核：未链接的数字 `<sup>N</sup>` 位于同一文件的
+水平分隔线之前，且分隔线后有编号匹配的 `N.`/`N)` 行时阻断构建并要求结构复核；不自动改写正文。
+扫描排除代码/注释和已链接标记，并用启发式排除部分变量上标；不做通用公式解析。
 结构父 scope 的跨分支归组逐 key 计算；一个 key 的引用/定义缺口不会把另一个 key 下自含的兄弟分支并入该 scope。
 
 对于所有 PDF，在 `refine-local` 后、`polish` 前运行 `footnote-prepare`。扫描 PDF 使用
@@ -640,6 +645,22 @@ OCR layout sidecar；旧原生文字运行在旧版本的 `ocr-pages` 阶段生�
 单个脚注可能跨页，多个脚注时也只有物理上最后一个脚注有自然
 续接位置。视觉审核任务要求
 先打开整页 PNG 判断整体边界，再用区域裁剪图放大文字细节，不能只看裁剪图。
+
+另有一个缺失续文审计：当页面最后一个明确标注的物理脚注候选（包括 review-all 模式下的 review 项）以断词连字符结束、下一张实际 PDF
+页没有可追溯的续文候选时，报告将前页源注释和后页设为 `continuation_reviews` 任务，附两页图像及
+哈希。Subagent 在 `footnote_decisions.json` 的同名字段中逐任务选择
+`truncated_source_exception`（图像显示原文确实截断或连字符合法）、
+`confirmed_not_a_footnote`（图像显示候选实际是普通正文）或
+`recovered_continuation`（后页图像可读到续文，并提供精确文本和原注 key）。普通 block 决定
+不会清除此任务；校验要求每个任务列出的页图当前且每个任务都有明确结果。恢复的内容只追加到唯一匹配的
+源注释，且仅在断词连字符仍存在时应用；原 `ocr_markdown/` 不被改写。只检查页面物理顺序中的
+最后一条带明确脚注标签的候选；PDF 末页只允许确认原文截断、合法连字符或候选不是脚注，并只需查看末页图。未检测到后页候选不等于自动认定文本缺失。
+
+`footnotes.mode: disabled` 是显式覆盖项。如果 TOC 标记 `footnotes`，脚注候选报告、handoff
+manifest、校验/应用结果和 CLI 会同时给出机器可读与双语警告，指出本次关闭页脚注的自动提取/链接创建；
+既有 Markdown 脚注链接仍可能生成。
+若 TOC 标记 `endnotes_only`，警告会指出页脚注处理关闭而 Markdown 集中尾注链接仍可能生成。
+`auto` 或没有冲突的配置不产生这些警告；警告不会阻止用户有意关闭处理。
 旧原生文字的
 页底编号候选不会仅因底部位置自动判为脚注；默认只有同页对应上标引用、小字号双重匹配且区域
 与页面相对内容尾部对齐的候选本地接受，其余候选交 Subagent 复核。扫描/OCR PDF 中只有明确标签、
@@ -869,9 +890,11 @@ Subagent；它必须为每条写入 `endnote_definition_decisions.json` 的一�
 `footnote-prepare → footnote-validate → footnote-apply`。没有歧义时不要求这两个哈希。
 
 `footnote_candidates.json`、`footnote_decisions.json` 和 `footnote_decision_validation.json`
-使用 prepare/decision schema 2；`endnote_definition_ambiguities.json` 及其 decisions 保持独立
-schema 1；`footnote_normalization.json` 使用 schema 5，TOC 使用 schema 2。版本号彼此独立。
-旧 normalization schema 1–4 和旧 prepare/decision schema 均不能复用：运行
+使用 prepare/decision schema 3；`endnote_definition_ambiguities.json` 及其 decisions 保持独立
+schema 1；`footnote_normalization.json` 使用 schema 6，TOC 使用 schema 2。版本号彼此独立。
+旧 normalization checkpoint 升级后需要重新运行 `footnote-prepare → footnote-validate →
+footnote-apply`，不需要重新 OCR。
+旧 normalization schema 1–5 和旧 prepare/decision schema 均不能复用：运行
 `uv run pdf2epub -c <配置> footnote-prepare`；只把新 manifest 列出的 pending/review 项交给
 工作区 Subagent。随后必须运行 `footnote-validate` 和 `footnote-apply`，即使没有待复核项也要执行。
 保留旧产物和 checkpoint，不手工改 schema 或哈希。该合同升级不要求重跑 OCR；恢复命令会更新准备

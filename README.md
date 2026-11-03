@@ -64,6 +64,10 @@ EPUB、MOBI、AZW3 将 [config_epub.yaml.example](config_epub.yaml.example) 复�
 PDF 原语言版和译文版都以通过润色验收的 Markdown 为源。原稿版会先生成，便于检查目录、段落、脚注和插图；
 发现源稿问题时，按操作手册修复并重新验收，再继续翻译。
 
+PDF 的页脚注抽取会复核疑似跨页断词缺口；需要时会把相邻两页图像交给工作区 Subagent，
+由图像证据确认原文截断或恢复缺失续文。`footnotes.mode: disabled` 会关闭页脚注自动提取和链接创建；
+若与 TOC 的脚注判断冲突，准备、校验和应用阶段都会显示警告。集中尾注的 Markdown 链接仍可能生成。
+
 PDF 和 EPUB 的结果通常位于 `output/<书名>/`：PDF 翻译生成原语言 EPUB 和译文 EPUB，PDF 只转换时生成原语言 EPUB，
 EPUB 翻译生成译文 EPUB。
 

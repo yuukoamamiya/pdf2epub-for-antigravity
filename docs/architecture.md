@@ -269,6 +269,12 @@ EPUB 构建的链接作用域独立于页面脚注候选模式：存在 Notes �
 结构局部 scope 内的定义；单一局部定义可由该 scope 多次引用共享。只有没有局部目标时才尝试
 真正集中的定义，不能把另一局部 scope 的同号注释当作目标。任何 Markdown 脚注引用未链接时构建失败；
 图检查 API 仍保留未链接引用报告供审计。
+链接图在构建前由 FootnoteManager 的源引用扫描生成预期 occurrence 投影，记录 `source_file`、
+`reference_id`、key、重复 occurrence 及目标 `target_file`/`target_id`。验证器逐项检查最终 XHTML
+引用和实际定义目标，因此空图、源引用消失和跨到错误脚注定义均不能假通过。另有保守的 legacy 复核：
+未链接的数字 `<sup>N</sup>` 位于同一文件的水平分隔线之前，且分隔线后有编号匹配的 `N.`/`N)` 行时
+阻断构建并要求结构复核；不自动改写正文。扫描排除代码/注释和已链接标记，并用启发式排除部分变量上标；
+不做通用公式解析。
 父结构 scope 的归组按脚注 key 分别推断；某个 key 的跨分支链接不会提升并吞并其他 key 下自含的兄弟分支。
 
 集中尾注定义边界的手递合同位于 `endnote_review.py`：
@@ -686,8 +692,8 @@ polish 或 translate Subagent。原始 OCR 单元不覆盖。
 已知 scope 边界处停止。单一 `(scope, key)` 定义可供该 scope 的多个引用共同使用；同一范围
 存在多个定义时仍按顺序逐次配对，额外引用不猜测目标。
 当前 `footnote_candidates.json`、`footnote_decisions.json` 和
-`footnote_decision_validation.json` 使用 prepare/decision schema 2；尾注边界歧义及其决定独立使用
-schema 1。该输出合同已更新到 `footnote_normalization.json` schema 5；旧 schema 1–4 checkpoint 会失效，
+`footnote_decision_validation.json` 使用 prepare/decision schema 3；尾注边界歧义及其决定独立使用
+schema 1。该输出合同已更新到 `footnote_normalization.json` schema 6；旧 schema 1–5 checkpoint 会失效，
 须重新运行 `footnote-prepare`，按新 manifest 的 pending 状态复核并写决定，再运行
 `footnote-validate → footnote-apply`。无需重跑 OCR。本次文档/代码维护不自动处理书稿产物；
 恢复命令会更新准备合同，并由 apply 重建 `footnote_normalized/` 与成功 checkpoint，用户需按需
@@ -920,7 +926,7 @@ PDF 结构阶段采用“共享证据、分离语义”的边界：
 | `footnote_status.py` | 归一化 checkpoint 的哈希和 freshness 诊断 | 候选扫描、脚注物化、修改 Markdown |
 
 脚注 apply 按“前置门禁/证据快照 → block 定位和 unit/lane 归属 → 引用与定义绑定 → 编辑冲突校验 → 内存纯转换 → 原子写入 → success checkpoint”的顺序运行。计划和所有绑定必须完整通过后才允许写入；源 unit 的哈希在读取原始字节时快照，写入前重新扫描 `ocr_markdown/*.md` 并与该快照逐项比较，同时先检查 `footnote_normalized/` 是否有不属于当前源 inventory 的 stale Markdown。
-任一计划、绑定、冲突或写前 inventory 校验失败时只写无效诊断 checkpoint，不改派生正文，也不生成有效 checkpoint。schema 保持 `footnote_candidates.json`/决定验证的 prepare schema 2 与 `footnote_normalization.json` schema 5；哈希快照字段不改变产物合同。
+任一计划、绑定、冲突或写前 inventory 校验失败时只写无效诊断 checkpoint，不改派生正文，也不生成有效 checkpoint。`footnote_candidates.json`/决定验证使用 prepare schema 3，`footnote_normalization.json` 使用 schema 6；旧 normalization checkpoint 需重跑 `footnote-prepare → footnote-validate → footnote-apply`，无需重新 OCR。
 
 新增 PDF 结构信号时，先判断它是共享的几何/证据事实还是某个领域的语义规则。前者进入
 共享模块并补一组跨阶段测试，后者只进入对应的 prepare/apply 模块。命令 handler 只读取
@@ -1162,6 +1168,15 @@ ocr-pages --resume
   `footnote_subagent_manifest.json` 是 handoff 索引，`footnote_decisions.json` 是唯一的
   人工/模型决定来源，`footnote_decision_validation.json` 是决定门禁，
   `footnote_normalization.json` 是 apply 后的结果检查点。它们的职责不能互换。
+  `footnote_candidates.json.continuation_reviews` 保存最后一个显式脚注标签页尾候选出现断词且下一实际页无可追溯续文的缺口；
+  `footnote_visual_audit_manifest.json` 为每项列出前后页图及哈希。决定文件必须为每个任务记录
+  图像支持的 `truncated_source_exception`、`confirmed_not_a_footnote` 或带可见文本/key 的 `recovered_continuation`。
+  校验独立要求该结果，不接受普通 block 角色作为替代；应用只把恢复文本写入唯一匹配的注释定义，
+  并要求源注释仍以断词连字符结尾。末页任务只允许原文截断/合法连字符结果；源 Markdown
+  与 OCR sidecar 均保持只读。
+- `warnings` 是报告和阶段结果中的机器可读记录。显式 `footnotes.mode: disabled` 与 TOC
+  `footnote_mode: footnotes` 冲突时必须提示页脚注自动提取/链接创建已关闭，既有 Markdown 脚注仍可能构建；TOC 为 `endnotes_only` 时提示
+  集中 Markdown 尾注链接仍可能创建。警告不阻断流程。
 - `No page layout sidecars found`、`source_kind`/`coordinate_system` 不一致、sidecar
   hash 过期、page/block 地址无法唯一命中或缺少正文命中，都是源阶段/定位失败，应阻断并
   重建候选；不能用手工改 JSON 或 `--allow-review-warnings` 绕过。

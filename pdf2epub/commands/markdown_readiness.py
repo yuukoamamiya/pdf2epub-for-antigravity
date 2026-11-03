@@ -23,6 +23,7 @@ from pdf2epub.utils.fingerprints import pages_fingerprint
 from pdf2epub.validation_receipts import validation_receipt_is_current
 from pdf2epub.workflow_contracts import atomic_write_json
 from pdf2epub.refine.subagent_workflow import validate_toc_tree_data
+from pdf2epub.refine.footnote_options import footnote_mode_warnings
 
 
 def run_readiness_check(
@@ -64,6 +65,7 @@ def run_readiness_check(
             "ready": False,
             "checks": checks,
             "errors": errors,
+            "warnings": [],
         }
         output_dir.mkdir(parents=True, exist_ok=True)
         atomic_write_json(output_dir / "readiness.json", report)
@@ -425,6 +427,7 @@ def run_readiness_check(
         "ready": not errors,
         "checks": checks,
         "errors": errors,
+        "warnings": footnote_mode_warnings(output_dir, config),
     }
     output_dir.mkdir(parents=True, exist_ok=True)
     atomic_write_json(output_dir / "readiness.json", report)

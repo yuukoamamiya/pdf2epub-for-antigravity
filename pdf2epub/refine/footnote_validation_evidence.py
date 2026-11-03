@@ -8,6 +8,7 @@ from typing import Any, Mapping, Optional
 from ..workflow_contracts import sha256_file
 from .footnote_options import EFFECTIVE_FOOTNOTE_MODES, resolve_effective_footnote_mode
 from .pdf_evidence import pdf_evidence_mode, require_current_consensus
+from .footnote_contracts import FOOTNOTE_PREPARE_SCHEMA_VERSION
 
 
 def validate_candidate_evidence(
@@ -22,6 +23,14 @@ def validate_candidate_evidence(
     configured_footnote_mode: Optional[str] = None
     footnote_mode_source: Optional[str] = None
     errors: list[str] = []
+    if report.get("schema_version") != FOOTNOTE_PREPARE_SCHEMA_VERSION:
+        errors.append(
+            "candidate report uses an older footnote contract; rerun footnote-prepare"
+        )
+    if not isinstance(report.get("continuation_reviews"), list):
+        errors.append(
+            "candidate report is missing its continuation_reviews queue; rerun footnote-prepare"
+        )
     if source_kind not in {"ocr", "native_text"}:
         errors.append("candidate report has an unsupported page source kind")
     if evidence_mode not in {"single_ocr", "two_ocr"}:

@@ -9,6 +9,7 @@ and ordinary body blocks stay in their original unit.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
@@ -111,10 +112,83 @@ def apply_footnote_normalization(
     target_dir = inputs.target_dir
     records = list(inputs.records)
     source_texts = dict(inputs.source_texts)
+    continuation_results = validation.get("continuation_reviews", [])
+
+    body_exception_decisions = []
+    report_for_resolution = dict(report)
+    adjusted_pages = []
+    for page_report in report.get("pages", []) or []:
+        if not isinstance(page_report, Mapping):
+            adjusted_pages.append(page_report)
+            continue
+        adjusted = dict(page_report)
+        candidates = []
+        for candidate in page_report.get("candidates", []) or []:
+            candidate_copy = dict(candidate)
+            matching_review = next((
+                item for item in continuation_results if isinstance(item, Mapping)
+                and item.get("outcome") == "confirmed_not_a_footnote"
+                and int((item.get("source_note") or {}).get("page", -1)) == int(candidate_copy.get("page", -2))
+                and int((item.get("source_note") or {}).get("block", -1)) == int(candidate_copy.get("block", -2))
+                and str((item.get("source_note") or {}).get("source") or "primary") == str(candidate_copy.get("source") or "primary")
+            ), None) if isinstance(continuation_results, list) else None
+            if matching_review:
+                candidate_copy["confidence"] = "review"
+                body_exception_decisions.append({
+                    "page": int(candidate_copy["page"]),
+                    "source": str(candidate_copy.get("source") or "primary"),
+                    "block": int(candidate_copy["block"]),
+                    "role": "body",
+                    "key": str(candidate_copy.get("key") or ""),
+                })
+            candidates.append(candidate_copy)
+        adjusted["candidates"] = candidates
+        adjusted_pages.append(adjusted)
+    if body_exception_decisions:
+        report_for_resolution["pages"] = adjusted_pages
+        validation_for_resolution = dict(validation)
+        validation_for_resolution["decisions"] = [
+            *(validation.get("decisions", []) or []),
+            *body_exception_decisions,
+        ]
+    else:
+        validation_for_resolution = validation
 
     decision_plan = resolve_page_decisions(
-        output_dir, report, validation, source_texts, records, report_footnote_mode
+        output_dir, report_for_resolution, validation_for_resolution,
+        source_texts, records, report_footnote_mode
     )
+    for review in continuation_results if isinstance(continuation_results, list) else []:
+        if not isinstance(review, Mapping) or review.get("outcome") != "recovered_continuation":
+            continue
+        source_task = next((
+            task for task in report.get("continuation_reviews", []) or []
+            if isinstance(task, Mapping) and task.get("task_id") == review.get("task_id")
+        ), None)
+        source_note = source_task.get("source_note", {}) if isinstance(source_task, Mapping) else {}
+        matches = [
+            note
+            for notes in decision_plan.notes_by_chapter.values()
+            for note in notes
+            if str(note.get("key")) == str(review.get("key"))
+            and int(note.get("source_page", -1)) == int(source_note.get("page", -2))
+        ]
+        if len(matches) != 1:
+            return _write_failure(output_dir, [
+                f"{review.get('task_id')}: recovered continuation does not identify one exact source note"
+            ])
+        note = matches[0]
+        text = str(review.get("text") or "").strip()
+        if not note.get("parts") or not re.search(r"[A-Za-zÀ-ÖØ-öø-ÿ]{2,}[-‐‑]$", str(note["parts"][-1]).rstrip()):
+            return _write_failure(output_dir, [
+                f"{review.get('task_id')}: source note no longer ends with its reviewed broken word; rerun footnote-prepare"
+            ])
+        if not re.match(r"^[a-zà-öø-ÿ]", text):
+            return _write_failure(output_dir, [
+                f"{review.get('task_id')}: recovered continuation must begin with the visible lowercase word suffix"
+            ])
+        note["parts"][-1] = str(note["parts"][-1]).rstrip()[:-1] + text
+        note.setdefault("recovered_continuations", []).append(str(review.get("task_id")))
     bind_note_markers(decision_plan, source_texts, records)
     edit_plan = create_footnote_edit_plan(
         source_texts, decision_plan, source_hashes=inputs.source_hashes
@@ -147,6 +221,7 @@ def apply_footnote_normalization(
         "footnote_mode": report_footnote_mode,
         "configured_footnote_mode": report.get("configured_footnote_mode"),
         "footnote_mode_source": report.get("footnote_mode_source"),
+        "warnings": list(report.get("warnings", [])),
         "status": "validated",
         "valid": True,
         "source_dir": "ocr_markdown",
@@ -160,6 +235,8 @@ def apply_footnote_normalization(
         "endnote_definition_ambiguities_sha256": endnote_ambiguities_sha256,
         "endnote_definition_decisions_sha256": endnote_decisions_sha256,
         "moved_count": len(edit_plan.resolved_blocks),
+        "continuation_reviews": list(continuation_results)
+        if isinstance(continuation_results, list) else [],
         "preserved_roles": dict(edit_plan.preserved_roles),
         "notes": [
             {
@@ -169,6 +246,7 @@ def apply_footnote_normalization(
                 "output_key": note["output_key"],
                 "source_page": note["source_page"],
                 "part_count": len(note["parts"]),
+                "recovered_continuations": list(note.get("recovered_continuations", [])),
             }
             for notes in edit_plan.notes_by_chapter.values()
             for note in notes

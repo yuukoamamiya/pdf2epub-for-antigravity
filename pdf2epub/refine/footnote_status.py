@@ -12,10 +12,12 @@ from .footnote_options import (
     EFFECTIVE_FOOTNOTE_MODES,
     resolve_effective_footnote_mode,
 )
+from .footnote_continuation_review import validate_continuation_review_decisions
+from .footnote_contracts import FOOTNOTE_PREPARE_SCHEMA_VERSION
 from .pdf_evidence import pdf_evidence_mode, require_current_consensus
 
 
-FOOTNOTE_NORMALIZATION_SCHEMA_VERSION = 5
+FOOTNOTE_NORMALIZATION_SCHEMA_VERSION = 6
 _SAFE_FILENAME_RE = re.compile(r"^[^/\\]+\.md$")
 
 
@@ -101,6 +103,10 @@ def footnote_normalization_status(
             output_dir / "footnote_decision_validation.json",
             "footnote_decision_validation.json",
         )
+        candidate_report = _load_json(
+            output_dir / "footnote_candidates.json",
+            "footnote_candidates.json",
+        )
     except (OSError, UnicodeError, ValueError, TypeError) as exc:
         fail("checkpoint_missing_or_invalid", str(exc))
         return {
@@ -126,6 +132,45 @@ def footnote_normalization_status(
         fail(
             "decision_validation_failed",
             "footnote_decision_validation.json is missing or invalid",
+        )
+    if candidate_report.get("schema_version") != FOOTNOTE_PREPARE_SCHEMA_VERSION:
+        fail(
+            "candidate_report_schema_mismatch",
+            "footnote_candidates.json uses an older or missing prepare contract; rerun footnote-prepare",
+        )
+    if validation.get("schema_version") != FOOTNOTE_PREPARE_SCHEMA_VERSION:
+        fail(
+            "decision_validation_schema_mismatch",
+            "footnote_decision_validation.json uses an older or missing prepare contract; rerun footnote-validate",
+        )
+    continuation_tasks = candidate_report.get("continuation_reviews")
+    if not isinstance(continuation_tasks, list):
+        fail(
+            "continuation_review_queue_missing",
+            "footnote candidate report is missing its continuation_reviews queue; rerun footnote-prepare",
+        )
+        continuation_tasks = []
+    if not isinstance(validation.get("continuation_reviews"), list):
+        fail(
+            "continuation_review_resolution_missing",
+            "footnote decision validation is missing continuation review outcomes; rerun footnote-validate",
+        )
+    validation_candidate_hash = validation.get("candidate_report_sha256")
+    if not isinstance(validation_candidate_hash, str) or len(validation_candidate_hash) != 64:
+        fail(
+            "decision_validation_candidate_hash_missing",
+            "decision validation is not bound to the candidate report; rerun footnote-validate",
+        )
+    _, continuation_errors = validate_continuation_review_decisions(
+        output_dir,
+        continuation_tasks,
+        validation.get("continuation_reviews", []),
+    )
+    if continuation_errors:
+        fail(
+            "continuation_review_stale",
+            "image-backed footnote continuation review is missing or stale: "
+            + "; ".join(continuation_errors[:5]),
         )
     report_mode = str(report.get("ocr_evidence_mode") or "single_ocr")
     validation_mode = str(validation.get("ocr_evidence_mode") or report_mode)
@@ -221,6 +266,11 @@ def footnote_normalization_status(
         fail(
             "candidate_report_stale",
             "footnote_candidates.json changed after footnote-apply",
+        )
+    if validation_candidate_hash != sha256_file(output_dir / "footnote_candidates.json"):
+        fail(
+            "decision_validation_candidate_hash_stale",
+            "decision validation is bound to an older candidate report; rerun footnote-validate",
         )
     if report.get("decision_validation_sha256") != sha256_file(
         output_dir / "footnote_decision_validation.json"

@@ -319,9 +319,18 @@ def test_footnote_status_reports_candidate_hash_as_root_cause(tmp_path: Path):
     target.write_text("body\n", encoding="utf-8")
     candidates = tmp_path / "footnote_candidates.json"
     decisions = tmp_path / "footnote_decision_validation.json"
-    candidates.write_text("{}", encoding="utf-8")
+    candidates.write_text(
+        json.dumps({"schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION, "continuation_reviews": []}),
+        encoding="utf-8",
+    )
     decisions.write_text(
-        json.dumps({"valid": True, "ocr_evidence_mode": "single_ocr"}),
+        json.dumps({
+            "valid": True,
+            "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
+            "ocr_evidence_mode": "single_ocr",
+            "continuation_reviews": [],
+            "candidate_report_sha256": hashlib.sha256(candidates.read_bytes()).hexdigest(),
+        }),
         encoding="utf-8",
     )
     normalization = tmp_path / "footnote_normalization.json"
@@ -348,7 +357,14 @@ def test_footnote_status_reports_candidate_hash_as_root_cause(tmp_path: Path):
         ),
         encoding="utf-8",
     )
-    candidates.write_text('{"changed": true}', encoding="utf-8")
+    candidates.write_text(
+        json.dumps({
+            "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
+            "continuation_reviews": [],
+            "changed": True,
+        }),
+        encoding="utf-8",
+    )
 
     status = footnote_normalization_status(tmp_path)
 
@@ -368,9 +384,23 @@ def test_footnote_status_requires_current_toc_for_scoped_endnotes(tmp_path: Path
     target.write_text("body\n", encoding="utf-8")
     candidates = tmp_path / "footnote_candidates.json"
     decisions = tmp_path / "footnote_decision_validation.json"
-    candidates.write_text("{}", encoding="utf-8")
+    candidates.write_text(
+        json.dumps({
+            "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
+            "continuation_reviews": [],
+            "source_sha256": {"unit.md": hashlib.sha256(source.read_bytes()).hexdigest()},
+            "target_sha256": {"unit.md": hashlib.sha256(target.read_bytes()).hexdigest()},
+        }),
+        encoding="utf-8",
+    )
     decisions.write_text(
-        json.dumps({"valid": True, "ocr_evidence_mode": "single_ocr"}),
+        json.dumps({
+            "valid": True,
+            "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
+            "ocr_evidence_mode": "single_ocr",
+            "continuation_reviews": [],
+            "candidate_report_sha256": hashlib.sha256(candidates.read_bytes()).hexdigest(),
+        }),
         encoding="utf-8",
     )
     toc_tree = tmp_path / "toc_tree.json"
@@ -2547,6 +2577,7 @@ def test_secondary_only_footnote_decision_materializes_explicit_text(
         "ocr_evidence_mode": "two_ocr",
         "sidecar_sha256": {},
         "secondary_sidecar_sha256": {},
+        "continuation_reviews": [],
         "pages": [
             {
                 "page": 1,
@@ -2662,6 +2693,7 @@ def test_secondary_only_repeated_marker_fails_closed(tmp_path: Path):
                 "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
                 "source_kind": "ocr",
                 "ocr_evidence_mode": "two_ocr",
+                "continuation_reviews": [],
                 "pages": [
                     {
                         "page": 1,
@@ -2687,6 +2719,10 @@ def test_secondary_only_repeated_marker_fails_closed(tmp_path: Path):
                 "valid": True,
                 "status": "validated",
                 "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
+                "continuation_reviews": [],
+                "candidate_report_sha256": hashlib.sha256(
+                    (tmp_path / "footnote_candidates.json").read_bytes()
+                ).hexdigest(),
                 "decisions": [
                     {
                         "page": 1,
@@ -2744,6 +2780,7 @@ def test_secondary_only_can_remove_an_explicit_primary_duplicate(tmp_path: Path)
                 "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
                 "source_kind": "ocr",
                 "ocr_evidence_mode": "two_ocr",
+                "continuation_reviews": [],
                 "pages": [
                     {
                         "page": 1,
@@ -2769,6 +2806,10 @@ def test_secondary_only_can_remove_an_explicit_primary_duplicate(tmp_path: Path)
                 "valid": True,
                 "status": "validated",
                 "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
+                "continuation_reviews": [],
+                "candidate_report_sha256": hashlib.sha256(
+                    (tmp_path / "footnote_candidates.json").read_bytes()
+                ).hexdigest(),
                 "decisions": [
                     {
                         "page": 1,

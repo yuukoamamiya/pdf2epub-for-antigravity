@@ -2,12 +2,40 @@ from pdf2epub.markdown_validation import (
     detect_polish_page_furniture,
     polish_content_integrity_check,
     polish_structure_audit,
+    validate_footnote_markers,
 )
 from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
 
 NOTE_COUNT = 150
 NOTE_TEXT = "Katz, Personal Influence, 16."
+
+
+def test_translation_preserves_raw_superscript_identity_and_multiplicity():
+    source = "A citation<sup class=\"cite\">4</sup>; math x<sup>2</sup>."
+    assert validate_footnote_markers(source, source) == []
+    assert validate_footnote_markers(
+        source, "A citation<sup class=\"cite\">4</sup>; math x<sup>2</sup><sup>2</sup>."
+    )
+    assert validate_footnote_markers(
+        source, "A citation<sup class=\"cite\">5</sup>; math x<sup>2</sup>."
+    )
+
+
+def test_translation_ignores_footnote_syntax_and_superscripts_in_code():
+    source = (
+        "Example `[^literal] <sup>7</sup>`.\n\n"
+        "```markdown\n[^also-literal]\n<sup>8</sup>\n```\n\n"
+        "Real [^note].\n\n[^note]: Note text.\n"
+    )
+    target = source.replace("Real [^note]", "译文 [^note]")
+    assert validate_footnote_markers(source, target) == []
+
+
+def test_unrelated_raw_superscripts_are_preserved_without_footnote_conversion():
+    source = "Source note¹ and citation <sup>42</sup>."
+    target = "译文注释¹和引文 <sup>42</sup>."
+    assert validate_footnote_markers(source, target) == []
 
 
 def _source_book(note_count: int = NOTE_COUNT) -> str:

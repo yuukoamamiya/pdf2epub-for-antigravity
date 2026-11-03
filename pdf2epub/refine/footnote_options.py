@@ -186,6 +186,48 @@ def resolve_effective_footnote_mode(
     return {"configured": configured, "effective": "footnotes", "source": "default"}
 
 
+def footnote_mode_warnings(
+    output_dir: Path,
+    config: Optional[Mapping[str, Any]] = None,
+    *,
+    resolution: Optional[Mapping[str, str]] = None,
+) -> list[dict[str, str]]:
+    """Describe intentional page-linking disablement that conflicts with TOC metadata.
+
+    Explicit ``disabled`` configuration remains authoritative.  The warning is
+    persisted so a successful stage cannot be mistaken for creating links.
+    """
+    resolved = dict(resolution or resolve_effective_footnote_mode(output_dir, config))
+    configured = str(resolved.get("configured") or "")
+    if configured != "disabled":
+        return []
+    toc_mode = toc_footnote_mode(output_dir)
+    if toc_mode == "footnotes":
+        code = "page_footnote_linking_disabled_toc_footnotes"
+        message = (
+            "Automatic page-footnote extraction/link creation is disabled by footnotes.mode=disabled, "
+            "although the TOC identifies page footnotes; existing Markdown footnote links may still be built. "
+            "footnotes.mode=disabled 已关闭页脚注的自动提取和链接创建，尽管目录标记了页脚注；既有 Markdown 脚注链接仍可能构建。"
+        )
+    elif toc_mode == "endnotes_only":
+        code = "page_footnote_linking_disabled_toc_endnotes_only"
+        message = (
+            "Page footnote linking is disabled by footnotes.mode=disabled and the TOC identifies "
+            "centralized endnotes; centralized Markdown note links may still be built. "
+            "footnotes.mode=disabled 已关闭页脚注链接，目录标记为集中尾注；Markdown 尾注链接仍可能构建。"
+        )
+    else:
+        return []
+    return [{
+        "code": code,
+        "severity": "warning",
+        "configured_mode": configured,
+        "effective_mode": str(resolved.get("effective") or configured),
+        "toc_mode": toc_mode,
+        "message": message,
+    }]
+
+
 __all__ = [
     "DEFAULT_AUTO_ACCEPT",
     "DEFAULT_BOTTOM_INTERSECTION_RATIO",
@@ -198,6 +240,7 @@ __all__ = [
     "FootnotePrepareOptions",
     "TOC_FOOTNOTE_MODES",
     "resolve_effective_footnote_mode",
+    "footnote_mode_warnings",
     "resolve_footnote_options",
     "toc_footnote_mode",
 ]

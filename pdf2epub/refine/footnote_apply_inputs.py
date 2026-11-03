@@ -20,6 +20,7 @@ from .endnote_review import (
     load_endnote_definition_decisions,
 )
 from .pdf_evidence import pdf_evidence_mode, require_current_consensus
+from .footnote_continuation_review import validate_continuation_review_decisions
 
 
 @dataclass(frozen=True)
@@ -82,6 +83,14 @@ def load_footnote_apply_inputs(
         raise FootnoteApplyInputError(
             "footnote decision validation uses an older marker contract; rerun footnote-validate"
         )
+    if not isinstance(report.get("continuation_reviews"), list):
+        raise FootnoteApplyInputError(
+            "footnote candidate report is missing its continuation_reviews queue; rerun footnote-prepare"
+        )
+    if not isinstance(validation.get("continuation_reviews"), list):
+        raise FootnoteApplyInputError(
+            "footnote decision validation is missing continuation review outcomes; rerun footnote-validate"
+        )
     footnote_mode = str(report.get("footnote_mode") or "footnotes").strip().lower()
     if footnote_mode not in EFFECTIVE_FOOTNOTE_MODES:
         raise FootnoteApplyInputError(f"unsupported footnote mode in candidate report: {footnote_mode}")
@@ -136,6 +145,19 @@ def load_footnote_apply_inputs(
     }:
         raise FootnoteApplyInputError(
             "footnote decisions are not validated; run footnote-validate after the Subagent review"
+        )
+    if validation.get("candidate_report_sha256") != sha256_file(output_dir / "footnote_candidates.json"):
+        raise FootnoteApplyInputError(
+            "footnote candidate report changed after decision validation; rerun footnote-validate"
+        )
+    _, continuation_errors = validate_continuation_review_decisions(
+        output_dir,
+        report["continuation_reviews"],
+        validation["continuation_reviews"],
+    )
+    if continuation_errors:
+        raise FootnoteApplyInputError(
+            "footnote continuation review is stale or incomplete: " + "; ".join(continuation_errors[:5])
         )
 
     endnote_decisions: Optional[list[dict[str, Any]]] = None

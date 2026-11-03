@@ -9,6 +9,7 @@ from ...footnote_markdown import collect_footnote_definition_blocks
 from loguru import logger
 
 from .models import FootnoteDefinition, FootnoteReference, FootnoteStyle
+from .source_references import mask_markdown_code_and_comments
 
 
 FOOTNOTE_KEY_PATTERN = r"[\w-]+"
@@ -57,16 +58,28 @@ class FootnoteScanner:
 
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
+                raw_lines = f.readlines()
+            lines = mask_markdown_code_and_comments(raw_lines)
 
-            definitions, consumed = collect_footnote_definition_blocks(
+            visible_definitions, consumed = collect_footnote_definition_blocks(
                 lines,
+                allow_no_colon=chapter_name in no_colon_definition_chapters,
+            )
+            raw_definitions, _raw_consumed = collect_footnote_definition_blocks(
+                raw_lines,
                 allow_no_colon=chapter_name in no_colon_definition_chapters,
             )
             for line_index, line in enumerate(lines):
                 line_num = line_index + 1
                 # Check for footnote definitions [^key]:
-                definition = definitions.get(line_index)
+                # Visibility comes from the masked parse so definitions inside
+                # code are ignored; payload text comes from the original parse
+                # so inline/fenced code inside a real note is preserved.
+                definition = (
+                    raw_definitions.get(line_index)
+                    if line_index in visible_definitions
+                    else None
+                )
                 def_matches = [definition[0]] if definition else []
                 for key in def_matches:
                     defined_keys.add(key)

@@ -195,6 +195,7 @@ def candidate_for_block(
         "confidence": confidence,
         "disposition": disposition,
         "text": text[:240],
+        "text_ending": text[-120:],
     }
     if key and page_markdown:
         candidate["same_page_marker"] = marker_before_block(

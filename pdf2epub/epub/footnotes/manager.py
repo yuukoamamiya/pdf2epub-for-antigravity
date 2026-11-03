@@ -14,6 +14,10 @@ from .keys import display_footnote_key, display_footnote_key_html
 from .models import FootnoteStyle, FootnoteDefinition
 from .scanner import FootnoteScanner
 from .mapper import FootnoteMapper
+from .source_references import (
+    scan_legacy_hr_note_candidates,
+    scan_source_reference_occurrences,
+)
 
 
 _ALLOWED_INLINE_HTML = {
@@ -479,6 +483,45 @@ class FootnoteManager:
             HTML filename (e.g., "chapter_25_part1.html")
         """
         return self.content_index.html_for_source(markdown_stem)
+
+    def expected_reference_contract(self) -> list[dict[str, str | int]]:
+        """Return the exact source-scoped reference anchors expected in XHTML.
+
+        This is derived from the Markdown scanner's references rather than
+        rendered ``<sup>`` elements, so a renderer that drops every footnote
+        marker cannot make the graph appear empty and valid.
+        """
+        expected: list[dict[str, str | int]] = []
+        for reference in scan_source_reference_occurrences(
+            self._chapter_files, self.no_colon_definition_chapters
+        ):
+            source_chapter = str(reference["source_chapter"])
+            key = str(reference["key"])
+            occurrence = int(reference["occurrence"])
+            rendered_reference = self.get_footnote_html(
+                key,
+                source_chapter,
+                occurrence_in_file=occurrence,
+            ) or ""
+            href_match = re.search(r"\bhref\s*=\s*['\"]([^'\"]+)['\"]", rendered_reference)
+            target_href = href_match.group(1) if href_match else ""
+            target_file, separator, target_id = target_href.partition("#")
+            expected.append(
+                {
+                    "source_file": self.get_html_filename(source_chapter),
+                    "source_chapter": source_chapter,
+                    "reference_id": self._fnref_id(source_chapter, key, occurrence),
+                    "key": key,
+                    "occurrence": occurrence,
+                    "target_file": target_file or self.get_html_filename(source_chapter),
+                    "target_id": target_id if separator else "",
+                }
+            )
+        return expected
+
+    def legacy_hr_note_review_candidates(self) -> list[dict[str, str | int]]:
+        """Return conservative raw-superscript note candidates for review."""
+        return scan_legacy_hr_note_candidates(self._chapter_files)
 
     def _chapter_sort_key(self, chapter_name: str) -> tuple:
         """

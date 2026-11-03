@@ -755,6 +755,172 @@ def test_graph_inspection_allows_explicit_unlinked_reference() -> None:
     assert report["backref_broken_count"] == 0
 
 
+def test_expected_reference_contract_catches_empty_or_partial_rendered_graph() -> None:
+    html = {
+        "chapter_1.html": (
+            '<p>Text<sup id="fnref-chapter_1-4"><a class="footnote-ref" '
+            'href="notes.html#fn-4">[4]</a></sup></p>'
+        ),
+        "notes.html": '<div class="footnote-def" id="fn-4">Note.</div>',
+    }
+    expected = [
+        {"source_file": "chapter_1.html", "source_chapter": "chapter_1", "reference_id": "fnref-chapter_1-4", "key": "4", "occurrence": 1, "target_file": "notes.html", "target_id": "fn-4"},
+        {"source_file": "chapter_1.html", "source_chapter": "chapter_1", "reference_id": "fnref-chapter_1-4-2", "key": "4", "occurrence": 2, "target_file": "notes.html", "target_id": "fn-4"},
+    ]
+
+    report = inspect_footnote_graph(html, expected)
+    assert report["missing_expected_reference_count"] == 1
+    assert report["missing_expected_reference_samples"] == [
+        ("chapter_1.html", "fnref-chapter_1-4-2", "4", 2)
+    ]
+    with pytest.raises(FootnoteGraphError, match="expected reference"):
+        validate_footnote_graph({"chapter_1.html": "<html><body>Text</body></html>"}, expected)
+
+
+@pytest.mark.parametrize(
+    "href",
+    [
+        "#body",
+        "notes.html#fn-other",
+        "https://example.test/notes.html#fn-4",
+        "missing-folder/notes.html#fn-4",
+        "../notes.html#fn-4",
+    ],
+)
+def test_expected_reference_requires_its_manager_resolved_footnote_target(href: str) -> None:
+    html = {
+        "chapter_1.html": (
+            '<sup id="fnref-chapter_1-4"><a class="footnote-ref" '
+            f'href="{href}">[4]</a></sup><p id="body">Text</p>'
+        ),
+        "notes.html": '<div class="footnote-def" id="fn-4">Note.</div>',
+    }
+    expected = [{
+        "source_file": "chapter_1.html",
+        "reference_id": "fnref-chapter_1-4",
+        "key": "4",
+        "occurrence": 1,
+        "target_file": "notes.html",
+        "target_id": "fn-4",
+    }]
+
+    with pytest.raises(FootnoteGraphError, match="expected reference"):
+        validate_footnote_graph(html, expected)
+
+
+def test_expected_reference_allows_normalized_dot_relative_target() -> None:
+    html = {
+        "chapter_1.html": (
+            '<sup id="fnref-chapter_1-4"><a class="footnote-ref" '
+            'href="./notes.html#fn-4">[4]</a></sup>'
+        ),
+        "notes.html": '<div class="footnote-def" id="fn-4">Note.</div>',
+    }
+    expected = [{
+        "source_file": "chapter_1.html",
+        "reference_id": "fnref-chapter_1-4",
+        "key": "4",
+        "occurrence": 1,
+        "target_file": "notes.html",
+        "target_id": "fn-4",
+    }]
+
+    report = validate_footnote_graph(html, expected)
+
+    assert report["missing_expected_reference_count"] == 0
+
+
+def test_manager_exposes_source_scoped_reference_occurrences(tmp_path: Path) -> None:
+    chapter = tmp_path / "chapter_1.md"
+    chapter.write_text("One [^4]. Two [^4].\n\n[^4]: Note.\n", encoding="utf-8")
+    manager = FootnoteManager(tmp_path)
+
+    assert manager.expected_reference_contract() == [
+        {"source_file": "chapter_1.html", "source_chapter": "chapter_1", "reference_id": "fnref-chapter_1-4", "key": "4", "occurrence": 1, "target_file": "chapter_1.html", "target_id": "fn-4"},
+        {"source_file": "chapter_1.html", "source_chapter": "chapter_1", "reference_id": "fnref-chapter_1-4-2", "key": "4", "occurrence": 2, "target_file": "chapter_1.html", "target_id": "fn-4"},
+    ]
+
+
+def test_expected_reference_contract_ignores_literal_code_and_definition_markers(
+    tmp_path: Path,
+) -> None:
+    chapter = tmp_path / "chapter_1.md"
+    chapter.write_text(
+        "Literal `[^code]` and comment <!-- [^comment] -->.\n"
+        "```markdown\n[^fenced]\n```\n"
+        "Real [^note].\n\n[^note]: Definition.\n",
+        encoding="utf-8",
+    )
+    manager = FootnoteManager(tmp_path)
+
+    assert manager.expected_reference_contract() == [
+        {"source_file": "chapter_1.html", "source_chapter": "chapter_1", "reference_id": "fnref-chapter_1-note", "key": "note", "occurrence": 1, "target_file": "chapter_1.html", "target_id": "fn-note"}
+    ]
+
+
+def test_scanner_masks_fake_code_markers_but_preserves_note_payload_code(
+    tmp_path: Path,
+) -> None:
+    chapter = tmp_path / "chapter_1.md"
+    chapter.write_text(
+        "Real [^1].\n\n"
+        "```markdown\n[^fake]: Fake definition.\n```\n\n"
+        "[^1]: Use `private_token` literally.\n"
+        "    ```text\n"
+        "    fenced_note_token\n"
+        "    ```\n",
+        encoding="utf-8",
+    )
+    manager = FootnoteManager(tmp_path)
+
+    assert [definition.key for definition in manager.definitions["1"]] == ["1"]
+    assert "fake" not in manager.definitions
+    assert "`private_token`" in manager.definitions["1"][0].content
+    assert "fenced_note_token" in manager.definitions["1"][0].content
+
+
+def test_legacy_superscript_note_pair_after_horizontal_rule_requires_review(
+    tmp_path: Path,
+) -> None:
+    chapter = tmp_path / "chapter_1.md"
+    chapter.write_text(
+        "Body<sup>4</sup>.\n\n---\n\n4) Confirmed page-note text.\n",
+        encoding="utf-8",
+    )
+    manager = FootnoteManager(tmp_path)
+
+    assert manager.legacy_hr_note_review_candidates() == [
+        {
+            "source_file": "chapter_1.md",
+            "key": "4",
+            "reference_line": 1,
+            "definition_line": 5,
+            "status": "review_required",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "x<sup>4</sup>\n\n4) Ordinary enumerated item.\n",
+        "Body<sup>4</sup>.\n\n4) Ordinary enumerated item.\n",
+        "Body<sup>4</sup>.\n\n---\n\n5) Different numbered note.\n",
+        "`Body<sup>4</sup>`\n\n---\n\n4) Literal code marker.\n",
+        "<a href=\"#n4\"><sup>4</sup></a>\n\n---\n\n4) Already linked note.\n",
+        "[<sup>4</sup>](#n4)\n\n---\n\n4) Already linked note.\n",
+    ],
+)
+def test_legacy_superscript_review_requires_hr_and_unambiguous_note_evidence(
+    tmp_path: Path, text: str
+) -> None:
+    chapter = tmp_path / "chapter_1.md"
+    chapter.write_text(text, encoding="utf-8")
+    manager = FootnoteManager(tmp_path)
+
+    assert manager.legacy_hr_note_review_candidates() == []
+
+
 def test_preserved_source_heading_with_structural_prefix_keeps_footnote_backlinks(
     tmp_path: Path,
 ) -> None:

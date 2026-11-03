@@ -893,6 +893,9 @@ def check_ready_command(args):
     )
     for error in report["errors"]:
         logger.error(error)
+    for warning in report.get("warnings", []):
+        if isinstance(warning, dict) and warning.get("message"):
+            logger.warning(str(warning["message"]))
     if report["ready"]:
         logger.success(f"Pre-flight check passed for {report['stage']}")
         return 0
@@ -915,10 +918,16 @@ def translate_command(args):
         bool(getattr(args, "skip_entities", False)),
     )
     if not readiness["ready"]:
+        for warning in readiness.get("warnings", []):
+            if isinstance(warning, dict) and warning.get("message"):
+                logger.warning(str(warning["message"]))
         for error in readiness["errors"]:
             logger.error(error)
         logger.error("Pre-flight check failed; translation hand-off was not created")
         return 1
+    for warning in readiness.get("warnings", []):
+        if isinstance(warning, dict) and warning.get("message"):
+            logger.warning(str(warning["message"]))
     return _prepare_pdf_markdown_task(args, "translate")
 def translate_validate_command(args):
     if not PipelinePolicy.from_config(load_config(args.config)).requires_translation:

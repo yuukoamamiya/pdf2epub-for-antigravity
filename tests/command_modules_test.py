@@ -15,6 +15,7 @@ from pdf2epub.commands.sources import _resolve_pdf_polish_source
 from pdf2epub.commands.registry import register_command_parsers
 from pdf2epub.commands.runtime import load_book_context
 from pdf2epub.refine.footnote_status import FOOTNOTE_NORMALIZATION_SCHEMA_VERSION
+from pdf2epub.refine.footnote_contracts import FOOTNOTE_PREPARE_SCHEMA_VERSION
 from pdf2epub.workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION, sha256_file
 
 
@@ -292,9 +293,33 @@ def test_polish_prefers_current_footnote_normalized_source(tmp_path: Path):
     normalized_dir.mkdir()
     (source_dir / "chapter_1.md").write_text("source", encoding="utf-8")
     (normalized_dir / "chapter_1.md").write_text("normalized", encoding="utf-8")
-    (tmp_path / "footnote_candidates.json").write_text("{}", encoding="utf-8")
+    candidates_path = tmp_path / "footnote_candidates.json"
+    candidates_path.write_text(
+        json.dumps(
+            {
+                "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
+                "continuation_reviews": [],
+                "ocr_evidence_mode": "single_ocr",
+                "footnote_mode": "footnotes",
+                "source_sha256": {"chapter_1.md": sha256_file(source_dir / "chapter_1.md")},
+                "target_sha256": {"chapter_1.md": sha256_file(normalized_dir / "chapter_1.md")},
+            }
+        ),
+        encoding="utf-8",
+    )
     (tmp_path / "footnote_decision_validation.json").write_text(
-        json.dumps({"valid": True, "status": "validated"}), encoding="utf-8"
+        json.dumps(
+            {
+                "valid": True,
+                "status": "validated",
+                "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
+                "continuation_reviews": [],
+                "ocr_evidence_mode": "single_ocr",
+                "footnote_mode": "footnotes",
+                "candidate_report_sha256": sha256_file(candidates_path),
+            }
+        ),
+        encoding="utf-8",
     )
     from pdf2epub.workflow_contracts import atomic_write_text
 
@@ -305,6 +330,7 @@ def test_polish_prefers_current_footnote_normalized_source(tmp_path: Path):
                 "schema_version": FOOTNOTE_NORMALIZATION_SCHEMA_VERSION,
                 "valid": True,
                 "status": "validated",
+                "ocr_evidence_mode": "single_ocr",
                 "source_sha256": {"chapter_1.md": sha256_file(source_dir / "chapter_1.md")},
                 "target_sha256": {
                     "chapter_1.md": sha256_file(normalized_dir / "chapter_1.md")

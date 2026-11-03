@@ -732,6 +732,36 @@ def relocate_leading_page_carryover(
     return records
 
 
+def _relocate_expected_footnote_references(
+    expected_references: List[Dict[str, object]],
+    relocation_records: List[Dict[str, object]],
+) -> List[Dict[str, object]]:
+    """Project source reference expectations through XHTML carry-over moves."""
+    projected = [dict(reference) for reference in expected_references]
+    for record in relocation_records:
+        source_file = str(record.get("source", ""))
+        destination = str(record.get("destination", ""))
+        destination_stem = Path(destination).stem
+        moved_keys = {str(key) for key in record.get("moved_footnotes", [])}
+        for reference in projected:
+            if (
+                str(reference.get("source_file", "")) != source_file
+                or str(reference.get("key", "")) not in moved_keys
+            ):
+                continue
+            source_chapter = str(reference.get("source_chapter", ""))
+            reference_id = str(reference.get("reference_id", ""))
+            prefix = f"fnref-{source_chapter}-"
+            if reference_id.startswith(prefix):
+                reference["reference_id"] = (
+                    f"fnref-{destination_stem}-{reference_id[len(prefix):]}"
+                )
+            if str(reference.get("target_file", "")) == source_file:
+                reference["target_file"] = destination
+            reference["source_file"] = destination
+    return projected
+
+
 def load_refinement_part_order(output_dir: Path) -> Dict[str, List[str]]:
     """Load authoritative continuation order from the refinement checkpoint."""
     progress_path = Path(output_dir) / "ocr_markdown" / "tree_progress.json"
@@ -1067,6 +1097,9 @@ def _render_epub_content(
     builder: EpubBuilder,
 ) -> List[str]:
     """Render chapter XHTML, relocate page carry-over, and write navigation."""
+    from .refine.footnote_options import resolve_footnote_options
+
+    footnote_mode = resolve_footnote_options(config.config).mode
     # Process and convert chapters
     all_html_files = []
     generated_html = {}
@@ -1221,7 +1254,23 @@ def _render_epub_content(
     if not ncx_written or not html_toc_written:
         raise ValueError("Failed to serialize the resolved TOC navigation")
 
-    footnote_report = validate_footnote_graph(generated_html)
+    expected_references = _relocate_expected_footnote_references(
+        footnote_manager.expected_reference_contract(), relocation_records
+    )
+    footnote_report = validate_footnote_graph(
+        generated_html,
+        expected_references=expected_references,
+    )
+    legacy_note_candidates = (
+        footnote_manager.legacy_hr_note_review_candidates()
+        if footnote_mode != "disabled"
+        else []
+    )
+    if legacy_note_candidates:
+        raise ValueError(
+            "Unprocessed legacy footnote markers require review: "
+            + repr(legacy_note_candidates[:10])
+        )
     if footnote_report["unlinked_sup_count"]:
         raise ValueError(
             "Footnote graph contains unlinked references: "

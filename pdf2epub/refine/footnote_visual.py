@@ -144,6 +144,7 @@ def ensure_region_review_images(
 def write_visual_audit_manifest(
     output_dir: Path,
     page_reports: Iterable[Mapping[str, Any]],
+    continuation_reviews: Iterable[Mapping[str, Any]] = (),
 ) -> tuple[Path, dict[str, Any]]:
     """Persist the small, region-scoped visual audit queue."""
     tasks: list[dict[str, Any]] = []
@@ -168,6 +169,18 @@ def write_visual_audit_manifest(
                 "status": "pending",
             }
             tasks.append(task)
+    for review in continuation_reviews:
+        tasks.append({
+            "task_id": review.get("task_id"),
+            "kind": review.get("kind"),
+            "pages": review.get("pages", []),
+            "source_note": review.get("source_note", {}),
+            "reason": review.get("reason"),
+            "visual_files": review.get("visual_files", {}),
+            "visual_image_manifest_sha256": review.get("visual_image_manifest_sha256"),
+            "source_pdf_sha256": review.get("source_pdf_sha256"),
+            "status": "pending",
+        })
     manifest = {
         "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
         "task": "footnote-visual-audit",

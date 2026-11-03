@@ -516,6 +516,7 @@ def build_doctor(config_path: str | Path = "config.yaml") -> dict[str, Any]:
         }
 
     title = str(config.get("title") or "").strip()
+    warnings = []
     check("title", bool(title), "title is configured" if title else "title is missing")
     try:
         policy = PipelinePolicy.from_config(config)
@@ -525,6 +526,11 @@ def build_doctor(config_path: str | Path = "config.yaml") -> dict[str, Any]:
     else:
         check("pipeline", True, f"pipeline: {policy.kind}")
     output_dir = book_output_dir(title) if title else Path("output") / "untitled"
+    try:
+        from pdf2epub.refine.footnote_options import footnote_mode_warnings
+        warnings = footnote_mode_warnings(output_dir, config)
+    except ValueError:
+        warnings = []
     try:
         input_type, input_path = _resolve_input(config, path, output_dir)
         check("input", input_path.is_file(), str(input_path) if input_path.is_file() else f"input file is missing: {input_path}")
@@ -604,6 +610,7 @@ def build_doctor(config_path: str | Path = "config.yaml") -> dict[str, Any]:
         "config_path": str(path),
         "ok": not any(item["status"] == "blocked" for item in checks),
         "checks": checks,
+        "warnings": warnings,
         "status": status,
     }
 
@@ -640,6 +647,9 @@ def doctor_command(args: Any) -> int:
         print(f"配置: {report['config_path']}")
         for check in report.get("checks", []):
             print(f"[{check['status']}] {check['name']}: {check['detail']}")
+        for warning in report.get("warnings", []):
+            if isinstance(warning, Mapping) and warning.get("message"):
+                print(f"[warning] {warning['message']}")
         print("doctor: " + ("通过" if report.get("ok") else "存在阻断"))
     return 0 if report.get("ok") else 1
 

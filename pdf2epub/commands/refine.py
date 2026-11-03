@@ -280,6 +280,7 @@ def footnote_prepare_command(args):
         return 1
 
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    _log_footnote_mode_warnings(manifest.get("warnings", []))
     logger.success(f"Wrote footnote candidate report: {paths['report']}")
     logger.success(f"Wrote footnote subagent manifest: {paths['manifest']}")
     logger.success(f"Wrote footnote subagent prompt: {paths['prompt']}")
@@ -309,6 +310,7 @@ def footnote_validate_command(args):
     except Exception as exc:
         logger.error(f"Could not validate footnote decisions: {exc}")
         return 1
+    _log_footnote_mode_warnings(report.get("warnings", []))
     if report.get("valid"):
         logger.success("Footnote layout decisions validated")
         return 0
@@ -335,6 +337,7 @@ def footnote_apply_command(args):
     except Exception as exc:
         logger.error(f"Could not apply footnote normalization: {exc}")
         return 1
+    _log_footnote_mode_warnings(report.get("warnings", []))
     if report.get("valid"):
         logger.success(
             f"Wrote chapter-end footnote source: "
@@ -347,3 +350,10 @@ def footnote_apply_command(args):
     for error in report.get("errors", [])[:10]:
         logger.error(f"Footnote normalization: {error}")
     return 1
+
+
+def _log_footnote_mode_warnings(warnings):
+    """Print persisted mode warnings at each footnote stage boundary."""
+    for item in warnings if isinstance(warnings, list) else []:
+        if isinstance(item, dict) and item.get("message"):
+            logger.warning(str(item["message"]))
