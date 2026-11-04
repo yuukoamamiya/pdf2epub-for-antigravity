@@ -22,6 +22,13 @@ scoped prompt/manifest 入口；CLI 打印首波入口。该清单只描述计�
 缺失语言词形的补充候选流程目前仍是提案，尚未实现；见
 [`术语表补充候选设计`](docs/glossary-supplement-design.md)。
 
+可选的动态术语记忆默认关闭。需要跨章节复用经 Reviewer 确认的新译名时，可在配置中设
+`translation.dynamic_terminology.enabled: true`；worker 只提交带源/目标证据的候选，由独立 Antigravity Reviewer
+审阅后通过 `term-memory-review-prepare` 和 `term-memory-publish` 生成不可变快照。启用后准备翻译前需确认
+没有相关活跃 Subagent 会话。`--review` 路径按当前工作目录解析，并必须位于书籍 `output/<title>/` 工作区内。
+详细顺序和分波命令见
+[`Antigravity 工作流说明`](docs/antigravity-workflow.md#动态术语记忆可选)。
+
 ## 快速开始
 
 ### 准备环境

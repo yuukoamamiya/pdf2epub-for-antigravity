@@ -150,7 +150,9 @@ def _entry_priority(entry: Mapping[str, Any]) -> int:
         return 0
     if entry.get("kind") == "domain":
         return 3 if entry.get("policy") == "fixed" else 2
-    return 1
+    if entry.get("kind") in {"book_entity", "memory"}:
+        return 1
+    return 0
 
 
 def _entry_max_form_length(entry: Mapping[str, Any]) -> int:

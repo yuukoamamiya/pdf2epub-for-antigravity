@@ -75,6 +75,8 @@ def test_command_registry_registers_every_workflow_command():
         "refine-local",
         "refine-prepare",
         "translate",
+        "term-memory-publish",
+        "term-memory-review-prepare",
         "translate-arxiv",
         "translate-arxiv-validate",
         "translate-novel",
@@ -203,6 +205,78 @@ def test_html_prepare_logs_generated_handoff_directory_and_scopes_validation_pro
     assert "translate-html_dispatch_prompt.md" in " ".join(logs)
 
 
+
+def test_html_prepare_dynamic_terminology_completes_and_persists_manifest(tmp_path, monkeypatch):
+    import hashlib
+    from types import SimpleNamespace
+    import pdf2epub.glossary as glossary
+    import pdf2epub.html_translation as html_translation
+
+    output_dir = tmp_path / "output"
+    compressed = output_dir / "compressed_units"
+    translated = output_dir / "translated_compressed"
+    compressed.mkdir(parents=True)
+    translated.mkdir()
+    (compressed / "chapter.part1.md").write_text("<p>social form</p>", encoding="utf-8")
+    (compressed / "chapter.mapping.json").write_text(json.dumps({
+        "translation_parts": ["chapter.part1.md"],
+        "original_extension": ".xhtml",
+    }), encoding="utf-8")
+    input_epub = output_dir / "input.epub"
+    input_epub.write_bytes(b"synthetic epub")
+    config = {"translation": {
+        "require_entities": False,
+        "source_language": "English",
+        "target_language": "Chinese",
+        "dynamic_terminology": {"enabled": True},
+    }}
+
+    class Pipeline:
+        def __init__(self, **_kwargs):
+            self.source_language = "English"
+            self.book_title = "HTML dynamic fixture"
+            self.compressed_units_dir = compressed
+            self.translated_dir = translated
+
+        @staticmethod
+        def declared_translation_files():
+            return ["chapter.part1.md"]
+
+        @staticmethod
+        def translation_file_roles(_files):
+            return {}
+
+    monkeypatch.setattr(html_commands, "_load_html_book_context", lambda *_: (
+        config, "HTML dynamic fixture", output_dir, input_epub,
+    ))
+    monkeypatch.setattr("pdf2epub.utils.ebook_converter.needs_conversion", lambda _path: False)
+    monkeypatch.setattr(html_translation, "HTMLEpubPipeline", Pipeline)
+    monkeypatch.setattr(html_commands, "entity_context_is_current", lambda *_: False)
+    monkeypatch.setattr(html_commands, "_load_html_chapter_groups", lambda _pipeline, _files: {
+        "chapter-1": ["chapter.part1.md"],
+    })
+    monkeypatch.setattr(glossary, "load_selected_glossaries", lambda *_: SimpleNamespace(context_files={}, rules=()))
+    monkeypatch.setattr(glossary, "build_unit_glossary_contexts", lambda *_args, **_kwargs: {})
+
+    result = html_commands._prepare_html_command(SimpleNamespace(
+        config=str(tmp_path / "config.yaml"), skip_extract=True, skip_entities=True,
+        source_language=None, target_language=None, resume=False,
+        confirm_no_active_sessions=True,
+    ))
+
+    assert result == 0
+    manifest_path = output_dir / "translate-html_subagent_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    dynamic = manifest["dynamic_terminology"]
+    assert dynamic["enabled"] is True
+    assert dynamic["preexisting_target_inventory"] == {}
+    expected_inventory_hash = hashlib.sha256(b"{}").hexdigest()
+    assert dynamic["preexisting_target_inventory_sha256"] == expected_inventory_hash
+    assert manifest["worker_handoffs"]
+    scoped = json.loads((output_dir / manifest["worker_handoffs"][0]["manifest"]).read_text(encoding="utf-8"))
+    assert scoped["dynamic_terminology"]["candidate_sidecar"].startswith("scratch/dynamic_terminology/translate-html/")
+
+
 def test_polish_validate_parser_accepts_check_only():
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command")
@@ -244,7 +318,7 @@ def test_polish_validate_check_only_writes_no_checkpoint_or_validated_copy(
         config_path=tmp_path / "config.yaml",
     )
     monkeypatch.setattr(
-        markdown_commands, "load_book_context", lambda args, stage: context
+        markdown_commands, "load_book_context", lambda args, stage, **kwargs: context
     )
     monkeypatch.setattr(
         markdown_commands,
@@ -292,7 +366,7 @@ def test_polish_revalidation_replaces_old_schema_receipt(
         config={"footnotes": {"mode": "disabled"}},
         book_title="Book", output_dir=output_dir, config_path=config_path,
     )
-    monkeypatch.setattr(markdown_commands, "load_book_context", lambda args, stage: context)
+    monkeypatch.setattr(markdown_commands, "load_book_context", lambda args, stage, **kwargs: context)
     monkeypatch.setattr(markdown_commands, "_resolve_pdf_polish_source", lambda output, config: (source_dir, "ocr"))
     monkeypatch.setattr(markdown_commands, "load_pdf_file_roles", lambda output: {})
     monkeypatch.setattr(markdown_commands, "_load_pdf_toc_titles", lambda output: [])

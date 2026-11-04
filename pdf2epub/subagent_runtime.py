@@ -101,9 +101,9 @@ def write_batch_handoffs(
     list as permission to process every batch, and assign TOC writing to one
     owner only.
     """
-    output_dir = Path(output_dir)
-    manifest_path = Path(manifest_path)
-    prompt_path = Path(prompt_path)
+    output_dir = Path(output_dir).resolve()
+    manifest_path = _confined_input_path(output_dir, manifest_path, "parent manifest")
+    prompt_path = _confined_input_path(output_dir, prompt_path, "parent prompt")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     prompt = prompt_path.read_text(encoding="utf-8")
     queue = manifest.get("batch_queue", [])
@@ -219,11 +219,13 @@ def _write_worker_glossary_context(
             relative = unit_contexts.get(filename)
             if not relative:
                 continue
-            context_path = (output_dir / str(relative)).resolve()
+            context_path = _confined_output_path(output_dir, str(relative), "unit terminology context")
             try:
                 context = json.loads(context_path.read_text(encoding="utf-8"))
-            except (OSError, UnicodeError, json.JSONDecodeError, TypeError):
-                continue
+            except (OSError, UnicodeError, json.JSONDecodeError, TypeError) as exc:
+                raise ValueError(f"invalid unit terminology context for {filename}: {exc}") from exc
+            if not isinstance(context, dict) or not isinstance(context.get("entries"), list):
+                raise ValueError(f"malformed unit terminology context for {filename}")
             context_entries[filename] = [
                 entry for entry in context.get("entries", []) or []
                 if isinstance(entry, Mapping)
@@ -235,22 +237,58 @@ def _write_worker_glossary_context(
     )
     if worker_context is None:
         return {}, {}
-    worker_context_path = (
-        output_dir / "translation_glossaries" / "worker_contexts"
-        / f"{manifest.get('task', 'translate')}_{worker_id}.json"
+    context_bytes = (
+        json.dumps(worker_context, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode("utf-8")
+    context_sha256 = hashlib.sha256(context_bytes).hexdigest()
+    assignment_sha256 = str(scoped.get("assignment_sha256") or "")
+    if len(assignment_sha256) != 64:
+        raise ValueError("worker context requires a validated assignment SHA-256")
+    dynamic_mode = any(
+        "/dynamic_terminology/unit_contexts/" in str(value).replace("\\", "/")
+        for value in (unit_contexts or {}).values()
+    )
+    context_directory = (
+        output_dir / "translation_glossaries" / "dynamic_terminology" / "worker_contexts"
+        if dynamic_mode else output_dir / "translation_glossaries" / "worker_contexts"
+    )
+    worker_context_path = context_directory / (
+        f"{manifest.get('task', 'translate')}_{worker_id}_{assignment_sha256[:16]}_{context_sha256[:16]}.json"
     )
     worker_context_path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_json(
-        worker_context_path, worker_context, indent=None, separators=(",", ":")
-    )
+    if worker_context_path.exists():
+        if worker_context_path.read_bytes() != context_bytes:
+            raise ValueError("content-addressed worker context path contains different bytes")
+    else:
+        atomic_write_text(worker_context_path, context_bytes.decode("utf-8"))
     relative = relative_posix_path(worker_context_path, output_dir)
     context_files = {worker_id: relative}
     context_hashes = {
-        worker_id: hashlib.sha256(worker_context_path.read_bytes()).hexdigest()
+        worker_id: context_sha256
     }
     scoped["worker_context_files"] = context_files
     scoped["worker_context_sha256"] = context_hashes
     return context_files, context_hashes
+
+
+def _confined_input_path(output_dir: Path, value: str | Path, label: str) -> Path:
+    """Resolve a public path argument relative to the caller's working directory."""
+    root = Path(output_dir).resolve()
+    resolved = Path(value).resolve()
+    if not resolved.is_relative_to(root):
+        raise ValueError(f"{label} escapes output workspace")
+    return resolved
+
+
+def _confined_output_path(output_dir: Path, value: str | Path, label: str) -> Path:
+    """Resolve a manifest-owned reference relative to the book output root."""
+    root = Path(output_dir).resolve()
+    candidate = Path(value)
+    candidate = candidate if candidate.is_absolute() else root / candidate
+    resolved = candidate.resolve()
+    if not resolved.is_relative_to(root):
+        raise ValueError(f"{label} escapes output workspace")
+    return resolved
 
 
 def _update_retired_worker_handoffs(
@@ -319,6 +357,7 @@ def write_worker_handoffs(
     prompt_path: Path,
     *,
     handoff_dir_name: Optional[str] = None,
+    retire_previous: bool = True,
 ) -> List[Dict[str, Any]]:
     """Create scoped worker handoffs.
 
@@ -327,9 +366,10 @@ def write_worker_handoffs(
     ``<task>_worker_handoffs``.  Callers should use returned paths as the
     authority for the generated directory name.
     """
-    output_dir = Path(output_dir)
-    manifest_path = Path(manifest_path)
-    prompt_path = Path(prompt_path)
+    output_dir = Path(output_dir).resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = _confined_input_path(output_dir, manifest_path, "parent manifest")
+    prompt_path = _confined_input_path(output_dir, prompt_path, "parent prompt")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     prompt = prompt_path.read_text(encoding="utf-8")
     task = str(manifest.get("task") or "translate").strip() or "translate"
@@ -368,6 +408,7 @@ def write_worker_handoffs(
     handoff_dir = output_dir / (
         handoff_dir_name or ("worker_handoffs" if task == "translate" else f"{task}_worker_handoffs")
     )
+    handoff_dir = _confined_output_path(output_dir, handoff_dir, "worker handoff directory")
     handoff_dir.mkdir(parents=True, exist_ok=True)
     lease_path = dispatch_lease_path(output_dir, task)
     manifest["dispatch_lease_file"] = relative_posix_path(lease_path, output_dir)
@@ -542,9 +583,13 @@ def write_worker_handoffs(
     current_handoff_paths = {
         str(item.get("manifest") or "") for item in handoffs
     }
-    retired_handoffs = _update_retired_worker_handoffs(
-        output_dir, previous_handoffs, current_assignments, completed_files,
-        current_handoff_paths,
+    retired_handoffs = (
+        _update_retired_worker_handoffs(
+            output_dir, previous_handoffs, current_assignments, completed_files,
+            current_handoff_paths,
+        )
+        if retire_previous
+        else []
     )
     previous_retired = manifest.get("retired_worker_handoffs", [])
     if not isinstance(previous_retired, list):

@@ -35,6 +35,7 @@ def stage_normalized_and_validated_targets(
     safety_blocked: list[str],
     review_required: list[dict[str, Any]],
     protected_workspace_blocked: bool,
+    hard_blocked_names: set[str] | None = None,
 ) -> dict[str, str]:
     """Apply normalization plans, then stage only a passing current scope."""
     if not context.create_validated_copy:
@@ -45,7 +46,7 @@ def stage_normalized_and_validated_targets(
         atomic_write_text(target_dir / name, text)
         target_hashes[name] = hashlib.sha256(text.encode("utf-8")).hexdigest()
     if context.partial:
-        remove_names = set(invalid_names) | set(missing)
+        remove_names = set(invalid_names) | set(missing) | set(hard_blocked_names or ())
         if protected_workspace_blocked:
             # A changed protected workspace invalidates every checkpoint in this
             # submitted scope, even when the Markdown itself passed its audit.
@@ -56,7 +57,7 @@ def stage_normalized_and_validated_targets(
             (validated_dir / name).unlink(missing_ok=True)
     if not missing and not invalid and not safety_blocked and (
         context.allow_review_warnings or not review_required
-    ):
+    ) and not hard_blocked_names:
         validated_dir.mkdir(parents=True, exist_ok=True)
         for source in sources:
             shutil.copy2(target_dir / source.name, validated_dir / source.name)
@@ -104,6 +105,8 @@ def persist_validation_report(
                 "review_required": [item for item in report["review_required"] if item.get("file") == name],
                 "retry_required": [item for item in report["retry_required"] if item.get("file") == name],
                 "human_review_required": [item for item in report["human_review_required"] if item.get("file") == name],
+                "dynamic_terminology": report.get("dynamic_terminology", {}).get("files", {}).get(name),
+                "dynamic_unit_context_sha256": report.get("dynamic_terminology", {}).get("prepared_unit_context_sha256", {}).get(name),
                 "review_warnings_acknowledged": bool(
                     report.get("allow_review_warnings")
                     and any(item.get("file") == name for item in report["review_required"])

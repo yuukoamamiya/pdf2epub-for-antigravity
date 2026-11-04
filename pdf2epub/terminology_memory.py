@@ -65,15 +65,18 @@ class MemoryAuthority:
         for digest, assignment in self.assignments.items():
             if not _hash(digest) or not isinstance(assignment, Mapping):
                 raise ValueError("assignments must map SHA-256 ids to assignment contracts")
-            expected = build_assignment_sha256(
-                task=assignment.get("task", ""), worker_id=assignment.get("worker_id", ""),
-                assigned_files=assignment.get("assigned_files", ()),
+            if not isinstance(assignment.get("assigned_files"), (list, tuple)):
+                raise ValueError("assignment assigned_files must be a list")
+            calculated = build_assignment_sha256(
+                task=str(assignment.get("task") or ""),
+                worker_id=str(assignment.get("worker_id") or ""),
+                assigned_files=assignment["assigned_files"],
                 batch_ids=assignment.get("batch_ids", ()),
                 source_sha256=assignment.get("source_sha256", {}),
                 context_sha256=assignment.get("context_sha256", {}),
             )
-            if digest != expected:
-                raise ValueError("assignment key does not match scoped assignment_sha256 contract")
+            if calculated != digest:
+                raise ValueError("assignment contract SHA-256 does not match its contents")
         if self.book_entities_path is None:
             if self.book_entities_sha256 is not None:
                 raise ValueError("explicit no-book-entities state must not carry a file hash")
@@ -261,7 +264,21 @@ def _validate_affected(affected: list[dict[str, Any]], authority: MemoryAuthorit
         if not isinstance(inventory, Mapping):
             errors.append(f"affected_targets[{i}] is not in authoritative book unit inventory")
             continue
-        for key in ("source_file", "target_file", "scope", "source_sha256", "target_sha256", "effective_projection_sha256"):
+        keys = ["source_file", "target_file", "scope", "source_sha256", "target_sha256", "effective_projection_sha256"]
+        if "base_context_sha256" in inventory:
+            keys.append("base_context_sha256")
+            context_path = inventory.get("base_context_path")
+            context_hash = inventory.get("base_context_sha256")
+            if context_path:
+                try:
+                    live_context = Path(context_path).resolve()
+                    if not live_context.is_relative_to(Path(authority.workspace).resolve()) or not live_context.is_file():
+                        raise ValueError("base context escapes workspace or is missing")
+                    if not _hash(context_hash) or _file_sha(live_context) != context_hash:
+                        errors.append(f"affected_targets[{i}] base context changed since prepare")
+                except (OSError, ValueError) as exc:
+                    errors.append(f"affected_targets[{i}] base context is unavailable: {exc}")
+        for key in keys:
             if item.get(key) != inventory.get(key):
                 errors.append(f"affected_targets[{i}].{key} does not match authoritative unit inventory")
         if item.get("source_file") != item.get("target_file"):
@@ -394,6 +411,23 @@ def _validate_packet(packet: Any, authority: MemoryAuthority) -> list[str]:
     errors.extend(validate_candidates(candidates, authority))
     if packet.get("candidate_set_sha256") != _sha(candidates):
         errors.append("candidate set content hash mismatch")
+    if isinstance(candidates, list):
+        for index, candidate in enumerate(candidates):
+            if not isinstance(candidate, Mapping):
+                continue
+            for path_key, hash_key, label in (
+                ("candidate_sidecar", "candidate_sidecar_sha256", "candidate sidecar"),
+                ("worker_manifest", "worker_manifest_sha256", "worker manifest"),
+            ):
+                relative, expected = candidate.get(path_key), candidate.get(hash_key)
+                if relative is None and expected is None:
+                    continue
+                try:
+                    live_path = authority.file_path(authority.workspace, str(relative))
+                    if not _hash(expected) or _file_sha(live_path) != expected:
+                        errors.append(f"candidates[{index}] {label} changed since prepare")
+                except (OSError, ValueError) as exc:
+                    errors.append(f"candidates[{index}] {label} is unavailable: {exc}")
     affected = packet.get("affected_targets")
     if not isinstance(affected, list):
         errors.append("affected_targets must be an array")
@@ -435,7 +469,7 @@ def _validate_review(packet: Mapping[str, Any], review: Any) -> list[str]:
         target_by_id = {r.get("unit_id"): r for r in targets if isinstance(r, dict) and _nonempty(r.get("unit_id"))}
         for old in packet["affected_targets"]:
             decision = target_by_id.get(old["unit_id"], {})
-            for field in ("source_sha256", "target_sha256", "scope"):
+            for field in ("source_sha256", "target_sha256", "scope", "effective_projection_sha256"):
                 if decision.get(field) != old.get(field):
                     errors.append(f"review for {old['unit_id']} is not bound to current {field}")
             if not isinstance(decision.get("decision"), str) or decision.get("decision") not in {"consistent", "retranslate_required"}:
@@ -464,6 +498,54 @@ def _load_parent(root: Path, digest: str | None, authority: MemoryAuthority) -> 
         if not isinstance(entry, dict) or not _nonempty(entry.get("candidate_id")) or not _nonempty(entry.get("source")) or not _nonempty(entry.get("target")) or not isinstance(entry.get("scope"), dict):
             raise ValueError("parent snapshot entry contract is invalid")
     return parent
+
+
+def load_verified_current_snapshot(
+    memory_root: Path,
+    *,
+    book_id: str,
+    source_language: str,
+    target_language: str,
+) -> tuple[str | None, dict[str, Any] | None]:
+    """Read and verify the current store and snapshot without mutation."""
+    digest = _current_parent(Path(memory_root))
+    if digest is None:
+        return None, None
+    snapshot = load_verified_snapshot(
+        memory_root, digest, book_id=book_id,
+        source_language=source_language, target_language=target_language,
+    )
+    return digest, snapshot
+
+
+def load_verified_snapshot(
+    memory_root: Path,
+    digest: str,
+    *,
+    book_id: str,
+    source_language: str,
+    target_language: str,
+) -> dict[str, Any]:
+    """Load one immutable snapshot by verified digest and identity."""
+    if not _hash(digest):
+        raise ValueError("snapshot digest must be lowercase SHA-256")
+    root_resolved, snapshots_root = _assert_memory_store_confined(memory_root)
+    snapshot_path = (snapshots_root / f"{digest}.json").resolve()
+    if not snapshot_path.is_relative_to(snapshots_root) or not snapshot_path.is_file():
+        raise ValueError("current snapshot is missing or escapes memory root")
+    snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    if _sha(snapshot) != digest:
+        raise ValueError("current snapshot content hash mismatch")
+    if snapshot.get("schema_version") != 1 or snapshot.get("book_id") != book_id:
+        raise ValueError("current snapshot book identity mismatch")
+    if snapshot.get("language_pair") != {"source": source_language, "target": target_language}:
+        raise ValueError("current snapshot language pair mismatch")
+    if not isinstance(snapshot.get("entries"), list):
+        raise ValueError("current snapshot entries are invalid")
+    for entry in snapshot["entries"]:
+        if not isinstance(entry, dict) or not _nonempty(entry.get("candidate_id")) or not _nonempty(entry.get("source")) or not _nonempty(entry.get("target")):
+            raise ValueError("current snapshot entry contract is invalid")
+    return snapshot
 
 
 def _session_barrier(lease_state: str, lease_session_id: str | None, session_stop_evidence: Mapping[str, Any] | None, operator_attestation: Mapping[str, Any] | None) -> None:
@@ -499,6 +581,8 @@ def publish_memory(
     lease_session_id: str | None = None,
     session_stop_evidence: Mapping[str, Any] | None = None,
     operator_attestation: Mapping[str, Any] | None = None,
+    approved_projection_sha256: Mapping[str, str] | None = None,
+    preexisting_target_inventory: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> str:
     """Verify live evidence, then atomically publish a cumulative snapshot."""
     errors = _validate_packet(packet, authority)
@@ -516,6 +600,18 @@ def publish_memory(
     ):
         raise ValueError("operator attestation does not match book and assignment")
     approved = {r["candidate_id"] for r in review["candidates"] if r["decision"] == "approve"}
+    projection_hashes = dict(approved_projection_sha256 or {})
+    expected_projection_units = {str(row["unit_id"]) for row in packet["affected_targets"]}
+    if not expected_projection_units.issubset(projection_hashes) or any(not _hash(value) for value in projection_hashes.values()):
+        raise ValueError("approved projection hashes must cover affected targets and use SHA-256 values")
+    inventory = {str(name): dict(row) for name, row in (preexisting_target_inventory or {}).items()}
+    for name, row in inventory.items():
+        if not _nonempty(name) or Path(name).name != name or any(not _nonempty(row.get(key)) for key in ("source_file", "target_file", "chapter_id")):
+            raise ValueError("preexisting target inventory has invalid unit identity")
+        if row.get("source_file") != name or row.get("target_file") != name or not _hash(row.get("source_sha256")) or not _hash(row.get("target_sha256")) or not _hash(row.get("effective_projection_sha256")):
+            raise ValueError("preexisting target inventory hashes or mapping are invalid")
+        if not isinstance(row.get("scope"), Mapping):
+            raise ValueError("preexisting target inventory scope is invalid")
     additions = [dict(row) for row in packet["candidates"] if row["candidate_id"] in approved]
     parent = _load_parent(Path(root), current_snapshot_sha256, authority)
     parent_entries = list(parent["entries"]) if parent else []
@@ -542,6 +638,9 @@ def publish_memory(
         "entries": entries,
         "review": review,
         "affected_targets": packet["affected_targets"],
+        "approved_projection_sha256": projection_hashes,
+        "preexisting_target_inventory": inventory,
+        "preexisting_target_inventory_complete": True,
         "publication_key": publication_key,
     }
     digest = _sha(snapshot)

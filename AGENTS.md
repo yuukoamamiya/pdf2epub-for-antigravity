@@ -179,6 +179,19 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
   猜测替代文件。
 - 术语优先级固定为：外部领域表 `fixed` > 外部领域表 `preferred` > 当前书实体表；
   短语优先于其组成部分。若出现无法按此规则解释的冲突，停止翻译并报告，不要临时造译法。
+- `translation.dynamic_terminology.enabled` 默认关闭；显式启用时，仅 PDF `translate` 和 EPUB
+  `translate-html` 正文使用动态记忆。动态记忆与书内实体同级，外部领域表仍优先；同级同源形式的
+  不同目标译法必须阻断。启用后每次准备前必须以 `--confirm-no-active-sessions` 确认相关工作区
+  Subagent 已停止；registry 中的 `claimed`/`running`/`assigned` lease 都会阻断。worker 候选 sidecar
+  不是正式术语，必须运行 `term-memory-review-prepare` 交独立 Antigravity Reviewer 逐候选、逐受影响译文决定，再通过
+  `term-memory-publish` 发布。`--review` 相对路径按当前工作目录解析，且最终文件必须位于
+  对应书籍的 `output/<title>/` 工作区内；推荐传仓库根目录起始的 `output/<title>/dynamic_terminology/review.json`。
+  动态记忆目录解析到书籍工作区之外的 symlink/junction 会在写入前阻断。按波次复核可使用 `--wave N`；
+  `retranslate_required` 文件先修复译文；可运行单文件校验定位结构错误，但若术语一致性门禁仍阻断，
+  不要等待普通单文件校验通过。直接用 `--consistency-only-file <file.md>` 准备只读结构检查并交独立
+  Antigravity Reviewer 复核。Reviewer 发布决定后，运行 `translate --resume` 或 `html-prepare --resume`
+  刷新 scoped context；不要继续派发旧 handoff。源、目标和上下文哈希均未变化且已有当前校验的单元可复用，
+  再对待处理单元执行正式单文件校验，最后运行全量校验。
 - 术语准备完成后，检查 `output/<title>/glossary_selection.json`：它记录本次是否明确
   选择外部表、配置路径、源文件哈希和工作区快照哈希。规范化只读快照位于
   `output/<title>/translation_glossaries/`；按源单元裁剪的上下文位于其下的

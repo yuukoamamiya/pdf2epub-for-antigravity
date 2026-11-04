@@ -51,6 +51,28 @@ def _prepare_pdf_markdown_task(args, task: str):
     from pdf2epub.markdown_handoff import prepare_markdown_subagent
     from pdf2epub.subagent_runtime import resolve_subagent_model
 
+    dynamic_attestation = None
+    if task == "translate":
+        try:
+            early_config = load_config(args.config)
+            early_policy = PipelinePolicy.from_config(early_config)
+            if early_policy.dynamic_terminology_enabled:
+                from pdf2epub.dynamic_terminology import session_attestation, verify_session_attestation
+                from pdf2epub.utils.paths import book_output_dir
+
+                title = str(early_config.get("title") or "").strip()
+                if not title:
+                    raise ValueError("title is required before dynamic terminology can prepare translation")
+                early_output = book_output_dir(title)
+                dynamic_attestation = session_attestation(
+                    early_output, "translate",
+                    confirmed=bool(getattr(args, "confirm_no_active_sessions", False)),
+                )
+                verify_session_attestation(early_output, dynamic_attestation)
+        except Exception as exc:
+            logger.error(f"Dynamic terminology pre-write gate blocked {task}: {exc}")
+            return 1
+
     context = load_book_context(args, f"{task}-prepare")
     if context is None:
         return 1
@@ -72,12 +94,19 @@ def _prepare_pdf_markdown_task(args, task: str):
     target_language = getattr(args, "target_language", None) or policy.target_language or (
         "Original" if conversion_pipeline else "Chinese"
     )
+    dynamic_snapshot_sha256 = None
+    dynamic_entries = []
+    if task == "translate" and policy.dynamic_terminology_enabled:
+        from pdf2epub.dynamic_terminology import verify_session_attestation
+        verify_session_attestation(output_dir, dynamic_attestation)
     glossary_bundle = None
     context_files = {}
     skipped_context_files = []
     unit_context_files = {}
     heading_contexts = {}
     global_toc_outline = ""
+    base_unit_context_files = {}
+    preexisting_dynamic_targets = {}
     prompt_context_files = None
     footnote_mode = None
     if task == "polish":
@@ -225,6 +254,22 @@ def _prepare_pdf_markdown_task(args, task: str):
             skipped_context_files.append("translation_entities")
         from pdf2epub.glossary import build_unit_glossary_contexts
 
+        chapter_groups = _load_pdf_chapter_groups(output_dir, source_dir)
+        if policy.dynamic_terminology_enabled:
+            from pdf2epub.dynamic_terminology import (
+                build_dynamic_unit_contexts,
+                load_current_snapshot,
+                verify_session_attestation,
+            )
+            dynamic_snapshot_sha256, dynamic_entries = load_current_snapshot(
+                output_dir / "dynamic_terminology", book_id=book_title,
+                source_language=source_language, target_language=target_language,
+            )
+        else:
+            dynamic_entries = []
+
+        if policy.dynamic_terminology_enabled:
+            verify_session_attestation(output_dir, dynamic_attestation)
         unit_context_files = build_unit_glossary_contexts(
             output_dir,
             source_dir,
@@ -233,12 +278,29 @@ def _prepare_pdf_markdown_task(args, task: str):
             source_language=source_language,
             target_language=target_language,
         )
+        base_unit_context_files = dict(unit_context_files)
+        if policy.dynamic_terminology_enabled:
+            from pdf2epub.dynamic_terminology import preexisting_target_inventory
+
+            preexisting_dynamic_targets = preexisting_target_inventory(target_dir)
+            verify_session_attestation(output_dir, dynamic_attestation)
+            unit_context_files = build_dynamic_unit_contexts(
+                output_dir, source_dir, unit_context_files, dynamic_entries,
+                source_language=source_language, target_language=target_language,
+                chapter_groups=chapter_groups,
+            )
+            rules.append(
+                "Dynamic terminology memory is frozen for this handoff. Read only the sparse context listed for your assigned file; never inspect the global snapshot or another unit. Optional unreviewed candidate suggestions belong only in the assignment-bound sidecar specified in your scoped manifest. Do not change TOC or metadata contracts."
+            )
         # Native glossary snapshots are audit inputs; workers receive only
         # per-unit projections through unit_context_files.
         prompt_context_files = {}
     try:
         controlled_files = {}
         if task == "translate":
+            if policy.dynamic_terminology_enabled:
+                from pdf2epub.dynamic_terminology import verify_session_attestation
+                verify_session_attestation(output_dir, dynamic_attestation)
             configured_special = policy.special_unit_modes or {}
             if configured_special:
                 from pdf2epub.special_unit_translation import controlled_unit_is_supported
@@ -285,11 +347,7 @@ def _prepare_pdf_markdown_task(args, task: str):
             heading_contexts=heading_contexts or None,
             global_toc_outline=global_toc_outline or None,
             unit_context_files=unit_context_files or None,
-            chapter_groups=(
-                _load_pdf_chapter_groups(output_dir, source_dir)
-                if task == "translate"
-                else None
-            ),
+            chapter_groups=chapter_groups if task == "translate" else None,
             continuation_files=_load_pdf_continuation_files(output_dir, source_dir),
             protected_toc_titles=(
                 _load_pdf_toc_titles(output_dir) if task == "polish" else None
@@ -299,30 +357,65 @@ def _prepare_pdf_markdown_task(args, task: str):
         )
         from pdf2epub.subagent_runtime import write_worker_handoffs
 
+        if task == "translate" and policy.dynamic_terminology_enabled:
+            from pdf2epub.dynamic_terminology import verify_session_attestation
+            verify_session_attestation(output_dir, dynamic_attestation)
+        handoff_options = {}
+        if task == "translate" and policy.dynamic_terminology_enabled:
+            from pdf2epub.dynamic_terminology import dynamic_handoff_dir_name
+
+            handoff_options = {
+                "handoff_dir_name": dynamic_handoff_dir_name(
+                    task, dynamic_snapshot_sha256, source_dir, unit_context_files or {},
+                    manifest_path=paths["manifest"],
+                ),
+                "retire_previous": False,
+            }
         handoffs = write_worker_handoffs(
-            output_dir,
-            paths["manifest"],
-            paths["prompt"],
+            output_dir, paths["manifest"], paths["prompt"], **handoff_options,
         )
-        if handoffs:
-            handoff_dir_name = (
-                "worker_handoffs" if task == "translate" else f"{task}_worker_handoffs"
+        if task == "translate" and policy.dynamic_terminology_enabled:
+            from pdf2epub.dynamic_terminology import attach_candidate_sidecars
+
+            attach_candidate_sidecars(
+                output_dir, handoffs, task=task,
+                chapter_by_file={name: chapter for chapter, files in chapter_groups.items() for name in files},
+                source_language=source_language, target_language=target_language, book_id=book_title,
             )
-            paths["worker_handoffs"] = output_dir / handoff_dir_name
+            manifest_data = json.loads(Path(paths["manifest"]).read_text(encoding="utf-8"))
+            manifest_data["dynamic_terminology"] = {
+                "schema_version": 1,
+                "enabled": True,
+                "current_snapshot_sha256": dynamic_snapshot_sha256,
+                "operator_attestation_sha256": dynamic_attestation["evidence_sha256"],
+                "base_unit_context_files": {
+                    name: path.resolve().relative_to(output_dir.resolve()).as_posix()
+                    for name, path in base_unit_context_files.items()
+                },
+                "preexisting_target_inventory": preexisting_dynamic_targets,
+                "preexisting_target_inventory_sha256": hashlib.sha256(
+                    json.dumps(preexisting_dynamic_targets, sort_keys=True, separators=(",", ":")).encode()
+                ).hexdigest(),
+            }
+            atomic_write_json(Path(paths["manifest"]), manifest_data)
+        if handoffs:
+            paths["worker_handoffs"] = output_dir / Path(handoffs[0]["manifest"]).parent
     except Exception as exc:
         logger.error(f"Could not prepare {task} task: {exc}")
         return 1
     logger.success(f"Wrote Subagent prompt: {paths['prompt']}")
     logger.info(f"Recommended Antigravity model: {resolve_subagent_model(config, task)}")
     if task in {"translate", "polish"}:
-        handoff_dir_label = (
-            "worker_handoffs" if task == "translate" else f"{task}_worker_handoffs"
-        )
+        handoff_dir = paths.get("worker_handoffs")
         logger.warning(
             "此步骤只生成交接文件，没有执行翻译；现在必须在 Antigravity 中打开工作区 "
-            f"Subagent，并按 {handoff_dir_label}/ 中的 assigned_files 执行。"
+            f"Subagent，并只按实际 scoped handoff 目录 {handoff_dir or '(no pending workers)'} 中的 assigned_files 执行。"
             + ("TOC 已由独立前置任务完成。" if task == "translate" else "")
         )
+        for item in handoffs:
+            if item.get("dispatch_wave") == (handoffs[0].get("dispatch_wave") if handoffs else None):
+                logger.info(f"Worker prompt: {output_dir / item['prompt']}")
+                logger.info(f"Worker manifest: {output_dir / item['manifest']}")
     logger.info(
         f"在 Antigravity 中让 Subagent 执行提示词，完成后运行 {task}-validate。"
     )
@@ -428,7 +521,7 @@ def _validate_pdf_markdown_task(args, task: str):
     if check_only and not getattr(args, "file", None):
         logger.error("--check-only requires --file")
         return 1
-    context = load_book_context(args, f"{task}-validate")
+    context = load_book_context(args, f"{task}-validate", init_logging=not check_only)
     if context is None:
         return 1
     config = context.config
@@ -529,6 +622,7 @@ def _validate_pdf_markdown_task(args, task: str):
         allow_review_warnings=bool(
             getattr(args, "allow_review_warnings", False)
         ),
+        dynamic_terminology_config=config if task == "translate" else None,
     )
     selected_scope = bool(getattr(args, "file", None))
     book_outputs_complete = not selected_scope and not report.get("missing")
@@ -546,7 +640,8 @@ def _validate_pdf_markdown_task(args, task: str):
         # checking that unit's own visible TOC heading bindings.
         if getattr(args, "file", None):
             _apply_local_toc_heading_binding(output_dir, report, str(selected_file))
-            _persist_file_validation_checkpoint(output_dir, report, task)
+            if not check_only:
+                _persist_file_validation_checkpoint(output_dir, report, task)
         else:
             entity_report = _validate_translation_entities(output_dir, config)
             report["entities"] = entity_report
@@ -832,12 +927,23 @@ def _persist_file_validation_checkpoint(output_dir: Path, report: dict, task: st
     if not isinstance(records, dict):
         records = {}
     for name in report.get("files_checked", []):
+        manifest_path = Path(output_dir) / f"{task}_subagent_manifest.json"
+        try:
+            manifest_value = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            manifest_value = {}
+        dynamic_context_hash = (
+            (manifest_value.get("unit_context_sha256", {}) or {}).get(name)
+            if (manifest_value.get("dynamic_terminology", {}) or {}).get("enabled") is True
+            else None
+        )
         records[name] = {
             "schema_version": markdown_validation_schema_version(task),
             "valid": name in report.get("valid_files", [])
             and not report.get("missing"),
             "source_sha256": report.get("source_sha256", {}).get(name),
             "target_sha256": report.get("target_sha256", {}).get(name),
+            **({"dynamic_unit_context_sha256": dynamic_context_hash} if dynamic_context_hash else {}),
             "validated_at": datetime.now(timezone.utc).isoformat(),
             "invalid": [
                 item for item in report.get("invalid", []) if item.get("file") == name

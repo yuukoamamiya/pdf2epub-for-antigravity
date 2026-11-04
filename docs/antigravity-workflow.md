@@ -1219,3 +1219,52 @@ pipeline 的能力矩阵由 `pdf2epub/pipeline_policy.py` 维护。命令模块�
 ## 安全边界
 
 仓库不硬编码内部项目 ID，不伪造 IDE 请求头，也不自动导出或冒用 ADC 凭证。任何需要账号授权的模型调用都应由用户在 Antigravity IDE 会话中完成。
+# 动态术语记忆（可选）
+
+默认关闭。需要将经 Reviewer 确认的新译名带入后续运行时，才配置：
+
+```yaml
+translation:
+  dynamic_terminology:
+    enabled: true
+```
+
+PDF `translate` 和 EPUB `translate-html` 会把动态术语作为稀疏、按单元命中的只读上下文交给正文 worker；
+目录、元数据及 worker 的翻译权限不变。每个正文 worker 可选写一个 assignment-bound sidecar 提交术语候选，
+候选在 Reviewer 批准并发布前不生效。默认 scope 是当前章节；worker 可明确提出 book scope，但只能依据自己
+assigned 文件中的证据。Reviewer packet 会列出全书范围内命中该词的所有现存目标，逐一给出一致性决定；
+只有 Reviewer 明确批准，book 词条才进入后续全书范围的上下文。启用时准备命令要求显式确认没有活动的
+相关 Subagent 会话：
+
+```text
+uv run pdf2epub -c config.yaml translate --confirm-no-active-sessions
+uv run pdf2epub -c config_epub.yaml html-prepare --confirm-no-active-sessions
+```
+
+`term-memory-publish --review <path>` 将相对路径按当前工作目录解析；最终路径必须位于对应书籍的
+`output/<title>/` 工作区内。推荐使用仓库根目录起始的 `output/<title>/dynamic_terminology/review.json`。
+动态记忆目录及其中的 packet、snapshot 和 operator attestation 也必须解析到书籍工作区之内；指向工作区外的
+symlink/junction 会在写入前被拒绝。
+
+完成当前波的正文 worker 并通过当前单文件校验后，按需只收集该波候选：
+
+```text
+uv run pdf2epub -c config.yaml term-memory-review-prepare --task translate --wave 1 --confirm-no-active-sessions
+uv run pdf2epub -c config.yaml term-memory-publish --task translate --wave 1 --review output/<书名>/dynamic_terminology/review.json --confirm-no-active-sessions
+```
+
+省略 `--wave` 会收集所有当前有效候选。review prompt 指定 `dynamic_terminology/review.json` 的逐候选
+决定和逐受影响目标的一致性决定；只有独立 Antigravity Reviewer 的决定经 publish 校验后，快照才成为后续运行的输入。
+若某目标被决定为 `retranslate_required`，先修复译文；可运行普通单文件校验定位结构错误，但术语一致性门禁仍阻断时，
+不要等待普通单文件校验通过，直接准备只读结构复核并交 Reviewer：
+
+```text
+uv run pdf2epub -c config.yaml term-memory-review-prepare --task translate --consistency-only-file chapter.md --confirm-no-active-sessions
+```
+
+`--consistency-only-file` 可重复指定。此模式对所选文件运行只读结构校验并核对冻结上下文，不写入
+最终 validation checkpoint，也不要求先生成全书最终 validation receipt。独立 Antigravity Reviewer 完成一致性复核并 publish
+后，运行 `translate --resume` 或 `html-prepare --resume` 刷新 scoped context；不要继续派发旧 handoff。源、目标和上下文哈希
+未变化且已有当前校验的单元可复用。随后对待处理单元运行正式单文件校验，再运行全量校验。记忆快照不可原地编辑；后续批准会生成以父快照为基准的新快照。book entity 与 memory
+同优先级，冲突会阻断；外部领域表的 `fixed` / `preferred` 项优先。会话确认是操作者 attestation，
+不能用过期 lease 文件推断会话已停止。

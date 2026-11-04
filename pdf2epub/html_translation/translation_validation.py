@@ -113,7 +113,12 @@ class HTMLTranslationValidator:
         return names or sorted(
             path.name for path in self.compressed_units_dir.glob("*.md") if path.is_file()
         )
-    def validate(self, file_name: Optional[str] = None) -> Dict[str, Any]:
+    def validate(
+        self,
+        file_name: Optional[str] = None,
+        *,
+        _skip_dynamic_terminology_gate: bool = False,
+    ) -> Dict[str, Any]:
         """
         Validate translated compressed units against their sources.
 
@@ -372,6 +377,52 @@ class HTMLTranslationValidator:
                 "reason": "single-file validation scope",
             }
 
+        dynamic_report: Dict[str, Any] = {
+            "enabled": False, "valid": True, "files": {}, "errors": [],
+        }
+        if _skip_dynamic_terminology_gate:
+            dynamic_report["skipped"] = True
+            dynamic_report["reason"] = "internal structural-only audit"
+        else:
+            try:
+                from pdf2epub.terminology_memory_validation import validate_dynamic_terminology_units
+
+                dynamic_report = validate_dynamic_terminology_units(
+                    self.output_dir,
+                    task="translate-html",
+                    source_dir=self.compressed_units_dir,
+                    target_dir=self.translated_dir,
+                    config=getattr(self, "config", {}) or {},
+                    selected_files=[requested_file] if file_name is not None else None,
+                    authoritative_files=declared_names,
+                )
+            except (OSError, UnicodeError, TypeError, ValueError) as exc:
+                dynamic_report = {
+                    "enabled": True, "valid": False, "all_passed": False,
+                    "files": {},
+                    "errors": [{"file": "<dynamic-terminology>", "error": str(exc)}],
+                }
+        if dynamic_report.get("enabled") and not dynamic_report.get("valid"):
+            blocked = {
+                str(name): list(item.get("errors", []))
+                for name, item in dynamic_report.get("files", {}).items()
+                if isinstance(item, dict) and item.get("valid") is False
+            }
+            if any(
+                not isinstance(item, dict)
+                or item.get("file") in {None, "<dynamic-terminology>", "<source-inventory>"}
+                for item in dynamic_report.get("errors", [])
+            ):
+                blocked.update({name: ["dynamic terminology readiness failed"] for name in declared_names})
+            for name, reasons in blocked.items():
+                if name in valid_files:
+                    valid_files.remove(name)
+                    valid -= 1
+                invalid.append({
+                    "file": name,
+                    "reason": "dynamic terminology validation failed: " + "; ".join(map(str, reasons)),
+                })
+
         all_passed = (
             len(missing) == 0
             and len(invalid) == 0
@@ -379,6 +430,7 @@ class HTMLTranslationValidator:
             and source_snapshot["valid"]
             and metadata_report["valid"]
             and context_report["valid"]
+            and (not dynamic_report.get("enabled") or dynamic_report.get("valid", False))
         )
 
         return {
@@ -414,6 +466,7 @@ class HTMLTranslationValidator:
             ),
             "metadata": metadata_report,
             "translation_context": context_report,
+            "dynamic_terminology": dynamic_report,
             "all_passed": all_passed,
             "book_complete": all_passed if scope == "book" else False,
         }

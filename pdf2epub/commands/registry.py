@@ -463,6 +463,10 @@ def register_command_parsers(subparsers) -> None:
         action="store_true",
         help="Skip the translation glossary gate for a genuinely non-terminological task",
     )
+    translate_parser.add_argument(
+        "--confirm-no-active-sessions", action="store_true",
+        help="Attest that no relevant workspace Subagent session is active (required when dynamic terminology is enabled)",
+    )
     translate_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.markdown", "translate_command"))
 
     translate_toc_parser = subparsers.add_parser(
@@ -687,7 +691,34 @@ def register_command_parsers(subparsers) -> None:
         action="store_true",
         help="Skip EPUB book-wide terminology extraction (external glossaries still apply)",
     )
+    html_prepare_parser.add_argument(
+        "--confirm-no-active-sessions", action="store_true",
+        help="Attest that no relevant workspace Subagent session is active (required when dynamic terminology is enabled)",
+    )
     html_prepare_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.html", "html_prepare_command"))
+
+    term_review_parser = subparsers.add_parser(
+        "term-memory-review-prepare",
+        help="Prepare a scoped human review packet for validated terminology candidates",
+    )
+    term_review_parser.add_argument("--task", choices=["translate", "translate-html"], default="translate")
+    term_review_parser.add_argument("--wave", type=int, help="Select one completed dispatch wave; omitted collects all currently validated candidate sidecars")
+    term_review_parser.add_argument(
+        "--consistency-only-file", action="append", default=[], metavar="FILE",
+        help="Prepare a consistency-only review for a retranslated file with a current single-file validation checkpoint; repeat for multiple files",
+    )
+    term_review_parser.add_argument("--confirm-no-active-sessions", action="store_true")
+    term_review_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.terminology_memory", "review_prepare_command"))
+
+    term_publish_parser = subparsers.add_parser(
+        "term-memory-publish",
+        help="Publish an approved terminology memory review with parent snapshot CAS",
+    )
+    term_publish_parser.add_argument("--task", choices=["translate", "translate-html"], default="translate")
+    term_publish_parser.add_argument("--wave", type=int, help="Expected dispatch wave recorded in the prepared review manifest")
+    term_publish_parser.add_argument("--review", required=True, help="Reviewer-produced JSON contract path")
+    term_publish_parser.add_argument("--confirm-no-active-sessions", action="store_true")
+    term_publish_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.terminology_memory", "publish_command"))
 
     # HTML Validate subcommand (pure local validation)
     html_validate_parser = subparsers.add_parser(

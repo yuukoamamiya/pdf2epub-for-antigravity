@@ -62,6 +62,11 @@ def build_input_snapshot(
         files["toc_translation_source"] = _file_sha256_or_none(
             output_dir / "toc_translation_source.json"
         )
+        dynamic_binding = _dynamic_terminology_snapshot_binding(
+            output_dir, Path(config_path)
+        )
+        if dynamic_binding is not None:
+            files["dynamic_terminology_snapshot"] = dynamic_binding
         # Optional controlled-unit artifacts participate only when present,
         # preserving legacy receipt behavior for projects that never enabled
         # the feature. Any changed prompt contract, mapping result, or apply
@@ -115,6 +120,40 @@ def build_input_snapshot(
     return {"files": files, "refinement_fingerprint": fingerprint}
 
 
+def _dynamic_terminology_snapshot_binding(output_dir: Path, config_path: Path) -> str | None:
+    """Bind translated package receipts to the verified current memory epoch."""
+    try:
+        from .pipeline_policy import PipelinePolicy
+        from .utils.configuration import load_config
+
+        config = load_config(str(config_path))
+        enabled = PipelinePolicy.from_config(config).dynamic_terminology_enabled
+    except (OSError, UnicodeError, TypeError, ValueError):
+        return "invalid"
+    if not enabled:
+        return None
+    try:
+        manifest = json.loads(
+            (Path(output_dir) / "translate_subagent_manifest.json").read_text(encoding="utf-8")
+        )
+        dynamic = manifest.get("dynamic_terminology") if isinstance(manifest, dict) else None
+        if not isinstance(dynamic, Mapping) or dynamic.get("schema_version") != 1 or dynamic.get("enabled") is not True:
+            return "invalid"
+        pair = (manifest.get("source_language"), manifest.get("target_language"))
+        title = config.get("title")
+        if not title or not all(isinstance(value, str) and value for value in pair):
+            return "invalid"
+        from .dynamic_terminology import load_current_snapshot
+
+        digest, _entries = load_current_snapshot(
+            Path(output_dir) / "dynamic_terminology",
+            book_id=str(title), source_language=pair[0], target_language=pair[1],
+        )
+        return digest or "none"
+    except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError, KeyError):
+        return "invalid"
+
+
 def _build_inputs_are_complete(snapshot: Mapping[str, Any], *, translated: bool) -> bool:
     files = snapshot.get("files")
     fingerprint = snapshot.get("refinement_fingerprint")
@@ -133,8 +172,14 @@ def _build_inputs_are_complete(snapshot: Mapping[str, Any], *, translated: bool)
         and bool(special_contracts)
         and all(isinstance(value, str) and value for value in special_contracts.values())
     )
+    dynamic_snapshot = files.get("dynamic_terminology_snapshot")
+    dynamic_snapshot_complete = dynamic_snapshot is None or (
+        dynamic_snapshot == "none"
+        or (isinstance(dynamic_snapshot, str) and len(dynamic_snapshot) == 64 and all(c in "0123456789abcdef" for c in dynamic_snapshot))
+    )
     return (
         special_contracts_complete
+        and dynamic_snapshot_complete
         and
         isinstance(toc_hash, str)
         and fingerprint.get("toc_sha256") == toc_hash
@@ -175,8 +220,55 @@ def validation_receipt_is_current(
         recorded_source == markdown_directory_sha256(Path(source_dir))
         and recorded_target == markdown_directory_sha256(Path(target_dir))
     )
-    if not current or not require_build_inputs:
+    if not current:
         return current
+    if task == "translate" and output_dir is not None:
+        try:
+            configured_dynamic = False
+            configured = {}
+            if config_path is not None:
+                from .pipeline_policy import PipelinePolicy
+                from .utils.configuration import load_config
+
+                configured = load_config(str(config_path))
+                configured_dynamic = PipelinePolicy.from_config(configured).dynamic_terminology_enabled
+            manifest_path = Path(output_dir) / "translate_subagent_manifest.json"
+            if not manifest_path.is_file():
+                if configured_dynamic:
+                    return False
+                manifest = {}
+            else:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            dynamic = manifest.get("dynamic_terminology") if isinstance(manifest, dict) else None
+            if configured_dynamic and (
+                not isinstance(dynamic, Mapping)
+                or dynamic.get("schema_version") != 1
+                or dynamic.get("enabled") is not True
+            ):
+                return False
+            if isinstance(dynamic, Mapping) and dynamic.get("enabled") is True:
+                from .terminology_memory_validation import validate_dynamic_terminology_units
+                from .utils.configuration import load_config
+
+                config = load_config(str(config_path)) if config_path is not None else {}
+                if not config.get("title"):
+                    config["title"] = manifest.get("book_title") or manifest.get("book_id")
+                config.setdefault("translation", {})
+                config["translation"].update({
+                    "source_language": manifest.get("source_language"),
+                    "target_language": manifest.get("target_language"),
+                    "dynamic_terminology": {"enabled": True},
+                })
+                memory_report = validate_dynamic_terminology_units(
+                    Path(output_dir), task="translate", source_dir=Path(source_dir),
+                    target_dir=Path(target_dir), config=config,
+                )
+                if memory_report.get("enabled") and not memory_report.get("valid"):
+                    return False
+        except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError, KeyError):
+            return False
+    if not require_build_inputs:
+        return True
     if output_dir is None or config_path is None:
         return False
     translated = task == "translate"

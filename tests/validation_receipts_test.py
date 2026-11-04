@@ -154,6 +154,80 @@ def test_unrelated_ocr_receipt_keeps_its_existing_schema_current(tmp_path: Path)
     )
 
 
+def test_enabled_dynamic_memory_with_missing_manifest_contract_is_invalid_snapshot(tmp_path: Path):
+    from pdf2epub.validation_receipts import _dynamic_terminology_snapshot_binding
+
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "title: Book\ntranslation:\n  dynamic_terminology:\n    enabled: true\n",
+        encoding="utf-8",
+    )
+    assert _dynamic_terminology_snapshot_binding(tmp_path, config) == "invalid"
+
+
+def test_dynamic_receipt_rechecks_current_memory_without_build_input_gate(tmp_path: Path, monkeypatch):
+    from pdf2epub import terminology_memory_validation
+    from pdf2epub.validation_receipts import _dynamic_terminology_snapshot_binding
+
+    source_dir, target_dir = tmp_path / "source", tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "unit.md").write_text("source", encoding="utf-8")
+    (target_dir / "unit.md").write_text("target", encoding="utf-8")
+    (tmp_path / "translate_subagent_manifest.json").write_text(json.dumps({
+        "book_title": "Book", "source_language": "English", "target_language": "Chinese",
+        "dynamic_terminology": {"schema_version": 1, "enabled": True},
+    }), encoding="utf-8")
+    receipt = tmp_path / "translate_validation.json"
+    receipt.write_text(json.dumps({
+        "schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION,
+        "task": "translate", "scope": "full", "all_passed": True,
+        "source_sha256": markdown_directory_sha256(source_dir),
+        "target_sha256": markdown_directory_sha256(target_dir),
+    }), encoding="utf-8")
+    calls = []
+
+    def invalid_memory(*args, **kwargs):
+        calls.append(kwargs)
+        return {"enabled": True, "valid": False}
+
+    monkeypatch.setattr(terminology_memory_validation, "validate_dynamic_terminology_units", invalid_memory)
+    assert not validation_receipt_is_current(
+        receipt, source_dir, target_dir, task="translate", output_dir=tmp_path,
+        require_build_inputs=False,
+    )
+    assert len(calls) == 1
+
+
+def test_enabled_dynamic_receipt_fails_when_manifest_memory_contract_is_missing(tmp_path: Path):
+    source_dir, target_dir = tmp_path / "source", tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "unit.md").write_text("source", encoding="utf-8")
+    (target_dir / "unit.md").write_text("target", encoding="utf-8")
+    (tmp_path / "translate_subagent_manifest.json").write_text(json.dumps({
+        "book_title": "Book", "source_language": "English", "target_language": "Chinese",
+        "files": ["unit.md"],
+    }), encoding="utf-8")
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "title: Book\ntranslation:\n  dynamic_terminology:\n    enabled: true\n",
+        encoding="utf-8",
+    )
+    receipt = tmp_path / "translate_validation.json"
+    receipt.write_text(json.dumps({
+        "schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION,
+        "task": "translate", "scope": "full", "all_passed": True,
+        "source_sha256": markdown_directory_sha256(source_dir),
+        "target_sha256": markdown_directory_sha256(target_dir),
+    }), encoding="utf-8")
+
+    assert not validation_receipt_is_current(
+        receipt, source_dir, target_dir, task="translate", output_dir=tmp_path,
+        config_path=config, require_build_inputs=False,
+    )
+
+
 def test_package_receipt_fingerprint_includes_native_layout_sidecars(tmp_path: Path):
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"

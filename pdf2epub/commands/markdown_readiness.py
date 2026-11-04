@@ -270,6 +270,32 @@ def run_readiness_check(
             emit_error=bool(footnote_status.get("current")),
         )
 
+    if stage == "package" and policy.requires_translation and policy.dynamic_terminology_enabled:
+        memory_ready = False
+        memory_detail = "dynamic terminology context is missing, stale, or invalid"
+        try:
+            from pdf2epub.terminology_memory_validation import validate_dynamic_terminology_units
+
+            memory_report = validate_dynamic_terminology_units(
+                output_dir,
+                task="translate",
+                source_dir=source_dir,
+                target_dir=output_dir / "translated",
+                config=config,
+            )
+            memory_ready = memory_report.get("valid") is True
+            memory_detail = (
+                "current effective terminology projections and target reviews are valid"
+                if memory_ready
+                else "; ".join(
+                    str(item.get("error")) for item in memory_report.get("errors", [])[:5]
+                    if isinstance(item, dict)
+                ) or "current effective terminology projection differs from the validated handoff"
+            )
+        except (OSError, UnicodeError, TypeError, ValueError) as exc:
+            memory_detail = str(exc)
+        record("dynamic_terminology", memory_ready, memory_detail)
+
     translation = config.get("translation", {}) or {}
     if not policy.requires_translation:
         record("translation_entities", True, "not applicable for pipeline: epub_conversion")

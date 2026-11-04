@@ -25,6 +25,7 @@ DISPATCH_LEASE_SCHEMA_VERSION = 1
 DEFAULT_DISPATCH_LEASE_SECONDS = 15 * 60
 MAX_DISPATCH_LEASE_HISTORY = 256
 _ACTIVE_STATUSES = frozenset({"claimed", "running", "assigned"})
+DISPATCH_ACTIVE_STATUSES = _ACTIVE_STATUSES
 _SAFE_FILE_RE = re.compile(r"^[^/\\]+$")
 
 
@@ -155,6 +156,44 @@ def _load_state(path: Path) -> dict[str, Any]:
     if not isinstance(leases, list):
         raise ValueError("dispatch lease registry leases must be a list")
     return {"schema_version": DISPATCH_LEASE_SCHEMA_VERSION, "leases": leases}
+
+
+def read_dispatch_registry_snapshot(path: Path, *, now: Optional[datetime] = None) -> dict[str, Any]:
+    """Read registry state and hashes without pruning, expiring, or writing it."""
+    path = Path(path)
+    raw = path.read_bytes() if path.is_file() else b""
+    if raw:
+        try:
+            state = json.loads(raw.decode("utf-8"))
+        except (UnicodeError, json.JSONDecodeError) as exc:
+            raise ValueError(f"invalid dispatch lease registry: {exc}") from exc
+        if not isinstance(state, dict) or state.get("schema_version") != DISPATCH_LEASE_SCHEMA_VERSION:
+            raise ValueError("unsupported dispatch lease registry schema")
+        if not isinstance(state.get("leases"), list):
+            raise ValueError("dispatch lease registry leases must be a list")
+    else:
+        state = _empty_state()
+    current = now or _now()
+    active, expired = [], []
+    for index, lease in enumerate(state["leases"]):
+        if not isinstance(lease, Mapping):
+            raise ValueError(f"dispatch lease registry lease {index} must be an object")
+        status = str(lease.get("status") or "")
+        if status not in _ACTIVE_STATUSES | {"released", "expired"}:
+            raise ValueError(f"dispatch lease registry lease {index} has invalid status")
+        if status not in _ACTIVE_STATUSES:
+            continue
+        expiry = _parse_time(lease.get("lease_expires_at"))
+        if expiry is None or expiry > current:
+            active.append(dict(lease))
+        else:
+            expired.append(dict(lease))
+    return {
+        "schema_version": DISPATCH_LEASE_SCHEMA_VERSION,
+        "registry_sha256": hashlib.sha256(raw).hexdigest() if raw else None,
+        "active_leases": active,
+        "expired_leases": expired,
+    }
 
 
 def _write_state(path: Path, state: Mapping[str, Any]) -> None:
@@ -377,12 +416,14 @@ def release_dispatch_lease(
 
 
 __all__ = [
+    "DISPATCH_ACTIVE_STATUSES",
     "DEFAULT_DISPATCH_LEASE_SECONDS",
     "DISPATCH_LEASE_SCHEMA_VERSION",
     "build_assignment_sha256",
     "claim_dispatch_lease",
     "dispatch_lease_path",
     "inspect_dispatch_assignment",
+    "read_dispatch_registry_snapshot",
     "release_dispatch_lease",
     "renew_dispatch_lease",
 ]

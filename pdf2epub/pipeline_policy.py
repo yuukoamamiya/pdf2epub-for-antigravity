@@ -27,6 +27,7 @@ class PipelinePolicy:
     requires_polish: bool
     source_language: Optional[str]
     target_language: Optional[str]
+    dynamic_terminology_enabled: bool = False
     requires_ocr_correction: bool = True
     special_unit_modes: Mapping[str, str] = field(default_factory=dict)
 
@@ -73,6 +74,20 @@ class PipelinePolicy:
 
         translation = config.get("translation")
         translation = translation if isinstance(translation, Mapping) else {}
+        dynamic = translation.get("dynamic_terminology", {}) or {}
+        if not isinstance(dynamic, Mapping):
+            raise ValueError("translation.dynamic_terminology must be a mapping")
+        unknown_dynamic = set(dynamic) - {"enabled"}
+        if unknown_dynamic:
+            raise ValueError(
+                "unknown translation.dynamic_terminology key(s): "
+                + ", ".join(sorted(str(key) for key in unknown_dynamic))
+            )
+        dynamic_enabled = dynamic.get("enabled", False)
+        if not isinstance(dynamic_enabled, bool):
+            raise ValueError("translation.dynamic_terminology.enabled must be a boolean")
+        if dynamic_enabled and kind != "translation":
+            raise ValueError("translation.dynamic_terminology is supported only by translation pipelines")
         special = translation.get("special_units", {})
         if special is not None and not isinstance(special, Mapping):
             raise ValueError("translation.special_units must be a mapping")
@@ -115,6 +130,7 @@ class PipelinePolicy:
             requires_polish=True,
             source_language=str(source_language) if source_language else None,
             target_language=str(target_language) if target_language else None,
+            dynamic_terminology_enabled=dynamic_enabled,
         )
 
 

@@ -38,6 +38,7 @@ def load_book_context(
     operation: str,
     *,
     title: Optional[str] = None,
+    init_logging: bool = True,
 ) -> Optional[BookCommandContext]:
     """Load config, require a title, and initialize operation logging.
 
@@ -52,7 +53,8 @@ def load_book_context(
     if not book_title:
         logger.error("No title found in config.yaml")
         return None
-    configure_logging(book_title, operation)
+    if init_logging:
+        configure_logging(book_title, operation)
     return BookCommandContext(
         config=config,
         config_path=config_path,

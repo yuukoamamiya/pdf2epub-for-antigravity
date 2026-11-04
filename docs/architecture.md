@@ -390,6 +390,15 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
 - `entity_context.py`：集中维护 PDF/EPUB 共用的书内实体源文件选择、Subagent 交接和源哈希
   新鲜度检查。`commands.entities` 只负责命令参数和 PDF 前置条件，HTML、Markdown 与诊断模块
   直接依赖该格式无关服务，不再跨 command 导入私有 helper。
+- `dynamic_terminology.py` 与 `terminology_memory.py`：提供默认关闭的动态术语候选、作用域投影、
+  Reviewer packet 和不可变快照发布。候选绑定 worker assignment、语言对、源/目标哈希和章节；
+  本地流程不批准候选。worker 默认提交章节 scope；只有显式提出 book scope 且 Reviewer 批准后才跨章节
+  生效，review packet 会枚举所有命中的现存目标。发布时重验 candidate sidecar、worker manifest、基础上下文、书内实体和当前
+  文件证据，并用父快照 CAS 避免并发覆盖。单元上下文只记录实际命中的有效条目；领域 fixed/preferred
+  高于书内实体和记忆，同优先级冲突阻断。历史 review 记录既有目标的一致性。`retranslate_required` 目标修复后，
+  可用普通单文件校验定位结构错误；若动态术语门禁仍阻断，则运行 consistency-only 准备命令做只读结构检查并交
+  独立 Antigravity Reviewer。发布后以 `translate --resume` 或 `html-prepare --resume` 刷新 scoped context，
+  不再派发旧 handoff；源、目标、上下文哈希和校验均当前的已完成单元可复用，再运行正式单文件及全量校验。
 - `page_furniture_rules.py`：提供无副作用的页眉、页脚、页码和出版信息候选识别；候选只是
   交给 Subagent 复核的提示，绝不在规则层删除正文。`page_furniture_repair.py` 只负责编排、
   快照和校验，并直接依赖规则模块的正式接口。

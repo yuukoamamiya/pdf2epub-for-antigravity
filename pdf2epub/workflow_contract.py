@@ -47,6 +47,8 @@ CLI_COMMANDS: Final[frozenset[str]] = frozenset(
         "special-unit-apply",
         "special-unit-prepare",
         "translate",
+        "term-memory-publish",
+        "term-memory-review-prepare",
         "translate-arxiv",
         "translate-arxiv-validate",
         "translate-novel",

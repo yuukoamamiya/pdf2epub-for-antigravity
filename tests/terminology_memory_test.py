@@ -43,7 +43,7 @@ def authority(tmp_path, *, book_entities_path=None, book_entities_sha256=None):
         workspace=workspace,
         source_dir=source_dir,
         target_dir=target_dir,
-        assignments={a1: c1, a2: c2},
+        assignments={a1: {**c1, "verified_from_handoff": True}, a2: {**c2, "verified_from_handoff": True}},
         book_id="book-1",
         source_language="English",
         target_language="Chinese",
@@ -92,7 +92,7 @@ def review_for(packet):
         "prepared_packet_sha256": packet["prepared_packet_sha256"],
         "candidates": [{"candidate_id": row["candidate_id"], "decision": "approve"} for row in packet["candidates"]],
         "affected_targets": [
-            {**{key: row[key] for key in ("unit_id", "source_sha256", "target_sha256", "scope")}, "decision": "consistent"}
+            {**{key: row[key] for key in ("unit_id", "source_sha256", "target_sha256", "scope", "effective_projection_sha256")}, "decision": "consistent"}
             for row in packet["affected_targets"]
         ],
     }
@@ -106,6 +106,10 @@ def publish(root, packet, review, auth, parent):
             "no_active_sessions": True, "checked_at": "2026-11-04T00:00:00Z",
         "book_id": auth.book_id, "authority_sha256": auth.authority_sha256,
             "evidence_sha256": sha("attestation"),
+        },
+        approved_projection_sha256={
+            row["unit_id"]: sha("projected:" + row["unit_id"])
+            for row in packet["affected_targets"]
         },
     )
 

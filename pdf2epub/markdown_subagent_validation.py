@@ -39,6 +39,7 @@ def validate_markdown_subagent(
     continuation_toc_titles: Optional[
         Mapping[str, Iterable[str]]
     ] = None,
+    dynamic_terminology_config: Optional[Mapping[str, Any]] = None,
 ) -> Dict:
     """Validate a Subagent markdown hand-off and optionally stage it."""
     context = load_markdown_validation_context(
@@ -95,6 +96,39 @@ def validate_markdown_subagent(
     bilingual_warnings = audit.bilingual_warnings
     normalized_roles = audit.file_roles
 
+    dynamic_report: dict[str, Any] = {"enabled": False, "valid": True, "files": {}, "errors": []}
+    dynamic_blocked_names: set[str] = set()
+    if task == "translate" and dynamic_terminology_config is not None:
+        try:
+            from .terminology_memory_validation import validate_dynamic_terminology_units
+
+            dynamic_report = validate_dynamic_terminology_units(
+                context.paths.output_dir,
+                task=task,
+                source_dir=context.paths.source_dir,
+                target_dir=context.paths.target_dir,
+                config=dynamic_terminology_config,
+                selected_files=[path.name for path in sources] if partial else None,
+            )
+        except (OSError, UnicodeError, ValueError, TypeError) as exc:
+            dynamic_report = {
+                "enabled": True, "valid": False, "all_passed": False,
+                "files": {}, "errors": [{"file": "<dynamic-terminology>", "error": str(exc)}],
+            }
+        if dynamic_report.get("enabled") and not dynamic_report.get("valid"):
+            dynamic_blocked_names = {
+                str(name) for name, item in dynamic_report.get("files", {}).items()
+                if isinstance(item, Mapping) and item.get("valid") is False
+            }
+            if any(
+                not isinstance(item, Mapping) or item.get("file") in {None, "<dynamic-terminology>", "<source-inventory>"}
+                for item in dynamic_report.get("errors", [])
+            ):
+                dynamic_blocked_names.update(path.name for path in sources)
+            valid_files = [name for name in valid_files if name not in dynamic_blocked_names]
+            for name in dynamic_blocked_names:
+                normalized_targets.pop(name, None)
+
     extras = [] if partial else sorted(
         path.name for path in markdown_files(target_dir)
         if path.name not in {p.name for p in sources}
@@ -125,6 +159,7 @@ def validate_markdown_subagent(
         missing=missing, invalid=invalid, safety_blocked=safety_blocked,
         review_required=review_required,
         protected_workspace_blocked=bool(protected_workspace_blocked),
+        hard_blocked_names=dynamic_blocked_names,
     )
     target_sha256.update(target_hashes)
 
@@ -167,6 +202,7 @@ def validate_markdown_subagent(
         },
         "extra": extras,
         "valid_files": valid_files,
+        "dynamic_terminology": dynamic_report,
         "source_sha256": source_sha256,
         "target_sha256": target_sha256,
         "validated_dir": str(validated_dir),
@@ -178,6 +214,7 @@ def validate_markdown_subagent(
             and not invalid
             and not safety_blocked
             and not extras
+            and (not dynamic_report.get("enabled") or dynamic_report.get("valid", False))
             and (allow_review_warnings or not review_required)
         ),
     }

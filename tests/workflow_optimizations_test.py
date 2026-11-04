@@ -215,6 +215,15 @@ def test_pipeline_policy_centralizes_conversion_and_translation_requirements():
     assert translation.source_language == "German"
     assert translation.target_language == "Chinese"
 
+    dynamic = PipelinePolicy.from_config({"translation": {"dynamic_terminology": {"enabled": True}}})
+    assert dynamic.dynamic_terminology_enabled is True
+    assert PipelinePolicy.from_config({"translation": {"dynamic_terminology": {}}}).dynamic_terminology_enabled is False
+    import pytest
+    with pytest.raises(ValueError, match="enabled must be a boolean"):
+        PipelinePolicy.from_config({"translation": {"dynamic_terminology": {"enabled": "yes"}}})
+    with pytest.raises(ValueError, match="only by translation pipelines"):
+        PipelinePolicy.from_config({"pipeline": "epub_conversion", "translation": {"dynamic_terminology": {"enabled": True}}})
+
     consensus_translation = PipelinePolicy.from_config(
         {
             "translation": {"source_language": "German", "target_language": "Chinese"},

@@ -1554,6 +1554,38 @@ def build_epub(config: BuildEpubConfig) -> Path:
     logger.info(f"Building EPUB for: {config.book_title}")
     logger.info(f"Source: {'translated' if config.translated else 'polished_markdown'}")
 
+    if config.translated:
+        from .pipeline_policy import PipelinePolicy
+
+        book_config = config.config or {}
+        if PipelinePolicy.from_config(book_config).dynamic_terminology_enabled:
+            try:
+                manifest = json.loads(
+                    (Path(config.output_dir) / "translate_subagent_manifest.json").read_text(encoding="utf-8")
+                )
+                source_dir = Path(config.output_dir) / manifest["source_dir"]
+                target_dir = Path(config.output_dir) / manifest["target_dir"]
+                from .terminology_memory_validation import validate_dynamic_terminology_units
+
+                memory_report = validate_dynamic_terminology_units(
+                    config.output_dir,
+                    task="translate",
+                    source_dir=source_dir,
+                    target_dir=target_dir,
+                    config=book_config,
+                )
+            except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError, KeyError) as exc:
+                raise ValueError(f"Dynamic terminology package gate failed: {exc}") from exc
+            if memory_report.get("valid") is not True:
+                reasons = [
+                    str(item.get("error")) for item in memory_report.get("errors", [])[:8]
+                    if isinstance(item, dict)
+                ]
+                raise ValueError(
+                    "Dynamic terminology package gate failed: "
+                    + ("; ".join(reasons) or "current effective terminology validation failed")
+                )
+
     original_toc_tree, toc_tree = _load_build_toc(config)
 
     epub_structure = _prepare_epub_structure(config, toc_tree, original_toc_tree)

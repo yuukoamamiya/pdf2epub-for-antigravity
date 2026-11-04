@@ -2107,6 +2107,48 @@ def test_epub_entity_extraction_excludes_deterministic_appendices(tmp_path: Path
     ]
 
 
+
+@pytest.mark.parametrize("dynamic_enabled", [False, True])
+def test_worker_handoff_paths_are_cwd_relative_for_relative_output_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dynamic_enabled: bool,
+):
+    from pdf2epub.dynamic_terminology import build_dynamic_unit_contexts, dynamic_handoff_dir_name
+
+    monkeypatch.chdir(tmp_path)
+    output_dir = Path(".work/relative-book")
+    source_dir = output_dir / "polished_markdown"
+    target_dir = output_dir / "translated"
+    source_dir.mkdir(parents=True)
+    target_dir.mkdir()
+    (source_dir / "chapter.md").write_text("A source paragraph.", encoding="utf-8")
+    contexts = {}
+    if dynamic_enabled:
+        contexts = build_dynamic_unit_contexts(
+            output_dir, source_dir, {}, [], source_language="English", target_language="Chinese",
+            chapter_groups={"chapter-1": ["chapter.md"]},
+        )
+    paths = prepare_markdown_subagent(
+        output_dir, "translate", source_dir, target_dir, "English", "Chinese", config={},
+        unit_context_files=contexts, chapter_groups={"chapter-1": ["chapter.md"]},
+    )
+    kwargs = {}
+    if dynamic_enabled:
+        kwargs = {
+            "handoff_dir_name": dynamic_handoff_dir_name(
+                "translate", None, source_dir, contexts, manifest_path=paths["manifest"],
+            ),
+            "retire_previous": False,
+        }
+    handoffs = write_worker_handoffs(
+        output_dir, paths["manifest"], paths["prompt"], **kwargs,
+    )
+    assert handoffs
+    scoped_path = output_dir / handoffs[0]["manifest"]
+    scoped = json.loads(scoped_path.read_text(encoding="utf-8"))
+    assert scoped["assigned_files"] == ["chapter.md"]
+    assert scoped_path.is_relative_to(output_dir)
+
+
 def test_prepare_markdown_subagent_isolates_large_units_and_writes_scoped_handoffs(
     tmp_path: Path,
 ):

@@ -4,6 +4,7 @@ Extraction, validation, and packaging remain local operations; translation is
 delegated to the workspace Subagent through the generated hand-off.
 """
 
+import hashlib
 import json
 import re
 from pathlib import Path, PurePosixPath
@@ -60,6 +61,20 @@ def _load_html_book_context(args, operation: str):
             logger.info(f"Auto-inferred book title from input file: {book_title}")
         else:
             logger.error("No title found in config and no input file to infer from.")
+            return None
+
+    if operation == "html-prepare" and PipelinePolicy.from_config(config).dynamic_terminology_enabled:
+        try:
+            from pdf2epub.dynamic_terminology import session_attestation, verify_session_attestation
+
+            early_output = book_output_dir(book_title)
+            attestation = session_attestation(
+                early_output, "translate-html",
+                confirmed=bool(getattr(args, "confirm_no_active_sessions", False)),
+            )
+            verify_session_attestation(early_output, attestation)
+        except Exception as exc:
+            logger.error(f"Dynamic terminology pre-write gate blocked html-prepare: {exc}")
             return None
 
     configure_logging(book_title, operation)
@@ -170,6 +185,20 @@ def _prepare_html_command(args):
     if context is None:
         return 1
     config, book_title, output_dir, epub_path = context
+    from pdf2epub.pipeline_policy import PipelinePolicy
+    dynamic_enabled = PipelinePolicy.from_config(config).dynamic_terminology_enabled
+    dynamic_attestation = None
+    dynamic_snapshot_sha256 = None
+    base_unit_context_files = {}
+    preexisting_dynamic_targets = {}
+    if dynamic_enabled:
+        from pdf2epub.dynamic_terminology import session_attestation, verify_session_attestation
+
+        dynamic_attestation = session_attestation(
+            output_dir, "translate-html",
+            confirmed=bool(getattr(args, "confirm_no_active_sessions", False)),
+        )
+        verify_session_attestation(output_dir, dynamic_attestation)
 
     # 格式转换或复制到 output 目录
     from pdf2epub.utils.ebook_converter import needs_conversion, convert_to_epub
@@ -205,6 +234,17 @@ def _prepare_html_command(args):
             or pipeline.source_language
         )
         target_language = args.target_language or config.get("translation", {}).get("target_language", "Chinese")
+
+        if dynamic_enabled:
+            from pdf2epub.dynamic_terminology import load_current_snapshot
+
+            verify_session_attestation(output_dir, dynamic_attestation)
+            dynamic_snapshot_sha256, dynamic_entries = load_current_snapshot(
+                output_dir / "dynamic_terminology", book_id=book_title,
+                source_language=source_language, target_language=target_language,
+            )
+        else:
+            dynamic_entries = []
 
         from pdf2epub.glossary import (
             build_unit_glossary_contexts,
@@ -295,7 +335,33 @@ def _prepare_html_command(args):
         # Create the body translation contract alongside the metadata contract.
         # Both are workspace Subagent tasks; this command never translates.
         from pdf2epub.markdown_handoff import prepare_markdown_subagent
+        if dynamic_enabled:
+            from pdf2epub.dynamic_terminology import verify_session_attestation
+            verify_session_attestation(output_dir, dynamic_attestation)
         declared_files = pipeline.declared_translation_files()
+        chapter_groups = _load_html_chapter_groups(pipeline, declared_files)
+        if dynamic_enabled:
+            from pdf2epub.dynamic_terminology import verify_session_attestation
+            verify_session_attestation(output_dir, dynamic_attestation)
+        unit_context_files = build_unit_glossary_contexts(
+            output_dir,
+            output_dir / "compressed_units",
+            glossary_bundle.context_files,
+            None if skip_entities else entity_path,
+            source_language=source_language,
+            target_language=target_language,
+        )
+        base_unit_context_files = dict(unit_context_files)
+        if dynamic_enabled:
+            from pdf2epub.dynamic_terminology import build_dynamic_unit_contexts, preexisting_target_inventory
+
+            verify_session_attestation(output_dir, dynamic_attestation)
+            preexisting_dynamic_targets = preexisting_target_inventory(pipeline.translated_dir)
+            unit_context_files = build_dynamic_unit_contexts(
+                output_dir, output_dir / "compressed_units", unit_context_files,
+                dynamic_entries, source_language=source_language,
+                target_language=target_language, chapter_groups=chapter_groups,
+            )
         body_paths = prepare_markdown_subagent(
             output_dir,
             "translate-html",
@@ -311,6 +377,7 @@ def _prepare_html_command(args):
                 "【Entity Preservation】: Copy protected entities and anchors literally, including `&amp;`, `&lt;`, `&gt;`, `<a/>`, and other self-closing or placeholder tokens. Translate surrounding text only; never replace an entity with its prose meaning.",
                 "【Direct File Writing】: Write output directly to the designated target file without markdown code fences.",
                 HTML_BODY_SELF_VALIDATION_RULE,
+                *(["Dynamic terminology memory is frozen for this handoff. Read only the sparse assigned-unit context; do not inspect the global snapshot, another unit, or independent metadata/TOC contracts. Write optional candidates only to the sidecar specified in your scoped manifest."] if dynamic_enabled else []),
                 *glossary_bundle.rules,
             ),
             config=config,
@@ -321,16 +388,9 @@ def _prepare_html_command(args):
             # Native glossary snapshots remain audit-only; workers receive
             # per-unit projected terms through unit_context_files.
             prompt_context_files={},
-            unit_context_files=build_unit_glossary_contexts(
-                output_dir,
-                output_dir / "compressed_units",
-                glossary_bundle.context_files,
-                None if skip_entities else entity_path,
-                source_language=source_language,
-                target_language=target_language,
-            ),
+            unit_context_files=unit_context_files,
             declared_files=declared_files,
-            chapter_groups=_load_html_chapter_groups(pipeline, declared_files),
+            chapter_groups=chapter_groups,
         )
         from pdf2epub.workflow_contracts import atomic_write_json, atomic_write_text, sha256_file
 
@@ -352,9 +412,48 @@ def _prepare_html_command(args):
         atomic_write_json(manifest_path, manifest)
         from pdf2epub.subagent_runtime import write_worker_handoffs
 
+        if dynamic_enabled:
+            from pdf2epub.dynamic_terminology import verify_session_attestation
+            verify_session_attestation(output_dir, dynamic_attestation)
+        handoff_options = {}
+        if dynamic_enabled:
+            from pdf2epub.dynamic_terminology import dynamic_handoff_dir_name
+
+            handoff_options = {
+                "handoff_dir_name": dynamic_handoff_dir_name(
+                    "translate-html", dynamic_snapshot_sha256,
+                    pipeline.compressed_units_dir, unit_context_files,
+                    manifest_path=body_paths["manifest"],
+                ),
+                "retire_previous": False,
+            }
         worker_handoffs = write_worker_handoffs(
-            output_dir, body_paths["manifest"], body_paths["prompt"]
+            output_dir, body_paths["manifest"], body_paths["prompt"], **handoff_options,
         )
+        if dynamic_enabled:
+            from pdf2epub.dynamic_terminology import attach_candidate_sidecars
+
+            attach_candidate_sidecars(
+                output_dir, worker_handoffs, task="translate-html",
+                chapter_by_file={name: chapter for chapter, files in chapter_groups.items() for name in files},
+                source_language=source_language, target_language=target_language,
+                book_id=book_title,
+            )
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["dynamic_terminology"] = {
+                "schema_version": 1, "enabled": True,
+                "current_snapshot_sha256": dynamic_snapshot_sha256,
+                "operator_attestation_sha256": dynamic_attestation["evidence_sha256"],
+                "base_unit_context_files": {
+                    name: path.resolve().relative_to(output_dir.resolve()).as_posix()
+                    for name, path in base_unit_context_files.items()
+                },
+                "preexisting_target_inventory": preexisting_dynamic_targets,
+                "preexisting_target_inventory_sha256": hashlib.sha256(
+                    json.dumps(preexisting_dynamic_targets, sort_keys=True, separators=(",", ":")).encode()
+                ).hexdigest(),
+            }
+            atomic_write_json(manifest_path, manifest)
         dispatch_manifest = json.loads(
             Path(body_paths["manifest"]).read_text(encoding="utf-8")
         )
@@ -525,7 +624,6 @@ def html_skeleton_retry_command(args):
     """Prepare one complex HTML unit for protected-token retry translation."""
     from pdf2epub.html_translation.skeleton import write_masked_unit
     from pdf2epub.markdown_handoff import prepare_markdown_subagent
-
     file_name = str(args.file)
     candidate = Path(file_name)
     if candidate.name != file_name or candidate.suffix.lower() != ".md":
