@@ -349,6 +349,13 @@ git -c http.proxy=http://127.0.0.1:10809 -c https.proxy=http://127.0.0.1:10809 p
 - 命令使用 Git Bash，不把复杂 Bash 语法丢给 PowerShell；
 - 复杂文本/JSON 操作用 Python，不用一次性 shell 拼接。
 
+CLI 导入时会将自身 stdout/stderr 配置为 UTF-8，并把 `PYTHONIOENCODING` 设为 `utf-8`，
+因此可覆盖启动环境继承的 GBK 设置，并让它启动的 Python 子进程继承 UTF-8。这个设置只
+影响 CLI 进程及其后代；独立运行的 `python -c ...` 或父级终端不会被 CLI 改变。需要让
+独立 Python 进程使用 UTF-8 时，可运行 `python -X utf8 ...`，或在启动前设置
+`PYTHONIOENCODING=UTF-8`。显式设置的 `PYTHONIOENCODING` 优先于 `-X utf8`；若继承值为
+`gbk`，应先清除或覆盖该变量，单独使用 `-X utf8` 不能保证改用 UTF-8。
+
 ### 5.5 “生成可分享的 sanitized export”
 
 使用 `scripts/sanitize_output.sh` 从现有输出目录创建独立副本；该工具不会修改源目录或调用者当前目录中的文件：
