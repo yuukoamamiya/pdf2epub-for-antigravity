@@ -121,6 +121,19 @@ def test_build_context_uses_scoped_context_and_freshness_hash(tmp_path: Path):
     assert context["unit_context_sha256"]
 
 
+def test_build_context_rejects_old_toc_heading_projection_version(tmp_path: Path):
+    _prepared(tmp_path)
+    manifest_path = tmp_path / "translate_subagent_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["toc_heading_contexts"]["index.md"]["projection_version"] = 2
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(SpecialUnitContextError, match="stale TOC heading context"):
+        build_special_unit_context(
+            tmp_path, "index.md", "index", source_language="German", target_language="Chinese"
+        )
+
+
 def test_contract_stays_unit_scoped_across_unrelated_parent_and_toc_reprepare(tmp_path: Path):
     _prepared(tmp_path)
     entity_path = tmp_path / "translation_entities.json"

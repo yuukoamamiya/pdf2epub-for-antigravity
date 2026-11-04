@@ -131,6 +131,16 @@ prompt 使用“本次 hand-off 使用的同一配置”措辞，不编造路径
 只审计内存中的规范化候选，不写回目标 Markdown；它也不清理临时文件、不写 partial ledger、
 验证报告或 checkpoint。formal 校验才应用规范化；写入后重新计算目标 SHA-256，并以实际落盘
 内容写入 validated 副本和 checkpoint。
+Markdown validator schema 4 使版本升级前的全量 receipts 和逐文件 ledgers 失效。保留已有目标时，
+重新运行对应的正式 `polish-validate` / `translate-validate` 建立当前记录；单文件 ledger 需按文件
+重新校验。只有新报告列出 pending/invalid 或源上下文确实变化时才重新派发 worker。该规则更新本身
+不要求重跑 OCR。
+对于旧 TOC projection，先运行一次 `translate --resume` 刷新 manifest/context，但不要按这次准备输出
+立即派发 pending；schema 3 的旧验证 receipt 本来就不会被复用，第一次可能把现有目标都标成 pending。
+然后先运行 `translate-validate` 校验现有译文并建立 schema 4 receipt，再运行第二次
+`translate --resume`。这时 current receipt 与 `projection_version: 3` context 会让有效目标重新成为
+completed；只派发仍列为 pending/invalid 的 assignment，完成后再做全量 `translate-validate`。
+对旧 polish receipt，先直接校验现有文本；只把实际失败的目标交回 Subagent。
 Markdown worker 的提示词还明确禁止修改 `pdf2epub/`、`tests/`、`docs/`、`glossaries/` 和项目
 配置。准备阶段会对这些受保护文件记录哈希；校验阶段发现 Worker 改动其中任何文件时，
 本轮会进入 `safety_blocked`，不会生成可恢复的内容 checkpoint，必须先由主 Agent 处理代码变更。
@@ -795,9 +805,9 @@ refinement unit 和正文定位；任何一层失败都必须修正决定后重�
 | `footnote_visual_audit_manifest.json` | 异常区域、bbox、原因、页面图/裁剪图和 review block | 视觉区域审计 |
 | `footnote_subagent_manifest.json` | 当前复核页、单位上下文、尾注歧义数量和 pending 状态 | 决定校验 |
 | `footnote_decisions.json` | Subagent 对候选 block 的角色决定 | sidecar 或候选事实 |
-| `endnote_definition_ambiguities.json` | 需要判断边界的 numbered punctuation 尾注定义行 | 本地自动删除或改写 |
-| `endnote_definition_decisions.json` | 每条歧义的 `definition`/`continuation` 决定 | 候选事实 |
-| `endnote_definition_validation.json` | 逐条覆盖、角色、文件和行号校验 | apply 结果 |
+| `endnote_definition_ambiguities.json` | 整行边界及定义行内上标边界候选（schema 2） | 本地自动删除或改写 |
+| `endnote_definition_decisions.json` | 按 file/line/kind/column 定位的 `definition`/`continuation` 决定 | 候选事实 |
+| `endnote_definition_validation.json` | 逐条覆盖、角色、文件、行号和列号校验 | apply 结果 |
 | `footnote_decision_validation.json` | 决定地址、角色、键、覆盖率和哈希门禁（含 `endnote_definitions`） | apply 结果 |
 | `footnote_normalization.json` | apply 后的定位、归并和输出检查点 | 上游候选报告 |
 
@@ -852,30 +862,48 @@ OCR 把 Notes 定义识别成无序列表时，行首可选的 `-`/`*`/`+` 标�
 等价；`footnote-apply` 的本地 normalization 会把 `- N. text`、`* N. text`、
 `+ N. text` 直接改写为 `[^N]: text`，不交给 polish 或 translate Subagent。
 
-集中尾注的定义边界采用混合识别。文件开头、前一行空行、前一行以句末标点结束，或前一行
-是 Markdown 标题的 `N.`/`N)`/`N：`（含可选 `-`/`*`/`+` 标记）行由本地直接接受；
+集中尾注的定义边界采用混合识别。除整行编号边界外，还会扫描 numbered Notes 定义行中的
+显式 `<sup>N</sup>` 内嵌标记；数学、代码和可识别的非脚注上标不进入该队列。文件开头、前一行
+空行、前一行以句末标点结束，或前一行是 Markdown 标题的 `N.`/`N)`/`N：`（含可选
+`-`/`*`/`+` 标记）行由本地直接接受；
 `N text` 日期续行继续使用
 `previous_line_blank` 规则，Markdown/HTML 定义和 scope 识别不进入该队列。前一行非空且
 不是句末标点（例如以 `:`、`,`、`;`、`-` 或普通单词结尾）的 numbered punctuation 行写入
-`endnote_definition_ambiguities.json`，每项包含 `file`、`line`、`key`、
-`previous_line`、`line_text`、`next_line` 和可用的 `scope_key`。只有这些行交给
-Subagent；它必须为每条写入 `endnote_definition_decisions.json` 的一个
-`definition`/`continuation` 决定。完整决定形状：
+`endnote_definition_ambiguities.json`。整行边界候选使用 `kind: "line"`、`column: 1`；行内上标候选
+使用 `kind: "inline"`，`column` 是原始 Notes 行中 `<sup>` 内容第一个数字的一基列号。两类候选都
+记录 `file`、`line` 和 `key`；行内候选另记录 `marker` 与其后的 `content`。Subagent 必须对每个
+精确身份写入 `endnote_definition_decisions.json` 的 `definition`/`continuation` 决定，不能把
+一行中的一个决定套用到另一个列位置。决定形状：
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "decisions": [
     {
-      "file": "chapter_10.part1.md",
+      "file": "notes.md",
       "line": 774,
-      "role": "continuation",
-      "confidence": "high",
-      "reason": "The number is a page locator; the sentence continues."
+      "kind": "inline",
+      "column": 26,
+      "key": "70",
+      "role": "continuation"
+    },
+    {
+      "file": "notes.md",
+      "line": 775,
+      "kind": "line",
+      "column": 1,
+      "key": "71",
+      "role": "definition"
     }
   ]
 }
 ```
+
+`footnote-validate` 将 inline 决定的 `inline_text` 记录为原样上标标记（含 `<sup>` 标签）与后续
+去除首尾空白的注释内容，中间使用一个规范空格。`footnote-apply` 把已审阅的 continuation 证据写入
+`footnote_normalization.json` 的 `reviewed_inline_continuations`（`file`、`key`、`text`）。EPUB
+构建门禁只接受当前决定校验、歧义清单、决定文件和归一化目标哈希所对应的 evidence receipt；并须在
+派生 Notes 文本中找到同一 key 和精确 text。缺失、过期或文本不匹配均阻断构建。
 
 `footnote_subagent_manifest.json` 记录 `endnote_ambiguity_count`、
 `endnote_ambiguities`、`endnote_decision_file` 和 `endnote_definition_file`；页面复核或
@@ -884,17 +912,22 @@ Subagent；它必须为每条写入 `endnote_definition_decisions.json` 的一�
 `footnote_decision_validation.json` 的 `endnote_definitions` 字段和
 `endnote_definition_validation.json`。`footnote-apply` 只有在该字段有效时才把 decisions
 传给 `normalize_endnotes()`；歧义无决定时在错误中给出 `file:line` 并 fail closed。
+两份 validation 都记录 `manifest_sha256`、`decisions_sha256`、`source_sha256`。validate 会先核对
+当前源文件与 manifest 中的源哈希；apply_inputs 只读核对 manifest、decisions、source 仍与
+validation 收据一致，任何一项变化都会阻断 apply，apply 不会静默重做验证。准备之后源文件改变时
+重新运行 `footnote-prepare`；只有 decisions 改变时重新运行 `footnote-validate`，然后再 apply。
 存在歧义时，`footnote_normalization.json` 记录
 `endnote_definition_ambiguities_sha256` 和 `endnote_definition_decisions_sha256`；
-`footnote_status` 对已记录的文件做 freshness 检查，缺失或变化时 stale，并提示重跑
-`footnote-prepare → footnote-validate → footnote-apply`。没有歧义时不要求这两个哈希。
+`footnote_status` 对已记录的文件做 freshness 检查，缺失或变化时 stale，并提示重跑相应阶段。
+没有歧义时不要求 ambiguity/decision 哈希。
 
 `footnote_candidates.json`、`footnote_decisions.json` 和 `footnote_decision_validation.json`
-使用 prepare/decision schema 3；`endnote_definition_ambiguities.json` 及其 decisions 保持独立
-schema 1；`footnote_normalization.json` 使用 schema 6，TOC 使用 schema 2。版本号彼此独立。
-旧 normalization checkpoint 升级后需要重新运行 `footnote-prepare → footnote-validate →
+使用 prepare/decision schema 3；`endnote_definition_ambiguities.json`、其 decisions 与 validation
+使用独立 schema 2；`footnote_normalization.json` 使用 schema 7，TOC 使用 schema 2。版本号彼此独立。
+旧 normalization schema 1–6 checkpoint 升级后需要重新运行 `footnote-prepare → footnote-validate →
 footnote-apply`，不需要重新 OCR。
-旧 normalization schema 1–5 和旧 prepare/decision schema 均不能复用：运行
+旧 prepare checkpoint 不能复用；schema 1 的 endnote decisions 只兼容没有 inline 候选的旧式行边界
+清单，当前 inline/line decisions 使用 schema 2。运行
 `uv run pdf2epub -c <配置> footnote-prepare`；只把新 manifest 列出的 pending/review 项交给
 工作区 Subagent。随后必须运行 `footnote-validate` 和 `footnote-apply`，即使没有待复核项也要执行。
 保留旧产物和 checkpoint，不手工改 schema 或哈希。该合同升级不要求重跑 OCR；恢复命令会更新准备
@@ -902,6 +935,14 @@ manifest/prompt，并由 apply 重建 `footnote_normalized/` 与成功 checkpoin
 应在恢复前备份。归一化源变化可能
 使 polish、翻译或 EPUB 构建 checkpoint 过期；先查看 `status` 与 pending/invalid 报告，按门禁
 恢复，不要直接构建。仅合同升级本身不要求重跑 OCR；只有源页或证据实际过期时才回到 OCR。
+
+PDF `polish`/`translate` 使用 Markdown validation schema 4，同时用于全量 receipt 和逐文件
+ledger；它使 superscript 保真规则升级前写入的 PDF 记录失效。OCR correction 和 HTML 翻译仍使用
+schema 3，不因这次规则变化失效。旧 PDF 报告不能支撑后续打包或 `--resume` 完成状态。若已存在有效的
+polish/translation 目标，只需重新运行相应的 `polish-validate` / `translate-validate` 建立当前
+校验记录；旧逐文件 ledger 需要按文件重新校验。只有校验报告列出 pending/invalid 或源上下文
+确实变化时，才把对应 assignment 交回 Subagent。归一化重建后先完成 polish 校验，再检查受影响
+的翻译 gate。规则升级本身不要求重新 OCR。
 
 EPUB 构建时，`pdf2epub/epub/footnotes/keys.py` 的 `display_footnote_key()` 负责把
 `fnc-<scope>-<key>` 和 `...-oN` 显示为对应的可见标记；集中尾注的数字/圈号别名可能规范化为数字，
@@ -990,6 +1031,10 @@ MathML 是当前默认策略，因为它不增加系统级 TeX 依赖，已满�
 4,500 token 的目标大小，仍按完整索引条目/子条目边界切分；可在
 `refine.oversized_unit_split.threshold_tokens_by_type` 和
 `target_tokens_by_type` 中调整。不要用固定字母范围或词典回填替代条目级校验。
+排查 handoff 数量时应区分两类规则：拆分阈值根据单元 token 数决定是否在合法条目边界切成多个
+物理 part；`index` 的特殊角色隔离则让完整单元独占 worker，与它是否超过拆分阈值无关。
+因此，单元低于 token/行/字节拆分预算但仍单独派发，通常是角色隔离；它不表示发生了索引拆分。
+增加普通 worker 数或更改并发额度不会取消特殊角色隔离，也不应用固定字母范围来减少 worker 数。
 拆分后若尾片小于目标的 15%，仅当合并后仍满足该单元目标 token 上限和有效单文件字节
 上限时才并入前片；否则尝试在合法块边界平衡最后两片，并继续保留脚注定义和索引续条约束。
 找不到安全边界时保留原拆分。该策略、预算和版本号写入 refine split policy 指纹，以避免
@@ -1000,7 +1045,10 @@ MathML 是当前默认策略，因为它不增加系统级 TeX 依赖，已满�
 润色前后的 Markdown 标题标记是结构合同：Subagent 不得把普通粗体、罗马数字
 或编号文字升级成 `#` 标题，只能删除确认重复的 running header。润色校验还会
 安全检查 OCR 中 Notes/注释章节的 `<sup>N</sup>` 注脚迁移为 `[^N]` 和
-`[^N]: ...`；数学、表格和序数上标不会按注脚处理。
+`[^N]: ...`；数学、表格和序数上标，以及合法的普通上标文字、星号和匕首号都须保留。
+明确的 Markdown 脚注引用与生成的 HTML 脚注引用不重复计入普通上标审计。四位年份邻接上标本身
+不够证明是版次；仅同一行符合明确 citation-list/page-locator 证据的上标按版次保留，其余仍
+进入引用迁移校验。
 
 启用第二套 OCR 时，PDF 正文翻译前必须按以下顺序运行。原语言 EPUB 检查通过后先准备实体和翻译 TOC；
 完整 `check-ready --stage translate` 在 `translate-toc-validate` 之后运行。若明确选择跳过实体，
@@ -1088,12 +1136,19 @@ part 归属。源标题在所有 part 都缺失的子标题只挂到第一个 pa
 对应 worker 不得新增该标题，校验也会跳过它。
 `container_only` 节点不伪造 Markdown 标题锚点；它保留 TOC 层级并导航到所属文件或首个有内容的
 后代。可见绑定必须在正确物理 part 中生成标题锚点，缺失或落在不同标题时构建失败。
-当前 TOC 节点必须携带显式唯一 `node_id`。构建时用源 TOC、`tree_progress.json` 和源 Markdown
-重建物理 ownership projection；不完整或身份不一致时阻断并要求重新准备、审阅和校验 TOC。
+当前 TOC 节点必须携带显式唯一 `node_id`。ownership projection 为每个节点记录
+`source_candidate_kind`：`heading`、`paragraph` 或 `container_only`。同一逻辑单元中标题候选优先于
+段落候选，即使标题只在后续 part 出现；源 Markdown 计数和 HTML 锚点匹配都按同一类别严格核对
+occurrence/count。构建时用源 TOC、`tree_progress.json` 和源 Markdown 重建物理 ownership
+projection；不完整或身份不一致时阻断并要求重新准备、审阅和校验 TOC。
 投影为 `visible` 的标题会在其指定物理 part 中建立锚点，包含嵌在后代单元中的结构祖先；若
 可见绑定未能落到实际标题，构建失败。容器节点保持逻辑层级并落到所属文件或首个内容后代。
 HTML TOC 与 NCX 在正文渲染完成后共用同一个导航模型；打包前核对 XHTML heading、ID、文件和
 fragment。NCX depth 使用逻辑 TOC 实际深度，合成的目录入口不增加一级。
+TOC heading context 使用 `projection_version: 3`。旧版本 context 必须通过
+`translate --resume` 重新准备并重新校验；检查新 manifest，只派发上下文哈希或源内容失效的文件，
+不要因为版本升级就盲目重译整本书。连续空白、Markdown 外层标记及成对引号/书名号只在运行时
+canonicalization 中容差，不写回标题，也不接受近义词或自行改译。
 
 跨语言的学派资料（例如德文术语表用于英文思想史书籍）必须单独配置在
 `translation.reference_glossaries`。候选报告会把它们标记为

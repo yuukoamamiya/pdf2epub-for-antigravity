@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import json
 import hashlib
 from pathlib import Path
+from pathlib import PurePosixPath
 from typing import Any, Mapping, Optional
 
 from ..workflow_contracts import sha256_file
@@ -183,9 +184,49 @@ def load_footnote_apply_inputs(
             raw_decisions = decisions_data.get("decisions")
             if not isinstance(raw_decisions, list):
                 raise FootnoteApplyInputError(f"{DECISIONS_FILENAME} must contain a decisions array")
+            current_manifest_hash = sha256_file(output_dir / AMBIGUITIES_FILENAME)
+            current_decisions_hash = sha256_file(output_dir / DECISIONS_FILENAME)
+            if endnote_validation.get("manifest_sha256") != current_manifest_hash:
+                raise FootnoteApplyInputError(
+                    f"{AMBIGUITIES_FILENAME} changed after footnote-validate; rerun footnote-validate"
+                )
+            if endnote_validation.get("decisions_sha256") != current_decisions_hash:
+                raise FootnoteApplyInputError(
+                    f"{DECISIONS_FILENAME} changed after footnote-validate; rerun footnote-validate"
+                )
+            source_hashes = endnote_validation.get("source_sha256")
+            if not isinstance(source_hashes, Mapping):
+                raise FootnoteApplyInputError(
+                    "endnote validation is missing its prepared source hashes; rerun footnote-validate"
+                )
+            required_sources = {
+                str(item.get("file") or "").replace("\\", "/")
+                for item in ambiguity_items
+                if isinstance(item, Mapping) and item.get("file")
+            }
+            normalized_source_hashes = {str(name).replace("\\", "/"): expected for name, expected in source_hashes.items()}
+            if required_sources - set(normalized_source_hashes):
+                raise FootnoteApplyInputError(
+                    "endnote validation source hashes are missing a reviewed file; rerun footnote-validate"
+                )
+            for name, expected_hash in normalized_source_hashes.items():
+                path_parts = PurePosixPath(name)
+                if not name or path_parts.is_absolute() or ".." in path_parts.parts or ":" in name:
+                    raise FootnoteApplyInputError(
+                        f"endnote validation has an unsafe source filename: {name!r}"
+                    )
+                if not isinstance(expected_hash, str) or len(expected_hash) != 64:
+                    raise FootnoteApplyInputError(
+                        f"endnote validation has an invalid source hash for {name}"
+                    )
+                source_path = output_dir / "ocr_markdown" / name
+                if not source_path.is_file() or sha256_file(source_path) != str(expected_hash):
+                    raise FootnoteApplyInputError(
+                        f"endnote source changed after footnote-validate at {name}; rerun footnote-prepare and footnote-validate"
+                    )
             endnote_decisions = [dict(item) for item in raw_decisions if isinstance(item, Mapping)]
-            ambiguity_hash = sha256_file(output_dir / AMBIGUITIES_FILENAME)
-            decisions_hash = sha256_file(output_dir / DECISIONS_FILENAME)
+            ambiguity_hash = current_manifest_hash
+            decisions_hash = current_decisions_hash
     except ValueError as exc:
         if isinstance(exc, FootnoteApplyInputError):
             raise

@@ -451,9 +451,8 @@ def _collect_scope_references(
                 continue
             for match in _HTML_SUP_RE.finditer(line):
                 key = key_from_printed_marker(html.unescape(match.group("key")))
-                if not key or (
-                    key.startswith("fnm-letter-")
-                    and _is_math_or_formula_superscript(line, match.start())
+                if not key or _is_math_or_formula_superscript(
+                    line, match.start(), match.end(), key=key
                 ):
                     continue
                 references[scope_key].append(

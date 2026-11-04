@@ -17,7 +17,9 @@ from .footnote_contracts import FOOTNOTE_PREPARE_SCHEMA_VERSION
 from .pdf_evidence import pdf_evidence_mode, require_current_consensus
 
 
-FOOTNOTE_NORMALIZATION_SCHEMA_VERSION = 6
+# Version 7 invalidates normalized output created before edition superscripts
+# were classified consistently during reference conversion.
+FOOTNOTE_NORMALIZATION_SCHEMA_VERSION = 7
 _SAFE_FILENAME_RE = re.compile(r"^[^/\\]+\.md$")
 
 

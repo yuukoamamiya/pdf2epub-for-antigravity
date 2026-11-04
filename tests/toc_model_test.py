@@ -255,6 +255,8 @@ def test_multiline_emphasized_soft_wrapped_title_is_one_source_label():
 def test_source_heading_footnote_reference_is_not_part_of_visible_title():
     assert normalize_toc_source_label("Heading[^1]") == "Heading"
     assert normalize_toc_source_label("[^1]: Footnote definition") == "[^1]: Footnote definition"
+    assert normalize_toc_source_label(r"Heading \*") == "Heading *"
+    assert normalize_toc_source_label("Heading<sup>*</sup>") == "Heading*"
     result = project_toc_ownership(
         [{"node_id": "heading", "title": "Heading"}],
         {"units": [{"node_id": "heading", "index_path": [1], "file": "unit.md"}]},
@@ -263,3 +265,68 @@ def test_source_heading_footnote_reference_is_not_part_of_visible_title():
     row = result["unit.md"]["headings"][0]
     assert row["binding_mode"] == "visible"
     assert row["source_title"] == "Heading"
+
+
+def test_occurrence_projection_prefers_headings_across_split_parts():
+    projection = project_toc_ownership(
+        [
+            {"node_id": "root", "title": "Chapter", "children": [
+                {"node_id": "child", "title": "Repeated"},
+            ]},
+        ],
+        {"units": [{"node_id": "root", "index_path": [1], "part_files": ["a.md", "b.md"]}]},
+        {"a.md": "# Chapter\n\nRepeated\n", "b.md": "# Repeated\n"},
+    )
+    rows = projection["b.md"]["headings"]
+    child = next(row for row in rows if row["node_id"] == "child")
+    assert child["source_candidate_kind"] == "heading"
+    assert child["source_match_count"] == 1
+
+
+def test_source_occurrences_keep_superscripts_and_trailing_symbols_literal():
+    assert normalize_toc_source_label("Dimension x<sup>2</sup>") == "Dimension x2"
+    assert normalize_toc_source_label("C++*") == "C++*"
+    assert normalize_toc_source_label("Title†") == "Title†"
+    assert normalize_toc_source_label("x < y > z", markdown_source=False) == "x < y > z"
+    projection = project_toc_ownership(
+        [{"node_id": "root", "title": "Dimension x<sup>2</sup>"}],
+        {"units": [{"node_id": "root", "index_path": [1], "file": "unit.md"}]},
+        {"unit.md": "# Dimension x<sup>2</sup>"},
+    )
+    assert projection["unit.md"]["binding_mode"] == "visible"
+
+
+def test_literal_markdown_punctuation_and_raw_superscript_roundtrip():
+    from pdf2epub.epub.converter import ContentConverter
+    from pdf2epub.markdown_to_html import convert_markdown_to_html
+
+    cases = [
+        ("# C++\\*", "C++*", "heading"),
+        (r"# \*A\*", "*A*", "heading"),
+        ("# Dimension x<sup>2</sup>", "Dimension x2", "heading"),
+        ("# Title†", "Title†", "heading"),
+    ]
+    converter = ContentConverter.__new__(ContentConverter)
+    for index, (markdown, title, kind) in enumerate(cases):
+        projection = project_toc_ownership(
+            [{"node_id": "root", "title": title}],
+            {"units": [{"node_id": "root", "index_path": [1], "file": "unit.md"}]},
+            {"unit.md": markdown},
+        )
+        row = projection["unit.md"]["headings"][0]
+        assert row["binding_mode"] == "visible"
+        rendered = convert_markdown_to_html(markdown, standalone=False)
+        updated, found = converter._add_subchapter_anchor(
+            rendered, title, f"toc-{index}", source_occurrence=1,
+            source_match_count=1, source_candidate_kind=kind,
+        )
+        assert found, (markdown, rendered)
+        assert f'id="toc-{index}"' in updated
+
+        stripped_title = title.rstrip("*") if title.endswith("*") else title + "*"
+        if stripped_title != title:
+            _unchanged, false_match = converter._add_subchapter_anchor(
+                rendered, stripped_title, "toc-stripped", source_occurrence=1,
+                source_match_count=1, source_candidate_kind=kind,
+            )
+            assert not false_match

@@ -17,6 +17,7 @@ from .toc_model import (
     iter_toc_nodes,
     project_toc_ownership,
     normalize_toc_source_label,
+    TOC_HEADING_CONTEXT_PROJECTION_VERSION,
     toc_node_anchor,
     toc_node_id,
     toc_nodes_by_id,
@@ -517,15 +518,14 @@ def build_toc_heading_contexts(
                 "structural_ancestor": bool(record.get("structural_ancestor")),
                 "source_occurrence": int(record.get("source_occurrence", 0)),
                 "source_match_count": int(record.get("source_match_count", 0)),
-                "source_occurrence": int(record.get("source_occurrence", 0)),
-                "source_match_count": int(record.get("source_match_count", 0)),
+                "source_candidate_kind": str(record.get("source_candidate_kind", "container_only")),
             })
         contexts[filename] = {
             "toc_title": str(target_node.get("title") or "").strip(),
             "node_id": identity,
             "anchor": toc_node_anchor(target_node, target_path),
             "parent_node_id": toc_node_id(source_by_path[source_path[:-1]], source_path[:-1]) if len(source_path) > 1 else None,
-            "projection_version": 2,
+            "projection_version": TOC_HEADING_CONTEXT_PROJECTION_VERSION,
             "binding_mode": unit_projection["binding_mode"],
             "children": child_contexts,
         }
@@ -639,9 +639,9 @@ def build_global_toc_outline(
     return "\n".join(chosen_lines)
 
 
-def _normalize_toc_heading_for_binding(value: str) -> str:
+def _normalize_toc_heading_for_binding(value: str, *, markdown_source: bool = True) -> str:
     """Normalize harmless presentation differences without changing wording."""
-    return normalize_toc_source_label(value)
+    return normalize_toc_source_label(value, markdown_source=markdown_source)
 
 
 def validate_toc_heading_bindings(
@@ -681,7 +681,11 @@ def validate_toc_heading_bindings(
         if context is None:
             errors.append(f"{name}: current TOC ownership context is missing")
             continue
-        if context.get("projection_version") != 2 or not context.get("node_id") or not context.get("anchor"):
+        if (
+            context.get("projection_version") != TOC_HEADING_CONTEXT_PROJECTION_VERSION
+            or not context.get("node_id")
+            or not context.get("anchor")
+        ):
             errors.append(f"{name}: stale or incomplete TOC ownership context; rerun translate")
             continue
         # Validate each assigned physical unit against its own text. Sibling
@@ -742,9 +746,9 @@ def validate_toc_heading_bindings(
             expected.append((label, child_title))
 
         for label, value in expected:
-            normalized_value = _normalize_toc_heading_for_binding(value)
+            normalized_value = _normalize_toc_heading_for_binding(value, markdown_source=False)
             value_stripped = re.sub(r"^\d+[\.\s、]+", "", value).strip()
-            norm_stripped = _normalize_toc_heading_for_binding(value_stripped)
+            norm_stripped = _normalize_toc_heading_for_binding(value_stripped, markdown_source=False)
             match_mode = "exact" if candidates[value] > 0 else None
             if match_mode == "exact":
                 candidates[value] -= 1

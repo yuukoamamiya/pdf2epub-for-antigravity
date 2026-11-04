@@ -15,13 +15,12 @@ from .markdown_validation_persistence import (
     stage_normalized_and_validated_targets,
     persist_validation_report,
 )
-from .workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION
+from .workflow_contracts import markdown_validation_schema_version
 
 
 # Changing the warning gate is a validation-contract change.  Older reports
 # were allowed to stage files while carrying advisory warnings, so callers
 # must not treat a pre-v2 report as proof that the new gate was evaluated.
-VALIDATION_SCHEMA_VERSION = MARKDOWN_VALIDATION_SCHEMA_VERSION
 def validate_markdown_subagent(
     output_dir: Path,
     task: str,
@@ -130,7 +129,7 @@ def validate_markdown_subagent(
     target_sha256.update(target_hashes)
 
     report = {
-        "schema_version": VALIDATION_SCHEMA_VERSION,
+        "schema_version": markdown_validation_schema_version(task),
         "task": task,
         "total": len(sources),
         "completed": len(sources) - len(missing),

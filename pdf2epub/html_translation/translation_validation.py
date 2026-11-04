@@ -15,13 +15,13 @@ from pdf2epub.markdown_validation import target_language_ratio_check
 from pdf2epub.special_role_audit import validate_special_role_markers
 from pdf2epub.subagent_safety import detect_refusal
 from pdf2epub.workflow_contracts import atomic_write_json
-from pdf2epub.workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION
+from pdf2epub.workflow_contracts import LEGACY_MARKDOWN_VALIDATION_SCHEMA_VERSION
 from .validation import nonempty_lines, tag_mismatch_count
 from .metadata_validation import HTMLMetadataValidator, MetadataValidationWorkspace
 from .unit_files import HTMLUnitStore, HTMLUnitWorkspace
 
 
-HTML_FILE_VALIDATION_SCHEMA_VERSION = MARKDOWN_VALIDATION_SCHEMA_VERSION
+HTML_FILE_VALIDATION_SCHEMA_VERSION = LEGACY_MARKDOWN_VALIDATION_SCHEMA_VERSION
 
 
 def validate_file_name(file_name: Optional[str]) -> Optional[str]:

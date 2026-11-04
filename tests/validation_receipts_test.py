@@ -4,6 +4,7 @@ from pathlib import Path
 
 from pdf2epub.validation_receipts import (
     build_input_snapshot,
+    markdown_directory_sha256,
     validation_receipt_is_current,
 )
 from pdf2epub.commands.markdown import _sync_subagent_manifest_progress
@@ -97,6 +98,59 @@ def test_package_receipt_covers_toc_refinement_config_and_translated_toc(tmp_pat
         output_dir=tmp_path,
         config_path=config,
         require_build_inputs=True,
+    )
+
+
+def test_receipt_from_old_superscript_policy_is_not_current(tmp_path: Path):
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "unit.md").write_text("Citations: 1856<sup>2</sup>, p. 4.", encoding="utf-8")
+    (target_dir / "unit.md").write_text("Citations: 1856<sup>2</sup>, p. 4.", encoding="utf-8")
+    receipt = tmp_path / "polish_validation.json"
+    report = {
+        "schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION - 1,
+        "task": "polish",
+        "scope": "full",
+        "all_passed": True,
+        "source_sha256": markdown_directory_sha256(source_dir),
+        "target_sha256": markdown_directory_sha256(target_dir),
+    }
+    receipt.write_text(json.dumps(report), encoding="utf-8")
+
+    assert not validation_receipt_is_current(
+        receipt, source_dir, target_dir, task="polish"
+    )
+
+    # A revalidation receipt using the current contract restores currentness.
+    report["schema_version"] = MARKDOWN_VALIDATION_SCHEMA_VERSION
+    receipt.write_text(json.dumps(report), encoding="utf-8")
+    assert validation_receipt_is_current(
+        receipt, source_dir, target_dir, task="polish"
+    )
+
+
+def test_unrelated_ocr_receipt_keeps_its_existing_schema_current(tmp_path: Path):
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "page_001.md").write_text("OCR source", encoding="utf-8")
+    (target_dir / "page_001.md").write_text("OCR corrected", encoding="utf-8")
+    receipt = tmp_path / "ocr-correct_validation.json"
+    receipt.write_text(
+        json.dumps({
+            "schema_version": 3,
+            "task": "ocr-correct", "scope": "full", "all_passed": True,
+            "source_sha256": markdown_directory_sha256(source_dir),
+            "target_sha256": markdown_directory_sha256(target_dir),
+        }),
+        encoding="utf-8",
+    )
+
+    assert validation_receipt_is_current(
+        receipt, source_dir, target_dir, task="ocr-correct"
     )
 
 

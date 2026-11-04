@@ -253,6 +253,18 @@ def apply_footnote_normalization(
         ],
         "resolved_blocks": list(edit_plan.resolved_blocks),
         "endnotes": dict(edit_plan.endnotes_report),
+        "reviewed_inline_continuations": [
+            {
+                "file": str(item.get("file") or ""),
+                "key": str(item.get("key") or ""),
+                "text": str(item.get("inline_text") or ""),
+            }
+            for item in ((validation.get("endnote_definitions") or {}).get("decisions", []) or [])
+            if isinstance(item, Mapping)
+            and item.get("kind") == "inline"
+            and item.get("role") == "continuation"
+            and item.get("inline_text")
+        ],
         "tree_progress_sha256": sha256_file(
             output_dir / "ocr_markdown" / "tree_progress.json"
         ),

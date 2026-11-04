@@ -13,9 +13,11 @@ import hashlib
 import json
 import re
 from pathlib import Path
+from pathlib import PurePosixPath
 from typing import Any, Mapping, Optional
 
 from ..workflow_contracts import atomic_write_json, sha256_file
+from ..footnote_normalization import _is_math_or_formula_superscript
 from .endnote_scopes import (
     EndnoteScopeError,
     build_endnote_scope_directory,
@@ -24,7 +26,7 @@ from .endnote_scopes import (
 )
 
 
-ENDNOTE_REVIEW_SCHEMA_VERSION = 1
+ENDNOTE_REVIEW_SCHEMA_VERSION = 2
 AMBIGUITIES_FILENAME = "endnote_definition_ambiguities.json"
 DECISIONS_FILENAME = "endnote_definition_decisions.json"
 VALIDATION_FILENAME = "endnote_definition_validation.json"
@@ -34,12 +36,66 @@ NUMBERED_PUNCT_DEF_RE = re.compile(
 )
 _TERMINAL_PUNCTUATION = frozenset(". ! ? 。 ！ ？ ” ’ \" '".split())
 _MARKDOWN_HEADING_RE = re.compile(r"^#{1,6}\s+\S")
+_INLINE_SUP_RE = re.compile(r" {2,}<sup\b[^>]*>[ \t]*(?P<key>\d+)[ \t]*</sup>[ \t]+", re.IGNORECASE)
 DECISION_ROLES = frozenset({"definition", "continuation"})
 _UNRESOLVED_ROLES = frozenset({"review_required"})
 
 
+def _inside_inline_code_or_math(line: str, position: int) -> bool:
+    for delimiter_re in (
+        re.compile(r"(?<!\\)(`+)(?!`)"),
+        re.compile(r"(?<!\\)(\$\$|(?<!\$)\$(?!\$))"),
+    ):
+        opened: Optional[tuple[str, int]] = None
+        for match in delimiter_re.finditer(line):
+            delimiter = match.group(1)
+            if opened is None:
+                opened = (delimiter, match.start())
+            elif opened[0] == delimiter:
+                if opened[1] < position < match.end():
+                    return True
+                opened = None
+    return False
+
+
+def inline_endnote_candidates(line: str, line_number: int) -> list[dict[str, Any]]:
+    """Return conservative numeric inline note candidates on one definition line."""
+    matches = list(_INLINE_SUP_RE.finditer(line))
+    result = []
+    for index, match in enumerate(matches):
+        if _inside_inline_code_or_math(line, match.start()):
+            continue
+        key = match.group("key")
+        if _is_math_or_formula_superscript(line, match.start(), match.end(), key=key):
+            continue
+        content_end = matches[index + 1].start() if index + 1 < len(matches) else len(line)
+        content = line[match.end():content_end].strip()
+        if not content:
+            continue
+        result.append({
+            "line": line_number,
+            "kind": "inline",
+            "column": match.start("key") + 1,
+            "key": key,
+            "marker": match.group(0).strip(),
+            "content": content,
+        })
+    return result
+
+
 def _normalized_file(value: Any) -> str:
     return str(value or "").replace("\\", "/")
+
+
+def _definition_owner_key(line: str) -> str:
+    match = re.match(r"^[ \t]*\[\^(?P<key>[^]]+)\]:", line)
+    if match:
+        return match.group("key")
+    match = NUMBERED_PUNCT_DEF_RE.match(line)
+    if match:
+        return match.group("key")
+    match = re.match(r"^[ \t]*<sup\b[^>]*>[ \t]*(?P<key>\d+)[ \t]*</sup>", line, re.I)
+    return match.group("key") if match else ""
 
 
 def is_ambiguous_definition_line(
@@ -163,6 +219,16 @@ def collect_endnote_definition_ambiguities(
         for line_number, line in enumerate(lines, 1):
             if fenced_lines[line_number - 1]:
                 continue
+            # Only inspect lines already recognized as a centralized note
+            # definition. The two-space separator is intentional evidence.
+            if re.match(r"^[ \t]{0,3}(?:\[\^[^]]+\]:|(?:[-*+][ \t]+)?\d+[ \t]*[.)。：:][ \t]+|<sup\b[^>]*>\s*\d+\s*</sup>)", line, re.I):
+                for inline in inline_endnote_candidates(line, line_number):
+                    items.append({
+                        **inline, "file": name, "line_text": line,
+                        "owner_key": _definition_owner_key(line),
+                        "previous_line": lines[line_number - 2] if line_number > 1 else "",
+                        "next_line": lines[line_number] if line_number < len(lines) else "",
+                    })
             previous_line = lines[line_number - 2] if line_number > 1 else None
             if not is_ambiguous_definition_line(line, previous_line, line_number):
                 continue
@@ -172,6 +238,8 @@ def collect_endnote_definition_ambiguities(
             item = {
                 "file": name,
                 "line": line_number,
+                "kind": "line",
+                "column": 1,
                 "key": match.group("key"),
                 "previous_line": previous_line or "",
                 "line_text": line,
@@ -240,10 +308,39 @@ def validate_endnote_definition_decisions(
     output_dir = Path(output_dir)
     errors: list[str] = []
     items = _manifest_items(manifest)
-    expected: dict[tuple[str, int], Mapping[str, Any]] = {}
+    source_hashes = manifest.get("source_sha256", {}) if isinstance(manifest, Mapping) else {}
+    if not isinstance(source_hashes, Mapping):
+        errors.append("ambiguity manifest source_sha256 must be an object")
+        source_hashes = {}
+    item_files = {_normalized_file(item.get("file")) for item in items if item.get("file")}
+    if item_files - {_normalized_file(name) for name in source_hashes}:
+        errors.append("ambiguity manifest source_sha256 is missing one or more reviewed files")
+    for raw_name, expected_hash in source_hashes.items():
+        name = _normalized_file(raw_name)
+        path_parts = PurePosixPath(name)
+        if not name or path_parts.is_absolute() or ".." in path_parts.parts or ":" in name:
+            errors.append(f"ambiguity manifest contains an unsafe source filename: {name!r}")
+            continue
+        if not re.fullmatch(r"[0-9a-f]{64}", str(expected_hash)):
+            errors.append(f"ambiguity manifest has an invalid source hash for {name}")
+            continue
+        source_path = output_dir / "ocr_markdown" / name
+        if not source_path.is_file():
+            errors.append(f"endnote ambiguity source is missing; rerun footnote-prepare: {name}")
+        elif sha256_file(source_path) != str(expected_hash):
+            errors.append(f"endnote source changed after footnote-prepare at {name}; rerun footnote-prepare")
+    manifest_path = output_dir / AMBIGUITIES_FILENAME
+    decisions_path = output_dir / DECISIONS_FILENAME
+    manifest_digest = sha256_file(manifest_path) if manifest_path.is_file() else None
+    decisions_digest = sha256_file(decisions_path) if decisions_path.is_file() else None
+    expected: dict[tuple[str, int, str, int], Mapping[str, Any]] = {}
     for item in items:
         try:
-            identity = (_normalized_file(item["file"]), int(item["line"]))
+            line = item["line"]
+            column = item.get("column", 1)
+            if isinstance(line, bool) or not isinstance(line, int) or isinstance(column, bool) or not isinstance(column, int):
+                raise ValueError
+            identity = (_normalized_file(item["file"]), line, str(item.get("kind") or "line"), column)
         except (KeyError, TypeError, ValueError):
             errors.append("ambiguity manifest item is missing a file/line identity")
             continue
@@ -265,6 +362,9 @@ def validate_endnote_definition_decisions(
             "status": "retry_required" if errors else "no_subagent_review_required",
             "errors": errors,
             "decisions": [],
+            "manifest_sha256": manifest_digest,
+            "decisions_sha256": decisions_digest,
+            "source_sha256": dict(source_hashes),
         }
         atomic_write_json(output_dir / VALIDATION_FILENAME, result)
         return result
@@ -276,21 +376,26 @@ def validate_endnote_definition_decisions(
         )
         decisions: list[Any] = []
     else:
-        if value.get("schema_version") != ENDNOTE_REVIEW_SCHEMA_VERSION:
+        legacy_line_only = value.get("schema_version") == 1 and all(key[2] == "line" for key in expected)
+        if value.get("schema_version") != ENDNOTE_REVIEW_SCHEMA_VERSION and not legacy_line_only:
             errors.append("endnote definition decisions have an unsupported schema_version")
         decisions = value.get("decisions")
         if not isinstance(decisions, list):
             errors.append("endnote definition decisions must contain a decisions array")
             decisions = []
 
-    seen: set[tuple[str, int]] = set()
+    seen: set[tuple[str, int, str, int]] = set()
     normalized: list[dict[str, Any]] = []
     for raw in decisions:
         if not isinstance(raw, Mapping):
             errors.append("each endnote definition decision must be an object")
             continue
         try:
-            identity = (_normalized_file(raw["file"]), int(raw["line"]))
+            line = raw["line"]
+            column = raw.get("column", 1)
+            if isinstance(line, bool) or not isinstance(line, int) or isinstance(column, bool) or not isinstance(column, int):
+                raise ValueError
+            identity = (_normalized_file(raw["file"]), line, str(raw.get("kind") or "line"), column)
         except (KeyError, TypeError, ValueError):
             errors.append("endnote definition decision is missing a file/line identity")
             continue
@@ -307,6 +412,9 @@ def validate_endnote_definition_decisions(
             )
             continue
         role = str(raw.get("role") or "").strip().lower()
+        if identity[2] == "inline" and (raw.get("kind") != "inline" or raw.get("column") is None):
+            errors.append(f"inline endnote decision must include kind and column at {identity[0]}:{identity[1]}")
+            continue
         if role in _UNRESOLVED_ROLES:
             errors.append(
                 f"endnote definition decision is unresolved at "
@@ -330,14 +438,20 @@ def validate_endnote_definition_decisions(
         decision = dict(raw)
         decision["file"] = identity[0]
         decision["line"] = identity[1]
+        decision["kind"] = identity[2]
+        decision["column"] = identity[3]
         decision["role"] = role
         if expected_key:
             decision["key"] = expected_key
+        if identity[2] == "inline":
+            item = expected[identity]
+            decision["inline_text"] = str(item.get("marker") or "") + " " + str(item.get("content") or "")
+            decision["owner_key"] = str(item.get("owner_key") or "")
         normalized.append(decision)
 
     for identity in sorted(set(expected) - seen):
         errors.append(
-            f"missing endnote definition decision for {identity[0]}:{identity[1]}"
+            f"missing endnote definition decision for {identity[0]}:{identity[1]}:{identity[2]}:{identity[3]}"
         )
 
     result = {
@@ -346,6 +460,9 @@ def validate_endnote_definition_decisions(
         "status": "validated" if not errors else "retry_required",
         "errors": errors,
         "decisions": normalized,
+        "manifest_sha256": manifest_digest,
+        "decisions_sha256": decisions_digest,
+        "source_sha256": dict(source_hashes),
     }
     atomic_write_json(output_dir / VALIDATION_FILENAME, result)
     return result
@@ -360,6 +477,7 @@ __all__ = [
     "VALIDATION_FILENAME",
     "collect_endnote_definition_ambiguities",
     "is_ambiguous_definition_line",
+    "inline_endnote_candidates",
     "load_endnote_definition_ambiguities",
     "load_endnote_definition_decisions",
     "validate_endnote_definition_decisions",

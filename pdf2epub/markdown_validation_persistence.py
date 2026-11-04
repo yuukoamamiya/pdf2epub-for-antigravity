@@ -9,10 +9,7 @@ from typing import Any, Mapping
 
 from .markdown_validation_checkpoint import discard_abandoned_temp_targets, quarantine_invalid_targets
 from .markdown_validation_context import MarkdownValidationContext
-from .workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION, atomic_write_json, atomic_write_text
-
-
-VALIDATION_SCHEMA_VERSION = MARKDOWN_VALIDATION_SCHEMA_VERSION
+from .workflow_contracts import markdown_validation_schema_version, atomic_write_json, atomic_write_text
 
 
 def begin_validation_io(context: MarkdownValidationContext) -> list[str]:
@@ -96,7 +93,7 @@ def persist_validation_report(
             records = {}
         for name in report["files_checked"]:
             records[name] = {
-                "schema_version": VALIDATION_SCHEMA_VERSION,
+                "schema_version": markdown_validation_schema_version(report["task"]),
                 "valid": name in report["valid_files"] and name not in report["missing"],
                 "source_sha256": report["source_sha256"].get(name),
                 "target_sha256": report["target_sha256"].get(name),
@@ -115,7 +112,7 @@ def persist_validation_report(
                 "polish_structure_audit": polish_structure_audits.get(name),
             }
         ledger = {
-            "schema_version": VALIDATION_SCHEMA_VERSION,
+            "schema_version": markdown_validation_schema_version(report["task"]),
             "task": report["task"],
             "scope": "file-checkpoints",
             "files": records,

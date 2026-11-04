@@ -481,8 +481,8 @@ def _validate_toc_node_source_correspondence(output_dir: Path, tree: Any, toc_li
                         source_region = []
                     if source_region:
                         source_region[0] = re.sub(r"^\s*#{1,6}\s*", "", source_region[0])
-                    source_label = normalize_toc_source_label(" ".join(source_region))
-                    tree_label = normalize_toc_source_label(node.get("title", ""))
+                    source_label = normalize_toc_source_label(" ".join(source_region), markdown_source=True)
+                    tree_label = normalize_toc_source_label(node.get("title", ""), markdown_source=False)
                     if not source_label or source_label != tree_label:
                         errors.append(f"TOC node {node_id} title does not match its reviewed source region")
                     boundary_info = node.get("boundary_info") or {}
@@ -502,8 +502,8 @@ def _validate_toc_node_source_correspondence(output_dir: Path, tree: Any, toc_li
             if layout_decision is not None:
                 layout_row = canonical if isinstance(canonical, dict) else {}
                 title_matches = (
-                    normalize_toc_source_label(node.get("title", ""))
-                    == normalize_toc_source_label(layout_row.get("text", ""))
+                    normalize_toc_source_label(node.get("title", ""), markdown_source=False)
+                    == normalize_toc_source_label(layout_row.get("text", ""), markdown_source=False)
                 )
                 exact = (
                     type(page) is int and page == layout_row.get("page")

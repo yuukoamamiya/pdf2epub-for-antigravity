@@ -395,16 +395,24 @@ PDF 正文 Prompt 还会从已验证的 `toc_tree_translated.json` 生成一个�
 它依据实际树深、分支规模和 `subagent.batching.global_toc_tokens`（默认 1,200）
 自适应压缩，不固定保留某几个标题级别。该轮廓只用于理解全书主题推进，当前章节的
 精确 `toc_heading_contexts` 才是可见标题和措辞的权威来源；完整 TOC 不得重复注入每个章节。
-TOC 绑定校验只对连续空白、Markdown 外层标记和成对书名号/引号做规范化容差；近义词或
+TOC 绑定校验对连续空白、Markdown 外层标记和成对书名号/引号只在运行时匹配时做规范化容差，
+不改写已存标题；近义词或
 独立改译仍必须失败。源 ownership 标题计数、分片 occurrence 分配和 HTML 锚点匹配在各自完成
 标记清理后统一使用 Unicode `lower()` 与连续空白归一化，不使用 `casefold()` 扩大等价关系；
 这不放宽译文与 TOC 的逐字标题绑定。worker Prompt 必须把当前文件的标题锚定清单置于 assigned 任务附近，
 要求对应的第一个匹配标题逐字使用 TOC 文本，但不强制其成为物理首行。
 当前 TOC 合同要求每个节点有唯一、显式的 `node_id`；数组路径只表示结构位置，标题文字不作身份。
 构建器通过 `tree_progress.json` 和源 Markdown 的共享 ownership projection 确定节点所属的物理文件
-及 `visible`/`container_only` 状态，并在对应 part 内放置可见标题锚点（包括实际出现在后代单元中的
-结构祖先）。可见标题缺少已绑定锚点时必须阻断 EPUB 构建；容器节点按合同落到所属内容文件或首个
-有内容的后代。TOC 更新后须重新完成结构审阅、翻译与校验，不迁移旧树或旧翻译结果。
+及 `visible`/`container_only` 状态，并记录 `source_candidate_kind`（`heading`、`paragraph`、
+`container_only`）。同一逻辑单元优先使用标题候选，即使其位于后续 part；只有没有标题候选时才用
+段落候选。源 Markdown 计数与生成 HTML 锚点匹配必须使用相同候选类别，并严格核对 occurrence 和
+count。可见标题缺少已绑定锚点时必须阻断 EPUB 构建；容器节点按合同落到所属内容文件或首个有内容
+的后代。新 `toc_heading_contexts` 使用 `projection_version: 3`；旧 context 必须先运行一次
+`translate --resume` 刷新 manifest/context，但不能按这次准备结果立即派发 pending，因为旧
+validation receipt 可能失效并暂时把所有现有目标列为 pending。随后运行
+`translate-validate` 校验现有译文并建立当前 receipt，再运行第二次 `translate --resume`；
+只派发仍列为 pending/invalid 的 assignment，完成后运行全量 `translate-validate`。
+只重派上下文/源哈希失效的 assignment，不因 projection 升级盲目重译全书，也不迁移旧树或旧翻译结果。
 EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编号格式差异；编号只在一侧缺失时，
 仅当去编号后的标题正文精确且全书分片中唯一、没有不同编号冲突时才回退。模糊相似标题不绑定，
 原有 HTML `id` 保留。
@@ -582,15 +590,25 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    `footnote_decisions.json`。当 manifest 的 `endnote_ambiguity_count` 大于 0 时，
    还要读取 `endnote_definition_ambiguities.json`，为每条歧义写入
    `endnote_definition_decisions.json`（`role` 只能是 `definition` 或
-   `continuation`；`review_required` 视为未解决）。随后执行：
+   `continuation`；`review_required` 视为未解决）。schema 2 决定必须按 manifest 的
+   `file`、`line`、`kind`、`column`、`key` 精确对应；`kind: line` 的列为 1，
+   `kind: inline` 的列是一基源行位置（`<sup>` 内容首个数字）。行内不同位置不能共用决定。
+   随后执行：
 
    ```text
    uv run pdf2epub -c config.yaml footnote-validate
    uv run pdf2epub -c config.yaml footnote-apply
    ```
 
-   当前脚注 prepare/decision validation 使用 schema 3；尾注边界歧义及其决定仍是独立 schema 1，
-   normalization 使用 schema 6。旧 normalization schema 1–5 或旧 prepare/decision schema 不能复用：
+   `footnote_decision_validation.json` 的 `endnote_definitions` 和
+   `endnote_definition_validation.json` 都绑定 `manifest_sha256`、`decisions_sha256`、
+   `source_sha256`。validate 会核对当前源与 manifest 记录的源哈希；apply 前会只读核对
+   manifest、decisions、source 仍与 validation 收据一致，不会静默重做验证。准备后源文件改变时
+   重跑 `footnote-prepare`；只有 decisions 改变时重跑 `footnote-validate`，再运行 apply。
+
+   当前脚注 prepare/decision validation 使用 schema 3；尾注边界歧义及其决定使用独立 schema 2，
+   normalization 使用 schema 7。旧 normalization schema 1–6 和旧 prepare checkpoint 不能复用；
+   endnote decision schema 1 仅兼容没有 inline 候选的旧式行边界清单，当前新决定文件使用 schema 2：
    重新执行 prepare，只派发新 manifest 的 pending 项，再 validate/apply；无需重新 OCR。apply 会重建
    `footnote_normalized/` 和成功 checkpoint，需保留旧派生版本时先备份。
 
@@ -701,11 +719,20 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    原文字符和块级结构。`polish-validate` 还会将源稿与润色稿按忽略换行、Markdown 外层标记和已确认页边装饰的
    方式做内容保真比较；正文 token 或数字标记大量丢失时会阻断。未通过
    `polish-validate` 不得继续实体提取或翻译。
+   PDF polish/translate 使用 Markdown validation schema 4，使 superscript 保真规则更新前的全量 receipt
+   与逐文件 ledger 失效；OCR correction 和 HTML translation 仍用 schema 3，不因该规则变化失效。
+   对旧 polish receipt，先运行 `polish-validate` 校验已有目标；只把实际失败项交回 Subagent。
+   若 translation context/receipt 旧，先运行 `translate --resume` 刷新 manifest/context，但不要按首轮
+   pending 立即派发；接着 `translate-validate` 校验现有译文，然后第二次 `translate --resume`，再按
+   当前报告只派发仍失效的 assignment，并完成全量 `translate-validate`。逐文件 ledger 若单独作为恢复
+   依据，按文件重新校验。规则版本升级本身不要求重跑 OCR。
    polish 还必须清除已确认的页眉、页脚、独立印刷页码和人工 OCR 页码标记；
    诸如 `Preface XII` 的短标题加页码组合在确认属于页边装饰后应整行删除。
    正文数字、标题编号、日期、引用、脚注、参考文献和索引中的页码不得删除。
-   润色不得把普通粗体、罗马数字、编号或序数上标升级成 Markdown 标题；已确认的
-   `<sup>N</sup>` 注脚才可规范化为 `[^N]`。
+   润色不得把普通粗体、罗马数字、编号或序数上标升级成 Markdown 标题；普通上标文字、星号和
+   匕首号须原样保留。显式 Markdown 脚注引用和生成的 HTML 脚注引用不作为普通上标迁移；裸四位年份
+   邻接上标本身不足以判定版次，只有同一行明确的引文列表/页码线索才允许保留为版次上标。
+   已确认的 `<sup>N</sup>` 注脚才可规范化为 `[^N]`。
    全量 polish 校验通过后，运行 `uv run pdf2epub -c config.yaml build-epub` 构建原语言正式书名 EPUB，
    并检查目录、段落、脚注和插图排版。翻译继续读取当前 `polished_markdown/validated/`，不重新从 EPUB
    提取；若检查发现源稿问题，按既有 Subagent 流程修复，重新 polish-validate 并重建原稿，再准备或恢复

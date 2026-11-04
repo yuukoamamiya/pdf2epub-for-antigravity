@@ -257,7 +257,7 @@ class PageMerger:
                 continue
             label_lines = list(raw_region)
             label_lines[0] = re.sub(r"^\s*#{1,6}\s*", "", label_lines[0])
-            if normalize_toc_source_label(" ".join(label_lines)) != normalize_toc_source_label(node.title):
+            if normalize_toc_source_label(" ".join(label_lines), markdown_source=True) != normalize_toc_source_label(node.title, markdown_source=False):
                 continue
             level = getattr(node, "level", 1)
             if type(level) is not int or not 1 <= level <= 6:

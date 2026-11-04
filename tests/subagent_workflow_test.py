@@ -2227,6 +2227,33 @@ def test_single_file_validation_preserves_other_validated_units(tmp_path: Path):
     assert ledger["files"]["one.md"]["valid"] is True
 
 
+def test_partial_polish_validation_persists_task_scoped_receipt(tmp_path: Path):
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
+
+    source_dir, target_dir = tmp_path / "source", tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    for name, source, target in (
+        ("one.md", "# One\nBody.\n", "# One\nBody.\n"),
+        ("two.md", "# Two\nBody.\n", "# Two\nBody.\n"),
+    ):
+        (source_dir / name).write_text(source, encoding="utf-8")
+        (target_dir / name).write_text(target, encoding="utf-8")
+
+    report = validate_markdown_subagent(
+        tmp_path, "polish", source_dir, target_dir, selected_files=["one.md"]
+    )
+
+    assert report["all_passed"] is True
+    ledger = json.loads(
+        (tmp_path / "polish_file_validation.json").read_text(encoding="utf-8")
+    )
+    assert ledger["task"] == "polish"
+    assert ledger["schema_version"] == 4
+    assert ledger["files"]["one.md"]["schema_version"] == 4
+    assert ledger["files"]["one.md"]["valid"] is True
+
+
 def test_prepare_markdown_subagent_records_read_only_context_hash(tmp_path: Path):
     source_dir = tmp_path / "source"
     source_dir.mkdir()

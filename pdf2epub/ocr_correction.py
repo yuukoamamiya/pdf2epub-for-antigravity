@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 
 from pdf2epub.workflow_contracts import (
-    MARKDOWN_VALIDATION_SCHEMA_VERSION,
+    LEGACY_MARKDOWN_VALIDATION_SCHEMA_VERSION,
     atomic_write_json,
     atomic_write_text,
     sha256_file,
@@ -34,7 +34,7 @@ from pdf2epub.ocr_consensus import (
 )
 
 
-OCR_CORRECTION_VALIDATION_SCHEMA_VERSION = MARKDOWN_VALIDATION_SCHEMA_VERSION
+OCR_CORRECTION_VALIDATION_SCHEMA_VERSION = LEGACY_MARKDOWN_VALIDATION_SCHEMA_VERSION
 OCR_REVIEW_IMAGE_SCHEMA_VERSION = 1
 OCR_PAGE_REVIEW_SCHEMA_VERSION = 1
 DEFAULT_REVIEW_IMAGE_DPI = 150

@@ -9,6 +9,7 @@ source for chapter structure and titles. This provides:
 """
 
 import json
+import hashlib
 import difflib
 import re
 from pathlib import Path
@@ -276,19 +277,51 @@ def add_subchapter_anchors_to_parts(
         source_occurrence = info.get("source_occurrence")
         source_match_count = info.get("source_match_count")
         if source_occurrence is not None or source_match_count is not None:
-            matches = []
+            from .epub.converter import visible_heading_text
+
+            heading_pattern = re.compile(r'<(h[1-6]|p)([^>]*)>(.*?)</\1>', re.I | re.S)
+            candidates_by_part = []
+            global_matches = []
             for part_index, (_filename, html_content) in enumerate(rendered_parts):
+                candidates = converter._subchapter_anchor_candidates(
+                    html_content, title, heading_pattern, visible_heading_text
+                )
+                candidates_by_part.append(candidates)
+                global_matches.extend(candidates)
+            selection = converter._select_source_occurrence(
+                global_matches,
+                source_occurrence,
+                source_match_count,
+                source_candidate_kind=info.get("source_candidate_kind"),
+            )
+            if selection is not None:
+                selected_match, selected_candidates = selection
+                selected_tier = selected_candidates[0][0][0]
+                part_index = next(
+                    index for index, candidates in enumerate(candidates_by_part)
+                    if any(candidate_match is selected_match for _rank, candidate_match in candidates)
+                )
+                local_selected = [
+                    (rank, candidate_match)
+                    for rank, candidate_match in candidates_by_part[part_index]
+                    if rank[0] == selected_tier
+                    and (info.get("source_candidate_kind") not in {"heading", "paragraph"}
+                         or (candidate_match.group(1).lower().startswith("h")) == (info.get("source_candidate_kind") == "heading"))
+                ]
+                local_occurrence = next(
+                    position for position, (_rank, candidate_match) in enumerate(local_selected, 1)
+                    if candidate_match is selected_match
+                )
                 updated, found = converter._add_subchapter_anchor(
-                    html_content,
+                    rendered_parts[part_index][1],
                     title,
                     anchor_id,
-                    source_occurrence=source_occurrence,
-                    source_match_count=source_match_count,
+                    source_occurrence=local_occurrence,
+                    source_match_count=len(local_selected),
+                    source_candidate_kind=info.get("source_candidate_kind"),
                 )
-                if found:
-                    matches.append((part_index, updated))
-            if len(matches) == 1:
-                part_index, updated = matches[0]
+                if not found:
+                    continue
                 filename, _old_content = rendered_parts[part_index]
                 rendered_parts[part_index] = (filename, updated)
                 locations[anchor_id] = filename
@@ -344,7 +377,11 @@ def has_notes_chapter(chapters: List[Dict]) -> bool:
     return False
 
 
-def validate_centralized_endnotes_for_build(structure: List[Dict]) -> dict:
+def validate_centralized_endnotes_for_build(
+    structure: List[Dict], output_dir: Optional[Path] = None,
+    markdown_dir: Optional[Path] = None, translated: bool = False,
+    config: Optional[Dict] = None,
+) -> dict:
     """Fail closed when a typed Notes unit still contains raw endnotes."""
     from .refine.endnote_normalization import validate_normalized_endnotes
 
@@ -368,7 +405,115 @@ def validate_centralized_endnotes_for_build(structure: List[Dict]) -> dict:
             visit(entry.get("children") or [])
 
     visit(structure)
-    return validate_normalized_endnotes(source_texts, file_roles)
+    reviewed_continuations = []
+    if output_dir is not None:
+        output_dir = Path(output_dir)
+        try:
+            from .refine.footnote_status import FOOTNOTE_NORMALIZATION_SCHEMA_VERSION, footnote_normalization_status
+            from .refine.footnote_contracts import FOOTNOTE_PREPARE_SCHEMA_VERSION
+            from .refine.endnote_review import inline_endnote_candidates
+            from .refine.endnote_scopes import markdown_fence_mask
+            from .validation_receipts import validation_receipt_is_current
+            receipt = json.loads((output_dir / "footnote_normalization.json").read_text(encoding="utf-8"))
+            decision_validation_path = output_dir / "footnote_decision_validation.json"
+            decision_validation = json.loads(decision_validation_path.read_text(encoding="utf-8"))
+            normalization_current = footnote_normalization_status(output_dir, config=config).get("current") is True
+            hashes_match = (
+                normalization_current
+                and receipt.get("valid") is True
+                and receipt.get("status") == "validated"
+                and receipt.get("schema_version") == FOOTNOTE_NORMALIZATION_SCHEMA_VERSION
+                and decision_validation.get("valid") is True
+                and (decision_validation.get("endnote_definitions") or {}).get("valid") is True
+                and (decision_validation.get("endnote_definitions") or {}).get("schema_version") == 2
+                and decision_validation.get("schema_version") == FOOTNOTE_PREPARE_SCHEMA_VERSION
+            )
+            target_hashes = receipt.get("target_sha256", {})
+            normalized_dir = output_dir / "footnote_normalized"
+            polished_dir = output_dir / "polished_markdown" / "validated"
+            translated_dir = output_dir / "translated" / "validated"
+            build_dir = Path(markdown_dir) if markdown_dir is not None else normalized_dir
+            if build_dir.resolve() == normalized_dir.resolve():
+                for name, role in file_roles.items():
+                    if role == "notes":
+                        text = source_texts.get(name)
+                        if name not in target_hashes or text is None or hashlib.sha256(text.encode("utf-8")).hexdigest() != target_hashes[name]:
+                            hashes_match = False
+            else:
+                hashes_match = hashes_match and validation_receipt_is_current(
+                    output_dir / "polish_validation.json", normalized_dir, polished_dir, task="polish"
+                )
+                expected_dir = polished_dir
+                if translated:
+                    hashes_match = hashes_match and validation_receipt_is_current(
+                        output_dir / "translate_validation.json", polished_dir, translated_dir, task="translate"
+                    )
+                    expected_dir = translated_dir
+                hashes_match = hashes_match and build_dir.resolve() == expected_dir.resolve()
+            endnote_decisions = (decision_validation.get("endnote_definitions") or {}).get("decisions", [])
+            if hashes_match:
+                approved_items = [
+                    item for item in endnote_decisions
+                    if isinstance(item, dict) and item.get("kind") == "inline" and item.get("role") == "continuation"
+                ]
+                approved_key_counts: dict[tuple[str, str], int] = {}
+                for item in approved_items:
+                    token = (str(item.get("file") or ""), str(item.get("key") or ""))
+                    approved_key_counts[token] = approved_key_counts.get(token, 0) + 1
+                def owner_inline_counts(text: str) -> dict[tuple[str, str], int]:
+                    counts: dict[tuple[str, str], int] = {}
+                    owner = ""
+                    lines = text.splitlines()
+                    fenced = markdown_fence_mask(lines)
+                    for line_number, line in enumerate(lines, 1):
+                        if fenced[line_number - 1]:
+                            continue
+                        definition = re.match(r"^[ \t]*\[\^(?P<key>[^]]+)\]:", line)
+                        if definition is None:
+                            definition = re.match(r"^[ \t]{0,3}(?:[-*+][ \t]+)?(?P<key>\d+)[ \t]*[.)。：:][ \t]+", line)
+                        if definition is not None:
+                            owner = definition.group("key")
+                        if not owner:
+                            continue
+                        for candidate in inline_endnote_candidates(line, line_number):
+                            token = (owner, str(candidate.get("key") or ""))
+                            counts[token] = counts.get(token, 0) + 1
+                    return counts
+
+                for name, key in approved_key_counts:
+                    normalized_text = (normalized_dir / name).read_text(encoding="utf-8")
+                    source_by_owner = owner_inline_counts(normalized_text)
+                    source_total = sum(count for (owner, raw_key), count in source_by_owner.items() if raw_key == key)
+                    if source_total != approved_key_counts[(name, key)]:
+                        hashes_match = False
+                        break
+                    expected_counts = {
+                        (name, owner, raw_key): count
+                        for (owner, raw_key), count in source_by_owner.items()
+                        if raw_key == key and count
+                    }
+                    for (owner_file, owner_key, inline_key), expected_occurrences in expected_counts.items():
+                        if owner_file != name:
+                            continue
+                        final_text = source_texts.get(name, "")
+                        target_count = owner_inline_counts(final_text).get((owner_key, inline_key), 0)
+                        if target_count != expected_occurrences:
+                            hashes_match = False
+                            break
+                        reviewed_continuations.append({
+                            "file": name, "owner_key": owner_key, "key": inline_key,
+                            "occurrences": expected_occurrences,
+                        })
+                    if not hashes_match:
+                        break
+                if not hashes_match:
+                    reviewed_continuations = []
+        except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
+            reviewed_continuations = []
+    return validate_normalized_endnotes(
+        source_texts, file_roles,
+        reviewed_inline_continuations=reviewed_continuations,
+    )
 
 
 def flatten_toc_tree(
@@ -1019,6 +1164,7 @@ def _prepare_epub_structure(
                         "anchor": target_node.get("anchor"),
                         "source_occurrence": heading.get("source_occurrence"),
                         "source_match_count": heading.get("source_match_count"),
+                        "source_candidate_kind": heading.get("source_candidate_kind"),
                     })
 
             def apply_binding(entries):
@@ -1038,7 +1184,10 @@ def _prepare_epub_structure(
 
     footnote_mode = resolve_footnote_options(config.config).mode
     endnote_build_report = (
-        validate_centralized_endnotes_for_build(epub_structure)
+        validate_centralized_endnotes_for_build(
+            epub_structure, config.output_dir, config.markdown_dir, config.translated,
+            config=config.config,
+        )
         if footnote_mode != "disabled"
         else {"valid": True, "definition_keys": [], "errors": [], "status": "disabled"}
     )

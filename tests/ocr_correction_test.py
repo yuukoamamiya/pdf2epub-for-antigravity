@@ -10,7 +10,7 @@ from pdf2epub.ocr_correction import (
     validate_ocr_correction_reviews,
 )
 from pdf2epub.subagent_runtime import write_worker_handoffs
-from pdf2epub.workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION, sha256_file
+from pdf2epub.workflow_contracts import LEGACY_MARKDOWN_VALIDATION_SCHEMA_VERSION, sha256_file
 
 
 def _write_current_review_manifest(output_dir: Path) -> None:
@@ -71,7 +71,7 @@ def test_ocr_correction_checkpoint_selects_validated_pages(tmp_path: Path):
     (tmp_path / "ocr-correct_validation.json").write_text(
         json.dumps(
             {
-                "schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION,
+                "schema_version": LEGACY_MARKDOWN_VALIDATION_SCHEMA_VERSION,
                 "task": "ocr-correct",
                 "all_passed": True,
                 "valid_files": [source.name],
@@ -158,7 +158,7 @@ def test_two_ocr_correction_checkpoint_requires_current_consensus(
     (tmp_path / "ocr-correct_validation.json").write_text(
         json.dumps(
             {
-                "schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION,
+                "schema_version": LEGACY_MARKDOWN_VALIDATION_SCHEMA_VERSION,
                 "task": "ocr-correct",
                 "all_passed": True,
                 "valid_files": [source.name],

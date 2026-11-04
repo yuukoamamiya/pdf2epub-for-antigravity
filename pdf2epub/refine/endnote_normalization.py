@@ -27,6 +27,7 @@ from ..footnote_normalization import (
 from ..footnote_keys import key_from_printed_marker
 from .endnote_review import NUMBERED_PUNCT_DEF_RE as _NUMBERED_PUNCT_DEF_RE
 from .endnote_review import is_ambiguous_definition_line
+from .endnote_review import inline_endnote_candidates
 from .endnote_scopes import markdown_fence_mask, scope_for_line, scope_report
 
 
@@ -72,6 +73,7 @@ _SCOPED_KEY_RE = re.compile(
 _SCOPED_MARKER_RE = re.compile(
     r"^fnc-[A-Za-z0-9]+-(?P<marker>fnm-.+?)(?:-o\d+)?$"
 )
+_INLINE_NOTE_RE = re.compile(r" {2,}<sup\b[^>]*>[ \t]*(?P<key>\d+)[ \t]*</sup>[ \t]+", re.I)
 
 
 class EndnoteNormalizationError(ValueError):
@@ -143,6 +145,8 @@ def _definition_decision_map(
         for item in values:
             if not isinstance(item, Mapping):
                 continue
+            if item.get("kind", "line") != "line":
+                continue
             try:
                 identity = (
                     _normalized_decision_file(item["file"]),
@@ -151,6 +155,98 @@ def _definition_decision_map(
             except (KeyError, TypeError, ValueError):
                 continue
             result[identity] = str(item.get("role") or "").strip().lower()
+    return result
+
+
+def _expand_reviewed_inline_definitions(source_texts: Mapping[str, str], decisions: Any):
+    """Create virtual definition lines while retaining original line ownership.
+
+    This is an in-memory projection only. Every emitted character comes from
+    the source; only the reviewed two-space boundary is represented as a line
+    boundary. Continuation markers remain literal content.
+    """
+    values = decisions.get("decisions", []) if isinstance(decisions, Mapping) else decisions
+    inline = {}
+    if isinstance(values, (list, tuple)):
+        for item in values:
+            if isinstance(item, Mapping) and item.get("kind") == "inline":
+                try:
+                    if any(isinstance(item.get(field), bool) or not isinstance(item.get(field), int) for field in ("line", "column")):
+                        raise ValueError
+                    inline[(_normalized_decision_file(item["file"]), item["line"], item["column"])] = str(item.get("role") or "").lower()
+                except EndnoteNormalizationError:
+                    raise
+                except (KeyError, TypeError, ValueError):
+                    continue
+    if not inline:
+        return dict(source_texts), decisions, {}, {}
+    expanded, origins, columns = dict(source_texts), {}, {}
+    for name, text in source_texts.items():
+        out, origin_map, col_map = [], {}, {}
+        for original_line, line in enumerate(text.splitlines(), 1):
+            matches = list(_INLINE_NOTE_RE.finditer(line))
+            selected = [(i, m) for i, m in enumerate(matches) if (name, original_line, m.start("key") + 1) in inline]
+            if not selected:
+                out.append(line); origin_map[len(out)] = original_line; continue
+            definitions = [(i, m) for i, m in selected if inline[(name, original_line, m.start("key") + 1)] == "definition"]
+            if not definitions:
+                out.append(line); origin_map[len(out)] = original_line; continue
+            cursor = 0
+            first_definition = definitions[0][1]
+            out.append(line[:first_definition.start()].rstrip())
+            origin_map[len(out)] = original_line
+            for definition_index, (match_index, match) in enumerate(definitions):
+                content_end = (
+                    definitions[definition_index + 1][1].start()
+                    if definition_index + 1 < len(definitions) else len(line)
+                )
+                content = line[match.end():content_end].strip()
+                marker_line = f"[^{match.group('key')}]: {content}"
+                out.append(marker_line)
+                origin_map[len(out)] = original_line
+                col_map[(name, original_line, match.start("key") + 1)] = len(out)
+                cursor = content_end
+            tail = line[cursor:].strip()
+            if tail:
+                out.append(tail); origin_map[len(out)] = original_line
+        ending = "\n" if text.endswith(("\n", "\r")) else ""
+        expanded[name] = "\n".join(out) + ending
+        origins[name] = origin_map
+        columns[name] = col_map
+    return expanded, decisions, origins, columns
+
+
+def _remap_inline_scope_directory(scopes: Optional[Mapping[str, Any]], origins: Mapping[str, Any]):
+    if scopes is None or not origins:
+        return scopes
+    result = dict(scopes)
+    spans_by_file = {}
+    for name, spans in (scopes.get("notes_spans", {}) or {}).items():
+        origin = origins.get(name)
+        if not origin:
+            spans_by_file[name] = spans
+            continue
+        mapped = []
+        for span in spans:
+            members = [virtual for virtual, original in origin.items() if int(span["start_line"]) <= original < int(span["end_line"])]
+            if members:
+                mapped.append({**span, "start_line": min(members), "end_line": max(members) + 1})
+        spans_by_file[name] = mapped
+    result["notes_spans"] = spans_by_file
+    unmatched = []
+    for item in scopes.get("unmatched_notes_headings", []) or []:
+        name = str(item.get("file") or "")
+        try:
+            line_number = int(item.get("line", -1))
+        except (TypeError, ValueError):
+            unmatched.append(item)
+            continue
+        remapped_lines = [
+            virtual for virtual, original in origins.get(name, {}).items()
+            if original == line_number
+        ]
+        unmatched.extend({**item, "line": virtual} for virtual in remapped_lines)
+    result["unmatched_notes_headings"] = unmatched
     return result
 
 
@@ -290,9 +386,8 @@ def _raw_body_keys(texts: Mapping[str, str], note_files: set[str]) -> set[str]:
             key
             for match in _HTML_SUP_RE.finditer(body_text)
             if (key := key_from_printed_marker(html.unescape(match.group("key"))))
-            and not (
-                key.startswith("fnm-letter-")
-                and _is_math_or_formula_superscript(body_text, match.start())
+            and not _is_math_or_formula_superscript(
+                body_text, match.start(), match.end(), key=key
             )
         )
         for match in _UNICODE_SUP_RE.finditer(body_text):
@@ -308,9 +403,8 @@ def _replace_body_markers(text: str, definition_keys: set[str]) -> tuple[str, in
         key = key_from_printed_marker(html.unescape(match.group("key")))
         if not key:
             return match.group(0)
-        if (
-            key.startswith("fnm-letter-")
-            and _is_math_or_formula_superscript(text, match.start())
+        if _is_math_or_formula_superscript(
+            match.string, match.start(), match.end(), key=key
         ):
             return match.group(0)
         if key not in definition_keys:
@@ -967,21 +1061,96 @@ def normalize_endnotes(
     }
     if not note_files:
         return dict(source_texts), _empty_report("not_applicable", note_files)
-    decisions = _definition_decision_map(definition_decisions)
+    inline_decisions = definition_decisions.get("decisions", []) if isinstance(definition_decisions, Mapping) else definition_decisions
+    supplied_inline: dict[tuple[str, int, int], Mapping[str, Any]] = {}
+    if isinstance(inline_decisions, (list, tuple)):
+        for item in inline_decisions:
+            if isinstance(item, Mapping) and item.get("kind") == "inline":
+                try:
+                    if any(isinstance(item.get(field), bool) or not isinstance(item.get(field), int) for field in ("line", "column")):
+                        raise EndnoteNormalizationError("inline endnote line and column must be exact integers")
+                    identity = (_normalized_decision_file(item["file"]), item["line"], item["column"])
+                except EndnoteNormalizationError:
+                    raise
+                except (KeyError, TypeError, ValueError):
+                    raise EndnoteNormalizationError("inline endnote decision is missing an exact file/line/column identity")
+                if identity in supplied_inline:
+                    raise EndnoteNormalizationError(f"duplicate inline endnote decision at {identity[0]}:{identity[1]}:{identity[2]}")
+                supplied_inline[identity] = item
+    discovered: dict[tuple[str, int, int], str] = {}
+    for name in note_files:
+        source_lines = source_texts[name].splitlines()
+        source_fenced = markdown_fence_mask(source_lines)
+        for line_number, line in enumerate(source_lines, 1):
+            if source_fenced[line_number - 1] or _definition_line(line, body_keys=set(), previous_line_blank=True) is None:
+                continue
+            for candidate in inline_endnote_candidates(line, line_number):
+                identity = (name, line_number, int(candidate["column"]))
+                discovered[identity] = str(candidate["key"])
+                decision = supplied_inline.get(identity)
+                if decision is None:
+                    raise EndnoteNormalizationError(
+                        f"unreviewed inline endnote boundary at {name}:{line_number}:{candidate['column']}"
+                    )
+                if str(decision.get("key") or "") != str(candidate["key"]):
+                    raise EndnoteNormalizationError(f"inline endnote key mismatch at {name}:{line_number}:{candidate['column']}")
+                if str(decision.get("role") or "").lower() not in {"definition", "continuation"}:
+                    raise EndnoteNormalizationError(f"inline endnote decision is unresolved at {name}:{line_number}:{candidate['column']}")
+    extra_inline = sorted(set(supplied_inline) - set(discovered))
+    if extra_inline:
+        item = extra_inline[0]
+        raise EndnoteNormalizationError(f"stale inline endnote decision at {item[0]}:{item[1]}:{item[2]}")
+    expanded_texts, decision_source, origins, virtual_inline_lines = _expand_reviewed_inline_definitions(
+        source_texts, definition_decisions
+    )
+    if origins:
+        scopes = _remap_inline_scope_directory(scopes, origins)
+    decisions = _definition_decision_map(decision_source)
+    if origins and decisions:
+        remapped = {}
+        for (name, line_number), role in decisions.items():
+            origin = origins.get(name, {})
+            virtual = next((v for v, original in origin.items() if original == line_number), line_number)
+            remapped[(name, virtual)] = role
+        decisions = remapped
+    if virtual_inline_lines:
+        values = decision_source.get("decisions", []) if isinstance(decision_source, Mapping) else decision_source
+        if isinstance(values, (list, tuple)):
+            for item in values:
+                if not isinstance(item, Mapping) or item.get("kind") != "inline" or item.get("role") != "definition":
+                    continue
+                try:
+                    identity = (_normalized_decision_file(item["file"]), item["line"], item["column"])
+                    virtual_line = virtual_inline_lines.get(identity[0], {}).get(identity)
+                    if virtual_line is not None:
+                        decisions[(identity[0], virtual_line)] = "definition"
+                except (KeyError, TypeError):
+                    continue
+    source_texts = expanded_texts
     if scopes is None:
-        return _normalize_legacy(
-            source_texts,
-            note_files,
+        transformed, report = _normalize_legacy(
+            source_texts, note_files, definition_decisions=decisions
+        )
+    else:
+        body_keys = _raw_body_keys(source_texts, note_files)
+        transformed, report = _normalize_scoped(
+            source_texts, note_files, scopes, body_keys=body_keys,
             definition_decisions=decisions,
         )
-    body_keys = _raw_body_keys(source_texts, note_files)
-    return _normalize_scoped(
-        source_texts,
-        note_files,
-        scopes,
-        body_keys=body_keys,
-        definition_decisions=decisions,
-    )
+    inline_records = [
+        {
+            "file": _normalized_decision_file(item.get("file")),
+            "line": item.get("line"), "column": item.get("column"),
+            "key": item.get("key"), "role": str(item.get("role") or "").lower(),
+        }
+        for item in (inline_decisions or [])
+        if isinstance(item, Mapping) and item.get("kind") == "inline"
+    ] if isinstance(inline_decisions, (list, tuple)) else []
+    if inline_records:
+        report["endnote_inline_definition_decisions_sha256"] = hashlib.sha256(
+            json.dumps(sorted(inline_records, key=lambda item: (item["file"], item["line"], item["column"])), sort_keys=True).encode("utf-8")
+        ).hexdigest()
+    return transformed, report
 
 
 _PHYSICAL_UNIT_EXPONENT_RE = re.compile(
@@ -992,6 +1161,8 @@ _PHYSICAL_UNIT_EXPONENT_RE = re.compile(
 def validate_normalized_endnotes(
     source_texts: Mapping[str, str],
     file_roles: Mapping[str, str],
+    *,
+    reviewed_inline_continuations: Optional[list[Mapping[str, Any]]] = None,
 ) -> dict[str, Any]:
     """Check that a build source no longer contains raw centralized endnotes."""
     note_files = {
@@ -1014,6 +1185,37 @@ def validate_normalized_endnotes(
         ]
         lines = source.splitlines()
         fenced_lines = markdown_fence_mask(lines)
+        approved = [item for item in (reviewed_inline_continuations or []) if isinstance(item, Mapping) and str(item.get("file") or "") == name]
+        approved_counts: Counter[tuple[str, str]] = Counter()
+        approved_text_counts: Counter[tuple[str, str]] = Counter()
+        for item in approved:
+            if item.get("occurrences") is not None:
+                approved_counts[(str(item.get("owner_key") or ""), str(item.get("key") or ""))] += int(item.get("occurrences", 0))
+            elif item.get("text") is not None:
+                approved_text_counts[(str(item.get("key") or ""), str(item.get("text") or ""))] += 1
+        current_owner = ""
+        for line_number, line in enumerate(lines, 1):
+            if fenced_lines[line_number - 1]:
+                continue
+            owner_match = re.match(r"^[ \t]*\[\^(?P<key>[^]]+)\]:", line)
+            if owner_match is None:
+                owner_match = re.match(r"^[ \t]{0,3}(?:[-*+][ \t]+)?(?P<key>\d+)[ \t]*[.)。：:][ \t]+", line)
+            if owner_match is not None:
+                current_owner = owner_match.group("key")
+            if _definition_line(line, body_keys=set(), previous_line_blank=True) is not None:
+                for candidate in inline_endnote_candidates(line, line_number):
+                    exact_text = str(candidate.get("marker") or "") + " " + str(candidate.get("content") or "")
+                    key = str(candidate.get("key") or "")
+                    approval = (current_owner, key)
+                    if approved_counts.get(approval, 0) > 0:
+                        approved_counts[approval] -= 1
+                        continue
+                    if approved_text_counts[(key, exact_text)] > 0:
+                        approved_text_counts[(key, exact_text)] -= 1
+                        continue
+                    errors.append(f"unresolved inline endnote definition boundary remains in {name}:{line_number}:{candidate['column']}")
+        if any(approved_counts.values()) or any(approved_text_counts.values()):
+            errors.append(f"reviewed inline endnote continuation evidence did not match the derived Notes source in {name}")
         for index, line in enumerate(lines):
             if fenced_lines[index]:
                 continue
@@ -1053,9 +1255,8 @@ def validate_normalized_endnotes(
             if (
                 key
                 and (key in definition_keys or key in scoped_markers)
-                and not (
-                    key.startswith("fnm-letter-")
-                    and _is_math_or_formula_superscript(body_text, match.start())
+                and not _is_math_or_formula_superscript(
+                    body_text, match.start(), match.end(), key=key
                 )
             ):
                 raw_refs.append(match.group("key").strip())
@@ -1074,16 +1275,17 @@ def validate_normalized_endnotes(
             match.group("key")
             for match in _HTML_SUP_RE.finditer(body_text)
             if match.group("key") in scoped_numbers
-            and not _is_math_or_formula_superscript(body_text, match.start())
+            and not _is_math_or_formula_superscript(
+                body_text, match.start(), match.end(), key=match.group("key")
+            )
         ]
         residual_scoped.extend(
             match.group("key").strip()
             for match in _HTML_SUP_RE.finditer(body_text)
             if key_from_printed_marker(html.unescape(match.group("key"))) in scoped_markers
-            and not (
-                key_from_printed_marker(html.unescape(match.group("key")))
-                and key_from_printed_marker(html.unescape(match.group("key"))).startswith("fnm-letter-")
-                and _is_math_or_formula_superscript(body_text, match.start())
+            and not _is_math_or_formula_superscript(
+                body_text, match.start(), match.end(),
+                key=key_from_printed_marker(html.unescape(match.group("key"))) or match.group("key")
             )
         )
         for match in _UNICODE_SUP_RE.finditer(body_text):

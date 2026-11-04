@@ -16,6 +16,7 @@ from pdf2epub.special_unit_context import build_special_unit_context
 from pdf2epub.special_unit_translation import apply, prepare
 from pdf2epub.validation_receipts import build_input_snapshot, validation_receipt_is_current
 from pdf2epub.workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION
+from pdf2epub.toc_model import TOC_HEADING_CONTEXT_PROJECTION_VERSION
 
 
 CONFIG = {
@@ -32,7 +33,7 @@ HEADING_CONTEXT = {
     "node_id": "index-node",
     "anchor": "toc-index-node",
     "parent_node_id": None,
-    "projection_version": 2,
+    "projection_version": TOC_HEADING_CONTEXT_PROJECTION_VERSION,
     "toc_title": "索引",
     "binding_mode": "visible",
     "children": [],

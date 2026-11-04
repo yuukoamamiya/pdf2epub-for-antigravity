@@ -18,7 +18,7 @@ import pymupdf as fitz
 from loguru import logger
 
 from ..markdown_to_html import convert_markdown_to_html
-from ..toc_model import toc_title_match_key
+from ..toc_model import normalize_toc_source_label, toc_title_match_key
 
 
 def visible_heading_text(value: str) -> str:
@@ -33,6 +33,8 @@ def visible_heading_text(value: str) -> str:
     )
     value = re.sub(r"<[^>]+>", "", value)
     value = html_module.unescape(value)
+    # This is already rendered HTML text. Running source Markdown cleanup here
+    # would reinterpret literal rendered symbols such as *A* as emphasis.
     return toc_title_match_key(re.sub(r"\s+", " ", value).strip())
 
 
@@ -761,6 +763,7 @@ class ContentConverter:
         visible_heading=None,
         source_occurrence: Optional[int] = None,
         source_match_count: Optional[int] = None,
+        source_candidate_kind: Optional[str] = None,
     ) -> Tuple[str, bool]:
         """Add one stable anchor and report whether a matching block was found.
 
@@ -779,25 +782,21 @@ class ContentConverter:
         if visible_heading is None:
             visible_heading = visible_heading_text
 
-        target_title = visible_heading(sub_title)
+        target_title = toc_title_match_key(normalize_toc_source_label(sub_title, markdown_source=False))
         matches = self._subchapter_anchor_candidates(
             html_content, target_title, heading_pattern, visible_heading
         )
-        eligible = [(rank, match) for rank, match in matches if rank[0] < 3]
         selected_match = None
         if source_occurrence is not None or source_match_count is not None:
-            if (
-                not isinstance(source_occurrence, int)
-                or not isinstance(source_match_count, int)
-                or source_occurrence < 1
-                or source_match_count < source_occurrence
-                or len(eligible) != source_match_count
-            ):
+            selection = self._select_source_occurrence(
+                matches,
+                source_occurrence,
+                source_match_count,
+                source_candidate_kind=source_candidate_kind,
+            )
+            if selection is None:
                 return html_content, False
-            selected_rank = eligible[source_occurrence - 1][0]
-            if selected_rank[0] == 2 and any(rank[0] == 3 for rank, _ in matches):
-                return html_content, False
-            selected_match = eligible[source_occurrence - 1][1]
+            selected_match, _selected_candidates = selection
         existing_ids = len(re.findall(rf'(?<![\w:-])id=["\']{re.escape(anchor_id)}["\']', html_content, re.I))
         if existing_ids:
             if existing_ids == 1 and (
@@ -840,6 +839,46 @@ class ContentConverter:
         updated = html_content[:match.start()] + replacement + html_content[match.end():]
         logger.debug(f"Added stable anchor #{anchor_id} to '{sub_title}'")
         return updated, True
+
+    @staticmethod
+    def _select_source_occurrence(
+        matches,
+        source_occurrence,
+        source_match_count,
+        *,
+        source_candidate_kind=None,
+    ):
+        """Select exact/format tiers by count; allow numberless only if unique."""
+        if (
+            type(source_occurrence) is not int
+            or type(source_match_count) is not int
+            or source_occurrence < 1
+            or source_match_count < source_occurrence
+            or (source_candidate_kind is not None and source_candidate_kind not in {"heading", "paragraph"})
+        ):
+            return None
+        conflicts = [rank for rank, _ in matches if rank[0] == 3]
+        if source_candidate_kind in {"heading", "paragraph"}:
+            matches = [
+                (rank, match) for rank, match in matches
+                if (match.group(1).lower().startswith("h")) == (source_candidate_kind == "heading")
+            ]
+        eligible = [(rank, match) for rank, match in matches if rank[0] < 3]
+        for tier in (0, 1):
+            candidates = [(rank, match) for rank, match in eligible if rank[0] == tier]
+            if candidates:
+                if len(candidates) != source_match_count:
+                    return None
+                return candidates[source_occurrence - 1][1], candidates
+        numberless = [(rank, match) for rank, match in eligible if rank[0] == 2]
+        if (
+            len(numberless) == 1
+            and source_match_count == 1
+            and source_occurrence == 1
+            and not conflicts
+        ):
+            return numberless[0][1], numberless
+        return None
 
     @staticmethod
     def _subchapter_anchor_candidates(html_content, sub_title, heading_pattern, visible_heading):

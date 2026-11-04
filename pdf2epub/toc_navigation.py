@@ -174,24 +174,32 @@ def validate_navigation_rendering(
                 def visible(value: str) -> str:
                     return visible_heading_text(value)
 
+                expected_node = nodes_by_id.get(node.target_node_id or "")
+                expected_title = expected_node.title if expected_node else node.title
                 matches = ContentConverter._subchapter_anchor_candidates(
-                    "".join(heading_blocks[filename]), visible(node.title), heading_pattern, visible
+                    "".join(heading_blocks[filename]), visible(expected_title), heading_pattern, visible
                 )
                 anchor_pattern = re.compile(rf'(?<![\w:-])id=["\']{re.escape(fragment)}["\']', re.I)
                 landed = any(
                     rank[0] < 3 and anchor_pattern.search(match.group(2) + match.group(3))
                     for rank, match in matches
                 )
-                if not landed:
-                    expected_node = nodes_by_id.get(node.target_node_id or "")
-                    expected_title = expected_node.title if expected_node else node.title
-                    if expected_node is not None and expected_node.node_id != node.node_id:
-                        matches = ContentConverter._subchapter_anchor_candidates(
-                            "".join(heading_blocks[filename]), visible(expected_title), heading_pattern, visible
+                anchored_numberless = any(
+                    rank[0] == 2 and anchor_pattern.search(match.group(2) + match.group(3))
+                    for rank, match in matches
+                )
+                if anchored_numberless:
+                    all_candidates = [
+                        candidate
+                        for blocks in heading_blocks.values()
+                        for candidate in ContentConverter._subchapter_anchor_candidates(
+                            "".join(blocks), visible(expected_title), heading_pattern, visible
                         )
-                        landed = any(
-                            rank[0] < 3 and anchor_pattern.search(match.group(2) + match.group(3))
-                            for rank, match in matches
+                    ]
+                    eligible_count = sum(1 for rank, _match in all_candidates if rank[0] < 3)
+                    if eligible_count != 1 or any(rank[0] == 3 for rank, _match in all_candidates):
+                        raise ValueError(
+                            f"Numberless TOC fallback is not globally unique or conflicts with a numbered heading: {node.target}"
                         )
                 if not landed:
                     raise ValueError(

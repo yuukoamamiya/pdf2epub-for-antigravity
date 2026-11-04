@@ -31,7 +31,7 @@ from pdf2epub.pdf_unit_roles import load_pdf_file_roles
 from pdf2epub.pipeline_policy import PipelinePolicy
 from pdf2epub.utils.configuration import load_config
 from pdf2epub.workflow_contracts import (
-    MARKDOWN_VALIDATION_SCHEMA_VERSION,
+    markdown_validation_schema_version,
     atomic_write_json,
     atomic_write_text,
     relative_posix_path,
@@ -833,7 +833,7 @@ def _persist_file_validation_checkpoint(output_dir: Path, report: dict, task: st
         records = {}
     for name in report.get("files_checked", []):
         records[name] = {
-            "schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION,
+            "schema_version": markdown_validation_schema_version(task),
             "valid": name in report.get("valid_files", [])
             and not report.get("missing"),
             "source_sha256": report.get("source_sha256", {}).get(name),
@@ -875,7 +875,7 @@ def _persist_file_validation_checkpoint(output_dir: Path, report: dict, task: st
     atomic_write_json(
         path,
         {
-            "schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION,
+            "schema_version": markdown_validation_schema_version(task),
             "task": task,
             "scope": "file-checkpoints",
             "files": records,

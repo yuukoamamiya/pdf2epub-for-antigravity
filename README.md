@@ -19,6 +19,8 @@ scoped prompt/manifest 入口；CLI 打印首波入口。该清单只描述计�
 外部术语表使用 schema 2 多语言概念格式，按配置的源语言与目标语言直接匹配词条；缺少某一
 语言时不会从其他语言推导译法。查看
 [`docs/antigravity-workflow.md`](docs/antigravity-workflow.md) 了解字段和选择流程。
+缺失语言词形的补充候选流程目前仍是提案，尚未实现；见
+[`术语表补充候选设计`](docs/glossary-supplement-design.md)。
 
 ## 快速开始
 
@@ -63,10 +65,15 @@ EPUB、MOBI、AZW3 将 [config_epub.yaml.example](config_epub.yaml.example) 复�
 
 PDF 原语言版和译文版都以通过润色验收的 Markdown 为源。原稿版会先生成，便于检查目录、段落、脚注和插图；
 发现源稿问题时，按操作手册修复并重新验收，再继续翻译。
+PDF 目录绑定会按源稿中的标题/段落类别和出现位置定位。恢复旧译文时，先刷新 handoff context，
+校验现有译文，再按新的恢复报告派发失效单元；具体步骤见 [AGENTS.md](AGENTS.md)。规则版本变化本身
+不要求重新 OCR 或重译全书。
 
 PDF 的页脚注抽取会复核疑似跨页断词缺口；需要时会把相邻两页图像交给工作区 Subagent，
 由图像证据确认原文截断或恢复缺失续文。`footnotes.mode: disabled` 会关闭页脚注自动提取和链接创建；
 若与 TOC 的脚注判断冲突，准备、校验和应用阶段都会显示警告。集中尾注的 Markdown 链接仍可能生成。
+PDF 润色/翻译校验规则升级可能使旧验证记录或脚注归一化 checkpoint 失效；恢复时按 [AGENTS.md](AGENTS.md)
+重跑对应校验或脚注准备/校验/应用，不需要仅因规则版本变化而重新 OCR。
 
 PDF 和 EPUB 的结果通常位于 `output/<书名>/`：PDF 翻译生成原语言 EPUB 和译文 EPUB，PDF 只转换时生成原语言 EPUB，
 EPUB 翻译生成译文 EPUB。

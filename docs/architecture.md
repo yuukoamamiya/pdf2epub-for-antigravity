@@ -198,6 +198,12 @@ PDF 精修的核心领域模块如下：
 候选、决定校验、materialize 和 status 阶段都用当前 effective mode 比较 checkpoint；
 TOC 的 `footnote_mode` 变化导致 effective mode 改变时视为 stale，必须重跑
 `footnote-prepare → footnote-validate → footnote-apply`。
+Footnote normalization schema 7 changes how non-footnote superscripts are
+classified. Existing schema 1–6 normalization checkpoints are stale and must
+be regenerated with `footnote-prepare → footnote-validate → footnote-apply`,
+then checked with `polish-validate`. If normalized source hashes change, inspect
+translation readiness and revalidate affected translation units before
+packaging; this rules-only upgrade does not require OCR again.
 脚注匹配使用 `pdf2epub/footnote_keys.py` 中的 dependency-free marker codec：打印标签与内部安全 key
 分开记录，数字/圈号保持数字别名，特殊符号和明确上标字母采用独立 key；读者显示层不暴露重复编号
 所用的内部 occurrence suffix。候选中的 `layout_scope` 仅为几何提示；同一 key 跨空间 lane 时必须经
@@ -280,16 +286,21 @@ EPUB 构建的链接作用域独立于页面脚注候选模式：存在 Notes �
 集中尾注定义边界的手递合同位于 `endnote_review.py`：
 `footnote_subagent_manifest.json` 增加 `endnote_ambiguity_count`、`endnote_ambiguities`、
 `endnote_decision_file` 和 `endnote_definition_file`；`status` 在页面复核或尾注歧义任一
-存在时为 `pending_review`。Subagent 只读 `endnote_definition_ambiguities.json` 并写
-`endnote_definition_decisions.json`（`schema_version: 1`，每条含 `file`、`line`、
-`role`、可选 `confidence`/`reason`）。`footnote-validate` 把校验结果并入
+存在时为 `pending_review`。Subagent 只读 `endnote_definition_ambiguities.json` 并按
+`file`/`line`/`kind`/`column`/`key` 精确 identity 写 `endnote_definition_decisions.json`
+（schema 2，决定角色为 `definition` 或 `continuation`）。行内上标决定中的一基 `column` 是
+原 Notes 行 `<sup>` 内容的第一个数字位置；整行候选使用 `kind: line, column: 1`。`footnote-validate` 把校验结果并入
 `footnote_decision_validation.json` 的 `endnote_definitions` 字段，同时写
-`endnote_definition_validation.json`；`footnote-apply` 只有在
+`endnote_definition_validation.json`。两处 validation 都绑定当前 manifest、decision 文件和
+源文件内容的 `manifest_sha256`、`decisions_sha256`、`source_sha256`；validate 前会核对
+manifest 中记录的源哈希，apply 前只读核对这三类哈希仍与当前产物一致。源文件在准备后改变时
+重新运行 `footnote-prepare`，只有 decisions 改变时重新运行 `footnote-validate`；apply 不会
+静默重做验证。`footnote-apply` 只有在
 `endnote_definitions.valid` 为真且决定文件存在时才把 decisions 传给
 `normalize_endnotes()`。`footnote_normalization.json` 在存在歧义时记录
 `endnote_definition_ambiguities_sha256` 和 `endnote_definition_decisions_sha256`；
-`footnote_status` 对这两个已记录的文件做哈希检查，缺失或变化时 stale，并提示重跑
-`footnote-prepare → footnote-validate → footnote-apply`。没有歧义时不要求这两个哈希。
+`footnote_status` 对已记录文件做哈希检查，缺失或变化时 stale，并提示重跑相应阶段。没有歧义时
+不要求 ambiguity/decision 哈希。
 
 `pipeline_policy.py` 是 PDF pipeline 的策略边界。`PipelinePolicy.from_config()` 将缺省
 配置视为传统翻译流程，将 `pipeline: epub_conversion` 和兼容别名
@@ -350,14 +361,17 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
 - `markdown_handoff_prompt.py`：从明确的 prompt identity、batching 和路径数据渲染提示词，不读取工作区文件。
 - `markdown_subagent_validation.py`：负责校验命令的协调，按顺序调用上下文加载、内容审计、review 状态决策和持久化服务；不承载规则实现。
 - `markdown_validation_context.py`：只读加载 manifest review/protected-workspace 快照，解析选中文件范围，并构造路径、审计选项和上下文类型。
-- `markdown_validation_audit.py`：`load_file_input()` 负责读取一次源/目标字节快照；`audit_markdown_file()` 接收 typed 字节输入和审计选项，不读写路径，执行 TOC 标签、结构标记、目标语言、特殊角色、脚注、拒答及 polish 内容/版面审计；批次入口仅聚合逐文件结果。
+- `markdown_validation_audit.py`：`load_file_input()` 负责读取一次源/目标字节快照；`audit_markdown_file()` 接收 typed 字节输入和审计选项，不读写路径，执行 TOC 标签、结构标记、目标语言、特殊角色、脚注、拒答及 polish 内容/版面审计。普通上标文字、星号和匕首号必须保留；显式 Markdown 脚注引用和生成的 HTML 脚注引用不重复计入普通上标审计；批次入口仅聚合逐文件结果。
 - `markdown_validation_state.py`：纯函数决定首次 review 的 Subagent 重试和同一 review 信号持续后的人工升级。
 - `markdown_validation_persistence.py`：formal 校验的唯一副作用层，清理 assigned 文件的遗留临时文件，应用规范化计划、维护 validated staging、合并局部 ledger、写报告并隔离无效目标。
 - `markdown_validation_checkpoint.py`：清理 atomic-write 遗留临时文件、隔离无效输出供恢复诊断；不执行内容审计，也不导入 validator。
-- 依赖方向保持单向：handoff/validation 协调入口调用各自的 context、planning/resume、audit/state、manifest/prompt 或 persistence 服务；纯审计和状态服务不导入协调器，checkpoint 工具也不反向导入 validator。Markdown 校验报告和 manifest 的既有 schema 合同保持不变。
+- 依赖方向保持单向：handoff/validation 协调入口调用各自的 context、planning/resume、audit/state、manifest/prompt 或 persistence 服务；纯审计和状态服务不导入协调器，checkpoint 工具也不反向导入 validator。Markdown 校验报告和 manifest 保持既有字段结构；校验规则改变时仍须提升版本以使旧 checkpoint 失效。
 - `markdown_validation.py`：提供纯函数式的 Markdown 风险检测、目标语言审计、规范化辅助
   函数和 polish 内容保真检查；它会阻断结构性空父标题导致的重复正文，并对 `notes`
-  单元中的标准尾注章节标题提供窄范围页眉误报豁免。已登记的 TOC Part/Chapter
+  单元中的标准尾注章节标题提供窄范围页眉误报豁免。PDF polish/translate 的 Markdown validation
+  schema 4 使 superscript 保真规则变更前的全量 receipt 和逐文件 ledger 失效；OCR correction 与
+  HTML validation 仍使用 schema 3。必须用当前校验器
+  重新校验后才能作为 checkpoint。已登记的 TOC Part/Chapter
   **Markdown 标题行**也会从 `running_title_plus_page_label` 候选中豁免，纯文本重复页眉
   仍按候选检测；`bilingual_warnings` 只在 translate 阶段运行，polish 不因源语言未变化
   触发双语警告。该模块把角色判断委托给
@@ -420,13 +434,16 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
   `status`/`doctor` 调用只读校验，不物化合并文件；不匹配或旧版本合同必须重新准备并审阅 TOC。
 - `toc_model.py`：提供显式 `node_id` 身份、锚点和遍历合同；节点数组路径只用于定位结构，不能
   代替身份。`project_toc_ownership()` 依据 TOC、`tree_progress.json` 和源 Markdown 为物理文件
-  确定节点所有权及 `visible`/`container_only` 绑定状态。
+  确定节点所有权及 `visible`/`container_only` 绑定状态，并记录
+  `source_candidate_kind`（`heading`、`paragraph` 或 `container_only`）。同一逻辑单元中只要有
+  标题候选，就优先绑定标题，包括位于后续 part 的标题；否则才选段落候选。源 Markdown 和
+  渲染 HTML 都按这个候选类别核对 occurrence/count，不能靠跨类别的相似文本凑数。
 - `toc_navigation.py`：在 HTML 内容完成渲染后，将逻辑 TOC 节点解析成唯一的不可变导航树。
   HTML TOC 和 NCX 共用该模型与目标，不分别推测链接。打包前验证目标文件、fragment 和 XHTML
   `id` 与标题落点；ownership projection 也驱动在实际所属 part 内放置可见结构祖先锚点。可见
   绑定缺失时阻断，容器节点按 ownership 合同落到所属文件或首个内容后代。NCX depth 按逻辑
   TOC 的真实层级计算，合成目录入口与 TOC 树同级。
-- TOC 源标题计数、分片 occurrence 分配和 HTML 锚点匹配在各自清理 Markdown/HTML 标记后，共用 `toc_title_match_key()` 做连续空白归一化和 Unicode `lower()`；不使用 `casefold()`，因此 `Straße` 不会被当作 `STRASSE`。该运行时匹配规则不放宽译文与 TOC 的逐字标题绑定。TOC 标题绑定区分 `visible` 与 `container_only`：无可见源标签的纯图片/边界单元不要求
+- TOC 源标题计数、分片 occurrence 分配和 HTML 锚点匹配在各自清理 Markdown/HTML 标记后，共用 `toc_title_match_key()` 做连续空白归一化和 Unicode `lower()`；不使用 `casefold()`，因此 `Straße` 不会被当作 `STRASSE`。连续空白、Markdown 外层标记和成对引号/书名号的 canonicalization 只用于运行时绑定比较，不改写 TOC 源标题、译文或存储上下文；近义词和独立改译仍失败。该规则不放宽译文与 TOC 的逐字标题绑定。TOC 标题绑定区分 `visible` 与 `container_only`：无可见源标签的纯图片/边界单元不要求
   worker 伪造 Markdown 标题，章节容器标题由 EPUB 构建器生成；可见子标题仍使用严格绑定。
   大章节拆成多个物理 part 时，`build_toc_heading_contexts` 为每个 part 生成独立 context：
   父标题只在源标题实际出现的 part 标记 `visible`，其余 part 标记 `container_only`；
@@ -434,6 +451,12 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
   part 并标记 `container_only`，避免 scoped worker 收到其他分片的标题或凭空新增标题。
   `container_only` 节点不生成虚构的 Markdown 锚点；它保留 TOC 层级，并导航到所属文件或首个
   含内容的后代。`visible` 节点的投影锚点缺失或落在不同标题时阻断构建。
+  新 handoff context 使用 `projection_version: 3`。旧 projection 不可用于 TOC heading binding。
+  先运行 `translate --resume` 只刷新准备 context，暂不派发；随后用 `translate-validate` 校验现有译文，
+  写出 schema 4 receipt。再运行一次 `translate --resume`，让当前 projection 和 receipt 共同决定
+  completed/pending；只派发仍失效的 assignment，最后运行全量 `translate-validate`。若第一次准备报告
+  所有文件 pending，不要直接据此重译整本书。对 normalization 变化后的 polished 文本也先做
+  `polish-validate`，仅将实际失败项交回 Subagent。
 
 Subagent 合同由上述具体模块按职责拥有，不新增聚合式兼容门面。`subagent_runtime.py` 仍只为
 历史调用保留必要的 helper 重导出；生产调用应直接依赖所属服务。移动公共函数时必须同步更新
@@ -613,7 +636,7 @@ Windows 禁止字符和控制字符替换为 `_`，首尾空格/句点会去除�
 repair-page-furniture（候选片段扫描/worker handoff） + 工作区 Subagent
 → translated/（同名文件定点修复）
 repair-page-furniture-validate → translated/validated/
-build-epub --translated → 最终译文 EPUB
+build-epub --only-translated → 最终译文 EPUB
 
 纯转换分支（`pipeline: epub_conversion`）：
 check-ready --stage package → build-epub → 原语言 EPUB
@@ -685,6 +708,14 @@ OCR：
 `N text`、`<sup>N</sup> text` 和已有 `[^N]: text`，并只把与这些定义匹配的普通单元上标
 转为 `[^N]`。带列表标记的定义在本地 normalization 中直接改写为 `[^N]: text`，不交给
 polish 或 translate Subagent。原始 OCR 单元不覆盖。
+对 numbered Notes 定义行中的内嵌 `<sup>N</sup>` 边界，`endnote_review.py` 生成 file/line/kind/column
+精确候选；schema 2 决定逐位置审阅，validation 将 `inline_text` 写为 marker、单个空格和去除首尾空白的
+后续内容。apply 把已审阅 continuation 写入 `reviewed_inline_continuations`。EPUB 构建从当前
+`footnote_normalized/` Notes 中按精确 inline text 和原 key 定位，再从已验证的归一化定义块推导
+当前 owner key（可能经过 scope 重编号或定义拆分）；它不依赖原始 `owner_key` 作为最终 owner。
+构建还按文件、owner key
+和 inline key 比较源与最终文本中的 occurrence 数。证据只在当前 normalization、polish receipt
+（译文构建还包括 translate receipt）有效时接受。
 可按章重启的重复编号由 `endnote_scopes.py` 配对后改写为 `fnc-<scope>-<number>`；无法
 唯一配对（缺少章标题、scope 没有正文 span，或同一 key 有多个定义且引用数超过定义数）时
 阻断归一化。围栏代码中的标题和编号行只作为当前 note 的内容，不参与 scope 切换或定义发现。
@@ -693,7 +724,7 @@ polish 或 translate Subagent。原始 OCR 单元不覆盖。
 存在多个定义时仍按顺序逐次配对，额外引用不猜测目标。
 当前 `footnote_candidates.json`、`footnote_decisions.json` 和
 `footnote_decision_validation.json` 使用 prepare/decision schema 3；尾注边界歧义及其决定独立使用
-schema 1。该输出合同已更新到 `footnote_normalization.json` schema 6；旧 schema 1–5 checkpoint 会失效，
+schema 2。该输出合同已更新到 `footnote_normalization.json` schema 7；旧 schema 1–6 checkpoint 会失效，
 须重新运行 `footnote-prepare`，按新 manifest 的 pending 状态复核并写决定，再运行
 `footnote-validate → footnote-apply`。无需重跑 OCR。本次文档/代码维护不自动处理书稿产物；
 恢复命令会更新准备合同，并由 apply 重建 `footnote_normalized/` 与成功 checkpoint，用户需按需
@@ -926,7 +957,7 @@ PDF 结构阶段采用“共享证据、分离语义”的边界：
 | `footnote_status.py` | 归一化 checkpoint 的哈希和 freshness 诊断 | 候选扫描、脚注物化、修改 Markdown |
 
 脚注 apply 按“前置门禁/证据快照 → block 定位和 unit/lane 归属 → 引用与定义绑定 → 编辑冲突校验 → 内存纯转换 → 原子写入 → success checkpoint”的顺序运行。计划和所有绑定必须完整通过后才允许写入；源 unit 的哈希在读取原始字节时快照，写入前重新扫描 `ocr_markdown/*.md` 并与该快照逐项比较，同时先检查 `footnote_normalized/` 是否有不属于当前源 inventory 的 stale Markdown。
-任一计划、绑定、冲突或写前 inventory 校验失败时只写无效诊断 checkpoint，不改派生正文，也不生成有效 checkpoint。`footnote_candidates.json`/决定验证使用 prepare schema 3，`footnote_normalization.json` 使用 schema 6；旧 normalization checkpoint 需重跑 `footnote-prepare → footnote-validate → footnote-apply`，无需重新 OCR。
+任一计划、绑定、冲突或写前 inventory 校验失败时只写无效诊断 checkpoint，不改派生正文，也不生成有效 checkpoint。`footnote_candidates.json`/决定验证使用 prepare schema 3，`footnote_normalization.json` 使用 schema 7；旧 normalization checkpoint 需重跑 `footnote-prepare → footnote-validate → footnote-apply`，无需重新 OCR。
 
 新增 PDF 结构信号时，先判断它是共享的几何/证据事实还是某个领域的语义规则。前者进入
 共享模块并补一组跨阶段测试，后者只进入对应的 prepare/apply 模块。命令 handler 只读取

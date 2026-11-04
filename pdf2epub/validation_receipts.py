@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 
-from .workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION
+from .workflow_contracts import markdown_validation_schema_version
 from .utils.fingerprints import pages_fingerprint
 
 # Compatibility alias for older diagnostic integrations.
@@ -161,7 +161,7 @@ def validation_receipt_is_current(
     if not isinstance(report, dict):
         return False
     if (
-        report.get("schema_version") != MARKDOWN_VALIDATION_SCHEMA_VERSION
+        report.get("schema_version") != markdown_validation_schema_version(task)
         or report.get("task") != task
         or report.get("scope") != "full"
         or report.get("all_passed") is not True

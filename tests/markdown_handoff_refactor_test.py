@@ -15,6 +15,9 @@ from pdf2epub.markdown_handoff_prompt import (
     render_markdown_prompt,
 )
 from pdf2epub.markdown_handoff_resume import unit_context_is_current
+from pdf2epub.markdown_handoff_resume import decide_resume
+from pdf2epub.markdown_handoff_planning import plan_markdown_handoff
+from pdf2epub.workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION, sha256_file
 
 
 def test_handoff_services_do_not_import_the_coordinator_or_cli_commands():
@@ -82,6 +85,163 @@ def test_resume_context_decision_is_unit_scoped_and_legacy_safe():
         unit_context_sha256={"a.md": "a-new"},
         heading_contexts={"a.md": {"title": "A"}}, resume=True,
     )
+
+
+def test_old_per_file_validation_ledger_is_not_reused_after_policy_version_bump(tmp_path):
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    source = source_dir / "unit.md"
+    target = target_dir / "unit.md"
+    source.write_text("Source superscript.", encoding="utf-8")
+    target.write_text("Target superscript.", encoding="utf-8")
+    request = MarkdownHandoffRequest(
+        output_dir=tmp_path, task="polish", source_dir=source_dir,
+        target_dir=target_dir, source_language="English",
+        target_language="English", resume=True,
+    )
+    plan = plan_markdown_handoff(source_dir, "polish")
+    context = normalize_handoff_context(request, ["unit.md"])
+    ledger_path = tmp_path / "polish_file_validation.json"
+    old_record = {
+        "schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION - 1,
+        "valid": True,
+        "source_sha256": sha256_file(source),
+        "target_sha256": sha256_file(target),
+    }
+    ledger_path.write_text(
+        __import__("json").dumps({
+            "schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION - 1,
+            "task": "polish", "scope": "file-checkpoints",
+            "files": {"unit.md": old_record},
+        }),
+        encoding="utf-8",
+    )
+
+    old_decision = decide_resume(request, plan, context)
+    assert old_decision.completed_files == ()
+    assert old_decision.pending_files == ("unit.md",)
+
+    old_record["schema_version"] = MARKDOWN_VALIDATION_SCHEMA_VERSION
+    ledger_path.write_text(
+        __import__("json").dumps({
+            "schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION,
+            "task": "polish", "scope": "file-checkpoints",
+            "files": {"unit.md": old_record},
+        }),
+        encoding="utf-8",
+    )
+    current_decision = decide_resume(request, plan, context)
+    assert current_decision.completed_files == ("unit.md",)
+    assert current_decision.pending_files == ()
+
+
+def test_existing_translate_html_schema_three_ledger_remains_reusable(tmp_path):
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    source = source_dir / "unit.md"
+    target = target_dir / "unit.md"
+    source.write_text("Source.", encoding="utf-8")
+    target.write_text("Target.", encoding="utf-8")
+    request = MarkdownHandoffRequest(
+        output_dir=tmp_path, task="translate-html", source_dir=source_dir,
+        target_dir=target_dir, source_language="English", target_language="Chinese",
+        resume=True,
+    )
+    plan = plan_markdown_handoff(source_dir, "translate-html")
+    context = normalize_handoff_context(request, ["unit.md"])
+    (tmp_path / "translate-html_subagent_manifest.json").write_text(
+        __import__("json").dumps({
+            "source_language": "English", "target_language": "Chinese",
+            "context_sha256": {}, "unit_context_sha256": {},
+            "toc_heading_contexts": {}, "special_unit_modes": {},
+        }),
+        encoding="utf-8",
+    )
+    (tmp_path / "translate-html_file_validation.json").write_text(
+        __import__("json").dumps({
+            "schema_version": 3, "task": "translate-html", "scope": "file-checkpoints",
+            "files": {"unit.md": {
+                "schema_version": 3, "valid": True,
+                "source_sha256": sha256_file(source),
+                "target_sha256": sha256_file(target),
+            }},
+        }),
+        encoding="utf-8",
+    )
+
+    decision = decide_resume(request, plan, context)
+
+    assert decision.completed_files == ("unit.md",)
+    assert decision.pending_files == ()
+
+
+def test_validate_existing_outputs_before_second_resume_avoids_full_redelegation(tmp_path):
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    source = source_dir / "unit.md"
+    target = target_dir / "unit.md"
+    source.write_text("Source paragraph.", encoding="utf-8")
+    target.write_text("Existing translated paragraph.", encoding="utf-8")
+    refreshed_context = {
+        "projection_version": 3, "node_id": "n1", "anchor": "a1"
+    }
+    request = MarkdownHandoffRequest(
+        output_dir=tmp_path, task="translate", source_dir=source_dir,
+        target_dir=target_dir, source_language="English", target_language="Chinese",
+        resume=True, heading_contexts={"unit.md": refreshed_context},
+    )
+    plan = plan_markdown_handoff(source_dir, "translate")
+    context = normalize_handoff_context(request, ["unit.md"])
+    manifest_path = tmp_path / "translate_subagent_manifest.json"
+    manifest_path.write_text(
+        __import__("json").dumps({
+            "source_language": "English", "target_language": "Chinese",
+            "context_sha256": {}, "unit_context_sha256": {},
+            "toc_heading_contexts": {"unit.md": {"projection_version": 2}}, "special_unit_modes": {},
+        }),
+        encoding="utf-8",
+    )
+    validation_path = tmp_path / "translate_validation.json"
+    validation_path.write_text(
+        __import__("json").dumps({
+            "schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION - 1,
+            "task": "translate", "scope": "full", "all_passed": True,
+            "valid_files": ["unit.md"],
+            "source_sha256": {"unit.md": sha256_file(source)},
+            "target_sha256": {"unit.md": sha256_file(target)},
+        }),
+        encoding="utf-8",
+    )
+
+    first_resume = decide_resume(request, plan, context)
+    assert first_resume.completed_files == ()
+    assert first_resume.pending_files == ("unit.md",)
+
+    # Preparation refreshes the v3 projection without dispatch. Existing outputs
+    # are then revalidated against it, producing a current schema-4 receipt.
+    manifest = __import__("json").loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["toc_heading_contexts"] = {"unit.md": refreshed_context}
+    manifest_path.write_text(__import__("json").dumps(manifest), encoding="utf-8")
+    validation_path.write_text(
+        __import__("json").dumps({
+            "schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION,
+            "task": "translate", "scope": "full", "all_passed": True,
+            "valid_files": ["unit.md"],
+            "source_sha256": {"unit.md": sha256_file(source)},
+            "target_sha256": {"unit.md": sha256_file(target)},
+        }),
+        encoding="utf-8",
+    )
+
+    second_resume = decide_resume(request, plan, context)
+    assert second_resume.completed_files == ("unit.md",)
+    assert second_resume.pending_files == ()
     legacy = {"context_sha256": {"snapshot": "old"}}
     assert not unit_context_is_current(
         "a.md", previous_manifest=legacy, controlled_files={},

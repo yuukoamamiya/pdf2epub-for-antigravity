@@ -95,9 +95,66 @@ def _note_section_keys(text: str) -> List[str]:
     return keys
 
 
-def _is_math_or_formula_superscript(text: str, start: int) -> bool:
-    """Return True if <sup... starts immediately after a single letter variable (e.g. A^2, x^3)."""
-    return bool(re.search(r"(?:^|[^A-Za-z0-9])([A-Za-z])$", text[:start]))
+def _is_math_or_formula_superscript(
+    text: str, start: int, end: int | None = None, *, key: str | None = None
+) -> bool:
+    """Identify formula or citation-edition superscripts, never year adjacency alone."""
+    variable = re.search(r"(?:^|[^A-Za-z0-9])([A-Za-z])$", text[:start])
+    if variable and (
+        key is None or key.startswith("fnm-letter-")
+        or (key.isdigit() and variable.group(1).islower())
+    ):
+        return True
+    if end is None:
+        m = re.match(r"<sup[^>]*>.*?</sup>", text[start:], flags=re.IGNORECASE)
+        if m:
+            end = start + m.end()
+    if end is None:
+        return False
+
+    line_start = text.rfind("\n", 0, start) + 1
+    line_end = text.find("\n", end)
+    if line_end < 0:
+        line_end = len(text)
+    before = text[line_start:start]
+    after = text[end:line_end]
+    follows_year = bool(re.search(r"\b\d{4}$", before))
+    precedes_year = bool(re.match(r"^\d{4}\b", after))
+    if not (follows_year or precedes_year):
+        return False
+
+    # A citation cue must accompany the year. A bare year plus superscript is
+    # ambiguous and remains eligible for normal footnote validation/conversion.
+    if _is_explicit_citation_list(text[line_start:line_end]):
+        return True
+    # A year immediately followed by its page locator is strong local evidence
+    # even when this citation is embedded in a longer bibliographic sentence.
+    if follows_year and re.match(r"^,\s*pp?\.\s*\d", after[:24], re.IGNORECASE):
+        return True
+    return not follows_year and _follows_cited_item_in_list(before)
+
+
+def _is_explicit_citation_list(line: str) -> bool:
+    """Accept only a complete, same-line list explicitly introduced as citations."""
+    match = re.search(r"\bCitations?:\s*(?P<items>.+)$", line, re.IGNORECASE)
+    if not match:
+        return False
+    sup = r"<sup\b[^>]*>\s*\d+\s*</sup>"
+    item = rf"(?:{sup}\s*\d{{4}}|\d{{4}}\s*{sup})(?:,\s*pp?\.\s*\d+(?:[-–]\d+)?)?"
+    listing = re.compile(rf"\s*{item}(?:(?:\s*,\s*|\s+and\s+){item})*\s*[.;]?\s*", re.IGNORECASE)
+    return bool(listing.fullmatch(match.group("items")))
+
+
+def _follows_cited_item_in_list(before: str) -> bool:
+    """Recognize a superscript-year continuation after a nearby cited year/page item."""
+    return bool(
+        re.search(
+            r"\b\d{4}<sup\b[^>]*>\s*\d+\s*</sup>,\s*pp?\.\s*\d+(?:[-–]\d+)?"
+            r"\s*(?:,\s*|and\s+)$",
+            before,
+            re.IGNORECASE,
+        )
+    )
 
 
 def validate_polish_footnote_normalization(
@@ -117,6 +174,18 @@ def validate_polish_footnote_normalization(
     role = str(file_role or "").strip().lower()
     if role == "notes":
         source_defs = endnote_definition_keys(source_text, file_role="notes")
+        for match in _HTML_SUP_RE.finditer(source_text):
+            key = match.group("key")
+            if (
+                key in expected_keys
+                and not _is_math_or_formula_superscript(
+                    source_text, match.start(), match.end(), key=key
+                )
+                and source_text[
+                    source_text.rfind("\n", 0, match.start()) + 1:match.start()
+                ].strip() != ""
+            ):
+                source_refs.append(key)
     else:
         legacy_defs = _note_section_keys(source_text)
         # Preserve every definition occurrence.  Numbered source definitions
@@ -138,15 +207,39 @@ def validate_polish_footnote_normalization(
                     continue
                 if _is_note_definition_occurrence(source_text, match.start(), match.end(), note_ranges):
                     continue
-                if _is_math_or_formula_superscript(source_text, match.start()):
+                if _is_math_or_formula_superscript(
+                    source_text, match.start(), match.end(), key=key
+                ):
                     continue
                 source_refs.append(key)
                 occupied.append((match.start(), match.end()))
+    source_preserved = [
+        match.group("key")
+        for match in _HTML_SUP_RE.finditer(source_text)
+        if _is_math_or_formula_superscript(
+            source_text, match.start(), match.end(), key=match.group("key")
+        )
+    ]
+    target_preserved = [
+        match.group("key")
+        for match in _HTML_SUP_RE.finditer(target_text)
+        if _is_math_or_formula_superscript(
+            target_text, match.start(), match.end(), key=match.group("key")
+        )
+    ]
+    preservation_errors = (
+        [
+            "preserved superscript mismatch: "
+            f"expected {source_preserved}, found {target_preserved}"
+        ]
+        if source_preserved != target_preserved
+        else []
+    )
     if not source_refs and not source_defs:
-        return []
+        return preservation_errors
     target_refs = [match.group("key") for match in _MARKDOWN_REF_RE.finditer(target_text)]
     target_defs = [match.group("key") for match in _MARKDOWN_DEF_RE.finditer(target_text)]
-    errors: List[str] = []
+    errors: List[str] = list(preservation_errors)
     if Counter(target_refs) != Counter(source_refs):
         errors.append(
             "footnote reference migration mismatch: "
@@ -172,10 +265,9 @@ def validate_polish_footnote_normalization(
             key_from_printed_marker(match.group("key")) or match.group("key")
             for match in _HTML_SUP_RE.finditer(target_text)
             if (key_from_printed_marker(match.group("key")) or match.group("key")) in expected_keys
-            and not (
-                key_from_printed_marker(match.group("key"))
-                and key_from_printed_marker(match.group("key")).startswith("fnm-letter-")
-                and _is_math_or_formula_superscript(target_text, match.start())
+            and not _is_math_or_formula_superscript(
+                target_text, match.start(), match.end(),
+                key=key_from_printed_marker(match.group("key")) or match.group("key")
             )
         ]
         if remaining_refs:
@@ -187,7 +279,9 @@ def validate_polish_footnote_normalization(
         remaining = [
             match.group("key") for match in _HTML_SUP_RE.finditer(target_text)
             if match.group("key") in (expected_keys | set(source_refs))
-            and not _is_math_or_formula_superscript(target_text, match.start())
+            and not _is_math_or_formula_superscript(
+                target_text, match.start(), match.end(), key=match.group("key")
+            )
         ]
         if remaining:
             errors.append("numbered HTML <sup> footnote markers remain after polishing")

@@ -254,6 +254,59 @@ def test_polish_validate_check_only_writes_no_checkpoint_or_validated_copy(
     assert json.loads(checkpoint.read_text(encoding="utf-8")) == sentinel
 
 
+def test_polish_revalidation_replaces_old_schema_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from pdf2epub.commands import markdown as markdown_commands
+    from pdf2epub.validation_receipts import validation_receipt_is_current
+
+    output_dir = tmp_path / "output"
+    source_dir = output_dir / "ocr_markdown"
+    target_dir = output_dir / "polished_markdown"
+    source_dir.mkdir(parents=True)
+    target_dir.mkdir(parents=True)
+    (source_dir / "unit.md").write_text("citation <sup>2</sup>", encoding="utf-8")
+    (target_dir / "unit.md").write_text("citation <sup>2</sup>", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("footnotes: {mode: disabled}\n", encoding="utf-8")
+    context = SimpleNamespace(
+        config={"footnotes": {"mode": "disabled"}},
+        book_title="Book", output_dir=output_dir, config_path=config_path,
+    )
+    monkeypatch.setattr(markdown_commands, "load_book_context", lambda args, stage: context)
+    monkeypatch.setattr(markdown_commands, "_resolve_pdf_polish_source", lambda output, config: (source_dir, "ocr"))
+    monkeypatch.setattr(markdown_commands, "load_pdf_file_roles", lambda output: {})
+    monkeypatch.setattr(markdown_commands, "_load_pdf_toc_titles", lambda output: [])
+    monkeypatch.setattr(markdown_commands, "_load_pdf_continuation_toc_titles", lambda output: {})
+    from pdf2epub.workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION, sha256_file
+
+    report_path = output_dir / "polish_validation.json"
+    report_path.write_text(json.dumps({"schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION - 1}), encoding="utf-8")
+
+    def validate(*args, **kwargs):
+        return {
+            "schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION,
+            "task": "polish", "scope": "full", "all_passed": True,
+            "valid_files": ["unit.md"], "files_checked": ["unit.md"],
+            "source_sha256": {"unit.md": sha256_file(source_dir / "unit.md")},
+            "target_sha256": {"unit.md": sha256_file(target_dir / "unit.md")},
+            "completed": 1, "total": 1, "invalid": [], "missing": [],
+            "validated_dir": str(target_dir / "validated"),
+        }
+
+    from pdf2epub import markdown_subagent_validation
+
+    monkeypatch.setattr(markdown_subagent_validation, "validate_markdown_subagent", validate)
+    assert markdown_commands._validate_pdf_markdown_task(
+        SimpleNamespace(file=None, check_only=False, allow_review_warnings=False), "polish"
+    ) == 0
+    stored = json.loads(report_path.read_text(encoding="utf-8"))
+    assert stored["schema_version"] == MARKDOWN_VALIDATION_SCHEMA_VERSION
+    assert validation_receipt_is_current(
+        report_path, source_dir, target_dir, task="polish"
+    )
+
+
 def test_pdf_source_stage_selects_only_current_polished_output(tmp_path: Path):
     ocr_dir = tmp_path / "ocr_markdown"
     polished_dir = tmp_path / "polished_markdown" / "validated"

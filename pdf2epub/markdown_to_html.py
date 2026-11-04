@@ -553,11 +553,24 @@ def preprocess_markdown(markdown_content: str, footnote_manager=None, source_cha
 
     # Now that formulas are protected by tokens, handle ordinary Markdown
     # emphasis without pairing TeX constructs such as Q^* or align*.
+    escaped_asterisk_fragments = {}
+    escaped_asterisk_prefix = f"PDF2EPUBESCAPEDASTERISK{secrets.token_hex(16)}TOKEN"
+    while escaped_asterisk_prefix in markdown_content:
+        escaped_asterisk_prefix = f"PDF2EPUBESCAPEDASTERISK{secrets.token_hex(16)}TOKEN"
+
+    def stash_escaped_asterisk(_match):
+        token = f"{escaped_asterisk_prefix}{len(escaped_asterisk_fragments)}END"
+        escaped_asterisk_fragments[token] = r"\*"
+        return token
+
+    markdown_content = re.sub(r"\\\*", stash_escaped_asterisk, markdown_content)
     markdown_content = re.sub(
         r'(?<!\*)\*(?!\*)([^\*\n]+?)(?<!\*)\*(?!\*)',
         r'<em>\1</em>',
         markdown_content,
     )
+    for token, escaped_asterisk in escaped_asterisk_fragments.items():
+        markdown_content = markdown_content.replace(token, escaped_asterisk)
 
     # Convert placeholders back to actual dollar signs
     markdown_content = markdown_content.replace(escaped_dollar_placeholder, '$')

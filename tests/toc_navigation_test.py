@@ -119,8 +119,230 @@ def test_occurrence_anchor_rejects_numberless_match_when_conflicting_number_exis
         source_occurrence=1,
         source_match_count=2,
     )
+    assert not found
+    assert updated == html
+
+
+def test_numberless_fallback_is_allowed_only_when_unique_and_unconflicted():
+    from pdf2epub.epub.converter import ContentConverter
+
+    converter = ContentConverter.__new__(ContentConverter)
+    html = "<h2>Civil War</h2>"
+    updated, found = converter._add_subchapter_anchor(
+        html, "1 Civil War", "toc-anchor", source_occurrence=1,
+        source_match_count=1, source_candidate_kind="heading",
+    )
     assert found
-    assert '<h2><span id="toc-anchor"></span>1 Civil War</h2>' in updated
+    assert '<span id="toc-anchor"></span>Civil War' in updated
+
+    conflict = "<h2>Civil War</h2><p>2 Civil War</p>"
+    updated, found = converter._add_subchapter_anchor(
+        conflict, "1 Civil War", "toc-anchor", source_occurrence=1,
+        source_match_count=1, source_candidate_kind="heading",
+    )
+    assert not found
+    assert updated == conflict
+
+
+@pytest.mark.parametrize(
+    "other_heading",
+    ["<h2>Civil War</h2>", "<h2>2 Civil War</h2>", "<h2>1 Civil War</h2>"],
+)
+def test_final_navigation_validation_rejects_book_level_numberless_ambiguity(other_heading):
+    from pdf2epub.toc_navigation import resolve_navigation, validate_navigation_rendering
+
+    structure = [{
+        "node_id": "chapter", "title": "1 Civil War", "anchor": "toc-civil-war",
+        "navigation_binding_mode": "visible", "unit_id": "unit", "file_path": "unit.md",
+    }]
+    navigation = resolve_navigation(
+        structure, {"toc-civil-war": "unit.html"}, generated_files={"unit.html", "other.html"}
+    )
+    generated = {
+        "unit.html": '<html xmlns="http://www.w3.org/1999/xhtml"><body><h2><span id="toc-civil-war"></span>Civil War</h2></body></html>',
+        "other.html": f'<html xmlns="http://www.w3.org/1999/xhtml"><body>{other_heading}</body></html>',
+    }
+    with pytest.raises(ValueError, match="Numberless TOC fallback"):
+        validate_navigation_rendering(navigation, generated)
+
+
+def test_final_navigation_validation_accepts_globally_unique_numberless_fallback():
+    from pdf2epub.toc_navigation import resolve_navigation, validate_navigation_rendering
+
+    structure = [{
+        "node_id": "chapter", "title": "1 Civil War", "anchor": "toc-civil-war",
+        "navigation_binding_mode": "visible", "unit_id": "unit", "file_path": "unit.md",
+    }]
+    navigation = resolve_navigation(
+        structure, {"toc-civil-war": "unit.html"}, generated_files={"unit.html", "other.html"}
+    )
+    validate_navigation_rendering(navigation, {
+        "unit.html": '<html xmlns="http://www.w3.org/1999/xhtml"><body><h2><span id="toc-civil-war"></span>Civil War</h2></body></html>',
+        "other.html": '<html xmlns="http://www.w3.org/1999/xhtml"><body><p>Other title</p></body></html>',
+    })
+
+
+def test_container_fallback_global_check_uses_descendant_title():
+    from pdf2epub.toc_navigation import resolve_navigation, validate_navigation_rendering
+
+    structure = [{
+        "node_id": "container", "title": "Front Matter", "anchor": "toc-container",
+        "navigation_binding_mode": "container_only", "children": [{
+            "node_id": "child", "title": "1 Civil War", "anchor": "toc-child",
+            "navigation_binding_mode": "visible", "unit_id": "unit", "file_path": "unit.md",
+        }],
+    }]
+    navigation = resolve_navigation(
+        structure, {"toc-child": "unit.html"}, generated_files={"unit.html", "other.html"}
+    )
+    generated = {
+        "unit.html": '<html xmlns="http://www.w3.org/1999/xhtml"><body><h2><span id="toc-child"></span>Civil War</h2></body></html>',
+        "other.html": '<html xmlns="http://www.w3.org/1999/xhtml"><body><h2>1 Civil War</h2></body></html>',
+    }
+    with pytest.raises(ValueError, match="Numberless TOC fallback"):
+        validate_navigation_rendering(navigation, generated)
+
+
+def test_container_fallback_matches_descendant_title_before_global_uniqueness_check():
+    from pdf2epub.toc_navigation import resolve_navigation, validate_navigation_rendering
+
+    structure = [{
+        "node_id": "container", "title": "1 Same", "anchor": "toc-container",
+        "navigation_binding_mode": "container_only", "children": [{
+            "node_id": "child", "title": "Same", "anchor": "toc-child",
+            "navigation_binding_mode": "visible", "unit_id": "unit", "file_path": "unit.md",
+        }],
+    }]
+    navigation = resolve_navigation(
+        structure, {"toc-child": "unit.html"}, generated_files={"unit.html", "other.html"}
+    )
+    generated = {
+        "unit.html": '<html xmlns="http://www.w3.org/1999/xhtml"><body><h2><span id="toc-child"></span>Same</h2></body></html>',
+        "other.html": '<html xmlns="http://www.w3.org/1999/xhtml"><body><h2>Same</h2></body></html>',
+    }
+    validate_navigation_rendering(navigation, generated)
+
+
+def test_occurrence_anchor_rejects_source_html_count_mismatch_and_bool_counts():
+    from pdf2epub.epub.converter import ContentConverter
+
+    converter = ContentConverter.__new__(ContentConverter)
+    html = "<h2>Heading</h2><p>Heading</p>"
+    for occurrence, count in ((1, 2), (True, 2), (1, True)):
+        updated, found = converter._add_subchapter_anchor(
+            html, "Heading", "toc-anchor", source_occurrence=occurrence,
+            source_match_count=count, source_candidate_kind="heading",
+        )
+        assert not found
+        assert updated == html
+
+
+def test_occurrence_anchor_kind_prefers_heading_and_matches_curly_quote_rendering():
+    from pdf2epub.epub.converter import ContentConverter, visible_heading_text
+
+    converter = ContentConverter.__new__(ContentConverter)
+    html = "<p>HEGEL’S Phenomenology</p><h1>HEGEL'S Phenomenology</h1>"
+    assert visible_heading_text("HEGEL’S Phenomenology") == visible_heading_text("HEGEL'S Phenomenology")
+    updated, found = converter._add_subchapter_anchor(
+        html, "HEGEL’S Phenomenology", "toc-anchor", source_occurrence=1,
+        source_match_count=1, source_candidate_kind="heading",
+    )
+    assert found
+    assert '<h1><span id="toc-anchor"></span>HEGEL\'S Phenomenology</h1>' in updated
+
+
+def test_build_part_anchor_uses_source_heading_kind_over_same_text_paragraph():
+    from pdf2epub.build_epub import add_subchapter_anchors_to_parts
+    from pdf2epub.epub.converter import ContentConverter
+    from pdf2epub.markdown_to_html import convert_markdown_to_html
+    from pdf2epub.toc_model import project_toc_ownership
+
+    markdown = "# Copyright\n\nCopyright\n"
+    ownership = project_toc_ownership(
+        [{"node_id": "root", "title": "Chapter", "children": [
+            {"node_id": "copyright", "title": "Copyright"},
+        ]}],
+        {"units": [{"node_id": "root", "index_path": [1], "file": "unit.md"}]},
+        {"unit.md": "# Chapter\n\n" + markdown},
+    )
+    info = next(row for row in ownership["unit.md"]["headings"] if row["node_id"] == "copyright")
+    assert info["source_candidate_kind"] == "heading"
+    assert info["source_match_count"] == 1
+    rendered = convert_markdown_to_html("# Chapter\n\n" + markdown, standalone=False)
+    parts, locations = add_subchapter_anchors_to_parts(
+        ContentConverter.__new__(ContentConverter),
+        [("chapter.html", rendered)], 1,
+        [{"title": "Copyright", "anchor": "toc-copyright",
+          "source_occurrence": info["source_occurrence"],
+          "source_match_count": info["source_match_count"],
+          "source_candidate_kind": info["source_candidate_kind"]}],
+    )
+    assert locations == {"toc-copyright": "chapter.html"}
+    assert '<span id="toc-copyright"></span>Copyright</h1>' in parts[0][1]
+    assert "<p>Copyright</p>" in parts[0][1]
+
+
+def test_build_part_occurrences_are_selected_across_all_rendered_parts():
+    from pdf2epub.build_epub import add_subchapter_anchors_to_parts
+    from pdf2epub.epub.converter import ContentConverter
+
+    converter = ContentConverter.__new__(ContentConverter)
+    repeated_parts = [("one.html", "<h2>Civil War</h2>"), ("two.html", "<h2>Civil War</h2>")]
+    unchanged, locations = add_subchapter_anchors_to_parts(
+        converter, repeated_parts, 1,
+        [{"title": "1 Civil War", "anchor": "toc-anchor", "source_occurrence": 1,
+          "source_match_count": 1, "source_candidate_kind": "heading"}],
+    )
+    assert not locations
+    assert unchanged == repeated_parts
+
+    exact_and_fallback = [("one.html", "<h2>1 Civil War</h2>"), ("two.html", "<h2>Civil War</h2>")]
+    updated, locations = add_subchapter_anchors_to_parts(
+        converter, exact_and_fallback, 1,
+        [{"title": "1 Civil War", "anchor": "toc-anchor", "source_occurrence": 1,
+          "source_match_count": 1, "source_candidate_kind": "heading"}],
+    )
+    assert locations == {"toc-anchor": "one.html"}
+    assert '<span id="toc-anchor"></span>1 Civil War' in updated[0][1]
+    assert updated[1][1] == "<h2>Civil War</h2>"
+
+
+def test_occurrence_anchor_rejects_invalid_candidate_kind():
+    from pdf2epub.epub.converter import ContentConverter
+
+    html = "<h2>Heading</h2>"
+    updated, found = ContentConverter.__new__(ContentConverter)._add_subchapter_anchor(
+        html, "Heading", "toc-anchor", source_occurrence=1,
+        source_match_count=1, source_candidate_kind="maybe-heading",
+    )
+    assert not found
+    assert updated == html
+
+
+def test_number_conflict_in_other_candidate_kind_still_blocks_numberless_fallback():
+    from pdf2epub.epub.converter import ContentConverter
+
+    converter = ContentConverter.__new__(ContentConverter)
+    html = "<h2>Civil War</h2><p>2 Civil War</p>"
+    updated, found = converter._add_subchapter_anchor(
+        html, "1 Civil War", "toc-anchor", source_occurrence=1,
+        source_match_count=1, source_candidate_kind="heading",
+    )
+    assert not found
+    assert updated == html
+
+
+def test_exact_occurrences_outrank_extra_numberless_heading_fallbacks():
+    from pdf2epub.epub.converter import ContentConverter
+
+    converter = ContentConverter.__new__(ContentConverter)
+    html = "<h2>1 Civil War</h2><h2>1 Civil War</h2><h2>Civil War</h2>"
+    updated, found = converter._add_subchapter_anchor(
+        html, "1 Civil War", "toc-second", source_occurrence=2,
+        source_match_count=2, source_candidate_kind="heading",
+    )
+    assert found
+    assert '<h2><span id="toc-second"></span>1 Civil War</h2><h2>Civil War</h2>' in updated
 
 
 def test_required_visible_binding_fails_closed_but_container_can_land_on_descendant():

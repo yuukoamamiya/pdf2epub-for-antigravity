@@ -89,9 +89,10 @@ def _endnote_ambiguity_section(ambiguity_count: int) -> str:
     return f"""
 ## Ambiguous centralized endnote definitions
 
-The local endnote pass found {ambiguity_count} numbered definition line(s) whose
-preceding boundary is unclear. Read `{AMBIGUITIES_FILENAME}` and decide only those
-items; do not send every Notes line to review.
+The local endnote pass found {ambiguity_count} ambiguous centralized endnote
+boundary item(s). This includes numbered lines and inline numeric superscripts
+separated from note text by at least two spaces. Read `{AMBIGUITIES_FILENAME}`
+and decide only those items; do not send every Notes line to review.
 
 For each item, classify `line_text` with the surrounding context:
 - `definition`: the `N.`/`N)`/`N：` marker starts a real endnote definition.
@@ -99,17 +100,25 @@ For each item, classify `line_text` with the surrounding context:
   number inside the preceding note/sentence, so this line belongs to the previous
   note and must not create a new definition.
 
+For `kind: inline`, identity includes the exact original `line` and one-based
+`column` of the superscript digits. Copy both `kind: "inline"` and `column`
+exactly. `definition` starts a new endnote at that superscript; `continuation`
+keeps the superscript and following text attached to the preceding note. Several
+items may share one source line and each needs its own decision.
+
 Use the previous/next lines and the scope key when present. A previous line ending
 in `:` or `,` is the typical ambiguous case. Do not modify the body Markdown.
 Write only valid JSON to `{DECISIONS_FILENAME}` with this shape:
 
 ```json
 {{
-  "schema_version": 1,
+  "schema_version": 2,
   "decisions": [
     {{
       "file": "chapter_10.part1.md",
       "line": 774,
+      "kind": "line",
+      "column": 1,
       "role": "continuation",
       "confidence": "high",
       "reason": "The number is a page locator; the sentence continues."

@@ -11,7 +11,7 @@ from typing import Any, Mapping, Optional
 from .batching_service import effective_max_concurrency, recommended_batches
 from .markdown_handoff_context import ContextProjection, MarkdownHandoffRequest
 from .markdown_handoff_planning import MarkdownHandoffPlan
-from .workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION, is_reusable_checkpoint
+from .workflow_contracts import markdown_validation_schema_version, is_reusable_checkpoint
 
 
 def _html_resume_context_is_current(
@@ -171,6 +171,7 @@ def decide_resume(
     """Load local receipts, then deterministically select reusable/pending units."""
     output_dir = request.output_dir
     task = request.task
+    validation_schema = markdown_validation_schema_version(task)
     previous_manifest = load_previous_manifest(output_dir / f"{task}_subagent_manifest.json", enabled=request.resume)
     validation: dict[str, Any] = {}
     validated_files: Optional[set[str]] = None
@@ -184,7 +185,7 @@ def decide_resume(
             loaded = json.loads(validation_path.read_text(encoding="utf-8"))
             if (
                 isinstance(loaded, dict)
-                and loaded.get("schema_version") == MARKDOWN_VALIDATION_SCHEMA_VERSION
+                and loaded.get("schema_version") == validation_schema
                 and isinstance(loaded.get("valid_files"), list)
                 and (
                     task != "translate-html"
@@ -222,7 +223,7 @@ def decide_resume(
                 and ledger.get("scope") == "file-checkpoints"
             )
             if (
-                ledger_schema == MARKDOWN_VALIDATION_SCHEMA_VERSION
+                ledger_schema == validation_schema
                 or versionless_html_ledger
             ) and isinstance(records, dict):
                 if validated_files is None:

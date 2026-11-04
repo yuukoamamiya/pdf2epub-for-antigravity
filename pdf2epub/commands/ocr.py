@@ -20,7 +20,7 @@ from pdf2epub.ocr_consensus import (
 from pdf2epub.ocr_progress import assess_progress
 from pdf2epub.utils.input_paths import resolve_book_input_path
 from pdf2epub.workflow_contracts import (
-    MARKDOWN_VALIDATION_SCHEMA_VERSION,
+    LEGACY_MARKDOWN_VALIDATION_SCHEMA_VERSION,
     atomic_write_json,
     sha256_file,
 )
@@ -117,7 +117,7 @@ def _write_auto_accepted_validation(output_dir: Path, files: list[str]) -> None:
         source_hashes[name] = sha256_file(source)
         target_hashes[name] = sha256_file(target)
     report = {
-        "schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION,
+        "schema_version": LEGACY_MARKDOWN_VALIDATION_SCHEMA_VERSION,
         "task": "ocr-correct",
         "scope": "full",
         "total": len(files),

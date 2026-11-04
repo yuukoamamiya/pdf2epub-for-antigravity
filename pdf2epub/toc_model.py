@@ -9,6 +9,7 @@ from typing import Any, Iterator, Mapping, Sequence
 
 TOCPath = tuple[int, ...]
 TOC_TREE_SCHEMA_VERSION = 2
+TOC_HEADING_CONTEXT_PROJECTION_VERSION = 3
 
 
 def _valid_explicit_anchor(value: str) -> bool:
@@ -139,40 +140,55 @@ def _contains_title(text: str, title: str) -> bool:
     return _title_occurrences(text, title) > 0
 
 
-def normalize_toc_source_label(value: str) -> str:
-    """Normalize whole-block Markdown wrappers without changing inner text."""
+def normalize_toc_source_label(value: str, *, markdown_source: bool = True) -> str:
+    """Normalize a visible TOC label or a source Markdown heading label."""
     value = str(value).strip()
     # A footnote reference is a semantic marker attached to a heading label,
     # not part of its visible title. Preserve definitions such as [^1]: text.
     value = re.sub(r"\[\^[^\]]+\](?!:)", "", value)
     value = re.sub(r"\s+", " ", value)
-    for wrapper in ("<strong>", "<em>", "<b>", "<i>", "**", "__", "*", "_", "`"):
-        if value.startswith(wrapper) and len(value) > 2 * len(wrapper):
-            closing = {"<strong>": "</strong>", "<em>": "</em>", "<b>": "</b>", "<i>": "</i>"}.get(wrapper, wrapper)
-            if value.endswith(closing):
-                value = value[len(wrapper):-len(closing)].strip()
+    if markdown_source:
+        for wrapper in ("<strong>", "<em>", "<b>", "<i>", "**", "__", "*", "_", "`"):
+            if value.startswith(wrapper) and len(value) > 2 * len(wrapper):
+                closing = {"<strong>": "</strong>", "<em>": "</em>", "<b>": "</b>", "<i>": "</i>"}.get(wrapper, wrapper)
+                if value.endswith(closing):
+                    value = value[len(wrapper):-len(closing)].strip()
+        # Escaped literal stars (\*A\*) stay visible asterisks.
+        value = re.sub(r"\\([\\`*_{}\[\]()#+\-.!>])", r"\1", value)
+    # Strip recognized inline HTML tags, retaining their visible text without
+    # treating arbitrary angle-bracket prose as markup.
+    value = re.sub(
+        r"</?(?:sup|sub|em|strong|b|i|u|span|small|big|code|kbd|s|del|ins|mark|a|br|hr)\b(?:\s+[^<>]*)?\s*/?>",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    )
     while len(value) >= 2 and (value[0], value[-1]) in {
         ("《", "》"), ("〈", "〉"), ("「", "」"), ("『", "』"),
         ("“", "”"), ("‘", "’"), ('"', '"'), ("'", "'"),
     }:
         value = value[1:-1].strip()
-    return value
+    return value.strip()
 
 
 def toc_title_match_key(value: str) -> str:
     """Normalize whitespace and case for already-cleaned source or HTML labels."""
-    return re.sub(r"\s+", " ", str(value)).strip().lower()
+    value = re.sub(r"[\u2018\u2019\u02bc]", "'", str(value))
+    value = re.sub(r"[\u201c\u201d]", '"', value)
+    return re.sub(r"\s+", " ", value).strip().lower()
 
 
-def _title_occurrences(text: str, title: str) -> int:
-    expected = toc_title_match_key(normalize_toc_source_label(title))
+def _title_occurrences(text: str, title: str, candidate_kind: str | None = None) -> int:
+    expected = toc_title_match_key(normalize_toc_source_label(title, markdown_source=False))
     if not expected:
         return False
     count = 0
     fenced = False
     paragraph: list[str] = []
 
-    def count_block(lines: list[str]) -> int:
+    def count_block(lines: list[str], kind: str = "paragraph") -> int:
+        if candidate_kind is not None and kind != candidate_kind:
+            return 0
         if not lines:
             return 0
         joined = toc_title_match_key(normalize_toc_source_label(" ".join(lines)))
@@ -202,7 +218,12 @@ def _title_occurrences(text: str, title: str) -> int:
         if heading:
             count += count_block(paragraph)
             paragraph.clear()
-            count += count_block([heading.group(1)])
+            heading_text = re.sub(r"\s+#+\s*$", "", heading.group(1)).strip()
+            count += count_block([heading_text], "heading")
+            continue
+        if re.match(r"^(?:=+|-+)\s*$", line) and paragraph:
+            count += count_block(paragraph, "heading")
+            paragraph.clear()
             continue
         paragraph.append(line)
     count += count_block(paragraph)
@@ -307,8 +328,14 @@ def project_toc_ownership(
         texts = texts_by_path[unit_path]
         node_id = toc_node_id(node, path)
         source_title = str(node.get("title") or "")
-        normalized_title = toc_title_match_key(normalize_toc_source_label(source_title))
-        match_counts = {name: _title_occurrences(texts[name], source_title) for name in names}
+        normalized_title = toc_title_match_key(normalize_toc_source_label(source_title, markdown_source=False))
+        heading_counts = {name: _title_occurrences(texts[name], source_title, "heading") for name in names}
+        candidate_kind = "heading" if any(heading_counts.values()) else "paragraph"
+        match_counts = {
+            name: heading_counts[name] if candidate_kind == "heading"
+            else _title_occurrences(texts[name], source_title, "paragraph")
+            for name in names
+        }
         match = None
         occurrence = None
         for name in names:
@@ -332,6 +359,7 @@ def project_toc_ownership(
             "structural_ancestor": path != unit_path and not (len(path) > len(unit_path) and path[:len(unit_path)] == unit_path),
             "source_occurrence": occurrence or 0,
             "source_match_count": match_counts[owner_file],
+            "source_candidate_kind": candidate_kind if match else "container_only",
         }
         rows_by_file[owner_file].append(row)
 

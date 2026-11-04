@@ -1451,7 +1451,7 @@ def test_toc_heading_contexts_without_source_dir_use_first_unit_part(tmp_path: P
     assert set(contexts) == {"chapter_1.part1.md", "chapter_1.part2.md"}
     assert contexts["chapter_1.part1.md"]["binding_mode"] == "visible"
     assert contexts["chapter_1.part1.md"]["children"] == [
-        {"title": "Exact child", "anchor": "toc-exact-child", "node_id": "chapter-1-child-1", "parent_node_id": "chapter-1", "binding_mode": "visible", "structural_ancestor": False, "source_occurrence": 1, "source_match_count": 1}
+        {"title": "Exact child", "anchor": "toc-exact-child", "node_id": "chapter-1-child-1", "parent_node_id": "chapter-1", "binding_mode": "visible", "structural_ancestor": False, "source_occurrence": 1, "source_match_count": 1, "source_candidate_kind": "paragraph"}
     ]
     assert validate_toc_heading_bindings(output)["valid"] is True
 
@@ -1493,12 +1493,12 @@ def test_toc_heading_contexts_split_children_by_physical_part(tmp_path: Path):
     assert contexts["chapter_1.part1.md"]["toc_title"] == "第一章"
     assert contexts["chapter_1.part1.md"]["binding_mode"] == "visible"
     assert contexts["chapter_1.part1.md"]["children"] == [
-        {"title": "子标题 A", "anchor": "toc-1-1", "node_id": "node-1-1", "parent_node_id": "node-1", "binding_mode": "visible", "structural_ancestor": False, "source_occurrence": 1, "source_match_count": 1}
+        {"title": "子标题 A", "anchor": "toc-1-1", "node_id": "node-1-1", "parent_node_id": "node-1", "binding_mode": "visible", "structural_ancestor": False, "source_occurrence": 1, "source_match_count": 1, "source_candidate_kind": "paragraph"}
     ]
     assert contexts["chapter_1.part2.md"]["toc_title"] == "第一章"
     assert contexts["chapter_1.part2.md"]["binding_mode"] == "container_only"
     assert contexts["chapter_1.part2.md"]["children"] == [
-        {"title": "子标题 B", "anchor": "toc-1-2", "node_id": "node-1-2", "parent_node_id": "node-1", "binding_mode": "visible", "structural_ancestor": False, "source_occurrence": 1, "source_match_count": 1}
+        {"title": "子标题 B", "anchor": "toc-1-2", "node_id": "node-1-2", "parent_node_id": "node-1", "binding_mode": "visible", "structural_ancestor": False, "source_occurrence": 1, "source_match_count": 1, "source_candidate_kind": "paragraph"}
     ]
 
 
@@ -1538,8 +1538,8 @@ def test_toc_heading_contexts_missing_child_stays_container_only(
     contexts = build_toc_heading_contexts(output, source_dir=source)
 
     assert contexts["chapter_1.part1.md"]["children"] == [
-        {"title": "子标题 A", "anchor": "toc-1-1", "node_id": "node-1-1", "parent_node_id": "node-1", "binding_mode": "visible", "structural_ancestor": False, "source_occurrence": 1, "source_match_count": 1},
-        {"title": "缺失子标题", "anchor": "toc-1-2", "node_id": "node-1-2", "parent_node_id": "node-1", "binding_mode": "container_only", "structural_ancestor": False, "source_occurrence": 0, "source_match_count": 0},
+        {"title": "子标题 A", "anchor": "toc-1-1", "node_id": "node-1-1", "parent_node_id": "node-1", "binding_mode": "visible", "structural_ancestor": False, "source_occurrence": 1, "source_match_count": 1, "source_candidate_kind": "paragraph"},
+        {"title": "缺失子标题", "anchor": "toc-1-2", "node_id": "node-1-2", "parent_node_id": "node-1", "binding_mode": "container_only", "structural_ancestor": False, "source_occurrence": 0, "source_match_count": 0, "source_candidate_kind": "container_only"},
     ]
     assert contexts["chapter_1.part2.md"]["children"] == []
 
@@ -1673,7 +1673,7 @@ def test_toc_heading_binding_allows_whitespace_and_outer_quote_variants(tmp_path
                     "chapter.md": {
                         "node_id": "chapter-1",
                         "anchor": "toc-chapter-1",
-                        "projection_version": 2,
+                        "projection_version": 3,
                         "toc_title": "Chapter One",
                         "children": [
                             {"title": "Exact Child", "anchor": "toc-1-1", "node_id": "child-1"}
@@ -1706,7 +1706,7 @@ def test_toc_heading_bindings_only_files_scope_ignores_other_units(
     _write_heading_manifest(
         output,
         {
-            "a.md": {"node_id": "a", "anchor": "toc-a", "projection_version": 2, "toc_title": "第一章", "binding_mode": "visible"},
+            "a.md": {"node_id": "a", "anchor": "toc-a", "projection_version": 3, "toc_title": "第一章", "binding_mode": "visible"},
         },
     )
     validated = output / "translated" / "validated"
@@ -1729,7 +1729,7 @@ def test_toc_heading_bindings_only_files_requires_target(tmp_path: Path):
     output.mkdir()
     _write_heading_manifest(
         output,
-        {"a.md": {"node_id": "a", "anchor": "toc-a", "projection_version": 2, "toc_title": "第一章", "binding_mode": "visible"}},
+        {"a.md": {"node_id": "a", "anchor": "toc-a", "projection_version": 3, "toc_title": "第一章", "binding_mode": "visible"}},
     )
 
     report = validate_toc_heading_bindings(output, only_files=["a.md"])
@@ -1747,7 +1747,7 @@ def test_toc_heading_bindings_only_files_skips_missing_context(
     output.mkdir()
     _write_heading_manifest(
         output,
-        {"b.md": {"node_id": "b", "anchor": "toc-b", "projection_version": 2, "toc_title": "第二章", "binding_mode": "visible"}},
+        {"b.md": {"node_id": "b", "anchor": "toc-b", "projection_version": 3, "toc_title": "第二章", "binding_mode": "visible"}},
     )
     validated = output / "translated" / "validated"
     validated.mkdir(parents=True)
@@ -1794,7 +1794,7 @@ def _write_single_file_heading_fixture(
             "chapter_1.part1.md": {
                 "node_id": "chapter-1",
                 "anchor": "toc-chapter-1",
-                "projection_version": 2,
+                "projection_version": 3,
                 "toc_title": "第一章",
                 "binding_mode": "visible",
                 "children": [],

@@ -16,9 +16,17 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 
 
-# Validation reports written before the review-warning gate was introduced
-# must not be reused as successful checkpoints.
-MARKDOWN_VALIDATION_SCHEMA_VERSION = 3
+# Version 4 is scoped to PDF polish/translate. Unrelated OCR and HTML
+# validation contracts remain at version 3.
+MARKDOWN_VALIDATION_SCHEMA_VERSION = 4
+LEGACY_MARKDOWN_VALIDATION_SCHEMA_VERSION = 3
+
+
+def markdown_validation_schema_version(task: str) -> int:
+    """Return the validation receipt version for a task's actual contract."""
+    if str(task).strip().lower() in {"polish", "translate"}:
+        return MARKDOWN_VALIDATION_SCHEMA_VERSION
+    return LEGACY_MARKDOWN_VALIDATION_SCHEMA_VERSION
 
 
 def sha256_file(path: Path) -> str:

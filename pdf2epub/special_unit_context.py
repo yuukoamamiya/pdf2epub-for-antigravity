@@ -15,6 +15,7 @@ from pdf2epub.glossary import (
     sort_glossary_entries,
 )
 from pdf2epub.toc_translation_workflow import build_toc_heading_contexts
+from pdf2epub.toc_model import TOC_HEADING_CONTEXT_PROJECTION_VERSION
 
 
 class SpecialUnitContextError(ValueError):
@@ -123,6 +124,10 @@ def build_special_unit_context(
     heading = heading_contexts.get(filename) if isinstance(heading_contexts, Mapping) else None
     if heading is not None and not isinstance(heading, dict):
         raise SpecialUnitContextError("invalid TOC heading context shape; rerun translate prepare")
+    if heading is not None and heading.get("projection_version") != TOC_HEADING_CONTEXT_PROJECTION_VERSION:
+        raise SpecialUnitContextError(
+            f"stale TOC heading context for {filename}; rerun translate prepare"
+        )
     if not expected_source_hash:
         raise SpecialUnitContextError(f"{filename} has no current source hash; run translate prepare first")
     if has_context_path != has_context_hash:

@@ -191,6 +191,47 @@ def test_restarted_note_numbers_are_scoped_per_chapter() -> None:
     assert report["orphan_definition_keys"] == []
 
 
+def test_inline_definition_scope_mapping_survives_virtual_line_splits() -> None:
+    toc, progress, texts = _simple_book(
+        body=(
+            "# Part 1: Roots\n## 1. First Chapter\nBody <sup>1</sup> and <sup>3</sup>.\n"
+            "## 2. Second Chapter\nBody <sup>1</sup> and <sup>3</sup>.\n"
+        ),
+        notes=(
+            "# Notes\n## Chapter 1: First Chapter\n"
+            "1. First note.  <sup>3</sup> Third note.\n"
+            "## Chapter 2: Second Chapter\n"
+            "1. First note again.  <sup>3</sup> Third note again.\n"
+        ),
+        children=[
+            {"title": "1. First Chapter", "start_page": 2, "end_page": 5},
+            {"title": "2. Second Chapter", "start_page": 6, "end_page": 10},
+        ],
+    )
+    scopes = build_endnote_scope_directory(toc, progress, texts)
+    note_lines = texts["chapter_3.md"].splitlines()
+    decisions = [
+        {
+            "file": "chapter_3.md", "line": line_number, "kind": "inline",
+            "column": line.index("3") + 1, "key": "3", "role": "definition",
+        }
+        for line_number, line in enumerate(note_lines, 1)
+        if "<sup>3</sup>" in line
+    ]
+    normalized, report = normalize_endnotes(
+        texts,
+        {"chapter_1.md": "", "chapter_2.md": "", "chapter_3.md": "notes"},
+        scopes=scopes,
+        definition_decisions=decisions,
+    )
+    assert report["scope_mode"] == "per_chapter"
+    assert report["scoped_keys"] == ["1", "3"]
+    assert "[^fnc-u2c1-3]: Third note." in normalized["chapter_3.md"]
+    assert "[^fnc-u2c2-3]: Third note again." in normalized["chapter_3.md"]
+    assert "[^fnc-u2c1-1]" in normalized["chapter_2.md"]
+    assert "[^fnc-u2c2-3]" in normalized["chapter_2.md"]
+
+
 def test_endnote_normalization_preserves_multiblock_content_and_boundaries(
     tmp_path,
 ) -> None:
