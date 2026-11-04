@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from functools import lru_cache
 import hashlib
 import re
 import unicodedata
@@ -9,7 +10,7 @@ from typing import Any, Iterator, Mapping, Sequence
 
 TOCPath = tuple[int, ...]
 TOC_TREE_SCHEMA_VERSION = 2
-TOC_HEADING_CONTEXT_PROJECTION_VERSION = 3
+TOC_HEADING_CONTEXT_PROJECTION_VERSION = 4
 
 
 def _valid_explicit_anchor(value: str) -> bool:
@@ -140,6 +141,16 @@ def _contains_title(text: str, title: str) -> bool:
     return _title_occurrences(text, title) > 0
 
 
+@lru_cache(maxsize=4096)
+def _markdown_visible_text(value: str) -> str:
+    """Render one label using project semantics, caching immutable output."""
+    # Delayed import avoids a module cycle: converter uses toc_model while the
+    # shared visibility helper lives beside the existing EPUB renderer.
+    from .markdown_to_html import markdown_visible_text
+
+    return markdown_visible_text(value)
+
+
 def normalize_toc_source_label(value: str, *, markdown_source: bool = True) -> str:
     """Normalize a visible TOC label or a source Markdown heading label."""
     value = str(value).strip()
@@ -148,21 +159,21 @@ def normalize_toc_source_label(value: str, *, markdown_source: bool = True) -> s
     value = re.sub(r"\[\^[^\]]+\](?!:)", "", value)
     value = re.sub(r"\s+", " ", value)
     if markdown_source:
-        for wrapper in ("<strong>", "<em>", "<b>", "<i>", "**", "__", "*", "_", "`"):
-            if value.startswith(wrapper) and len(value) > 2 * len(wrapper):
-                closing = {"<strong>": "</strong>", "<em>": "</em>", "<b>": "</b>", "<i>": "</i>"}.get(wrapper, wrapper)
-                if value.endswith(closing):
-                    value = value[len(wrapper):-len(closing)].strip()
-        # Escaped literal stars (\*A\*) stay visible asterisks.
-        value = re.sub(r"\\([\\`*_{}\[\]()#+\-.!>])", r"\1", value)
+        # Reuse Python-Markdown's inline semantics. Literal underscores in
+        # identifiers and escaped emphasis delimiters stay visible; code,
+        # links, nested emphasis and entities match the document renderer.
+        value = re.sub(r"^#{1,6}\s+", "", value)
+        value = re.sub(r"\s+#+\s*$", "", value).strip()
+        value = _markdown_visible_text(value)
     # Strip recognized inline HTML tags, retaining their visible text without
     # treating arbitrary angle-bracket prose as markup.
-    value = re.sub(
-        r"</?(?:sup|sub|em|strong|b|i|u|span|small|big|code|kbd|s|del|ins|mark|a|br|hr)\b(?:\s+[^<>]*)?\s*/?>",
-        "",
-        value,
-        flags=re.IGNORECASE,
-    )
+    if not markdown_source:
+        value = re.sub(
+            r"</?(?:sup|sub|em|strong|b|i|u|span|small|big|code|kbd|s|del|ins|mark|a|br|hr)\b(?:\s+[^<>]*)?\s*/?>",
+            "",
+            value,
+            flags=re.IGNORECASE,
+        )
     while len(value) >= 2 and (value[0], value[-1]) in {
         ("《", "》"), ("〈", "〉"), ("「", "」"), ("『", "』"),
         ("“", "”"), ("‘", "’"), ('"', '"'), ("'", "'"),
@@ -178,56 +189,128 @@ def toc_title_match_key(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip().lower()
 
 
-def _title_occurrences(text: str, title: str, candidate_kind: str | None = None) -> int:
+def toc_markdown_visible_title_candidates(
+    text: str, title: str, candidate_kind: str | None = None
+) -> list[str]:
+    """Return visible titles evidenced by matching source Markdown blocks.
+
+    The raw title is accepted as Markdown only when a matching source block
+    supplies that exact syntax. Otherwise the TOC title remains literal.
+    """
     expected = toc_title_match_key(normalize_toc_source_label(title, markdown_source=False))
-    if not expected:
-        return False
-    count = 0
+    inventory = _source_title_inventory(text)
+    literal = [row for row in inventory
+               if (candidate_kind is None or row["kind"] == candidate_kind)
+               and toc_title_match_key(row["visible"]) == expected]
+    if literal:
+        resolved_key = expected
+    else:
+        exact = [row for row in inventory
+                 if (candidate_kind is None or row["kind"] == candidate_kind)
+                 and row["raw"] == title]
+        visible_keys = {toc_title_match_key(row["visible"]) for row in exact}
+        if len(visible_keys) != 1:
+            return []
+        resolved_key = next(iter(visible_keys))
+    matching = [row for row in inventory
+                if toc_title_match_key(row["visible"]) == resolved_key]
+    if candidate_kind is not None:
+        same_kind = [row for row in matching if row["kind"] == candidate_kind]
+        if not same_kind:
+            return []
+        matching = same_kind
+    elif any(row["kind"] == "heading" for row in matching):
+        matching = [row for row in matching if row["kind"] == "heading"]
+    if not matching:
+        return []
+    return [row["visible"] for row in matching]
+
+
+def _source_title_inventory(text: str) -> list[dict[str, Any]]:
+    """Enumerate Markdown title candidates once with stable per-text IDs."""
+    inventory: list[dict[str, Any]] = []
     fenced = False
     paragraph: list[str] = []
+    paragraph_lines: list[tuple[int, str]] = []
+    paragraph_start = 0
 
-    def count_block(lines: list[str], kind: str = "paragraph") -> int:
-        if candidate_kind is not None and kind != candidate_kind:
-            return 0
-        if not lines:
-            return 0
-        joined = toc_title_match_key(normalize_toc_source_label(" ".join(lines)))
-        if joined == expected and len(lines) > 1:
+    def flush_paragraph():
+        if paragraph:
+            raw = " ".join(paragraph).strip()
             wrappers = ("<strong>", "<em>", "<b>", "<i>", "**", "__", "*", "_")
-            raw = " ".join(lines).strip()
-            if any(raw.startswith(wrapper) and raw.endswith(
+            if len(paragraph_lines) > 1 and any(raw.startswith(wrapper) and raw.endswith(
                 {"<strong>": "</strong>", "<em>": "</em>", "<b>": "</b>", "<i>": "</i>"}.get(wrapper, wrapper)
             ) for wrapper in wrappers):
-                return 1
-        return sum(toc_title_match_key(normalize_toc_source_label(line)) == expected for line in lines)
-
-    for line in str(text or "").splitlines():
-        line = line.strip()
-        if line.startswith(("```", "~~~")):
-            count += count_block(paragraph)
+                inventory.append({
+                    "candidate_id": paragraph_start,
+                    "kind": "paragraph",
+                    "raw": raw,
+                    "visible": normalize_toc_source_label(raw, markdown_source=True),
+                })
+            else:
+                for line_index, line_text in paragraph_lines:
+                    inventory.append({
+                        "candidate_id": line_index,
+                        "kind": "paragraph",
+                        "raw": line_text,
+                        "visible": normalize_toc_source_label(line_text, markdown_source=True),
+                    })
             paragraph.clear()
+            paragraph_lines.clear()
+
+    for line_index, line in enumerate(str(text or "").splitlines()):
+        value = line.strip()
+        if value.startswith(("```", "~~~")):
+            flush_paragraph()
             fenced = not fenced
             continue
         if fenced:
             continue
-        if not line:
-            count += count_block(paragraph)
-            paragraph.clear()
-            continue
-        heading = re.match(r"^#{1,6}\s+(.*)$", line)
+        heading = re.match(r"^#{1,6}\s+(.*)$", value)
         if heading:
-            count += count_block(paragraph)
-            paragraph.clear()
-            heading_text = re.sub(r"\s+#+\s*$", "", heading.group(1)).strip()
-            count += count_block([heading_text], "heading")
+            flush_paragraph()
+            raw = re.sub(r"\s+#+\s*$", "", heading.group(1)).strip()
+            inventory.append({
+                "candidate_id": line_index,
+                "kind": "heading",
+                "raw": raw,
+                "visible": normalize_toc_source_label(raw, markdown_source=True),
+            })
             continue
-        if re.match(r"^(?:=+|-+)\s*$", line) and paragraph:
-            count += count_block(paragraph, "heading")
+        if re.match(r"^(?:=+|-+)\s*$", value) and paragraph:
+            raw = " ".join(paragraph).strip()
             paragraph.clear()
+            paragraph_lines.clear()
+            inventory.append({
+                "candidate_id": paragraph_start,
+                "kind": "heading",
+                "raw": raw,
+                "visible": normalize_toc_source_label(raw, markdown_source=True),
+            })
             continue
-        paragraph.append(line)
-    count += count_block(paragraph)
-    return count
+        if not value:
+            flush_paragraph()
+            continue
+        if not paragraph:
+            paragraph_start = line_index
+        paragraph.append(value)
+        paragraph_lines.append((line_index, value))
+    flush_paragraph()
+    return inventory
+
+
+def _title_occurrences(text: str, title: str, candidate_kind: str | None = None) -> int:
+    expected = toc_title_match_key(normalize_toc_source_label(title, markdown_source=False))
+    inventory = _source_title_inventory(text)
+    literal = [row for row in inventory
+               if (candidate_kind is None or row["kind"] == candidate_kind)
+               and toc_title_match_key(row["visible"]) == expected]
+    matched = literal or [row for row in inventory
+                          if (candidate_kind is None or row["kind"] == candidate_kind)
+                          and row["raw"] == title]
+    if not literal and len({toc_title_match_key(row["visible"]) for row in matched}) != 1:
+        return 0
+    return len(matched)
 
 
 def project_toc_ownership(
@@ -320,7 +403,12 @@ def project_toc_ownership(
     rows_by_file: dict[str, list[dict[str, Any]]] = {
         name: [] for names in names_by_path.values() for name in names
     }
-    used: dict[tuple[tuple[int, ...], str, str], int] = {}
+    used_candidates: set[tuple[tuple[int, ...], str, int]] = set()
+    inventories_by_file = {
+        name: _source_title_inventory(text)
+        for texts in texts_by_path.values()
+        for name, text in texts.items()
+    }
 
     for path, node in iter_toc_nodes(chapters):
         unit_path = owner_by_node[path]
@@ -328,32 +416,68 @@ def project_toc_ownership(
         texts = texts_by_path[unit_path]
         node_id = toc_node_id(node, path)
         source_title = str(node.get("title") or "")
-        normalized_title = toc_title_match_key(normalize_toc_source_label(source_title, markdown_source=False))
-        heading_counts = {name: _title_occurrences(texts[name], source_title, "heading") for name in names}
-        candidate_kind = "heading" if any(heading_counts.values()) else "paragraph"
-        match_counts = {
-            name: heading_counts[name] if candidate_kind == "heading"
-            else _title_occurrences(texts[name], source_title, "paragraph")
-            for name in names
+        literal_key = toc_title_match_key(normalize_toc_source_label(source_title, markdown_source=False))
+        inventories = {name: inventories_by_file[name] for name in names}
+        literal_matches = {
+            name: [candidate for candidate in inventory
+                   if toc_title_match_key(candidate["visible"]) == literal_key]
+            for name, inventory in inventories.items()
         }
+        if any(literal_matches.values()):
+            resolved_key = literal_key
+        else:
+            # A marked legacy TOC label is interpreted as Markdown only when
+            # the owning source contains that exact raw label.
+            exact_matches = {
+                name: [candidate for candidate in inventory if candidate["raw"] == source_title]
+                for name, inventory in inventories.items()
+            }
+            visible_keys = {
+                toc_title_match_key(candidate["visible"])
+                for rows in exact_matches.values() for candidate in rows
+            }
+            resolved_key = next(iter(visible_keys)) if len(visible_keys) == 1 else None
+        matched = {
+            name: [candidate for candidate in inventory
+                   if resolved_key is not None
+                   and toc_title_match_key(candidate["visible"]) == resolved_key]
+            for name, inventory in inventories.items()
+        }
+        candidate_kind = "heading" if any(
+            candidate["kind"] == "heading" for rows in matched.values() for candidate in rows
+        ) else "paragraph"
+        matched = {
+            name: [candidate for candidate in rows if candidate["kind"] == candidate_kind]
+            for name, rows in matched.items()
+        }
+        match_counts = {name: len(rows) for name, rows in matched.items()}
         match = None
         occurrence = None
         for name in names:
-            key = (unit_path, node_id, name)
-            already_used = used.get((unit_path, "title:" + normalized_title, name), 0)
-            if match_counts[name] > already_used:
+            available = [candidate for candidate in matched[name]
+                         if (unit_path, name, candidate["candidate_id"]) not in used_candidates]
+            if available:
                 match = name
-                occurrence = already_used + 1
-                used[(unit_path, "title:" + normalized_title, name)] = occurrence
+                selected = available[0]
+                used_candidates.add((unit_path, name, selected["candidate_id"]))
+                occurrence = next(
+                    index for index, candidate in enumerate(matched[name], 1)
+                    if candidate["candidate_id"] == selected["candidate_id"]
+                )
                 break
         explicit_container = node.get("binding_mode") == "container_only"
         if match is None and not explicit_container:
             raise ValueError(f"visible TOC node {node_id} ({source_title!r}) is absent from its owning source unit")
         owner_file = match or names[0]
+        resolved_visible_title = (
+            matched[match][occurrence - 1]["visible"] if match and occurrence
+            else source_title
+        )
         row = {
             "node_id": node_id,
             "path": path,
             "source_title": source_title,
+            "expected_visible_title": resolved_visible_title,
             "owner_file": owner_file,
             "binding_mode": "visible" if match else "container_only",
             "structural_ancestor": path != unit_path and not (len(path) > len(unit_path) and path[:len(unit_path)] == unit_path),

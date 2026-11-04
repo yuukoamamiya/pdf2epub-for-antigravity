@@ -10,15 +10,14 @@ import secrets
 from html.parser import HTMLParser
 from typing import Optional
 from loguru import logger
-from .utils.logging_config import configure_logging
 from .utils.html_safety import sanitize_html_fragment
 from .footnote_markdown import collect_footnote_definition_blocks
 
 # We'll use markdown library - need to add to pyproject.toml: 
 # poetry add markdown
 
-# Configure logger
-logger = configure_logging()
+# The application configures Loguru during startup. Importing this renderer
+# must not remove handlers installed by the caller.
 
 # Footnote normalization may suffix repeated local keys (for example
 # ``[^1-2]``). Keep the key grammar in sync with the scanner and splitter.
@@ -45,6 +44,33 @@ INLINE_CODE_RE = re.compile(
 def contains_footnote_syntax(markdown_content: str) -> bool:
     """Return whether markdown contains supported footnote syntax."""
     return bool(FOOTNOTE_SYNTAX_RE.search(markdown_content))
+
+
+def markdown_visible_text(markdown_text: str) -> str:
+    """Render an isolated label through the EPUB pipeline and extract text.
+
+    Footnote references are navigation metadata rather than title text. Remove
+    them before conversion so this helper needs no footnote manager.
+    """
+    source = str(markdown_text or "")
+    if re.match(r"^\s*\[\^[^\]]+\]:", source):
+        return source.strip()
+    source = re.sub(r"\[\^[^\]]+\](?!:)", "", source)
+    # A heading wrapper prevents list-looking labels and metadata-looking
+    # colons from changing block structure during isolated inline rendering.
+    rendered = convert_markdown_to_html(f"## {source}", standalone=False)
+    parser = _VisibleTextParser()
+    parser.feed(rendered)
+    return "".join(parser.parts)
+
+
+class _VisibleTextParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+
+    def handle_data(self, data):
+        self.parts.append(data)
 
 
 def get_epub_css():

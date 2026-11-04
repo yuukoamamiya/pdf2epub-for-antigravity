@@ -138,7 +138,7 @@ Markdown validator schema 4 使版本升级前的全量 receipts 和逐文件 le
 对于旧 TOC projection，先运行一次 `translate --resume` 刷新 manifest/context，但不要按这次准备输出
 立即派发 pending；schema 3 的旧验证 receipt 本来就不会被复用，第一次可能把现有目标都标成 pending。
 然后先运行 `translate-validate` 校验现有译文并建立 schema 4 receipt，再运行第二次
-`translate --resume`。这时 current receipt 与 `projection_version: 3` context 会让有效目标重新成为
+`translate --resume`。这时 current receipt 与 `projection_version: 4` context 会让有效目标重新成为
 completed；只派发仍列为 pending/invalid 的 assignment，完成后再做全量 `translate-validate`。
 对旧 polish receipt，先直接校验现有文本；只把实际失败的目标交回 Subagent。
 Markdown worker 的提示词还明确禁止修改 `pdf2epub/`、`tests/`、`docs/`、`glossaries/` 和项目
@@ -1145,10 +1145,13 @@ projection；不完整或身份不一致时阻断并要求重新准备、审阅�
 可见绑定未能落到实际标题，构建失败。容器节点保持逻辑层级并落到所属文件或首个内容后代。
 HTML TOC 与 NCX 在正文渲染完成后共用同一个导航模型；打包前核对 XHTML heading、ID、文件和
 fragment。NCX depth 使用逻辑 TOC 实际深度，合成的目录入口不增加一级。
-TOC heading context 使用 `projection_version: 3`。旧版本 context 必须通过
+TOC heading context 使用 `projection_version: 4`。旧版本 context 必须通过
 `translate --resume` 重新准备并重新校验；检查新 manifest，只派发上下文哈希或源内容失效的文件，
 不要因为版本升级就盲目重译整本书。连续空白、Markdown 外层标记及成对引号/书名号只在运行时
 canonicalization 中容差，不写回标题，也不接受近义词或自行改译。
+源 ownership 与译文标题绑定依据 Markdown renderer 的可见文本；已渲染 HTML 仅提取文本，不再解析为 Markdown。
+legacy TOC 标题含强调标记时，必须有源 Markdown 中完全对应且唯一的标题语法证据。projection v4 也会让旧
+heading context 失效，按上文先刷新、验证现有译文、再次 resume 的步骤只派发失效项。
 
 跨语言的学派资料（例如德文术语表用于英文思想史书籍）必须单独配置在
 `translation.reference_glossaries`。候选报告会把它们标记为

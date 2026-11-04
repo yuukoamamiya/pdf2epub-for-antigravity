@@ -397,8 +397,11 @@ PDF 正文 Prompt 还会从已验证的 `toc_tree_translated.json` 生成一个�
 精确 `toc_heading_contexts` 才是可见标题和措辞的权威来源；完整 TOC 不得重复注入每个章节。
 TOC 绑定校验对连续空白、Markdown 外层标记和成对书名号/引号只在运行时匹配时做规范化容差，
 不改写已存标题；近义词或
-独立改译仍必须失败。源 ownership 标题计数、分片 occurrence 分配和 HTML 锚点匹配在各自完成
-标记清理后统一使用 Unicode `lower()` 与连续空白归一化，不使用 `casefold()` 扩大等价关系；
+独立改译仍必须失败。源 ownership 标题计数、分片 occurrence 分配和 HTML 锚点匹配先按 Markdown
+renderer 语义提取可见文本；HTML 已渲染文本只提取可见文本，不再解析为 Markdown。字面转义标记、代码、
+链接、实体、数学和上下标遵循实际渲染结果；legacy TOC 中的强调语法必须有 owning Markdown 的原始标题
+语法证据，不能只靠去标记猜测。标识符下划线和字面 `*A*` 不得误配。投影使用 Unicode `lower()`
+与连续空白归一化，不使用 `casefold()` 扩大等价关系；
 这不放宽译文与 TOC 的逐字标题绑定。worker Prompt 必须把当前文件的标题锚定清单置于 assigned 任务附近，
 要求对应的第一个匹配标题逐字使用 TOC 文本，但不强制其成为物理首行。
 当前 TOC 合同要求每个节点有唯一、显式的 `node_id`；数组路径只表示结构位置，标题文字不作身份。
@@ -407,7 +410,7 @@ TOC 绑定校验对连续空白、Markdown 外层标记和成对书名号/引号
 `container_only`）。同一逻辑单元优先使用标题候选，即使其位于后续 part；只有没有标题候选时才用
 段落候选。源 Markdown 计数与生成 HTML 锚点匹配必须使用相同候选类别，并严格核对 occurrence 和
 count。可见标题缺少已绑定锚点时必须阻断 EPUB 构建；容器节点按合同落到所属内容文件或首个有内容
-的后代。新 `toc_heading_contexts` 使用 `projection_version: 3`；旧 context 必须先运行一次
+的后代。新 `toc_heading_contexts` 使用 `projection_version: 4`；旧 context 必须先运行一次
 `translate --resume` 刷新 manifest/context，但不能按这次准备结果立即派发 pending，因为旧
 validation receipt 可能失效并暂时把所有现有目标列为 pending。随后运行
 `translate-validate` 校验现有译文并建立当前 receipt，再运行第二次 `translate --resume`；

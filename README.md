@@ -65,7 +65,8 @@ EPUB、MOBI、AZW3 将 [config_epub.yaml.example](config_epub.yaml.example) 复�
 
 PDF 原语言版和译文版都以通过润色验收的 Markdown 为源。原稿版会先生成，便于检查目录、段落、脚注和插图；
 发现源稿问题时，按操作手册修复并重新验收，再继续翻译。
-PDF 目录绑定会按源稿中的标题/段落类别和出现位置定位。恢复旧译文时，先刷新 handoff context，
+PDF 目录绑定按源稿中 Markdown 渲染后的可见标题、标题/段落类别和出现位置定位；字面星号和标识符下划线
+不会被当作强调标记。恢复旧译文时，先刷新 handoff context，
 校验现有译文，再按新的恢复报告派发失效单元；具体步骤见 [AGENTS.md](AGENTS.md)。规则版本变化本身
 不要求重新 OCR 或重译全书。
 

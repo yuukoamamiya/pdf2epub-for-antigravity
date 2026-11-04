@@ -189,7 +189,7 @@ def test_validate_existing_outputs_before_second_resume_avoids_full_redelegation
     source.write_text("Source paragraph.", encoding="utf-8")
     target.write_text("Existing translated paragraph.", encoding="utf-8")
     refreshed_context = {
-        "projection_version": 3, "node_id": "n1", "anchor": "a1"
+        "projection_version": 4, "node_id": "n1", "anchor": "a1"
     }
     request = MarkdownHandoffRequest(
         output_dir=tmp_path, task="translate", source_dir=source_dir,

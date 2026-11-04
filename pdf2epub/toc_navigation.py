@@ -17,6 +17,7 @@ class ResolvedNavigationNode:
     binding_status: str
     target_node_id: Optional[str]
     children: tuple["ResolvedNavigationNode", ...] = ()
+    expected_title: Optional[str] = None
 
 
 def _file_target(entry: Mapping) -> Optional[str]:
@@ -113,10 +114,11 @@ def resolve_navigation(
                         raise ValueError(f"TOC fragment is not in rendered anchor map: {target}")
             resolved.append(ResolvedNavigationNode(
                 node_id=node_id,
-                title=str(entry.get("title") or ""),
+                title=str(entry.get("navigation_display_title") or entry.get("title") or ""),
                 target=target,
                 binding_status=status,
                 target_node_id=target_node_id,
+                expected_title=str(entry.get("navigation_expected_title") or entry.get("title") or ""),
                 children=children,
             ))
         return tuple(resolved)
@@ -175,7 +177,7 @@ def validate_navigation_rendering(
                     return visible_heading_text(value)
 
                 expected_node = nodes_by_id.get(node.target_node_id or "")
-                expected_title = expected_node.title if expected_node else node.title
+                expected_title = (expected_node.expected_title or expected_node.title) if expected_node else (node.expected_title or node.title)
                 matches = ContentConverter._subchapter_anchor_candidates(
                     "".join(heading_blocks[filename]), visible(expected_title), heading_pattern, visible
                 )

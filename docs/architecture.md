@@ -445,7 +445,7 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
   `id` 与标题落点；ownership projection 也驱动在实际所属 part 内放置可见结构祖先锚点。可见
   绑定缺失时阻断，容器节点按 ownership 合同落到所属文件或首个内容后代。NCX depth 按逻辑
   TOC 的真实层级计算，合成目录入口与 TOC 树同级。
-- TOC 源标题计数、分片 occurrence 分配和 HTML 锚点匹配在各自清理 Markdown/HTML 标记后，共用 `toc_title_match_key()` 做连续空白归一化和 Unicode `lower()`；不使用 `casefold()`，因此 `Straße` 不会被当作 `STRASSE`。连续空白、Markdown 外层标记和成对引号/书名号的 canonicalization 只用于运行时绑定比较，不改写 TOC 源标题、译文或存储上下文；近义词和独立改译仍失败。该规则不放宽译文与 TOC 的逐字标题绑定。TOC 标题绑定区分 `visible` 与 `container_only`：无可见源标签的纯图片/边界单元不要求
+- TOC 源标题计数、分片 occurrence 分配和 HTML 锚点匹配先按 Markdown renderer 语义提取可见文本，再共用 `toc_title_match_key()` 做连续空白归一化和 Unicode `lower()`；HTML 已渲染文本只提取可见文本，不再解析为 Markdown。legacy 标记标题必须有 owning Markdown 原始标题语法证据；字面星号、标识符下划线、代码、链接、实体、数学和上下标按渲染结果区分。新 context 使用 `projection_version: 4`。不使用 `casefold()`，因此 `Straße` 不会被当作 `STRASSE`。规范化只用于运行时绑定比较，不改写存储标题；近义词和独立改译仍失败。该规则不放宽译文与 TOC 的逐字标题绑定。TOC 标题绑定区分 `visible` 与 `container_only`：无可见源标签的纯图片/边界单元不要求
   worker 伪造 Markdown 标题，章节容器标题由 EPUB 构建器生成；可见子标题仍使用严格绑定。
   大章节拆成多个物理 part 时，`build_toc_heading_contexts` 为每个 part 生成独立 context：
   父标题只在源标题实际出现的 part 标记 `visible`，其余 part 标记 `container_only`；
@@ -453,7 +453,7 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
   part 并标记 `container_only`，避免 scoped worker 收到其他分片的标题或凭空新增标题。
   `container_only` 节点不生成虚构的 Markdown 锚点；它保留 TOC 层级，并导航到所属文件或首个
   含内容的后代。`visible` 节点的投影锚点缺失或落在不同标题时阻断构建。
-  新 handoff context 使用 `projection_version: 3`。旧 projection 不可用于 TOC heading binding。
+  新 handoff context 使用 `projection_version: 4`。旧 projection 不可用于 TOC heading binding。
   先运行 `translate --resume` 只刷新准备 context，暂不派发；随后用 `translate-validate` 校验现有译文，
   写出 schema 4 receipt。再运行一次 `translate --resume`，让当前 projection 和 receipt 共同决定
   completed/pending；只派发仍失效的 assignment，最后运行全量 `translate-validate`。若第一次准备报告

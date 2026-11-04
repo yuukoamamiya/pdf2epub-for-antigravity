@@ -241,6 +241,7 @@ def add_subchapter_anchors_to_parts(
     rendered_parts: list[tuple[str, str]],
     chapter_index: int,
     subchapter_info: list[dict],
+    source_markdown_by_file: dict[str, str] | None = None,
 ) -> tuple[list[tuple[str, str]], dict[str, str]]:
     """Place each child anchor in the part that actually contains its title.
 
@@ -276,6 +277,34 @@ def add_subchapter_anchors_to_parts(
 
         source_occurrence = info.get("source_occurrence")
         source_match_count = info.get("source_match_count")
+        expected_visible_title = info.get("expected_visible_title")
+        if expected_visible_title is None and source_markdown_by_file:
+            from .toc_model import toc_markdown_visible_title_candidates, toc_title_match_key
+
+            source_text = source_markdown_by_file.get(info.get("source_file", ""))
+            if source_text is None and len(source_markdown_by_file) == 1:
+                source_text = next(iter(source_markdown_by_file.values()))
+            if source_text is not None:
+                evidence = toc_markdown_visible_title_candidates(
+                    source_text, title, info.get("source_candidate_kind")
+                )
+                evidence_keys = {toc_title_match_key(value) for value in evidence}
+                if (
+                    type(source_occurrence) is int
+                    and type(source_match_count) is int
+                    and len(evidence) == source_match_count
+                    and 1 <= source_occurrence <= len(evidence)
+                    and len(evidence_keys) == 1
+                ):
+                    expected_visible_title = evidence[source_occurrence - 1]
+        has_inline_formatting = bool(re.search(
+            r"(?<!\\)(?:\*\*|__|(?<!\*)\*(?!\*)|(?<!_)_(?!_)|`|\]\(|</?(?:em|strong|i|b|code|a)\b)",
+            title,
+            re.I,
+        ))
+        if has_inline_formatting and expected_visible_title is not None and expected_visible_title != title:
+            info["navigation_expected_title"] = expected_visible_title
+            info["navigation_display_title"] = expected_visible_title
         if source_occurrence is not None or source_match_count is not None:
             from .epub.converter import visible_heading_text
 
@@ -284,7 +313,8 @@ def add_subchapter_anchors_to_parts(
             global_matches = []
             for part_index, (_filename, html_content) in enumerate(rendered_parts):
                 candidates = converter._subchapter_anchor_candidates(
-                    html_content, title, heading_pattern, visible_heading_text
+                    html_content, title, heading_pattern, visible_heading_text,
+                    expected_visible_title=expected_visible_title,
                 )
                 candidates_by_part.append(candidates)
                 global_matches.extend(candidates)
@@ -319,6 +349,7 @@ def add_subchapter_anchors_to_parts(
                     source_occurrence=local_occurrence,
                     source_match_count=len(local_selected),
                     source_candidate_kind=info.get("source_candidate_kind"),
+                    expected_visible_title=expected_visible_title,
                 )
                 if not found:
                     continue
@@ -1253,6 +1284,15 @@ def _render_epub_content(
     all_html_files = []
     generated_html = {}
     anchor_locations: dict[str, str] = {}
+    rendered_nodes: dict[str, Dict] = {}
+
+    def index_rendered_nodes(entries):
+        for item in entries:
+            if item.get("node_id"):
+                rendered_nodes[str(item["node_id"])] = item
+            index_rendered_nodes(item.get("children") or [])
+
+    index_rendered_nodes(epub_structure)
 
     def process_chapters(entries: List[Dict]):
         """Recursively process all chapters with files."""
@@ -1337,9 +1377,21 @@ def _render_epub_content(
                                 [(filename, html_content)],
                                 chapter_index,
                                 anchors_for_part,
+                                source_markdown_by_file={
+                                    Path(part_file).name: Path(part_file).read_text(encoding="utf-8")
+                                },
                             )
                             rendered_parts[part_idx] = anchored[0]
                             anchor_locations.update(locations)
+                            for anchor_info in anchors_for_part:
+                                identity = anchor_info.get("node_id")
+                                target_node = rendered_nodes.get(str(identity))
+                                anchor_key = str(anchor_info.get("anchor") or "").lstrip("#")
+                                if target_node is not None and anchor_key in locations:
+                                    if anchor_info.get("navigation_expected_title"):
+                                        target_node["navigation_expected_title"] = anchor_info["navigation_expected_title"]
+                                    if anchor_info.get("navigation_display_title"):
+                                        target_node["navigation_display_title"] = anchor_info["navigation_display_title"]
 
                     for html_filename, html_content in rendered_parts:
                         html_path = epub_dir / "text" / html_filename

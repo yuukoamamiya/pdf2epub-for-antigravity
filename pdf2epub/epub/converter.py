@@ -764,6 +764,7 @@ class ContentConverter:
         source_occurrence: Optional[int] = None,
         source_match_count: Optional[int] = None,
         source_candidate_kind: Optional[str] = None,
+        expected_visible_title: Optional[str] = None,
     ) -> Tuple[str, bool]:
         """Add one stable anchor and report whether a matching block was found.
 
@@ -782,9 +783,9 @@ class ContentConverter:
         if visible_heading is None:
             visible_heading = visible_heading_text
 
-        target_title = toc_title_match_key(normalize_toc_source_label(sub_title, markdown_source=False))
         matches = self._subchapter_anchor_candidates(
-            html_content, target_title, heading_pattern, visible_heading
+            html_content, sub_title, heading_pattern, visible_heading,
+            expected_visible_title=expected_visible_title,
         )
         selected_match = None
         if source_occurrence is not None or source_match_count is not None:
@@ -881,7 +882,9 @@ class ContentConverter:
         return None
 
     @staticmethod
-    def _subchapter_anchor_candidates(html_content, sub_title, heading_pattern, visible_heading):
+    def _subchapter_anchor_candidates(
+        html_content, sub_title, heading_pattern, visible_heading, *, expected_visible_title=None
+    ):
         """Collect exact, prefix-format-equivalent, and numberless candidates."""
         prefix = re.compile(r"^\s*(\d+(?:[.:]\d+)*)(?:\s*[.):]|\s*[-–—])?\s+(.*)$")
 
@@ -892,6 +895,7 @@ class ContentConverter:
             return tuple(match.group(1).replace(":", ".").split(".")), match.group(2)
 
         target = visible_heading(sub_title)
+        target = toc_title_match_key(expected_visible_title) if expected_visible_title is not None else target
         target_number, target_body = parse(target)
         matches = []
         for match in heading_pattern.finditer(html_content):

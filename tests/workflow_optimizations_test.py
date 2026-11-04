@@ -1673,7 +1673,7 @@ def test_toc_heading_binding_allows_whitespace_and_outer_quote_variants(tmp_path
                     "chapter.md": {
                         "node_id": "chapter-1",
                         "anchor": "toc-chapter-1",
-                        "projection_version": 3,
+                        "projection_version": 4,
                         "toc_title": "Chapter One",
                         "children": [
                             {"title": "Exact Child", "anchor": "toc-1-1", "node_id": "child-1"}
@@ -1706,7 +1706,7 @@ def test_toc_heading_bindings_only_files_scope_ignores_other_units(
     _write_heading_manifest(
         output,
         {
-            "a.md": {"node_id": "a", "anchor": "toc-a", "projection_version": 3, "toc_title": "第一章", "binding_mode": "visible"},
+            "a.md": {"node_id": "a", "anchor": "toc-a", "projection_version": 4, "toc_title": "第一章", "binding_mode": "visible"},
         },
     )
     validated = output / "translated" / "validated"
@@ -1729,7 +1729,7 @@ def test_toc_heading_bindings_only_files_requires_target(tmp_path: Path):
     output.mkdir()
     _write_heading_manifest(
         output,
-        {"a.md": {"node_id": "a", "anchor": "toc-a", "projection_version": 3, "toc_title": "第一章", "binding_mode": "visible"}},
+        {"a.md": {"node_id": "a", "anchor": "toc-a", "projection_version": 4, "toc_title": "第一章", "binding_mode": "visible"}},
     )
 
     report = validate_toc_heading_bindings(output, only_files=["a.md"])
@@ -1747,7 +1747,7 @@ def test_toc_heading_bindings_only_files_skips_missing_context(
     output.mkdir()
     _write_heading_manifest(
         output,
-        {"b.md": {"node_id": "b", "anchor": "toc-b", "projection_version": 3, "toc_title": "第二章", "binding_mode": "visible"}},
+        {"b.md": {"node_id": "b", "anchor": "toc-b", "projection_version": 4, "toc_title": "第二章", "binding_mode": "visible"}},
     )
     validated = output / "translated" / "validated"
     validated.mkdir(parents=True)
@@ -1794,7 +1794,7 @@ def _write_single_file_heading_fixture(
             "chapter_1.part1.md": {
                 "node_id": "chapter-1",
                 "anchor": "toc-chapter-1",
-                "projection_version": 3,
+                "projection_version": 4,
                 "toc_title": "第一章",
                 "binding_mode": "visible",
                 "children": [],

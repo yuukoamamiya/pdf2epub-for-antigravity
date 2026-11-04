@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections import Counter
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional
@@ -639,7 +638,7 @@ def build_global_toc_outline(
     return "\n".join(chosen_lines)
 
 
-def _normalize_toc_heading_for_binding(value: str, *, markdown_source: bool = True) -> str:
+def _normalize_toc_heading_for_binding(value: str, *, markdown_source: bool = False) -> str:
     """Normalize harmless presentation differences without changing wording."""
     return normalize_toc_source_label(value, markdown_source=markdown_source)
 
@@ -692,8 +691,7 @@ def validate_toc_heading_bindings(
         # chapter files must never mask a missing/wrong-part heading.
         candidate_files = [target]
 
-        candidates = Counter()
-        normalized_candidates = Counter()
+        candidates: list[tuple[str, str]] = []
         for cand_file in candidate_files:
             try:
                 lines = cand_file.read_text(encoding="utf-8").splitlines()
@@ -709,8 +707,8 @@ def validate_toc_heading_bindings(
                 if fenced or not value:
                     continue
                 value = re.sub(r"^#{1,6}\s+", "", value)
-                candidates[value] += 1
-                normalized_candidates[_normalize_toc_heading_for_binding(value)] += 1
+                visible_value = _normalize_toc_heading_for_binding(value, markdown_source=True)
+                candidates.append((value, visible_value))
 
         expected = []
         title = str(context.get("toc_title") or "").strip()
@@ -745,20 +743,49 @@ def validate_toc_heading_bindings(
                 continue
             expected.append((label, child_title))
 
-        for label, value in expected:
+        def candidate_indices(value: str) -> tuple[list[int], list[int], list[int]]:
             normalized_value = _normalize_toc_heading_for_binding(value, markdown_source=False)
             value_stripped = re.sub(r"^\d+[\.\s、]+", "", value).strip()
             norm_stripped = _normalize_toc_heading_for_binding(value_stripped, markdown_source=False)
-            match_mode = "exact" if candidates[value] > 0 else None
-            if match_mode == "exact":
-                candidates[value] -= 1
-                normalized_candidates[_normalize_toc_heading_for_binding(value)] -= 1
-            if match_mode is None and normalized_candidates[normalized_value] > 0:
-                match_mode = "normalized"
-                normalized_candidates[normalized_value] -= 1
-            elif match_mode is None and norm_stripped and normalized_candidates[norm_stripped] > 0:
-                match_mode = "normalized"
-                normalized_candidates[norm_stripped] -= 1
+            exact = [index for index, (raw, _visible) in enumerate(candidates) if raw == value]
+            visible = [index for index, (_raw, rendered) in enumerate(candidates) if rendered == normalized_value]
+            numberless = [index for index, (_raw, rendered) in enumerate(candidates) if norm_stripped and rendered == norm_stripped]
+            return exact, visible, numberless
+
+        alternatives = [candidate_indices(value) for _label, value in expected]
+        exact_assignments: dict[int, int] = {}
+        reserved_exact: set[int] = set()
+        for expected_index, groups in enumerate(alternatives):
+            exact = next((index for index in groups[0] if index not in reserved_exact), None)
+            if exact is not None:
+                exact_assignments[expected_index] = exact
+                reserved_exact.add(exact)
+        labels_by_candidate: dict[int, set[str]] = {}
+        for expected_index, ((_label, value), groups) in enumerate(zip(expected, alternatives)):
+            if expected_index in exact_assignments:
+                continue
+            for index in set(groups[1] + groups[2]) - reserved_exact:
+                labels_by_candidate.setdefault(index, set()).add(value)
+        ambiguous = {index for index, values in labels_by_candidate.items() if len(values) > 1}
+        for index in sorted(ambiguous):
+            errors.append(
+                f"{name}: one Markdown heading ambiguously matches distinct TOC labels: "
+                f"{sorted(labels_by_candidate[index])!r}"
+            )
+        consumed: set[int] = set(reserved_exact)
+        for expected_index, ((label, value), (_exact, visible, numberless)) in enumerate(zip(expected, alternatives)):
+            choices = [exact_assignments[expected_index]] if expected_index in exact_assignments else []
+            match_mode = "exact" if choices else None
+            if not choices:
+                choices = [index for index in visible if index not in consumed and index not in ambiguous]
+                if choices:
+                    match_mode = "normalized"
+            if not choices:
+                choices = [index for index in numberless if index not in consumed and index not in ambiguous]
+                if choices:
+                    match_mode = "normalized"
+            if choices:
+                consumed.add(choices[0])
             checked.append(
                 {
                     "file": name,
