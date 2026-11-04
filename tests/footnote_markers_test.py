@@ -116,7 +116,7 @@ def test_decorative_number_forms_are_not_treated_as_numeric_sequences():
 
 @pytest.mark.parametrize(
     ("candidate_schema", "validation_schema", "expected"),
-    [(1, 3, "candidate report"), (3, 1, "decision validation")],
+    [(1, 4, "candidate report"), (4, 1, "decision validation")],
 )
 def test_apply_rejects_old_marker_checkpoint_contracts(
     tmp_path: Path, candidate_schema: int, validation_schema: int, expected: str
@@ -130,7 +130,7 @@ def test_apply_rejects_old_marker_checkpoint_contracts(
     result = apply_footnote_normalization(tmp_path)
     assert result["valid"] is False
     assert expected in result["errors"][0]
-    assert FOOTNOTE_PREPARE_SCHEMA_VERSION == 3
+    assert FOOTNOTE_PREPARE_SCHEMA_VERSION == 4
 
 
 def test_special_marker_matching_is_exact_and_ignores_prose_star():

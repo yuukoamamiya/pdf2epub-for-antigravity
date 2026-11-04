@@ -184,6 +184,16 @@ def region_layout_evidence(
         block = blocks[record_index] if record_index < len(blocks) else None
         if not isinstance(block, Mapping) or not is_ordinary_body_block(block):
             continue
+        later_box = record["bbox"]
+        region_left = min(float(item["bbox"][0]) for item in region_records)
+        region_right = max(float(item["bbox"][2]) for item in region_records)
+        candidate_width = max(0.0, region_right - region_left)
+        later_width = max(0.0, float(later_box[2]) - float(later_box[0]))
+        horizontal = max(0.0, min(region_right, float(later_box[2])) - max(region_left, float(later_box[0])))
+        # A later block in the opposite column is not body continuation for
+        # this note lane. Full-width or overlapping prose remains evidence.
+        if min(candidate_width, later_width) > 0 and horizontal / min(candidate_width, later_width) < 0.2:
+            continue
         later_bottom = float(record["bbox"][3])
         if later_bottom >= content_bottom - tail_tolerance:
             body_continues = True
@@ -382,6 +392,11 @@ def body_flow_warning(
             continue
         later_bbox = _normalise_bbox(later, sidecar)
         if not later_bbox:
+            continue
+        candidate_width = max(0.0, values[2] - values[0])
+        later_width = max(0.0, later_bbox[2] - later_bbox[0])
+        horizontal = max(0.0, min(values[2], later_bbox[2]) - max(values[0], later_bbox[0]))
+        if min(candidate_width, later_width) > 0 and horizontal / min(candidate_width, later_width) < 0.2:
             continue
         if later_bbox[1] < values[3] - DEFAULT_REGION_MAX_GAP:
             continue

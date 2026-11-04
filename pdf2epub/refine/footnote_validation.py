@@ -81,7 +81,16 @@ def _persist_result(
         updated_report["decisions"] = result["decisions"]
         updated_report["decisions_status"] = "validated"
         atomic_write_json(report_path, updated_report)
-        _write_footnote_unit_contexts(output_dir, updated_report)
+        manifest_path = output_dir / "footnote_subagent_manifest.json"
+        if manifest_path.is_file():
+            context_files = _write_footnote_unit_contexts(output_dir, updated_report)
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["unit_context_files"] = context_files
+            manifest["unit_context_sha256"] = {
+                name: sha256_file(output_dir / relative)
+                for name, relative in context_files.items()
+            }
+            atomic_write_json(manifest_path, manifest)
     if report_path.is_file():
         result["candidate_report_sha256"] = sha256_file(report_path)
     atomic_write_json(output_dir / "footnote_decision_validation.json", result)

@@ -361,9 +361,18 @@ def _cost_inventory(output_dir: Path, loaded: Mapping[str, Any], artifacts: Mapp
             try: path.relative_to(output_dir.resolve())
             except ValueError: continue
             if path.is_file(): files[path.relative_to(output_dir.resolve()).as_posix()] = {"bytes": path.stat().st_size, "category": "unit_context"}
+    packet_relative = subagent.get("review_packet")
+    if isinstance(packet_relative, str):
+        path = (output_dir / packet_relative).resolve()
+        try:
+            path.relative_to(output_dir.resolve())
+        except ValueError:
+            path = None
+        if path is not None and path.is_file():
+            files[path.relative_to(output_dir.resolve()).as_posix()] = {"bytes": path.stat().st_size, "category": "review_packet"}
     totals = Counter()
     for detail in files.values(): totals[detail["category"]] += detail["bytes"]
-    handoff_bytes = sum(totals[k] for k in ("subagent_manifest", "visual_audit_manifest", "prompt", "unit_context"))
+    handoff_bytes = sum(totals[k] for k in ("subagent_manifest", "visual_audit_manifest", "prompt", "unit_context", "review_packet"))
     valid_image_refs = [x for x in image_refs if isinstance(x, str)] if image_refs is not None else None
     return {"files": files, "bytes_by_category": dict(totals), "total_unique_bytes": sum(totals.values()),
         "handoff_unique_bytes": handoff_bytes,
@@ -401,7 +410,7 @@ def build_footnote_review_summary(output_dir: Path) -> dict[str, Any]:
             "unique_supporting_page_images": costs["unique_page_images"],
             "repeated_page_image_references": costs["repeated_page_image_references"],
             "unique_region_crop_images": costs["unique_region_crop_images"],
-            "handoff_files_bytes": costs["handoff_unique_bytes"] if any(costs["bytes_by_category"].get(k, 0) for k in ("subagent_manifest", "visual_audit_manifest", "prompt", "unit_context")) else None},
+            "handoff_files_bytes": costs["handoff_unique_bytes"] if any(costs["bytes_by_category"].get(k, 0) for k in ("subagent_manifest", "visual_audit_manifest", "prompt", "unit_context", "review_packet")) else None},
         "region_reasons_multi_select": region_summary["reason_counts"],
         "region_reason_combinations": region_summary["reason_combinations"],
         "candidate_review_reason_distribution": dict(candidate_data["review_reasons"]),

@@ -1,4 +1,5 @@
 import json
+import pytest
 
 from pdf2epub.refine.footnote_continuation_review import (
     validate_continuation_review_decisions,
@@ -6,10 +7,46 @@ from pdf2epub.refine.footnote_continuation_review import (
 from pdf2epub.refine.footnote_options import footnote_mode_warnings
 from pdf2epub.refine.footnote_report import build_footnote_report
 from pdf2epub.refine.footnote_handoff import prepare_footnote_subagent
+from pdf2epub.refine.footnote_handoff import load_footnote_unit_contexts
 from pdf2epub.refine.footnote_validation import validate_footnote_decisions
 from pdf2epub.refine.footnote_apply import apply_footnote_normalization
 from pdf2epub.refine.footnote_status import footnote_normalization_status
 from pdf2epub.refine.footnote_windows import build_missing_continuation_reviews
+
+
+def test_old_footnote_handoff_contract_requires_regeneration(tmp_path):
+    (tmp_path / "footnote_subagent_manifest.json").write_text(
+        json.dumps({"schema_version": 3, "unit_context_files": {"chapter.md": "old.json"}}),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="rerun footnote-prepare"):
+        load_footnote_unit_contexts(tmp_path)
+
+
+def test_missing_handoff_manifest_remains_library_compatible(tmp_path):
+    assert load_footnote_unit_contexts(tmp_path) == {}
+
+
+@pytest.mark.parametrize("manifest_bytes", [b"{broken", b"\xff"])
+def test_existing_unreadable_handoff_manifest_fails_closed(tmp_path, manifest_bytes):
+    (tmp_path / "footnote_subagent_manifest.json").write_bytes(manifest_bytes)
+    with pytest.raises(ValueError, match="manifest is unreadable"):
+        load_footnote_unit_contexts(tmp_path)
+
+
+@pytest.mark.parametrize("values,hashes", [
+    ([], {}),
+    ({"../escape.md": "footnote_contexts/escape.md.json"}, {"../escape.md": "a"}),
+    ({"chapter.md": "../outside.json"}, {"chapter.md": "a"}),
+])
+def test_invalid_context_inventory_names_and_paths_fail_closed(tmp_path, values, hashes):
+    (tmp_path / "footnote_subagent_manifest.json").write_text(json.dumps({
+        "schema_version": 4,
+        "unit_context_files": values,
+        "unit_context_sha256": hashes,
+    }), encoding="utf-8")
+    with pytest.raises(ValueError, match="inventory|filename|path"):
+        load_footnote_unit_contexts(tmp_path)
 
 
 def _page(page, candidates):
@@ -168,6 +205,13 @@ def test_prepare_handoff_validate_apply_and_status_require_explicit_resolution(t
     paths, _ = _prepare_continuation_book(tmp_path, monkeypatch)
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
     report = json.loads(paths["report"].read_text(encoding="utf-8"))
+    packet_path = tmp_path / manifest["review_packet"]
+    assert manifest["review_packet_sha256"]
+    packet = json.loads(packet_path.read_text(encoding="utf-8"))
+    assert packet["continuation_reviews"][0]["pages"] == [1, 2]
+    assert packet["continuation_reviews"][0]["visual_files"]["2"]["path"] == "page_002.png"
+    assert "1:primary:0" in packet["candidates"]
+    assert "footnote_review_packet.json" in paths["prompt"].read_text(encoding="utf-8")
     assert manifest["status"] == "pending_review"
     task = report["continuation_reviews"][0]
     decision = {
@@ -193,6 +237,8 @@ def test_prepare_handoff_validate_apply_and_status_require_explicit_resolution(t
         }],
     }), encoding="utf-8")
     assert validate_footnote_decisions(tmp_path)["valid"] is True
+    from pdf2epub.workflow_contracts import sha256_file
+    assert sha256_file(packet_path) == manifest["review_packet_sha256"]
     normalized = apply_footnote_normalization(tmp_path)
     assert normalized["valid"] is True
     assert normalized["continuation_reviews"][0]["outcome"] == "recovered_continuation"
@@ -232,6 +278,36 @@ def test_prepare_handoff_validate_apply_and_status_require_explicit_resolution(t
     (tmp_path / "page_002.png").write_bytes(b"changed after validation")
     assert footnote_normalization_status(tmp_path)["current"] is False
     assert apply_footnote_normalization(tmp_path)["valid"] is False
+    contexts = load_footnote_unit_contexts(tmp_path)
+    assert "chapter_1.md" in contexts
+    context = json.loads(contexts["chapter_1.md"].read_text(encoding="utf-8"))
+    assert context["source_units"] == ["chapter_1.md"]
+    assert context["source_packet"] == {
+        "path": manifest["review_packet"], "sha256": manifest["review_packet_sha256"],
+        "usage": "provenance_only_do_not_open_for_unit_work",
+    }
+    assert "1:primary:0" in context["pages"][0]["candidate_refs"]
+    assert all(ref in context["candidates"] for ref in context["pages"][0]["candidate_refs"])
+    assert set(context["pages"][0]["page"] for _ in [0]) == {1}
+    context["candidates"].clear()
+    contexts["chapter_1.md"].write_text(json.dumps(context), encoding="utf-8")
+    manifest["unit_context_sha256"]["chapter_1.md"] = sha256_file(contexts["chapter_1.md"])
+    paths["manifest"].write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(ValueError, match="missing or excess candidate refs"):
+        load_footnote_unit_contexts(tmp_path)
+    packet_path.write_text(packet_path.read_text(encoding="utf-8") + " ", encoding="utf-8")
+    assert apply_footnote_normalization(tmp_path)["valid"] is False
+
+
+def test_validate_rejects_modified_preparation_evidence_before_decisions(tmp_path, monkeypatch):
+    paths, _ = _prepare_continuation_book(tmp_path, monkeypatch)
+    report = json.loads(paths["report"].read_text(encoding="utf-8"))
+    report["pages"][0]["sidecar"] = "pages/changed.ocr.json"
+    paths["report"].write_text(json.dumps(report), encoding="utf-8")
+    result = validate_footnote_decisions(tmp_path)
+    assert result["valid"] is False
+    assert any("preparation evidence changed" in error for error in result["errors"])
+
 
 
 def test_image_confirmed_body_candidate_is_not_moved(tmp_path, monkeypatch):

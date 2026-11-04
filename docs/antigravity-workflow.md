@@ -924,8 +924,11 @@ validation 收据一致，任何一项变化都会阻断 apply，apply 不会静
 没有歧义时不要求 ambiguity/decision 哈希。
 
 `footnote_candidates.json`、`footnote_decisions.json` 和 `footnote_decision_validation.json`
-使用 prepare/decision schema 3；`endnote_definition_ambiguities.json`、其 decisions 与 validation
+使用 prepare/decision schema 4；`endnote_definition_ambiguities.json`、其 decisions 与 validation
 使用独立 schema 2；`footnote_normalization.json` 使用 schema 8，TOC 使用 schema 2。版本号彼此独立。
+prepare manifest 另以 SHA-256 绑定 compact `footnote_review_packet.json`；Reviewer 使用 packet，完整
+candidate report 留作审计/恢复。validation 写回决定不会重建 packet。packet 缺失或哈希不符时须重跑
+`footnote-prepare`，旧 handoff 不得静默加载。
 旧 normalization schema 1–7 checkpoint 升级后需要重新运行 `footnote-prepare → footnote-validate →
 footnote-apply`，不需要重新 OCR。
 旧 prepare checkpoint 不能复用；schema 1 的 endnote decisions 只兼容没有 inline 候选的旧式行边界

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-FOOTNOTE_PREPARE_SCHEMA_VERSION = 3
+FOOTNOTE_PREPARE_SCHEMA_VERSION = 4
 
 
 DECISION_ROLES = frozenset(

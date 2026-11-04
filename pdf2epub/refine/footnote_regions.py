@@ -64,6 +64,48 @@ def build_page_footnote_regions(
         for index in ordered
         if 0 <= index < len(blocks) and isinstance(blocks[index], Mapping)
     }
+    # A wide first note line and a narrower following line can be one footer
+    # lane when their left edges align and they touch vertically. Only fold a
+    # wide block when there is exactly one compatible note lane; this leaves
+    # cross-column bridges ambiguous.
+    folded_wide_notes: dict[int, int] = {}
+    wide_notes = [
+        index for index in ordered
+        if index in scopes
+        and str(scopes[index].get("placement")) == "full_width"
+        and _FOOTNOTE_LABEL_RE.search(str(by_index[index].get("label") or ""))
+        and not by_index[index].get("body_flow_warning")
+        and not by_index[index].get("table_adjacent")
+    ]
+    for wide_index in wide_notes:
+        wide_box = scopes[wide_index].get("bbox")
+        if not wide_box:
+            continue
+        compatible = []
+        for other_index in ordered:
+            if other_index == wide_index or other_index not in scopes:
+                continue
+            other_box = scopes[other_index].get("bbox")
+            if not other_box or str(scopes[other_index].get("placement")) in {"full_width", "margin_left", "margin_right"}:
+                continue
+            other_candidate = by_index[other_index]
+            if (
+                not _FOOTNOTE_LABEL_RE.search(str(other_candidate.get("label") or ""))
+                or other_candidate.get("body_flow_warning")
+                or other_candidate.get("table_adjacent")
+                or (by_index[wide_index].get("key") and by_index[wide_index].get("key") == other_candidate.get("key"))
+            ):
+                continue
+            vertical_gap = max(
+                0.0,
+                float(other_box[1]) - float(wide_box[3]),
+                float(wide_box[1]) - float(other_box[3]),
+            )
+            aligned_left = abs(float(other_box[0]) - float(wide_box[0])) <= 0.025
+            if aligned_left and vertical_gap <= DEFAULT_REGION_MAX_GAP:
+                compatible.append(other_index)
+        if len(compatible) == 1:
+            folded_wide_notes[wide_index] = compatible[0]
     # Infer candidate lanes from actual horizontal overlap, not the page
     # midpoint. That keeps centered or narrow single-column text together.
     lane_components: list[list[int]] = []
@@ -158,6 +200,40 @@ def build_page_footnote_regions(
                 "margin_right",
             }:
                 scope["scope_id"] = lane_id
+    for wide_index, narrow_index in folded_wide_notes.items():
+        narrow_component = next(
+            (component for component in lane_components if narrow_index in component),
+            [narrow_index],
+        )
+        unsupported_neighbors = []
+        for member in narrow_component:
+            if member in {wide_index, narrow_index}:
+                continue
+            candidate = by_index.get(member, {})
+            if _FOOTNOTE_LABEL_RE.search(str(candidate.get("label") or "")):
+                continue
+            evidence = candidate.get("continuation_evidence")
+            semantic = evidence.get("semantic_comparison") if isinstance(evidence, Mapping) else None
+            strong_continuation = (
+                candidate.get("local_role") == "footnote_continuation"
+                and candidate.get("key")
+                and isinstance(evidence, Mapping)
+                and evidence.get("confidence") == "high"
+                and isinstance(semantic, Mapping)
+                and semantic.get("winner") == "footnote"
+                and semantic.get("confidence") == "high"
+            )
+            if not strong_continuation:
+                unsupported_neighbors.append(member)
+        if (
+            wide_index not in ambiguous_lane_blocks
+            and narrow_index not in ambiguous_lane_blocks
+            and not unsupported_neighbors
+            and scopes[wide_index].get("placement") not in {"margin_left", "margin_right"}
+            and scopes[narrow_index].get("placement") not in {"margin_left", "margin_right"}
+            and not ocr_conflict
+        ):
+            scopes[wide_index]["scope_id"] = scopes[narrow_index]["scope_id"]
     key_scopes: dict[str, set[str]] = {}
     for index, item in by_index.items():
         key = str(item.get("key") or "").strip()

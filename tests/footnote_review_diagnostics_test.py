@@ -77,13 +77,20 @@ def test_legacy_missing_fields_and_stale_hash_are_not_success(tmp_path):
     (tmp_path / "footnote_contexts").mkdir()
     (tmp_path / "footnote_contexts" / "unit-a.json").write_text("{}", encoding="utf-8")
     put(tmp_path, "footnote_subagent_manifest.json", {"unit_context_files": {"unit-a": "footnote_contexts/unit-a.json", "unit-b": "footnote_contexts/unit-a.json"}})
+    (tmp_path / "footnote_review_packet.json").write_text("{\"compact\":true}", encoding="utf-8")
+    put(tmp_path, "footnote_subagent_manifest.json", {
+        "unit_context_files": {"unit-a": "footnote_contexts/unit-a.json", "unit-b": "footnote_contexts/unit-a.json"},
+        "review_packet": "footnote_review_packet.json",
+    })
     result = build_footnote_review_summary(tmp_path)
     assert result["validation_freshness"] == "candidate_report_stale"
     assert result["counts"]["high_confidence_candidates"] == 1
     assert result["counts"]["handoff_files_bytes"] is not None
     assert result["cost_inventory"]["files"]["footnote_contexts/unit-a.json"]["bytes"] == 2
+    assert result["cost_inventory"]["files"]["footnote_review_packet.json"]["category"] == "review_packet"
     assert result["counts"]["handoff_files_bytes"] == ((tmp_path / "footnote_subagent_manifest.json").stat().st_size
-                                                       + (tmp_path / "footnote_visual_audit_manifest.json").stat().st_size + 2)
+                                                       + (tmp_path / "footnote_visual_audit_manifest.json").stat().st_size + 2
+                                                       + (tmp_path / "footnote_review_packet.json").stat().st_size)
     assert result["artifacts"]["footnote_candidates.json"]["sha256"]
     assert result["decision_diagnostics"]["missing_decision_addresses"] is None
     assert "footnote_decisions.json" in result["missing_artifacts"]

@@ -92,6 +92,14 @@ def validate_candidate_evidence(
         hashes_current("secondary_sidecar_sha256")
     elif secondary_hashes:
         errors.append("single-OCR candidate report unexpectedly contains secondary OCR files")
+    manifest_path = Path(output_dir) / "footnote_subagent_manifest.json"
+    if manifest_path.is_file():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            from .footnote_review_packet import validate_review_packet
+            validate_review_packet(Path(output_dir), manifest)
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+            errors.append(f"review packet/evidence contract is invalid: {exc}")
     return {
         "source_kind": source_kind,
         "evidence_mode": evidence_mode,

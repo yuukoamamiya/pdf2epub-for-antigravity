@@ -88,6 +88,16 @@ def load_footnote_apply_inputs(
         raise FootnoteApplyInputError(
             "footnote candidate report is missing its continuation_reviews queue; rerun footnote-prepare"
         )
+    manifest_path = output_dir / "footnote_subagent_manifest.json"
+    if manifest_path.is_file():
+        try:
+            manifest = _read_json(manifest_path, "footnote_subagent_manifest.json")
+            from .footnote_review_packet import validate_review_packet
+            validate_review_packet(output_dir, manifest)
+        except ValueError as exc:
+            raise FootnoteApplyInputError(
+                f"footnote preparation evidence is stale; rerun footnote-prepare: {exc}"
+            ) from exc
     if not isinstance(validation.get("continuation_reviews"), list):
         raise FootnoteApplyInputError(
             "footnote decision validation is missing continuation review outcomes; rerun footnote-validate"

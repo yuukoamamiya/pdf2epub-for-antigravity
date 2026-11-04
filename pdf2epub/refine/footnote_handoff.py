@@ -20,6 +20,7 @@ from .endnote_review import (
 from .footnote_contracts import FOOTNOTE_PREPARE_SCHEMA_VERSION
 from .footnote_structure import load_refined_units as _load_refined_units
 from .footnote_prepare import prepare_footnote_candidates
+from .footnote_review_packet import validate_review_packet, write_review_packet
 
 def _unit_context_path(output_dir: Path, source_name: str) -> Path:
     safe_name = Path(str(source_name)).name
@@ -36,10 +37,28 @@ def _unit_context_path(output_dir: Path, source_name: str) -> Path:
 def _write_unit_contexts(
     output_dir: Path,
     report: Mapping[str, Any],
+    *,
+    review_packet: Optional[str] = None,
+    review_packet_sha256: Optional[str] = None,
 ) -> dict[str, str]:
     """Write sparse per-unit projections so workers do not load the book report."""
     page_reports = report.get("pages", [])
     cross_windows = report.get("cross_page_windows", [])
+    if review_packet is None or review_packet_sha256 is None:
+        try:
+            current_manifest = json.loads((output_dir / "footnote_subagent_manifest.json").read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            current_manifest = {}
+        review_packet = review_packet or current_manifest.get("review_packet")
+        review_packet_sha256 = review_packet_sha256 or current_manifest.get("review_packet_sha256")
+    packet_data: Mapping[str, Any] = {}
+    if isinstance(review_packet, str):
+        try:
+            loaded_packet = json.loads((output_dir / review_packet).read_text(encoding="utf-8"))
+            if isinstance(loaded_packet, Mapping):
+                packet_data = loaded_packet
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            packet_data = {}
     unit_context_files: dict[str, str] = {}
     for unit in _load_refined_units(output_dir):
         names = [str(name) for name in (unit.get("part_files") or [unit.get("file")]) if name]
@@ -50,22 +69,78 @@ def _write_unit_contexts(
             start_page, end_page = int(page_range[0]), int(page_range[1])
         except (TypeError, ValueError):
             continue
-        pages = [
-            item for item in page_reports
-            if start_page <= int(item.get("page", -1)) <= end_page
-        ]
         windows = [
-            item for item in cross_windows
+            _compact_window_context(item) for item in cross_windows
             if any(start_page <= int(page) <= end_page for page in item.get("pages", []))
         ]
         continuation_reviews = [
-            item for item in report.get("continuation_reviews", [])
+            _compact_window_context(item) for item in report.get("continuation_reviews", [])
             if any(start_page <= int(page) <= end_page for page in item.get("pages", []))
         ]
+        evidence_pages = set(range(start_page, end_page + 1))
+        for window in [*windows, *continuation_reviews]:
+            evidence_pages.update(
+                int(page) for page in window.get("pages", [])
+                if str(page).lstrip("-").isdigit()
+            )
+        pages = [
+            _compact_page_context(item) for item in page_reports
+            if int(item.get("page", -1)) in evidence_pages
+        ]
+        by_evidence_page = {int(item["page"]): item for item in pages if str(item.get("page", "")).isdigit()}
+        visual_inventory = report.get("visual_evidence", {}).get("files", {}) if isinstance(report.get("visual_evidence"), Mapping) else {}
+        for page_number in sorted(evidence_pages):
+            page_context = by_evidence_page.setdefault(page_number, {
+                "page": page_number,
+                "sidecar": f"pages/page_{page_number:03d}.ocr.json",
+            })
+            image = visual_inventory.get(str(page_number), visual_inventory.get(page_number)) if isinstance(visual_inventory, Mapping) else None
+            if isinstance(image, str) and not page_context.get("visual_file"):
+                page_context["visual_file"] = image
+            if report.get("ocr_evidence_mode") == "two_ocr":
+                secondary_hashes = report.get("secondary_sidecar_sha256", {})
+                secondary_path = next((path for path in secondary_hashes if f"page_{page_number:03d}" in str(path)), None)
+                if secondary_path and not page_context.get("secondary_sidecar"):
+                    page_context["secondary_sidecar"] = secondary_path
+        pages = [by_evidence_page[number] for number in sorted(by_evidence_page)]
+        # Each part is a distinct Markdown permission boundary. Page evidence
+        # is retained as one shared read-only projection, but never lists its
+        # sibling parts as authorized source units.
+        refs: set[str] = set()
+        for page_context in pages:
+            refs.update(str(ref) for ref in page_context.get("candidate_refs", []))
+            for region in page_context.get("footnote_regions", []):
+                refs.update(str(ref) for ref in region.get("candidate_refs", []))
+        for window in [*windows, *continuation_reviews]:
+            for key in ("left_candidate_refs", "right_candidate_refs"):
+                refs.update(str(ref) for ref in window.get(key, []))
+            if window.get("source_note_ref"):
+                refs.add(str(window["source_note_ref"]))
+        packet_candidates = packet_data.get("candidates", {}) if isinstance(packet_data, Mapping) else {}
+        page_by_number = {int(page["page"]): page for page in pages if str(page.get("page", "")).isdigit()}
+        local_facts = {}
+        if isinstance(packet_candidates, Mapping):
+            for ref in sorted(refs):
+                fact = packet_candidates.get(ref)
+                if not isinstance(fact, Mapping):
+                    continue
+                page_context = page_by_number.get(int(fact.get("page", 0)), {})
+                local_facts[ref] = _unit_fact_projection(fact, page_context)
+        if refs - set(local_facts):
+            raise ValueError(
+                "footnote unit context contains candidate refs missing from its packet: "
+                + ", ".join(sorted(refs - set(local_facts))[:10])
+            )
         context = {
             "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
             "task": "footnote-prepare",
-            "source_units": names,
+            "preparation_evidence_sha256": packet_data.get("preparation_evidence_sha256"),
+            "source_packet": {
+                "path": review_packet,
+                "sha256": review_packet_sha256,
+                "usage": "provenance_only_do_not_open_for_unit_work",
+            },
+            "source_units": [],
             "page_range": [start_page, end_page],
             "pages": pages,
             "cross_page_windows": windows,
@@ -76,12 +151,76 @@ def _write_unit_contexts(
                 if isinstance(item, Mapping)
                 and start_page <= int(item.get("page", -1)) <= end_page
             ],
+            "candidates": local_facts,
         }
         for name in names:
+            context["source_units"] = [name]
             context_path = _unit_context_path(output_dir, name)
             atomic_write_json(context_path, context)
             unit_context_files[name] = context_path.relative_to(output_dir).as_posix()
     return unit_context_files
+
+
+def _compact_page_context(page: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep review facts and evidence paths without serializing scan payloads."""
+    projected = {
+        key: page[key] for key in (
+            "page", "sidecar", "secondary_sidecar", "visual_file",
+            "consensus_visual_review", "consensus_status",
+        ) if key in page
+    }
+    refs = []
+    for field, default_source in (("candidates", "primary"), ("audit_candidates", "primary"), ("secondary_only_candidates", "secondary")):
+        for row in page.get(field, []) or []:
+            if isinstance(row, Mapping):
+                refs.append(f"{int(row.get('page', page.get('page', 0)))}:{row.get('source', default_source)}:{int(row.get('block', -1))}")
+    projected["candidate_refs"] = sorted(set(refs))
+    projected["footnote_regions"] = [
+        {key: region[key] for key in ("region_id", "disposition", "reasons", "region_visual_file") if key in region}
+        | {"candidate_refs": [
+            f"{int(block.get('page', page.get('page', 0)))}:{block.get('source', 'primary')}:{int(block.get('block', -1))}"
+            for block in region.get("blocks", []) if isinstance(block, Mapping)
+        ]}
+        for region in page.get("footnote_regions", [])
+        if isinstance(region, Mapping) and region.get("disposition") == "visual_audit_required"
+    ]
+    return projected
+
+
+def _unit_fact_projection(fact: Mapping[str, Any], page_context: Mapping[str, Any]) -> dict[str, Any]:
+    """Project a packet fact into the least text required by one unit."""
+    source = str(fact.get("source") or "primary")
+    projected = {
+        key: fact[key] for key in (
+            "page", "source", "block", "key", "label", "bbox",
+            "confidence", "local_role", "marker_label", "review_reason",
+            "text_ending", "body_flow_warning",
+        ) if key in fact
+    }
+    if fact.get("text") and (not fact.get("key") or str(fact.get("local_role") or "").endswith("continuation")):
+        projected["text_excerpt"] = str(fact["text"])[:240]
+    projected["source_sidecar"] = page_context.get(
+        "secondary_sidecar" if source == "secondary" else "sidecar"
+    )
+    return projected
+
+
+def _compact_window_context(window: Mapping[str, Any]) -> dict[str, Any]:
+    """Retain every adjacent-page evidence path and exact source address."""
+    result = {key: window[key] for key in (
+        "pages", "kind", "status", "source_note", "visual_files",
+        "source_note_ref",
+        "sidecars", "reason", "task_id", "expected_next_page",
+        "terminal_page", "continuation_evidence", "gap_evidence",
+    ) if key in window}
+    for field in ("left_candidates", "right_candidates"):
+        rows = window.get(field)
+        if isinstance(rows, list):
+            result[field.removesuffix("_candidates") + "_candidate_refs"] = [
+                f"{int(row.get('page', 0))}:{row.get('source', 'primary')}:{int(row.get('block', -1))}"
+                for row in rows if isinstance(row, Mapping)
+            ]
+    return result
 
 
 def _endnote_ambiguity_section(ambiguity_count: int) -> str:
@@ -184,7 +323,12 @@ def prepare_footnote_subagent(
         auto_accept=auto_accept,
         native_max_font_ratio=native_max_font_ratio,
     )
-    unit_context_files = _write_unit_contexts(output_dir, report)
+    packet_path, packet_sha256, preparation_evidence_sha256 = write_review_packet(output_dir, report)
+    unit_context_files = _write_unit_contexts(
+        output_dir, report,
+        review_packet=packet_path,
+        review_packet_sha256=packet_sha256,
+    )
     if report["footnote_mode"] == "disabled":
         ambiguities = {
             "schema_version": 1,
@@ -214,6 +358,9 @@ def prepare_footnote_subagent(
         "footnote_mode_source": report.get("footnote_mode_source"),
         "warnings": report.get("warnings", []),
         "candidate_report": "footnote_candidates.json",
+        "review_packet": packet_path,
+        "review_packet_sha256": packet_sha256,
+        "preparation_evidence_sha256": preparation_evidence_sha256,
         "review_pages": report["review_pages"],
         "high_confidence_candidate_count": report["high_confidence_candidate_count"],
         "review_candidate_count": report["review_candidate_count"],
@@ -238,6 +385,14 @@ def prepare_footnote_subagent(
         "continuation_reviews": report.get("continuation_reviews", []),
         "consensus_visual_review_pages": report["consensus_visual_review_pages"],
         "unit_context_files": unit_context_files,
+        "unit_context_sha256": {
+            name: sha256_file(output_dir / relative)
+            for name, relative in unit_context_files.items()
+        },
+        "unit_context_sha256": {
+            name: sha256_file(output_dir / relative)
+            for name, relative in unit_context_files.items()
+        },
         "decision_file": (
             "footnote_decisions.json" if page_review_required else None
         ),
@@ -313,7 +468,7 @@ def prepare_footnote_subagent(
             "endnote ambiguities use the final section and write "
             f"`{DECISIONS_FILENAME}`."
         )
-    prompt = f"""# Footnote review\n\nBook: {book_title}\n\nRead `footnote_subagent_manifest.json`, `footnote_candidates.json`, and `footnote_visual_audit_manifest.json`. The local script first inferred page-level bottom-note regions. Review only the regions listed as `visual_audit_required` and their blocks marked `confidence: review`; blocks marked `confidence: high` are already accepted by the deterministic local rule and do not need a decision. Do not reread or rewrite the whole book. {source_guidance}\n\nCandidate page sidecars and visual evidence:\n{page_text}\n\nFor every listed review page, open the full-page `visual` PNG first. It is authoritative for the overall body/footnote boundary, page furniture, reading order, and cross-page context. When a `crop` PNG is present, open it as a zoomed supplement for small text and block-level details; never use the crop alone to decide whether a region belongs to the page footer or body. If the full-page image is unavailable, use the crop and sidecar coordinates.\n\nA region audit is one visual decision for the area, but the output must still contain one block decision for every listed review/audit block so the deterministic apply stage can address exact sidecar coordinates. Treat the page image as authoritative for region boundaries, continuations, headers, footers, and OCR omissions.\n\nUse these meanings strictly:\n- `footnote_start`: the beginning of a real page footnote; it will be moved to the end of its logical chapter.\n- `footnote_continuation`: text continuing a real footnote from an earlier page; it will be joined to that footnote.\n- `footnote_definition`: a complete footnote definition already presented as a note block.\n- `citation`: an in-text citation, quoted source, parenthetical/numeric reference, or other scholarly reference; it must stay in the body and must never be moved.\n- `bibliography`: a reference-list/bibliography entry; it must stay in place and must never be moved.\n- `body`: ordinary prose or an uncertain block that is not a footnote.\n\nWrite one `region_audits` entry for every audit region, with its exact `region_id`, a `disposition` of `footnote_region`, `body_region`, or `review_required`, and nested block decisions. A `review_required` region or block is unresolved and will block the workflow. Also keep a flat `decisions` array for compatibility; it may repeat the nested decisions, but do not emit duplicates. For each review/audit block assign exactly one role and keep its page, source, and block number. `source` defaults to `primary`; use `source: "secondary"` only for a candidate listed under `secondary_only_candidates`. For `footnote_start` and `footnote_definition`, copy the visible numeric key when present. For `footnote_continuation`, provide the key of the footnote it continues. A numeric marker alone is not enough to call something a footnote: if it is a citation or reference, use `citation` or `bibliography`.\n\nWrite only valid JSON to `footnote_decisions.json` with this shape:\n\n```json\n{{\n  "schema_version": {FOOTNOTE_PREPARE_SCHEMA_VERSION},\n  "region_audits": [\n    {{\n      "region_id": "page-125-region-01",\n      "disposition": "footnote_region",\n      "decisions": [\n        {{\n          "page": 125,\n          "source": "primary",\n          "block": 8,\n          "role": "footnote_continuation",\n          "key": "36",\n          "confidence": "high"\n        }}\n      ]\n    }}\n  ],\n  "decisions": []\n}}\n```\n\nIf a block or region is genuinely ambiguous, use `role` or `disposition: "review_required"` and explain it in `reason`; do not guess.\n"""
+    prompt = f"""# Footnote review\n\nBook: {book_title}\n\nRead `footnote_subagent_manifest.json`, `footnote_review_packet.json`, and `footnote_visual_audit_manifest.json`. The compact packet is hash-bound by the manifest. `footnote_candidates.json` remains the audit and recovery source; do not load it for routine review. Review exact page/source/block references and region IDs in the packet. Retain and inspect every listed adjacent-page window, primary/secondary sidecar, full-page image, and gap-review image even when no continuation candidate was emitted. Do not reread or rewrite the whole book. {source_guidance}\n\nCandidate page sidecars and visual evidence:\n{page_text}\n\nFor every listed review page, open the full-page `visual` PNG first. It is authoritative for the overall body/footnote boundary, page furniture, reading order, and cross-page context. When a `crop` PNG is present, open it as a zoomed supplement for small text and block-level details; never use the crop alone to decide whether a region belongs to the page footer or body. If the full-page image is unavailable, use the crop and sidecar coordinates.\n\nA region audit is one visual decision for the area, but the output must still contain one block decision for every listed review/audit block so the deterministic apply stage can address exact sidecar coordinates. Treat the page image as authoritative for region boundaries, continuations, headers, footers, and OCR omissions.\n\nUse these meanings strictly:\n- `footnote_start`: the beginning of a real page footnote; it will be moved to the end of its logical chapter.\n- `footnote_continuation`: text continuing a real footnote from an earlier page; it will be joined to that footnote.\n- `footnote_definition`: a complete footnote definition already presented as a note block.\n- `citation`: an in-text citation, quoted source, parenthetical/numeric reference, or other scholarly reference; it must stay in the body and must never be moved.\n- `bibliography`: a reference-list/bibliography entry; it must stay in place and must never be moved.\n- `body`: ordinary prose or an uncertain block that is not a footnote.\n\nWrite one `region_audits` entry for every audit region, with its exact `region_id`, a `disposition` of `footnote_region`, `body_region`, or `review_required`, and nested block decisions. A `review_required` region or block is unresolved and will block the workflow. Also keep a flat `decisions` array for compatibility; it may repeat the nested decisions, but do not emit duplicates. For each review/audit block assign exactly one role and keep its page, source, and block number. `source` defaults to `primary`; use `source: "secondary"` only for a candidate listed under `secondary_only_candidates`. For `footnote_start` and `footnote_definition`, copy the visible numeric key when present. For `footnote_continuation`, provide the key of the footnote it continues. A numeric marker alone is not enough to call something a footnote: if it is a citation or reference, use `citation` or `bibliography`.\n\nWrite only valid JSON to `footnote_decisions.json` with this shape:\n\n```json\n{{\n  "schema_version": {FOOTNOTE_PREPARE_SCHEMA_VERSION},\n  "region_audits": [\n    {{\n      "region_id": "page-125-region-01",\n      "disposition": "footnote_region",\n      "decisions": [\n        {{\n          "page": 125,\n          "source": "primary",\n          "block": 8,\n          "role": "footnote_continuation",\n          "key": "36",\n          "confidence": "high"\n        }}\n      ]\n    }}\n  ],\n  "decisions": []\n}}\n```\n\nIf a block or region is genuinely ambiguous, use `role` or `disposition: "review_required"` and explain it in `reason`; do not guess.\n"""
     prompt = prompt.replace(
         "Candidate page sidecars and visual evidence:",
         "When a `visual:` or `crop=` path is present, open that matching PNG and use it as the visual authority. "
@@ -392,6 +547,7 @@ def prepare_footnote_subagent(
         "report": output_dir / "footnote_candidates.json",
         "manifest": manifest_path,
         "prompt": prompt_path,
+        "review_packet": output_dir / packet_path,
     }
 
 
@@ -399,25 +555,94 @@ def load_footnote_unit_contexts(output_dir: Path) -> dict[str, Path]:
     """Load current sparse context projections for Markdown hand-offs."""
     output_dir = Path(output_dir)
     manifest_path = output_dir / "footnote_subagent_manifest.json"
+    if not manifest_path.exists():
+        return {}
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        return {}
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"footnote handoff manifest is unreadable; rerun footnote-prepare: {exc}") from exc
+    if not isinstance(manifest, Mapping) or manifest.get("schema_version") != FOOTNOTE_PREPARE_SCHEMA_VERSION:
+        raise ValueError(
+            "footnote handoff schema is outdated or invalid; rerun footnote-prepare "
+            "and footnote-validate to regenerate current unit contexts"
+        )
     values = manifest.get("unit_context_files", {}) if isinstance(manifest, dict) else {}
     if not isinstance(values, Mapping):
-        return {}
-    result: dict[str, Path] = {}
+        raise ValueError("footnote unit context inventory is invalid; rerun footnote-prepare")
+    expected_context_hashes = manifest.get("unit_context_sha256")
+    if not isinstance(expected_context_hashes, Mapping) or set(expected_context_hashes) != set(values):
+        raise ValueError("footnote unit context hash inventory is missing or stale; rerun footnote-prepare")
     root = output_dir.resolve()
     for name, relative in values.items():
         if not isinstance(name, str) or not isinstance(relative, str):
-            continue
+            raise ValueError("footnote unit context inventory contains invalid names or paths; rerun footnote-prepare")
+        expected_relative = _unit_context_path(output_dir, name).relative_to(output_dir).as_posix()
+        if Path(relative).is_absolute() or Path(relative).as_posix() != expected_relative:
+            raise ValueError(f"footnote unit context path is invalid for {name}; rerun footnote-prepare")
+        try:
+            (output_dir / relative).resolve().relative_to(root)
+        except ValueError as exc:
+            raise ValueError(f"footnote unit context path escapes output directory for {name}") from exc
+    packet = validate_review_packet(output_dir, manifest)
+    result: dict[str, Path] = {}
+    for name, relative in values.items():
+        if not isinstance(name, str) or not isinstance(relative, str):
+            raise ValueError("footnote unit context inventory contains invalid names or paths; rerun footnote-prepare")
+        expected_relative = _unit_context_path(output_dir, name).relative_to(output_dir).as_posix()
+        if Path(relative).is_absolute() or Path(relative).as_posix() != expected_relative:
+            raise ValueError(f"footnote unit context path is invalid for {name}; rerun footnote-prepare")
         path = (output_dir / relative).resolve()
         try:
             path.relative_to(root)
-        except ValueError:
-            continue
-        if path.is_file():
-            result[name] = path
+        except ValueError as exc:
+            raise ValueError(f"footnote unit context path escapes output directory for {name}") from exc
+        if not path.is_file() or sha256_file(path) != expected_context_hashes.get(name):
+            raise ValueError(f"footnote unit context {name} is missing or changed; rerun footnote-prepare")
+        try:
+            context = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise ValueError(f"footnote unit context {name} is invalid; rerun footnote-prepare: {exc}") from exc
+        if (
+            not isinstance(context, Mapping)
+            or context.get("schema_version") != FOOTNOTE_PREPARE_SCHEMA_VERSION
+            or context.get("source_units") != [name]
+            or context.get("preparation_evidence_sha256") != manifest.get("preparation_evidence_sha256")
+        ):
+            raise ValueError(f"footnote unit context {name} has a stale contract or source scope; rerun footnote-prepare")
+        source_packet = context.get("source_packet")
+        if not isinstance(source_packet, Mapping) or (
+            source_packet.get("path") != manifest.get("review_packet")
+            or source_packet.get("sha256") != manifest.get("review_packet_sha256")
+        ):
+            raise ValueError(f"footnote unit context {name} has stale packet provenance; rerun footnote-prepare")
+        facts = context.get("candidates")
+        if not isinstance(facts, Mapping):
+            raise ValueError(f"footnote unit context {name} has no local candidate fact table")
+        refs: set[str] = set()
+        for page in context.get("pages", []) or []:
+            if not isinstance(page, Mapping):
+                continue
+            refs.update(str(ref) for ref in page.get("candidate_refs", []))
+            for region in page.get("footnote_regions", []) or []:
+                if isinstance(region, Mapping):
+                    refs.update(str(ref) for ref in region.get("candidate_refs", []))
+        for window in [*(context.get("cross_page_windows", []) or []), *(context.get("continuation_reviews", []) or [])]:
+            if not isinstance(window, Mapping):
+                continue
+            refs.update(str(ref) for ref in window.get("left_candidate_refs", []))
+            refs.update(str(ref) for ref in window.get("right_candidate_refs", []))
+            if window.get("source_note_ref"):
+                refs.add(str(window["source_note_ref"]))
+        if refs != set(facts) or any(ref not in packet.get("candidates", {}) for ref in refs):
+            raise ValueError(f"footnote unit context {name} has missing or excess candidate refs; rerun footnote-prepare")
+        packet_candidates = packet.get("candidates", {})
+        packet_pages = {int(page.get("page", 0)): page for page in packet.get("visual_pages", []) if isinstance(page, Mapping)}
+        for ref, fact in facts.items():
+            source_fact = packet_candidates[ref]
+            page_context = packet_pages.get(int(source_fact.get("page", 0)), {})
+            if not isinstance(fact, Mapping) or dict(fact) != _unit_fact_projection(source_fact, page_context):
+                raise ValueError(f"footnote unit context {name} candidate fact does not match {ref}; rerun footnote-prepare")
+        result[name] = path
     return result
 
 __all__ = [

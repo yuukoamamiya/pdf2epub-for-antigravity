@@ -726,12 +726,20 @@ polish 或 translate Subagent。原始 OCR 单元不覆盖。
 已知 scope 边界处停止。单一 `(scope, key)` 定义可供该 scope 的多个引用共同使用；同一范围
 存在多个定义时仍按顺序逐次配对，额外引用不猜测目标。
 当前 `footnote_candidates.json`、`footnote_decisions.json` 和
-`footnote_decision_validation.json` 使用 prepare/decision schema 3；尾注边界歧义及其决定独立使用
+`footnote_decision_validation.json` 使用 prepare/decision schema 4；尾注边界歧义及其决定独立使用
 schema 2。该输出合同已更新到 `footnote_normalization.json` schema 8；旧 schema 1–7 checkpoint 会失效，
 须重新运行 `footnote-prepare`，按新 manifest 的 pending 状态复核并写决定，再运行
 `footnote-validate → footnote-apply`。无需重跑 OCR。本次文档/代码维护不自动处理书稿产物；
 恢复命令会更新准备合同，并由 apply 重建 `footnote_normalized/` 与成功 checkpoint，用户需按需
 备份旧派生结果。
+
+`footnote_subagent_manifest.json` schema 4 绑定 `footnote_review_packet.json` 的 SHA-256。
+Reviewer 常规读取 compact packet 和 visual audit manifest；完整 `footnote_candidates.json`
+保留作审计与恢复。packet 在准备时从无决定的候选证据生成，validation 回写已验证决定不会改写
+packet 或其哈希。缺失、哈希不符或旧 handoff 必须重新运行 `footnote-prepare`，不得跳过证据检查。
+各 Markdown unit context 仅内嵌该 unit 所需的候选事实和 exact refs；packet 路径/哈希只作来源证明，
+不授权 polish worker 打开全书 packet。manifest 同时绑定每个 unit context 的 SHA-256；loader 验证
+source_units、packet provenance、局部 facts/ref 一致性和文件哈希。
 `footnote_normalization.json` 的 `endnotes` 子报告记录最终定义键、转换引用数、scope 统计、
 双层编号识别数、重复定义和孤立定义，供后续审计。
 
@@ -960,7 +968,7 @@ PDF 结构阶段采用“共享证据、分离语义”的边界：
 | `footnote_status.py` | 归一化 checkpoint 的哈希和 freshness 诊断 | 候选扫描、脚注物化、修改 Markdown |
 
 脚注 apply 按“前置门禁/证据快照 → block 定位和 unit/lane 归属 → 引用与定义绑定 → 编辑冲突校验 → 内存纯转换 → 原子写入 → success checkpoint”的顺序运行。计划和所有绑定必须完整通过后才允许写入；源 unit 的哈希在读取原始字节时快照，写入前重新扫描 `ocr_markdown/*.md` 并与该快照逐项比较，同时先检查 `footnote_normalized/` 是否有不属于当前源 inventory 的 stale Markdown。
-任一计划、绑定、冲突或写前 inventory 校验失败时只写无效诊断 checkpoint，不改派生正文，也不生成有效 checkpoint。`footnote_candidates.json`/决定验证使用 prepare schema 3，`footnote_normalization.json` 使用 schema 8；旧 schema 1–7 normalization checkpoint 需重跑 `footnote-prepare → footnote-validate → footnote-apply`，无需重新 OCR。
+任一计划、绑定、冲突或写前 inventory 校验失败时只写无效诊断 checkpoint，不改派生正文，也不生成有效 checkpoint。`footnote_candidates.json`/决定验证使用 prepare schema 4，`footnote_normalization.json` 使用 schema 8；旧 prepare handoff 和旧 schema 1–7 normalization checkpoint 需重跑 `footnote-prepare → footnote-validate → footnote-apply`，无需重新 OCR。
 
 新增 PDF 结构信号时，先判断它是共享的几何/证据事实还是某个领域的语义规则。前者进入
 共享模块并补一组跨阶段测试，后者只进入对应的 prepare/apply 模块。命令 handler 只读取
