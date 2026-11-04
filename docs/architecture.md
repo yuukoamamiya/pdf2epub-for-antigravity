@@ -198,9 +198,9 @@ PDF 精修的核心领域模块如下：
 候选、决定校验、materialize 和 status 阶段都用当前 effective mode 比较 checkpoint；
 TOC 的 `footnote_mode` 变化导致 effective mode 改变时视为 stale，必须重跑
 `footnote-prepare → footnote-validate → footnote-apply`。
-Footnote normalization schema 7 changes how non-footnote superscripts are
-classified. Existing schema 1–6 normalization checkpoints are stale and must
-be regenerated with `footnote-prepare → footnote-validate → footnote-apply`,
+Footnote normalization schema 7 originally changed how non-footnote superscripts are
+classified. Schema 8 now also changes HTML visible-text matching and entity provenance.
+Existing schema 1–7 normalization checkpoints are stale and must be regenerated with `footnote-prepare → footnote-validate → footnote-apply`,
 then checked with `polish-validate`. If normalized source hashes change, inspect
 translation readiness and revalidate affected translation units before
 packaging; this rules-only upgrade does not require OCR again.
@@ -252,7 +252,9 @@ TOC 中标记为
   编号引用无法唯一定位时阻断而不猜测。章节定义转换、normalized unit 原子持久化/inventory
   和成功 checkpoint 写入由独立 helper 承担；apply 编排不复制这些持久化合同。
 - `refine/footnote_matching.py`：集中处理 sidecar block 到 Markdown 源文的安全定位、文本变体和
-  非重叠编辑区间；不读取工作流状态，也不执行脚注物化。
+  非重叠编辑区间；统一提取普通块与列表项可见文本，inline HTML 连写、块级标签分隔，且实体解码保留
+  原文偏移。含尖括号实体的块仅用保留实体编码的候选定位，无法证明源跨度时阻断；不读取工作流状态，
+  也不执行脚注物化。
 - `refine/footnote_status.py`：集中计算脚注归一化 checkpoint 的哈希和 freshness 状态；不依赖
   apply/prepare 编排，供命令层和 readiness 诊断复用。
 
@@ -724,7 +726,7 @@ polish 或 translate Subagent。原始 OCR 单元不覆盖。
 存在多个定义时仍按顺序逐次配对，额外引用不猜测目标。
 当前 `footnote_candidates.json`、`footnote_decisions.json` 和
 `footnote_decision_validation.json` 使用 prepare/decision schema 3；尾注边界歧义及其决定独立使用
-schema 2。该输出合同已更新到 `footnote_normalization.json` schema 7；旧 schema 1–6 checkpoint 会失效，
+schema 2。该输出合同已更新到 `footnote_normalization.json` schema 8；旧 schema 1–7 checkpoint 会失效，
 须重新运行 `footnote-prepare`，按新 manifest 的 pending 状态复核并写决定，再运行
 `footnote-validate → footnote-apply`。无需重跑 OCR。本次文档/代码维护不自动处理书稿产物；
 恢复命令会更新准备合同，并由 apply 重建 `footnote_normalized/` 与成功 checkpoint，用户需按需
@@ -957,7 +959,7 @@ PDF 结构阶段采用“共享证据、分离语义”的边界：
 | `footnote_status.py` | 归一化 checkpoint 的哈希和 freshness 诊断 | 候选扫描、脚注物化、修改 Markdown |
 
 脚注 apply 按“前置门禁/证据快照 → block 定位和 unit/lane 归属 → 引用与定义绑定 → 编辑冲突校验 → 内存纯转换 → 原子写入 → success checkpoint”的顺序运行。计划和所有绑定必须完整通过后才允许写入；源 unit 的哈希在读取原始字节时快照，写入前重新扫描 `ocr_markdown/*.md` 并与该快照逐项比较，同时先检查 `footnote_normalized/` 是否有不属于当前源 inventory 的 stale Markdown。
-任一计划、绑定、冲突或写前 inventory 校验失败时只写无效诊断 checkpoint，不改派生正文，也不生成有效 checkpoint。`footnote_candidates.json`/决定验证使用 prepare schema 3，`footnote_normalization.json` 使用 schema 7；旧 normalization checkpoint 需重跑 `footnote-prepare → footnote-validate → footnote-apply`，无需重新 OCR。
+任一计划、绑定、冲突或写前 inventory 校验失败时只写无效诊断 checkpoint，不改派生正文，也不生成有效 checkpoint。`footnote_candidates.json`/决定验证使用 prepare schema 3，`footnote_normalization.json` 使用 schema 8；旧 schema 1–7 normalization checkpoint 需重跑 `footnote-prepare → footnote-validate → footnote-apply`，无需重新 OCR。
 
 新增 PDF 结构信号时，先判断它是共享的几何/证据事实还是某个领域的语义规则。前者进入
 共享模块并补一组跨阶段测试，后者只进入对应的 prepare/apply 模块。命令 handler 只读取

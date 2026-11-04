@@ -923,8 +923,8 @@ validation 收据一致，任何一项变化都会阻断 apply，apply 不会静
 
 `footnote_candidates.json`、`footnote_decisions.json` 和 `footnote_decision_validation.json`
 使用 prepare/decision schema 3；`endnote_definition_ambiguities.json`、其 decisions 与 validation
-使用独立 schema 2；`footnote_normalization.json` 使用 schema 7，TOC 使用 schema 2。版本号彼此独立。
-旧 normalization schema 1–6 checkpoint 升级后需要重新运行 `footnote-prepare → footnote-validate →
+使用独立 schema 2；`footnote_normalization.json` 使用 schema 8，TOC 使用 schema 2。版本号彼此独立。
+旧 normalization schema 1–7 checkpoint 升级后需要重新运行 `footnote-prepare → footnote-validate →
 footnote-apply`，不需要重新 OCR。
 旧 prepare checkpoint 不能复用；schema 1 的 endnote decisions 只兼容没有 inline 候选的旧式行边界
 清单，当前 inline/line decisions 使用 schema 2。运行

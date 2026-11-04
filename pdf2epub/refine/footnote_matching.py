@@ -34,15 +34,56 @@ _CIRCLED_DIGITS_MAP = {str(i): char for i, char in enumerate(_CIRCLED_CHARS, 1)}
 _ORDERED_LIST_VARIANT = "\x00ordered-list\x00"
 _UNORDERED_LIST_VARIANT = "\x00unordered-list\x00"
 
+_HTML_TAG_RE = re.compile(
+    r"</?([A-Za-z][\w:-]*)\b(?:[^>\"']|\"[^\"]*\"|'[^']*')*>"
+)
+_HTML_TAG_NAMES = frozenset(
+    "a abbr address article aside b blockquote br code dd del div dl dt em fieldset "
+    "figcaption figure footer form h1 h2 h3 h4 h5 h6 header hr i ins li main nav ol p "
+    "pre s section span strong sub sup table tbody td tfoot th thead tr u ul math "
+    "maction malignmark maligngroup menclose merror mfenced mfrac mglyph mi mlabeledtr "
+    "mmultiscripts mn mo mover mpadded mphantom mprescripts mroot mrow ms mspace msqrt "
+    "mstyle msub msubsup msup mtable mtd mtext mtr munder munderover semantics annotation".split()
+)
+_HTML_BLOCK_TAGS = frozenset(
+    "address article aside blockquote br dd div dl dt fieldset figcaption figure footer "
+    "form h1 h2 h3 h4 h5 h6 header hr li main nav ol p pre section table tbody td "
+    "tfoot th thead tr ul".split()
+)
+
+
+def _visible_html_text(value: str, *, decode_entities: bool = True) -> str:
+    """Strip recognized HTML tags while retaining visible text and block breaks."""
+    parts: list[str] = []
+    cursor = 0
+    for match in _HTML_TAG_RE.finditer(value):
+        tag_name = match.group(1).casefold()
+        if tag_name not in _HTML_TAG_NAMES:
+            continue
+        parts.append(value[cursor:match.start()])
+        if tag_name in _HTML_BLOCK_TAGS:
+            parts.append(" ")
+        cursor = match.end()
+    parts.append(value[cursor:])
+    visible = "".join(parts)
+    return html.unescape(visible) if decode_entities else visible
+
+
+def _contains_encoded_angle(value: str) -> bool:
+    for match in re.finditer(r"&(?:[A-Za-z][A-Za-z0-9]+|#\d+|#x[0-9a-f]+);", value, re.I):
+        if any(char in html.unescape(match.group(0)) for char in "<>"):
+            return True
+    return False
+
 
 def plain_block_text(block: Mapping[str, Any]) -> str:
     """Return a compact text representation of one sidecar block."""
     value = block.get("text")
     if value is None:
         value = block.get("html", "")
-    value = html.unescape(str(value or ""))
+    value = str(value or "")
     value = _AUTO_LINK_RE.sub(r"\g<url>", value)
-    value = re.sub(r"<[^>]+>", " ", value)
+    value = _visible_html_text(value)
     return re.sub(r"\s+", " ", value).strip()
 
 
@@ -149,13 +190,15 @@ def signature_with_map(value: str) -> tuple[str, list[int]]:
             if re.match(r"^<https?://", value[index:]):
                 index += 1
                 continue
-            tag_match = re.match(r"^</?[A-Za-z][\w:-]*\b[^>]*>", value[index:])
+            tag_match = _HTML_TAG_RE.match(value, index)
+            if tag_match and tag_match.group(1).casefold() not in _HTML_TAG_NAMES:
+                tag_match = None
             if tag_match:
+                if tag_match.group(1).casefold() in _HTML_BLOCK_TAGS:
+                    if chars and chars[-1] != " ":
+                        chars.append(" ")
+                        positions.append(index)
                 index += len(tag_match.group(0))
-                continue
-            close = value.find(">", index + 1)
-            if close >= 0:
-                index = close + 1
                 continue
         if re.match(r"(?:https?://|mailto:)", value[index:], re.IGNORECASE):
             bare_url_match = re.match(
@@ -173,9 +216,6 @@ def signature_with_map(value: str) -> tuple[str, list[int]]:
                 _append_url_signature(value, index, index + len(url), chars, positions)
                 index += len(url)
                 continue
-        if char == ">":
-            index += 1
-            continue
         if char in "*_~`$":
             index += 1
             continue
@@ -273,10 +313,8 @@ def _expand_mapped_span(source: str, start: int, end: int) -> tuple[int, int]:
         end += 1
     opening_tags = {
         match.group(1).casefold()
-        for match in re.finditer(
-            r"<\s*([A-Za-z][\w:-]*)\b[^>]*>",
-            source[start:end],
-        )
+        for match in _HTML_TAG_RE.finditer(source[start:end])
+        if match.group(1).casefold() in _HTML_TAG_NAMES
     }
     while start > 0:
         if source[start - 1] in "*_~`":
@@ -285,11 +323,8 @@ def _expand_mapped_span(source: str, start: int, end: int) -> tuple[int, int]:
         if source[start - 1] == ">":
             tag_start = source.rfind("<", 0, start)
             if tag_start >= 0:
-                match = re.fullmatch(
-                    r"<\s*([A-Za-z][\w:-]*)\b[^>]*>",
-                    source[tag_start:start],
-                )
-                if match:
+                match = _HTML_TAG_RE.fullmatch(source[tag_start:start])
+                if match and match.group(1).casefold() in _HTML_TAG_NAMES:
                     opening_tags.add(match.group(1).casefold())
                     start = tag_start
                     continue
@@ -300,15 +335,14 @@ def _expand_mapped_span(source: str, start: int, end: int) -> tuple[int, int]:
             end += 1
             continue
         if source[end] == "<":
-            tag_end = source.find(">", end + 1)
-            if tag_end >= 0:
-                match = re.fullmatch(
-                    r"<\s*/\s*([A-Za-z][\w:-]*)\s*>",
-                    source[end : tag_end + 1],
-                )
-                if match and match.group(1).casefold() in opening_tags:
-                    end = tag_end + 1
-                    continue
+            match = _HTML_TAG_RE.match(source, end)
+            if (
+                match
+                and source[end + 1 : end + 2] == "/"
+                and match.group(1).casefold() in opening_tags
+            ):
+                end = match.end()
+                continue
         break
     if end > 0:
         entity_start = source.rfind("&", 0, end)
@@ -457,11 +491,26 @@ def block_text_variants(
 ) -> list[str]:
     """Return raw text plus validated correction and source-format variants."""
     raw_text = plain_block_text(block)
-    variants = [raw_text] if raw_text else []
+    raw_value = block.get("text")
+    if raw_value is None:
+        raw_value = block.get("html", "")
+    raw_value = str(raw_value or "")
     raw_html = block.get("html")
+    html_text = str(raw_html or "")
+    has_encoded_angle = _contains_encoded_angle(raw_value + "\n" + html_text)
+    # Keep entity provenance ahead of display-decoded text. The decoded form
+    # can look like Markdown/HTML markup and match unrelated source prose.
+    safe_raw_text = re.sub(
+        r"\s+", " ", _visible_html_text(raw_value, decode_entities=False)
+    ).strip()
+    variants = [safe_raw_text] if safe_raw_text else []
+    safe_html_text = re.sub(
+        r"\s+", " ", _visible_html_text(html_text, decode_entities=False)
+    ).strip()
+    if safe_html_text and safe_html_text not in variants:
+        variants.insert(0, safe_html_text)
     structured_list = False
     if raw_html:
-        html_text = str(raw_html)
         list_open = re.search(r"<(ol|ul)\b([^>]*)>", html_text, re.I)
         list_items = re.findall(r"<li\b[^>]*>(.*?)</li\s*>", html_text, re.I | re.S)
         if list_open and list_items:
@@ -477,9 +526,7 @@ def block_text_variants(
                 explicit_numbers: list[int | None] = []
                 item_texts: list[str] = []
                 for item in list_items:
-                    item_text = html.unescape(item)
-                    item_text = re.sub(r"</?(?:p|div|span)\b[^>]*>", " ", item_text, flags=re.I)
-                    item_text = re.sub(r"<[^>]+>", " ", item_text)
+                    item_text = _visible_html_text(item, decode_entities=False)
                     item_text = re.sub(r"\s+", " ", item_text).strip()
                     if not item_text:
                         list_items = []
@@ -523,25 +570,24 @@ def block_text_variants(
                         ]
                         variants.append(prefix + "\n".join(parenthesized))
         else:
-            stripped = html.unescape(html_text)
-            stripped = re.sub(r"<[^>]+>", "", stripped)
+            stripped = _visible_html_text(html_text, decode_entities=False)
             compact = re.sub(r"\s+", " ", stripped).strip()
             if compact and compact not in variants:
-                variants.append(compact)
+                variants.insert(0, compact)
             math_spaced = re.sub(r"(<math>[^<]+</math>)", r" \1 ", html_text)
             if math_spaced != html_text:
-                stripped_math = re.sub(r"<[^>]+>", "", html.unescape(math_spaced))
+                stripped_math = _visible_html_text(math_spaced, decode_entities=False)
                 compact_math = re.sub(r"\s+", " ", stripped_math).strip()
                 if compact_math and compact_math not in variants:
                     variants.append(compact_math)
-    if not structured_list:
+    if not structured_list and not has_encoded_angle:
         corrected = _corrected_block_text(output_dir, page, raw_text)
         if not corrected and raw_html:
             corrected = _corrected_block_text(output_dir, page, raw_html)
         if corrected and corrected not in variants:
             variants.append(corrected)
     raw_md_path = Path(output_dir) / "pages" / f"page_{page:03d}.md"
-    if raw_md_path.is_file() and not structured_list:
+    if raw_md_path.is_file() and not structured_list and not has_encoded_angle:
         try:
             def _extract_delimited_key(text: str) -> Optional[str]:
                 text = text.strip()

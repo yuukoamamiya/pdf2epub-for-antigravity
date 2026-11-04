@@ -607,7 +607,7 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    重跑 `footnote-prepare`；只有 decisions 改变时重跑 `footnote-validate`，再运行 apply。
 
    当前脚注 prepare/decision validation 使用 schema 3；尾注边界歧义及其决定使用独立 schema 2，
-   normalization 使用 schema 7。旧 normalization schema 1–6 和旧 prepare checkpoint 不能复用；
+   normalization 使用 schema 8。旧 normalization schema 1–7 和旧 prepare checkpoint 不能复用；
    endnote decision schema 1 仅兼容没有 inline 候选的旧式行边界清单，当前新决定文件使用 schema 2：
    重新执行 prepare，只派发新 manifest 的 pending 项，再 validate/apply；无需重新 OCR。apply 会重建
    `footnote_normalized/` 和成功 checkpoint，需保留旧派生版本时先备份。
