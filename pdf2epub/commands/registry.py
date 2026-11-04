@@ -44,6 +44,17 @@ def register_command_parsers(subparsers) -> None:
     )
     doctor_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.diagnostics", "doctor_command"))
 
+    footnote_summary_parser = subparsers.add_parser(
+        "footnote-review-summary",
+        help="Summarize existing footnote review cost and coverage without writing files",
+    )
+    footnote_summary_parser.add_argument(
+        "--json", action="store_true", help="Print machine-readable JSON"
+    )
+    footnote_summary_parser.set_defaults(
+        func=_lazy_handler("pdf2epub.commands.footnote_diagnostics", "footnote_review_summary_command")
+    )
+
     check_ready_parser = subparsers.add_parser(
         "check-ready",
         help="Run deterministic pre-flight checks before translation or packaging",

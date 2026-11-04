@@ -656,6 +656,8 @@ OCR layout sidecar；旧原生文字运行在旧版本的 `ocr-pages` 阶段生�
 续接位置。视觉审核任务要求
 先打开整页 PNG 判断整体边界，再用区域裁剪图放大文字细节，不能只看裁剪图。
 
+维护者可用 `uv run pdf2epub -c <配置> footnote-review-summary --json` 汇总现有候选报告、视觉区域任务、决定与验证报告的只读统计。该诊断区分实际区域页与包含跨页上下文的 review pages；相邻页是发现跨页脚注的证据，不应据此自动删除窗口。决定分布只是审阅记录，不是 ground truth；命令也不设置生产 `validated` 状态。
+
 另有一个缺失续文审计：当页面最后一个明确标注的物理脚注候选（包括 review-all 模式下的 review 项）以断词连字符结束、下一张实际 PDF
 页没有可追溯的续文候选时，报告将前页源注释和后页设为 `continuation_reviews` 任务，附两页图像及
 哈希。Subagent 在 `footnote_decisions.json` 的同名字段中逐任务选择

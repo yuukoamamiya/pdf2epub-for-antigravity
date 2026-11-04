@@ -22,6 +22,7 @@ CLI_COMMANDS: Final[frozenset[str]] = frozenset(
         "extract-entities-validate",
         "footnote-apply",
         "footnote-prepare",
+        "footnote-review-summary",
         "footnote-validate",
         "glossary-candidates",
         "html-prepare",

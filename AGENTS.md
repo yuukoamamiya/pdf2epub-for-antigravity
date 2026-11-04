@@ -78,6 +78,7 @@ uv run pdf2epub -c config.yaml doctor
 `status` 只读取当前阶段、哈希和验证报告，不创建恢复产物；`doctor` 检查配置、输入文件、
 选中的 OCR 依赖和配置兼容性。页面 OCR 只能使用注册表中当前存在的后端；未知、退役或遗留
 的后端配置会在 `doctor` 阶段阻断，不能靠关闭开关绕过。
+维护者可用 `uv run pdf2epub -c config.yaml footnote-review-summary --json` 只读汇总脚注复核成本；它是独立诊断，不能替代 `footnote-validate`，也不建议删除相邻页上下文窗口。
 
 ## 0.2 依赖和 OCR 后端快速配置
 

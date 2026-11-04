@@ -343,7 +343,8 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
 
 `local_credentials.py` 负责读取被 Git 忽略的本地凭据；各 OCR 后端不共享运行时状态。
 
-`commands/diagnostics.py` 提供只读的 `status` 和 `doctor`。`status` 根据当前输入哈希、阶段
+`commands/diagnostics.py` 提供只读的 `status` 和 `doctor`。`commands/footnote_diagnostics.py`
+通过纯读取 JSON 的 `refine/footnote_review_diagnostics.py` 汇总既有脚注复核页面、区域、候选地址、决定和证据图成本；它不写入报告，也不代表生产校验通过。`status` 根据当前输入哈希、阶段
 检查点和验证报告给出恢复顺序；`doctor` 在载入完整工作流前拒绝未知或退役的 OCR backend
 以及缺失的选配 SDK。诊断命令不写入 readiness 或其他恢复产物。
 

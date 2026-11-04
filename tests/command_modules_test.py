@@ -53,6 +53,7 @@ def test_command_registry_registers_every_workflow_command():
         "extract-entities-validate",
         "footnote-apply",
         "footnote-prepare",
+        "footnote-review-summary",
         "footnote-validate",
         "illustration-apply",
         "illustration-prepare",
@@ -100,6 +101,24 @@ def test_command_registry_defers_workflow_imports(monkeypatch):
 
     monkeypatch.setattr(command_registry, "import_module", fail_import)
     register_command_parsers(subparsers)
+
+
+def test_footnote_review_summary_uses_lazy_read_only_handler(monkeypatch):
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers(dest="command")
+    register_command_parsers(subparsers)
+    calls = []
+
+    class HandlerModule:
+        @staticmethod
+        def footnote_review_summary_command(args):
+            calls.append(args)
+            return 0
+
+    monkeypatch.setattr(command_registry, "import_module", lambda name: HandlerModule if name == "pdf2epub.commands.footnote_diagnostics" else None)
+    args = parser.parse_args(["footnote-review-summary", "--json"])
+    assert args.func(args) == 0
+    assert calls == [args]
 def test_polish_validate_parser_accepts_single_file_checkpoint():
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command")
