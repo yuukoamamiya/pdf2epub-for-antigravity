@@ -55,6 +55,15 @@ def create_entity_extraction_prompt(
 Read only the Markdown files listed by `entity_subagent_manifest.json`.
 Extract recurring people, places, organizations, terms, species, and items
 from {source_language} for consistent {target_language} translation.
+For `terms`, include recurring secondary concepts as well as headline concepts;
+include meaningful compound words and fixed multiword phrases when their
+meaning or translation is not safely recoverable from the individual words.
+Keep semantic boundaries explicit: distinguish an abstract concept from a
+similarly named organization, movement, group, or member; preserve differences
+in grammatical number and category. Do not invent aliases across those
+boundaries or collapse nearby but distinct concepts. Explain genuine ambiguity
+in the description/note so a reviewer can decide; extraction is a proposal, not
+approval of terminology.
 
 ## Security boundary
 
