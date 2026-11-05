@@ -439,7 +439,9 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
   收到独立的 scoped context：子标题只下发到其源标题首次出现的 part，父标题只在可见的 part
   标记 `visible`；所有 part 都找不到源标题的子标题只挂到第一个 part 并标记 `container_only`。
   `container_only` 节点不伪造 Markdown 标题锚点；TOC 层级保留，并导航到所属文件或首个有内容的
-  后代。`visible` 锚点必须出现在其投影指定的 part 中并落在对应标题上，缺失时构建阻断。
+  后代。显式 `container_only` 节点在分配可见标题候选前跳过匹配，不消耗同名候选；后续可见节点仍须
+  在其实际所属 part 中通过 occurrence/count 与导航锚点校验。`visible` 锚点必须出现在其投影指定的
+  part 中并落在对应标题上，缺失时构建阻断。
   HTML TOC 与 NCX 在内容渲染后共用同一份已解析导航树；打包前核对目标文件、fragment 和
   XHTML id。NCX depth 按实际逻辑层级计算，合成的目录入口不额外增加层级。
 

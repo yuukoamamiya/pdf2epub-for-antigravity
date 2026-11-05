@@ -462,7 +462,8 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
   每个子标题按其源标题首次出现的 part 归属，源标题在所有 part 都缺失时只挂到第一个
   part 并标记 `container_only`，避免 scoped worker 收到其他分片的标题或凭空新增标题。
   `container_only` 节点不生成虚构的 Markdown 锚点；它保留 TOC 层级，并导航到所属文件或首个
-  含内容的后代。`visible` 节点的投影锚点缺失或落在不同标题时阻断构建。
+  含内容的后代。显式容器在源候选分配前跳过可见标题匹配，不消耗同名候选；可见节点仍按原有
+  occurrence/count 和 DOM 锚点合同校验。`visible` 节点的投影锚点缺失或落在不同标题时阻断构建。
   新 handoff context 使用 `projection_version: 4`。旧 projection 不可用于 TOC heading binding。
   先运行 `translate --resume` 只刷新准备 context，暂不派发；随后用 `translate-validate` 校验现有译文，
   写出 schema 4 receipt。再运行一次 `translate --resume`，让当前 projection 和 receipt 共同决定

@@ -361,6 +361,50 @@ def test_required_visible_binding_fails_closed_but_container_can_land_on_descend
     assert resolved[0].binding_status == "first_content_descendant"
 
 
+def test_container_with_same_title_does_not_steal_child_navigation_dom_anchor():
+    from pdf2epub.build_epub import add_subchapter_anchors_to_parts
+    from pdf2epub.epub.converter import ContentConverter
+    from pdf2epub.markdown_to_html import convert_markdown_to_html
+    from pdf2epub.toc_model import project_toc_ownership
+
+    projection = project_toc_ownership(
+        [{"node_id": "container", "title": "Same", "binding_mode": "container_only",
+          "children": [{"node_id": "visible", "title": "Same"}]}],
+        {"units": [{"node_id": "container", "index_path": [1],
+                    "part_files": ["part1.md", "part2.md"]}]},
+        {"part1.md": "Container prose", "part2.md": "# Same\n\nChild prose"},
+    )
+    child_row = next(row for part in projection.values() for row in part["headings"]
+                     if row["node_id"] == "visible")
+    structure = [{"node_id": "container", "title": "Same", "anchor": "container-anchor",
+                  "navigation_binding_mode": "container_only", "unit_id": "chapter",
+                  "file_path": "part1.md", "part_files": ["part1.md", "part2.md"],
+                  "children": [{"node_id": "visible", "title": "Same", "anchor": "visible-anchor",
+                                "navigation_binding_mode": child_row["binding_mode"],
+                                "unit_id": "chapter", "file_path": child_row["owner_file"],
+                                "part_files": ["part1.md", "part2.md"]}]}]
+    converter = ContentConverter.__new__(ContentConverter)
+    rendered_parts, locations = add_subchapter_anchors_to_parts(
+        converter,
+        [("chapter_part1.html", convert_markdown_to_html("Container prose", standalone=False)),
+         ("chapter_part2.html", convert_markdown_to_html("# Same\n\nChild prose", standalone=False))],
+        1,
+        [{"title": "Same", "anchor": "visible-anchor", "source_occurrence": child_row["source_occurrence"],
+          "source_match_count": child_row["source_match_count"],
+          "source_candidate_kind": child_row["source_candidate_kind"]}],
+    )
+    assert locations == {"visible-anchor": "chapter_part2.html"}
+    navigation = resolve_navigation(
+        structure,
+        locations,
+        generated_files={name for name, _ in rendered_parts},
+    )
+    assert navigation[0].target == "chapter_part1.html"
+    assert navigation[0].children[0].target == "chapter_part2.html#visible-anchor"
+    generated = {name: f"<html><body>{html}</body></html>" for name, html in rendered_parts}
+    validate_navigation_rendering(navigation, generated)
+
+
 def test_builder_consumes_physical_ownership_for_split_heading(tmp_path):
     output = tmp_path / "output"
     source_dir = output / "ocr_markdown"

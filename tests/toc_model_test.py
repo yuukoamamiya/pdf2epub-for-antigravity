@@ -184,6 +184,40 @@ def test_same_title_parent_and_child_reserve_separate_source_occurrences():
     ]
 
 
+def test_explicit_container_does_not_consume_same_title_candidate_across_parts():
+    chapters = [{"node_id": "container", "title": "Same", "binding_mode": "container_only",
+                 "children": [{"node_id": "visible", "title": "Same"}]}]
+    projection = project_toc_ownership(
+        chapters,
+        {"units": [{"node_id": "container", "index_path": [1],
+                    "part_files": ["part1.md", "part2.md"]}]},
+        {"part1.md": "Container prose", "part2.md": "# Same\n\nChild body"},
+    )
+    by_id = {row["node_id"]: (name, row) for name, value in projection.items()
+             for row in value["headings"]}
+    assert by_id["container"][0] == "part1.md"
+    assert by_id["container"][1]["binding_mode"] == "container_only"
+    assert by_id["container"][1]["source_occurrence"] == 0
+    assert by_id["visible"][0] == "part2.md"
+    assert by_id["visible"][1]["binding_mode"] == "visible"
+    assert by_id["visible"][1]["source_occurrence"] == 1
+
+
+def test_explicit_container_does_not_consume_only_same_title_candidate_in_single_part():
+    projection = project_toc_ownership(
+        [{"node_id": "container", "title": "Same", "binding_mode": "container_only",
+          "children": [{"node_id": "visible", "title": "Same"}]}],
+        {"units": [{"node_id": "container", "index_path": [1], "file": "unit.md"}]},
+        {"unit.md": "# Same\n\nBody"},
+    )
+    rows = {row["node_id"]: row for row in projection["unit.md"]["headings"]}
+    assert rows["container"]["binding_mode"] == "container_only"
+    assert rows["container"]["source_occurrence"] == 0
+    assert rows["visible"]["binding_mode"] == "visible"
+    assert rows["visible"]["source_occurrence"] == 1
+    assert rows["visible"]["source_match_count"] == 1
+
+
 def test_case_only_parent_child_titles_share_occurrence_key_but_sharp_s_is_distinct():
     chapters = [{"node_id": "parent", "title": "DIALEKTIK DER WERTFORM", "children": [
         {"node_id": "child", "title": "Dialektik der Wertform"},

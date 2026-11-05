@@ -416,6 +416,7 @@ def project_toc_ownership(
         texts = texts_by_path[unit_path]
         node_id = toc_node_id(node, path)
         source_title = str(node.get("title") or "")
+        explicit_container = node.get("binding_mode") == "container_only"
         literal_key = toc_title_match_key(normalize_toc_source_label(source_title, markdown_source=False))
         inventories = {name: inventories_by_file[name] for name in names}
         literal_matches = {
@@ -451,21 +452,23 @@ def project_toc_ownership(
             for name, rows in matched.items()
         }
         match_counts = {name: len(rows) for name, rows in matched.items()}
+        # An explicit container owns a navigation position, not a source-title
+        # occurrence. Leave matching candidates available to visible nodes.
         match = None
         occurrence = None
-        for name in names:
-            available = [candidate for candidate in matched[name]
-                         if (unit_path, name, candidate["candidate_id"]) not in used_candidates]
-            if available:
-                match = name
-                selected = available[0]
-                used_candidates.add((unit_path, name, selected["candidate_id"]))
-                occurrence = next(
-                    index for index, candidate in enumerate(matched[name], 1)
-                    if candidate["candidate_id"] == selected["candidate_id"]
-                )
-                break
-        explicit_container = node.get("binding_mode") == "container_only"
+        if not explicit_container:
+            for name in names:
+                available = [candidate for candidate in matched[name]
+                             if (unit_path, name, candidate["candidate_id"]) not in used_candidates]
+                if available:
+                    match = name
+                    selected = available[0]
+                    used_candidates.add((unit_path, name, selected["candidate_id"]))
+                    occurrence = next(
+                        index for index, candidate in enumerate(matched[name], 1)
+                        if candidate["candidate_id"] == selected["candidate_id"]
+                    )
+                    break
         if match is None and not explicit_container:
             raise ValueError(f"visible TOC node {node_id} ({source_title!r}) is absent from its owning source unit")
         owner_file = match or names[0]
