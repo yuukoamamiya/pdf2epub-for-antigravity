@@ -179,7 +179,7 @@ def test_hierarchical_toc_uses_reader_language_label(tmp_path: Path) -> None:
         language="zh",
     )
 
-    assert "<text>目录</text>" in ncx_path.read_text(encoding="utf-8")
+    assert "navpoint-toc" not in ncx_path.read_text(encoding="utf-8")
     html = html_path.read_text(encoding="utf-8")
     assert "<title>目录</title>" in html
     assert "<h1>目录</h1>" in html
@@ -204,7 +204,7 @@ def test_epub_builder_uses_reader_language_label(tmp_path: Path) -> None:
     assert generate_hierarchical_toc_html(
         [], builder.config.book_title, html_path, language=builder.config.language
     )
-    assert "<text>目录</text>" in ncx_path.read_text(encoding="utf-8")
+    assert "navpoint-toc" not in ncx_path.read_text(encoding="utf-8")
     assert "<title>目录</title>" in html_path.read_text(encoding="utf-8")
 
 
@@ -273,7 +273,7 @@ def test_hierarchical_ncx_reuses_play_order_for_same_target(
         if target == "text/chapter_1.html"
     ]
 
-    assert same_target_orders == ["2", "2"]
+    assert same_target_orders == ["1", "1"]
     assert len({point.attrib["id"] for point in points}) == len(points)
 
 

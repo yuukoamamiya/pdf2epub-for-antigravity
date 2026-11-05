@@ -28,6 +28,7 @@ from pdf2epub.toc_translation_workflow import (
     build_toc_heading_contexts,
     validate_toc_heading_bindings,
 )
+from pdf2epub.toc_model import TOC_HEADING_CONTEXT_PROJECTION_VERSION
 from pdf2epub.utils.common import is_epub_conversion_pipeline
 from pdf2epub.validation_receipts import validation_receipt_is_current
 from pdf2epub.workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION
@@ -1414,7 +1415,7 @@ def test_toc_heading_contexts_without_source_dir_use_first_unit_part(tmp_path: P
     progress_dir = output / "ocr_markdown"
     progress_dir.mkdir()
     (output / "toc_tree.json").write_text(
-        json.dumps({"schema_version": 2, "chapters": [{"node_id": "chapter-1", "title": "Chapter", "children": [{"node_id": "chapter-1-child-1", "title": "Exact child"}]}]}),
+        json.dumps({"schema_version": 2, "chapters": [{"node_id": "chapter-1", "title": "Chapter", "children": [{"node_id": "chapter-1-child-1", "title": "Exact child", "anchor": "toc-exact-child"}]}]}),
         encoding="utf-8",
     )
     (progress_dir / "tree_progress.json").write_text(
@@ -1527,7 +1528,7 @@ def test_toc_heading_contexts_missing_child_stays_container_only(
                     "title": "第一章",
                     "children": [
                         {"title": "子标题 A", "anchor": "toc-1-1"},
-                        {"title": "缺失子标题", "anchor": "toc-1-2"},
+                        {"title": "缺失子标题", "anchor": "toc-1-2", "binding_mode": "container_only"},
                     ],
                 }
             ]
@@ -1629,7 +1630,7 @@ def test_image_only_unit_uses_package_only_toc_container(tmp_path: Path):
         json.dumps(toc, ensure_ascii=False), encoding="utf-8"
     )
     (output / "toc_tree_translated.json").write_text(
-        json.dumps({"schema_version": 2, "chapters": [{"node_id": "cover", "title": "封面", "children": []}]}, ensure_ascii=False),
+        json.dumps({"schema_version": 2, "chapters": [{"node_id": "cover", "title": "封面", "binding_mode": "container_only", "children": []}]}, ensure_ascii=False),
         encoding="utf-8",
     )
     progress_dir = output / "ocr_markdown"
@@ -1676,7 +1677,7 @@ def test_toc_heading_binding_allows_whitespace_and_outer_quote_variants(tmp_path
                     "chapter.md": {
                         "node_id": "chapter-1",
                         "anchor": "toc-chapter-1",
-                        "projection_version": 4,
+                        "projection_version": TOC_HEADING_CONTEXT_PROJECTION_VERSION,
                         "toc_title": "Chapter One",
                         "children": [
                             {"title": "Exact Child", "anchor": "toc-1-1", "node_id": "child-1"}
@@ -1709,7 +1710,7 @@ def test_toc_heading_bindings_only_files_scope_ignores_other_units(
     _write_heading_manifest(
         output,
         {
-            "a.md": {"node_id": "a", "anchor": "toc-a", "projection_version": 4, "toc_title": "第一章", "binding_mode": "visible"},
+            "a.md": {"node_id": "a", "anchor": "toc-a", "projection_version": TOC_HEADING_CONTEXT_PROJECTION_VERSION, "toc_title": "第一章", "binding_mode": "visible"},
         },
     )
     validated = output / "translated" / "validated"
@@ -1732,7 +1733,7 @@ def test_toc_heading_bindings_only_files_requires_target(tmp_path: Path):
     output.mkdir()
     _write_heading_manifest(
         output,
-        {"a.md": {"node_id": "a", "anchor": "toc-a", "projection_version": 4, "toc_title": "第一章", "binding_mode": "visible"}},
+        {"a.md": {"node_id": "a", "anchor": "toc-a", "projection_version": TOC_HEADING_CONTEXT_PROJECTION_VERSION, "toc_title": "第一章", "binding_mode": "visible"}},
     )
 
     report = validate_toc_heading_bindings(output, only_files=["a.md"])
@@ -1750,7 +1751,7 @@ def test_toc_heading_bindings_only_files_skips_missing_context(
     output.mkdir()
     _write_heading_manifest(
         output,
-        {"b.md": {"node_id": "b", "anchor": "toc-b", "projection_version": 4, "toc_title": "第二章", "binding_mode": "visible"}},
+        {"b.md": {"node_id": "b", "anchor": "toc-b", "projection_version": TOC_HEADING_CONTEXT_PROJECTION_VERSION, "toc_title": "第二章", "binding_mode": "visible"}},
     )
     validated = output / "translated" / "validated"
     validated.mkdir(parents=True)
@@ -1797,7 +1798,7 @@ def _write_single_file_heading_fixture(
             "chapter_1.part1.md": {
                 "node_id": "chapter-1",
                 "anchor": "toc-chapter-1",
-                "projection_version": 4,
+                "projection_version": TOC_HEADING_CONTEXT_PROJECTION_VERSION,
                 "toc_title": "第一章",
                 "binding_mode": "visible",
                 "children": [],

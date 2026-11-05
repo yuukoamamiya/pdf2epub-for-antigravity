@@ -452,9 +452,80 @@ def _validate_toc_node_source_correspondence(output_dir: Path, tree: Any, toc_li
             node_id = node.get("node_id")
             if not isinstance(node_id, str): continue
             binding_mode = node.get("binding_mode", "visible")
+            page = node.get("start_page")
+            line = (node.get("boundary_info") or {}).get("start_line") if isinstance(node.get("boundary_info"), dict) else None
             matching_decisions = decisions_by_node.get(node_id, [])
+            if node.get("navigation_visibility", "auto") != "auto" and not any(
+                record.get("navigation_visibility") == node.get("navigation_visibility")
+                for record in matching_decisions
+            ):
+                errors.append(f"TOC node {node_id} navigation_visibility requires a matching explicit structure decision")
+            if node.get("numbering_label") is not None and not any(
+                record.get("numbering_label") == node.get("numbering_label")
+                and record.get("numbering_evidence") == node.get("numbering_evidence")
+                for record in matching_decisions
+            ):
+                errors.append(f"TOC node {node_id} numbering_label and evidence must be copied into its structure decision")
             if not isinstance(binding_mode, str) or binding_mode not in {"visible", "container_only"}:
                 errors.append(f"TOC node {node_id} has invalid binding_mode")
+            node_boundary = node.get("boundary_info") if isinstance(node.get("boundary_info"), dict) else {}
+            has_heading_prefix = "heading_prefix" in node_boundary
+            heading_prefix = node_boundary.get("heading_prefix")
+            if binding_mode == "container_only" and has_heading_prefix:
+                errors.append(f"container_only TOC node {node_id} cannot declare heading_prefix")
+            if has_heading_prefix and node_id in layout_ids:
+                errors.append(f"layout TOC node {node_id} cannot declare heading_prefix")
+            if has_heading_prefix:
+                if not isinstance(heading_prefix, str) or not heading_prefix.strip() or "\n" in heading_prefix or "\r" in heading_prefix:
+                    errors.append(f"TOC node {node_id} heading_prefix must be a non-empty single-line prefix")
+                elif type(page) is not int or type(line) is not int:
+                    errors.append(f"TOC node {node_id} heading_prefix requires a source page and line")
+                else:
+                    page_record = valid_pages.get(page, {})
+                    source_path = output_dir / str(page_record.get("path", ""))
+                    try:
+                        if not source_path.resolve().is_relative_to(output_dir.resolve()):
+                            raise ValueError("page path escapes output directory")
+                        source_line = source_path.read_text(encoding="utf-8").splitlines()[line - 1]
+                    except (OSError, ValueError, IndexError):
+                        source_line = None
+                    normalized_source_line = re.sub(r"^\s*#{1,6}\s*", "", source_line) if source_line is not None else None
+                    if normalized_source_line is None or not normalized_source_line.startswith(heading_prefix):
+                        errors.append(f"TOC node {node_id} heading_prefix does not match its source line")
+                    else:
+                        from ..toc_model import compose_numbered_title
+                        source_prefix = normalize_toc_source_label(heading_prefix, markdown_source=True)
+                        bare_title = normalize_toc_source_label(node.get("title", ""), markdown_source=False)
+                        numbering_label = node.get("numbering_label")
+                        numbered_title = normalize_toc_source_label(
+                            compose_numbered_title(str(node.get("title") or ""), numbering_label),
+                            markdown_source=False,
+                        ) if numbering_label else bare_title
+                        if source_prefix not in {bare_title, numbered_title}:
+                            errors.append(f"TOC node {node_id} heading_prefix visible text does not match its title")
+            if node.get("numbering_label") is not None:
+                evidence = node.get("numbering_evidence")
+                if not isinstance(evidence, dict):
+                    errors.append(f"TOC node {node_id} numbering_label requires numbering_evidence")
+                else:
+                    evidence_page, evidence_line = evidence.get("page"), evidence.get("line")
+                    excerpt = evidence.get("excerpt")
+                    page_record = valid_pages.get(evidence_page, {}) if type(evidence_page) is int else {}
+                    source_path = output_dir / str(page_record.get("path", ""))
+                    try:
+                        if type(evidence_line) is not int or not source_path.resolve().is_relative_to(output_dir.resolve()):
+                            raise ValueError("invalid evidence location")
+                        evidence_text = source_path.read_text(encoding="utf-8").splitlines()[evidence_line - 1]
+                    except (OSError, ValueError, IndexError):
+                        evidence_text = None
+                    if (evidence_text is None or not isinstance(excerpt, str) or excerpt not in evidence_text
+                            or not 1 <= evidence_line <= int(page_record.get("line_count") or 0)
+                            or not re.search(
+                                rf"(?<!\w){re.escape(str(node.get('numbering_label')))}(?!\w)(?!\.\d)",
+                                excerpt,
+                                re.IGNORECASE,
+                            )):
+                        errors.append(f"TOC node {node_id} numbering_evidence does not support its label")
             if binding_mode == "container_only" and not any(
                 isinstance(r.get("reason"), str) and r["reason"].strip()
                 for r in matching_decisions
@@ -463,8 +534,6 @@ def _validate_toc_node_source_correspondence(output_dir: Path, tree: Any, toc_li
             if any(r.get("binding_mode", "visible") != binding_mode for r in matching_decisions):
                 errors.append(f"TOC node {node_id} binding_mode differs from its decision")
             exact = False
-            page = node.get("start_page")
-            line = (node.get("boundary_info") or {}).get("start_line") if isinstance(node.get("boundary_info"), dict) else None
             canonical = candidate_by_id.get(node_id)
             if canonical and canonical.get("kind") != "pdf_outline" and type(page) is int and page == canonical.get("page") and type(line) is int and line == canonical.get("line"):
                 exact = True
@@ -481,9 +550,22 @@ def _validate_toc_node_source_correspondence(output_dir: Path, tree: Any, toc_li
                         source_region = []
                     if source_region:
                         source_region[0] = re.sub(r"^\s*#{1,6}\s*", "", source_region[0])
-                    source_label = normalize_toc_source_label(" ".join(source_region), markdown_source=True)
+                    reviewed_prefix = (node.get("boundary_info") or {}).get("heading_prefix")
+                    source_label = normalize_toc_source_label(
+                        reviewed_prefix if isinstance(reviewed_prefix, str) else " ".join(source_region),
+                        markdown_source=True,
+                    )
                     tree_label = normalize_toc_source_label(node.get("title", ""), markdown_source=False)
-                    if not source_label or source_label != tree_label:
+                    numbering_label = node.get("numbering_label")
+                    if numbering_label:
+                        from ..toc_model import compose_numbered_title
+                        numbered_label = normalize_toc_source_label(
+                            compose_numbered_title(str(node.get("title") or ""), numbering_label),
+                            markdown_source=False,
+                        )
+                    else:
+                        numbered_label = tree_label
+                    if not source_label or source_label not in {tree_label, numbered_label}:
                         errors.append(f"TOC node {node_id} title does not match its reviewed source region")
                     boundary_info = node.get("boundary_info") or {}
                     heading_end = boundary_info.get("heading_end_line") if isinstance(boundary_info, dict) else None

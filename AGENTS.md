@@ -433,7 +433,7 @@ renderer 语义提取可见文本；HTML 已渲染文本只提取可见文本，
 `container_only`）。同一逻辑单元优先使用标题候选，即使其位于后续 part；只有没有标题候选时才用
 段落候选。源 Markdown 计数与生成 HTML 锚点匹配必须使用相同候选类别，并严格核对 occurrence 和
 count。可见标题缺少已绑定锚点时必须阻断 EPUB 构建；容器节点按合同落到所属内容文件或首个有内容
-的后代。新 `toc_heading_contexts` 使用 `projection_version: 4`；旧 context 必须先运行一次
+的后代。新 `toc_heading_contexts` 使用 `projection_version: 5`；旧 context 必须先运行一次
 `translate --resume` 刷新 manifest/context，但不能按这次准备结果立即派发 pending，因为旧
 validation receipt 可能失效并暂时把所有现有目标列为 pending。随后运行
 `translate-validate` 校验现有译文并建立当前 receipt，再运行第二次 `translate --resume`；
@@ -451,8 +451,14 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
   后代。显式 `container_only` 节点在分配可见标题候选前跳过匹配，不消耗同名候选；后续可见节点仍须
   在其实际所属 part 中通过 occurrence/count 与导航锚点校验。`visible` 锚点必须出现在其投影指定的
   part 中并落在对应标题上，缺失时构建阻断。
+  阅读目录是完整书稿结构树的展示投影。`navigation_visibility` 可设 `auto`、`include` 或 `exclude`；
+  `auto` 仅隐藏明确的 `cover`、`copyright`、`metadata`、`catalog`、`ad`、`toc` 角色，不能整类隐藏
+  `frontmatter`。经复核的献辞/题名页可设 `exclude`，前言/年表可设 `include`。隐藏父节点时后代仍进入
+  阅读目录，树、spine 和正文文件分配不变。行内标题可在 `boundary_info.heading_prefix` 提供源行精确
+  Markdown 前缀，复核校验可见文本后才可物化；不得按句号或长度猜范围。`numbering_label` 必须附有
+  支持它的 `numbering_evidence` 源页、行及原文摘录。
   HTML TOC 与 NCX 在内容渲染后共用同一份已解析导航树；打包前核对目标文件、fragment 和
-  XHTML id。NCX depth 按实际逻辑层级计算，合成的目录入口不额外增加层级。
+  XHTML id。NCX depth 按实际逻辑层级计算；构建不再注入合成的目录入口。
 
 ## 2. PDF 翻译流程（扫描/混合稿）
 

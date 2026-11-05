@@ -16,6 +16,9 @@ Antigravity 工作区 Agent 负责翻译和需要语义判断的内容，本地 
 流程不需要 OCR。`html-prepare` 会生成主 Agent 专用的 EPUB worker 派发清单，列出所有波次的
 scoped prompt/manifest 入口；CLI 打印首波入口。该清单只描述计划，不会自动启动 Subagent。
 
+PDF 的完整书稿结构树与读者阅读目录分开：封面、版权页等明确角色可默认从导航隐藏，前言等前置内容仍保留；
+经结构复核的行内标题和原书标号会在正文与阅读目录中使用一致显示。显式可见绑定必须落到正文中的对应标题；结构容器可提供导航落点，但不会把可见绑定降级为文件或容器回退。
+
 外部术语表使用 schema 2 多语言概念格式，按配置的源语言与目标语言直接匹配词条；缺少某一
 语言时不会从其他语言推导译法。查看
 [`docs/antigravity-workflow.md`](docs/antigravity-workflow.md) 了解字段和选择流程。

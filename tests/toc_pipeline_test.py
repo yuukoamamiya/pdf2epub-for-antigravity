@@ -23,14 +23,16 @@ def test_review_to_refine_to_translation_handoff_and_epub_roundtrip(tmp_path):
     pages.mkdir(parents=True)
     (output / "input.pdf").write_bytes(b"synthetic PDF bytes")
     page_texts = [
-        "*Parent*\n\nParent body retained.\n",
+        "1. *Parent*\n\nParent body retained.\n",
         "## Child\n\nChild body retained.\n",
         "### Grandchild\n\nGrandchild body retained.\n",
     ]
     for index, text in enumerate(page_texts, 1):
         (pages / f"page_{index:03d}.md").write_text(text, encoding="utf-8")
     tree = {"schema_version": TOC_TREE_SCHEMA_VERSION, "chapters": [{
-        "title": "Parent", "level": 1, "start_page": 1, "end_page": 3,
+        "title": "1. Parent", "level": 1, "start_page": 1, "end_page": 3,
+        "numbering_label": "1",
+        "numbering_evidence": {"page": 1, "line": 1, "excerpt": "1. *Parent*"},
         "boundary_info": {"start_line": 1}, "children": [{
             "title": "Child", "level": 2, "start_page": 2, "end_page": 3,
             "boundary_info": {"start_line": 1}, "children": [{
@@ -41,6 +43,13 @@ def test_review_to_refine_to_translation_handoff_and_epub_roundtrip(tmp_path):
     }]}
     (output / "toc_tree.json").write_text(json.dumps(tree), encoding="utf-8")
     install_toc_review_contract(output, pages)
+    review = json.loads((output / "toc_structure_decisions.json").read_text(encoding="utf-8"))
+    reviewed_tree = json.loads((output / "toc_tree.json").read_text(encoding="utf-8"))
+    root_node_id = reviewed_tree["chapters"][0]["node_id"]
+    next(record for record in review["candidate_decisions"] if record.get("node_id") == root_node_id).update(
+        numbering_label="1", numbering_evidence={"page": 1, "line": 1, "excerpt": "1. *Parent*"}
+    )
+    (output / "toc_structure_decisions.json").write_text(json.dumps(review), encoding="utf-8")
 
     units = RefinedBreakdown(config={}, max_tokens=8000).process_from_toc(
         output / "input.pdf", output, "Synthetic Book"
@@ -78,7 +87,7 @@ def test_review_to_refine_to_translation_handoff_and_epub_roundtrip(tmp_path):
                 text = text.replace(f"## {source_title}\n", f"## {target_title}\n")
                 text = text.replace(f"### {source_title}\n", f"### {target_title}\n")
                 if source_title == "Parent":
-                    text = text.replace("*Parent*\n", "*父章节*\n")
+                    text = text.replace("1. *Parent*\n", "*父章节*\n")
             (validated_dir / filename).write_text(text, encoding="utf-8")
         for filename in unit.get("part_files", []):
             text = (source_dir / filename).read_text(encoding="utf-8")
@@ -99,8 +108,13 @@ def test_review_to_refine_to_translation_handoff_and_epub_roundtrip(tmp_path):
     assert epub_path.is_file()
     with zipfile.ZipFile(epub_path) as archive:
         names = archive.namelist()
+        html_toc = ET.fromstring(archive.read("text/toc.html"))
         ncx_name = next(name for name in names if name.endswith("toc.ncx"))
         ncx = ET.fromstring(archive.read(ncx_name))
+    html_toc_labels = [
+        " ".join("".join(element.itertext()).split())
+        for element in html_toc.iter() if element.tag.endswith("}a")
+    ]
     rendered_dir = output / "epub_build" / "text"
     xhtml_names = list(rendered_dir.glob("*.html")) + list(rendered_dir.glob("*.xhtml"))
     rendered = "\n".join(path.read_text(encoding="utf-8") for path in xhtml_names)
@@ -114,14 +128,23 @@ def test_review_to_refine_to_translation_handoff_and_epub_roundtrip(tmp_path):
     grandchild_point = child_point.find("n:navPoint", ns)
     points = [root_point, child_point, grandchild_point]
     labels = [node.find("n:navLabel/n:text", ns).text for node in points]
-    assert labels == ["父章节", "子章节", "孙章节"]
-    for point in points:
-        source = point.find("n:content", ns).attrib["src"].split("#", 1)
-        target_file, fragment = source
-        page = output / "epub_build" / target_file
-        if not page.is_file():
-            page = output / "epub_build" / "text" / target_file
-        assert fragment in page.read_text(encoding="utf-8")
+    assert labels == ["1 父章节", "子章节", "孙章节"]
+    assert html_toc_labels == labels
+    expected_levels = ["h1", "h2", "h3"]
+    with zipfile.ZipFile(epub_path) as archive:
+        for point, expected_level in zip(points, expected_levels):
+            source = point.find("n:content", ns).attrib["src"].split("#", 1)
+            target_file, fragment = source
+            if target_file not in names:
+                target_file = "text/" + target_file
+            target_root = ET.fromstring(archive.read(target_file))
+            target = next(element for element in target_root.iter() if element.attrib.get("id") == fragment)
+            parents = {child: parent for parent in target_root.iter() for child in parent}
+            while not target.tag.endswith(expected_level) and target in parents:
+                target = parents[target]
+            heading_text = " ".join("".join(target.itertext()).split())
+            assert target.tag.endswith(expected_level)
+            assert heading_text == point.find("n:navLabel/n:text", ns).text
     assert xhtml_names
 
     leaf_file = next((validated_dir / name for unit in progress["units"] for name in (unit.get("part_files") or [unit.get("file")]) if name and "孙章节" in (validated_dir / name).read_text(encoding="utf-8")), None)

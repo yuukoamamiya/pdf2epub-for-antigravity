@@ -114,6 +114,17 @@ evidence and the exact `excerpt`, then use that ID in the tree. Visible nodes
 use `binding_mode: "visible"` and their start page/line must match accepted
 evidence. Use `binding_mode: "container_only"` only for an invisible
 structural container; provide an explicit `reason` in its decision.
+Optional `boundary_info.heading_prefix` is an exact, reviewed prefix of the
+source start line after removing any ATX marker. Use it only when a visible
+heading shares a line with body text; copy the exact Markdown including inline
+markup and punctuation. Its visible text must equal the node title. Never
+guess a prefix from sentence punctuation or length. `navigation_visibility`
+may be `auto`, `include`, or `exclude`; use `exclude` for reviewed dedication
+or title-page entries, retain prefaces/chronologies with `include`, and do not
+infer from translated titles. `numbering_label` requires `numbering_evidence`
+with the exact source page, line, and excerpt supporting the label. Copy an
+explicit visibility choice and numbering evidence into the matching candidate
+decision as well as the tree.
 For an accepted sidecar-only `layout_region`, use that candidate ID as the
 node ID, copy its page/block/source/bbox into `evidence`, and provide the
 explicit page `start_line` where the heading belongs in Markdown. Local code

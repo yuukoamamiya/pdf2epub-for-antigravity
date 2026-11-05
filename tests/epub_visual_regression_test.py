@@ -365,20 +365,14 @@ def _assert_nested_pdf_toc(epub_path: Path) -> None:
          point.find("ncx:content", ns).get("src"))
         for point in points
     ]
-    # The EPUB includes a synthetic TOC entry before the logical navigation tree.
-    assert entries[0][0] == "目录"
-    assert [label for label, _href in entries[1:]] == expected
+    assert [label for label, _href in entries] == expected
     depth = ncx_root.find(".//ncx:meta[@name='dtb:depth']", ns)
     assert depth is not None and depth.get("content") == "3"
     for _label, href in entries:
         assert href
         target_member, fragment = assert_href_resolves("toc.ncx", href)
-        if _label == "目录":
-            assert target_member == toc_member
-            assert fragment is None
-        else:
-            assert target_member == chapter_member
-            assert fragment
+        assert target_member == chapter_member
+        assert fragment
 
 
 def test_pdf_markdown_builder_final_epub_preserves_visual_and_structural_contract(
@@ -482,6 +476,126 @@ def test_pdf_markdown_builder_final_epub_preserves_visual_and_structural_contrac
     if qa_dir:
         artifact_paths = _save_visual_qa_artifacts(final_epub, "pdf-markdown-rich", Path(qa_dir))
         assert artifact_paths
+
+
+def test_pdf_heading_hierarchy_renders_at_desktop_and_narrow_viewports(tmp_path: Path) -> None:
+    output = tmp_path / "output"
+    source = output / "ocr_markdown"
+    markdown = output / "polished_markdown"
+    source.mkdir(parents=True)
+    markdown.mkdir()
+    labels = [f"Level {level} 标题 / Heading {level}" for level in range(1, 7)]
+    content = []
+    chapters = []
+    parent = None
+    for level, label in enumerate(labels, 1):
+        content.extend([f"{'#' * level} {label}", f"Body sample for level {level}."])
+        node = {"node_id": f"heading-{level}", "title": label, "level": level,
+                "binding_mode": "visible", "children": []}
+        if parent is None:
+            chapters.append(node)
+        else:
+            parent["children"].append(node)
+        parent = node
+    markdown_file = markdown / "chapter_1.md"
+    markdown_file.write_text("\n\n".join(content) + "\n", encoding="utf-8")
+    (source / "chapter_1.md").write_text(markdown_file.read_text(encoding="utf-8"), encoding="utf-8")
+    (source / "tree_progress.json").write_text(
+        json.dumps({"units": [{"node_id": "heading-1", "index_path": [1], "file": "chapter_1.md"}]}),
+        encoding="utf-8",
+    )
+    tree_path = output / "toc_tree.json"
+    tree_path.write_text(json.dumps({"schema_version": TOC_TREE_SCHEMA_VERSION, "chapters": chapters}), encoding="utf-8")
+    epub_path = output / "heading-levels.epub"
+    assert build_epub(BuildEpubConfig(
+        book_title="Heading Levels", output_dir=output, markdown_dir=markdown,
+        toc_tree_path=tree_path, translated=False,
+        config={"footnotes": {"mode": "auto"}}, output_epub=epub_path,
+    )) == epub_path
+
+    with ZipFile(epub_path) as archive:
+        chapter = archive.read("text/chapter_1.html").decode("utf-8")
+        toc_html = archive.read("text/toc.html")
+        assert all(f"<h{level} " in chapter for level in range(1, 7))
+        assert b"<navPoint id=\"navpoint-toc\"" not in archive.read("toc.ncx")
+
+    toc_html_text = " ".join(" ".join(ET.fromstring(toc_html).itertext()).split())
+    assert all(label in toc_html_text for label in labels)
+    toc_only_epub = tmp_path / "heading-levels-toc-only.epub"
+    with ZipFile(epub_path) as source_archive:
+        opf_name = next(name for name in source_archive.namelist() if name.endswith("content.opf"))
+        opf_root = ET.fromstring(source_archive.read(opf_name))
+        opf_ns = {"opf": "http://www.idpf.org/2007/opf"}
+        toc_item = next(
+            item for item in opf_root.findall("opf:manifest/opf:item", opf_ns)
+            if item.get("href") == "text/toc.html"
+        )
+        spine = opf_root.find("opf:spine", opf_ns)
+        assert spine is not None
+        for itemref in list(spine):
+            spine.remove(itemref)
+        ET.SubElement(spine, f"{{{opf_ns['opf']}}}itemref", {"idref": toc_item.get("id")})
+        with ZipFile(toc_only_epub, "w") as toc_archive:
+            for info in source_archive.infolist():
+                contents = ET.tostring(opf_root, encoding="utf-8", xml_declaration=True) if info.filename == opf_name else source_archive.read(info.filename)
+                toc_archive.writestr(info, contents)
+
+    for width, height, viewport_name in ((900, 1200, "desktop"), (540, 900, "narrow")):
+        with pymupdf.open(epub_path) as document:
+            document.layout(width=width, height=height)
+            assert document.page_count > 0
+            chapter_pages = [page for page in document if "Body sample for level" in page.get_text("text")]
+            span_rows = [
+                span
+                for page in chapter_pages
+                for block in page.get_text("dict")["blocks"] if "lines" in block
+                for line in block["lines"]
+                for span in line["spans"] if span.get("text", "").strip()
+            ]
+            by_label = {
+                label: max(
+                    (span for span in span_rows if f"Heading {labels.index(label) + 1}" in span["text"]),
+                    key=lambda span: span["size"],
+                )
+                for label in labels
+            }
+            body = next(span for span in span_rows if span["text"].strip() == "Body sample for level 2.")
+            assert by_label[labels[1]]["size"] > body["size"]
+            assert by_label[labels[1]]["flags"] & pymupdf.TEXT_FONT_BOLD
+            assert by_label[labels[4]]["size"] >= body["size"]
+            assert by_label[labels[5]]["size"] >= body["size"]
+            assert by_label[labels[4]]["flags"] & pymupdf.TEXT_FONT_BOLD
+            assert by_label[labels[5]]["flags"] & pymupdf.TEXT_FONT_BOLD
+            body_page = next(
+                page for page in document
+                if "Body sample for level 2." in page.get_text("text")
+            )
+            screenshot = tmp_path / f"{viewport_name}-heading-page.png"
+            body_page.get_pixmap(alpha=False).save(screenshot)
+
+        with pymupdf.open(toc_only_epub) as document:
+            document.layout(width=width, height=height)
+            toc_text = " ".join(" ".join(page.get_text("text").split()) for page in document)
+            assert all(f"Heading {level}" in toc_text for level in range(1, 7))
+            assert not any(marker in toc_text for marker in ("▸", "▹", "•", "◦"))
+            toc_spans = [
+                span
+                for page in document
+                for block in page.get_text("dict")["blocks"] if "lines" in block
+                for line in block["lines"]
+                for span in line["spans"] if span.get("text", "").strip()
+            ]
+            toc_levels = {
+                level: max(
+                    (span for span in toc_spans if f"Heading {level}" in span["text"]),
+                    key=lambda span: span["size"],
+                )
+                for level in range(1, 7)
+            }
+            assert all(abs(toc_levels[level]["size"] - toc_levels[1]["size"]) <= 0.01
+                       for level in range(2, 7))
+            toc_page = next(page for page in document if "Heading 1" in page.get_text("text"))
+            toc_page.get_pixmap(alpha=False).save(tmp_path / f"deep-toc-{viewport_name}.png")
 
 
 def _write_html_rebuild_input(path: Path) -> None:

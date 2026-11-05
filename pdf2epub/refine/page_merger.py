@@ -241,13 +241,17 @@ class PageMerger:
             boundary = getattr(node, "boundary_info", None) or {}
             start_line = boundary.get("start_line") if isinstance(boundary, dict) else None
             if type(start_line) is not int or not 1 <= start_line <= len(source_lines) + 1:
+                if isinstance(boundary, dict) and "heading_prefix" in boundary:
+                    raise ValueError(f"Reviewed heading_prefix has invalid source line for TOC node {node_id}")
                 continue
             if node_id.startswith("layout-"):
                 level = getattr(node, "level", 1)
                 if type(level) is int and 1 <= level <= 6:
-                    regions.append((start_line, start_line, level, str(node.title), True))
+                    regions.append((start_line, start_line, level, str(node.title), True, ""))
                 continue
             if start_line > len(source_lines):
+                if "heading_prefix" in boundary:
+                    raise ValueError(f"Reviewed heading_prefix is outside source page for TOC node {node_id}")
                 continue
             end_exclusive = boundary.get("heading_end_line", start_line + 1)
             if type(end_exclusive) is not int or not start_line < end_exclusive <= len(source_lines) + 1:
@@ -255,30 +259,90 @@ class PageMerger:
             raw_region = source_lines[start_line - 1:end_exclusive - 1]
             if not raw_region:
                 continue
+            has_heading_prefix = isinstance(boundary, dict) and "heading_prefix" in boundary
+            heading_prefix = boundary.get("heading_prefix") if isinstance(boundary, dict) else None
+            if has_heading_prefix:
+                if not isinstance(heading_prefix, str) or not heading_prefix.strip() or "\n" in heading_prefix or "\r" in heading_prefix:
+                    raise ValueError(f"Invalid reviewed heading_prefix for TOC node {node_id}")
+                source_line = raw_region[0]
+                source_body_line = re.sub(r"^\s*#{1,6}\s*", "", source_line)
+                if not source_body_line.startswith(heading_prefix):
+                    raise ValueError(f"Reviewed heading_prefix does not match source line for TOC node {node_id}")
+                prefix_label = normalize_toc_source_label(heading_prefix, markdown_source=True)
+                canonical_label = normalize_toc_source_label(node.title, markdown_source=False)
+                numbering_label = getattr(node, "numbering_label", None)
+                if numbering_label:
+                    from ..toc_model import compose_numbered_title
+                    numbered_label = normalize_toc_source_label(
+                        compose_numbered_title(node.title, numbering_label), markdown_source=False
+                    )
+                else:
+                    numbered_label = canonical_label
+                if prefix_label not in {canonical_label, numbered_label}:
+                    raise ValueError(f"Reviewed heading_prefix does not match canonical title for TOC node {node_id}")
+                if len(raw_region) != 1:
+                    raise ValueError(f"Multiline reviewed heading_prefix is unsupported for TOC node {node_id}")
+                level = getattr(node, "level", 1)
+                if type(level) is not int or level < 1:
+                    raise ValueError(f"Reviewed heading_prefix has invalid canonical level for TOC node {node_id}")
+                level = min(level, 6)
+                title_markup = heading_prefix.strip()
+                label = getattr(node, "numbering_label", None)
+                if label:
+                    from ..toc_model import compose_numbered_title
+                    visible_title = normalize_toc_source_label(title_markup, markdown_source=True)
+                    composed_visible = compose_numbered_title(visible_title, label)
+                    if composed_visible != visible_title:
+                        title_markup = f"{label} {title_markup}"
+                remainder = source_body_line[len(heading_prefix):].lstrip(" \t")
+                regions.append((start_line, start_line + 1, level, title_markup, False, remainder))
+                continue
             label_lines = list(raw_region)
             label_lines[0] = re.sub(r"^\s*#{1,6}\s*", "", label_lines[0])
-            if normalize_toc_source_label(" ".join(label_lines), markdown_source=True) != normalize_toc_source_label(node.title, markdown_source=False):
+            source_heading_label = normalize_toc_source_label(" ".join(label_lines), markdown_source=True)
+            canonical_label = normalize_toc_source_label(node.title, markdown_source=False)
+            numbering_label = getattr(node, "numbering_label", None)
+            if numbering_label:
+                from ..toc_model import compose_numbered_title
+                numbered_label = normalize_toc_source_label(
+                    compose_numbered_title(node.title, numbering_label), markdown_source=False
+                )
+            else:
+                numbered_label = canonical_label
+            if source_heading_label not in {canonical_label, numbered_label}:
                 continue
             level = getattr(node, "level", 1)
-            if type(level) is not int or not 1 <= level <= 6:
+            if type(level) is not int or level < 1:
                 continue
+            level = min(level, 6)
             heading_text = " ".join(label_lines).strip()
-            regions.append((start_line, end_exclusive, level, heading_text, False))
+            label = getattr(node, "numbering_label", None)
+            if label:
+                from ..toc_model import compose_numbered_title
+                visible_heading = normalize_toc_source_label(heading_text, markdown_source=True)
+                composed_visible = compose_numbered_title(visible_heading, label)
+                if composed_visible != visible_heading:
+                    heading_text = f"{label} {heading_text}"
+            regions.append((start_line, end_exclusive, level, heading_text, False, ""))
 
-        by_start = {start: (end, level, title, layout_only) for start, end, level, title, layout_only in regions}
+        by_start = {start: (end, level, title, layout_only, remainder) for start, end, level, title, layout_only, remainder in regions}
         output: list[str] = []
         line_positions: dict[int, int] = {}
         boundary_positions: dict[int, int] = {1: 0}
         line_no = 1
         while line_no <= len(source_lines) + 1:
             if line_no in by_start:
-                end_exclusive, level, title, layout_only = by_start[line_no]
+                end_exclusive, level, title, layout_only, remainder = by_start[line_no]
                 if output and output[-1].strip():
                     output.append("")
                 heading_position = len(output)
                 output.append(f"{'#' * level} {title}")
+                if remainder:
+                    output.append("")
+                    output.append(remainder)
                 following_index = end_exclusive - 1 if not layout_only else line_no - 1
                 if (following_index < len(source_lines)
+                        and not remainder
                         and source_lines[following_index].strip()):
                     output.append("")
                 boundary_positions[line_no] = heading_position

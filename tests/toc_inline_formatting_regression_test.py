@@ -205,11 +205,12 @@ def test_renderer_helper_import_does_not_reset_loguru_handlers():
 
 def _validate_translated_titles(tmp_path, titles, markdown_source):
     from pdf2epub.toc_translation_workflow import validate_toc_heading_bindings
+    from pdf2epub.toc_model import TOC_HEADING_CONTEXT_PROJECTION_VERSION
 
     manifest = {
         "toc_heading_contexts": {
             "unit.md": {
-                "projection_version": 4,
+                "projection_version": TOC_HEADING_CONTEXT_PROJECTION_VERSION,
                 "node_id": "root",
                 "anchor": "toc-root",
                 "toc_title": titles[0],

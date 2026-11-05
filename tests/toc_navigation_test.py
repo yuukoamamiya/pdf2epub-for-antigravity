@@ -7,6 +7,7 @@ from pdf2epub.build_epub import generate_hierarchical_toc_html, generate_hierarc
 from pdf2epub.build_epub import BuildEpubConfig, _prepare_epub_structure, build_epub
 from pdf2epub.toc_navigation import (
     navigation_depth,
+    present_navigation_headings,
     resolve_navigation,
     validate_navigation_rendering,
 )
@@ -37,13 +38,13 @@ def test_html_and_ncx_serialize_same_arbitrary_depth_navigation(tmp_path):
     ns = {"n": "http://www.daisy.org/z3986/2005/ncx/"}
     assert root.find("n:head/n:meta[@name='dtb:depth']", ns).attrib["content"] == "3"
     points = root.findall(".//n:navPoint", ns)
-    assert [p.find("n:navLabel/n:text", ns).text for p in points[1:]] == ["Repeated", "Repeated", "Leaf"]
+    assert [p.find("n:navLabel/n:text", ns).text for p in points] == ["Repeated", "Repeated", "Leaf"]
     html_root = ET.fromstring(html)
     links = html_root.findall(".//{http://www.w3.org/1999/xhtml}a")
     assert [link.text for link in links] == ["Repeated", "Repeated", "Leaf"]
     assert [link.attrib["href"] for link in links] == [
         point.find("n:content", ns).attrib["src"].removeprefix("text/")
-        for point in points[1:]
+        for point in points
     ]
     assert len(html_root.findall(".//{http://www.w3.org/1999/xhtml}ul")) == 3
 
@@ -57,6 +58,96 @@ def test_container_uses_first_content_descendant_and_explicit_anchor(tmp_path):
     assert model[0].target == "chapter.html#explicit-id"
     assert model[0].binding_status == "first_content_descendant"
     assert model[0].children[0].binding_status == "rendered_anchor"
+
+
+def test_navigation_projection_hides_auto_excluded_roles_but_preserves_included_frontmatter():
+    structure = [
+        {"node_id": "copyright", "title": "Copyright", "type": "copyright", "navigation_binding_mode": "container_only", "file_path": "copyright.md", "unit_id": "copyright", "children": []},
+        {"node_id": "preface", "title": "Preface", "type": "frontmatter", "navigation_binding_mode": "container_only", "file_path": "preface.md", "unit_id": "preface", "children": []},
+        {"node_id": "dedication", "title": "Dedication", "type": "frontmatter", "navigation_visibility": "exclude", "navigation_binding_mode": "container_only", "file_path": "dedication.md", "unit_id": "dedication", "children": []},
+    ]
+    model = resolve_navigation(structure, generated_files={"copyright.html", "preface.html", "dedication.html"})
+    assert [node.node_id for node in model] == ["preface"]
+
+
+def test_hidden_parent_keeps_child_owner_and_invalid_visibility_fails_closed():
+    structure = [{
+        "node_id": "copyright", "title": "Copyright", "type": "copyright",
+        "navigation_binding_mode": "container_only", "file_path": "copyright.md",
+        "unit_id": "copyright", "children": [{
+            "node_id": "logical", "title": "Group", "navigation_binding_mode": "container_only",
+            "children": [],
+        }],
+    }]
+    model = resolve_navigation(structure, generated_files={"copyright.html"})
+    assert [node.node_id for node in model] == ["logical"]
+    assert model[0].target == "copyright.html"
+    structure[0]["navigation_visibility"] = "maybe"
+    with pytest.raises(ValueError, match="Invalid TOC navigation_visibility"):
+        resolve_navigation(structure, generated_files={"copyright.html"})
+    assert resolve_navigation([{
+        "node_id": "empty-cover", "title": "Cover", "type": "cover",
+        "navigation_binding_mode": "container_only", "children": [],
+    }], generated_files=set()) == ()
+
+
+def test_container_alias_anchor_remains_non_heading_and_needs_only_valid_fragment():
+    structure = [{"node_id": "container", "title": "Part Group", "level": 1,
+                  "anchor": "container-alias", "navigation_binding_mode": "container_only"}]
+    model = resolve_navigation(structure, {"container-alias": "chapter.html"})
+    source = {"chapter.html": '<html><body><div id="container-alias">Group content</div></body></html>'}
+    rendered = present_navigation_headings(model, source)
+    assert rendered == source
+    validate_navigation_rendering(model, source)
+
+
+def test_deep_heading_is_capped_visually_and_keeps_logical_level_class():
+    structure = [{"node_id": "deep", "title": "Deep", "level": 8,
+                  "anchor": "deep-anchor", "navigation_binding_mode": "visible"}]
+    model = resolve_navigation(structure, {"deep-anchor": "chapter.html"})
+    rendered = present_navigation_headings(model, {
+        "chapter.html": '<html><body><p id="deep-anchor">Deep</p></body></html>'
+    })
+    assert '<h6 id="deep-anchor" class="logical-level-8">Deep</h6>' in rendered["chapter.html"]
+    validate_navigation_rendering(model, rendered)
+
+
+def test_navigation_visibility_and_number_label_roundtrip_and_validation():
+    from pdf2epub.toc_model import compose_numbered_title, validate_toc_node_identities
+
+    node = {"node_id": "chapter", "title": "Civil War", "level": 1,
+            "navigation_visibility": "include", "numbering_label": "II",
+            "numbering_evidence": {"page": 1, "line": 1, "excerpt": "II Civil War"},
+            "binding_mode": "container_only", "children": []}
+    assert validate_toc_node_identities([node]) == []
+    node["navigation_visibility"] = "sometimes"
+    assert any("navigation_visibility" in error for error in validate_toc_node_identities([node]))
+    assert compose_numbered_title("The Shape of Truth", "1") == "1 The Shape of Truth"
+    assert compose_numbered_title("A Study in Blue", "1") == "1 A Study in Blue"
+    assert compose_numbered_title("1. Shape", "1") == "1. Shape"
+    assert compose_numbered_title("(1) Shape", "1.") == "(1) Shape"
+    assert compose_numbered_title("I Introduction", "I") == "I Introduction"
+    assert compose_numbered_title("A Study", "1") == "1 A Study"
+    with pytest.raises(ValueError, match="conflicts"):
+        compose_numbered_title("1.2 Scope", "1")
+    with pytest.raises(ValueError, match="conflicts"):
+        compose_numbered_title("2 Shape", "1")
+    assert any("invalid TOC numbering_label" in error for error in validate_toc_node_identities([
+        {"node_id": "bad", "title": "x", "numbering_label": "<img onerror=alert(1)>", "children": []}
+    ]))
+    for malformed in (".", "()", "( ).", ")", "(1", "1)"):
+        assert any("invalid TOC numbering_label" in error for error in validate_toc_node_identities([
+            {"node_id": "bad", "title": "x", "numbering_label": malformed,
+             "numbering_evidence": {"page": 1, "line": 1, "excerpt": malformed}, "children": []}
+        ]))
+    from pdf2epub.refine.toc_tree import TOCNode
+    model = TOCNode.from_dict({"title": "Title", "level": 1, "start_page": 1, "end_page": 1,
+                               "node_id": "id", "navigation_visibility": "exclude",
+                               "numbering_label": "II", "numbering_evidence": {"page": 1, "line": 1, "excerpt": "II Title"}})
+    serialized = model.to_dict()
+    assert serialized["navigation_visibility"] == "exclude"
+    assert serialized["numbering_label"] == "II"
+    assert serialized["numbering_evidence"]["excerpt"] == "II Title"
 
 
 def test_navigation_rejects_duplicate_identity_anchor_and_missing_file():
@@ -84,12 +175,56 @@ def test_heading_validation_accepts_canonical_emphasis_paragraph_and_rejects_num
                 "navigation_binding_mode": "visible", "unit_id": "chapter",
                 "file_path": "chapter.md", "part_files": ["chapter.md"]}]
     model = resolve_navigation(visible, {"heading-anchor": "chapter.html"})
-    validate_navigation_rendering(model, {
-        "chapter.html": '<html><body><p><em>1 Civil War</em><span id="heading-anchor"></span></p></body></html>'
-    })
+    with pytest.raises(ValueError, match="not rendered at its canonical heading level"):
+        validate_navigation_rendering(model, {
+            "chapter.html": '<html><body><p><em>1 Civil War</em><span id="heading-anchor"></span></p></body></html>'
+        })
     with pytest.raises(ValueError, match="does not land on the expected heading"):
         validate_navigation_rendering(model, {
             "chapter.html": '<html><body><h2><span id="heading-anchor"></span>2 Civil War</h2></body></html>'
+        })
+
+
+def test_presentation_promotes_exact_title_paragraph_and_preserves_body_paragraph():
+    structure = [{"node_id": "heading", "title": "Title", "level": 2,
+                  "anchor": "a", "navigation_binding_mode": "visible"}]
+    model = resolve_navigation(structure, {"a": "chapter.html"})
+    rendered = present_navigation_headings(model, {
+        "chapter.html": '<html><body><p><span id="a"></span><em>Title</em></p><p id="body">Title with following body.</p></body></html>'
+    })["chapter.html"]
+    assert '<h2><span id="a"></span><em>Title</em></h2>' in rendered
+    assert '<p id="body">Title with following body.</p>' in rendered
+
+
+def test_reviewed_numbering_is_added_once_only_when_bare_heading_is_unique():
+    structure = [{
+        "node_id": "heading", "title": "Civil War", "level": 2,
+        "numbering_label": "II", "anchor": "a", "navigation_binding_mode": "visible",
+    }]
+    model = resolve_navigation(structure, {"a": "chapter.html"})
+    rendered = present_navigation_headings(model, {
+        "chapter.html": '<html><body><p id="a">Civil War</p></body></html>'
+    })
+    assert '<h2 id="a">II Civil War</h2>' in rendered["chapter.html"]
+    structure[0]["title"] = "II Civil War"
+    model = resolve_navigation(structure, {"a": "chapter.html"})
+    rendered = present_navigation_headings(model, {
+        "chapter.html": '<html><body><p id="a">II Civil War</p></body></html>'
+    })
+    assert '<h2 id="a">II Civil War</h2>' in rendered["chapter.html"]
+    with pytest.raises(ValueError, match="cannot be applied uniquely"):
+        present_navigation_headings(model, {
+            "chapter.html": '<html><body><p id="a">Civil War</p><h2>III Civil War</h2></body></html>'
+        })
+
+    roman = [{
+        "node_id": "roman", "title": "I Heading", "level": 2,
+        "numbering_label": "I", "anchor": "roman", "navigation_binding_mode": "visible",
+    }]
+    roman_model = resolve_navigation(roman, {"roman": "chapter.html"})
+    with pytest.raises(ValueError, match="cannot be applied uniquely"):
+        present_navigation_headings(roman_model, {
+            "chapter.html": '<html><body><p id="roman">Heading</p><h2>I Heading</h2></body></html>'
         })
 
 

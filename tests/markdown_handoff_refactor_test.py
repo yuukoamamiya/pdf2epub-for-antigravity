@@ -350,7 +350,8 @@ def test_validate_existing_outputs_before_second_resume_avoids_full_redelegation
     source.write_text("Source paragraph.", encoding="utf-8")
     target.write_text("Existing translated paragraph.", encoding="utf-8")
     old_context = {"projection_version": 2, "node_id": "n1", "anchor": "a1"}
-    refreshed_context = {"projection_version": 4, "node_id": "n1", "anchor": "a1"}
+    from pdf2epub.toc_model import TOC_HEADING_CONTEXT_PROJECTION_VERSION
+    refreshed_context = {"projection_version": TOC_HEADING_CONTEXT_PROJECTION_VERSION, "node_id": "n1", "anchor": "a1"}
     from pdf2epub.markdown_handoff import prepare_markdown_subagent
     from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 

@@ -170,7 +170,7 @@ Markdown validator schema 4 使版本升级前的全量 receipts 和逐文件 le
 对于旧 TOC projection，先运行一次 `translate --resume` 刷新 manifest/context，但不要按这次准备输出
 立即派发 pending；schema 3 的旧验证 receipt 本来就不会被复用，第一次可能把现有目标都标成 pending。
 然后先运行 `translate-validate` 校验现有译文并建立 schema 4 receipt，再运行第二次
-`translate --resume`。这时 current receipt 与 `projection_version: 4` context 会让有效目标重新成为
+`translate --resume`。这时 current receipt 与 `projection_version: 5` context 会让有效目标重新成为
 completed；只派发仍列为 pending/invalid 的 assignment，完成后再做全量 `translate-validate`。
 对旧 polish receipt，先直接校验现有文本；只把实际失败的目标交回 Subagent。
 Markdown worker 的提示词还明确禁止修改 `pdf2epub/`、`tests/`、`docs/`、`glossaries/` 和项目
@@ -1181,8 +1181,13 @@ projection；不完整或身份不一致时阻断并要求重新准备、审阅�
 投影为 `visible` 的标题会在其指定物理 part 中建立锚点，包含嵌在后代单元中的结构祖先；若
 可见绑定未能落到实际标题，构建失败。容器节点保持逻辑层级并落到所属文件或首个内容后代。
 HTML TOC 与 NCX 在正文渲染完成后共用同一个导航模型；打包前核对 XHTML heading、ID、文件和
-fragment。NCX depth 使用逻辑 TOC 实际深度，合成的目录入口不增加一级。
-TOC heading context 使用 `projection_version: 4`。旧版本 context 必须通过
+fragment。NCX depth 使用逻辑 TOC 实际深度；构建不注入合成目录入口。TOC
+`navigation_visibility` 可显式为 `auto`、`include` 或 `exclude`；`auto` 默认隐藏封面、版权、
+元数据、目录册和广告角色，保留前置内容。先完整解析、物化并校验 heading，再投影 HTML TOC/NCX；
+隐藏导航项仍须满足结构与锚点合同，隐藏父项不得改变子项 ownership。可选 `numbering_label` 和
+`numbering_evidence` 将经复核的编号作为不可变 TOC 元数据传递；标题正文已含相同编号时不会重复显示，
+正文只有裸标题时仅在其全局唯一时补入编号。该编号统一用于正文标题、HTML TOC 和 NCX。
+TOC heading context 使用 `projection_version: 5`。旧版本 context 必须通过
 `translate --resume` 重新准备并重新校验；检查新 manifest，只派发上下文哈希或源内容失效的文件，
 不要因为版本升级就盲目重译整本书。连续空白、Markdown 外层标记及成对引号/书名号只在运行时
 canonicalization 中容差，不写回标题，也不接受近义词或自行改译。

@@ -65,6 +65,63 @@ def test_review_requires_complete_candidate_and_page_coverage(tmp_path):
     assert any("page coverage" in error for error in errors)
 
 
+def test_reviewed_run_in_prefix_validates_against_exact_prefix_not_full_candidate(tmp_path):
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    (pages / "page_001.md").write_text("# *Heading.* Body text\n", encoding="utf-8")
+    outline = tmp_path / "outline_toc_draft.json"
+    outline.write_text(json.dumps({"chapters": []}), encoding="utf-8")
+    pdf = tmp_path / "input.pdf"
+    pdf.write_bytes(b"synthetic")
+    manifest = build_structure_review(tmp_path, pages, "ocr", outline, pdf)
+    candidates = json.loads((tmp_path / "toc_heading_candidates.json").read_text(encoding="utf-8"))
+    candidate = next(row for row in candidates["candidates"] if row["kind"] == "text_line")
+    tree = {"schema_version": 2, "chapters": [{
+        "title": "Heading.", "level": 2, "start_page": 1, "end_page": 1,
+        "node_id": candidate["candidate_id"], "binding_mode": "visible",
+        "boundary_info": {"start_line": 1, "heading_prefix": "*Heading.*"}, "children": [],
+    }]}
+    (tmp_path / "toc_tree.json").write_text(json.dumps(tree), encoding="utf-8")
+    decisions = {"schema_version": 1, "source_fingerprint": manifest["source_fingerprint"],
+                 "candidate_inventory_sha256": candidates["inventory_sha256"],
+                 "candidate_decisions": [{"candidate_id": candidate["candidate_id"],
+                    "disposition": "toc_node", "node_id": candidate["candidate_id"], "binding_mode": "visible"}],
+                 "page_coverage": [{"page": 1, "reviewed": True, "evidence": ["visual"]}]}
+    (tmp_path / "toc_structure_decisions.json").write_text(json.dumps(decisions), encoding="utf-8")
+    expected = _snapshot(tmp_path, pages, outline, pdf)
+    assert validate_structure_review(tmp_path, tree, expected_snapshot=expected) == []
+
+
+def test_reviewed_number_label_can_live_in_source_title_or_separate_metadata(tmp_path):
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    (pages / "page_001.md").write_text("# 1. Heading\nBody\n", encoding="utf-8")
+    outline = tmp_path / "outline_toc_draft.json"
+    outline.write_text(json.dumps({"chapters": []}), encoding="utf-8")
+    pdf = tmp_path / "input.pdf"
+    pdf.write_bytes(b"synthetic")
+    manifest = build_structure_review(tmp_path, pages, "ocr", outline, pdf)
+    candidates = json.loads((tmp_path / "toc_heading_candidates.json").read_text(encoding="utf-8"))
+    candidate = next(row for row in candidates["candidates"] if row["kind"] == "text_line")
+    evidence = {"page": 1, "line": 1, "excerpt": "1. Heading"}
+    tree = {"schema_version": 2, "chapters": [{
+        "title": "Heading", "level": 1, "start_page": 1, "end_page": 1,
+        "node_id": candidate["candidate_id"], "binding_mode": "visible",
+        "numbering_label": "1.", "numbering_evidence": evidence,
+        "boundary_info": {"start_line": 1}, "children": [],
+    }]}
+    (tmp_path / "toc_tree.json").write_text(json.dumps(tree), encoding="utf-8")
+    decisions = {"schema_version": 1, "source_fingerprint": manifest["source_fingerprint"],
+                 "candidate_inventory_sha256": candidates["inventory_sha256"],
+                 "candidate_decisions": [{"candidate_id": candidate["candidate_id"],
+                    "disposition": "toc_node", "node_id": candidate["candidate_id"],
+                    "binding_mode": "visible", "numbering_label": "1.", "numbering_evidence": evidence}],
+                 "page_coverage": [{"page": 1, "reviewed": True, "evidence": ["visual"]}]}
+    (tmp_path / "toc_structure_decisions.json").write_text(json.dumps(decisions), encoding="utf-8")
+    expected = _snapshot(tmp_path, pages, outline, pdf)
+    assert validate_structure_review(tmp_path, tree, expected_snapshot=expected) == []
+
+
 def test_review_rejects_duplicate_unknown_unresolved_and_stale_sources(tmp_path):
     pages, outline, pdf, _ = _prepared(tmp_path)
     decision_path = tmp_path / "toc_structure_decisions.json"

@@ -25,6 +25,8 @@ from .toc_navigation import (
     ResolvedNavigationNode,
     navigation_depth,
     resolve_navigation,
+    present_navigation_headings,
+    project_navigation,
     serialize_html_navigation,
     serialize_ncx_navigation,
     validate_navigation_rendering,
@@ -586,6 +588,9 @@ def flatten_toc_tree(
         }
         if 'type' in chapter:
             entry['type'] = chapter['type']
+        for field in ("navigation_visibility", "numbering_label", "numbering_evidence"):
+            if field in chapter:
+                entry[field] = chapter[field]
 
         if 'children' in chapter and chapter['children']:
             entry['children'] = flatten_toc_tree(
@@ -626,6 +631,9 @@ def build_epub_structure(
             result['type'] = entry['type']
         if 'anchor' in entry:
             result['anchor'] = entry['anchor']
+        for field in ("navigation_visibility", "numbering_label", "numbering_evidence"):
+            if field in entry:
+                result[field] = entry[field]
 
         # Find markdown file using unit_id
         index_path = entry.get('index_path')
@@ -1017,7 +1025,6 @@ def generate_hierarchical_toc_ncx(
 <meta name="dtb:uid" content="{html.escape(uid, quote=True)}"/><meta name="dtb:depth" content="{depth}"/>
 <meta name="dtb:totalPageCount" content="0"/><meta name="dtb:maxPageNumber" content="0"/></head>
 <docTitle><text>{html.escape(book_title)}</text></docTitle><navMap>
-<navPoint id="navpoint-toc" playOrder="1"><navLabel><text>{html.escape(toc_label)}</text></navLabel><content src="text/toc.html"/></navPoint>
 {serialize_ncx_navigation(nodes)}</navMap></ncx>'''
     try:
         Path(output_path).write_text(content, encoding="utf-8")
@@ -1429,12 +1436,17 @@ def _render_epub_content(
 
     # Navigation is generated after conversion so child anchors can point to
     # the actual split part containing their heading rather than always part 1.
-    resolved_navigation = resolve_navigation(
+    resolved_structure = resolve_navigation(
         epub_structure,
         anchor_locations,
         generated_files=set(all_html_files),
+        project=False,
     )
-    validate_navigation_rendering(resolved_navigation, generated_html)
+    generated_html = present_navigation_headings(resolved_structure, generated_html)
+    for filename, document in generated_html.items():
+        (epub_dir / "text" / filename).write_text(document, encoding="utf-8")
+    validate_navigation_rendering(resolved_structure, generated_html)
+    resolved_navigation = project_navigation(resolved_structure)
     ncx_written = generate_hierarchical_toc_ncx(
         epub_structure,
         config.book_title,

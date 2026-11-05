@@ -813,6 +813,11 @@ class RefinedBreakdown:
                 )
             if node.chapter_type:
                 metadata['type'] = node.chapter_type
+            if node.navigation_visibility != "auto":
+                metadata["navigation_visibility"] = node.navigation_visibility
+            if node.numbering_label is not None:
+                metadata["numbering_label"] = node.numbering_label
+                metadata["numbering_evidence"] = node.numbering_evidence
             unit_metadata.append(metadata)
 
             logger.debug(f"Saved {unit['unit_id']}: {unit['token_count']} tokens")

@@ -18,6 +18,11 @@ class ResolvedNavigationNode:
     target_node_id: Optional[str]
     children: tuple["ResolvedNavigationNode", ...] = ()
     expected_title: Optional[str] = None
+    expected_level: Optional[int] = None
+    binding_mode: str = "visible"
+    numberless_expected_title: Optional[str] = None
+    numbering_label: Optional[str] = None
+    navigation_visible: bool = True
 
 
 def _file_target(entry: Mapping) -> Optional[str]:
@@ -38,6 +43,7 @@ def resolve_navigation(
     anchor_locations: Optional[Mapping[str, str]] = None,
     *,
     generated_files: Optional[set[str]] = None,
+    project: bool = True,
 ) -> tuple[ResolvedNavigationNode, ...]:
     """Bind logical TOC entries to rendered files/fragments.
 
@@ -46,6 +52,12 @@ def resolve_navigation(
     descendant. Entries backed by a file fall back to that unit's first part.
     """
     anchor_locations = anchor_locations or {}
+    hidden_roles = {"cover", "copyright", "metadata", "catalog", "ad", "toc"}
+
+    for path, entry in _walk_entries(structure):
+        visibility = entry.get("navigation_visibility", "auto")
+        if not isinstance(visibility, str) or visibility not in {"auto", "include", "exclude"}:
+            raise ValueError(f"Invalid TOC navigation_visibility at {path}: {visibility}")
     identifiers: set[str] = set()
     anchors: dict[str, str] = {}
 
@@ -75,6 +87,11 @@ def resolve_navigation(
                 anchors[anchor] = node_id
 
             own_file = _file_target(entry)
+            visibility = entry.get("navigation_visibility", "auto")
+            role = str(entry.get("type") or "").lower()
+            hidden_from_navigation = visibility == "exclude" or (
+                visibility == "auto" and role in hidden_roles
+            )
             child_owner = own_file or owner_target
             children = resolve_list(entry.get("children") or (), item_path, child_owner)
             target = None
@@ -93,18 +110,22 @@ def resolve_navigation(
                 if target:
                     status = "file_fallback"
                     target_node_id = node_id
-                elif children:
-                    target = children[0].target
+                elif (first_descendant := _first_target_node(children)) is not None:
+                    target = first_descendant.target
                     status = "first_content_descendant"
-                    target_node_id = children[0].target_node_id
+                    target_node_id = first_descendant.target_node_id
                 elif owner_target:
                     target = owner_target
                     status = "owning_file_fallback"
                     target_node_id = None
+                elif hidden_from_navigation:
+                    target = ""
+                    status = "hidden"
+                    target_node_id = None
                 else:
                     raise ValueError(f"TOC node has no rendered destination: {node_id}")
 
-            if generated_files is not None:
+            if generated_files is not None and target:
                 filename = target.split("#", 1)[0]
                 if filename not in generated_files:
                     raise ValueError(f"TOC target file does not exist: {filename}")
@@ -114,20 +135,168 @@ def resolve_navigation(
                         raise ValueError(f"TOC fragment is not in rendered anchor map: {target}")
             resolved.append(ResolvedNavigationNode(
                 node_id=node_id,
-                title=str(entry.get("navigation_display_title") or entry.get("title") or ""),
+                title=_navigation_title(entry),
                 target=target,
                 binding_status=status,
                 target_node_id=target_node_id,
-                expected_title=str(entry.get("navigation_expected_title") or entry.get("title") or ""),
+                expected_title=_navigation_title(entry),
+                expected_level=entry.get("level") if type(entry.get("level")) is int else None,
+                binding_mode=binding,
+                numberless_expected_title=_numberless_title(entry),
+                numbering_label=entry.get("numbering_label") if isinstance(entry.get("numbering_label"), str) else None,
+                navigation_visible=not hidden_from_navigation,
                 children=children,
             ))
         return tuple(resolved)
 
-    return resolve_list(structure, ())
+    resolved = resolve_list(structure, ())
+
+    if not project:
+        return resolved
+
+    return project_navigation(resolved)
+
+
+def project_navigation(nodes: Sequence[ResolvedNavigationNode]) -> tuple[ResolvedNavigationNode, ...]:
+    def project_items(items):
+        output = []
+        for node in items:
+            children = project_items(node.children)
+            if not node.navigation_visible:
+                output.extend(children)
+            else:
+                output.append(ResolvedNavigationNode(
+                    node.node_id, node.title, node.target, node.binding_status,
+                    node.target_node_id, children, node.expected_title,
+                    node.expected_level,
+                    node.binding_mode,
+                    node.numberless_expected_title,
+                    node.numbering_label,
+                    node.navigation_visible,
+                ))
+        return tuple(output)
+
+    return project_items(nodes)
+
+
+def _first_target_node(nodes: Sequence[ResolvedNavigationNode]) -> Optional[ResolvedNavigationNode]:
+    for node in nodes:
+        if node.target:
+            return node
+        descendant = _first_target_node(node.children)
+        if descendant is not None:
+            return descendant
+    return None
+
+
+def _walk_entries(entries):
+    for index, entry in enumerate(entries, 1):
+        path = (index,)
+        yield path, entry
+        for child_path, child in _walk_entries(entry.get("children") or ()):
+            yield path + child_path, child
+
+
+def _navigation_title(entry: Mapping) -> str:
+    title = str(entry.get("navigation_display_title") or entry.get("title") or "")
+    from .toc_model import compose_numbered_title
+
+    return compose_numbered_title(title, entry.get("numbering_label"))
+
+
+def _numberless_title(entry: Mapping) -> str:
+    title = str(entry.get("title") or "").strip()
+    label = entry.get("numbering_label")
+    if not isinstance(label, str) or not label.strip():
+        return title
+    from .toc_model import strip_numbering_label
+
+    return strip_numbering_label(title, label) or title
 
 
 def navigation_depth(nodes: Sequence[ResolvedNavigationNode]) -> int:
     return max((1 + navigation_depth(node.children) for node in nodes), default=0)
+
+
+def present_navigation_headings(
+    nodes: Sequence[ResolvedNavigationNode], generated_html: Mapping[str, str]
+) -> dict[str, str]:
+    """Promote exact anchored title-only blocks to their canonical h-level."""
+    import re
+    from .epub.converter import visible_heading_text
+    from .toc_model import (
+        normalize_toc_source_label, toc_title_match_key,
+        _numbered_prefix, strip_numbering_label,
+    )
+
+    requests: dict[tuple[str, str], tuple[str, int, int, str, Optional[str]]] = {}
+
+    def collect(items):
+        for node in items:
+            filename, marker, fragment = node.target.partition("#")
+            if marker and node.binding_status == "rendered_anchor" and node.binding_mode == "visible":
+                logical_level = node.expected_level or 1
+                requests[(filename, fragment)] = (
+                    node.expected_title or node.title,
+                    min(logical_level, 6),
+                    logical_level,
+                    node.numberless_expected_title or node.expected_title or node.title,
+                    node.numbering_label,
+                )
+            collect(node.children)
+
+    collect(nodes)
+    block = re.compile(r"<(h[1-6]|p)(\b[^>]*)>(.*?)</\1\s*>", re.I | re.S)
+    updated = dict(generated_html)
+    for (filename, fragment), (expected, level, logical_level, numberless_title, numbering_label) in requests.items():
+        if filename not in updated:
+            continue
+        expected_key = toc_title_match_key(normalize_toc_source_label(expected, markdown_source=False))
+        numberless_key = toc_title_match_key(normalize_toc_source_label(numberless_title, markdown_source=False))
+
+        def numberless_is_unique() -> bool:
+            matches = 0
+            for document in updated.values():
+                for candidate in block.finditer(document):
+                    visible = normalize_toc_source_label(visible_heading_text(candidate.group(3)), markdown_source=False)
+                    marker = _numbered_prefix(visible)
+                    exact_numberless = strip_numbering_label(visible, numbering_label)
+                    candidate_numberless_key = toc_title_match_key(
+                        normalize_toc_source_label(
+                            exact_numberless if exact_numberless is not None else visible[marker.end():] if marker else visible,
+                            markdown_source=False,
+                        )
+                    )
+                    if candidate_numberless_key == numberless_key:
+                        matches += 1
+            return matches == 1
+
+        def replace(match):
+            tag, attrs, inner = match.groups()
+            if not re.search(rf"(?<![\w:-])id=[\"']{re.escape(fragment)}[\"']", attrs + inner, re.I):
+                return match.group(0)
+            visible = toc_title_match_key(normalize_toc_source_label(visible_heading_text(inner), markdown_source=False))
+            if visible != expected_key:
+                if not numbering_label or visible != numberless_key:
+                    return match.group(0)
+                if not numberless_is_unique():
+                    raise ValueError(f"Reviewed numbering cannot be applied uniquely to {filename}#{fragment}")
+                inner = f"{html.escape(numbering_label)} {inner}"
+            canonical_tag = f"h{level}"
+            if logical_level > 6:
+                logical_class = f"logical-level-{logical_level}"
+                class_match = re.search(r"\bclass=[\"']([^\"']*)[\"']", attrs, re.I)
+                if class_match:
+                    classes = class_match.group(1).split()
+                    if logical_class not in classes:
+                        classes.append(logical_class)
+                        attrs = attrs[:class_match.start(1)] + " ".join(classes) + attrs[class_match.end(1):]
+                else:
+                    attrs += f' class="{logical_class}"'
+            return f"<{canonical_tag}{attrs}>{inner}</{canonical_tag}>"
+
+        updated[filename] = block.sub(replace, updated[filename])
+    return updated
 
 
 def validate_navigation_rendering(
@@ -163,11 +332,18 @@ def validate_navigation_rendering(
     def visit(items):
         for node in items:
             filename, marker, fragment = node.target.partition("#")
+            if not node.navigation_visible and not node.target:
+                visit(node.children)
+                continue
             if filename not in generated_html:
                 raise ValueError(f"TOC target file does not exist: {filename}")
             if marker and fragment not in ids_by_file.get(filename, set()):
                 raise ValueError(f"TOC fragment is absent from rendered XHTML: {node.target}")
             if marker:
+                expected_node = nodes_by_id.get(node.target_node_id or "")
+                if expected_node and expected_node.binding_mode == "container_only":
+                    visit(node.children)
+                    continue
                 from .epub.converter import ContentConverter
                 from .epub.converter import visible_heading_text
 
@@ -176,7 +352,6 @@ def validate_navigation_rendering(
                 def visible(value: str) -> str:
                     return visible_heading_text(value)
 
-                expected_node = nodes_by_id.get(node.target_node_id or "")
                 expected_title = (expected_node.expected_title or expected_node.title) if expected_node else (node.expected_title or node.title)
                 matches = ContentConverter._subchapter_anchor_candidates(
                     "".join(heading_blocks[filename]), visible(expected_title), heading_pattern, visible
@@ -186,6 +361,25 @@ def validate_navigation_rendering(
                     rank[0] < 3 and anchor_pattern.search(match.group(2) + match.group(3))
                     for rank, match in matches
                 )
+                anchored_matches = [
+                    match for rank, match in matches
+                    if anchor_pattern.search(match.group(2) + match.group(3))
+                ]
+                if expected_node and expected_node.binding_mode == "visible":
+                    canonical_level = expected_node.expected_level
+                    required_level = min(canonical_level, 6) if canonical_level else None
+                    valid_heading = any(
+                        match.group(1).lower().startswith("h")
+                        and (required_level is None or match.group(1).lower() == f"h{required_level}")
+                        for match in anchored_matches
+                    )
+                    if not valid_heading:
+                        raise ValueError(f"Visible TOC heading is not rendered at its canonical heading level: {node.target}")
+                    if canonical_level and canonical_level > 6 and not any(
+                        re.search(rf"\blogical-level-{canonical_level}\b", match.group(2), re.I)
+                        for match in anchored_matches
+                    ):
+                        raise ValueError(f"Deep TOC heading lost its logical level class: {node.target}")
                 anchored_numberless = any(
                     rank[0] == 2 and anchor_pattern.search(match.group(2) + match.group(3))
                     for rank, match in matches
@@ -225,9 +419,9 @@ def serialize_html_navigation(nodes: Sequence[ResolvedNavigationNode]) -> str:
 
 
 def serialize_ncx_navigation(nodes: Sequence[ResolvedNavigationNode]) -> str:
-    counter = 2
-    play_orders = {"text/toc.html": 1}
-    next_order = 2
+    counter = 1
+    play_orders = {}
+    next_order = 1
 
     def render(items, level=2):
         nonlocal counter, next_order

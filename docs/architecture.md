@@ -456,8 +456,14 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
   HTML TOC 和 NCX 共用该模型与目标，不分别推测链接。打包前验证目标文件、fragment 和 XHTML
   `id` 与标题落点；ownership projection 也驱动在实际所属 part 内放置可见结构祖先锚点。可见
   绑定缺失时阻断，容器节点按 ownership 合同落到所属文件或首个内容后代。NCX depth 按逻辑
-  TOC 的真实层级计算，合成目录入口与 TOC 树同级。
-- TOC 源标题计数、分片 occurrence 分配和 HTML 锚点匹配先按 Markdown renderer 语义提取可见文本，再共用 `toc_title_match_key()` 做连续空白归一化和 Unicode `lower()`；HTML 已渲染文本只提取可见文本，不再解析为 Markdown。legacy 标记标题必须有 owning Markdown 原始标题语法证据；字面星号、标识符下划线、代码、链接、实体、数学和上下标按渲染结果区分。新 context 使用 `projection_version: 4`。不使用 `casefold()`，因此 `Straße` 不会被当作 `STRASSE`。规范化只用于运行时绑定比较，不改写存储标题；近义词和独立改译仍失败。该规则不放宽译文与 TOC 的逐字标题绑定。TOC 标题绑定区分 `visible` 与 `container_only`：无可见源标签的纯图片/边界单元不要求
+  TOC 的真实层级计算，不再向 TOC/NCX 注入合成目录入口。导航投影在完整解析和校验后执行；
+  `navigation_visibility` 支持 `auto`、`include`、`exclude`，默认 `auto` 隐藏 `cover`、
+  `copyright`、`metadata`、`catalog`、`ad`、`toc` 角色并保留 `frontmatter`。隐藏节点的子节点仍
+  按完整树计算 ownership 和目标，不能因投影跳过 XHTML 锚点或标题层级校验。
+- TOC 可选 `numbering_label` 与带页/行/excerpt 的 `numbering_evidence` 保存经复核的结构编号；
+  翻译模板将其作为不可变元数据传递。正文标题缺少编号时，EPUB 只在标题裸文本全局唯一时补入该编号，
+  已有相同编号只呈现一次，冲突或歧义则阻断。编号参与 HTML TOC、NCX 和正文 heading 的同一显示合同。
+- TOC 源标题计数、分片 occurrence 分配和 HTML 锚点匹配先按 Markdown renderer 语义提取可见文本，再共用 `toc_title_match_key()` 做连续空白归一化和 Unicode `lower()`；HTML 已渲染文本只提取可见文本，不再解析为 Markdown。legacy 标记标题必须有 owning Markdown 原始标题语法证据；字面星号、标识符下划线、代码、链接、实体、数学和上下标按渲染结果区分。新 context 使用 `projection_version: 5`。不使用 `casefold()`，因此 `Straße` 不会被当作 `STRASSE`。规范化只用于运行时绑定比较，不改写存储标题；近义词和独立改译仍失败。该规则不放宽译文与 TOC 的逐字标题绑定。TOC 标题绑定区分 `visible` 与 `container_only`：无可见源标签的纯图片/边界单元不要求
   worker 伪造 Markdown 标题，章节容器标题由 EPUB 构建器生成；可见子标题仍使用严格绑定。
   大章节拆成多个物理 part 时，`build_toc_heading_contexts` 为每个 part 生成独立 context：
   父标题只在源标题实际出现的 part 标记 `visible`，其余 part 标记 `container_only`；
@@ -466,7 +472,7 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
   `container_only` 节点不生成虚构的 Markdown 锚点；它保留 TOC 层级，并导航到所属文件或首个
   含内容的后代。显式容器在源候选分配前跳过可见标题匹配，不消耗同名候选；可见节点仍按原有
   occurrence/count 和 DOM 锚点合同校验。`visible` 节点的投影锚点缺失或落在不同标题时阻断构建。
-  新 handoff context 使用 `projection_version: 4`。旧 projection 不可用于 TOC heading binding。
+  新 handoff context 使用 `projection_version: 5`。旧 projection 不可用于 TOC heading binding。
   先运行 `translate --resume` 只刷新准备 context，暂不派发；随后用 `translate-validate` 校验现有译文，
   写出 schema 4 receipt。再运行一次 `translate --resume`，让当前 projection 和 receipt 共同决定
   completed/pending；只派发仍失效的 assignment，最后运行全量 `translate-validate`。若第一次准备报告

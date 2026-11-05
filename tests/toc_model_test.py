@@ -56,6 +56,9 @@ def test_tree_correspondence_uses_node_ids_and_requires_same_path():
     assert validate_toc_tree_correspondence(source, translated) == []
     moved = {"schema_version": 2, "chapters": [{"node_id": "other", "title": "Translated"}]}
     assert validate_toc_tree_correspondence(source, moved)
+    level_drift = {"schema_version": 2, "chapters": [{"node_id": "one", "title": "Translated", "level": 4}]}
+    source_with_level = {"schema_version": 2, "chapters": [{"node_id": "one", "title": "Source", "level": 2}]}
+    assert any("metadata changed" in error for error in validate_toc_tree_correspondence(source_with_level, level_drift))
 
 
 def test_heading_projection_includes_owned_grandchildren_but_stops_at_nested_unit(tmp_path):
@@ -110,6 +113,44 @@ def test_shared_ownership_projection_assigns_split_headings_to_first_matching_pa
     assert [item["node_id"] for item in part2] == ["grand"]
     assert projection["part1.md"]["binding_mode"] == "visible"
     assert projection["part2.md"]["binding_mode"] == "container_only"
+
+
+def test_reviewed_number_label_is_used_for_source_ownership():
+    chapters = [{"node_id": "numbered", "title": "Heading", "numbering_label": "1.",
+                 "numbering_evidence": {"page": 1, "line": 1, "excerpt": "1. Heading"},
+                 "children": []}]
+    projection = project_toc_ownership(
+        chapters,
+        {"units": [{"node_id": "numbered", "part_files": ["chapter.md"]}]},
+        {"chapter.md": "# 1. Heading\nBody"},
+    )
+    assert projection["chapter.md"]["headings"][0]["node_id"] == "numbered"
+
+
+def test_number_label_flows_into_translated_heading_context_and_binding_validation(tmp_path):
+    output = tmp_path / "output"
+    source = output / "ocr_markdown"
+    source.mkdir(parents=True)
+    chapters = [{"node_id": "numbered", "title": "Heading", "level": 1,
+                 "numbering_label": "1.",
+                 "numbering_evidence": {"page": 1, "line": 1, "excerpt": "1. Heading"},
+                 "children": []}]
+    translated = [{**chapters[0], "title": "标题"}]
+    (output / "toc_tree.json").write_text(json.dumps({"schema_version": 2, "chapters": chapters}), encoding="utf-8")
+    (output / "toc_tree_translated.json").write_text(json.dumps({"schema_version": 2, "chapters": translated}), encoding="utf-8")
+    (source / "tree_progress.json").write_text(json.dumps({"units": [{"node_id": "numbered", "index_path": [1], "file": "chapter.md"}]}), encoding="utf-8")
+    (source / "chapter.md").write_text("# 1. Heading\nBody", encoding="utf-8")
+
+    contexts = build_toc_heading_contexts(output, source_dir=source)
+    assert contexts["chapter.md"]["toc_title"] == "1. 标题"
+    assert contexts["chapter.md"]["numbering_label"] == "1."
+    manifest = {"toc_heading_contexts": contexts}
+    (output / "translate_subagent_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+    validated = output / "translated" / "validated"
+    validated.mkdir(parents=True)
+    (validated / "chapter.md").write_text("# 1. 标题\n正文", encoding="utf-8")
+    from pdf2epub.toc_translation_workflow import validate_toc_heading_bindings
+    assert validate_toc_heading_bindings(output)["valid"] is True
 
 
 def test_repeated_visible_titles_use_distinct_source_occurrences():

@@ -43,6 +43,11 @@ class TOCNode:
     # Whether the node title must be visibly present in source content.
     binding_mode: str = "visible"
 
+    # Projection into reader-facing navigation; independent of semantic role.
+    navigation_visibility: str = "auto"
+    numbering_label: Optional[str] = None
+    numbering_evidence: Optional[Dict] = None
+
     def is_leaf(self) -> bool:
         """Check if this node has no children."""
         return len(self.children) == 0
@@ -79,6 +84,12 @@ class TOCNode:
             result["node_id"] = self.node_id
         if self.binding_mode != "visible":
             result["binding_mode"] = self.binding_mode
+        if self.navigation_visibility != "auto":
+            result["navigation_visibility"] = self.navigation_visibility
+        if self.numbering_label is not None:
+            result["numbering_label"] = self.numbering_label
+            if self.numbering_evidence is not None:
+                result["numbering_evidence"] = self.numbering_evidence
         if self.children:
             result["children"] = [child.to_dict() for child in self.children]
         if self.boundary_info:
@@ -104,6 +115,9 @@ class TOCNode:
             chapter_type=data.get('type'),
             node_id=data.get('node_id'),
             binding_mode=data.get('binding_mode', 'visible'),
+            navigation_visibility=data.get('navigation_visibility', 'auto'),
+            numbering_label=data.get('numbering_label'),
+            numbering_evidence=data.get('numbering_evidence'),
         )
 
         children_data = data.get('children', [])

@@ -22,6 +22,7 @@ from .toc_model import (
     toc_nodes_by_id,
     validate_toc_node_identities,
     validate_toc_tree_correspondence,
+    compose_numbered_title,
 )
 from .workflow_contracts import atomic_write_json, atomic_write_text, relative_posix_path
 
@@ -120,6 +121,8 @@ Read `toc_translation_source.json` and the exact flat result template in
 `toc_translation_result.json`. Keep the `entries` in exactly the same order,
 with the same `path` and `original` values, and fill every non-empty
 `translated` value. Fill `book_title.translated` as well.
+An entry's optional `numbering_label` is immutable source metadata; translate
+only its title text and do not add, remove, or alter the label field.
 
 Do not write or modify `toc_tree_translated.json`: the local validator will
 deep-copy the immutable source tree and merge the validated title results into
@@ -509,7 +512,7 @@ def build_toc_heading_contexts(
             path, translated_node = pair
             parent_id = toc_node_id(source_by_path[path[:-1]], path[:-1]) if len(path) > 1 else None
             child_contexts.append({
-                "title": str(translated_node.get("title") or "").strip(),
+                "title": compose_numbered_title(str(translated_node.get("title") or "").strip(), translated_node.get("numbering_label")),
                 "anchor": toc_node_anchor(translated_node, path),
                 "node_id": record_id,
                 "parent_node_id": parent_id,
@@ -520,7 +523,7 @@ def build_toc_heading_contexts(
                 "source_candidate_kind": str(record.get("source_candidate_kind", "container_only")),
             })
         contexts[filename] = {
-            "toc_title": str(target_node.get("title") or "").strip(),
+            "toc_title": compose_numbered_title(str(target_node.get("title") or "").strip(), target_node.get("numbering_label")),
             "node_id": identity,
             "anchor": toc_node_anchor(target_node, target_path),
             "parent_node_id": toc_node_id(source_by_path[source_path[:-1]], source_path[:-1]) if len(source_path) > 1 else None,
@@ -528,6 +531,19 @@ def build_toc_heading_contexts(
             "binding_mode": unit_projection["binding_mode"],
             "children": child_contexts,
         }
+        if target_node.get("navigation_visibility", "auto") != "auto":
+            contexts[filename]["navigation_visibility"] = target_node["navigation_visibility"]
+        if target_node.get("numbering_label") is not None:
+            contexts[filename]["numbering_label"] = target_node["numbering_label"]
+        for record, child_context in zip(
+            [item for item in unit_projection["headings"] if item["node_id"] != identity],
+            child_contexts,
+        ):
+            child_target = target_nodes[str(record["node_id"])][1]
+            if child_target.get("navigation_visibility", "auto") != "auto":
+                child_context["navigation_visibility"] = child_target["navigation_visibility"]
+            if child_target.get("numbering_label") is not None:
+                child_context["numbering_label"] = child_target["numbering_label"]
     return contexts
 
 
@@ -552,7 +568,7 @@ def build_global_toc_outline(
         return ""
 
     def title(node: Mapping[str, Any]) -> str:
-        value = str(node.get("title") or "").strip()
+        value = compose_numbered_title(str(node.get("title") or "").strip(), node.get("numbering_label"))
         # Titles are document data.  Collapse line breaks so one malicious or
         # malformed TOC field cannot escape the outline item's indentation.
         value = re.sub(r"\s+", " ", value)

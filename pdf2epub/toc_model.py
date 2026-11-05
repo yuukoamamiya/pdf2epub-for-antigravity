@@ -10,7 +10,7 @@ from typing import Any, Iterator, Mapping, Sequence
 
 TOCPath = tuple[int, ...]
 TOC_TREE_SCHEMA_VERSION = 2
-TOC_HEADING_CONTEXT_PROJECTION_VERSION = 4
+TOC_HEADING_CONTEXT_PROJECTION_VERSION = 5
 
 
 def _valid_explicit_anchor(value: str) -> bool:
@@ -44,6 +44,64 @@ def iter_toc_nodes(
 def _path_text(path: Sequence[int]) -> str:
     return ".".join(str(part) for part in path)
 
+
+def compose_numbered_title(title: str, label: Any) -> str:
+    """Apply reviewed numbering once, preserving a matching source prefix."""
+    value = str(title or "").strip()
+    if not isinstance(label, str) or not label.strip():
+        return value
+    label = label.strip()
+    prefix = _explicit_numbered_prefix(value, label)
+    if prefix:
+        return value
+    if _numbered_prefix(value):
+        raise ValueError(f"TOC title numbering conflicts with canonical label {label!r}: {value!r}")
+    return f"{label} {value}".strip()
+
+
+def _normalized_number(value: str) -> str:
+    return re.sub(r"[()\s]", "", value).rstrip(".").casefold()
+
+
+def _roman_number_pattern() -> str:
+    return r"(?=[MDCLXVI])M{0,4}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3})"
+
+
+def _valid_numbering_label(value: Any) -> bool:
+    if not isinstance(value, str) or not value.strip() or any(ord(char) < 32 or char in "<>" for char in value):
+        return False
+    token = value.strip()
+    atom = rf"(?:\d{{1,4}}(?:\.\d{{1,4}})*|{_roman_number_pattern()}|[A-Za-z])"
+    return re.fullmatch(rf"(?:\(\s*{atom}\s*\)|{atom}\.?)", token, re.IGNORECASE) is not None
+
+
+def _explicit_numbered_prefix(value: str, label: str) -> re.Match[str] | None:
+    """Parse an exact leading label, including single-letter Roman numerals."""
+    atom = rf"(?:\d{{1,4}}(?:\.\d{{1,4}})*|{_roman_number_pattern()}|[A-Za-z])"
+    match = re.match(rf"^\s*(\(\s*{atom}\s*\)|{atom}\.?)((?=\s|$))", value, re.IGNORECASE)
+    if match and _normalized_number(match.group(1)) == _normalized_number(label):
+        return match
+    return None
+
+
+def strip_numbering_label(value: str, label: Any) -> str | None:
+    """Return a title's numberless suffix when it begins with this exact label."""
+    if not isinstance(label, str) or not label.strip():
+        return None
+    prefix = _explicit_numbered_prefix(value, label.strip())
+    return value[prefix.end():].strip() if prefix else None
+
+
+def _numbered_prefix(value: str) -> re.Match[str] | None:
+    roman = _roman_number_pattern()
+    atom = rf"(?:\d{{1,4}}(?:\.\d{{1,4}})*|{roman}|[A-Za-z])"
+    match = re.match(rf"^\s*(\(\s*{atom}\s*\)|{atom}\.?)((?=\s|[、)]|$))", value, re.IGNORECASE)
+    if match:
+        marker = match.group(1).strip()
+        bare = marker.strip("(). ")
+        if len(bare) == 1 and bare.isalpha() and not any(char in marker for char in ".()"):
+            return None
+    return match
 
 def toc_node_id(node: Mapping[str, Any], path: Sequence[int]) -> str:
     """Return the required explicit stable ID; paths are never node identity."""
@@ -98,6 +156,20 @@ def validate_toc_node_identities(chapters: Any) -> list[str]:
         binding_mode = node.get("binding_mode", "visible")
         if not isinstance(binding_mode, str) or binding_mode not in {"visible", "container_only"}:
             errors.append(f"invalid TOC binding_mode at {_path_text(path)}")
+        visibility = node.get("navigation_visibility", "auto")
+        if not isinstance(visibility, str) or visibility not in {"auto", "include", "exclude"}:
+            errors.append(f"invalid TOC navigation_visibility at {_path_text(path)}")
+        label = node.get("numbering_label")
+        if label is not None and not _valid_numbering_label(label):
+            errors.append(f"invalid TOC numbering_label at {_path_text(path)}")
+        if label is not None:
+            evidence = node.get("numbering_evidence")
+            if not isinstance(evidence, Mapping) or type(evidence.get("page")) is not int or type(evidence.get("line")) is not int or not isinstance(evidence.get("excerpt"), str) or not evidence["excerpt"].strip():
+                errors.append(f"TOC numbering_label requires numbering_evidence at {_path_text(path)}")
+            if isinstance(label, str) and isinstance(node.get("title"), str):
+                prefix = _numbered_prefix(node["title"].strip())
+                if prefix and _normalized_number(prefix.group(1)) != _normalized_number(label.strip()):
+                    errors.append(f"TOC numbering_label conflicts with title prefix at {_path_text(path)}")
     return errors
 
 
@@ -134,6 +206,19 @@ def validate_toc_tree_correspondence(
                    if source_nodes[identity][0] != translated_nodes[identity][0])
     if moved:
         errors.append(f"translated TOC node paths changed: {moved}")
+    for identity in set(source_nodes) & set(translated_nodes):
+        source_node = source_nodes[identity][1]
+        target_node = translated_nodes[identity][1]
+        source_fields = {key: value for key, value in source_node.items() if key not in {"title", "children"}}
+        target_fields = {key: value for key, value in target_node.items() if key not in {"title", "children"}}
+        for defaults in ({"binding_mode": "visible", "navigation_visibility": "auto"},):
+            for key, value in defaults.items():
+                source_fields.setdefault(key, value)
+                target_fields.setdefault(key, value)
+        if source_fields != target_fields:
+            changed = sorted(key for key in set(source_fields) | set(target_fields)
+                             if source_fields.get(key) != target_fields.get(key))
+            errors.append(f"translated TOC metadata changed for node {identity}: {changed}")
     return errors
 
 
@@ -415,7 +500,9 @@ def project_toc_ownership(
         names = names_by_path[unit_path]
         texts = texts_by_path[unit_path]
         node_id = toc_node_id(node, path)
-        source_title = str(node.get("title") or "")
+        source_title = compose_numbered_title(
+            str(node.get("title") or ""), node.get("numbering_label")
+        )
         explicit_container = node.get("binding_mode") == "container_only"
         literal_key = toc_title_match_key(normalize_toc_source_label(source_title, markdown_source=False))
         inventories = {name: inventories_by_file[name] for name in names}

@@ -88,6 +88,79 @@ def test_same_page_text_and_layout_headings_preserve_body_order():
     assert output.count("body.") == 2
 
 
+def test_reviewed_run_in_prefix_materializes_only_the_exact_heading_range():
+    merger = PageMerger()
+    merger._toc_nodes = [SimpleNamespace(
+        start_page=1, binding_mode="visible", node_id="run-in",
+        boundary_info={"start_line": 1, "heading_prefix": "*Heading.*"},
+        level=2, title="Heading.",
+    )]
+    rendered, _, _ = merger._materialize_reviewed_headings(
+        1, ["*Heading.* The short body remains in the paragraph."]
+    )
+    assert rendered == ["## *Heading.*", "", "The short body remains in the paragraph."]
+
+
+def test_reviewed_roman_label_is_not_duplicated_in_run_in_heading_prefix():
+    merger = PageMerger()
+    merger._toc_nodes = [SimpleNamespace(
+        start_page=1, binding_mode="visible", node_id="run-in-roman",
+        boundary_info={"start_line": 1, "heading_prefix": "I Heading"},
+        level=2, title="Heading", numbering_label="I",
+    )]
+    rendered, _, _ = merger._materialize_reviewed_headings(1, ["I Heading The body remains here."])
+    assert rendered == ["## I Heading", "", "The body remains here."]
+
+
+def test_run_in_prefix_is_relative_to_heading_marker_free_source_line():
+    merger = PageMerger()
+    merger._toc_nodes = [SimpleNamespace(
+        start_page=1, binding_mode="visible", node_id="run-in",
+        boundary_info={"start_line": 1, "heading_prefix": "*Heading.*"},
+        level=2, title="Heading.",
+    )]
+    rendered, _, _ = merger._materialize_reviewed_headings(
+        1, ["#### *Heading.*    Body"]
+    )
+    assert rendered == ["## *Heading.*", "", "Body"]
+
+
+def test_run_in_heading_preserves_original_paragraph_continuation_and_boundaries():
+    merger = PageMerger()
+    merger._toc_nodes = [SimpleNamespace(
+        start_page=1, binding_mode="visible", node_id="run-in",
+        boundary_info={"start_line": 1, "heading_prefix": "*Heading.*"},
+        level=2, title="Heading.",
+    )]
+    rendered, _, _ = merger._materialize_reviewed_headings(1, [
+        "*Heading.* Body first line", "continuation of the same paragraph.", "", "Next paragraph."
+    ])
+    assert rendered == ["## *Heading.*", "", "Body first line", "continuation of the same paragraph.", "", "Next paragraph."]
+
+
+def test_unreviewed_or_mismatched_run_in_prefix_is_not_guessed():
+    merger = PageMerger()
+    merger._toc_nodes = [SimpleNamespace(
+        start_page=1, binding_mode="visible", node_id="run-in",
+        boundary_info={"start_line": 1}, level=2, title="Heading.",
+    )]
+    rendered, _, _ = merger._materialize_reviewed_headings(
+        1, ["Heading. This 51 character contaminated paragraph remains body."]
+    )
+    assert "Heading. This 51 character contaminated paragraph remains body." in rendered
+    assert not any(line.startswith("## ") for line in rendered)
+
+
+def test_reviewed_source_heading_level_is_rewritten_to_canonical_level():
+    merger = PageMerger()
+    merger._toc_nodes = [SimpleNamespace(
+        start_page=1, binding_mode="visible", node_id="heading",
+        boundary_info={"start_line": 1}, level=2, title="Heading",
+    )]
+    rendered, _, _ = merger._materialize_reviewed_headings(1, ["#### Heading"])
+    assert rendered == ["## Heading"]
+
+
 def test_eof_layout_heading_respects_explicit_boundary_and_spans_next_page(tmp_path):
     pages = tmp_path / "pages"
     pages.mkdir()
