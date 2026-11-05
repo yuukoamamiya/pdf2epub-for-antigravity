@@ -208,6 +208,9 @@ def _write_worker_glossary_context(
     scoped: Dict[str, Any],
 ) -> tuple[Dict[str, str], Dict[str, str]]:
     """Load assigned terminology inputs and persist the pure scoped projection."""
+    task = str(manifest.get("task") or "")
+    if task not in _TRANSLATION_TASKS and not task.startswith("translate-"):
+        return {}, {}
     context_names = (
         group.get("chapter_context_files", files)
         if chapter_mode and not chapter_pack

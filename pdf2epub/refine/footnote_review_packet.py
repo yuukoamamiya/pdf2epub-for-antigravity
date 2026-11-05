@@ -7,6 +7,7 @@ from typing import Any, Mapping
 
 from ..workflow_contracts import atomic_write_json, sha256_file
 from .footnote_contracts import FOOTNOTE_PREPARE_SCHEMA_VERSION
+from .footnote_page_evidence import resolve_page_sidecar_path
 
 PACKET_FILENAME = "footnote_review_packet.json"
 
@@ -87,7 +88,7 @@ def build_review_packet(report: Mapping[str, Any]) -> dict[str, Any]:
                 item["visual_file"] = visual
         if report.get("ocr_evidence_mode") == "two_ocr":
             secondary_hashes = report.get("secondary_sidecar_sha256", {})
-            secondary_path = next((path for path in secondary_hashes if f"page_{number:03d}" in str(path)), None)
+            secondary_path = resolve_page_sidecar_path(secondary_hashes, number, "ocr_secondary")
             if secondary_path and not item.get("secondary_sidecar"):
                 item["secondary_sidecar"] = secondary_path
         visual_pages.append(item)

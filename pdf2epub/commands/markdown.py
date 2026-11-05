@@ -949,6 +949,9 @@ def _persist_file_validation_checkpoint(output_dir: Path, report: dict, task: st
             and not report.get("missing"),
             "source_sha256": report.get("source_sha256", {}).get(name),
             "target_sha256": report.get("target_sha256", {}).get(name),
+            "file_role": report.get("file_roles", {}).get(name),
+            "file_role_source": report.get("file_role_sources", {}).get(name),
+            "resume_context": report.get("resume_contexts", {}).get(name),
             **({"dynamic_unit_context_sha256": dynamic_context_hash} if dynamic_context_hash else {}),
             "validated_at": datetime.now(timezone.utc).isoformat(),
             "invalid": [

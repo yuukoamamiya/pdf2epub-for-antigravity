@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 from pathlib import Path
 from typing import Any, Mapping
@@ -10,6 +11,127 @@ from typing import Any, Mapping
 from .markdown_validation_checkpoint import discard_abandoned_temp_targets, quarantine_invalid_targets
 from .markdown_validation_context import MarkdownValidationContext
 from .workflow_contracts import markdown_validation_schema_version, atomic_write_json, atomic_write_text
+
+
+def capture_pdf_resume_contexts(output_dir: Path, task: str, filenames: list[str]) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
+    """Capture per-file PDF context receipts and reject stale prepared inputs."""
+    if task not in {"translate", "polish"}:
+        return {}, {}
+    manifest_path = output_dir / f"{task}_subagent_manifest.json"
+    if not manifest_path.exists():
+        # Validation is also a public standalone API. With no prepared manifest
+        # there is no declared PDF context to snapshot or validate.
+        return {}, {}
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return {}, {name: "prepared manifest is unreadable" for name in filenames}
+    if not isinstance(manifest, Mapping):
+        return {}, {name: "prepared manifest is malformed" for name in filenames}
+    context_inventory_keys = (
+        "unit_context_files", "unit_context_sha256", "toc_heading_contexts",
+        "special_unit_modes",
+    )
+    has_declared_context = any(key in manifest for key in context_inventory_keys)
+    if manifest.get("task") != task:
+        if not has_declared_context:
+            return {}, {}
+        return {}, {name: "prepared manifest task does not match validation" for name in filenames}
+    if not all(isinstance(manifest.get(key), str) and manifest.get(key) for key in ("source_language", "target_language")):
+        if not has_declared_context:
+            return {}, {}
+        return {}, {name: "prepared manifest language context is malformed" for name in filenames}
+
+    root = output_dir.resolve()
+    file_contexts = manifest.get("unit_context_files", {})
+    unit_hashes = manifest.get("unit_context_sha256", {})
+    heading_contexts = manifest.get("toc_heading_contexts", {})
+    special_modes = manifest.get("special_unit_modes", {})
+    roles = manifest.get("file_roles", {})
+    role_sources = manifest.get("file_role_sources", {})
+    raw_maps = (file_contexts, unit_hashes, heading_contexts, special_modes, roles, role_sources)
+    bad_map = any(value is not None and not isinstance(value, Mapping) for value in raw_maps)
+    if bad_map:
+        return {}, {name: "prepared manifest context inventory is malformed" for name in filenames}
+    maps = tuple(value if isinstance(value, Mapping) else {} for value in raw_maps)
+    file_contexts, unit_hashes, heading_contexts, special_modes, roles, role_sources = maps
+    snapshots: dict[str, dict[str, Any]] = {}
+    errors: dict[str, str] = {}
+    for name in filenames:
+        expected = unit_hashes.get(name)
+        relative = file_contexts.get(name)
+        if expected is not None:
+            if not isinstance(expected, str) or not isinstance(relative, str):
+                errors[name] = "prepared unit context hash or path is malformed"
+                continue
+            if len(expected) != 64 or any(char not in "0123456789abcdefABCDEF" for char in expected):
+                errors[name] = "prepared unit context hash is malformed"
+                continue
+            candidate = Path(relative)
+            candidate = candidate if candidate.is_absolute() else root / candidate
+            path = candidate.resolve()
+            if path != root and root not in path.parents:
+                errors[name] = "prepared unit context path escapes output workspace"
+                continue
+            try:
+                actual = hashlib.sha256(path.read_bytes()).hexdigest()
+            except OSError as exc:
+                errors[name] = f"prepared unit context cannot be read: {exc}"
+                continue
+            if actual != expected:
+                errors[name] = "prepared unit context changed after preparation"
+                continue
+        elif relative is not None:
+            errors[name] = "prepared unit context has no declared hash"
+            continue
+        snapshot: dict[str, Any] = {
+            "unit_context_sha256": ({name: expected} if expected is not None else {}),
+            "toc_heading_contexts": ({name: heading_contexts[name]} if name in heading_contexts else {}),
+            "context_sha256": manifest.get("context_sha256", {}),
+            "special_unit_modes": ({name: special_modes[name]} if name in special_modes else {}),
+            "file_roles": ({name: roles[name]} if name in roles else {}),
+            "file_role_sources": ({name: role_sources[name]} if name in role_sources else {}),
+            "source_language": manifest.get("source_language"),
+            "target_language": manifest.get("target_language"),
+        }
+        snapshots[name] = snapshot
+    return snapshots, errors
+
+
+def _archive_superseded_partial_checkpoint(output_dir: Path, task: str) -> dict[str, str] | None:
+    """Preserve the exact prior ledger bytes before a full PDF report replaces it."""
+    ledger_path = Path(output_dir) / f"{task}_file_validation.json"
+    if not ledger_path.is_file():
+        return None
+    payload = ledger_path.read_bytes()
+    digest = hashlib.sha256(payload).hexdigest()
+    root = Path(output_dir).resolve()
+    directory = root / "scratch" / task / "superseded_checkpoints"
+    directory.mkdir(parents=True, exist_ok=True)
+    resolved_directory = directory.resolve()
+    if resolved_directory != root and root not in resolved_directory.parents:
+        raise ValueError("superseded checkpoint archive escapes output workspace")
+    candidate = resolved_directory / f"{digest}.json"
+    suffix = 0
+    while True:
+        if candidate.exists():
+            if candidate.read_bytes() == payload:
+                break
+            suffix += 1
+            candidate = resolved_directory / f"{digest}.{suffix}.json"
+            continue
+        try:
+            with candidate.open("xb") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            break
+        except FileExistsError:
+            continue
+    return {
+        "path": candidate.relative_to(root).as_posix(),
+        "sha256": digest,
+    }
 
 
 def begin_validation_io(context: MarkdownValidationContext) -> list[str]:
@@ -115,6 +237,7 @@ def persist_validation_report(
                 ),
                 "polish_content_integrity": polish_content_integrity.get(name),
                 "polish_structure_audit": polish_structure_audits.get(name),
+                "resume_context": report.get("resume_contexts", {}).get(name),
             }
         ledger = {
             "schema_version": markdown_validation_schema_version(report["task"]),
@@ -124,6 +247,16 @@ def persist_validation_report(
         }
         atomic_write_json(report_path, ledger)
     else:
+        if report["task"] in {"translate", "polish"}:
+            # A full PDF validation covers every source unit, so any older
+            # partial ledger entries are archived before the complete report
+            # supersedes them as the active checkpoint.
+            archive = _archive_superseded_partial_checkpoint(
+                context.paths.output_dir, report["task"]
+            )
+            if archive is not None:
+                report["superseded_partial_checkpoint_archive"] = archive
+            (context.paths.output_dir / f"{report['task']}_file_validation.json").unlink(missing_ok=True)
         atomic_write_json(report_path, report)
 
     invalid_names = {
@@ -131,8 +264,17 @@ def persist_validation_report(
         for item in report["invalid"]
         if isinstance(item, Mapping) and item.get("file")
     }
+    errors_by_file: dict[str, list[Mapping[str, Any]]] = {}
+    for item in report["invalid"]:
+        if isinstance(item, Mapping) and item.get("file"):
+            errors_by_file.setdefault(str(item["file"]), []).append(item)
+    stale_context_names = {
+        name for name, items in errors_by_file.items()
+        if items and all(item.get("kind") == "prepared_context" for item in items)
+    }
     quarantined = quarantine_invalid_targets(
-        context.paths.output_dir, report["task"], context.paths.target_dir, invalid_names
+        context.paths.output_dir, report["task"], context.paths.target_dir,
+        invalid_names - stale_context_names,
     )
     report["discarded_temp_files"] = discarded_temp_files
     report["quarantined_files"] = quarantined

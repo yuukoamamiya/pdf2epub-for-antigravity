@@ -7,6 +7,7 @@ filesystem contract presented to the workspace Subagent.
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
@@ -17,10 +18,11 @@ from .endnote_review import (
     collect_endnote_definition_ambiguities,
     write_endnote_definition_ambiguities,
 )
-from .footnote_contracts import FOOTNOTE_PREPARE_SCHEMA_VERSION
+from .footnote_contracts import FOOTNOTE_PREPARE_SCHEMA_VERSION, FOOTNOTE_UNIT_CONTEXT_PROJECTION_VERSION
 from .footnote_structure import load_refined_units as _load_refined_units
 from .footnote_prepare import prepare_footnote_candidates
 from .footnote_review_packet import validate_review_packet, write_review_packet
+from .footnote_page_evidence import page_sidecar_index
 
 def _unit_context_path(output_dir: Path, source_name: str) -> Path:
     safe_name = Path(str(source_name)).name
@@ -34,41 +36,41 @@ def _unit_context_path(output_dir: Path, source_name: str) -> Path:
     return output_dir / "footnote_contexts" / f"{safe_name}.json"
 
 
-def _write_unit_contexts(
-    output_dir: Path,
+def _project_unit_contexts(
     report: Mapping[str, Any],
-    *,
-    review_packet: Optional[str] = None,
-    review_packet_sha256: Optional[str] = None,
-) -> dict[str, str]:
-    """Write sparse per-unit projections so workers do not load the book report."""
+    packet_data: Mapping[str, Any],
+    refined_units: list[Mapping[str, Any]],
+    page_index: Mapping[int, Mapping[str, Any]],
+    review_packet: str,
+) -> dict[str, dict[str, Any]]:
+    """Build canonical sparse projections from already validated, explicit inputs."""
     page_reports = report.get("pages", [])
     cross_windows = report.get("cross_page_windows", [])
-    if review_packet is None or review_packet_sha256 is None:
-        try:
-            current_manifest = json.loads((output_dir / "footnote_subagent_manifest.json").read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError):
-            current_manifest = {}
-        review_packet = review_packet or current_manifest.get("review_packet")
-        review_packet_sha256 = review_packet_sha256 or current_manifest.get("review_packet_sha256")
-    packet_data: Mapping[str, Any] = {}
-    if isinstance(review_packet, str):
-        try:
-            loaded_packet = json.loads((output_dir / review_packet).read_text(encoding="utf-8"))
-            if isinstance(loaded_packet, Mapping):
-                packet_data = loaded_packet
-        except (OSError, UnicodeError, json.JSONDecodeError):
-            packet_data = {}
-    unit_context_files: dict[str, str] = {}
-    for unit in _load_refined_units(output_dir):
+    unit_contexts: dict[str, dict[str, Any]] = {}
+    for unit in refined_units:
         names = [str(name) for name in (unit.get("part_files") or [unit.get("file")]) if name]
+        if not names:
+            raise ValueError("refined footnote unit is missing its scoped source filename")
+        if len(names) != len(set(names)):
+            raise ValueError(f"refined footnote unit {names} contains duplicate source filenames")
+        for name in names:
+            _unit_context_path(Path("."), name)
+            if name in unit_contexts:
+                raise ValueError(f"duplicate refined footnote source unit filename: {name}")
         page_range = unit.get("page_range")
         if not isinstance(page_range, list) or len(page_range) != 2:
-            continue
+            raise ValueError(f"refined footnote unit {names} has no valid page range")
         try:
             start_page, end_page = int(page_range[0]), int(page_range[1])
         except (TypeError, ValueError):
-            continue
+            raise ValueError(f"refined footnote unit {names} has a nonnumeric page range: {page_range}")
+        known_pages = page_index.keys()
+        if (
+            start_page < 1 or end_page < start_page or not known_pages
+            or end_page > max(known_pages)
+            or end_page - start_page + 1 > len(page_index)
+        ):
+            raise ValueError(f"invalid refined page range for footnote context {names}: {page_range}")
         windows = [
             _compact_window_context(item) for item in cross_windows
             if any(start_page <= int(page) <= end_page for page in item.get("pages", []))
@@ -97,12 +99,21 @@ def _write_unit_contexts(
             image = visual_inventory.get(str(page_number), visual_inventory.get(page_number)) if isinstance(visual_inventory, Mapping) else None
             if isinstance(image, str) and not page_context.get("visual_file"):
                 page_context["visual_file"] = image
-            if report.get("ocr_evidence_mode") == "two_ocr":
-                secondary_hashes = report.get("secondary_sidecar_sha256", {})
-                secondary_path = next((path for path in secondary_hashes if f"page_{page_number:03d}" in str(path)), None)
-                if secondary_path and not page_context.get("secondary_sidecar"):
-                    page_context["secondary_sidecar"] = secondary_path
         pages = [by_evidence_page[number] for number in sorted(by_evidence_page)]
+        for page_context in pages:
+            evidence = page_index.get(int(page_context["page"]), {})
+            primary = evidence.get("primary")
+            secondary = evidence.get("secondary")
+            if not primary:
+                raise ValueError(f"footnote primary sidecar missing for page {page_context['page']}")
+            page_context["sidecar"] = primary["path"]
+            page_context["sidecar_sha256"] = primary["sha256"]
+            if secondary:
+                page_context["secondary_sidecar"] = secondary["path"]
+                page_context["secondary_sidecar_sha256"] = secondary["sha256"]
+            else:
+                page_context.pop("secondary_sidecar", None)
+                page_context.pop("secondary_sidecar_sha256", None)
         # Each part is a distinct Markdown permission boundary. Page evidence
         # is retained as one shared read-only projection, but never lists its
         # sibling parts as authorized source units.
@@ -116,7 +127,7 @@ def _write_unit_contexts(
                 refs.update(str(ref) for ref in window.get(key, []))
             if window.get("source_note_ref"):
                 refs.add(str(window["source_note_ref"]))
-        packet_candidates = packet_data.get("candidates", {}) if isinstance(packet_data, Mapping) else {}
+        packet_candidates = packet_data.get("candidates", {})
         page_by_number = {int(page["page"]): page for page in pages if str(page.get("page", "")).isdigit()}
         local_facts = {}
         if isinstance(packet_candidates, Mapping):
@@ -133,11 +144,13 @@ def _write_unit_contexts(
             )
         context = {
             "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
+            "projection_version": FOOTNOTE_UNIT_CONTEXT_PROJECTION_VERSION,
             "task": "footnote-prepare",
-            "preparation_evidence_sha256": packet_data.get("preparation_evidence_sha256"),
+            "source_kind": report.get("source_kind"),
+            "ocr_evidence_mode": report.get("ocr_evidence_mode"),
+            "footnote_mode": report.get("footnote_mode"),
             "source_packet": {
                 "path": review_packet,
-                "sha256": review_packet_sha256,
                 "usage": "provenance_only_do_not_open_for_unit_work",
             },
             "source_units": [],
@@ -154,11 +167,49 @@ def _write_unit_contexts(
             "candidates": local_facts,
         }
         for name in names:
-            context["source_units"] = [name]
-            context_path = _unit_context_path(output_dir, name)
-            atomic_write_json(context_path, context)
-            unit_context_files[name] = context_path.relative_to(output_dir).as_posix()
-    return unit_context_files
+            unit_context = deepcopy(context)
+            unit_context["source_units"] = [name]
+            unit_contexts[name] = unit_context
+    return unit_contexts
+
+
+def _write_unit_contexts(
+    output_dir: Path,
+    report: Mapping[str, Any],
+    *,
+    review_packet: Optional[str] = None,
+    review_packet_sha256: Optional[str] = None,
+) -> dict[str, str]:
+    """Persist canonical sparse contexts and return their relative paths."""
+    if review_packet is None or review_packet_sha256 is None:
+        try:
+            current_manifest = json.loads((output_dir / "footnote_subagent_manifest.json").read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            current_manifest = {}
+        review_packet = review_packet or current_manifest.get("review_packet")
+        review_packet_sha256 = review_packet_sha256 or current_manifest.get("review_packet_sha256")
+    if not isinstance(review_packet, str) or not isinstance(review_packet_sha256, str):
+        raise ValueError("footnote review packet provenance is missing; rerun footnote-prepare")
+    try:
+        (output_dir / review_packet).resolve().relative_to(output_dir.resolve())
+    except ValueError as exc:
+        raise ValueError("footnote review packet path escapes output directory") from exc
+    try:
+        packet_data = json.loads((output_dir / review_packet).read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"footnote review packet is unreadable; rerun footnote-prepare: {exc}") from exc
+    if not isinstance(packet_data, Mapping):
+        raise ValueError("footnote review packet is invalid; rerun footnote-prepare")
+    page_index = page_sidecar_index(output_dir, report)
+    projected = _project_unit_contexts(
+        report, packet_data, _load_refined_units(output_dir), page_index, review_packet,
+    )
+    result = {}
+    for name, context in projected.items():
+        path = _unit_context_path(output_dir, name)
+        atomic_write_json(path, context)
+        result[name] = path.relative_to(output_dir).as_posix()
+    return result
 
 
 def _compact_page_context(page: Mapping[str, Any]) -> dict[str, Any]:
@@ -584,6 +635,18 @@ def load_footnote_unit_contexts(output_dir: Path) -> dict[str, Path]:
         except ValueError as exc:
             raise ValueError(f"footnote unit context path escapes output directory for {name}") from exc
     packet = validate_review_packet(output_dir, manifest)
+    # The report is the independent page inventory. A worker context cannot
+    # authenticate its own evidence paths by changing both a page and a fact.
+    try:
+        report = json.loads((output_dir / "footnote_candidates.json").read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"footnote candidate report is unreadable; rerun footnote-prepare: {exc}") from exc
+    expected_contexts = _project_unit_contexts(
+        report, packet, _load_refined_units(output_dir),
+        page_sidecar_index(output_dir, report), manifest["review_packet"],
+    )
+    if set(values) != set(expected_contexts) or set(expected_context_hashes) != set(expected_contexts):
+        raise ValueError("footnote unit context inventory differs from current refined mapping; rerun footnote-prepare and footnote-validate (existing decisions are retained)")
     result: dict[str, Path] = {}
     for name, relative in values.items():
         if not isinstance(name, str) or not isinstance(relative, str):
@@ -605,43 +668,12 @@ def load_footnote_unit_contexts(output_dir: Path) -> dict[str, Path]:
         if (
             not isinstance(context, Mapping)
             or context.get("schema_version") != FOOTNOTE_PREPARE_SCHEMA_VERSION
+            or context.get("projection_version") != FOOTNOTE_UNIT_CONTEXT_PROJECTION_VERSION
             or context.get("source_units") != [name]
-            or context.get("preparation_evidence_sha256") != manifest.get("preparation_evidence_sha256")
         ):
-            raise ValueError(f"footnote unit context {name} has a stale contract or source scope; rerun footnote-prepare")
-        source_packet = context.get("source_packet")
-        if not isinstance(source_packet, Mapping) or (
-            source_packet.get("path") != manifest.get("review_packet")
-            or source_packet.get("sha256") != manifest.get("review_packet_sha256")
-        ):
-            raise ValueError(f"footnote unit context {name} has stale packet provenance; rerun footnote-prepare")
-        facts = context.get("candidates")
-        if not isinstance(facts, Mapping):
-            raise ValueError(f"footnote unit context {name} has no local candidate fact table")
-        refs: set[str] = set()
-        for page in context.get("pages", []) or []:
-            if not isinstance(page, Mapping):
-                continue
-            refs.update(str(ref) for ref in page.get("candidate_refs", []))
-            for region in page.get("footnote_regions", []) or []:
-                if isinstance(region, Mapping):
-                    refs.update(str(ref) for ref in region.get("candidate_refs", []))
-        for window in [*(context.get("cross_page_windows", []) or []), *(context.get("continuation_reviews", []) or [])]:
-            if not isinstance(window, Mapping):
-                continue
-            refs.update(str(ref) for ref in window.get("left_candidate_refs", []))
-            refs.update(str(ref) for ref in window.get("right_candidate_refs", []))
-            if window.get("source_note_ref"):
-                refs.add(str(window["source_note_ref"]))
-        if refs != set(facts) or any(ref not in packet.get("candidates", {}) for ref in refs):
-            raise ValueError(f"footnote unit context {name} has missing or excess candidate refs; rerun footnote-prepare")
-        packet_candidates = packet.get("candidates", {})
-        packet_pages = {int(page.get("page", 0)): page for page in packet.get("visual_pages", []) if isinstance(page, Mapping)}
-        for ref, fact in facts.items():
-            source_fact = packet_candidates[ref]
-            page_context = packet_pages.get(int(source_fact.get("page", 0)), {})
-            if not isinstance(fact, Mapping) or dict(fact) != _unit_fact_projection(source_fact, page_context):
-                raise ValueError(f"footnote unit context {name} candidate fact does not match {ref}; rerun footnote-prepare")
+            raise ValueError(f"footnote unit context {name} has a stale projection contract or source scope; rerun footnote-prepare and footnote-validate (existing decisions are retained)")
+        if context != expected_contexts.get(name):
+            raise ValueError(f"footnote unit context {name} differs from canonical report/packet projection; rerun footnote-prepare and footnote-validate (existing decisions are retained)")
         result[name] = path
     return result
 

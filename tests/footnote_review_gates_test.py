@@ -283,7 +283,7 @@ def test_prepare_handoff_validate_apply_and_status_require_explicit_resolution(t
     context = json.loads(contexts["chapter_1.md"].read_text(encoding="utf-8"))
     assert context["source_units"] == ["chapter_1.md"]
     assert context["source_packet"] == {
-        "path": manifest["review_packet"], "sha256": manifest["review_packet_sha256"],
+        "path": manifest["review_packet"],
         "usage": "provenance_only_do_not_open_for_unit_work",
     }
     assert "1:primary:0" in context["pages"][0]["candidate_refs"]
@@ -293,7 +293,7 @@ def test_prepare_handoff_validate_apply_and_status_require_explicit_resolution(t
     contexts["chapter_1.md"].write_text(json.dumps(context), encoding="utf-8")
     manifest["unit_context_sha256"]["chapter_1.md"] = sha256_file(contexts["chapter_1.md"])
     paths["manifest"].write_text(json.dumps(manifest), encoding="utf-8")
-    with pytest.raises(ValueError, match="missing or excess candidate refs"):
+    with pytest.raises(ValueError, match="canonical report/packet projection"):
         load_footnote_unit_contexts(tmp_path)
     packet_path.write_text(packet_path.read_text(encoding="utf-8") + " ", encoding="utf-8")
     assert apply_footnote_normalization(tmp_path)["valid"] is False
@@ -307,6 +307,74 @@ def test_validate_rejects_modified_preparation_evidence_before_decisions(tmp_pat
     result = validate_footnote_decisions(tmp_path)
     assert result["valid"] is False
     assert any("preparation evidence changed" in error for error in result["errors"])
+
+
+def test_unit_context_cannot_self_certify_changed_page_and_candidate_sidecar(tmp_path, monkeypatch):
+    from pdf2epub.refine.footnote_handoff import load_footnote_unit_contexts
+    from pdf2epub.workflow_contracts import sha256_file
+
+    paths, _ = _prepare_continuation_book(tmp_path, monkeypatch)
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    context_path = tmp_path / manifest["unit_context_files"]["chapter_1.md"]
+    context = json.loads(context_path.read_text(encoding="utf-8"))
+    context["pages"][0]["sidecar"] = "pages/unrelated.ocr.json"
+    context["candidates"]["1:primary:0"]["source_sidecar"] = "pages/unrelated.ocr.json"
+    context_path.write_text(json.dumps(context), encoding="utf-8")
+    manifest["unit_context_sha256"]["chapter_1.md"] = sha256_file(context_path)
+    paths["manifest"].write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(ValueError, match="canonical report/packet projection"):
+        load_footnote_unit_contexts(tmp_path)
+
+
+@pytest.mark.parametrize("remove", [False, True])
+def test_unit_context_load_requires_current_reported_sidecar_bytes(tmp_path, monkeypatch, remove):
+    from pdf2epub.refine.footnote_handoff import load_footnote_unit_contexts
+
+    paths, _ = _prepare_continuation_book(tmp_path, monkeypatch)
+    report = json.loads(paths["report"].read_text(encoding="utf-8"))
+    entry = next(iter(report["sidecar_sha256"].items()))
+    sidecar = tmp_path / entry[0]
+    if remove:
+        sidecar.unlink()
+    else:
+        sidecar.write_bytes(sidecar.read_bytes() + b" tampered")
+    with pytest.raises(ValueError, match="sidecar missing or changed"):
+        load_footnote_unit_contexts(tmp_path)
+
+
+def test_unit_context_projection_version_upgrade_preserves_decisions_for_refresh(tmp_path, monkeypatch):
+    from pdf2epub.refine.footnote_handoff import load_footnote_unit_contexts
+    from pdf2epub.workflow_contracts import sha256_file
+
+    paths, _ = _prepare_continuation_book(tmp_path, monkeypatch)
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    context_path = tmp_path / manifest["unit_context_files"]["chapter_1.md"]
+    context = json.loads(context_path.read_text(encoding="utf-8"))
+    context.pop("projection_version")
+    context_path.write_text(json.dumps(context), encoding="utf-8")
+    manifest["unit_context_sha256"]["chapter_1.md"] = sha256_file(context_path)
+    paths["manifest"].write_text(json.dumps(manifest), encoding="utf-8")
+    decisions = tmp_path / "footnote_decisions.json"
+    decisions.write_text('{"decisions": []}', encoding="utf-8")
+    with pytest.raises(ValueError, match="rerun footnote-prepare and footnote-validate"):
+        load_footnote_unit_contexts(tmp_path)
+    assert decisions.is_file()
+
+
+def test_unit_context_projection_rejects_deleted_page_after_hash_refresh(tmp_path, monkeypatch):
+    from pdf2epub.refine.footnote_handoff import load_footnote_unit_contexts
+    from pdf2epub.workflow_contracts import sha256_file
+
+    paths, _ = _prepare_continuation_book(tmp_path, monkeypatch)
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    context_path = tmp_path / manifest["unit_context_files"]["chapter_1.md"]
+    context = json.loads(context_path.read_text(encoding="utf-8"))
+    context["pages"].pop()
+    context_path.write_text(json.dumps(context), encoding="utf-8")
+    manifest["unit_context_sha256"]["chapter_1.md"] = sha256_file(context_path)
+    paths["manifest"].write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(ValueError, match="canonical report/packet projection"):
+        load_footnote_unit_contexts(tmp_path)
 
 
 

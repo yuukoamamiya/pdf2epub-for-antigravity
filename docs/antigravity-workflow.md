@@ -82,6 +82,10 @@ subagent:
 
 正文任务按文件拆分。使用 `--resume` 重新准备任务时，manifest 会根据目标目录写出 `completed_files` 和 `pending_files`；提示词要求 Subagent 只处理 `pending_files`。已经通过校验的输出不会被重新覆盖。新 manifest 还会按单元比较 `unit_context_sha256` 和精确 TOC 上下文，因此外部术语表变化只会使受影响单元重新进入 `pending`；没有单元哈希的旧 manifest 才采用整批重做的兼容策略。Subagent 输出遵守 `atomic_output_contract`：先写临时同级文件，再原子替换正式文件；校验器会清理遗留临时文件，并把无效目标移到可恢复的 scratch 区。恢复前建议先运行对应的 `*-validate`，这样可以先发现空文件、行数不一致或标签损坏。
 
+PDF `translate`/`polish` 的全量报告和逐文件 ledger 会保存 validation-time `unit_context_sha256` 与 TOC heading context。上下文改变或移除后，重复 prepare 不能刷新旧 receipt；先 prepare 更新 manifest，再正式 validate 现有目标，之后 resume 才能复用。旧 receipt 缺少上下文快照时，若当前单元没有上下文仍兼容复用；若已有 unit/heading 或全书 context，则要求一次正式校验。校验发现 `prepared_context` 文件实际哈希与 manifest 不符时，只清除该单元的 validated 副本并提示刷新 context、重新校验；合法 target 保留不移动。若同单元另有内容错误，内容错误仍会隔离 target。Full validation 替代旧 partial ledger 前会保留原始 ledger bytes 到 `scratch/<task>/superseded_checkpoints/`，并在最新报告记录相对路径和 SHA-256；check-only 不创建此归档。
+
+脚注 handoff 的 unit context 使用独立的 `projection_version`。加载时以候选报告和 review packet 的页来源重新核对侧车路径；context 自身的页/fact/hash 不能作为来源证明。旧 context 缺少当前 projection version 时，重新运行 `footnote-prepare` 与 `footnote-validate`；原有 decision 文件保留，只有当前证据身份仍一致且校验通过时才可复用。此刷新不会调用 OCR，也不会放宽语义决定门禁。
+
 PDF/EPUB 的 `translate` manifest 会在 `worker_handoffs/` 按 TOC 顺序为相邻短章节装箱，生成隔离的最小 manifest 和提示词；父级 manifest 保留完整审计索引，worker 只接收自己的文件、批次、上下文哈希和必要的章节元数据，不重复携带全书文件统计、章节映射或审计快照路径；
 `polish` 使用独立的 `polish_worker_handoffs/`，避免不同阶段的任务被误认。每个 Subagent
 只读取自己 handoff 的 `assigned_files`；超过 30,000 字节的单元自动独立成批，但不能与

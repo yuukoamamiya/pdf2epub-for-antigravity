@@ -12,6 +12,7 @@ from .markdown_validation_audit import audit_markdown_files
 from .markdown_validation_state import resolve_review_state
 from .markdown_validation_persistence import (
     begin_validation_io,
+    capture_pdf_resume_contexts,
     stage_normalized_and_validated_targets,
     persist_validation_report,
 )
@@ -97,6 +98,18 @@ def validate_markdown_subagent(
     review_required = audit.review_required
     bilingual_warnings = audit.bilingual_warnings
     normalized_roles = audit.file_roles
+
+    resume_contexts, stale_contexts = capture_pdf_resume_contexts(
+        context.paths.output_dir, task, [source.name for source in sources]
+    )
+    for name, reason in stale_contexts.items():
+        invalid.append({
+            "file": name,
+            "kind": "prepared_context",
+            "action": "refresh_context_and_revalidate",
+            "reason": reason,
+        })
+        valid_files = [item for item in valid_files if item != name]
 
     dynamic_report: dict[str, Any] = {"enabled": False, "valid": True, "files": {}, "errors": []}
     dynamic_blocked_names: set[str] = set()
@@ -208,6 +221,10 @@ def validate_markdown_subagent(
         "dynamic_terminology": dynamic_report,
         "source_sha256": source_sha256,
         "target_sha256": target_sha256,
+        "resume_contexts": {
+            name: snapshot for name, snapshot in resume_contexts.items()
+            if name in valid_files
+        },
         "validated_dir": str(validated_dir),
         "scope": "files" if partial else "full",
         "files_checked": [source.name for source in sources],

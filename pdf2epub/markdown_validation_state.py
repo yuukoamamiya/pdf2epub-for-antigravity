@@ -46,7 +46,12 @@ def resolve_review_state(
          "reason": "Subagent did not write the assigned target file"}
         for name in missing
     ]
-    retry.extend({**dict(item), "kind": "invalid_output", "action": "retry_subagent"} for item in invalid)
+    for item in invalid:
+        value = dict(item)
+        if value.get("kind") == "prepared_context" and value.get("action"):
+            retry.append(value)
+        else:
+            retry.append({**value, "kind": "invalid_output", "action": "retry_subagent"})
     retry.extend(
         {**item, "action": "retry_subagent"}
         for item in review

@@ -439,6 +439,19 @@ def _write_endnote_apply_fixture(tmp_path: Path) -> dict:
         ),
         encoding="utf-8",
     )
+    # The notes unit below is explicitly mapped to PDF page 2. Keep a real
+    # synthetic sidecar for that page so the scoped context has authoritative
+    # evidence even when the page contains no footnote candidate.
+    (pages / "page_002.ocr.json").write_text(
+        json.dumps({
+            "schema_version": 1,
+            "page_number": 2,
+            "backend": "test",
+            "page_box": [0, 0, 1000, 1000],
+            "blocks": [],
+        }),
+        encoding="utf-8",
+    )
     source = tmp_path / "ocr_markdown"
     source.mkdir()
     (source / "chapter_1.md").write_text("Body <sup>1</sup>.\n", encoding="utf-8")
@@ -687,6 +700,16 @@ def test_prepare_apply_build_preserves_identical_continuations_in_repeated_scope
         {"title": "Notes", "start_page": 3, "end_page": 3, "type": "notes"},
     ]}
     (tmp_path / "toc_tree.json").write_text(json.dumps(toc), encoding="utf-8")
+    (tmp_path / "pages" / "page_003.ocr.json").write_text(
+        json.dumps({
+            "schema_version": 1,
+            "page_number": 3,
+            "backend": "test",
+            "page_box": [0, 0, 1000, 1000],
+            "blocks": [],
+        }),
+        encoding="utf-8",
+    )
 
     paths = prepare_footnote_subagent(tmp_path, book_title="Scoped inline", config=config)
     candidates = json.loads((tmp_path / AMBIGUITIES_FILENAME).read_text(encoding="utf-8"))["items"]

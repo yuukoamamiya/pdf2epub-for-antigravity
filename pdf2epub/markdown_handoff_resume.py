@@ -264,11 +264,10 @@ def decide_resume(
                     if record.get("human_review_required"):
                         human_review_files.add(str(name))
                     if record.get("valid") is not True or record.get("safety_blocked"):
-                        if task == "translate-html":
-                            validated_files.discard(name)
-                            source_hashes.pop(name, None)
-                            target_hashes.pop(name, None)
-                            html_resume_contexts.pop(name, None)
+                        validated_files.discard(name)
+                        source_hashes.pop(name, None)
+                        target_hashes.pop(name, None)
+                        html_resume_contexts.pop(name, None)
                         continue
                     source_digest = record.get("source_sha256")
                     target_digest = record.get("target_sha256")
@@ -303,8 +302,7 @@ def decide_resume(
                                 validation[snapshot_key].update(values)
                 validation["source_sha256"] = source_hashes
                 validation["target_sha256"] = target_hashes
-                if task == "translate-html":
-                    validation["resume_contexts"] = html_resume_contexts
+                validation["resume_contexts"] = html_resume_contexts
         except (OSError, json.JSONDecodeError, AttributeError, TypeError):
             pass
 
@@ -339,6 +337,33 @@ def decide_resume(
             resume=request.resume,
         )
         html_fingerprint = None
+        if task in {"translate", "polish"}:
+            receipt_contexts = validation.get("resume_contexts", {})
+            receipt_context = receipt_contexts.get(name) if isinstance(receipt_contexts, Mapping) else None
+            if isinstance(receipt_context, Mapping):
+                context_current = context_current and (
+                    receipt_context.get("source_language") == request.source_language
+                    and receipt_context.get("target_language") == request.target_language
+                    and unit_context_is_current(
+                        name,
+                        previous_manifest=receipt_context,
+                        controlled_files=controlled,
+                        context_sha256=context.context_sha256,
+                        unit_context_sha256=context.unit_context_sha256,
+                        heading_contexts=context.heading_contexts,
+                        file_roles=context.file_roles,
+                        file_role_sources=context.file_role_sources,
+                        resume=True,
+                    )
+                )
+            elif (
+                name in context.unit_context_sha256
+                or name in context.heading_contexts
+                or bool(context.context_sha256)
+            ):
+                # A legacy receipt cannot prove which unit or book-wide
+                # projection was validated. Keep context-free receipts reusable.
+                context_current = False
         if task == "translate-html":
             html_fingerprint = _html_checkpoint_fingerprint(name, validation)
             receipt_contexts = validation.get("resume_contexts", {})

@@ -349,9 +349,18 @@ def test_validate_existing_outputs_before_second_resume_avoids_full_redelegation
     target = target_dir / "unit.md"
     source.write_text("Source paragraph.", encoding="utf-8")
     target.write_text("Existing translated paragraph.", encoding="utf-8")
-    refreshed_context = {
-        "projection_version": 4, "node_id": "n1", "anchor": "a1"
-    }
+    old_context = {"projection_version": 2, "node_id": "n1", "anchor": "a1"}
+    refreshed_context = {"projection_version": 4, "node_id": "n1", "anchor": "a1"}
+    from pdf2epub.markdown_handoff import prepare_markdown_subagent
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
+
+    prepare_markdown_subagent(
+        tmp_path, "translate", source_dir, target_dir, "English", "Chinese",
+        heading_contexts={"unit.md": old_context},
+    )
+    assert validate_markdown_subagent(
+        tmp_path, "translate", source_dir, target_dir,
+    )["all_passed"]
     request = MarkdownHandoffRequest(
         output_dir=tmp_path, task="translate", source_dir=source_dir,
         target_dir=target_dir, source_language="English", target_language="Chinese",
@@ -360,49 +369,28 @@ def test_validate_existing_outputs_before_second_resume_avoids_full_redelegation
     plan = plan_markdown_handoff(source_dir, "translate")
     context = normalize_handoff_context(request, ["unit.md"])
     manifest_path = tmp_path / "translate_subagent_manifest.json"
-    manifest_path.write_text(
-        __import__("json").dumps({
-            "source_language": "English", "target_language": "Chinese",
-            "context_sha256": {}, "unit_context_sha256": {},
-            "toc_heading_contexts": {"unit.md": {"projection_version": 2}}, "special_unit_modes": {},
-        }),
-        encoding="utf-8",
-    )
-    validation_path = tmp_path / "translate_validation.json"
-    validation_path.write_text(
-        __import__("json").dumps({
-            "schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION - 1,
-            "task": "translate", "scope": "full", "all_passed": True,
-            "valid_files": ["unit.md"],
-            "source_sha256": {"unit.md": sha256_file(source)},
-            "target_sha256": {"unit.md": sha256_file(target)},
-        }),
-        encoding="utf-8",
-    )
 
     first_resume = decide_resume(request, plan, context)
     assert first_resume.completed_files == ()
     assert first_resume.pending_files == ("unit.md",)
 
-    # Preparation refreshes the v3 projection without dispatch. Existing outputs
-    # are then revalidated against it, producing a current schema-4 receipt.
-    manifest = __import__("json").loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["toc_heading_contexts"] = {"unit.md": refreshed_context}
-    manifest_path.write_text(__import__("json").dumps(manifest), encoding="utf-8")
-    validation_path.write_text(
-        __import__("json").dumps({
-            "schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION,
-            "task": "translate", "scope": "full", "all_passed": True,
-            "valid_files": ["unit.md"],
-            "source_sha256": {"unit.md": sha256_file(source)},
-            "target_sha256": {"unit.md": sha256_file(target)},
-        }),
-        encoding="utf-8",
+    # Refreshing preparation context alone cannot replace the old validation
+    # receipt. A second resume remains pending until formal validation runs.
+    refreshed = prepare_markdown_subagent(
+        tmp_path, "translate", source_dir, target_dir, "English", "Chinese",
+        resume=True, heading_contexts={"unit.md": refreshed_context},
     )
+    assert __import__("json").loads(refreshed["manifest"].read_text(encoding="utf-8"))["pending_files"] == ["unit.md"]
 
     second_resume = decide_resume(request, plan, context)
-    assert second_resume.completed_files == ("unit.md",)
-    assert second_resume.pending_files == ()
+    assert second_resume.completed_files == ()
+    assert second_resume.pending_files == ("unit.md",)
+    assert validate_markdown_subagent(tmp_path, "translate", source_dir, target_dir)["all_passed"]
+    final = prepare_markdown_subagent(
+        tmp_path, "translate", source_dir, target_dir, "English", "Chinese",
+        resume=True, heading_contexts={"unit.md": refreshed_context},
+    )
+    assert __import__("json").loads(final["manifest"].read_text(encoding="utf-8"))["completed_files"] == ["unit.md"]
     legacy = {"context_sha256": {"snapshot": "old"}}
     assert not unit_context_is_current(
         "a.md", previous_manifest=legacy, controlled_files={},

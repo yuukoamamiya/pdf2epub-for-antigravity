@@ -1227,18 +1227,12 @@ def test_resume_only_invalidates_units_with_changed_context(tmp_path: Path):
         "Chinese",
         unit_context_files=context_files,
     )
-    validation_records = {}
     for name in ("a.md", "b.md"):
         target = target_dir / name
-        target.write_text("validated", encoding="utf-8")
-        validation_records[name] = {
-            "valid": True,
-            "source_sha256": hashlib.sha256((source_dir / name).read_bytes()).hexdigest(),
-            "target_sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
-        }
-    (tmp_path / "translate_file_validation.json").write_text(
-        json.dumps({"schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION, "files": validation_records}), encoding="utf-8"
-    )
+        target.write_text(f"translated {name}", encoding="utf-8")
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
+    report = validate_markdown_subagent(tmp_path, "translate", source_dir, target_dir)
+    assert report["all_passed"], report["invalid"]
 
     # Change only the projected context for a.md.  The external/full context
     # snapshot is intentionally not part of this test: resume is unit-scoped.

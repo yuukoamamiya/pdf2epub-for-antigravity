@@ -82,6 +82,7 @@ PDF 的页脚注抽取会复核疑似跨页断词缺口；需要时会把相邻�
 由图像证据确认原文截断或恢复缺失续文。`footnotes.mode: disabled` 会关闭页脚注自动提取和链接创建；
 若与 TOC 的脚注判断冲突，准备、校验和应用阶段都会显示警告。集中尾注的 Markdown 链接仍可能生成。
 维护者可运行 `uv run pdf2epub -c config.yaml footnote-review-summary --json` 汇总既有脚注复核的页面、区域、候选块和决定覆盖；该命令纯只读，输出是成本诊断，不代表生产校验通过。
+脚注 worker 的精简 unit context 由候选报告、精确页侧车映射和当前 refined unit mapping 重算校验；侧车哈希变化或旧 projection 版本会要求重跑 `footnote-prepare` 与 `footnote-validate`，既有语义决定文件会保留。
 PDF 润色/翻译校验规则升级可能使旧验证记录或脚注归一化 checkpoint 失效；恢复时按 [AGENTS.md](AGENTS.md)
 重跑对应校验或脚注准备/校验/应用，不需要仅因规则版本变化而重新 OCR。
 

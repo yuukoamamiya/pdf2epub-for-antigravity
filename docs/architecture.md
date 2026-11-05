@@ -162,7 +162,7 @@ PDF 精修的核心领域模块如下：
 - `refine/footnote_prepare.py`：只编排按页面 layout sidecar 生成脚注候选、结构排除和双 OCR
   比较，不负责页面扫描细节、区域策略、视觉证据或报告持久化；这些职责分别由
   `footnote_page_scan.py`、`footnote_continuation_regions.py`、`footnote_regions.py` 和
-  `footnote_report.py` 承担。视觉 OCR 先用
+  `footnote_report.py` 承担。worker unit context 使用独立 projection version，并由当前 report、精确页侧车路径/哈希索引和 refined unit mapping 重算；父 manifest 保留全书 packet freshness，单元 context 只携带本单元的局部证据。旧 projection 要求重新 prepare/validate，decision 文件保留且仍须通过原语义校验。视觉 OCR 先用
   宽松的页底召回地板收集候选，再结合页面自身的内容尾部、相对块间距和独立语义证据决定是否本地接受；
   全书固定的 `bbox[3]` 不再是自动判定条件。标签只能作为辅助证据，不能单独绕过几何条件。它排除
   页眉、页脚、纯页码和引用标签，把连续数字开头块（例如
@@ -359,14 +359,14 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
 - `markdown_handoff.py`：协调规划、上下文、恢复、manifest 和 prompt 服务，写入本次 handoff 产物。
 - `markdown_handoff_planning.py`：以 `MarkdownHandoffPlan` 返回已校验的源文件 inventory、哈希、统计、有效角色及来源、续文信息和默认批次计划；显式角色优先于共享推断，推断角色也参与普通/特殊 worker 隔离；不读写 manifest/prompt，也不导入 handoff 编排器。
 - `markdown_handoff_context.py`：将已声明的上下文文件投影为 handoff 可用路径和 hash；不读取未声明上下文。
-- `markdown_handoff_resume.py`：读取旧 manifest 和校验检查点，判断单元上下文、有效角色与角色来源是否仍可复用，并生成恢复决定。准备 manifest 更新不会刷新 validation-time 角色 receipt；需要正式校验后才能恢复复用。
+- `markdown_handoff_resume.py`：读取旧 manifest 和校验检查点，判断单元上下文、有效角色与角色来源是否仍可复用，并生成恢复决定。PDF `translate`/`polish` validation receipt 按文件记录验证时的 `unit_context_sha256`、TOC heading context、语言及角色来源；准备 manifest 更新不会刷新该 receipt。已有上下文而旧 receipt 缺少快照时，先 prepare、正式 validate，再 resume；无上下文的旧普通 receipt 仍可兼容复用。
 - `markdown_handoff_manifest.py`：组装 manifest 数据，并检查可选视觉复核、次 OCR、review 输出目录相对 output 的边界；不负责协调器提供的 source/target/scratch 字符串，也不渲染 prompt。
 - `markdown_handoff_prompt.py`：从明确的 prompt identity、batching 和路径数据渲染提示词，不读取工作区文件。
 - `markdown_subagent_validation.py`：负责校验命令的协调，按顺序调用上下文加载、内容审计、review 状态决策和持久化服务；不承载规则实现。
 - `markdown_validation_context.py`：只读加载 manifest review/protected-workspace 快照，解析选中文件范围，并构造路径、审计选项和上下文类型。
 - `markdown_validation_audit.py`：`load_file_input()` 负责读取一次源/目标字节快照；`audit_markdown_file()` 接收 typed 字节输入和审计选项，不读写路径，执行 TOC 标签、结构标记、目标语言、特殊角色、脚注、拒答及 polish 内容/版面审计。普通上标文字、星号和匕首号必须保留；显式 Markdown 脚注引用和生成的 HTML 脚注引用不重复计入普通上标审计；批次入口仅聚合逐文件结果。
 - `markdown_validation_state.py`：纯函数决定首次 review 的 Subagent 重试和同一 review 信号持续后的人工升级。
-- `markdown_validation_persistence.py`：formal 校验的唯一副作用层，清理 assigned 文件的遗留临时文件，应用规范化计划、维护 validated staging、合并局部 ledger、写报告并隔离无效目标。
+- `markdown_validation_persistence.py`：formal 校验的唯一副作用层，清理 assigned 文件的遗留临时文件，应用规范化计划、维护 validated staging、合并局部 ledger、写报告并隔离无效目标。`prepared_context` 证据过期时清除对应 validated 副本并要求刷新上下文后重新校验，但保留 target 原文；若同一文件还有内容错误，仍按普通无效输出隔离。Full PDF validation supersede 旧 partial ledger 前，将原始 bytes 按内容哈希归档到 `scratch/<task>/superseded_checkpoints/`，并在 full report 记录归档路径与哈希；check-only 不创建归档。
 - `markdown_validation_checkpoint.py`：清理 atomic-write 遗留临时文件、隔离无效输出供恢复诊断；不执行内容审计，也不导入 validator。
 - 依赖方向保持单向：handoff/validation 协调入口调用各自的 context、planning/resume、audit/state、manifest/prompt 或 persistence 服务；纯审计和状态服务不导入协调器，checkpoint 工具也不反向导入 validator。Markdown 校验报告和 manifest 保持既有字段结构；校验规则改变时仍须提升版本以使旧 checkpoint 失效。
 - `markdown_validation.py`：提供纯函数式的 Markdown 风险检测、目标语言审计、规范化辅助
