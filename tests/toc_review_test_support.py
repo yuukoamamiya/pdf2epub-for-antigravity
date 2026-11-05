@@ -27,7 +27,7 @@ def install_toc_review_contract(output_dir: Path, pages_dir: Path | None = None)
     by_location = {
         (c["page"], c["line"]): c
         for c in candidates
-        if c.get("kind") == "text_line" and type(c.get("line")) is int
+        if c.get("kind") in {"text_line", "standalone_number", "explicit_page_label"} and type(c.get("line")) is int
     }
     used = set()
     decisions = [{"candidate_id": c["candidate_id"], "disposition": "body_text"} for c in candidates]
@@ -45,6 +45,8 @@ def install_toc_review_contract(output_dir: Path, pages_dir: Path | None = None)
             used.add((page, line))
             excerpt = lines[line - 1].strip()
             candidate = by_location.get((page, line))
+            boundary["heading_end_line"] = (candidate.get("end_line", line) + 1) if candidate else line + 1
+            boundary["heading_action"] = "bind"
             if candidate:
                 cid = candidate["candidate_id"]
                 decisions[:] = [d for d in decisions if d["candidate_id"] != cid]
@@ -72,7 +74,7 @@ def install_toc_review_contract(output_dir: Path, pages_dir: Path | None = None)
     tree["schema_version"] = 2
     tree_path.write_text(json.dumps(tree, ensure_ascii=False), encoding="utf-8")
     evidence = "visual" if manifest["visual_evidence"] else "page_text"
-    decision_doc = {"schema_version": 1, "source_fingerprint": manifest["source_fingerprint"],
+    decision_doc = {"schema_version": 2, "source_fingerprint": manifest["source_fingerprint"],
                     "candidate_inventory_sha256": candidates_doc["inventory_sha256"],
                     "candidate_decisions": decisions,
                     "page_coverage": [{"page": p, "reviewed": True, "evidence": [evidence]} for p in pages]}

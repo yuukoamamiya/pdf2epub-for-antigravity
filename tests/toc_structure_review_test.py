@@ -3,8 +3,10 @@ import json
 import pytest
 
 from pdf2epub.refine.toc_structure_review import (
+    _heading_like_text_regions,
     build_structure_review,
     create_structure_review_snapshot,
+    reviewed_page_number_lines,
     validate_structure_review,
 )
 from pdf2epub.refine.toc_tree import TOCNode
@@ -29,7 +31,7 @@ def _prepared(tmp_path):
     rows = candidates["candidates"]
     node_row = next(row for row in rows if row["kind"] == "text_line")
     decisions = {
-        "schema_version": 1,
+        "schema_version": 2,
         "source_fingerprint": manifest["source_fingerprint"],
         "candidate_inventory_sha256": candidates["inventory_sha256"],
         "candidate_decisions": [
@@ -43,7 +45,7 @@ def _prepared(tmp_path):
     }
     (tmp_path / "toc_structure_decisions.json").write_text(json.dumps(decisions), encoding="utf-8")
     tree = {"schema_version": 2, "chapters": [{"title": "Introduction", "level": 1, "start_page": 1, "end_page": 2,
-                                               "boundary_info": {"start_line": node_row["line"]}, "node_id": node_row["candidate_id"]}]}
+                                               "boundary_info": {"start_line": node_row["line"], "heading_end_line": node_row["end_line"] + 1, "heading_action": "bind"}, "node_id": node_row["candidate_id"]}]}
     (tmp_path / "toc_tree.json").write_text(json.dumps(tree), encoding="utf-8")
     return pages, outline, pdf, tree
 
@@ -65,6 +67,67 @@ def test_review_requires_complete_candidate_and_page_coverage(tmp_path):
     assert any("page coverage" in error for error in errors)
 
 
+def test_bound_heading_range_must_fit_page_line_count(tmp_path):
+    pages, outline, pdf, tree = _prepared(tmp_path)
+    tree["chapters"][0]["boundary_info"]["heading_end_line"] = 999
+    errors = validate_structure_review(tmp_path, tree, expected_snapshot=_snapshot(tmp_path, pages, outline, pdf))
+    assert any("valid in-page exclusive heading range" in error for error in errors)
+
+
+def test_standalone_numerals_are_explicit_candidates_but_code_lists_and_footnotes_are_not():
+    lines = [
+        "2", "", "正文里的数字 2 保留。", "II", "三", "# 8",
+        "```", "4", "```", "    5", "1. A real list item", "[^2]: footnote",
+    ]
+    rows = _heading_like_text_regions(1, lines)
+    assert [(row["line"], row["excerpt"]) for row in rows if row["kind"] == "standalone_number"] == [
+        (1, "2"), (4, "II"), (5, "三"), (6, "# 8"),
+    ]
+
+
+def test_roman_wrappers_and_invalid_fence_closers_are_handled_as_source_lines():
+    lines = ["ii.", "（二）", "```", "```not-a-close", "3", "```"]
+    rows = _heading_like_text_regions(1, lines)
+    assert [(row["line"], row["excerpt"]) for row in rows if row["kind"] == "standalone_number"] == [
+        (1, "ii."), (2, "（二）"),
+    ]
+
+
+def test_same_numeral_has_position_scoped_page_heading_and_body_dispositions(tmp_path):
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    (pages / "page_001.md").write_text("2\nBody number 2.\n2\n### 2\nSection body.\n", encoding="utf-8")
+    outline = tmp_path / "outline_toc_draft.json"
+    outline.write_text(json.dumps({"chapters": []}), encoding="utf-8")
+    pdf = tmp_path / "input.pdf"
+    pdf.write_bytes(b"synthetic")
+    manifest = build_structure_review(tmp_path, pages, "ocr", outline, pdf)
+    inventory = json.loads((tmp_path / "toc_heading_candidates.json").read_text(encoding="utf-8"))
+    numeric = {row["line"]: row for row in inventory["candidates"] if row["kind"] == "standalone_number"}
+    heading = numeric[4]
+    tree = {"schema_version": 2, "chapters": [{
+        "node_id": heading["candidate_id"], "title": "2", "level": 3,
+        "start_page": 1, "end_page": 1, "boundary_info": {"start_line": 4, "heading_end_line": 5, "heading_action": "bind"}, "children": [],
+    }]}
+    (tmp_path / "toc_tree.json").write_text(json.dumps(tree), encoding="utf-8")
+    decisions = {
+        "schema_version": 2,
+        "source_fingerprint": manifest["source_fingerprint"],
+        "candidate_inventory_sha256": inventory["inventory_sha256"],
+        "candidate_decisions": [
+            {"candidate_id": numeric[1]["candidate_id"], "disposition": "page_number"},
+            {"candidate_id": numeric[3]["candidate_id"], "disposition": "body_text"},
+            {"candidate_id": heading["candidate_id"], "disposition": "toc_node", "node_id": heading["candidate_id"]},
+                {"candidate_id": next(row["candidate_id"] for row in inventory["candidates"] if row["line"] == 5), "disposition": "body_text"},
+        ],
+            "page_coverage": [{"page": 1, "reviewed": True, "evidence": ["visual"]}],
+    }
+    (tmp_path / "toc_structure_decisions.json").write_text(json.dumps(decisions), encoding="utf-8")
+    expected = create_structure_review_snapshot(tmp_path, pages, "ocr", outline, pdf)
+    assert validate_structure_review(tmp_path, tree, expected_snapshot=expected) == []
+    assert reviewed_page_number_lines(tmp_path) == {1: {1}}
+
+
 def test_reviewed_run_in_prefix_validates_against_exact_prefix_not_full_candidate(tmp_path):
     pages = tmp_path / "pages"
     pages.mkdir()
@@ -79,10 +142,10 @@ def test_reviewed_run_in_prefix_validates_against_exact_prefix_not_full_candidat
     tree = {"schema_version": 2, "chapters": [{
         "title": "Heading.", "level": 2, "start_page": 1, "end_page": 1,
         "node_id": candidate["candidate_id"], "binding_mode": "visible",
-        "boundary_info": {"start_line": 1, "heading_prefix": "*Heading.*"}, "children": [],
+        "boundary_info": {"start_line": 1, "heading_end_line": 2, "heading_action": "bind", "heading_prefix": "*Heading.*"}, "children": [],
     }]}
     (tmp_path / "toc_tree.json").write_text(json.dumps(tree), encoding="utf-8")
-    decisions = {"schema_version": 1, "source_fingerprint": manifest["source_fingerprint"],
+    decisions = {"schema_version": 2, "source_fingerprint": manifest["source_fingerprint"],
                  "candidate_inventory_sha256": candidates["inventory_sha256"],
                  "candidate_decisions": [{"candidate_id": candidate["candidate_id"],
                     "disposition": "toc_node", "node_id": candidate["candidate_id"], "binding_mode": "visible"}],
@@ -108,10 +171,10 @@ def test_reviewed_number_label_can_live_in_source_title_or_separate_metadata(tmp
         "title": "Heading", "level": 1, "start_page": 1, "end_page": 1,
         "node_id": candidate["candidate_id"], "binding_mode": "visible",
         "numbering_label": "1.", "numbering_evidence": evidence,
-        "boundary_info": {"start_line": 1}, "children": [],
+        "boundary_info": {"start_line": 1, "heading_end_line": 2, "heading_action": "bind"}, "children": [],
     }]}
     (tmp_path / "toc_tree.json").write_text(json.dumps(tree), encoding="utf-8")
-    decisions = {"schema_version": 1, "source_fingerprint": manifest["source_fingerprint"],
+    decisions = {"schema_version": 2, "source_fingerprint": manifest["source_fingerprint"],
                  "candidate_inventory_sha256": candidates["inventory_sha256"],
                  "candidate_decisions": [{"candidate_id": candidate["candidate_id"],
                     "disposition": "toc_node", "node_id": candidate["candidate_id"],

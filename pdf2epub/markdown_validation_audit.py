@@ -6,10 +6,11 @@ from pathlib import Path
 from typing import Any, Dict, List
 from .document_roles import DENSITY_EXEMPT_ROLES
 from .footnote_normalization import validate_polish_footnote_normalization
-from .markdown_validation import (heading_reduction_is_duplicate_only, validate_footnote_markers, detect_bilingual_output, detect_polish_page_furniture, fix_reference_heading_mismatch, is_bibliography_text, is_front_matter_text, polish_content_integrity_check, polish_structure_audit, strip_outer_markdown_fences, target_language_ratio_check, translation_diff_summary)
+from .markdown_validation import (validate_footnote_markers, detect_bilingual_output, detect_polish_page_furniture, fix_reference_heading_mismatch, is_bibliography_text, is_front_matter_text, polish_content_integrity_check, polish_structure_audit, strip_outer_markdown_fences, target_language_ratio_check, translation_diff_summary)
 from .special_role_audit import validate_special_role_markers
 from .subagent_safety import detect_refusal
 from .utils.ocr_artifacts import clean_ocr_page_artifacts
+from .toc_model import normalize_toc_source_label, toc_title_match_key
 from .markdown_validation_context import MarkdownAuditOptions, MarkdownValidationContext
 
 def _structural_mismatch_reason(pattern: str, source_text: str, target_text: str, source_count: int, target_count: int) -> str:
@@ -31,21 +32,31 @@ def audit_toc_label_preservation(
     continuation_titles: frozenset[str],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Return review signals and exemptions for protected polish TOC labels."""
-    def normalize(value: str) -> str:
-        value = re.sub(r"^\s*#{1,6}\s+", "", value.strip())
-        value = re.sub(r"[*_`]+", "", value).strip()
-        return re.sub(r"\s+", " ", value).casefold()
+    def normalize(value: str, *, markdown_source: bool = True) -> str:
+        return toc_title_match_key(normalize_toc_source_label(value, markdown_source=markdown_source))
 
-    source_labels = [normalize(line) for line in source_text.splitlines() if normalize(line)]
-    target_labels = [normalize(line) for line in target_text.splitlines() if normalize(line)]
+    heading = re.compile(r"^\s*#{1,6}\s+(.+?)\s*#*\s*$")
+    source_labels = [normalize(match.group(0)) for line in source_text.splitlines()
+                     if (match := heading.match(line))]
+    target_labels = [normalize(match.group(0)) for line in target_text.splitlines()
+                     if (match := heading.match(line))]
     source_prefix = {normalize(line) for line in source_text.splitlines()[:5] if normalize(line)}
     continuation = {normalize(value) for value in continuation_titles}
     review, exemptions = [], []
     for title in protected_titles:
         label = normalize(title)
-        if source_labels.count(label) != 1 or target_labels.count(label):
+        source_count = source_labels.count(label)
+        target_count = target_labels.count(label)
+        if source_count == 0:
+            # Some reviewed TOC labels remain plain text in OCR output until
+            # polish promotes or preserves their block structure. Protect an
+            # exact opening label occurrence without treating body mentions
+            # as headings.
+            source_count = sum(normalize(line) == label for line in source_text.splitlines()[:5])
+            target_count = sum(normalize(line) == label for line in target_text.splitlines()[:5])
+        if source_count == 0 or target_count >= source_count:
             continue
-        if label in continuation and label in source_prefix:
+        if source_count == 1 and label in continuation and label in source_prefix:
             exemptions.append({
                 "file": name,
                 "kind": "polish_continuation_toc_label_removed",
@@ -67,7 +78,7 @@ def audit_structural_markers(
     source_text: str,
     target_text: str,
     patterns: tuple[str, ...],
-    tolerate_duplicate_headings: bool,
+    *, task: str,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], bool]:
     """Compare requested Markdown structure markers for one source/target pair."""
     errors, warnings = [], []
@@ -85,12 +96,22 @@ def audit_structural_markers(
             and [len(m.group(0).split()[0]) for m in source_matches]
             != [len(m.group(0).split()[0]) for m in target_matches]
         )
-        mismatch = source_count != target_count or level_changed
-        allowed = (
-            mismatch and pattern == r"^#{1,6}\s" and tolerate_duplicate_headings
-            and heading_reduction_is_duplicate_only(comparison_source, target_text)
-        )
-        if mismatch and not allowed:
+        sequence_changed = False
+        if task == "polish" and pattern == r"^#{1,6}\s":
+            heading = re.compile(r"^\s*(#{1,6})\s+(.+?)\s*#*\s*$", re.MULTILINE)
+
+            def signature(text: str) -> list[tuple[int, str]]:
+                result = []
+                for match in heading.finditer(text):
+                    label = toc_title_match_key(
+                        normalize_toc_source_label(match.group(0), markdown_source=True)
+                    )
+                    result.append((len(match.group(1)), label))
+                return result
+
+            sequence_changed = signature(comparison_source) != signature(target_text)
+        mismatch = source_count != target_count or level_changed or sequence_changed
+        if mismatch:
             errors.append({
                 "file": name,
                 "reason": _structural_mismatch_reason(
@@ -98,13 +119,6 @@ def audit_structural_markers(
                 ),
             })
             return errors, warnings, False
-        if allowed:
-            warnings.append({
-                "file": name,
-                "reason": "duplicate Markdown heading removed during polishing",
-                "source_count": source_count,
-                "target_count": target_count,
-            })
     return errors, warnings, True
 
 
@@ -280,7 +294,6 @@ def audit_markdown_file(
     normalized_protected_toc_titles = options.protected_toc_titles
     normalized_continuation_toc_titles = options.continuation_toc_titles
     expected_endnote_keys = options.expected_endnote_keys
-    tolerate_duplicate_headings = options.tolerate_duplicate_headings
     validate_footnote_normalization = options.validate_footnote_normalization
     fix_reference_headings = options.fix_reference_headings
     target_language = options.target_language
@@ -421,7 +434,7 @@ def audit_markdown_file(
                         )
                 structure_errors, structure_warnings, structure_valid = audit_structural_markers(
                     file.name, source_text, target_text, tuple(structural_patterns),
-                    tolerate_duplicate_headings,
+                    task=task,
                 )
                 invalid.extend(structure_errors)
                 structural_warnings.extend(structure_warnings)

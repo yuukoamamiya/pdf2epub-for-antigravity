@@ -15,10 +15,6 @@ from ..utils.fingerprints import pages_fingerprint
 from ..workflow_contracts import atomic_write_json
 from .toc_tree import TOCNode, dict_list_to_toc_tree
 from .page_merger import PageMerger
-from .toc_heading_recovery import (
-    collect_toc_heading_recoveries,
-    toc_heading_recovery_fingerprint,
-)
 from .subagent_workflow import page_numbers, validate_toc_tree_data
 from .toc_structure_review import create_structure_review_snapshot, selected_page_source_kind, validate_structure_review
 from .pagination import build_pagination_map
@@ -28,7 +24,6 @@ from .footnote_stitcher import scan_boundary_footnotes
 from .illustration_prepare import load_current_illustration_pages
 from ..utils.ocr_artifacts import (
     clean_ocr_page_artifacts,
-    remove_printed_page_number_lines,
 )
 
 # Initialize tokenizer
@@ -356,31 +351,23 @@ class RefinedBreakdown:
         ocr_markdown_dir = output_dir / "ocr_markdown"
         tree_progress_file = ocr_markdown_dir / "tree_progress.json"
 
-        # Chandra can discard a real heading as page furniture.  Reconstruct
-        # only exact TOC matches from the retained page HTML/sidecar evidence;
-        # the page source itself stays read-only.
-        recoveries, recovery_report = collect_toc_heading_recoveries(
-            toc_tree,
-            page_markdown_dir=pages_dir,
-            evidence_dir=output_dir / "pages",
-        )
-        self.page_merger.set_toc_heading_recoveries(recoveries)
         self.page_merger.set_toc_nodes(toc_tree)
-        recovery_report["toc_sha256"] = (source_fingerprint or {}).get("toc_sha256")
-        recovery_report_path = output_dir / "toc_heading_recovery.json"
-        try:
-            atomic_write_json(recovery_report_path, recovery_report)
-        except OSError as exc:
-            raise RuntimeError(
-                f"Could not write TOC heading recovery report "
-                f"{recovery_report_path}: {exc}"
-            ) from exc
-        if source_fingerprint is not None:
-            source_fingerprint = dict(source_fingerprint)
-            source_fingerprint["toc_heading_recovery_sha256"] = (
-                toc_heading_recovery_fingerprint(recoveries)
-            )
-
+        decision_path = output_dir / "toc_structure_decisions.json"
+        if decision_path.is_file():
+            from .toc_structure_review import reviewed_page_number_lines
+            try:
+                page_number_lines = reviewed_page_number_lines(output_dir)
+            except ValueError as exc:
+                raise ValueError(f"Invalid reviewed page-number projection: {exc}") from exc
+            self.page_merger.set_reviewed_page_number_lines(page_number_lines)
+            if source_fingerprint is not None:
+                source_fingerprint = dict(source_fingerprint)
+                source_fingerprint["toc_structure_decisions_sha256"] = hashlib.sha256(
+                    decision_path.read_bytes()
+                ).hexdigest()
+                source_fingerprint["toc_heading_candidates_sha256"] = hashlib.sha256(
+                    (output_dir / "toc_heading_candidates.json").read_bytes()
+                ).hexdigest()
         if resume and tree_progress_file.exists():
             progress_data = json.loads(tree_progress_file.read_text(encoding="utf-8"))
             checkpoint = progress_data.get("fingerprint")
@@ -574,6 +561,18 @@ class RefinedBreakdown:
         """Check an uncovered page range for content owned by the parent."""
         boundary = node.boundary_info or {}
         parent_title = cls._normalize_heading_text(node.title)
+        heading_start = boundary.get("start_line")
+        heading_end = boundary.get("heading_end_line")
+        if (type(heading_start) is not int or type(heading_end) is not int
+                or not 1 <= heading_start < heading_end):
+            return True
+        try:
+            from .toc_structure_review import reviewed_page_number_lines
+            reviewed_numbers = reviewed_page_number_lines(pages_dir.parent)
+        except (OSError, ValueError, TypeError):
+            # Without a current validated projection, do not infer that a gap
+            # contains only page furniture.
+            return True
 
         for page_num in range(start_page, end_page + 1):
             page_file = pages_dir / f"page_{page_num:03d}.md"
@@ -583,19 +582,30 @@ class RefinedBreakdown:
                 # unverified parent-owned range.
                 return True
 
-            lines = page_file.read_text(encoding="utf-8").split("\n")
+            projected_numbers = reviewed_numbers.get(page_num, set())
+            original_lines = page_file.read_text(encoding="utf-8").split("\n")
+            start_line = 1
+            end_line = len(original_lines) + 1
             if page_num == node.start_page:
-                start_line = boundary.get("start_line")
-                if isinstance(start_line, int) and start_line > 1:
-                    lines = lines[start_line - 1 :]
+                start_line = max(start_line, heading_start)
             if page_num == node.end_page:
-                end_line = boundary.get("end_line")
-                if isinstance(end_line, int):
-                    lines = lines[: max(0, end_line - 1)]
+                node_end = boundary.get("end_line")
+                if type(node_end) is int:
+                    end_line = min(end_line, node_end)
+            lines = [
+                line for line_no, line in enumerate(original_lines, 1)
+                if start_line <= line_no < end_line
+                and line_no not in projected_numbers
+                and not (
+                    page_num == node.start_page
+                    and heading_start <= line_no < heading_end
+                )
+            ]
 
             cleaned = clean_ocr_page_artifacts("\n".join(lines))
-            cleaned_lines = remove_printed_page_number_lines(cleaned.split("\n"))
-            for line in cleaned_lines:
+            # Page-number removal is based on the exact reviewed projection;
+            # do not run generic number heuristics over the gap here.
+            for line in cleaned.split("\n"):
                 stripped = line.strip()
                 if not stripped:
                     continue

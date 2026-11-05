@@ -598,6 +598,126 @@ def test_pdf_heading_hierarchy_renders_at_desktop_and_narrow_viewports(tmp_path:
             toc_page.get_pixmap(alpha=False).save(tmp_path / f"deep-toc-{viewport_name}.png")
 
 
+def test_general_toc_has_no_forced_blank_spine_tail_page(tmp_path: Path) -> None:
+    """Render builder-generated TOCs alone so a forced trailing break is observable."""
+    output = tmp_path / "output"
+    source = output / "ocr_markdown"
+    markdown = output / "polished_markdown"
+    source.mkdir(parents=True)
+    markdown.mkdir()
+
+    long_toc = [
+        (chapter, section, f"Subsection {chapter:02d}.{section:02d}.{subsection:02d}")
+        for chapter in range(1, 4)
+        for section in range(1, 5)
+        for subsection in range(1, 3)
+    ]
+    cases = {"compact": None, "long": long_toc}
+    built_epubs: dict[str, Path] = {}
+    for case_name, toc_entries in cases.items():
+        chapters = []
+        progress_units = []
+        node_counter = 0
+
+        def add_node(parent: list[dict], label: str, level: int) -> dict:
+            nonlocal node_counter
+            node_counter += 1
+            node = {"node_id": f"node-{case_name}-{node_counter}", "title": label, "level": level,
+                    "binding_mode": "visible", "children": []}
+            parent.append(node)
+            return node
+
+        if case_name == "compact":
+            add_node(chapters, "Compact chapter", 1)
+            root_labels = [["Compact chapter"]]
+        else:
+            root_labels = []
+            for chapter in range(1, 4):
+                root_label = f"Chapter {chapter:02d}"
+                root = add_node(chapters, root_label, 1)
+                labels = [root_label]
+                for section in range(1, 5):
+                    child = add_node(root["children"], f"Section {chapter:02d}.{section:02d}", 2)
+                    labels.append(child["title"])
+                    for subsection in range(1, 3):
+                        subnode = add_node(child["children"],
+                                           f"Subsection {chapter:02d}.{section:02d}.{subsection:02d}", 3)
+                        labels.append(subnode["title"])
+                root_labels.append(labels)
+        for root_index, labels in enumerate(root_labels, 1):
+            filename = f"chapter_{root_index}.md"
+            content = "\n\n".join(f"{'#' * (1 if i == 0 else (2 if label.startswith('Section ') else 3))} {label}\n\nBody for {label}."
+                                    for i, label in enumerate(labels)) + "\n"
+            (markdown / filename).write_text(content, encoding="utf-8")
+            (source / filename).write_text(content, encoding="utf-8")
+            progress_units.append({"node_id": chapters[root_index - 1]["node_id"],
+                                   "index_path": [root_index], "file": filename})
+        (source / "tree_progress.json").write_text(
+            json.dumps({"units": progress_units}),
+            encoding="utf-8",
+        )
+        tree_path = output / f"toc-tree-{case_name}.json"
+        tree_path.write_text(json.dumps({"schema_version": TOC_TREE_SCHEMA_VERSION, "chapters": chapters}), encoding="utf-8")
+        epub_path = output / f"toc-{case_name}.epub"
+        build_epub(BuildEpubConfig(
+            book_title="TOC pagination regression", output_dir=output, markdown_dir=markdown,
+            toc_tree_path=tree_path, translated=False,
+            config={"footnotes": {"mode": "auto"}}, output_epub=epub_path,
+        ))
+        toc_only_epub = output / f"toc-{case_name}-spine.epub"
+        with ZipFile(epub_path) as source_archive:
+            opf_name = next(name for name in source_archive.namelist() if name.endswith("content.opf"))
+            opf_root = ET.fromstring(source_archive.read(opf_name))
+            opf_ns = {"opf": "http://www.idpf.org/2007/opf"}
+            toc_item = next(
+                item for item in opf_root.findall("opf:manifest/opf:item", opf_ns)
+                if item.get("href") == "text/toc.html"
+            )
+            spine = opf_root.find("opf:spine", opf_ns)
+            assert spine is not None
+            for itemref in list(spine):
+                spine.remove(itemref)
+            ET.SubElement(spine, f"{{{opf_ns['opf']}}}itemref", {"idref": toc_item.get("id")})
+            with ZipFile(toc_only_epub, "w") as toc_archive:
+                for info in source_archive.infolist():
+                    contents = ET.tostring(opf_root, encoding="utf-8", xml_declaration=True) if info.filename == opf_name else source_archive.read(info.filename)
+                    toc_archive.writestr(info, contents)
+        built_epubs[case_name] = toc_only_epub
+
+    qa_dir = Path(os.environ.get("PDF2EPUB_VISUAL_QA_DIR", tmp_path / "visual"))
+    for width, height, viewport in ((900, 1200, "desktop"), (540, 900, "narrow")):
+        for case_name, epub_path in built_epubs.items():
+            with pymupdf.open(epub_path) as document:
+                document.layout(width=width, height=height)
+                page_texts = [page.get_text("text").strip() for page in document]
+                qa_dir.mkdir(parents=True, exist_ok=True)
+                for index, page in enumerate(document, 1):
+                    page.get_pixmap(alpha=False).save(qa_dir / f"general-toc-{case_name}-{viewport}-page-{index:02d}.png")
+                assert all(page_texts), f"{case_name} {viewport}: blank TOC page(s): {page_texts!r}"
+                expected_labels = (["Compact chapter"] if case_name == "compact" else
+                                   [f"Chapter {chapter:02d}" for chapter in range(1, 4)] +
+                                   [f"Section {chapter:02d}.{section:02d}"
+                                    for chapter in range(1, 4) for section in range(1, 5)] +
+                                       [label for _chapter, _section, label in long_toc])
+                combined = " ".join(" ".join(text.split()) for text in page_texts)
+                assert all(label in combined for label in expected_labels)
+                if case_name == "long":
+                    assert document.page_count > 1, f"{viewport}: long TOC should paginate naturally"
+                assert not any(marker in combined for marker in ("▸", "▹", "•", "◦"))
+                spans = [
+                    span for page in document
+                    for block in page.get_text("dict")["blocks"] if "lines" in block
+                    for line in block["lines"] for span in line["spans"]
+                    if span.get("text", "").strip()
+                ]
+                if case_name == "long":
+                    level_size = next(span["size"] for span in spans if "Chapter 01" in span["text"])
+                    assert all(
+                        span["size"] >= level_size - 0.01
+                        for span in spans if re.match(r"(?:Chapter|Section|Subsection) \d+", span["text"])
+                    )
+
+
 def _write_html_rebuild_input(path: Path) -> None:
     opf = """<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/" version="3.0">

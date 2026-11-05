@@ -16,9 +16,10 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 
 
-# Version 4 is scoped to PDF polish/translate. Unrelated OCR and HTML
+# Version 5 is scoped to PDF polish/translate. It adds ordered, normalized
+# heading preservation to the polish validation contract. Unrelated OCR and HTML
 # validation contracts remain at version 3.
-MARKDOWN_VALIDATION_SCHEMA_VERSION = 4
+MARKDOWN_VALIDATION_SCHEMA_VERSION = 5
 LEGACY_MARKDOWN_VALIDATION_SCHEMA_VERSION = 3
 
 

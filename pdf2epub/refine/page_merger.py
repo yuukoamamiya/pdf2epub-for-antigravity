@@ -13,9 +13,9 @@ from typing import Any, Iterable, List, Optional, Set, Tuple
 from loguru import logger
 
 from .toc_tree import TOCNode
-from .toc_heading_recovery import _iter_nodes, _titles_match, title_present_in_lines
 from ..toc_model import normalize_toc_source_label
 from .layout_evidence import normalized_bbox, text_from_block
+from .heading_ranges import source_range_matches_title
 from ..utils.ocr_artifacts import (
     clean_ocr_page_artifacts,
     native_repeated_edge_furniture_index,
@@ -42,12 +42,22 @@ def _matches_protected_heading(value: str, titles: Iterable[str]) -> bool:
         # "Chapter 2: Title" against a TOC "2. Title"), but require identical
         # Arabic numbering so adjacent numbered headings cannot protect each other.
         title_digits = tuple(re.findall(r"\d+", title_text))
-        if _titles_match(value, title_text) and (digits == title_digits or not digits or not title_digits):
+        left = re.sub(r"^(?:chapter|part|section|book|volume)\s+", "", value, flags=re.I)
+        right = re.sub(r"^(?:chapter|part|section|book|volume)\s+", "", title_text, flags=re.I)
+        left_key = "".join(char for char in left.casefold() if char.isalnum())
+        right_key = "".join(char for char in right.casefold() if char.isalnum())
+        if left_key == right_key and (digits == title_digits or not digits or not title_digits):
             matches.append((title_text, title_digits))
     if len(matches) != 1:
         return False
     title_digits = matches[0][1]
     return digits == title_digits or not digits or not title_digits
+
+
+def _iter_nodes(nodes: Iterable[Any]) -> Iterable[Any]:
+    for node in nodes:
+        yield node
+        yield from _iter_nodes(getattr(node, "children", []) or [])
 
 _ROMAN_PAGE_LABEL = r"(?=[ivxlcdm])m{0,3}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3})"
 _PAGE_LABEL = rf"(?:\d{{1,4}}|{_ROMAN_PAGE_LABEL})"
@@ -201,9 +211,15 @@ class PageMerger:
         self._native_furniture_cache: dict[Path, dict[str, int]] = {}
         self._visual_running_header_cache: dict[Path, dict[int, list[str]]] = {}
         self._visual_sidecar_pages_cache: dict[Path, set[int]] = {}
-        self._toc_heading_recoveries: dict[int, list[dict]] = {}
         self._toc_start_page_titles: dict[int, set[str]] = {}
         self._toc_nodes: list[TOCNode] = []
+        self._reviewed_page_number_lines: dict[int, set[int]] = {}
+
+    def set_reviewed_page_number_lines(self, page_lines: dict[int, set[int]]) -> None:
+        """Install the source-bound page-number disposition projection."""
+        self._reviewed_page_number_lines = {
+            int(page): set(lines) for page, lines in page_lines.items()
+        }
 
     def set_toc_nodes(self, nodes: Any) -> None:
         """Register TOC nodes so titles on their start pages are never stripped."""
@@ -238,24 +254,35 @@ class PageMerger:
             if getattr(node, "binding_mode", "visible") != "visible":
                 continue
             node_id = str(getattr(node, "node_id", "") or "")
+            if not node_id:
+                continue
             boundary = getattr(node, "boundary_info", None) or {}
             start_line = boundary.get("start_line") if isinstance(boundary, dict) else None
             if type(start_line) is not int or not 1 <= start_line <= len(source_lines) + 1:
-                if isinstance(boundary, dict) and "heading_prefix" in boundary:
-                    raise ValueError(f"Reviewed heading_prefix has invalid source line for TOC node {node_id}")
-                continue
-            if node_id.startswith("layout-"):
+                raise ValueError(f"Reviewed visible heading has an invalid source line for TOC node {node_id}")
+            heading_action = boundary.get("heading_action") if isinstance(boundary, dict) else None
+            if heading_action not in {"bind", "insert"}:
+                raise ValueError(f"Reviewed visible heading requires explicit heading_action for TOC node {node_id}")
+            if heading_action == "insert":
+                if not boundary.get("heading_evidence_id"):
+                    raise ValueError(f"Reviewed inserted heading lacks evidence for TOC node {node_id}")
+                checked = boundary.get("heading_checked_range")
+                if (not isinstance(checked, dict) or type(checked.get("start_line")) is not int
+                        or type(checked.get("end_line")) is not int
+                        or not 1 <= checked["start_line"] < checked["end_line"] <= len(source_lines) + 1
+                        or not checked["start_line"] <= start_line <= checked["end_line"]):
+                    raise ValueError(f"Reviewed insertion lacks a valid bounded absence check for TOC node {node_id}")
+                if source_range_matches_title(source_lines, checked["start_line"], checked["end_line"], str(node.title), anchor_line=start_line):
+                    raise ValueError(f"Reviewed insertion range already contains the heading for TOC node {node_id}; bind that source range")
                 level = getattr(node, "level", 1)
                 if type(level) is int and 1 <= level <= 6:
                     regions.append((start_line, start_line, level, str(node.title), True, ""))
                 continue
             if start_line > len(source_lines):
-                if "heading_prefix" in boundary:
-                    raise ValueError(f"Reviewed heading_prefix is outside source page for TOC node {node_id}")
-                continue
-            end_exclusive = boundary.get("heading_end_line", start_line + 1)
+                raise ValueError(f"Reviewed bound heading is outside source page for TOC node {node_id}")
+            end_exclusive = boundary.get("heading_end_line")
             if type(end_exclusive) is not int or not start_line < end_exclusive <= len(source_lines) + 1:
-                continue
+                raise ValueError(f"Reviewed visible heading lacks a valid exclusive source range for TOC node {node_id}")
             raw_region = source_lines[start_line - 1:end_exclusive - 1]
             if not raw_region:
                 continue
@@ -297,8 +324,7 @@ class PageMerger:
                 remainder = source_body_line[len(heading_prefix):].lstrip(" \t")
                 regions.append((start_line, start_line + 1, level, title_markup, False, remainder))
                 continue
-            label_lines = list(raw_region)
-            label_lines[0] = re.sub(r"^\s*#{1,6}\s*", "", label_lines[0])
+            label_lines = [re.sub(r"^\s*#{1,6}\s*", "", line).strip() for line in raw_region]
             source_heading_label = normalize_toc_source_label(" ".join(label_lines), markdown_source=True)
             canonical_label = normalize_toc_source_label(node.title, markdown_source=False)
             numbering_label = getattr(node, "numbering_label", None)
@@ -310,12 +336,12 @@ class PageMerger:
             else:
                 numbered_label = canonical_label
             if source_heading_label not in {canonical_label, numbered_label}:
-                continue
+                raise ValueError(f"Reviewed heading range does not match canonical TOC title for TOC node {node_id}")
             level = getattr(node, "level", 1)
             if type(level) is not int or level < 1:
                 continue
             level = min(level, 6)
-            heading_text = " ".join(label_lines).strip()
+            heading_text = " ".join(value for value in label_lines if value).strip()
             label = getattr(node, "numbering_label", None)
             if label:
                 from ..toc_model import compose_numbered_title
@@ -325,6 +351,10 @@ class PageMerger:
                     heading_text = f"{label} {heading_text}"
             regions.append((start_line, end_exclusive, level, heading_text, False, ""))
 
+        ordered_regions = sorted(regions, key=lambda region: (region[0], region[1]))
+        for previous, current in zip(ordered_regions, ordered_regions[1:]):
+            if current[0] < previous[1] or current[0] == previous[0]:
+                raise ValueError("Reviewed heading source ranges overlap or share an insertion position")
         by_start = {start: (end, level, title, layout_only, remainder) for start, end, level, title, layout_only, remainder in regions}
         output: list[str] = []
         line_positions: dict[int, int] = {}
@@ -352,7 +382,9 @@ class PageMerger:
                     line_no = end_exclusive
                     boundary_positions[line_no] = len(output)
                     continue
-                line_positions[line_no] = heading_position
+                # The original source row still maps after an inserted heading;
+                # boundary_positions retains the logical unit start at the title.
+                line_positions[line_no] = len(output)
                 if line_no > len(source_lines):
                     break
             if line_no not in by_start:
@@ -505,83 +537,6 @@ class PageMerger:
                 break
         return result
 
-    def set_toc_heading_recoveries(
-        self,
-        recoveries: Optional[dict[int, list[dict]]],
-    ) -> None:
-        """Set per-page TOC headings recovered from page evidence."""
-        normalized: dict[int, list[dict]] = {}
-        for page, items in (recoveries or {}).items():
-            try:
-                page_number = int(page)
-            except (TypeError, ValueError):
-                continue
-            if not isinstance(items, (list, tuple)):
-                continue
-            normalized[page_number] = [
-                dict(item) for item in items if isinstance(item, dict)
-            ]
-        self._toc_heading_recoveries = normalized
-
-    def _inject_toc_heading_recoveries(
-        self,
-        page_num: int,
-        lines: list[str],
-        fragment_start_line: int,
-        fragment_end_line: int,
-        line_positions: Optional[dict[int, int]] = None,
-        fragment_start_offset: Optional[int] = None,
-    ) -> list[str]:
-        insertions = self._toc_heading_recoveries.get(page_num)
-        if not insertions:
-            return lines
-
-        positioned: list[tuple[int, int, str, dict]] = []
-        for order, item in enumerate(insertions):
-            title = str(item.get("title") or "").strip()
-            if not title:
-                continue
-            if title_present_in_lines(lines, title):
-                continue
-            start_line = item.get("start_line")
-            if isinstance(start_line, int):
-                if not (fragment_start_line <= start_line <= fragment_end_line):
-                    logger.debug(
-                        "Skipping recovered heading %r on page %s: start_line %s "
-                        "outside fragment %s..%s",
-                        title,
-                        page_num,
-                        start_line,
-                        fragment_start_line,
-                        fragment_end_line,
-                    )
-                    continue
-                if line_positions is not None and fragment_start_offset is not None:
-                    offset = line_positions.get(start_line, fragment_start_offset) - fragment_start_offset
-                else:
-                    offset = start_line - fragment_start_line
-            else:
-                offset = 0
-            positioned.append((offset, order, title, item))
-
-        for offset, _order, title, item in sorted(
-            positioned,
-            key=lambda entry: (entry[0], entry[1]),
-            reverse=True,
-        ):
-            if title_present_in_lines(lines, title):
-                continue
-            level = item.get("level")
-            try:
-                level = int(level)
-            except (TypeError, ValueError):
-                level = 1
-            level = max(1, min(6, level))
-            block = ["", f"{'#' * level} {title}", ""]
-            index = max(0, min(offset, len(lines)))
-            lines[index:index] = block
-        return lines
-
     def _native_furniture_index(self, pages_dir: Path) -> dict[str, int]:
         pages_dir = Path(pages_dir).resolve()
         cached = self._native_furniture_cache.get(pages_dir)
@@ -678,16 +633,21 @@ class PageMerger:
             lines, line_positions, boundary_positions = self._materialize_reviewed_headings(
                 page_num, source_lines
             )
+            for source_line in self._reviewed_page_number_lines.get(page_num, set()):
+                output_line = line_positions.get(source_line)
+                if output_line is None or not 0 <= output_line < len(lines):
+                    raise ValueError(f"Reviewed page-number line is outside current source page: {page_num}/{source_line}")
+                lines[output_line] = ""
             if page_num == node.start_page:
-                start_index = line_positions.get(start_index + 1, boundary_positions.get(start_index + 1, start_index))
+                start_index = boundary_positions.get(start_index + 1, line_positions.get(start_index + 1, start_index))
             else:
-                start_index = boundary_positions.get(start_index + 1, start_index)
+                start_index = boundary_positions.get(start_index + 1, line_positions.get(start_index + 1, start_index))
             if explicit_end_boundary:
                 # Explicit source cuts, including a next-node start, stay
                 # before a reviewed heading inserted at that position.
-                end_index = line_positions.get(
+                end_index = boundary_positions.get(
                     end_index + 1,
-                    boundary_positions.get(end_index + 1, end_index),
+                    line_positions.get(end_index + 1, end_index),
                 )
             else:
                 end_index = len(lines)
@@ -704,6 +664,7 @@ class PageMerger:
                 self._native_sidecar(pages_dir, page_num),
                 repeated_index=self._native_furniture_index(pages_dir),
                 page_number=page_num,
+                protected_titles=self._toc_start_page_titles.get(page_num, set()),
             )
             for item in removed_furniture:
                 logger.debug(
@@ -724,19 +685,12 @@ class PageMerger:
                 current_header = None
             else:
                 lines, current_header = remove_repeated_page_header(
-                    lines, previous_header
+                    lines, previous_header,
+                    protected_titles=self._toc_start_page_titles.get(page_num, set()),
                 )
                 if current_header is not None and current_header == previous_header:
                     logger.debug(f"Removed repeated running header on page {page_num}")
             previous_header = current_header
-            lines = self._inject_toc_heading_recoveries(
-                page_num,
-                lines,
-                original_start_index + 1,
-                original_end_index,
-                line_positions=line_positions,
-                fragment_start_offset=start_index,
-            )
             page_content = '\n'.join(lines)
             if page_content.strip():
                 content_parts.append((page_num, page_content))
@@ -815,11 +769,16 @@ class PageMerger:
             lines, line_positions, boundary_positions = self._materialize_reviewed_headings(
                 page_num, source_lines
             )
-            start_index = line_positions.get(
-                start_index + 1, boundary_positions.get(start_index + 1, start_index)
+            for source_line in self._reviewed_page_number_lines.get(page_num, set()):
+                output_line = line_positions.get(source_line)
+                if output_line is None or not 0 <= output_line < len(lines):
+                    raise ValueError(f"Reviewed page-number line is outside current source page: {page_num}/{source_line}")
+                lines[output_line] = ""
+            start_index = boundary_positions.get(
+                start_index + 1, line_positions.get(start_index + 1, start_index)
             )
             end_index = (
-                line_positions.get(end_index + 1, boundary_positions.get(end_index + 1, end_index))
+                boundary_positions.get(end_index + 1, line_positions.get(end_index + 1, end_index))
                 if explicit_end_boundary else len(lines)
             )
             lines = lines[start_index:end_index] if end_index >= start_index else []
@@ -835,6 +794,7 @@ class PageMerger:
                 self._native_sidecar(pages_dir, page_num),
                 repeated_index=self._native_furniture_index(pages_dir),
                 page_number=page_num,
+                protected_titles=self._toc_start_page_titles.get(page_num, set()),
             )
             for item in removed_furniture:
                 logger.debug(
@@ -855,19 +815,12 @@ class PageMerger:
                 current_header = None
             else:
                 lines, current_header = remove_repeated_page_header(
-                    lines, previous_header
+                    lines, previous_header,
+                    protected_titles=self._toc_start_page_titles.get(page_num, set()),
                 )
                 if current_header is not None and current_header == previous_header:
                     logger.debug(f"Removed repeated running header on page {page_num}")
             previous_header = current_header
-            lines = self._inject_toc_heading_recoveries(
-                page_num,
-                lines,
-                fragment_start_line,
-                fragment_end_line,
-                line_positions=line_positions,
-                fragment_start_offset=start_index,
-            )
             page_content = '\n'.join(lines)
             if page_content.strip():
                 content_parts.append((page_num, page_content))

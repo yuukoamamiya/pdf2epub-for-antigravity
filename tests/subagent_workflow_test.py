@@ -1511,7 +1511,7 @@ def test_markdown_validation_rejects_added_code_fence(tmp_path: Path):
     assert "code fence mismatch" in report["invalid"][0]["reason"]
 
 
-def test_polish_validation_allows_only_duplicate_heading_reduction(tmp_path: Path):
+def test_polish_validation_does_not_allow_loss_of_same_named_reviewed_sections(tmp_path: Path):
     from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
     source_dir = tmp_path / "source"
@@ -1519,12 +1519,12 @@ def test_polish_validation_allows_only_duplicate_heading_reduction(tmp_path: Pat
     source_dir.mkdir()
     target_dir.mkdir()
     (source_dir / "unit.md").write_text(
-        "## Preface and Acknowledgements\n\nText.\n\n"
-        "## Preface and Acknowledgements\n\nMore text.\n",
+        "### 1\n\nFirst section.\n\n"
+        "### 1\n\nSecond section.\n",
         encoding="utf-8",
     )
     (target_dir / "unit.md").write_text(
-        "## Preface and Acknowledgements\n\nText.\n\nMore text.\n",
+        "### 1\n\nFirst section.\n\nSecond section.\n",
         encoding="utf-8",
     )
 
@@ -1534,11 +1534,10 @@ def test_polish_validation_allows_only_duplicate_heading_reduction(tmp_path: Pat
         source_dir,
         target_dir,
         structural_patterns=(r"^#{1,6}\s",),
-        tolerate_duplicate_headings=True,
     )
 
-    assert report["all_passed"] is True
-    assert report["structural_warnings"][0]["file"] == "unit.md"
+    assert report["all_passed"] is False
+    assert "structural marker mismatch" in report["invalid"][0]["reason"]
 
 
 def test_polish_validation_still_rejects_unique_heading_removal(tmp_path: Path):
@@ -1557,11 +1556,61 @@ def test_polish_validation_still_rejects_unique_heading_removal(tmp_path: Path):
         source_dir,
         target_dir,
         structural_patterns=(r"^#{1,6}\s",),
-        tolerate_duplicate_headings=True,
     )
 
     assert report["all_passed"] is False
     assert "structural marker mismatch" in report["invalid"][0]["reason"]
+
+
+def test_polish_validator_rejects_same_level_heading_reordering(tmp_path: Path):
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "unit.md").write_text(
+        "## Section 1\n\nFirst body.\n\n## Section 2\n\nSecond body.\n",
+        encoding="utf-8",
+    )
+    (target_dir / "unit.md").write_text(
+        "## Section 2\n\nFirst body.\n\n## Section 1\n\nSecond body.\n",
+        encoding="utf-8",
+    )
+
+    report = validate_markdown_subagent(
+        tmp_path, "polish", source_dir, target_dir,
+        structural_patterns=(r"^#{1,6}\s",),
+    )
+
+    assert report["all_passed"] is False
+    assert any("heading structure mismatch" in row["reason"] for row in report["invalid"])
+
+
+def test_polish_validator_preserves_heading_identifiers_and_allows_visual_markup_change(tmp_path: Path):
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    body = "A sufficiently long body sentence remains byte-for-byte intact for this audit.\n"
+    (source_dir / "unit.md").write_text("# A_B\n\n" + body, encoding="utf-8")
+    (target_dir / "unit.md").write_text("# AB\n\n" + body, encoding="utf-8")
+
+    rejected = validate_markdown_subagent(
+        tmp_path, "polish", source_dir, target_dir,
+        structural_patterns=(r"^#{1,6}\s",), protected_toc_titles=["A_B"],
+    )
+    assert rejected["all_passed"] is False
+    assert any("A_B" in str(row) for row in rejected["invalid"] + rejected["review_required"])
+
+    (target_dir / "unit.md").write_text("# **A_B**\n\n" + body, encoding="utf-8")
+    accepted = validate_markdown_subagent(
+        tmp_path, "polish", source_dir, target_dir,
+        structural_patterns=(r"^#{1,6}\s",), protected_toc_titles=["A_B"],
+    )
+    assert accepted["all_passed"] is True
 
 
 def test_polish_content_integrity_rejects_substantial_source_loss():
@@ -2329,8 +2378,8 @@ def test_partial_polish_validation_persists_task_scoped_receipt(tmp_path: Path):
         (tmp_path / "polish_file_validation.json").read_text(encoding="utf-8")
     )
     assert ledger["task"] == "polish"
-    assert ledger["schema_version"] == 4
-    assert ledger["files"]["one.md"]["schema_version"] == 4
+    assert ledger["schema_version"] == MARKDOWN_VALIDATION_SCHEMA_VERSION
+    assert ledger["files"]["one.md"]["schema_version"] == MARKDOWN_VALIDATION_SCHEMA_VERSION
     assert ledger["files"]["one.md"]["valid"] is True
 
 
@@ -2960,11 +3009,11 @@ def test_refine_local_splits_a_parent_when_children_cover_its_range(tmp_path: Pa
     pages_dir = tmp_path / "pages"
     pages_dir.mkdir()
     (pages_dir / "page_001.md").write_text(
-        "Container heading\nFirst heading\nPage 1 content", encoding="utf-8"
+        "# Container\n## First\nPage 1 content", encoding="utf-8"
     )
     for number in range(2, 5):
         (pages_dir / f"page_{number:03d}.md").write_text(
-            f"Page {number} content", encoding="utf-8"
+            f"{'## Second' if number == 3 else ''}\nPage {number} content", encoding="utf-8"
         )
     (tmp_path / "toc_tree.json").write_text(
         json.dumps({
@@ -3057,7 +3106,7 @@ def test_refine_local_does_not_merge_children_into_heading_only_parent(tmp_path:
 def test_refine_local_preserves_midpage_parent_and_previous_prefix(tmp_path: Path):
     pages_dir = tmp_path / "pages"
     pages_dir.mkdir()
-    (pages_dir / "page_001.md").write_text("Previous page.", encoding="utf-8")
+    (pages_dir / "page_001.md").write_text("# Previous\nPrevious page.", encoding="utf-8")
     (pages_dir / "page_002.md").write_text(
         "The previous sentence continues.\n"
         "It ends here.\n"
@@ -3118,11 +3167,11 @@ def test_refine_local_keeps_explicit_previous_end_boundary(tmp_path: Path):
     pages_dir = tmp_path / "pages"
     pages_dir.mkdir()
     (pages_dir / "page_001.md").write_text(
-        "Previous heading\nPrevious body\nExcluded page furniture\nStill excluded",
+        "# Previous\nPrevious body\nExcluded page furniture\nStill excluded",
         encoding="utf-8",
     )
     (pages_dir / "page_002.md").write_text(
-        "Continuation before next heading\nAnother prefix line\nNext heading\nNext body",
+        "Continuation before next heading\nAnother prefix line\nNext\nNext body",
         encoding="utf-8",
     )
     (tmp_path / "toc_tree.json").write_text(
@@ -3314,7 +3363,7 @@ def test_refine_local_does_not_reuse_checkpoint_after_toc_changes(tmp_path: Path
     pages_dir = tmp_path / "pages"
     pages_dir.mkdir()
     for number in range(1, 3):
-        (pages_dir / f"page_{number:03d}.md").write_text("Content", encoding="utf-8")
+        (pages_dir / f"page_{number:03d}.md").write_text("# First\nContent", encoding="utf-8")
     toc_path = tmp_path / "toc_tree.json"
     toc_path.write_text(json.dumps({
         "chapters": [{"title": "First", "level": 1, "start_page": 1, "end_page": 2}]
@@ -3327,6 +3376,7 @@ def test_refine_local_does_not_reuse_checkpoint_after_toc_changes(tmp_path: Path
     toc_path.write_text(json.dumps({
         "chapters": [{"title": "Renamed", "level": 1, "start_page": 1, "end_page": 2}]
     }), encoding="utf-8")
+    (pages_dir / "page_001.md").write_text("# Renamed\nContent", encoding="utf-8")
     install_toc_review_contract(tmp_path)
     second = refiner.process_from_toc(tmp_path / "input.pdf", tmp_path, "Book", resume=True)
     assert second[0]["title"] == "Renamed"
@@ -3335,7 +3385,7 @@ def test_refine_local_does_not_reuse_checkpoint_after_toc_changes(tmp_path: Path
 def test_refine_local_invalidates_legacy_page_merger_fingerprint(tmp_path: Path):
     pages_dir = tmp_path / "pages"
     pages_dir.mkdir()
-    (pages_dir / "page_001.md").write_text("Content", encoding="utf-8")
+    (pages_dir / "page_001.md").write_text("# First\nContent", encoding="utf-8")
     (tmp_path / "toc_tree.json").write_text(
         json.dumps(
             {
@@ -3360,13 +3410,13 @@ def test_refine_local_invalidates_legacy_page_merger_fingerprint(tmp_path: Path)
     install_toc_review_contract(tmp_path)
     refiner.process_from_toc(tmp_path / "input.pdf", tmp_path, "Book", resume=True)
 
-    assert unit_path.read_text(encoding="utf-8") == "Content"
+    assert unit_path.read_text(encoding="utf-8").startswith("# First")
 
 
 def test_refine_local_does_not_reuse_units_after_split_policy_changes(tmp_path: Path):
     pages_dir = tmp_path / "pages"
     pages_dir.mkdir()
-    (pages_dir / "page_001.md").write_text("Content", encoding="utf-8")
+    (pages_dir / "page_001.md").write_text("# First\nContent", encoding="utf-8")
     (tmp_path / "toc_tree.json").write_text(
         json.dumps({"chapters": [{"title": "First", "level": 1, "start_page": 1, "end_page": 1}]}),
         encoding="utf-8",
@@ -3385,7 +3435,7 @@ def test_refine_local_does_not_reuse_units_after_split_policy_changes(tmp_path: 
     install_toc_review_contract(tmp_path)
     changed_policy.process_from_toc(tmp_path / "input.pdf", tmp_path, "Book", resume=True)
 
-    assert unit_path.read_text(encoding="utf-8") == "Content"
+    assert unit_path.read_text(encoding="utf-8") == "# First\n\nContent"
 
 
 def test_toc_validation_requires_in_place_translated_fields(tmp_path: Path):

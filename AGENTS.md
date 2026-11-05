@@ -397,6 +397,7 @@ ocr-pages
 `review_required`；首次出现时必须先让 Subagent 重新判断，复核后仍存在则升级为
 `human_review_required`，不授权本地脚本自动删除或继续。仅在明确确认合法保留后使用
 `--allow-review-warnings`。
+润色还必须保留源稿标题的规范化有序序列和每次出现；删掉重复标题、改变标题文字或交换同级标题都会被校验阻断。
 EPUB、轻小说和 TeX 流程不使用这一 PDF 润色阶段。
 
 PDF 的具体循环为：`ocr-pages →（若启用第二套 OCR：ocr-correct → ocr-correct-validate）→ refine-prepare → illustration-prepare →（有候选时交给 Subagent）→ illustration-validate → illustration-apply → refine-local → footnote-prepare →（有待复核时交给 Subagent）→ footnote-validate → footnote-apply → polish → polish-validate`。
@@ -545,25 +546,24 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    本地程序校验页码范围、父子关系、兄弟节点重叠，并生成 `ocr_markdown/`。
    `toc_tree.json` 中的 `boundary_info.start_line`/`end_line` 是对应
    `page_XXX.md` 的 1-based 行号，其中 `start_line` 包含该行、`end_line` 不包含该行。
-   TOC schema 2 的每个可见标题还须由 Subagent 在 `boundary_info.heading_end_line` 标出标题区域的
-   exclusive 结束行；它与节点正文边界 `end_line` 是不同字段。`refine-local` 只将审阅确认且与
-   TOC 标题精确对应的源行区域物化为 Markdown 标题，再进入 polish；原区域内联标记和脚注引用保留，
-   不从相邻正文推断标题范围，也不改写原始 `pages/`。
+   每个可见标题必须在 `boundary_info` 明确写入 `heading_action: bind`、`start_line` 和 exclusive
+   `heading_end_line`；布局侧车中 Markdown 缺失的标题只能显式 `heading_action: insert`，同时提供
+   `heading_evidence_id` 和覆盖插入锚点的非空 `heading_checked_range`。源行范围按原始页行号编辑，
+   保留 inline markup、脚注引用和作者 ID；矛盾、重叠、超出源页或陈旧范围阻断。每个独立阿拉伯、
+   罗马和中文数字候选必须明确判为 TOC 节点、正文、页码或页边装饰；数字值和靠近页边都不能证明
+   页码。所有数字页码都必须有当前 review 的精确 `page_number` 行决定；布局/几何证据只用于
+   其他已确认的页边装饰，不能单独授权删除数字。无法确定时保留。
    新章节从页面中部开始时，上一单元保留同页标题前的前缀；父标题和首个子标题同页时，
    两者都必须提供 `start_line`，本地步骤把父标题/导语放入首个子章节单元。
    `refine-local` 还会从当前页面生成 `pagination_map.json`，并以页码候选加起始页正文标题
    的双重证据保守清洗 TOC 末尾页码；所有修改、未修改候选和源/目标哈希写入
    `toc_title_normalization.json`，证据不足时保持原题名。`tree_progress.json` 会锁定规范化后的
    TOC/OCR 指纹；输入变化后必须重新生成受影响单元。
-   视觉 OCR 若把真实 TOC 标题误标为 `Page-Header`/`Page-Footer`，`refine-local` 会从当前
-   `pages/page_NNN.html` 或 sidecar 的 `raw_html` 中按 DOM 顺序合并页眉/页脚块，只在规范化
-   后与 TOC 标题精确匹配时于内存中恢复标题；同页同标题只恢复一次，证据不足、已存在或存在
-   歧义时写入 skipped 而不猜测。恢复结果写入 `toc_heading_recovery.json`，原始 `pages/`
-   保持只读。`tree_progress.json` 的指纹包含恢复映射哈希和证据目录指纹；切换正文页面来源
-   （如 `ocr_corrected_pages/validated/`）、证据模式或 HTML/sidecar 后不得复用旧恢复报告或
-   旧 checkpoint。
+   侧车中漏掉的真实标题必须在结构 review 中绑定到页面布局候选并显式插入；程序不再从页眉/页脚
+   HTML 自动恢复标题。重复页眉清理不得删除当前 review 绑定的标题。
    对旧原生文字运行，`refine-local` 仍会只读当前页的 PDF 坐标 sidecar，在不改写原始
-   `pages/` 的前提下确定性移除页边 5% 内的 DOI/孤立页码，以及跨页重复的短页眉页脚；
+   `pages/` 的前提下处理页边 5% 内的 DOI 和跨页重复短页眉页脚。数字页码只能按当前 TOC
+   structure review 中精确绑定的 `page_number` 行决定移除；sidecar 几何位置不能单独授权删除数字。
    唯一正文或书目 DOI 不因单次出现而删除。
 8. `refine-local` 完成后处理脚注：
 
@@ -602,8 +602,7 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    内层真实注释号”只在当前 scope 的正文引用集合
    包含内层数字且内层不小于外层时采用内层，否则保留外层，避免把 `3. 2005 was...` 误判为
    第 2005 条。重复 key 没有章标题、引用所在 scope 没有定义、定义 scope 没有正文 span
-   或同一 key 有多个定义且引用数超过定义数时必须 fail closed，并提示修复 TOC/章标题（可先检查
-   `toc_heading_recovery.json`）后重跑 `footnote-prepare → footnote-validate →
+   或同一 key 有多个定义且引用数超过定义数时必须 fail closed，并提示修复 TOC/章标题后重跑 `footnote-prepare → footnote-validate →
    footnote-apply`；不得改用 `footnotes.mode: disabled` 绕过。一个作用域内只有一个
    定义时可供多个正文引用共同使用；多个定义仍按出现顺序保守配对，超出定义数时停止归一化，
    不作猜测。尾注段落和列表、引文、表格等 Markdown 块应保留边界。
@@ -761,7 +760,7 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    原文字符和块级结构。`polish-validate` 还会将源稿与润色稿按忽略换行、Markdown 外层标记和已确认页边装饰的
    方式做内容保真比较；正文 token 或数字标记大量丢失时会阻断。未通过
    `polish-validate` 不得继续实体提取或翻译。
-   PDF polish/translate 使用 Markdown validation schema 4，使 superscript 保真规则更新前的全量 receipt
+   PDF polish/translate 使用 Markdown validation schema 5，使有序标题保真规则更新前的全量 receipt
    与逐文件 ledger 失效；OCR correction 和 HTML translation 仍用 schema 3，不因该规则变化失效。
    对旧 polish receipt，先运行 `polish-validate` 校验已有目标；只把实际失败项交回 Subagent。
    若 translation context/receipt 旧，先运行 `translate --resume` 刷新 manifest/context，但不要按首轮

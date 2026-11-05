@@ -109,8 +109,8 @@ Subagent 合同层
   还是 `two_ocr` 共识，并集中校验共识检查点；脚注和插图阶段不得各自重新解释这个选择。
 - `refine/toc_structure_review.py`：生成 `toc_heading_candidates.json` 和
   `toc_structure_review_manifest.json`，固定源页、OCR/layout 证据与视觉证据 allowlist；验证
-  `toc_structure_decisions.json` 的逐候选处置、schema-2 节点身份/起始位置和逐页覆盖。
-  候选清单及决定分别使用 schema 1；TOC 树使用 schema 2。全页覆盖必须逐页标注
+  `toc_structure_decisions.json` 的逐候选处置、schema-2 节点身份/源范围和逐页覆盖。
+  候选清单、review 决定和 TOC 树使用 schema 2。全页覆盖必须逐页标注
   `reviewed: true` 及 `visual` 或 `page_text` 证据；`unresolved` 候选阻断 refine-local。
 - `refine/layout_evidence.py`：统一加载 layout sidecar、清理 block 文本和归一化 bbox；它只
   处理几何/文本证据，不包含脚注或插图的语义判断。
@@ -143,18 +143,18 @@ PDF 精修的核心领域模块如下：
 - `refine/toc_sanitization.py`：只在当前物理起始页同时提供匹配的印刷页码和去掉该数字后的
   正文标题时清洗 TOC 末尾页码；所有候选、证据和源/目标哈希写入
   `toc_title_normalization.json`，证据不足时保留原题名。
-- `refine/toc_heading_recovery.py`：从只读的 `pages/page_NNN.html` 或 sidecar `raw_html`
-  中提取 `Page-Header`/`Page-Footer` 块，并在规范化后与 TOC 标题精确匹配；只用于恢复视觉
-  OCR 误删的真实标题，不做模糊相似度匹配。旧 `native_text` sidecar、缺少证据、标题已存在和
-  歧义匹配都写入 skipped。恢复映射供 `PageMerger` 在内存中注入，原始页面文件不变。
+- `refine/toc_structure_review.py`：以源页和侧车哈希生成候选、清单及逐候选 review；schema 2
+  要求处置独立阿拉伯/罗马/中文数字，并以精确行号投影页码决定。标题范围与布局插入都显式声明，
+  当前性、源行范围、页面覆盖或决策矛盾时 fail closed。
 - `refine/page_merger.py`：消费已验证的整页插图绑定，恢复“前页半句 → 插图页 → 后页续句”；
-  并在 polish 前按 schema 2 TOC 节点的 `boundary_info.start_line` 与 exclusive
-  `heading_end_line` 物化已审阅的可见标题区域；它仅接受规范化后精确匹配 TOC 标题的源行，
-  保留区域内联标记和脚注引用，不从相邻正文推断标题范围，也不修改 `pages/`。
+  并在 polish 前消费显式 heading bind/insert 与精确 page-number 源行投影。绑定范围按原始行坐标
+  一次物化，逐行移除 ATX 标记并保留 inline markup、脚注和作者 ID；所有插入必须绑定布局证据及
+  局部检查范围，不按身份字符串或近邻相似标题猜测，也不修改 `pages/`。
   图片及说明随后放回连续正文之后。普通页面边界也会在前后均为未结束的正文块时保守拼接，
   不把完整句子、标题、列表、脚注、图片或表格误合并。视觉 OCR sidecar 中跨至少两页、位于
   页顶的短 `Section-Header` 会按共享坐标归一化和去除有效阿拉伯/罗马页码前后缀后的重复文本作为页眉清除；`Chapter 1`、`Part II`、`Section 3` 等结构编号标题的尾号不作为页码清除。重复签名可由几何合格的 `Page-Header` 或 `Section-Header` 跨页共同确认，但此清理只删除重复的 `Section-Header`。单次出现或几何证据不足的标题保留；
-  旧原生文字运行还会根据 page-point sidecar 在页边 5% 内确定性清除 DOI/孤立页码，并仅清除
+  旧原生文字运行还会根据 page-point sidecar 在页边 5% 内确定性清除 DOI；所有数字页码仍须由当前
+  TOC structure review 的精确 `page_number` 行决定删除，几何证据不能单独授权删除数字。它还仅清除
   跨页重复短页眉页脚；TOC 节点起始页的真实标题受精确文本和编号身份保护，嵌套节点同样
   适用；其他页面上的重复页眉仍按候选逐行删除，不会整页豁免。该策略版本参与 refine
   checkpoint，旧合并结果会在 `refine-local --resume` 时重建。原始 `pages/`
@@ -372,9 +372,10 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
 - `markdown_validation.py`：提供纯函数式的 Markdown 风险检测、目标语言审计、规范化辅助
   函数和 polish 内容保真检查；它会阻断结构性空父标题导致的重复正文，并对 `notes`
   单元中的标准尾注章节标题提供窄范围页眉误报豁免。PDF polish/translate 的 Markdown validation
-  schema 4 使 superscript 保真规则变更前的全量 receipt 和逐文件 ledger 失效；OCR correction 与
+  schema 5 使有序、规范化标题保真规则变更前的全量 receipt 和逐文件 ledger 失效；OCR correction 与
   HTML validation 仍使用 schema 3。必须用当前校验器
-  重新校验后才能作为 checkpoint。已登记的 TOC Part/Chapter
+  重新校验后才能作为 checkpoint。polish 按标题层级及共享 TOC Markdown 语义规范化后的文本序列
+  保留每次出现，因此删除重复标题和交换同级标题都会阻断；translate 仍验证译文结构，不比较源语言标题文字。已登记的 TOC Part/Chapter
   **Markdown 标题行**也会从 `running_title_plus_page_label` 候选中豁免，纯文本重复页眉
   仍按候选检测；`bilingual_warnings` 只在 translate 阶段运行，polish 不因源语言未变化
   触发双语警告。该模块把角色判断委托给
@@ -474,7 +475,7 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
   occurrence/count 和 DOM 锚点合同校验。`visible` 节点的投影锚点缺失或落在不同标题时阻断构建。
   新 handoff context 使用 `projection_version: 5`。旧 projection 不可用于 TOC heading binding。
   先运行 `translate --resume` 只刷新准备 context，暂不派发；随后用 `translate-validate` 校验现有译文，
-  写出 schema 4 receipt。再运行一次 `translate --resume`，让当前 projection 和 receipt 共同决定
+  写出 schema 5 receipt。再运行一次 `translate --resume`，让当前 projection 和 receipt 共同决定
   completed/pending；只派发仍失效的 assignment，最后运行全量 `translate-validate`。若第一次准备报告
   所有文件 pending，不要直接据此重译整本书。对 normalization 变化后的 polished 文本也先做
   `polish-validate`，仅将实际失败项交回 Subagent。
@@ -605,7 +606,7 @@ illustration-prepare + 工作区 Subagent（只复核疑似整页插图页）
   → illustration_bindings.json
 refine-local
   → pagination_map.json + toc_title_normalization.json
-  → toc_heading_recovery.json（被误删 TOC 标题的确定性恢复报告）
+  → 当前 review 行投影（heading source ranges + page-number dispositions）
   → ocr_markdown/ + tree_progress.json
 footnote-prepare +（必要时）工作区 Subagent
   → footnote_candidates.json → footnote-validate → footnote-apply
@@ -1191,27 +1192,24 @@ sidecar 哈希；旧原生文字运行还必须保留 `coordinate_system: page_p
 哈希和证据模式。`refine-local`、`footnote-apply` 和插图加载阶段都会重新检查这些绑定；
 配置从单 OCR 切换到双 OCR，或反向切换时，必须重新准备对应阶段。
 
-### 5.0 TOC 标题恢复合同
+### 5.0 PDF 标题范围与独立数字合同
 
-视觉 OCR 关闭 `include_headers_footers` 时会从 `page_NNN.md` 删除被标为
-`Page-Header`/`Page-Footer` 的块。`refine-local` 在生成 `ocr_markdown/` 前从证据目录
-（固定为 `output/<title>/pages/`）的 `page_NNN.html` 或 sidecar `raw_html` 重建页眉/页脚
-文本，并按 TOC 顺序尝试恢复：
+结构 review inventory 收集 heading-like 候选与独立 Arabic、Roman、中文数字行。代码块、缩进代码、
+真实 Markdown 列表和脚注定义不作为裸数字候选。Reviewer 对每个候选逐项决定 `toc_node`、
+`body_text`、`page_number`、`running_header` 或 `ornament`；数字、字号、所在页边都不能自动决定
+语义。只有显式 Page/PDF Page 标签、已审核 `page_number` 的精确源行或经校验几何证据允许删除，
+其他独立数字保留。
 
-- 正文字段来自当前 refine 选择的页面目录（可能是
-  `ocr_corrected_pages/validated/`）；证据 HTML/sidecar 始终来自 `pages/`，两者不能混用。
-- 同页多个页眉/页脚块按 DOM 顺序以空格合并后再比较；匹配只做字母数字 casefold 和
-  `Chapter N:`/前导编号的确定性剥离，不做模糊相似度。
-- 标题已存在、缺少页面证据、`source_kind: native_text`、无匹配、歧义和重复恢复都记入
-  `toc_heading_recovery.json` 的 `skipped`，不阻断流程；只有精确匹配的标题才在内存中注入，
-  `pages/` 不被改写。
-- 报告至少包含 `schema_version`、`status`（`validated`/`no_recovery`）、`recovered`、
-  `skipped`、`toc_sha256`、`page_markdown_fingerprint`、`evidence_pages_fingerprint`。
-- `evidence_pages_fingerprint` 哈希 `page_*.md`、`page_*.ocr.json` 和 `page_*.html`；
-  `tree_progress.json` 的 fingerprint 还包含恢复映射的稳定哈希
-  `toc_heading_recovery_sha256`。缺少该键的旧 checkpoint 直接重新生成。
-- 切换正文页面来源、OCR 证据模式或 HTML/sidecar 后，旧报告和旧 `tree_progress.json`
-  checkpoint 不得复用。
+可见标题须在 `boundary_info` 写入 `heading_action: bind`、`start_line` 和 exclusive
+`heading_end_line`。布局标题仅在 Markdown 缺失时允许 `heading_action: insert`，并绑定
+`heading_evidence_id` 与覆盖插入位置的非空 `heading_checked_range`。插入重复检查只检查锚点起始的
+连续标题块；其他位置的同名标题不影响决定。范围重叠、陈旧、无证据、内部切分冲突和页码/绑定标题
+同一原行冲突均阻断。PageMerger 对原始源坐标生成一次 edit plan，保留行/边界映射、inline markup、
+脚注引用和作者 ID，并将多行标题只物化一次。任何阶段都不通过 node ID 前缀猜测标题来自 layout。
+
+目录层级必须依据原目录和正文共同复核；印刷目录可能省略小节，扁平 outline 不能自动接受。独立裸
+数字只能采用 Reviewer 结合上下文明确给定的同级层级。前置封面或编委会可按 review 排除导航，前言
+保留。程序不从旧 flat tree 推断缺失语义，也不再从 HTML/sidecar 自动恢复被漏掉的标题。
 
 ### 5.1 原生文字脚注的恢复合同
 

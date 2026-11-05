@@ -369,7 +369,6 @@ hr.dots::before { content: "• • •"; }
    Elegant Table of Contents
    ================================= */
 .toc {
-    page-break-after: always;
     margin: 0;
     padding: 2em 0;
 }

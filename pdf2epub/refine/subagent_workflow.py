@@ -98,13 +98,18 @@ page in the manifest allowlist, the outline draft, and bounded visual evidence
 listed by the manifest (source PDF or listed page images). Candidate rows are
 locations to inspect, not claims that a line is a heading. Review every page, including pages with no
 candidates. Never infer hierarchy automatically from numbering, typography,
-or candidate order.
+or candidate order. Establish part → chapter → section from the original TOC
+and body together; a flattened printed outline may omit sections and is not
+enough evidence to accept a flat tree. Do not infer structure from number value.
 
 Write both `toc_tree.json` and `toc_structure_decisions.json`. The tree is the
 sole canonical hierarchy. The companion contains decisions and evidence
 pointers only, never a second tree. Give every candidate exactly one
-disposition: `toc_node`, `body_text`, `running_header`, `ornament`, or
-`unresolved`. A `toc_node` maps to exactly one tree node using stable
+disposition: `toc_node`, `body_text`, `page_number`, `running_header`, `ornament`, or
+`unresolved`. Every independent Arabic, Roman, or Chinese numeral candidate
+requires an explicit disposition. A number alone never establishes a heading,
+page number, or hierarchy; uncertain numbers remain body text or unresolved.
+`page_number` applies only to that exact source line. A `toc_node` maps to exactly one tree node using stable
 `node_id`; set it to the ID of the canonical visible line candidate. Supporting
 outline or layout-region evidence maps to that same ID. Every tree node maps back to one or more
 evidence decisions. IDs are source-location and excerpt digests, never title,
@@ -114,6 +119,20 @@ evidence and the exact `excerpt`, then use that ID in the tree. Visible nodes
 use `binding_mode: "visible"` and their start page/line must match accepted
 evidence. Use `binding_mode: "container_only"` only for an invisible
 structural container; provide an explicit `reason` in its decision.
+Bind every visible heading to an exact source range: `start_line` inclusive and
+`heading_end_line` exclusive, and set `heading_action: "bind"`. A multi-line range covers only the reviewed title;
+local processing removes ATX markers line by line, materializes the range once,
+and preserves inline markup, footnote references, author IDs, and source order.
+For a sidecar-only title absent from Markdown, set `heading_action: "insert"`,
+copy its layout candidate ID into `heading_evidence_id`, and give the exact
+`heading_checked_range` inspected for an existing source heading. The check is
+limited to that range, so an identical title at another source position is not
+confused with this missing heading. If the title already exists in the checked
+range, bind that exact range instead of inserting it. A bare numbered
+heading uses the level established by review and the surrounding tree; sibling
+numbered headings may all be level 3. True covers or editorial boards may be
+excluded from navigation; prefaces remain included.
+
 Optional `boundary_info.heading_prefix` is an exact, reviewed prefix of the
 source start line after removing any ATX marker. Use it only when a visible
 heading shares a line with body text; copy the exact Markdown including inline
@@ -136,7 +155,7 @@ Decision JSON shape:
 
 ```json
 {{
-  "schema_version": 1,
+  "schema_version": 2,
   "source_fingerprint": "<copy from toc_structure_review_manifest.json>",
   "candidate_inventory_sha256": "<copy from toc_heading_candidates.json>",
   "candidate_decisions": [

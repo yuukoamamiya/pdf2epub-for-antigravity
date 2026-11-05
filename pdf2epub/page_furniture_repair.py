@@ -490,7 +490,6 @@ def validate_page_furniture_repair(
             r"\[\^[^\]]+\]",
         ),
         file_roles=file_roles,
-        tolerate_duplicate_headings=False,
         validate_footnote_normalization=False,
     )
     snapshot_dir = output_dir / str(manifest.get("snapshot_dir", ""))

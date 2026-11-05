@@ -163,13 +163,13 @@ prompt 使用“本次 hand-off 使用的同一配置”措辞，不编造路径
 只审计内存中的规范化候选，不写回目标 Markdown；它也不清理临时文件、不写 partial ledger、
 验证报告或 checkpoint。formal 校验才应用规范化；写入后重新计算目标 SHA-256，并以实际落盘
 内容写入 validated 副本和 checkpoint。
-Markdown validator schema 4 使版本升级前的全量 receipts 和逐文件 ledgers 失效。保留已有目标时，
+Markdown validator schema 5 使版本升级前的全量 receipts 和逐文件 ledgers 失效。保留已有目标时，
 重新运行对应的正式 `polish-validate` / `translate-validate` 建立当前记录；单文件 ledger 需按文件
 重新校验。只有新报告列出 pending/invalid 或源上下文确实变化时才重新派发 worker。该规则更新本身
 不要求重跑 OCR。
 对于旧 TOC projection，先运行一次 `translate --resume` 刷新 manifest/context，但不要按这次准备输出
 立即派发 pending；schema 3 的旧验证 receipt 本来就不会被复用，第一次可能把现有目标都标成 pending。
-然后先运行 `translate-validate` 校验现有译文并建立 schema 4 receipt，再运行第二次
+然后先运行 `translate-validate` 校验现有译文并建立 schema 5 receipt，再运行第二次
 `translate --resume`。这时 current receipt 与 `projection_version: 5` context 会让有效目标重新成为
 completed；只派发仍列为 pending/invalid 的 assignment，完成后再做全量 `translate-validate`。
 对旧 polish receipt，先直接校验现有文本；只把实际失败的目标交回 Subagent。
@@ -591,12 +591,12 @@ pipeline: epub_conversion
 - 校验页码范围、层级、父子包含关系和兄弟节点重叠；
 - 用本地 tokenizer 估算单元大小；
 - 用 `PageMerger` 合并页面并生成 `ocr_markdown/`；
-- 按 schema 2 TOC 决定中的 `boundary_info.start_line` 和 exclusive `heading_end_line`，
-  将已审阅且与节点标题精确对应的源区域物化为 Markdown 标题；该区域的行内标记和脚注引用保留，
-  不推断相邻正文的标题范围，原始 `pages/` 保持只读。此结构标题在后续 polish 前已写入合并稿；
-- 从证据目录 `pages/` 的 `page_NNN.html` 或 sidecar `raw_html` 恢复被视觉 OCR 误删的
-  TOC 标题，把精确匹配结果在内存中注入页面合并，并写入 `toc_heading_recovery.json`；
-  原始页面文件和当前正文来源（可能是 `ocr_corrected_pages/validated/`）保持不变；
+- 结构 review schema 2 逐项决定独立数字的语义；每个可见标题须显式绑定起始行和 exclusive
+  结束行，布局侧车补充的标题须显式声明插入证据和局部 absence-check range。程序不会因数字
+  值或页边位置自动定级/删行；页码投影按源页原始行号消费，当前决策哈希进入 refine progress；
+- 每个源范围只编辑一次并返回源行、标题位置和章节边界映射；多行标题去除每行 ATX 标记后物化一次，
+  保留 inline markup、脚注引用、作者 ID 和后续正文。页眉/页脚清理保护当前审阅的标题；漏掉的布局
+  标题只能由 reviewer 显式插入，程序不再模糊查找或自动恢复；
 - 从当前 `pages/` 生成 `pagination_map.json`；对于 TOC 标题末尾的阿拉伯数字，只有在
   节点物理起始页同时出现相同印刷页码和去掉该数字后的正文标题时才自动清洗。原始/规范化
   哈希、修改项、保留候选和证据写入 `toc_title_normalization.json`，证据不足不会改写标题；
@@ -620,22 +620,6 @@ pipeline: epub_conversion
 段落和块级结构，不会通过删除半句来“修复”错误的章节切分。页面合并器只会在前后均为
 普通正文、前页句子明显未结束且后页不是标题、列表、脚注、图片或表格时自动拼接跨页续句；
 其他页面边界保留为空段落，交给 polish 复核。
-
-### TOC 标题恢复报告
-
-`toc_heading_recovery.json` 是 `refine-local` 的确定性报告，不是 Subagent 决定文件：
-
-- `recovered` 只包含页眉/页脚合并文本与 TOC 标题精确匹配的条目，记录 `page`、`title`、
-  `level`、`block_text`、`evidence`（HTML 文件和块索引）以及可用的 `start_line`；
-- `skipped` 记录 `title_already_present`、`no_page_evidence`、`no_header_blocks`、
-  `no_heading_match`、`native_sidecar`、`invalid_sidecar`、`ambiguity` 等原因；这些情况
-  一律不猜测、不阻断；
-- `status` 为 `validated`（至少恢复一项）或 `no_recovery`；
-- `page_markdown_fingerprint` 绑定当前正文页目录，`evidence_pages_fingerprint` 绑定证据
-  目录的 `page_*.md`、`page_*.ocr.json` 和 `page_*.html`；`toc_sha256` 绑定当前 TOC；
-- 恢复映射的稳定哈希写入 `tree_progress.json` 的 `toc_heading_recovery_sha256`。旧
-  checkpoint 缺少该键、恢复映射变化或证据目录变化时，`refine-local --resume` 必须重新
-  生成单元。切换 `ocr_corrected_pages/validated/`、`pages/` 或其他页面来源后不得复用旧报告。
 
 `refine-local` 完成物理切分后会运行边界注脚扫描器，将安全匹配的跨文件 Markdown 脚注引用/定义记录
 到 `footnote_boundary_bindings.json`；EPUB 构建时由 `FootnoteManager` 消费。原始 PDF 书签
@@ -883,8 +867,8 @@ Notes 中可能出现“外层页计数器 + 内层真实注释号”（例如 `
 scope 边界处停止。单一 scope/key 定义可供同一 scope 的多个引用共享；多个定义仍按
 出现顺序逐次配对，超出定义数时归一化阻断，不按内容猜测目标。
 
-以下情况必须 fail closed，并提示修复 `toc_tree.json`/章标题（可先检查
-`toc_heading_recovery.json`）后重跑 `footnote-prepare → footnote-validate →
+以下情况必须 fail closed，并提示修复当前复核后的 `toc_tree.json`/章标题后重跑
+`footnote-prepare → footnote-validate →
 footnote-apply`：重复 key 落在 `scope_key=None`；定义所在 scope 没有正文 span；引用所在
 scope 没有对应定义；有多个定义时引用数超过定义数。定义数多于引用数时，多出的定义仍写入
 Notes，并作为 `orphan_scoped_definitions` 报告。scope 目录没有独立文件；相关事实写入
@@ -973,8 +957,8 @@ manifest/prompt，并由 apply 重建 `footnote_normalized/` 与成功 checkpoin
 使 polish、翻译或 EPUB 构建 checkpoint 过期；先查看 `status` 与 pending/invalid 报告，按门禁
 恢复，不要直接构建。仅合同升级本身不要求重跑 OCR；只有源页或证据实际过期时才回到 OCR。
 
-PDF `polish`/`translate` 使用 Markdown validation schema 4，同时用于全量 receipt 和逐文件
-ledger；它使 superscript 保真规则升级前写入的 PDF 记录失效。OCR correction 和 HTML 翻译仍使用
+PDF `polish`/`translate` 使用 Markdown validation schema 5，同时用于全量 receipt 和逐文件
+ledger；它使 有序标题保真规则升级前写入的 PDF 记录失效。OCR correction 和 HTML 翻译仍使用
 schema 3，不因这次规则变化失效。旧 PDF 报告不能支撑后续打包或 `--resume` 完成状态。若已存在有效的
 polish/translation 目标，只需重新运行相应的 `polish-validate` / `translate-validate` 建立当前
 校验记录；旧逐文件 ledger 需要按文件重新校验。只有校验报告列出 pending/invalid 或源上下文

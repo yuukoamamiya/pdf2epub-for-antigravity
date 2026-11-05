@@ -610,7 +610,6 @@ def _validate_pdf_markdown_task(args, task: str):
         create_validated_copy=not check_only,
         file_roles=load_pdf_file_roles(output_dir) if task in {"translate", "polish"} else None,
         file_role_sources=_pdf_file_role_sources(output_dir) if task in {"translate", "polish"} else None,
-        tolerate_duplicate_headings=task == "polish",
         validate_footnote_normalization=footnote_validation_enabled,
         fix_reference_headings=task == "translate" and bool(
             getattr(args, "fix_reference_heading", False)

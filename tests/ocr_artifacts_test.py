@@ -31,10 +31,11 @@ def test_clean_ocr_page_artifacts_keeps_real_image_and_text():
     assert clean_ocr_page_artifacts(content) == content
 
 
-def test_remove_printed_page_number_lines_removes_edge_labels_only():
+def test_remove_printed_page_number_lines_preserves_unreviewed_edge_numbers():
     lines = ["XII", "A paragraph with the number 12 in its prose.", "42"]
 
-    assert remove_printed_page_number_lines(lines) == [
+    assert remove_printed_page_number_lines(lines) == lines
+    assert remove_printed_page_number_lines(lines, reviewed_page_lines={1, 3}) == [
         "A paragraph with the number 12 in its prose."
     ]
 
@@ -42,12 +43,18 @@ def test_remove_printed_page_number_lines_removes_edge_labels_only():
 def test_remove_printed_page_number_lines_removes_synthetic_stamp_but_not_body_number():
     lines = ["PDF Page: 7", "A body paragraph.", "The answer is 7."]
 
-    assert remove_printed_page_number_lines(lines) == lines[1:]
+    assert remove_printed_page_number_lines(lines) == lines
+    assert remove_printed_page_number_lines(lines, reviewed_page_lines={1}) == lines[1:]
 
 
 def test_remove_printed_page_number_lines_leaves_mixed_running_title_for_polish():
     lines = ["Preface XII", "A paragraph."]
 
+    assert remove_printed_page_number_lines(lines) == lines
+
+
+def test_page_number_cleanup_leaves_reviewed_numbered_heading_untouched():
+    lines = ["### *2*", "", "Section body."]
     assert remove_printed_page_number_lines(lines) == lines
 
 
@@ -93,6 +100,49 @@ def test_native_edge_furniture_removes_doi_and_repeated_header_only_after_first_
     assert "Second body." in second
     assert {item["kind"] for item in first_removed} == {"doi_edge"}
     assert {item["kind"] for item in second_removed} == {"repeated_edge_text"}
+
+
+def test_native_geometry_keeps_reviewed_page_two_heading():
+    sidecar = {
+        "source_kind": "native_text", "page_number": 2, "page_box": [0, 0, 100, 100],
+        "blocks": [{"bbox": [0, 2, 100, 6], "markdown_text": "Page 2"}],
+    }
+    cleaned, removed = remove_native_page_furniture(
+        "Page 2\n\nBody", sidecar, repeated_index={"page 2": 1}, page_number=2,
+        protected_titles=["Page 2"],
+    )
+    assert cleaned == "Page 2\n\nBody"
+    assert removed == []
+
+
+def test_native_component_header_cannot_remove_materialized_multiline_toc_heading(tmp_path: Path):
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    for page in (1, 2):
+        (pages / f"page_{page:03d}.md").write_text(
+            "# Part Alpha\n\n## Theory\n\nBody stays.", encoding="utf-8"
+        )
+        (pages / f"page_{page:03d}.ocr.json").write_text(json.dumps({
+            "source_kind": "native_text",
+            "page_number": page,
+            "coordinate_system": "page_points",
+            "page_box": [0, 0, 100, 100],
+            "blocks": [{"text": "Part Alpha", "markdown_text": "Part Alpha",
+                        "bbox": [0, 2, 100, 6]}],
+        }), encoding="utf-8")
+    first = TOCNode("Part Alpha Theory", 1, 1, 1, boundary_info={
+        "start_line": 1, "heading_end_line": 4, "heading_action": "bind",
+    }, node_id="part-one")
+    second = TOCNode("Part Alpha Theory", 1, 2, 2, boundary_info={
+        "start_line": 1, "heading_end_line": 4, "heading_action": "bind",
+    }, node_id="part-two")
+    merger = PageMerger()
+    merger.set_toc_nodes([first, second])
+
+    merged = merger.merge_nodes_content([first, second], pages)
+
+    assert merged.count("# Part Alpha Theory") == 2
+    assert merged.count("Body stays.") == 2
 
 
 def test_page_merger_removes_repeated_h2_header_and_keeps_blank_page_cleaned(tmp_path: Path):
@@ -410,8 +460,8 @@ def test_real_toc_start_page_section_header_survives_page_header_confirmation(
         else merger.merge_nodes_content([toc], pages)
     )
 
-    assert result.count("Conclusion") == 2
-    assert result.count("## Conclusion") == 2
+    assert result.count("Conclusion") == 1
+    assert result.count("## Conclusion") == 1
     assert all(f"Body text on page {number}." in result for number in (214, 216, 218))
 
 

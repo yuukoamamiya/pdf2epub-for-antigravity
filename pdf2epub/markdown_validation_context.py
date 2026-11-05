@@ -36,7 +36,6 @@ class MarkdownAuditOptions:
     file_roles: Mapping[str, str]
     file_role_sources: Mapping[str, Mapping[str, Any]]
     invalid_file_roles: Mapping[str, str]
-    tolerate_duplicate_headings: bool
     validate_footnote_normalization: bool
     fix_reference_headings: bool
     target_language: str | None
@@ -96,7 +95,6 @@ def load_markdown_validation_context(
     create_validated_copy: bool = True,
     file_roles: Mapping[str, str] | None = None,
     file_role_sources: Mapping[str, Mapping[str, Any]] | None = None,
-    tolerate_duplicate_headings: bool = False,
     validate_footnote_normalization: bool = False,
     fix_reference_headings: bool = False,
     selected_files: Iterable[str] | None = None,
@@ -159,7 +157,7 @@ def load_markdown_validation_context(
         output_dir / (f"{task}_file_validation.json" if selected is not None else f"{task}_validation.json"),
     )
     options = MarkdownAuditOptions(
-        task, tuple(structural_patterns), roles, role_sources, invalid_roles, tolerate_duplicate_headings,
+        task, tuple(structural_patterns), roles, role_sources, invalid_roles,
         validate_footnote_normalization, fix_reference_headings, target_language,
         titles, continuation, frozenset(expected),
     )

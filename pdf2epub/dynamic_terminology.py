@@ -26,7 +26,9 @@ from pdf2epub.terminology_memory import (
     prepare_memory,
     publish_memory,
 )
-from pdf2epub.workflow_contracts import atomic_write_json, atomic_write_text
+from pdf2epub.workflow_contracts import (
+    atomic_write_json, atomic_write_text, markdown_validation_schema_version,
+)
 
 
 def dynamic_terminology_enabled(config: Mapping[str, Any]) -> bool:
@@ -473,7 +475,7 @@ def _read_validation(output_dir: Path, task: str) -> dict[str, Any]:
     report = {}
     if path.is_file():
         report = json.loads(path.read_text(encoding="utf-8"))
-    expected_schema = 4 if task == "translate" else 3
+    expected_schema = markdown_validation_schema_version(task)
     if not isinstance(report, dict) or report.get("task") != task or report.get("schema_version") != expected_schema:
         report = {}
     if task == "translate-html" and report and report.get("scope") == "file":

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from typing import Any, Iterable, Mapping
+from ..numbering import standalone_number_label
 
 
 _MARKDOWN_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
@@ -111,6 +112,7 @@ def remove_native_page_furniture(
     *,
     repeated_index: Mapping[str, int] | None = None,
     page_number: int | None = None,
+    protected_titles: Iterable[str] = (),
     edge_ratio: float = _NATIVE_EDGE_RATIO,
 ) -> tuple[str, list[dict[str, Any]]]:
     """Remove deterministic native edge furniture from one page fragment.
@@ -122,6 +124,7 @@ def remove_native_page_furniture(
         return str(content), []
     lines = str(content).split("\n")
     repeated_index = repeated_index or {}
+    protected_title_values = tuple(protected_titles)
     remove_lines: dict[int, dict[str, Any]] = {}
     for block_index, block in enumerate(sidecar.get("blocks", []) or []):
         if not isinstance(block, Mapping):
@@ -131,6 +134,19 @@ def remove_native_page_furniture(
             continue
         block_text = str(block.get("markdown_text") or block.get("text") or "").strip()
         if not block_text:
+            continue
+        normalized_block = re.sub(r"<[^>]+>", " ", block_text)
+        normalized_block = re.sub(r"^\s*#{1,6}\s*", "", normalized_block)
+        normalized_block = re.sub(r"\s+", " ", normalized_block).strip().casefold()
+        protected = {
+            re.sub(r"\s+", " ", re.sub(r"^\s*#{1,6}\s*", "", str(title or ""))).strip().casefold()
+            for title in protected_title_values
+        }
+        if normalized_block in protected:
+            continue
+        if standalone_number_label(re.sub(r"<[^>]+>", "", block_text).strip()):
+            # Numeral blocks are ambiguous; only an exact structure-review
+            # line disposition may remove them.
             continue
         signature = _native_furniture_signature(block_text)
         candidates: list[tuple[str, str]] = []
@@ -150,6 +166,28 @@ def remove_native_page_furniture(
             candidates.append(("repeated_edge_text", block_text))
         for kind, candidate_text in candidates:
             span = _native_line_span(lines, candidate_text)
+            if span and protected_title_values:
+                # A native sidecar may describe only one component of a
+                # reviewed multi-line heading. After materialization that
+                # component can match a substring of the combined heading;
+                # protect the actual ATX line by its full rendered title.
+                from ..toc_model import normalize_toc_source_label, toc_title_match_key
+
+                protected_labels = {
+                    toc_title_match_key(
+                        normalize_toc_source_label(str(title), markdown_source=False)
+                    )
+                    for title in protected_title_values
+                }
+                if any(
+                    line_number in span
+                    and re.match(r"^\s{0,3}#{1,6}\s+", lines[line_number])
+                    and toc_title_match_key(
+                        normalize_toc_source_label(lines[line_number], markdown_source=True)
+                    ) in protected_labels
+                    for line_number in range(len(lines))
+                ):
+                    continue
             for line_number in span:
                 remove_lines.setdefault(
                     line_number,
@@ -214,28 +252,15 @@ def clean_ocr_page_artifacts(content: str) -> str:
 
 
 def remove_printed_page_number_lines(
-    lines: list[str], *, edge_window: int = 4
+    lines: list[str], *, reviewed_page_lines: set[int] | frozenset[int] = frozenset()
 ) -> list[str]:
-    """Remove unambiguous page labels at the physical page edges.
+    """Remove only page labels explicitly reviewed at 1-based source lines.
 
-    Page-level OCR and native PDF extraction can expose a printed Arabic or
-    Roman page label as a standalone Markdown line.  The same is true for the
-    synthetic ``PDF Page: N`` labels added to scanned-PDF preprocessing.  Only
-    short labels in the first or last few non-empty lines are removed; numbers
-    inside prose, citations, lists, footnotes, bibliography, and index entries
-    are left untouched.
-
-    This deliberately does not remove a running title such as ``Preface XII``.
-    That requires layout judgment and remains part of the Subagent polish gate.
+    A standalone number is also a valid section heading or body content. Its
+    position near a page edge is not sufficient evidence to delete it.
+    ``reviewed_page_lines`` is projected from the current structure review and
+    is intentionally expressed in the original page coordinate system.
     """
-    if not lines or edge_window <= 0:
-        return list(lines)
-
-    non_empty = [index for index, line in enumerate(lines) if line.strip()]
-    if not non_empty:
-        return list(lines)
-    edge_indexes = set(non_empty[:edge_window] + non_empty[-edge_window:])
-
     def is_page_label(line: str) -> bool:
         stripped = line.strip().strip("|•·—–-").strip()
         if not stripped or stripped.startswith(("#", "!", "[")):
@@ -245,11 +270,8 @@ def remove_printed_page_number_lines(
             or _SYNTHETIC_PAGE_STAMP_RE.fullmatch(stripped)
         )
 
-    return [
-        line
-        for index, line in enumerate(lines)
-        if index not in edge_indexes or not is_page_label(line)
-    ]
+    return [line for index, line in enumerate(lines, 1)
+            if index not in reviewed_page_lines or not is_page_label(line)]
 
 
 def heading_signature(line: str) -> tuple[int, str] | None:
@@ -280,11 +302,20 @@ def leading_h2_h3_heading(
 def remove_repeated_page_header(
     lines: list[str],
     previous_header: tuple[int, str] | None,
+    *,
+    protected_titles: Iterable[str] = (),
 ) -> tuple[list[str], tuple[int, str] | None]:
     """Remove a repeated H2/H3 heading at the top of an adjacent page."""
     current = leading_h2_h3_heading(lines)
     if current is not None and previous_header is not None and current[1] == previous_header:
         index, _signature = current
+        protected = {
+            re.sub(r"\s+", " ", re.sub(r"[`*_~]", "", re.sub(r"\[\^[^\]]+\]", "", re.sub(r"^\s*#{1,6}\s+", "", str(title or ""))))).strip().casefold()
+            for title in protected_titles
+        }
+        current_text = re.sub(r"[`*_~]", "", re.sub(r"\[\^[^\]]+\]", "", current[1][1])).strip().casefold()
+        if current_text in protected:
+            return lines, current[1]
         del lines[index]
         # Keep the removed header as the page signature. A running header can
         # occur on three or more consecutive pages.

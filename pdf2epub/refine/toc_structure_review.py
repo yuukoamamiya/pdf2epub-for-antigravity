@@ -18,9 +18,11 @@ from pdf2epub.toc_model import (
     validate_toc_node_identities,
 )
 from pdf2epub.workflow_contracts import atomic_write_json
+from pdf2epub.numbering import standalone_number_label
+from .heading_ranges import source_range_matches_title
 
-SCHEMA_VERSION = 1
-DISPOSITIONS = {"toc_node", "body_text", "running_header", "ornament", "unresolved"}
+SCHEMA_VERSION = 2
+DISPOSITIONS = {"toc_node", "body_text", "page_number", "running_header", "ornament", "unresolved"}
 MAX_LAYOUT_BLOCKS_PER_PAGE = 80
 _CANDIDATE = re.compile(r"^\s*(?:#{1,6}\s+.+|\*\*[^*]{2,100}\*\*|(?:chapter|part|book|appendix|section)\s+[\wIVXLCDM.-]+.*|\d+(?:\.\d+){0,4}[.)]?\s+.{2,100})\s*$", re.I)
 _STANDALONE_EMPHASIS = re.compile(
@@ -30,6 +32,8 @@ _STANDALONE_EMPHASIS = re.compile(
 )
 _EMPHASIS_OPEN = re.compile(r"^\s*(\*\*?|__?)\s*\S.*$")
 _EMPHASIS_CLOSE = re.compile(r".*\S\s*(\*\*?|__?)\s*$")
+_MARKDOWN_LIST = re.compile(r"^\s{0,3}(?:[-+*]\s+|\d+[.)]\s+|\[\^.+?\]:\s*)")
+_FENCE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
 
 
 def _sha(data: bytes) -> str:
@@ -55,9 +59,34 @@ def _heading_like_text_regions(page: int, lines: list[str]) -> list[dict[str, An
     """Collect heading-like source locations without deciding their meaning."""
     rows: list[dict[str, Any]] = []
     line_no = 1
+    fence: tuple[str, int] | None = None
     while line_no <= len(lines):
         line = lines[line_no - 1]
         stripped = line.strip()
+        fence_match = _FENCE.match(line)
+        if fence_match:
+            marker = fence_match.group(1)
+            if fence is None:
+                fence = (marker[0], len(marker))
+            elif (marker[0] == fence[0] and len(marker) >= fence[1]
+                  and not line[fence_match.end():].strip()):
+                fence = None
+            line_no += 1
+            continue
+        if fence is not None or line.startswith(("    ", "\t")) or _MARKDOWN_LIST.match(line):
+            line_no += 1
+            continue
+        number_text = standalone_number_label(stripped)
+        if number_text:
+            digest_source = f"{page}:{line_no}:{line_no}:{stripped}"
+            rows.append({
+                "candidate_id": "cand-" + _sha(digest_source.encode())[:20],
+                "kind": "explicit_page_label" if re.match(r"(?i)^(?:pdf\s+)?page\b", stripped) else "standalone_number",
+                "page": page, "line": line_no,
+                "end_line": line_no, "excerpt": stripped[:300],
+            })
+            line_no += 1
+            continue
         standalone_title = bool(
             stripped and len(stripped) <= 100 and stripped.isupper()
             and any(character.isalpha() for character in stripped)
@@ -338,6 +367,10 @@ def _validate_candidate_decisions_and_evidence(output_dir: Path, candidates: lis
             errors.append(f"invalid disposition for {cid}")
             continue
         if disp == "unresolved": errors.append(f"unresolved candidate: {cid}")
+        if disp == "page_number" and (
+            cid not in allowed or allowed[cid].get("kind") not in {"standalone_number", "explicit_page_label"}
+        ):
+            errors.append(f"page_number disposition {cid} must target one exact standalone numeral candidate")
         if disp == "toc_node":
             node_id = record.get("node_id")
             if not isinstance(node_id, str) or not node_id.strip(): errors.append(f"TOC candidate {cid} requires node_id")
@@ -426,6 +459,7 @@ def _validate_toc_node_source_correspondence(output_dir: Path, tree: Any, toc_li
         if set(valid_node_ids) != set(toc_links.values()):
             errors.append("tree node_id set must match accepted toc_node candidate decisions")
         starts: dict[tuple[int, int], str] = {}
+        source_ranges: list[tuple[int, int, int, str, str]] = []
         for _, source_node in iter_toc_nodes(tree["chapters"]):
             source_id = source_node.get("node_id")
             source_page = source_node.get("start_page")
@@ -439,10 +473,29 @@ def _validate_toc_node_source_correspondence(output_dir: Path, tree: Any, toc_li
                         f"TOC nodes {prior} and {source_id} share source insertion position {source_page}/{source_line}"
                     )
                 starts[location] = source_id
+                action = source_boundary.get("heading_action") if isinstance(source_boundary, dict) else None
+                end = source_boundary.get("heading_end_line") if isinstance(source_boundary, dict) else None
+                if source_node.get("binding_mode", "visible") == "visible":
+                    source_ranges.append((source_page, source_line, end if type(end) is int else source_line + 1,
+                                          source_id, action or ""))
+        for page in {record[0] for record in source_ranges}:
+            page_ranges = sorted((record for record in source_ranges if record[0] == page), key=lambda item: (item[1], item[2]))
+            for index, current in enumerate(page_ranges):
+                for following in page_ranges[index + 1:]:
+                    if current[4] == "insert":
+                        overlap = current[1] == following[1] or (
+                            following[4] == "bind" and following[1] <= current[1] < following[2]
+                        )
+                    elif following[4] == "insert":
+                        overlap = current[1] <= following[1] < current[2]
+                    else:
+                        overlap = following[1] < current[2]
+                    if overlap:
+                        errors.append(f"reviewed heading source ranges overlap for TOC nodes {current[3]} and {following[3]}")
         candidate_by_id = allowed
         exact_text_ids = {
             cid for cid, row in candidate_by_id.items()
-            if row.get("kind") == "text_line" and row.get("line") is not None
+            if row.get("kind") in {"text_line", "standalone_number", "explicit_page_label"} and row.get("line") is not None
         }
         layout_ids = {
             cid for cid, row in candidate_by_id.items()
@@ -469,6 +522,20 @@ def _validate_toc_node_source_correspondence(output_dir: Path, tree: Any, toc_li
             if not isinstance(binding_mode, str) or binding_mode not in {"visible", "container_only"}:
                 errors.append(f"TOC node {node_id} has invalid binding_mode")
             node_boundary = node.get("boundary_info") if isinstance(node.get("boundary_info"), dict) else {}
+            if binding_mode == "visible" and node_boundary.get("heading_action") not in {"bind", "insert"}:
+                errors.append(f"visible TOC node {node_id} requires explicit heading_action")
+            if binding_mode == "visible" and node_boundary.get("heading_action") == "bind":
+                heading_start = node_boundary.get("start_line")
+                heading_end = node_boundary.get("heading_end_line")
+                page_record = valid_pages.get(page, {}) if type(page) is int else {}
+                line_count = page_record.get("line_count")
+                if (type(heading_start) is not int or type(heading_end) is not int
+                        or type(line_count) is not int
+                        or heading_start != line
+                        or not 1 <= heading_start < heading_end <= line_count + 1):
+                    errors.append(f"bound TOC node {node_id} requires a valid in-page exclusive heading range")
+            if binding_mode == "visible" and node_boundary.get("heading_action") == "insert" and node_id not in layout_ids:
+                errors.append(f"only reviewed layout evidence may authorize inserted heading TOC node {node_id}")
             has_heading_prefix = "heading_prefix" in node_boundary
             heading_prefix = node_boundary.get("heading_prefix")
             if binding_mode == "container_only" and has_heading_prefix:
@@ -537,19 +604,35 @@ def _validate_toc_node_source_correspondence(output_dir: Path, tree: Any, toc_li
             canonical = candidate_by_id.get(node_id)
             if canonical and canonical.get("kind") != "pdf_outline" and type(page) is int and page == canonical.get("page") and type(line) is int and line == canonical.get("line"):
                 exact = True
-                if canonical.get("kind") == "text_line":
+                if canonical.get("kind") in {"text_line", "standalone_number", "explicit_page_label"}:
                     page_record = valid_pages.get(page, {})
                     source_path = output_dir / str(page_record.get("path", ""))
                     try:
                         if not source_path.resolve().is_relative_to(output_dir.resolve()):
                             raise ValueError("page path escapes output directory")
                         source_lines = source_path.read_text(encoding="utf-8").splitlines()
-                        region_end = canonical.get("end_line", line)
+                        # The reviewer may bind one visible TOC heading to a
+                        # multi-line source range (for example, a title and
+                        # subtitle on adjacent lines). The candidate inventory
+                        # records the candidate's own extent; it does not cap
+                        # the explicitly reviewed heading range.
+                        boundary_info = node.get("boundary_info") if isinstance(node.get("boundary_info"), dict) else {}
+                        reviewed_heading_end = boundary_info.get("heading_end_line")
+                        region_end = (
+                            reviewed_heading_end - 1
+                            if boundary_info.get("heading_action") == "bind"
+                            and type(reviewed_heading_end) is int
+                            and reviewed_heading_end > line
+                            else canonical.get("end_line", line)
+                        )
+                        candidate_end = canonical.get("end_line", line)
+                        if type(candidate_end) is int and candidate_end > region_end:
+                            errors.append(f"TOC node {node_id} reviewed heading range does not contain its accepted text candidate")
                         source_region = source_lines[line - 1:region_end]
                     except (OSError, ValueError, IndexError):
                         source_region = []
                     if source_region:
-                        source_region[0] = re.sub(r"^\s*#{1,6}\s*", "", source_region[0])
+                        source_region = [re.sub(r"^\s*#{1,6}\s*", "", item) for item in source_region]
                     reviewed_prefix = (node.get("boundary_info") or {}).get("heading_prefix")
                     source_label = normalize_toc_source_label(
                         reviewed_prefix if isinstance(reviewed_prefix, str) else " ".join(source_region),
@@ -570,9 +653,7 @@ def _validate_toc_node_source_correspondence(output_dir: Path, tree: Any, toc_li
                     boundary_info = node.get("boundary_info") or {}
                     heading_end = boundary_info.get("heading_end_line") if isinstance(boundary_info, dict) else None
                     expected_heading_end = region_end + 1
-                    if region_end > line and heading_end != expected_heading_end:
-                        errors.append(f"multiline TOC heading {node_id} requires heading_end_line={expected_heading_end}")
-                    elif heading_end is not None and heading_end != expected_heading_end:
+                    if heading_end != expected_heading_end:
                         errors.append(f"TOC heading {node_id} has invalid heading_end_line")
             layout_decision = next((
                 record for record in matching_decisions
@@ -583,6 +664,49 @@ def _validate_toc_node_source_correspondence(output_dir: Path, tree: Any, toc_li
             ), None)
             if layout_decision is not None:
                 layout_row = canonical if isinstance(canonical, dict) else {}
+                node_boundary = node.get("boundary_info") if isinstance(node.get("boundary_info"), dict) else {}
+                heading_action = node_boundary.get("heading_action")
+                if heading_action not in {"bind", "insert"}:
+                    errors.append(f"layout TOC node {node_id} requires explicit heading_action bind or insert")
+                if heading_action == "insert" and node_boundary.get("heading_evidence_id") != node_id:
+                    errors.append(f"inserted layout TOC node {node_id} must identify its reviewed layout evidence")
+                if heading_action == "insert":
+                    checked = node_boundary.get("heading_checked_range")
+                    page_record = valid_pages.get(page, {})
+                    line_count = page_record.get("line_count")
+                    if (not isinstance(checked, dict) or type(checked.get("start_line")) is not int
+                            or type(checked.get("end_line")) is not int or type(line_count) is not int
+                            or not 1 <= checked["start_line"] < checked["end_line"] <= line_count + 1
+                            or type(line) is not int or not checked["start_line"] <= line <= checked["end_line"]):
+                        errors.append(f"inserted layout TOC node {node_id} requires an exact heading_checked_range")
+                    else:
+                        source_path = output_dir / str(page_record.get("path") or "")
+                        try:
+                            if not source_path.resolve().is_relative_to(output_dir.resolve()):
+                                raise ValueError("page path escapes output directory")
+                            page_lines = source_path.read_text(encoding="utf-8").splitlines()
+                        except (OSError, ValueError):
+                            page_lines = []
+                        if source_range_matches_title(page_lines, checked["start_line"], checked["end_line"], node.get("title", ""), anchor_line=line):
+                            errors.append(f"inserted layout TOC node {node_id} range already contains its title; bind that source range")
+                if heading_action == "bind":
+                    heading_end = node_boundary.get("heading_end_line")
+                    if type(line) is not int or type(heading_end) is not int or heading_end <= line:
+                        errors.append(f"bound layout TOC node {node_id} requires an explicit source heading range")
+                    else:
+                        source_path = output_dir / str(valid_pages.get(page, {}).get("path") or "")
+                        try:
+                            if not source_path.resolve().is_relative_to(output_dir.resolve()):
+                                raise ValueError("page path escapes output directory")
+                            raw_region = source_path.read_text(encoding="utf-8").splitlines()[line - 1:heading_end - 1]
+                        except (OSError, ValueError):
+                            raw_region = []
+                        source_title = normalize_toc_source_label(
+                            " ".join(re.sub(r"^\s*#{1,6}\s*", "", value) for value in raw_region),
+                            markdown_source=True,
+                        )
+                        if source_title != normalize_toc_source_label(node.get("title", ""), markdown_source=False):
+                            errors.append(f"bound layout TOC node {node_id} source range does not match its title")
                 title_matches = (
                     normalize_toc_source_label(node.get("title", ""), markdown_source=False)
                     == normalize_toc_source_label(layout_row.get("text", ""), markdown_source=False)
@@ -615,6 +739,23 @@ def _validate_toc_node_source_correspondence(output_dir: Path, tree: Any, toc_li
             if not exact:
                 if binding_mode != "container_only":
                     errors.append(f"TOC node {node_id} start {page}/{line} does not match its accepted source candidate")
+        page_number_locations = {
+            (allowed[record["candidate_id"]].get("page"), allowed[record["candidate_id"]].get("line"))
+            for record in records
+            if isinstance(record, dict) and record.get("disposition") == "page_number"
+            and record.get("candidate_id") in allowed
+        }
+        for _, node in iter_toc_nodes(tree["chapters"]):
+            boundary = node.get("boundary_info") if isinstance(node.get("boundary_info"), dict) else {}
+            if boundary.get("heading_action") != "bind":
+                continue
+            page = node.get("start_page")
+            start = boundary.get("start_line")
+            end = boundary.get("heading_end_line")
+            if type(page) is int and type(start) is int and type(end) is int:
+                if any(number_page == page and start <= number_line < end
+                       for number_page, number_line in page_number_locations):
+                    errors.append(f"page_number disposition conflicts with bound heading range for TOC node {node.get('node_id')}")
     return errors
 
 
@@ -698,3 +839,34 @@ def validate_structure_review(output_dir: Path, tree: Any = None,
         output_dir, tree, toc_links, records, decisions_by_node, allowed, valid_pages
     ))
     return errors
+
+
+def reviewed_page_number_lines(output_dir: Path) -> dict[int, set[int]]:
+    """Project exact current standalone-number decisions into source coordinates.
+
+    Call only after ``validate_structure_review`` succeeds. This function is
+    deliberately strict so callers cannot silently skip malformed evidence.
+    """
+    candidates = _json(Path(output_dir) / "toc_heading_candidates.json")
+    decisions = _json(Path(output_dir) / "toc_structure_decisions.json")
+    if not isinstance(candidates, dict) or not isinstance(decisions, dict):
+        raise ValueError("current TOC structure review artifacts are required for page-number projection")
+    by_id = {row.get("candidate_id"): row for row in candidates.get("candidates", [])
+             if isinstance(row, dict) and isinstance(row.get("candidate_id"), str)}
+    projection: dict[int, set[int]] = {}
+    seen: set[str] = set()
+    for decision in decisions.get("candidate_decisions", []):
+        if not isinstance(decision, dict):
+            raise ValueError("malformed TOC structure decision in page-number projection")
+        candidate_id = decision.get("candidate_id")
+        if not isinstance(candidate_id, str) or candidate_id in seen:
+            raise ValueError("duplicate or invalid candidate decision in page-number projection")
+        seen.add(candidate_id)
+        row = by_id.get(candidate_id)
+        if row is None or decision.get("disposition") != "page_number":
+            continue
+        if (row.get("kind") not in {"standalone_number", "explicit_page_label"} or type(row.get("page")) is not int
+                or type(row.get("line")) is not int):
+            raise ValueError(f"page_number disposition is not bound to a standalone numbered source line: {candidate_id}")
+        projection.setdefault(row["page"], set()).add(row["line"])
+    return projection

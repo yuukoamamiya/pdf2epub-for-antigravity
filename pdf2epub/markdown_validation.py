@@ -442,30 +442,6 @@ def fix_reference_heading_mismatch(
         }
     ]
 
-def heading_reduction_is_duplicate_only(source_text: str, target_text: str) -> bool:
-    """Allow polishing to remove only headings duplicated in the source.
-
-    This covers running headers repeated across a page boundary without
-    silently accepting the loss of a unique section heading.
-    """
-    from collections import Counter
-
-    heading_pattern = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
-
-    def signatures(text: str) -> Counter:
-        return Counter(
-            (len(match.group(1)), re.sub(r"\s+", " ", match.group(2)).strip().casefold())
-            for match in heading_pattern.finditer(text)
-        )
-
-    source = signatures(source_text)
-    target = signatures(target_text)
-    if sum(source.values()) <= sum(target.values()):
-        return False
-    missing = source - target
-    return bool(missing) and all(source[signature] >= 2 for signature in missing)
-
-
 def strip_outer_markdown_fences(text: str) -> tuple[str, bool]:
     """Remove only a wrapping Markdown fence accidentally added by a Subagent.
 
@@ -944,7 +920,6 @@ __all__ = [
     "detect_bilingual_output",
     "detect_polish_page_furniture",
     "fix_reference_heading_mismatch",
-    "heading_reduction_is_duplicate_only",
     "polish_content_integrity_check",
     "polish_structure_audit",
     "strip_outer_markdown_fences",
@@ -956,4 +931,3 @@ __all__ = [
 
 # Compatibility aliases; new code should use the public names.
 _validate_footnote_markers = validate_footnote_markers
-_heading_reduction_is_duplicate_only = heading_reduction_is_duplicate_only
