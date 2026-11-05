@@ -34,6 +34,7 @@ from .subagent_dispatch import (
     dispatch_lease_path,
     inspect_dispatch_assignment,
 )
+from .subagent_dispatch_recovery import recovery_state_path
 from .worker_grouping import (
     _worker_groups,
     _chapter_worker_groups,
@@ -415,6 +416,10 @@ def write_worker_handoffs(
     handoff_dir.mkdir(parents=True, exist_ok=True)
     lease_path = dispatch_lease_path(output_dir, task)
     manifest["dispatch_lease_file"] = relative_posix_path(lease_path, output_dir)
+    manifest["dispatch_recovery_state_file"] = relative_posix_path(recovery_state_path(output_dir, task), output_dir)
+    manifest["dispatch_recovery_hint"] = (
+        f"Read dispatch-status for task {task} before each wave; recovery state is operator-only and does not alter assignments."
+    )
     unit_contexts = manifest.get("unit_context_files", {}) or {}
     previous_handoffs = manifest.get("previous_worker_handoffs", [])
     if not isinstance(previous_handoffs, list):
@@ -556,15 +561,12 @@ def write_worker_handoffs(
             "assigned_files": files,
             "estimated_tokens": group["estimated_tokens"],
             "assignment_sha256": assignment_sha256,
-            "dispatch_status": (
-                inspect_dispatch_assignment(
-                    lease_path,
-                    assignment_sha256=assignment_sha256,
-                    assigned_files=files,
-                )["status"]
-                if lease_path.is_file()
-                else "available"
-            ),
+            "dispatch_status": inspect_dispatch_assignment(
+                lease_path,
+                assignment_sha256=assignment_sha256,
+                assigned_files=files,
+                task=task,
+            )["status"],
             "manifest": relative_posix_path(scoped_path, output_dir),
             "prompt": relative_posix_path(scoped_prompt_path, output_dir),
             "status": "pending",
@@ -614,12 +616,12 @@ def write_worker_handoffs(
     manifest["worker_queue"] = worker_queue
     manifest["worker_handoffs"] = handoffs
     manifest["retired_worker_handoffs"] = list(retired_by_assignment.values())
+    if task in {"translate", "polish", "translate-html"}:
+        guide_path = output_dir / f"{task}_dispatch_prompt.md"
     if task == "translate-html":
-        guide_path = output_dir / "translate-html_dispatch_prompt.md"
         manifest["dispatch_strategy"] = "ordinary_before_large_with_extreme_barriers"
-        manifest["dispatch_operator_prompt"] = relative_posix_path(
-            guide_path, output_dir
-        )
+    if task in {"translate", "polish", "translate-html"}:
+        manifest["dispatch_operator_prompt"] = relative_posix_path(guide_path, output_dir)
         atomic_write_text(
             guide_path,
             render_dispatch_operator_prompt(
@@ -627,6 +629,7 @@ def write_worker_handoffs(
                 manifest_path=relative_posix_path(manifest_path, output_dir),
                 handoffs=handoffs,
                 dispatch_plan=dispatch_plan,
+                config_path=str(manifest.get("config_path") or "config.yaml"),
             ),
         )
     atomic_write_json(manifest_path, manifest)

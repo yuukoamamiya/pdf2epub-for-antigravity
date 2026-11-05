@@ -192,6 +192,11 @@ to the node.  If the node ends before another node on its last page,
 `boundary_info.end_line` may record the first line after the node; `end_line`
 is exclusive.
 
+A parent's page and line boundaries must contain all descendants. If a parent
+and its next sibling share the parent's last page, use the next sibling's
+explicit `boundary_info.start_line` as evidence for the handoff. Report missing
+or conflicting line evidence for review; do not silently expand a parent.
+
 Required output shape:
 
 ```json
@@ -316,7 +321,19 @@ def validate_toc_tree_data(
             allowed = ", ".join(sorted(TOC_FOOTNOTE_MODES | {"auto"}))
             errors.append(f"footnote_mode must be one of: {allowed}")
 
-    def visit(nodes: Any, parent: Optional[Dict[str, Any]], path: str) -> None:
+    def boundary_dict(node: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        value = node.get("boundary_info") if isinstance(node, dict) else None
+        return value if isinstance(value, dict) else {}
+
+    def valid_line(value: Any) -> bool:
+        return isinstance(value, int) and not isinstance(value, bool)
+
+    def visit(
+        nodes: Any,
+        parent: Optional[Dict[str, Any]],
+        path: str,
+        parent_next_sibling: Optional[Dict[str, Any]] = None,
+    ) -> None:
         if not isinstance(nodes, list):
             errors.append(f"{path}.children must be an array")
             return
@@ -340,7 +357,7 @@ def validate_toc_tree_data(
             if isinstance(boundary, dict):
                 for key in ("start_line", "end_line"):
                     if key in boundary and (
-                        not isinstance(boundary[key], int) or boundary[key] < 1
+                        not valid_line(boundary[key]) or boundary[key] < 1
                     ):
                         errors.append(
                             f"{node_path}.boundary_info.{key} must be a positive integer"
@@ -349,8 +366,8 @@ def validate_toc_tree_data(
                 end_line = boundary.get("end_line")
                 if (
                     start == end
-                    and isinstance(start_line, int)
-                    and isinstance(end_line, int)
+                    and valid_line(start_line)
+                    and valid_line(end_line)
                     and end_line <= start_line
                 ):
                     errors.append(
@@ -374,13 +391,57 @@ def validate_toc_tree_data(
                 errors.append(f"{node_path} references missing OCR page(s): {missing[:5]}")
             if parent is not None:
                 if start < parent["start_page"] or end > parent["end_page"]:
-                    errors.append(f"{node_path} is outside its parent page range")
+                    candidate_parent_start = min(parent["start_page"], start)
+                    candidate_parent_end = max(parent["end_page"], end)
+                    next_start_line = boundary_dict(parent_next_sibling).get("start_line")
+                    errors.append(
+                        f"{node_path} ({node.get('node_id')!r}, {title!r}) is outside "
+                        f"its parent page range: child {start}-{end}, parent "
+                        f"{parent.get('node_id')!r} ({parent.get('title')!r}) "
+                        f"parent {parent['start_page']}-{parent['end_page']}; next sibling "
+                        f"{(parent_next_sibling or {}).get('node_id')!r} "
+                        f"({(parent_next_sibling or {}).get('title')!r}) range "
+                        f"{(parent_next_sibling or {}).get('start_page')!r}-"
+                        f"{(parent_next_sibling or {}).get('end_page')!r}, start_line "
+                        f"{boundary_dict(parent_next_sibling).get('start_line')!r}; "
+                        f"candidate parent closure range {candidate_parent_start}-"
+                        f"{candidate_parent_end} is not applied; compare with next sibling "
+                        "and verify the child's ownership. If the candidate end page "
+                        f"shares page {(parent_next_sibling or {}).get('start_page')!r}, "
+                        "review parent/child exclusive end_line against next sibling "
+                        f"start_line {next_start_line!r}; if closure crosses into the "
+                        "next chapter, recheck ownership. Neither direction is applied "
+                        "automatically"
+                    )
+                parent_boundary = boundary_dict(parent)
+                parent_start_line = parent_boundary.get("start_line")
+                parent_end_line = parent_boundary.get("end_line")
+                if start == parent.get("start_page") and valid_line(start_line):
+                    if valid_line(parent_start_line) and start_line < parent_start_line:
+                        errors.append(
+                            f"{node_path} ({node.get('node_id')!r}, {title!r}) starts "
+                            f"before parent {parent.get('node_id')!r} "
+                            f"({parent.get('title')!r}) on page {start}: child line "
+                            f"{start_line}, parent line {parent_start_line}"
+                        )
+                if end == parent.get("end_page") and valid_line(parent_end_line):
+                    if not valid_line(end_line) or end_line > parent_end_line:
+                        errors.append(
+                            f"{node_path} ({node.get('node_id')!r}, {title!r}) crosses "
+                            f"parent {parent.get('node_id')!r} ({parent.get('title')!r}) "
+                            f"line boundary on page {end}: child range {start}-{end} "
+                            f"lines {start_line!r}-{end_line!r} (exclusive), parent "
+                            f"range {parent.get('start_page')}-{parent.get('end_page')} "
+                            f"ends at exclusive line {parent_end_line}. Check the next "
+                            "chapter's start_line and OCR page; review ranges without "
+                            "auto-expanding the parent"
+                        )
                 if isinstance(level, int) and level <= parent.get("level", 0):
                     errors.append(f"{node_path}.level must be deeper than its parent")
                 if index == 0 and start == parent.get("start_page"):
-                    parent_boundary = parent.get("boundary_info") or {}
+                    parent_boundary = boundary_dict(parent)
                     parent_start_line = parent_boundary.get("start_line")
-                    if not isinstance(start_line, int) or not isinstance(parent_start_line, int):
+                    if not valid_line(start_line) or not valid_line(parent_start_line):
                         errors.append(
                             f"{node_path} starts on its parent's first page; "
                             "both parent and child boundary_info.start_line values are required"
@@ -396,25 +457,43 @@ def validate_toc_tree_data(
                 elif start < previous["end_page"]:
                     errors.append(f"{node_path} overlaps {previous_path}")
                 elif start == previous["end_page"]:
-                    previous_boundary = previous.get("boundary_info") or {}
+                    previous_boundary = boundary_dict(previous)
                     previous_end_line = previous_boundary.get("end_line")
-                    if not isinstance(start_line, int):
+                    if not valid_line(start_line):
                         errors.append(
                             f"{node_path} shares page {start} with {previous_path}; "
                             "boundary_info.start_line is required"
                         )
                     elif (
-                        isinstance(previous_end_line, int)
+                        valid_line(previous_end_line)
                         and start_line < previous_end_line
                     ):
                         errors.append(
                             f"{node_path}.boundary_info.start_line precedes the "
                             f"end of {previous_path} on shared page {start}"
                         )
+                    if valid_line(start_line) and previous.get("children"):
+                        for child_index, child in enumerate(previous["children"]):
+                            if not isinstance(child, dict) or child.get("end_page") != start:
+                                continue
+                            child_end_line = boundary_dict(child).get("end_line")
+                            if not valid_line(child_end_line) or child_end_line > start_line:
+                                errors.append(
+                                    f"{previous_path}.children[{child_index}] "
+                                    f"({child.get('node_id')!r}, {child.get('title')!r}) "
+                                    f"does not fit before next sibling {node.get('node_id')!r} "
+                                    f"({title!r}) on shared page {start}: child exclusive "
+                                    f"end_line {child_end_line!r}, next start_line {start_line}; "
+                                    "review OCR ranges; do not expand the parent automatically"
+                                )
             previous = node
             previous_path = node_path
 
-            visit(node.get("children", []), node, f"{node_path}.children")
+            next_sibling = nodes[index + 1] if index + 1 < len(nodes) else None
+            visit(
+                node.get("children", []), node, f"{node_path}.children",
+                next_sibling if isinstance(next_sibling, dict) else None,
+            )
 
     visit(chapters, None, "chapters")
     return errors

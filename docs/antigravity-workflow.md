@@ -102,6 +102,10 @@ PDF 角色使用 TOC 与 `tree_progress.json` 的稳定 `node_id` 对齐，并�
 只有兼容旧 checkpoint 时才使用无身份/无路径的顺序回退。`bibliography`、`index`、`notes`、
 `author_notes` 会穿过普通 `chapter` 子节点继承；其他特殊角色只作用于显式声明节点，普通
 chapter 不会清除上述可继承角色。同一节点在 TOC 与 progress 中显式声明不同特殊角色时阻断。
+TOC 范围诊断会明确报告父子页/行范围和实际 next sibling；exclusive `end_line` 是首个不属于
+该节点的行，子节点页/行范围必须包含在祖先范围内。共享页边界仅在存在明确行证据时给出待审阅的
+候选范围；校验只给出修正建议，不自动修改 TOC、扩展父范围或应用候选。原生 outline 与 TOC
+冲突只写入 draft warning，供操作员对照 OCR 复核。
 父 manifest 记录每个物理文件的角色与来源；scoped worker manifest 只投影 assigned 文件条目。
 显式角色与保守文本推断结果统一进入隔离分批、assignment 哈希和 validation-time role receipt。
 角色或来源改变后，`--resume` 会让受影响文件保持 pending；准备 manifest 的刷新本身不能更新旧验证
@@ -116,12 +120,26 @@ receipt，必须用当前角色运行正式校验，再次准备才会复用该�
 `extreme_file_token_threshold`（默认 24,000 tokens）时该单元独占额度 1。metadata 与正文共用波次额度，不能和极大单元波重叠。
 该计划是操作员合同，不会启动模型或强制 IDE 实际信号量，也不授权 worker 调度其他 worker。每个
 不同 assignment 必须使用独立的新工作区 Subagent 会话；同一 assignment 的修复重试可保留原会话。
-同波必须按可用 IDE 槽位和 wave cap 并发派发独立 worker；有空槽时不得通过旧会话串行排队。只有
-可用容量低于 wave cap 时才允许分批，并须记录实际峰值、如实报告，不要求占满 4 个槽位。普通波
+同波必须按可用 IDE 槽位和 wave cap 并发派发独立 worker；有空槽时不得通过旧会话串行排队。可用容量不足，
+或当前任务有已记录的服务商临时更低并发上限时，按实际剩余启动额度分组，并须记录实际峰值、如实报告，
+不要求占满 4 个槽位。总并发 cap 包含正在运行的所有 worker 与 metadata。普通波
 不超过配置额度，大单元波不超过 2，极大单元波不超过 1。禁止把新 assignment 或后续 wave 顺延到旧
 worker 会话。整波完成且主 Agent 验收后才开始下一波。完成后主 Agent 保留结果和审计记录，确认会话终止再调用 `release_dispatch_lease()`；恢复时
 先检查真实活动会话以避免重复派发，不得盲目释放活跃 lease。lease API 继续提供原子 claim/renew/release，
 不强制绑定 IDE session 生命周期。
+
+provider 429 的操作员恢复状态与译文验证 receipt 分开，使用 `dispatch-record-failure`、
+`dispatch-status`、`dispatch-resume`。`rate_limit` 用 Retry-After 或有界指数退避；
+`quota_exhausted` 需提供 timezone-aware `--reset-at`，缺失时进入 operator block；
+`unknown_429` 有界重试后也需人工确认。例：
+`uv run pdf2epub -c config.yaml dispatch-record-failure --task translate --worker-id worker_001 --assignment-sha256 <current-digest> --kind rate_limit --retry-after 120 --actual-peak-concurrency 2 --temporary-cap 2`。
+每波前及恢复后读取最新 status，报告实际空闲 IDE 槽位和当前运行中的任务 worker 数（包含 metadata）。
+`concurrency_cap=min(configured,wave,temporary)` 是总并发上限，`new_worker_slots=max(0,min(free_slots,concurrency_cap-active_workers))`
+才是本次最多新派发数；活动数未知时该字段为 `null`，不能从 lease 数推断。temporary cap 只影响之后的派发，不终止运行中的 worker；extreme wave 总 cap 为 1。
+恢复时先核对 IDE 活跃会话、lease 与 validation，再用 `dispatch-resume --confirm-sessions-reconciled`
+（quota 类还需 `--confirm-quota-available`）。这只记录操作员审计，不释放 lease、不校验译文、
+不重试网络请求或切换模型；只恢复 pending/invalid 单元。降低并发不保证解决小时额度耗尽。
+
 
 `translate-html` 按原 worker 顺序保留 assignment 身份，只调整 dispatch wave：每个 extreme
 worker 是不可跨越的边界；边界内 ordinary workers 稳定收集后按配置 cap 装波，large workers

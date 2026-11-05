@@ -264,8 +264,9 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
   `reason`（`ordinary`、`large_units` 或 `extreme_unit`）；handoff 的 `dispatch_wave`、
   `dispatch_wave_max_concurrency` 和 `dispatch_wave_reason` 是派发提示。每个不同 assignment
   使用独立的新工作区 Subagent 会话；同一 assignment 的修复重试可保留原会话。同波必须按可用 IDE
-  槽位和 wave cap 并发派发独立 worker；有空槽时不得改用旧会话串行排队。只有可用容量低于 wave cap
-  时才分批派发，并如实记录实际峰值；完成整波且主 Agent 验收后才能开始下一波。禁止把新 assignment
+  槽位和 wave cap 并发派发独立 worker；有空槽时不得改用旧会话串行排队。可用容量不足，或当前任务有
+  已记录的服务商临时更低并发上限时，按实际剩余启动额度分组派发，并如实记录实际峰值；总并发 cap
+  包含所有正在运行的 worker 和 metadata。完成整波且主 Agent 验收后才能开始下一波。禁止把新 assignment
   或后续 wave 顺延到旧 worker 会话。`subagent.batching.max_concurrency`（有效上限 6）是全局上限；
   普通波不超过配置额度，大单元波不超过 2，极大单元波不超过 1。元数据任务也占用同一波额度，不能与极大单元波重叠。这是操作员合同，不会启动模型
   或强制 IDE 的实际并发信号量，也不授权 worker 调度其他 worker。主 Agent 完成后保留结果和审计记录，
@@ -296,6 +297,8 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
 Subagent 直接写文件 → 单文件校验 → 收集完成结果 → 下一批/失败重试 →
 全量校验 → 打包
 ```
+
+Provider 429 恢复使用 `dispatch-record-failure` / `dispatch-status` / `dispatch-resume` 操作员命令。每波前读取最新状态；短时 `rate_limit` 与 `unknown_429` 使用有界退避，`quota_exhausted` 必须记录 reset 时间，缺失时保持人工阻断。恢复前核对真实 IDE 会话、lease 和验证报告，只重新处理 pending/invalid 项；确认会话结束后再按原规则释放 lease。操作员确认只记审计，不自动释放 lease、重试网络请求或验证译文。小时额度下调并发可能仍无法避免额度耗尽。
 
 ### 1.1 主 Agent 的快速执行表
 

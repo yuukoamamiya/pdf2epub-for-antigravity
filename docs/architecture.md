@@ -521,10 +521,19 @@ Subagent 实际读写哪些文件。两者不能互相替代。
 metadata 也占同一波额度，且不与极大单元波重叠。父级 `dispatch_contract` 与每个 scoped prompt
 共用 `worker_prompt.py` 的单一操作员合同。不同 assignment 使用独立新会话；同一 assignment 的修复
 重试可保留原会话。同波必须按可用 IDE 槽位和 wave cap 并发派发独立 worker；有空槽时不得通过旧会话
-串行排队，容量不足才分批并如实报告实际峰值。整波完成且主 Agent 验收后才进入下一波。普通波不超过
+串行排队。可用容量不足，或当前任务有已记录的服务商临时更低并发上限时，按实际剩余启动额度分组，
+并如实报告实际峰值。总并发 cap 包含正在运行的所有 worker 与 metadata。整波完成且主 Agent 验收后才进入
+下一波。普通波不超过
 配置额度，large wave 不超过 2，extreme wave 不超过 1。合同不授权 worker 调度其他 worker。完成后主 Agent 保留结果/审计记录，确认会话
 终止再释放 lease；恢复时检查真实活动会话，避免重复派发或误释放活跃 lease。lease API 继续负责原子
 claim/renew/release，但不强制 IDE session 生命周期，也不启动模型或实现 IDE 实际并发信号量。
+`state_lock.py` 是 lease 与恢复状态 JSON 共用的独立跨平台文件锁实现，避免两个状态模块相互导入。
+任务级 `subagent_dispatch_recovery.py` 以 schema 1 JSON
+记录 provider 限流、操作员确认和实际峰值，并与 validation receipt 分离。CLI 提供
+`dispatch-status`（只读）、`dispatch-record-failure` 与 `dispatch-resume`；运行时不会自动重试
+网络请求、换模型、释放 lease 或假定 IDE session 已结束。短时 rate limit 尊重 Retry-After，
+quota block 需明确 reset/操作员确认；temporary cap 只约束后续分组，降低并发也不保证绕过小时额度。
+
 
 HTML EPUB handoff 使用专属 `ordinary_before_large_with_extreme_barriers` 调度策略：在每个
 extreme worker 边界内，ordinary worker 按原相对顺序先装波，large worker 再按原相对顺序装波；

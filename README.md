@@ -92,6 +92,25 @@ EPUB 翻译生成译文 EPUB。
 高保真 EPUB 重建可配置外部 EPUBCheck。需安装官方 W3C EPUBCheck Java 发布版本，并通过 PATH 或
 `html_translation.epubcheck_path` 指定；warn 模式缺少工具时会记录跳过，不代表检查通过，strict 模式会失败。
 
+### 工作派发遇到 429 时恢复
+
+遇到服务商 429 后，先记录错误，再读取下一次可派发时间和有效并发上限：
+
+```text
+uv run pdf2epub -c config.yaml dispatch-record-failure --task translate --worker-id worker_001 --assignment-sha256 <current-digest> --kind rate_limit --retry-after 120 --actual-peak-concurrency 2 --temporary-cap 2
+uv run pdf2epub -c config.yaml dispatch-status --task translate --wave-reason ordinary --available-cap 2 --active-workers 0 --json
+```
+
+`--available-cap`、`--active-workers` 和 `--wave-reason` 由操作员按真实 IDE 空闲槽位、当前任务正在运行的 worker 数（含 metadata）及当前波次填写。`concurrency_cap` 是总并发上限，取配置、波次和临时上限中的最小值；`new_worker_slots` 才是最多可新开的数量，按空闲槽位与 `concurrency_cap - active_workers` 两者取小。活动数未知时新开数显示为 unknown；空闲槽位为 0 时显示 0。它只是操作员派发合同，不读取或控制 IDE 会话，也不会中止已运行的 worker。
+
+短时请求限流用 `rate_limit`，已知额度重置时间用带 `--reset-at` 的 `quota_exhausted`，服务商未说明原因时用 `unknown_429`。缺少额度重置时间或有限重试次数耗尽后会阻断新派发。恢复时先核对真实 IDE 会话、lease 和验证结果；到达 Retry-After/reset 时间后，再只恢复 pending/invalid 单元。额度错误还需明确确认额度可用，例如：
+
+```text
+uv run pdf2epub -c config.yaml dispatch-resume --task translate --reason "session status reconciled and provider quota reset confirmed" --confirm-sessions-reconciled --confirm-quota-available
+```
+
+`dispatch-resume` 只写入操作员审计，不会释放 lease、验证译文、重试网络请求或切换模型。降低并发不保证解决小时额度耗尽。
+
 ## 文档
 
 - [AGENTS.md](AGENTS.md)：完整操作步骤与限制。

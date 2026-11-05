@@ -11,14 +11,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
-from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Iterator, Mapping, Optional
+from typing import Any, Mapping, Optional
 
 from .workflow_contracts import atomic_write_json
+from .state_lock import state_lock as _state_lock
 
 
 DISPATCH_LEASE_SCHEMA_VERSION = 1
@@ -105,38 +104,6 @@ def dispatch_lease_path(output_dir: Path, task: str) -> Path:
     if not safe_task:
         raise ValueError("task must not be empty")
     return Path(output_dir) / f"{safe_task}_dispatch_leases.json"
-
-
-@contextmanager
-def _state_lock(state_path: Path) -> Iterator[None]:
-    """Serialize lease mutations on Windows and POSIX hosts."""
-    lock_path = Path(f"{state_path}.lock")
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("a+b") as handle:
-        if handle.tell() == 0:
-            handle.write(b"0")
-            handle.flush()
-        handle.seek(0)
-        if os.name == "nt":
-            import msvcrt
-
-            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
-        else:
-            import fcntl
-
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            if os.name == "nt":
-                import msvcrt
-
-                handle.seek(0)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                import fcntl
-
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _empty_state() -> dict[str, Any]:
@@ -239,6 +206,7 @@ def inspect_dispatch_assignment(
     *,
     assignment_sha256: str,
     assigned_files: list[str] | tuple[str, ...] | set[str],
+    task: Optional[str] = None,
     now: Optional[datetime] = None,
 ) -> dict[str, Any]:
     """Report whether an assignment is available, active, or conflicting."""
@@ -267,6 +235,13 @@ def inspect_dispatch_assignment(
         return _lease_result("active_same_assignment", same[0])
     if conflicts:
         return _lease_result("conflict", conflicts=conflicts)
+    if task:
+        from .subagent_dispatch_recovery import recovery_state_path, snapshot
+
+        recovery = snapshot(recovery_state_path(state_path.parent, task), task, now=current_time)
+        block = recovery.get("task_block") or {}
+        if block.get("operator_blocked") or recovery.get("cooldown_active"):
+            return _lease_result("recovery_blocked", recovery=block)
     return _lease_result("available")
 
 
@@ -326,6 +301,18 @@ def claim_dispatch_lease(
             state["leases"] = leases
             _write_state(state_path, state)
             return _lease_result("conflict", conflicts=conflicts)
+
+        # Provider backoff is an operator gate for new assignments only. It
+        # never clears or supersedes an existing lease.
+        try:
+            from .subagent_dispatch_recovery import recovery_state_path, snapshot
+
+            recovery = snapshot(recovery_state_path(state_path.parent, str(task).strip()), str(task).strip(), now=current_time)
+            block = recovery.get("task_block") or {}
+            if block.get("operator_blocked") or recovery.get("cooldown_active"):
+                return _lease_result("recovery_blocked", recovery=block)
+        except FileNotFoundError:
+            pass
 
         lease = {
             "task": str(task).strip(),

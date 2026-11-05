@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 from .batching_service import POLISH_ISOLATED_ROLES
@@ -12,8 +13,10 @@ DISPATCH_OPERATOR_CONTRACT = (
     "fresh Subagent conversation. Dispatch distinct workers in the same wave "
     "concurrently up to the available IDE capacity and the wave cap; do not "
     "serialize them through an old conversation while IDE slots are available. "
-    "Only when available IDE capacity is below the wave cap may the wave be "
-    "split into smaller concurrent groups. Finish every worker in the wave and "
+    "A provider 429 record may impose a temporary smaller cap for subsequent "
+    "dispatch groups; check the latest dispatch-status before each wave and "
+    "split the current wave into smaller concurrent groups under that cap. "
+    "Do not kill workers already running. Finish every worker in the wave and "
     "have the main agent accept the results before starting the next wave. "
     "Report the actual peak concurrency; do not claim unused slots. "
     "Never send a new assignment or later wave to an old worker conversation to "
@@ -150,14 +153,17 @@ def render_dispatch_operator_prompt(
     manifest_path: str,
     handoffs: List[Mapping[str, Any]],
     dispatch_plan: List[Mapping[str, Any]],
+    config_path: str = "config.yaml",
 ) -> str:
     """Render a main-agent-only dispatch guide from persisted handoffs."""
+    config_arg = shlex.quote(config_path)
     lines = [
         f"# {task} dispatch guide (main agent only)",
         "",
         f"Parent manifest: `{manifest_path}`",
         "",
         "This guide is for the main agent. Do not give it to a worker. Each worker gets only its own scoped manifest and prompt.",
+        f"Before every wave and after recovery, run `uv run pdf2epub -c {config_arg} dispatch-status --task {task} --wave-reason <ordinary|large_units|extreme_unit> --available-cap <observed free IDE slots> --active-workers <running task workers including metadata> --json` and use `new_worker_slots` as the maximum number of new workers to dispatch. The concurrency cap includes already-running task workers; neither leases nor this status are an IDE semaphore. Use `uv run pdf2epub -c {config_arg} dispatch-record-failure --task {task} ...` to record a provider failure with the current worker assignment digest. Reconcile real IDE sessions and leases, inspect validation results, then use `uv run pdf2epub -c {config_arg} dispatch-resume --task {task} --reason <operator evidence> --confirm-sessions-reconciled` only for pending/invalid work (quota exhaustion also needs `--confirm-quota-available`). These commands do not make network requests, validate translations, release leases, or prove that IDE sessions ended.",
         "",
         DISPATCH_OPERATOR_CONTRACT,
         "",

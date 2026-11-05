@@ -42,6 +42,22 @@ def _assign_end_pages(nodes: List[Dict[str, Any]], parent_end: int) -> None:
         _assign_end_pages(node["children"], node["end_page"])
 
 
+def _warn_child_range_conflicts(nodes: List[Dict[str, Any]], warnings: List[str]) -> None:
+    """Keep suspicious inferred hierarchy visible for OCR based TOC review."""
+    for parent in nodes:
+        for child in parent.get("children", []) or []:
+            if child["start_page"] > parent["end_page"]:
+                warnings.append(
+                    "Native outline draft range conflict: child "
+                    f"{child.get('title')!r} (entry {child.get('outline_entry')}, "
+                    f"page {child['start_page']}) starts after parent "
+                    f"{parent.get('title')!r} (entry {parent.get('outline_entry')}, "
+                    f"ends page {parent['end_page']}); review OCR and same-page line "
+                    "boundaries before approving the TOC"
+                )
+            _warn_child_range_conflicts([child], warnings)
+
+
 _OUTLINE_CONTAINER_RE = re.compile(
     r"(?:^|\b)(?:table\s+of\s+contents|contents|list\s+of\s+figures|"
     r"list\s+of\s+tables|目录|图表目录|附录|appendix)(?:$|\b)",
@@ -220,6 +236,7 @@ def extract_pdf_outline(
         _assign_end_pages(chapters, usable_pages)
         chapters, normalization = _heuristic_unflatten(chapters, usable_pages, warnings)
         _assign_end_pages(chapters, usable_pages)
+        _warn_child_range_conflicts(chapters, warnings)
 
     draft = {
         "schema_version": 1,

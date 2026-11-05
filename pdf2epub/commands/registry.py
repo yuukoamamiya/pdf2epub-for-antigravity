@@ -22,6 +22,34 @@ def _lazy_handler(module_name: str, attribute: str) -> Callable[[Any], Any]:
 def register_command_parsers(subparsers) -> None:
     """Register every workflow command on an argparse subparser collection."""
 
+    dispatch_status = subparsers.add_parser("dispatch-status", help="Read operator dispatch recovery state")
+    dispatch_status.add_argument("--task", required=True)
+    dispatch_status.add_argument("--json", action="store_true")
+    dispatch_status.add_argument("--wave-cap", type=int)
+    dispatch_status.add_argument("--wave-reason", choices=["ordinary", "large_units", "extreme_unit"], default="ordinary")
+    dispatch_status.add_argument("--available-cap", type=int, help="Actual IDE capacity reported by the operator")
+    dispatch_status.add_argument("--active-workers", type=int, help="Actual running task workers, including metadata, reported by the operator")
+    dispatch_status.set_defaults(func=_lazy_handler("pdf2epub.commands.dispatch_recovery", "dispatch_status_command"))
+
+    dispatch_failure = subparsers.add_parser("dispatch-record-failure", help="Record a provider 429 and recovery timing")
+    dispatch_failure.add_argument("--task", required=True)
+    dispatch_failure.add_argument("--worker-id", required=True)
+    dispatch_failure.add_argument("--assignment-sha256", required=True)
+    dispatch_failure.add_argument("--manifest", help="Parent manifest filename (default: <task>_subagent_manifest.json)")
+    dispatch_failure.add_argument("--kind", choices=["rate_limit", "quota_exhausted", "unknown_429"], required=True)
+    dispatch_failure.add_argument("--retry-after")
+    dispatch_failure.add_argument("--reset-at")
+    dispatch_failure.add_argument("--actual-peak-concurrency", type=int, required=True)
+    dispatch_failure.add_argument("--temporary-cap", type=int, help="Operator cap for later dispatch groups (1-6)")
+    dispatch_failure.set_defaults(func=_lazy_handler("pdf2epub.commands.dispatch_recovery", "dispatch_record_failure_command"))
+
+    dispatch_resume = subparsers.add_parser("dispatch-resume", help="Record operator-confirmed dispatch recovery")
+    dispatch_resume.add_argument("--task", required=True)
+    dispatch_resume.add_argument("--reason", required=True)
+    dispatch_resume.add_argument("--confirm-sessions-reconciled", action="store_true")
+    dispatch_resume.add_argument("--confirm-quota-available", action="store_true")
+    dispatch_resume.set_defaults(func=_lazy_handler("pdf2epub.commands.dispatch_recovery", "dispatch_resume_command"))
+
     status_parser = subparsers.add_parser(
         "status",
         help="Show the read-only stage and checkpoint status for the current book",

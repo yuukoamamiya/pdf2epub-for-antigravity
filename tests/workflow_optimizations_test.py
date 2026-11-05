@@ -373,7 +373,7 @@ def test_worker_handoffs_balance_pending_batches_and_keep_files_disjoint(tmp_pat
         "repair retry for the same assignment",
         "Dispatch distinct workers in the same wave concurrently",
         "do not serialize them through an old conversation while IDE slots are available",
-        "Only when available IDE capacity is below the wave cap",
+        "A provider 429 record may impose a temporary smaller cap for subsequent",
         "report the actual peak concurrency",
         "confirm the conversation has ended",
         "do not release a lease for a live worker",
