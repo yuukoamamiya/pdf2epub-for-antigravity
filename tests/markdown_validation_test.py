@@ -189,6 +189,49 @@ def test_translation_preserves_escaped_numbered_prose_markers(tmp_path):
     assert any("escaped numbered-prose markers" in item["reason"] for item in invalid["invalid"])
 
 
+def test_escaped_numbered_prose_renders_as_paragraphs_while_headings_and_lists_stay_structural(tmp_path):
+    from bs4 import BeautifulSoup
+    from pdf2epub.markdown_to_html import convert_markdown_to_html
+
+    source = tmp_path / "source"
+    target = tmp_path / "translated"
+    source.mkdir()
+    target.mkdir()
+    source_text = (
+        "17\\. This is a numbered prose paragraph with a complete sentence.\n\n"
+        "18\\. This is another numbered prose paragraph with its own sentence.\n\n"
+        "# 19. A genuine heading\n\n"
+        "1. First actual list item\n2. Second actual list item\n"
+    )
+    target_text = (
+        "17\\. 这是一条保留编号的完整正文段落。\n\n"
+        "18\\. 这是另一条独立的编号正文段落。\n\n"
+        "# 19. 真正的标题\n\n"
+        "1. 第一条真实列表项\n2. 第二条真实列表项\n"
+    )
+    (source / "chapter.md").write_text(source_text, encoding="utf-8")
+    (target / "chapter.md").write_text(target_text, encoding="utf-8")
+    report = validate_markdown_subagent(
+        tmp_path, "translate", source, target,
+        structural_patterns=(r"^#{1,6}\s", r"^\d+\\\.\s"),
+        create_validated_copy=False,
+    )
+    assert report["all_passed"] is True
+
+    rendered = convert_markdown_to_html(source_text, standalone=False)
+    dom = BeautifulSoup(f"<html><body>{rendered}</body></html>", "html.parser")
+    paragraphs = [p.get_text("", strip=True) for p in dom.find_all("p")]
+    assert paragraphs[:2] == [
+        "17. This is a numbered prose paragraph with a complete sentence.",
+        "18. This is another numbered prose paragraph with its own sentence.",
+    ]
+    assert dom.find("h1").get_text("", strip=True) == "19. A genuine heading"
+    list_items = [li.get_text("", strip=True) for li in dom.find_all("li")]
+    assert len(list_items) == 2
+    assert all("actual list item" in item for item in list_items)
+    assert dom.find("ol") is not None
+
+
 def test_polish_structure_audit_flags_body_text_appended_to_heading():
     source = (
         "A sufficiently long body paragraph explains the previous idea.\n\n"

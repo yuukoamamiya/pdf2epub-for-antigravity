@@ -138,6 +138,49 @@ def test_html_validated_receipt_resumes_completed_and_invalidates_context_or_saf
     assert resumed["pending_files"] == ["chapter.md"]
 
 
+def test_html_special_role_receipt_is_persisted_and_reused_after_validation(tmp_path):
+    output, source_dir, target_dir = _workspace(tmp_path)
+    source_name = "bibliography.md"
+    source = source_dir / source_name
+    target = target_dir / source_name
+    source.write_text("<p>References 1999</p>\n", encoding="utf-8")
+    (source_dir / "bibliography.mapping.json").write_text(
+        json.dumps({"original_extension": ".xhtml", "translation_parts": [source_name]}),
+        encoding="utf-8",
+    )
+    input_epub = output / "input.epub"
+    input_epub.write_bytes(b"synthetic epub")
+    roles = {source_name: "bibliography"}
+    role_sources = {source_name: {"source": "filename_inference", "reason": "bibliography filename"}}
+    paths = prepare_markdown_subagent(
+        output, "translate-html", source_dir, target_dir, "English", "Chinese",
+        config={"subagent": {"batching": {"max_concurrency": 1}}},
+        declared_files=[source_name], file_roles=roles,
+        file_role_sources=role_sources,
+    )
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    manifest["input_epub"] = "input.epub"
+    manifest["input_epub_sha256"] = hashlib.sha256(input_epub.read_bytes()).hexdigest()
+    paths["manifest"].write_text(json.dumps(manifest), encoding="utf-8")
+    target.write_text("<p>参考文献 1999</p>\n", encoding="utf-8")
+    validator = HTMLTranslationValidator(HTMLValidationWorkspace(
+        output, source_dir, target_dir, {"translation": {"target_language": "Chinese"}}
+    ))
+    report = validator.validate(file_name=source_name)
+    assert report["valid_files"] == [source_name]
+    assert report["resume_contexts"][source_name]["file_roles"] == roles
+    validator.persist_checkpoint(report)
+
+    resumed_paths = prepare_markdown_subagent(
+        output, "translate-html", source_dir, target_dir, "English", "Chinese",
+        config={"subagent": {"batching": {"max_concurrency": 1}}},
+        declared_files=[source_name], resume=True, file_roles=roles,
+        file_role_sources=role_sources,
+    )
+    resumed = json.loads(resumed_paths["manifest"].read_text(encoding="utf-8"))
+    assert resumed["completed_files"] == [source_name]
+    assert resumed["pending_files"] == []
+
 @pytest.mark.parametrize("missing_hash", ["source_sha256", "target_sha256"])
 def test_versionless_html_ledger_requires_both_current_hashes_and_valid_record(
     tmp_path: Path, missing_hash: str,

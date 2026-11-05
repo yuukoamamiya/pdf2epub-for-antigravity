@@ -87,6 +87,28 @@ def test_resume_context_decision_is_unit_scoped_and_legacy_safe():
     )
 
 
+def test_role_source_change_invalidates_only_its_own_unit():
+    previous = {
+        "special_unit_modes": {},
+        "file_roles": {"a.md": "bibliography", "b.md": "notes"},
+        "file_role_sources": {
+            "a.md": {"source": "toc_tree.type", "node_id": "a", "index_path": [1]},
+            "b.md": {"source": "toc_tree.type", "node_id": "b", "index_path": [2]},
+        },
+        "context_sha256": {}, "unit_context_sha256": {}, "toc_heading_contexts": {},
+    }
+    current_sources = {
+        "a.md": previous["file_role_sources"]["a.md"],
+        "b.md": {"source": "tree_progress.type", "node_id": "b", "index_path": [2]},
+    }
+    for name in ("a.md", "b.md"):
+        assert unit_context_is_current(
+            name, previous_manifest=previous, controlled_files={}, context_sha256={},
+            unit_context_sha256={}, heading_contexts={}, resume=True,
+            file_roles=previous["file_roles"], file_role_sources=current_sources,
+        ) is (name == "a.md")
+
+
 def test_old_per_file_validation_ledger_is_not_reused_after_policy_version_bump(tmp_path):
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"
@@ -177,6 +199,145 @@ def test_existing_translate_html_schema_three_ledger_remains_reusable(tmp_path):
 
     assert decision.completed_files == ("unit.md",)
     assert decision.pending_files == ()
+
+
+def test_role_change_stays_pending_across_prepare_until_new_validation_receipt(tmp_path):
+    from pdf2epub.markdown_handoff import prepare_markdown_subagent
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
+    source_dir, target_dir = tmp_path / "source", tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    source, target = source_dir / "unit.md", target_dir / "unit.md"
+    source.write_text("# A title\n\nAn ordinary source paragraph.", encoding="utf-8")
+    target.write_text("# A title\n\n一段普通译文。", encoding="utf-8")
+    role = {"unit.md": "bibliography"}
+    role_source = {"unit.md": {"source": "toc_tree.type", "node_id": "refs", "index_path": [1]}}
+    prepare_markdown_subagent(
+        tmp_path, "translate", source_dir, target_dir, "English", "Chinese"
+    )
+    assert validate_markdown_subagent(
+        tmp_path, "translate", source_dir, target_dir
+    )["all_passed"]
+    request = MarkdownHandoffRequest(
+        output_dir=tmp_path, task="translate", source_dir=source_dir, target_dir=target_dir,
+        source_language="English", target_language="Chinese", resume=True,
+        file_roles=role, file_role_sources=role_source,
+    )
+    plan = plan_markdown_handoff(source_dir, "translate", file_roles=role)
+    context = normalize_handoff_context(request, ["unit.md"])
+    first_prepare = prepare_markdown_subagent(
+        tmp_path, "translate", source_dir, target_dir, "English", "Chinese",
+        resume=True, file_roles=role, file_role_sources=role_source,
+    )
+    import json
+    assert json.loads(first_prepare["manifest"].read_text(encoding="utf-8"))["pending_files"] == ["unit.md"]
+    second_prepare = prepare_markdown_subagent(
+        tmp_path, "translate", source_dir, target_dir, "English", "Chinese",
+        resume=True, file_roles=role, file_role_sources=role_source,
+    )
+    assert json.loads(second_prepare["manifest"].read_text(encoding="utf-8"))["pending_files"] == ["unit.md"]
+    assert decide_resume(request, plan, context).pending_files == ("unit.md",)
+    assert validate_markdown_subagent(
+        tmp_path, "translate", source_dir, target_dir,
+        file_roles=role, file_role_sources=role_source,
+    )["all_passed"]
+    decision = decide_resume(request, plan, context)
+    assert decision.completed_files == ("unit.md",)
+    assert decision.pending_files == ()
+
+
+@__import__("pytest").mark.parametrize("source_name,source_text,roles,sources", [
+    ("unit.md", "# References\n\nAuthor. Book, 1999.", {"unit.md": "bibliography"},
+     {"unit.md": {"source": "toc_tree.type", "node_id": "refs", "index_path": [1]}}),
+    ("unit.md", "# 3. Primary literature\n\nAuthor. Book, 1999.", {}, {}),
+])
+def test_role_receipt_e2e_reuses_after_prepare_and_validation(tmp_path, source_name, source_text, roles, sources):
+    import json
+    from pdf2epub.markdown_handoff import prepare_markdown_subagent
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
+
+    source_dir, target_dir = tmp_path / "source", tmp_path / "translated"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / source_name).write_text(source_text, encoding="utf-8")
+    target_heading = "# 3. 参考文献" if source_text.startswith("# 3.") else "# 参考文献"
+    (target_dir / source_name).write_text(f"{target_heading}\n\n作者。书名，1999。", encoding="utf-8")
+    prepare_markdown_subagent(
+        tmp_path, "translate", source_dir, target_dir, "English", "Chinese",
+        file_roles=roles, file_role_sources=sources,
+    )
+    report = validate_markdown_subagent(
+        tmp_path, "translate", source_dir, target_dir,
+        file_roles=roles, file_role_sources=sources,
+    )
+    assert report["all_passed"] is True, report["invalid"]
+    manifest = json.loads((tmp_path / "translate_subagent_manifest.json").read_text(encoding="utf-8"))
+    effective_role = manifest["file_roles"][source_name]
+    assert effective_role == "bibliography"
+    if not roles:
+        assert manifest["file_role_sources"][source_name]["source"] == "text_inference"
+    paths = prepare_markdown_subagent(
+        tmp_path, "translate", source_dir, target_dir, "English", "Chinese",
+        resume=True, file_roles=roles, file_role_sources=sources,
+    )
+    resumed = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    assert resumed["completed_files"] == [source_name]
+    assert resumed["pending_files"] == []
+
+
+def test_inferred_short_bibliography_is_isolated_from_short_chapter_during_polish(tmp_path):
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    (source_dir / "chapter.md").write_text("A short prose paragraph.", encoding="utf-8")
+    (source_dir / "references.md").write_text(
+        "# 3. Primary literature\n\nSmith, John. Book, 1999.", encoding="utf-8"
+    )
+    plan = plan_markdown_handoff(source_dir, "polish")
+    assert plan.normalized_roles["references.md"] == "bibliography"
+    assert plan.isolated_files == {"references.md"}
+    assert plan.recommended_batches == [["chapter.md"], ["references.md"]]
+
+
+def test_partial_role_receipt_change_to_ordinary_clears_old_full_role(tmp_path):
+    import json
+    from pdf2epub.markdown_handoff import prepare_markdown_subagent
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
+
+    source_dir, target_dir = tmp_path / "source", tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "unit.md").write_text("# A title\n\nAn ordinary source paragraph.", encoding="utf-8")
+    (target_dir / "unit.md").write_text("# A title\n\n一段普通译文。", encoding="utf-8")
+    old_roles = {"unit.md": "bibliography"}
+    old_sources = {"unit.md": {"source": "toc_tree.type", "node_id": "refs", "index_path": [1]}}
+    prepare_markdown_subagent(
+        tmp_path, "translate", source_dir, target_dir, "English", "Chinese",
+        file_roles=old_roles, file_role_sources=old_sources,
+    )
+    assert validate_markdown_subagent(
+        tmp_path, "translate", source_dir, target_dir,
+        file_roles=old_roles, file_role_sources=old_sources,
+    )["all_passed"]
+
+    changed = prepare_markdown_subagent(
+        tmp_path, "translate", source_dir, target_dir, "English", "Chinese",
+        resume=True, file_roles={}, file_role_sources={},
+    )
+    assert json.loads(changed["manifest"].read_text(encoding="utf-8"))["pending_files"] == ["unit.md"]
+    partial = validate_markdown_subagent(
+        tmp_path, "translate", source_dir, target_dir,
+        selected_files=["unit.md"], file_roles={}, file_role_sources={},
+    )
+    assert partial["all_passed"]
+    ledger = json.loads((tmp_path / "translate_file_validation.json").read_text(encoding="utf-8"))
+    assert ledger["files"]["unit.md"]["file_role"] is None
+    resumed = prepare_markdown_subagent(
+        tmp_path, "translate", source_dir, target_dir, "English", "Chinese",
+        resume=True, file_roles={}, file_role_sources={},
+    )
+    manifest = json.loads(resumed["manifest"].read_text(encoding="utf-8"))
+    assert manifest["completed_files"] == ["unit.md"]
+    assert manifest["pending_files"] == []
 
 
 def test_validate_existing_outputs_before_second_resume_avoids_full_redelegation(tmp_path):

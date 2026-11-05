@@ -94,6 +94,16 @@ index 条目 1:1、书目逐条、notes 标记和 CIP/版权页短行标识符�
 术语上下文只注入一次；相邻章节合并 worker 使用按
 文件分区的直接上下文；大章节拆分时使用 `shared_entries` 和当前分片的 `local_entries`。
 
+PDF 角色使用 TOC 与 `tree_progress.json` 的稳定 `node_id` 对齐，并校验两者的路径一致。
+只有兼容旧 checkpoint 时才使用无身份/无路径的顺序回退。`bibliography`、`index`、`notes`、
+`author_notes` 会穿过普通 `chapter` 子节点继承；其他特殊角色只作用于显式声明节点，普通
+chapter 不会清除上述可继承角色。同一节点在 TOC 与 progress 中显式声明不同特殊角色时阻断。
+父 manifest 记录每个物理文件的角色与来源；scoped worker manifest 只投影 assigned 文件条目。
+显式角色与保守文本推断结果统一进入隔离分批、assignment 哈希和 validation-time role receipt。
+角色或来源改变后，`--resume` 会让受影响文件保持 pending；准备 manifest 的刷新本身不能更新旧验证
+receipt，必须用当前角色运行正式校验，再次准备才会复用该文件。旧 receipt 缺少角色快照时，只在
+观察到当前角色/来源与旧记录不同时失效；普通角色未变化的旧单元仍可复用。
+
 父级 worker manifest 可附带 `dispatch_plan`，按波次列出 `worker_ids`、`max_concurrency` 和
 `reason`（`ordinary`、`large_units`、`extreme_unit`）；worker handoff 对应记录
 `dispatch_wave`、`dispatch_wave_max_concurrency` 和 `dispatch_wave_reason`。操作时顺序完成每一波

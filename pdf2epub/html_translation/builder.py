@@ -17,7 +17,7 @@ from loguru import logger
 from .epub_parser import EPUBParser, EPUBResourceNotFoundError
 from .compressed_cache import CompressedExtractionCache
 from .unit_files import PART_FILE_RE
-from pdf2epub.document_roles import infer_translation_file_role
+from pdf2epub.document_roles import infer_translation_file_role, infer_translation_file_role_with_reason
 
 
 from .build_contracts import (
@@ -392,6 +392,21 @@ class HTMLEpubPipeline:
             if role:
                 roles[str(name)] = role
         return roles
+
+    def translation_file_role_sources(self, names: Optional[List[str]] = None) -> Dict[str, Dict[str, str]]:
+        """Return per-unit reasons for conservative inferred special roles."""
+        names = names if names is not None else self.declared_translation_files()
+        sources = {}
+        for name in names:
+            path = Path(self.compressed_units_dir) / name
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeError):
+                text = ""
+            role, source = infer_translation_file_role_with_reason(name, text)
+            if role and source:
+                sources[str(name)] = source
+        return sources
 
     def _get_language_code(self, language: str) -> str:
         from .metadata_preparation import get_language_code

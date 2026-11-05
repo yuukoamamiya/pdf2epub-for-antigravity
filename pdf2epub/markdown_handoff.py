@@ -36,6 +36,7 @@ def prepare_markdown_subagent(
     config: Optional[Mapping[str, Any]] = None,
     resume: bool = False,
     file_roles: Optional[Mapping[str, str]] = None,
+    file_role_sources: Optional[Mapping[str, Mapping[str, Any]]] = None,
     context_files: Optional[Mapping[str, Path]] = None,
     skipped_context_files: Iterable[str] = (),
     file_contexts: Optional[Mapping[str, str]] = None,
@@ -66,6 +67,7 @@ def prepare_markdown_subagent(
         config=config,
         resume=resume,
         file_roles=file_roles,
+        file_role_sources=file_role_sources,
         context_files=context_files,
         skipped_context_files=tuple(skipped_context_files or ()),
         file_contexts=file_contexts,
@@ -90,6 +92,7 @@ def prepare_markdown_subagent(
         request.config,
         declared_files=request.declared_files,
         file_roles=request.file_roles,
+        file_role_sources=request.file_role_sources,
         controlled_files=request.controlled_files,
         continuation_files=request.continuation_files,
     )

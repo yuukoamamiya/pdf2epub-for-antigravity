@@ -34,6 +34,8 @@ def _html_resume_context_is_current(
         context_sha256=context.context_sha256,
         unit_context_sha256=context.unit_context_sha256,
         heading_contexts=context.heading_contexts,
+        file_roles=context.file_roles,
+        file_role_sources=context.file_role_sources,
         resume=True,
     )
 
@@ -81,12 +83,24 @@ def unit_context_is_current(
     unit_context_sha256: Mapping[str, str],
     heading_contexts: Mapping[str, Mapping[str, Any]],
     resume: bool,
+    file_roles: Mapping[str, str] | None = None,
+    file_role_sources: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> bool:
     """Decide whether the context projection for one source unit is unchanged."""
     previous_special_modes = previous_manifest.get("special_unit_modes", {})
     if not isinstance(previous_special_modes, Mapping):
         previous_special_modes = {}
     if previous_special_modes.get(name) != controlled_files.get(name):
+        return False
+    previous_roles = previous_manifest.get("file_roles", {})
+    previous_sources = previous_manifest.get("file_role_sources", {})
+    if not isinstance(previous_roles, Mapping):
+        previous_roles = {}
+    if not isinstance(previous_sources, Mapping):
+        previous_sources = {}
+    if previous_roles.get(name) != (file_roles or {}).get(name):
+        return False
+    if previous_sources.get(name) != (file_role_sources or {}).get(name):
         return False
     previous_unit_hashes = previous_manifest.get("unit_context_sha256", {})
     if not isinstance(previous_unit_hashes, Mapping):
@@ -193,12 +207,22 @@ def decide_resume(
                 )
             ):
                 validation = loaded
+                validation["file_roles"] = dict(loaded.get("file_roles", {})) if isinstance(loaded.get("file_roles"), Mapping) else {}
+                validation["file_role_sources"] = dict(loaded.get("file_role_sources", {})) if isinstance(loaded.get("file_role_sources"), Mapping) else {}
                 validated_files = set(loaded["valid_files"])
                 raw_contexts = loaded.get("resume_contexts", {})
                 if isinstance(raw_contexts, Mapping):
                     html_resume_contexts.update(
                         {str(name): value for name, value in raw_contexts.items()}
                     )
+                    for snapshot in raw_contexts.values():
+                        if isinstance(snapshot, Mapping):
+                            roles = snapshot.get("file_roles", {})
+                            sources = snapshot.get("file_role_sources", {})
+                            if isinstance(roles, Mapping):
+                                validation["file_roles"].update(roles)
+                            if isinstance(sources, Mapping):
+                                validation["file_role_sources"].update(sources)
                 if loaded.get("safety_blocked") or loaded.get("protected_workspace_blocked"):
                     workspace_blocked = True
                     validated_files.clear()
@@ -248,6 +272,14 @@ def decide_resume(
                         continue
                     source_digest = record.get("source_sha256")
                     target_digest = record.get("target_sha256")
+                    validation.setdefault("file_roles", {})
+                    validation.setdefault("file_role_sources", {})
+                    validation["file_roles"].pop(str(name), None)
+                    validation["file_role_sources"].pop(str(name), None)
+                    if record.get("file_role") is not None:
+                        validation["file_roles"][str(name)] = record["file_role"]
+                    if record.get("file_role_source") is not None:
+                        validation["file_role_sources"][str(name)] = record["file_role_source"]
                     if task == "translate-html" and not all(
                         isinstance(digest, str)
                         and re.fullmatch(r"(?i)[0-9a-f]{64}", digest)
@@ -263,6 +295,12 @@ def decide_resume(
                     target_hashes[str(name)] = target_digest
                     if isinstance(record.get("resume_context"), Mapping):
                         html_resume_contexts[str(name)] = dict(record["resume_context"])
+                        snapshot = record["resume_context"]
+                        for snapshot_key in ("file_roles", "file_role_sources"):
+                            values = snapshot.get(snapshot_key, {})
+                            if isinstance(values, Mapping):
+                                validation.setdefault(snapshot_key, {}).pop(str(name), None)
+                                validation[snapshot_key].update(values)
                 validation["source_sha256"] = source_hashes
                 validation["target_sha256"] = target_hashes
                 if task == "translate-html":
@@ -296,6 +334,8 @@ def decide_resume(
             context_sha256=context.context_sha256,
             unit_context_sha256=context.unit_context_sha256,
             heading_contexts=context.heading_contexts,
+            file_roles=context.file_roles,
+            file_role_sources=context.file_role_sources,
             resume=request.resume,
         )
         html_fingerprint = None
@@ -325,6 +365,14 @@ def decide_resume(
         checkpoint_current = request.resume and context_current and is_reusable_checkpoint(
             target, name, source_hash, validated_files or (), validation_hashes, target_hashes
         )
+        if checkpoint_current:
+            receipt_roles = validation.get("file_roles", {})
+            receipt_sources = validation.get("file_role_sources", {})
+            if (not isinstance(receipt_roles, Mapping)
+                    or receipt_roles.get(name) != context.file_roles.get(name)
+                    or not isinstance(receipt_sources, Mapping)
+                    or receipt_sources.get(name) != context.file_role_sources.get(name)):
+                checkpoint_current = False
         if checkpoint_current and name in controlled:
             checkpoint_current = controlled_special_checkpoint_is_current(
                 request.output_dir, target, name, controlled[name], source_hash,

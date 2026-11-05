@@ -357,9 +357,9 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
 这些模块是格式无关或 Markdown/TOC 专用的本地合同实现：
 
 - `markdown_handoff.py`：协调规划、上下文、恢复、manifest 和 prompt 服务，写入本次 handoff 产物。
-- `markdown_handoff_planning.py`：以 `MarkdownHandoffPlan` 返回已校验的源文件 inventory、哈希、统计、角色、续文信息和默认批次计划；不读写 manifest/prompt，也不导入 handoff 编排器。
+- `markdown_handoff_planning.py`：以 `MarkdownHandoffPlan` 返回已校验的源文件 inventory、哈希、统计、有效角色及来源、续文信息和默认批次计划；显式角色优先于共享推断，推断角色也参与普通/特殊 worker 隔离；不读写 manifest/prompt，也不导入 handoff 编排器。
 - `markdown_handoff_context.py`：将已声明的上下文文件投影为 handoff 可用路径和 hash；不读取未声明上下文。
-- `markdown_handoff_resume.py`：读取旧 manifest 和校验检查点，判断单元上下文是否仍可复用，并生成恢复决定。
+- `markdown_handoff_resume.py`：读取旧 manifest 和校验检查点，判断单元上下文、有效角色与角色来源是否仍可复用，并生成恢复决定。准备 manifest 更新不会刷新 validation-time 角色 receipt；需要正式校验后才能恢复复用。
 - `markdown_handoff_manifest.py`：组装 manifest 数据，并检查可选视觉复核、次 OCR、review 输出目录相对 output 的边界；不负责协调器提供的 source/target/scratch 字符串，也不渲染 prompt。
 - `markdown_handoff_prompt.py`：从明确的 prompt identity、batching 和路径数据渲染提示词，不读取工作区文件。
 - `markdown_subagent_validation.py`：负责校验命令的协调，按顺序调用上下文加载、内容审计、review 状态决策和持久化服务；不承载规则实现。
@@ -386,7 +386,8 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
 - `commands/markdown_context.py`：只读加载 TOC、续文和章节分组上下文；准备、校验和
   worker 装箱共享同一份 PDF 单元投影，`commands.markdown` 不再承载这组状态读取细节。
 - `document_roles.py`：集中维护特殊翻译角色、参考文献/前置内容识别、目标语言密度豁免和
-  文件名角色回退规则。它只处理文本与文件名事实，不读取工作流状态，也不执行写入。
+  文件名角色回退规则。编号书目标题仅按有限多语言完整标签识别；续页需要重复的书目条目结构，
+  普通正文的年份、引用或 DOI/URL 本身不触发豁免。它只处理文本与文件名事实，不读取工作流状态，也不执行写入。
 - `entity_context.py`：集中维护 PDF/EPUB 共用的书内实体源文件选择、Subagent 交接和源哈希
   新鲜度检查。`commands.entities` 只负责命令参数和 PDF 前置条件，HTML、Markdown 与诊断模块
   直接依赖该格式无关服务，不再跨 command 导入私有 helper。
@@ -402,7 +403,8 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
 - `page_furniture_rules.py`：提供无副作用的页眉、页脚、页码和出版信息候选识别；候选只是
   交给 Subagent 复核的提示，绝不在规则层删除正文。`page_furniture_repair.py` 只负责编排、
   快照和校验，并直接依赖规则模块的正式接口。
-- `pdf_unit_roles.py`：从当前 `tree_progress.json` 或兼容的 `toc_tree.json` 投影 PDF 单元角色。
+- `pdf_unit_roles.py`：从当前 `tree_progress.json` 与 `toc_tree.json` 投影 PDF 单元角色，并提供带来源的只读详细结果。
+  优先以 node_id 对齐并验证 index_path；旧的无身份/无路径产物保留位置回退。`bibliography`、`index`、`notes`、`author_notes` 可跨普通 chapter 继承，其他角色仅适用自身；相同节点的 progress/TOC 显式特殊角色冲突和畸形数据均明确报错。
   投影覆盖 `toc`、`notes`、`bibliography`、`index`、`author_notes`、`catalog`、`ad` 以及
   `copyright`、`frontmatter`、`metadata`、`cover`；refine 写入的 `type` 会经该模块进入
   translate/polish 的 `file_roles`，其中版权页/CIP 和前置页在 polish 中作为 isolated batch

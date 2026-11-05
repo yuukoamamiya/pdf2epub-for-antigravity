@@ -2042,6 +2042,44 @@ def test_prepare_markdown_subagent_records_special_file_roles(tmp_path: Path):
     assert "preserve author names" in prompt
 
 
+def test_worker_assignment_hashes_role_and_source_and_scopes_role_maps(tmp_path: Path):
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    (source_dir / "chapter.md").write_text("Ordinary prose.\n", encoding="utf-8")
+    (source_dir / "refs.md").write_text("References\n", encoding="utf-8")
+    role_sources = {
+        "refs.md": {"source": "toc_tree.type", "node_id": "refs", "index_path": [2]},
+    }
+    paths = prepare_markdown_subagent(
+        tmp_path, "translate", source_dir, tmp_path / "target", "English", "Chinese",
+        config={"subagent": {"batching": {"max_files": 1}}},
+        file_roles={"refs.md": "bibliography"}, file_role_sources=role_sources,
+    )
+    first_handoffs = write_worker_handoffs(tmp_path, paths["manifest"], paths["prompt"])
+    first_by_file = {}
+    for handoff in first_handoffs:
+        worker_manifest = json.loads((tmp_path / handoff["manifest"]).read_text(encoding="utf-8"))
+        files = worker_manifest["assigned_files"]
+        first_by_file[files[0]] = handoff["assignment_sha256"]
+        assert set(worker_manifest.get("file_roles", {})) <= set(files)
+        assert set(worker_manifest.get("file_role_sources", {})) <= set(files)
+        if files == ["refs.md"]:
+            assert worker_manifest["file_role_sources"] == role_sources
+        else:
+            assert "refs.md" not in worker_manifest.get("file_role_sources", {})
+
+    parent = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    parent["file_roles"]["refs.md"] = "notes"
+    parent["file_role_sources"]["refs.md"] = {
+        "source": "tree_progress.type", "node_id": "refs", "index_path": [2],
+    }
+    paths["manifest"].write_text(json.dumps(parent), encoding="utf-8")
+    second_handoffs = write_worker_handoffs(tmp_path, paths["manifest"], paths["prompt"])
+    second_by_file = {item["assigned_files"][0]: item["assignment_sha256"] for item in second_handoffs}
+    assert second_by_file["refs.md"] != first_by_file["refs.md"]
+    assert second_by_file["chapter.md"] == first_by_file["chapter.md"]
+
+
 def test_polish_isolates_copyright_units_and_scopes_cip_rules(tmp_path: Path):
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"

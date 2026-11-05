@@ -224,6 +224,11 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
   `max_nonempty_lines` 默认值为 350；EPUB 的密集单元超过该值时在准备阶段生成有序的
   `.partN.md`，每个 part 单独交给 worker，最终构建前再按原 mapping 合并。`index` 和
   `bibliography` 即使未超行数预算也不得与相邻章节合并。
+  PDF 特殊角色先以稳定 `node_id` 对齐 TOC 与 progress，再校验 `index_path`；无法对齐或同节点
+  显式角色冲突时阻断。`bibliography`、`index`、`notes`、`author_notes` 可穿过普通 `chapter`
+  节点继承，其他特殊角色不向下继承；角色来源保留在父 manifest 并只投影给 assigned 文件。
+  角色及来源参与 assignment 和验证 receipt 当前性；角色变化后连续运行 `--resume` 仍保持 pending，
+  直到用新角色正式校验，再次准备才可复用。旧无身份/无路径 checkpoint 保留位置兼容。
   `index` 单元还受 `refine.oversized_unit_split.threshold_tokens_by_type` 与
   `target_tokens_by_type` 的条目级拆分阈值约束；不得用固定字母范围或词典回填替代
   页码、层级和交叉引用校验。极短尾片只可在硬 token/字节预算内并入前片；否则只在
@@ -496,7 +501,8 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    `index`；版权页/CIP 页标注 `type: "copyright"`，其他明确的前置页（如献词、题词、
    前言）标注 `type: "frontmatter"`，仅在证据明确时才使用 `type: "cover"` 或
    `type: "metadata"`。这些角色会贯通到 translate/polish 的特殊单元隔离；普通正文节点
-   不写 `type`，也不得为了规避普通正文规则而滥用这些角色。
+   不写 `type`，也不得为了规避普通正文规则而滥用这些角色。普通 `chapter` 子节点不打断上述四种
+   可继承角色；TOC/progress 显式特殊类型冲突会阻断。
 6. 在 `refine-local` 前处理整页插图候选：
 
    ```text

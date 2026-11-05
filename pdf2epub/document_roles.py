@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Any, Mapping, Optional
 
 
 TRANSLATION_SPECIAL_ROLES = frozenset(
@@ -50,6 +50,18 @@ _REFERENCE_SOURCE_LABELS = {
     "sources",
     "notes",
     "endnotes",
+    "primary literature",
+    "secondary literature",
+    "primary sources",
+    "secondary sources",
+    "primärliteratur",
+    "sekundärliteratur",
+    "literaturverzeichnis",
+    "bibliografía",
+    "bibliographie",
+    "ouvrages cités",
+    "bibliografia",
+    "riferimenti bibliografici",
 }
 _REFERENCE_TARGET_LABELS = {
     "参考文献",
@@ -80,6 +92,7 @@ def _plain_markdown_label(line: str) -> str:
     """Normalize a standalone label without treating it as a heading."""
     value = line.strip()
     value = re.sub(r"^#{1,6}\s+", "", value)
+    value = re.sub(r"^\d{1,3}[.)]\s+", "", value)
     value = re.sub(r"^\*{1,3}|\*{1,3}$|^_{1,3}|_{1,3}$", "", value)
     value = value.strip().strip("：:—–-·• ")
     return re.sub(r"\s+", " ", value).casefold()
@@ -102,17 +115,17 @@ def is_bibliography_text(text: str) -> bool:
     first_line = blocks[0].splitlines()[0].strip()
     if _is_reference_label(first_line):
         return True
-    first_block = blocks[0].strip()
-    if re.match(
-        r"^(?:#{1,6}\s+)?(?:references|bibliography|literatur|works cited|参考文献)\b",
-        first_block,
-        re.IGNORECASE,
-    ):
-        return True
     if len(blocks) >= 5:
-        cite_re = re.compile(r"\(\d{4}[a-z]?\)|https?://|doi\.org", re.IGNORECASE)
-        cite_count = sum(1 for block in blocks if cite_re.search(block))
-        if cite_count / len(blocks) >= 0.8:
+        citation_patterns = (
+            re.compile(r"^[^\n,]{2,},\s*[^\n.]{2,}\.\s*(?:18|19|20)\d{2}[a-z]?\b", re.I),
+            re.compile(r"^[A-Z][\w'’-]+(?:,\s*[^()\n]+)?[.,]?\s+\(\s*(?:18|19|20)\d{2}[a-z]?\s*\)\.\s+[^\n]{8,}$", re.I),
+            re.compile(r"^[^\n:]{2,}:\s*[^\n,]{2,},\s*(?:18|19|20)\d{2}[a-z]?\s*(?:\)\.?|\.)?$", re.I),
+        )
+        entry_count = sum(
+            1 for block in blocks
+            if any(pattern.search(block.strip()) for pattern in citation_patterns)
+        )
+        if entry_count / len(blocks) >= 0.8:
             return True
     return False
 
@@ -148,6 +161,36 @@ def infer_translation_file_role(
     return None
 
 
+def infer_translation_file_role_with_reason(
+    filename: str, text: Optional[str] = None,
+) -> tuple[Optional[str], Optional[dict[str, str]]]:
+    """Return conservative inferred role plus a compact explanation."""
+    role = infer_translation_file_role(filename, text)
+    if role is None:
+        return None, None
+    stem = Path(str(filename)).name
+    if infer_translation_file_role(filename, None) is not None:
+        return role, {"source": "filename_inference", "reason": f"recognized special-unit filename: {stem}"}
+    first = next((line.strip() for line in str(text or "").splitlines() if line.strip()), "")
+    if first and _is_reference_label(first):
+        return role, {"source": "text_inference", "reason": f"standalone bibliography heading: {first[:120]}"}
+    return role, {"source": "text_inference", "reason": "bibliographic entry format repeated across unit"}
+
+
+def resolve_translation_file_role(
+    filename: str,
+    text: Optional[str],
+    *,
+    declared_role: Optional[str] = None,
+    declared_source: Optional[Mapping[str, Any]] = None,
+) -> tuple[Optional[str], Optional[dict[str, Any]]]:
+    """Use an explicit special role first, then the shared conservative inference."""
+    role = str(declared_role or "").strip().lower()
+    if role in TRANSLATION_SPECIAL_ROLES:
+        return role, dict(declared_source or {"source": "explicit_role", "reason": "declared special-unit role"})
+    return infer_translation_file_role_with_reason(filename, text)
+
+
 def is_density_exempt_role(role: Optional[str]) -> bool:
     """Return whether a unit is exempt from prose-language density checks."""
     return str(role or "").strip().lower() in DENSITY_EXEMPT_ROLES
@@ -157,7 +200,9 @@ __all__ = [
     "DENSITY_EXEMPT_ROLES",
     "TRANSLATION_SPECIAL_ROLES",
     "infer_translation_file_role",
+    "infer_translation_file_role_with_reason",
     "is_bibliography_text",
     "is_density_exempt_role",
     "is_front_matter_text",
+    "resolve_translation_file_role",
 ]

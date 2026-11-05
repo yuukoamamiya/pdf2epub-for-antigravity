@@ -27,7 +27,7 @@ from pdf2epub.commands.markdown_context import (
     _load_pdf_file_contexts,
     _load_pdf_toc_titles,
 )
-from pdf2epub.pdf_unit_roles import load_pdf_file_roles
+from pdf2epub.pdf_unit_roles import load_pdf_file_role_details, load_pdf_file_roles
 from pdf2epub.pipeline_policy import PipelinePolicy
 from pdf2epub.utils.configuration import load_config
 from pdf2epub.workflow_contracts import (
@@ -40,6 +40,10 @@ from pdf2epub.validation_receipts import (
     build_input_snapshot,
     validation_receipt_is_current,
 )
+
+
+def _pdf_file_role_sources(output_dir: Path) -> dict[str, dict[str, Any]]:
+    return {name: dict(record["role_origin"]) for name, record in load_pdf_file_role_details(output_dir).items()}
 
 
 def polish_command(args):
@@ -338,6 +342,7 @@ def _prepare_pdf_markdown_task(args, task: str):
                 getattr(args, "retry_after_human_review", False)
             ),
             file_roles=load_pdf_file_roles(output_dir) if task in {"translate", "polish"} else None,
+            file_role_sources=_pdf_file_role_sources(output_dir) if task in {"translate", "polish"} else None,
             context_files=context_files or None,
             skipped_context_files=skipped_context_files,
             prompt_context_files=prompt_context_files,
@@ -604,6 +609,7 @@ def _validate_pdf_markdown_task(args, task: str):
         ),
         create_validated_copy=not check_only,
         file_roles=load_pdf_file_roles(output_dir) if task in {"translate", "polish"} else None,
+        file_role_sources=_pdf_file_role_sources(output_dir) if task in {"translate", "polish"} else None,
         tolerate_duplicate_headings=task == "polish",
         validate_footnote_normalization=footnote_validation_enabled,
         fix_reference_headings=task == "translate" and bool(

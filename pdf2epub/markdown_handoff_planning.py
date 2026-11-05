@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional
 
@@ -14,7 +14,7 @@ from .batching_service import (
     markdown_files,
     recommended_batches,
 )
-from .document_roles import TRANSLATION_SPECIAL_ROLES
+from .document_roles import TRANSLATION_SPECIAL_ROLES, resolve_translation_file_role
 
 
 @dataclass(frozen=True)
@@ -30,6 +30,7 @@ class MarkdownHandoffPlan:
     task_max_files: int
     recommended_batches: list[list[str]]
     oversized_files: list[str]
+    role_sources: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
 
 def plan_markdown_handoff(
@@ -39,6 +40,7 @@ def plan_markdown_handoff(
     *,
     declared_files: Optional[Iterable[str]] = None,
     file_roles: Optional[Mapping[str, str]] = None,
+    file_role_sources: Optional[Mapping[str, Mapping[str, Any]]] = None,
     controlled_files: Optional[Mapping[str, str]] = None,
     continuation_files: Optional[Mapping[str, Mapping[str, Any]]] = None,
 ) -> MarkdownHandoffPlan:
@@ -62,9 +64,11 @@ def plan_markdown_handoff(
     batching = batching_config(config)
     file_stats: Dict[str, Dict[str, int]] = {}
     source_sha256: Dict[str, str] = {}
+    source_texts: dict[str, str] = {}
     for source in sources:
         raw = source.read_bytes()
         text = raw.decode("utf-8")
+        source_texts[source.name] = text
         source_sha256[source.name] = hashlib.sha256(raw).hexdigest()
         lines = text.splitlines()
         file_stats[source.name] = {
@@ -73,11 +77,24 @@ def plan_markdown_handoff(
             "nonempty_line_count": sum(bool(line.strip()) for line in lines),
             "estimated_tokens": estimate_tokens(text),
         }
-    normalized_roles = {
+    explicit_roles = {
         str(name): str(role).strip().lower()
         for name, role in (file_roles or {}).items()
         if str(role).strip().lower() in TRANSLATION_SPECIAL_ROLES
     }
+    normalized_roles: dict[str, str] = {}
+    role_sources: dict[str, dict[str, Any]] = {}
+    for source in sources:
+        resolved_role, role_source = resolve_translation_file_role(
+            source.name, source_texts[source.name],
+            declared_role=explicit_roles.get(source.name),
+            declared_source=dict(file_role_sources[source.name])
+            if file_role_sources and source.name in file_role_sources else None,
+        )
+        if resolved_role in TRANSLATION_SPECIAL_ROLES:
+            normalized_roles[source.name] = resolved_role
+            if role_source:
+                role_sources[source.name] = role_source
     controlled = {str(name): str(kind) for name, kind in (controlled_files or {}).items()}
     if set(controlled) - {source.name for source in sources}:
         raise ValueError("controlled special-unit files must be declared Markdown sources")
@@ -118,6 +135,10 @@ def plan_markdown_handoff(
         or stats["nonempty_line_count"] > batching["max_nonempty_lines"]
     ]
     return MarkdownHandoffPlan(
-        sources, batching, file_stats, source_sha256, normalized_roles, controlled,
-        continuation_metadata, isolated_files, task_max_files, batches, oversized,
+        sources=sources, batching=batching, file_stats=file_stats,
+        source_sha256=source_sha256, normalized_roles=normalized_roles,
+        controlled_files=controlled, continuation_files=continuation_metadata,
+        isolated_files=isolated_files, task_max_files=task_max_files,
+        recommended_batches=batches, oversized_files=oversized,
+        role_sources=role_sources,
     )

@@ -106,8 +106,10 @@ def build_markdown_manifest(data: ManifestBuild) -> dict[str, Any]:
         manifest["secondary_source_dir"] = data.secondary_source_dir
     if data.review_output_dir is not None:
         manifest["review_output_dir"] = data.review_output_dir
-    if plan.normalized_roles:
-        manifest["file_roles"] = plan.normalized_roles
+    if context.file_roles:
+        manifest["file_roles"] = dict(context.file_roles)
+    if context.file_role_sources:
+        manifest["file_role_sources"] = dict(context.file_role_sources)
     if context.context_files:
         manifest["context_files"] = dict(context.context_files)
         manifest["context_sha256"] = dict(context.context_sha256)

@@ -445,6 +445,14 @@ def write_worker_handoffs(
         global_context_hashes = manifest.get("context_sha256", {})
         if not isinstance(global_context_hashes, Mapping):
             global_context_hashes = {}
+        role_context_hashes = {}
+        for role_key in ("file_roles", "file_role_sources"):
+            values = manifest.get(role_key, {})
+            if isinstance(values, Mapping):
+                for name in files:
+                    if name in values:
+                        encoded = json.dumps(values[name], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+                        role_context_hashes[f"{role_key}:{name}"] = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
         assignment_sha256 = build_assignment_sha256(
             task=task,
             worker_id=worker_id,
@@ -461,6 +469,7 @@ def write_worker_handoffs(
                     f"global:{name}": value
                     for name, value in global_context_hashes.items()
                 },
+                **role_context_hashes,
             },
         )
         prior = previous_by_assignment.get(assignment_sha256)

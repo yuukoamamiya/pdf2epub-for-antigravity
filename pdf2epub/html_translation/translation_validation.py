@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional
 
-from pdf2epub.document_roles import infer_translation_file_role, is_density_exempt_role
+from pdf2epub.document_roles import is_density_exempt_role, resolve_translation_file_role
 from pdf2epub.glossary import validate_translation_context
 from pdf2epub.markdown_validation import target_language_ratio_check
 from pdf2epub.special_role_audit import validate_special_role_markers
@@ -51,7 +51,15 @@ def _resume_context_snapshot(manifest: Mapping[str, Any], file_name: str) -> Dic
         "toc_heading_contexts": {},
         "source_language": manifest.get("source_language"),
         "target_language": manifest.get("target_language"),
+        "file_roles": {},
+        "file_role_sources": {},
     }
+    roles = manifest.get("file_roles", {})
+    sources = manifest.get("file_role_sources", {})
+    if isinstance(roles, Mapping) and file_name in roles:
+        snapshot["file_roles"][file_name] = roles[file_name]
+    if isinstance(sources, Mapping) and file_name in sources:
+        snapshot["file_role_sources"][file_name] = sources[file_name]
     unit_hashes = manifest.get("unit_context_sha256", {})
     if isinstance(unit_hashes, dict) and file_name in unit_hashes:
         snapshot["unit_context_sha256"][file_name] = unit_hashes[file_name]
@@ -150,6 +158,7 @@ class HTMLTranslationValidator:
         manifest_path = self.output_dir / "translate-html_subagent_manifest.json"
         manifest: Dict[str, Any] = {}
         manifest_file_roles: Dict[str, str] = {}
+        manifest_file_role_sources: Dict[str, Mapping[str, Any]] = {}
         snapshot_errors: List[str] = []
         snapshot_expected_hashes: Dict[str, str] = {}
         if manifest_path.is_file():
@@ -163,6 +172,12 @@ class HTMLTranslationValidator:
                             str(name): str(role).strip().lower()
                             for name, role in raw_roles.items()
                             if str(name).strip() and str(role).strip()
+                        }
+                    raw_sources = manifest.get("file_role_sources", {})
+                    if isinstance(raw_sources, Mapping):
+                        manifest_file_role_sources = {
+                            str(name): value for name, value in raw_sources.items()
+                            if isinstance(value, Mapping)
                         }
                 else:
                     snapshot_errors.append("HTML translation manifest is not a JSON object")
@@ -256,9 +271,15 @@ class HTMLTranslationValidator:
 
             src_content = src_file.read_text(encoding="utf-8")
             tgt_content = tgt_file.read_text(encoding="utf-8")
-            role = manifest_file_roles.get(src_file.name) or infer_translation_file_role(
-                src_file.name, src_content
+            role, role_source = resolve_translation_file_role(
+                src_file.name, src_content,
+                declared_role=manifest_file_roles.get(src_file.name),
+                declared_source=manifest_file_role_sources.get(src_file.name),
             )
+            if role:
+                resume_contexts[src_file.name]["file_roles"] = {src_file.name: role}
+                if role_source:
+                    resume_contexts[src_file.name]["file_role_sources"] = {src_file.name: role_source}
             if role:
                 logical_stem = re.sub(
                     r"\.part\d+$", "", src_file.stem, flags=re.IGNORECASE
@@ -451,6 +472,16 @@ class HTMLTranslationValidator:
                 name: resume_contexts[name]
                 for name in source_sha256
                 if name in resume_contexts
+            },
+            "file_roles": {
+                name: snapshot["file_roles"][name]
+                for name, snapshot in resume_contexts.items()
+                if name in source_sha256 and name in snapshot.get("file_roles", {})
+            },
+            "file_role_sources": {
+                name: snapshot["file_role_sources"][name]
+                for name, snapshot in resume_contexts.items()
+                if name in source_sha256 and name in snapshot.get("file_role_sources", {})
             },
             "source_snapshot": source_snapshot,
             "target_language_audits": target_language_audits,

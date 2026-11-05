@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional
 
+from .document_roles import TRANSLATION_SPECIAL_ROLES, resolve_translation_file_role
+
 
 @dataclass(frozen=True)
 class MarkdownHandoffRequest:
@@ -19,6 +21,7 @@ class MarkdownHandoffRequest:
     config: Optional[Mapping[str, Any]] = None
     resume: bool = False
     file_roles: Optional[Mapping[str, str]] = None
+    file_role_sources: Optional[Mapping[str, Mapping[str, Any]]] = None
     context_files: Optional[Mapping[str, Path]] = None
     skipped_context_files: tuple[str, ...] = ()
     file_contexts: Optional[Mapping[str, str]] = None
@@ -60,6 +63,8 @@ class ContextProjection:
     global_toc_outline: str = ""
     global_toc_outline_sha256: str = ""
     chapter_groups: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    file_roles: Mapping[str, str] = field(default_factory=dict)
+    file_role_sources: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
 
 
 def _project_files(output_dir: Path, files: Optional[Mapping[str, Path]], label: str) -> tuple[dict[str, str], dict[str, str]]:
@@ -107,6 +112,30 @@ def normalize_handoff_context(request: MarkdownHandoffRequest, declared_names: I
     outline = str(request.global_toc_outline or "").strip()
     chapter_groups: dict[str, tuple[str, ...]] = {}
     declared = set(declared_names)
+    roles = {
+        str(name): str(role).strip().lower()
+        for name, role in (request.file_roles or {}).items()
+        if str(name) in declared and str(role).strip().lower() in TRANSLATION_SPECIAL_ROLES
+    }
+    role_sources = {
+        str(name): dict(source)
+        for name, source in (request.file_role_sources or {}).items()
+        if str(name) in declared and isinstance(source, Mapping)
+    }
+    for name in declared_names:
+        source_path = request.source_dir / name
+        try:
+            source_text = source_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            source_text = ""
+        resolved, reason = resolve_translation_file_role(
+            name, source_text, declared_role=roles.get(name),
+            declared_source=role_sources.get(name),
+        )
+        if resolved in TRANSLATION_SPECIAL_ROLES:
+            roles[name] = resolved
+            if reason:
+                role_sources[name] = reason
     for chapter_id, names in (request.chapter_groups or {}).items():
         normalized = tuple(dict.fromkeys(str(name) for name in (names or ()) if str(name) in declared))
         if normalized:
@@ -130,4 +159,6 @@ def normalize_handoff_context(request: MarkdownHandoffRequest, declared_names: I
         global_toc_outline=outline,
         global_toc_outline_sha256=hashlib.sha256(outline.encode("utf-8")).hexdigest() if outline else "",
         chapter_groups=chapter_groups,
+        file_roles=roles,
+        file_role_sources=role_sources,
     )

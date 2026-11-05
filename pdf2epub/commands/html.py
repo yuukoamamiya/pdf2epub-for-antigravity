@@ -385,6 +385,11 @@ def _prepare_html_command(args):
             context_files=context_files or None,
             skipped_context_files=skipped_context_files,
             file_roles=pipeline.translation_file_roles(declared_files),
+            file_role_sources=(
+                pipeline.translation_file_role_sources(declared_files)
+                if callable(getattr(pipeline, "translation_file_role_sources", None))
+                else {}
+            ),
             # Native glossary snapshots remain audit-only; workers receive
             # per-unit projected terms through unit_context_files.
             prompt_context_files={},

@@ -29,6 +29,7 @@ def validate_markdown_subagent(
     structural_patterns: Iterable[str] = (),
     create_validated_copy: bool = True,
     file_roles: Optional[Mapping[str, str]] = None,
+    file_role_sources: Optional[Mapping[str, Mapping[str, Any]]] = None,
     tolerate_duplicate_headings: bool = False,
     validate_footnote_normalization: bool = False,
     fix_reference_headings: bool = False,
@@ -47,6 +48,7 @@ def validate_markdown_subagent(
         structural_patterns=structural_patterns,
         create_validated_copy=create_validated_copy,
         file_roles=file_roles,
+        file_role_sources=file_role_sources,
         tolerate_duplicate_headings=tolerate_duplicate_headings,
         validate_footnote_normalization=validate_footnote_normalization,
         fix_reference_headings=fix_reference_headings,
@@ -195,6 +197,7 @@ def validate_markdown_subagent(
         "structural_warnings": structural_warnings,
         "diff_summary": diff_summary,
         "file_roles": normalized_roles,
+        "file_role_sources": dict(context.options.file_role_sources),
         "protected_toc_titles": normalized_protected_toc_titles,
         "continuation_toc_titles": {
             name: sorted(titles)

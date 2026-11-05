@@ -98,6 +98,8 @@ def persist_validation_report(
                 "valid": name in report["valid_files"] and name not in report["missing"],
                 "source_sha256": report["source_sha256"].get(name),
                 "target_sha256": report["target_sha256"].get(name),
+                "file_role": report.get("file_roles", {}).get(name),
+                "file_role_source": report.get("file_role_sources", {}).get(name),
                 "invalid": [item for item in report["invalid"] if item.get("file") == name],
                 "safety_blocked": name in report["safety_blocked"],
                 "target_language_blocked": name in report["target_language_blocked"],

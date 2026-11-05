@@ -8,6 +8,7 @@ from typing import Any, Iterable, Mapping
 
 from .batching_service import markdown_files
 from .document_roles import TRANSLATION_SPECIAL_ROLES
+from .document_roles import resolve_translation_file_role
 from .footnote_normalization import endnote_definition_keys
 from .subagent_safety import protected_workspace_changes
 
@@ -33,6 +34,7 @@ class MarkdownAuditOptions:
     task: str
     structural_patterns: tuple[str, ...]
     file_roles: Mapping[str, str]
+    file_role_sources: Mapping[str, Mapping[str, Any]]
     invalid_file_roles: Mapping[str, str]
     tolerate_duplicate_headings: bool
     validate_footnote_normalization: bool
@@ -93,6 +95,7 @@ def load_markdown_validation_context(
     structural_patterns: Iterable[str] = (),
     create_validated_copy: bool = True,
     file_roles: Mapping[str, str] | None = None,
+    file_role_sources: Mapping[str, Mapping[str, Any]] | None = None,
     tolerate_duplicate_headings: bool = False,
     validate_footnote_normalization: bool = False,
     fix_reference_headings: bool = False,
@@ -115,6 +118,23 @@ def load_markdown_validation_context(
         for name, role in (file_roles or {}).items()
         if str(role).strip().lower() in TRANSLATION_SPECIAL_ROLES
     }
+    role_sources = {
+        str(name): dict(value) for name, value in (file_role_sources or {}).items()
+        if str(name) in {source.name for source in sources} and isinstance(value, Mapping)
+    }
+    for source in sources:
+        try:
+            text = source.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            text = ""
+        resolved, reason = resolve_translation_file_role(
+            source.name, text, declared_role=roles.get(source.name),
+            declared_source=role_sources.get(source.name),
+        )
+        if resolved in TRANSLATION_SPECIAL_ROLES:
+            roles[source.name] = resolved
+            if reason:
+                role_sources[source.name] = reason
     invalid_roles = {
         str(name): str(role).strip().lower()
         for name, role in (file_roles or {}).items()
@@ -139,7 +159,7 @@ def load_markdown_validation_context(
         output_dir / (f"{task}_file_validation.json" if selected is not None else f"{task}_validation.json"),
     )
     options = MarkdownAuditOptions(
-        task, tuple(structural_patterns), roles, invalid_roles, tolerate_duplicate_headings,
+        task, tuple(structural_patterns), roles, role_sources, invalid_roles, tolerate_duplicate_headings,
         validate_footnote_normalization, fix_reference_headings, target_language,
         titles, continuation, frozenset(expected),
     )

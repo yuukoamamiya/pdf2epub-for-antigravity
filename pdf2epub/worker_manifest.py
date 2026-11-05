@@ -91,6 +91,7 @@ def _worker_manifest_projection(
         "file_stats",
         "repair_file_stats",
         "file_roles",
+        "file_role_sources",
         "file_contexts",
         "toc_heading_contexts",
         "repair_candidates",
