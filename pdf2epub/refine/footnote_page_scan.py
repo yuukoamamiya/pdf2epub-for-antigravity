@@ -24,6 +24,7 @@ from .footnote_candidates import (
 from .footnote_continuation import (
     _annotate_cross_page_continuations as annotate_cross_page_continuations,
     _build_footnote_page_context as build_footnote_page_context,
+    _expand_orphan_continuation_candidates as expand_orphan_continuation_candidates,
     _has_footnote_evidence as has_footnote_evidence,
     _suppress_soft_continuation_candidates as suppress_soft_continuation_candidates,
 )
@@ -154,6 +155,7 @@ def _scan_primary_candidates(
     dict[str, Any],
     int,
     list[dict[str, Any]],
+    list[dict[str, Any]],
 ]:
     """Build primary candidates, continuation context, and audit misses."""
     candidates: list[dict[str, Any]] = []
@@ -236,10 +238,24 @@ def _scan_primary_candidates(
         previous_page_footnote_evidence=previous_page_footnote_evidence,
         excluded_block_indexes=excluded_block_indexes,
     )
+    candidates, orphan_regions = expand_orphan_continuation_candidates(
+        page_number,
+        sidecar,
+        candidates,
+        bottom_ratio=options.bottom_ratio,
+        bottom_intersection_ratio=options.bottom_intersection_ratio,
+        native_text_source=native_text_source,
+        page_markdown=page_markdown,
+        auto_accept=options.auto_accept,
+        native_max_font_ratio=options.native_max_font_ratio,
+        layout_profile=layout_profile,
+        previous_page_context=previous_page_context,
+        excluded_block_indexes=excluded_block_indexes,
+    )
     continuation_evidence = annotate_cross_page_continuations(
         sidecar,
         candidates,
-        continuous_regions,
+        [*continuous_regions, *orphan_regions],
         previous_page_context,
     )
     candidates, suppressed = suppress_soft_continuation_candidates(candidates)
@@ -289,6 +305,7 @@ def _scan_primary_candidates(
         bottom_stats,
         len(suppressed),
         suppressed_native_citations,
+        orphan_regions,
     )
 
 
@@ -306,6 +323,7 @@ def _scan_secondary_candidates(
     list[dict[str, Any]],
     dict[str, Any],
     set[int],
+    list[dict[str, Any]],
 ]:
     """Build gated secondary candidates and compare them with primary later."""
     layout_profile = page_layout_profile(secondary)
@@ -345,14 +363,28 @@ def _scan_secondary_candidates(
         previous_page_footnote_evidence=previous_page_footnote_evidence,
         excluded_block_indexes=excluded_blocks,
     )
+    candidates, orphan_regions = expand_orphan_continuation_candidates(
+        page_number,
+        secondary,
+        candidates,
+        bottom_ratio=options.bottom_ratio,
+        bottom_intersection_ratio=options.bottom_intersection_ratio,
+        native_text_source=False,
+        page_markdown="",
+        auto_accept=False,
+        native_max_font_ratio=options.native_max_font_ratio,
+        layout_profile=layout_profile,
+        previous_page_context=previous_page_context,
+        excluded_block_indexes=excluded_blocks,
+    )
     continuation_evidence = annotate_cross_page_continuations(
         secondary,
         candidates,
-        regions,
+        [*regions, *orphan_regions],
         previous_page_context,
     )
     candidates.sort(key=lambda item: (item["order"], item["block"]))
-    return candidates, regions, continuation_evidence, excluded_blocks
+    return candidates, regions, continuation_evidence, excluded_blocks, orphan_regions
 
 
 def scan_footnote_page(
@@ -441,6 +473,7 @@ def scan_footnote_page(
         bottom_stats,
         soft_count,
         suppressed_native_citations,
+        orphan_regions,
     ) = (
         _scan_primary_candidates(
             page_number,
@@ -462,6 +495,7 @@ def scan_footnote_page(
 
     secondary_candidates: list[dict[str, Any]] = []
     secondary_regions: list[dict[str, Any]] = []
+    secondary_orphan_regions: list[dict[str, Any]] = []
     secondary_continuation_evidence: dict[str, Any] = {
         "mode": "gated",
         "candidate_count": 0,
@@ -479,6 +513,7 @@ def scan_footnote_page(
             secondary_regions,
             secondary_continuation_evidence,
             _secondary_excluded_blocks,
+            secondary_orphan_regions,
         ) = _scan_secondary_candidates(
             page_number,
             secondary,
@@ -573,9 +608,13 @@ def scan_footnote_page(
                 secondary_only_candidates if evidence_mode == "two_ocr" else []
             ),
             "continuous_numeric_regions": continuous_regions,
+            "orphan_continuation_regions": orphan_regions,
             "continuation_evidence": continuation_evidence,
             "secondary_continuous_numeric_regions": (
                 secondary_regions if evidence_mode == "two_ocr" else []
+            ),
+            "secondary_orphan_continuation_regions": (
+                secondary_orphan_regions if evidence_mode == "two_ocr" else []
             ),
             "secondary_continuation_evidence": secondary_continuation_evidence,
             "footnote_regions": footnote_regions,

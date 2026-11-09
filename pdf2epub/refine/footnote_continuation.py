@@ -17,6 +17,8 @@ from .footnote_signals import (
     _CITATION_LABEL_RE,
     _FOOTNOTE_LABEL_RE,
     _FURNITURE_LABEL_RE,
+    _NUMERIC_ONLY_RE,
+    leading_footnote_key as _leading_footnote_key,
 )
 
 DEFAULT_REGION_MAX_GAP = 0.035
@@ -664,10 +666,122 @@ def _aggregate_continuation_evidence(
             summary[field] += int(evidence.get(field, 0) or 0)
     return summary
 
+
+def _expand_orphan_continuation_candidates(
+    page_number: int,
+    sidecar: Mapping[str, Any],
+    candidates: list[dict[str, Any]],
+    *,
+    bottom_ratio: float,
+    bottom_intersection_ratio: float,
+    native_text_source: bool,
+    page_markdown: str,
+    auto_accept: bool,
+    native_max_font_ratio: float,
+    layout_profile: Optional[Mapping[str, Any]] = None,
+    previous_page_context: Optional[Mapping[str, Any]] = None,
+    excluded_block_indexes: Optional[Iterable[int]] = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Add review-only blocks that continue an unfinished previous-page note.
+
+    The continuous numeric region path requires at least two numbered notes on
+    the current page.  A page can instead begin with a bare continuation line
+    (``body -> continuation`` with no new numbered note, or only one new note).
+    That orphan continuation has no numeric region to anchor it, so this entry
+    point uses only the previous page's unfinished physical tail as the trigger.
+    Scoring itself stays in :func:`_annotate_cross_page_continuations`.
+    """
+    if not isinstance(previous_page_context, Mapping):
+        return candidates, []
+    previous = previous_page_context.get("last_physical_footnote")
+    if not isinstance(previous, Mapping):
+        return candidates, []
+    if not _text_looks_unfinished(str(previous.get("text") or "")):
+        return candidates, []
+
+    from .footnote_candidates import (
+        candidate_for_block as _candidate_for_block,
+        candidate_for_native_block as _candidate_for_native_block,
+    )
+
+    blocks = sidecar.get("blocks", [])
+    excluded = {int(index) for index in (excluded_block_indexes or set())}
+    existing = {int(item["block"]) for item in candidates}
+    expanded = list(candidates)
+    orphan_indexes: set[int] = set()
+    for block_index, block in enumerate(blocks):
+        if not isinstance(block, Mapping):
+            continue
+        if block_index in excluded or block_index in existing:
+            continue
+        text = _text_from_block(block)
+        if not text or _NUMERIC_ONLY_RE.fullmatch(text):
+            continue
+        if _leading_footnote_key(text) is not None:
+            continue
+        label = str(block.get("label") or "").strip()
+        if _FURNITURE_LABEL_RE.search(label) or _CITATION_LABEL_RE.search(label):
+            continue
+        bbox = _normalise_bbox(block, sidecar)
+        if not bbox:
+            continue
+        if bbox[3] < float(bottom_ratio) - 0.16:
+            continue
+        if native_text_source:
+            candidate = _candidate_for_native_block(
+                page_number,
+                block_index,
+                block,
+                sidecar,
+                bottom_ratio=bottom_ratio,
+                bottom_intersection_ratio=bottom_intersection_ratio,
+                page_markdown=page_markdown,
+                auto_accept=auto_accept,
+                native_max_font_ratio=native_max_font_ratio,
+                region_evidence=True,
+                layout_profile=layout_profile,
+            )
+        else:
+            candidate = _candidate_for_block(
+                page_number,
+                block_index,
+                block,
+                sidecar,
+                bottom_ratio=bottom_ratio,
+                bottom_intersection_ratio=bottom_intersection_ratio,
+                force_review=True,
+                source="primary",
+                region_evidence=True,
+                page_markdown=page_markdown,
+                layout_profile=layout_profile,
+            )
+        if candidate is None:
+            continue
+        candidate["confidence"] = "review"
+        candidate["disposition"] = "review_required"
+        candidate["review_reason"] = "orphan_continuation"
+        candidate["continuous_region_evidence"] = True
+        candidate["continuous_region_has_footnote_label"] = False
+        expanded.append(candidate)
+        orphan_indexes.add(block_index)
+
+    if not orphan_indexes:
+        return expanded, []
+    orphan_regions = [
+        {
+            "first_block": -1,
+            "backtracked_block_indices": sorted(orphan_indexes),
+            "orphan": True,
+        }
+    ]
+    return expanded, orphan_regions
+
+
 __all__ = [
     "_aggregate_continuation_evidence",
     "_annotate_cross_page_continuations",
     "_build_footnote_page_context",
+    "_expand_orphan_continuation_candidates",
     "_has_footnote_evidence",
     "_suppress_soft_continuation_candidates",
 ]

@@ -1315,6 +1315,57 @@ def test_cross_page_single_complete_footnote_does_not_become_implicit_target(
     assert report["visual_audit_task_count"] == 0
 
 
+def test_orphan_continuation_without_new_numbered_note_is_reviewed(tmp_path: Path):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [_block("36 Footnote starts here,", 0, label="Footnote", y0=820)],
+    )
+    _write_sidecar(
+        tmp_path,
+        2,
+        [
+            _block("Body text on page two", 0, y0=120),
+            _block("Berlin 2002, the note continues", 1, y0=820),
+        ],
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    page = next(item for item in report["pages"] if item["page"] == 2)
+    candidate = next(item for item in page["candidates"] if item["block"] == 1)
+    assert candidate["review_reason"] == "orphan_continuation"
+    assert candidate["continuation_evidence"]["matched_previous_key"] == "36"
+    assert report["review_required"] is True
+
+
+def test_orphan_continuation_does_not_fire_when_previous_note_complete(
+    tmp_path: Path,
+):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [_block("36 A complete note ending in a period.", 0, label="Footnote", y0=820)],
+    )
+    _write_sidecar(
+        tmp_path,
+        2,
+        [
+            _block("Body text on page two", 0, y0=120),
+            _block("Ordinary body paragraph", 1, y0=820),
+        ],
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    page = next((item for item in report["pages"] if item["page"] == 2), None)
+    if page is not None:
+        assert all(
+            item.get("review_reason") != "orphan_continuation"
+            for item in page["candidates"]
+        )
+
+
 def test_page_footer_inside_a_confirmed_numeric_region_is_reviewed_not_dropped(
     tmp_path: Path,
 ):
