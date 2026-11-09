@@ -172,7 +172,11 @@ def _prepare_pdf_markdown_task(args, task: str):
         if content_type and content_type != "auto":
             rules.append(f"Treat this as {content_type} content and preserve its domain-specific conventions.")
     else:
-        source_dir, source_stage = _resolve_pdf_markdown_source(output_dir, config)
+        try:
+            source_dir, source_stage = _resolve_pdf_markdown_source(output_dir, config)
+        except ValueError as exc:
+            logger.error(str(exc))
+            return 1
         if source_stage != "polished":
             logger.error(
                 "PDF translation requires a current validated polished source for "
@@ -553,7 +557,11 @@ def _validate_pdf_markdown_task(args, task: str):
         source_dir, _ = _resolve_pdf_polish_source(output_dir, config)
         target_dir = output_dir / "polished_markdown"
     else:
-        source_dir, _ = _resolve_pdf_markdown_source(output_dir, config)
+        try:
+            source_dir, _ = _resolve_pdf_markdown_source(output_dir, config)
+        except ValueError as exc:
+            logger.error(str(exc))
+            return 1
         target_dir = output_dir / "translated"
     selected_file = getattr(args, "file", None)
     if selected_file:

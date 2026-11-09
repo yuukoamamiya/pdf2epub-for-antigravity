@@ -61,6 +61,12 @@ def _resolve_pdf_markdown_source(
         return ocr_dir, "ocr"
     if polished_available:
         return polished_dir, "polished"
+    if polished_dir.is_dir() and any(polished_dir.glob("*.md")):
+        raise ValueError(
+            "polished_markdown/validated exists but its validation receipt is missing "
+            "or stale; rerun polish-validate (or set translation.source_stage: ocr to "
+            "explicitly use raw OCR Markdown)"
+        )
     return ocr_dir, "ocr"
 
 

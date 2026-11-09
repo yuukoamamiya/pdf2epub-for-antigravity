@@ -536,6 +536,31 @@ def test_native_text_probe_does_not_bypass_polished_source(tmp_path: Path):
     assert _resolve_pdf_markdown_source(tmp_path, {}) == (ocr_dir, "ocr")
 
 
+def test_pdf_source_stage_blocks_on_stale_polished_output(tmp_path: Path):
+    ocr_dir = tmp_path / "ocr_markdown"
+    polished_dir = tmp_path / "polished_markdown" / "validated"
+    ocr_dir.mkdir()
+    polished_dir.mkdir(parents=True)
+    (ocr_dir / "chapter_1.md").write_text("ocr", encoding="utf-8")
+    (polished_dir / "chapter_1.md").write_text("polished", encoding="utf-8")
+    with pytest.raises(ValueError, match="polish-validate"):
+        _resolve_pdf_markdown_source(
+            tmp_path, {"translation": {"source_stage": "auto"}}
+        )
+
+
+def test_pdf_source_stage_explicit_ocr_bypasses_stale_polished(tmp_path: Path):
+    ocr_dir = tmp_path / "ocr_markdown"
+    polished_dir = tmp_path / "polished_markdown" / "validated"
+    ocr_dir.mkdir()
+    polished_dir.mkdir(parents=True)
+    (ocr_dir / "chapter_1.md").write_text("ocr", encoding="utf-8")
+    (polished_dir / "chapter_1.md").write_text("polished", encoding="utf-8")
+    assert _resolve_pdf_markdown_source(
+        tmp_path, {"translation": {"source_stage": "ocr"}}
+    ) == (ocr_dir, "ocr")
+
+
 def test_pdf_markdown_context_helpers_propagate_roles_and_hierarchy(tmp_path: Path):
     ocr_dir = tmp_path / "ocr_markdown"
     ocr_dir.mkdir()

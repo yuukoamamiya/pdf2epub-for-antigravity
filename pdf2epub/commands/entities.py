@@ -39,7 +39,11 @@ def extract_entities_command(args):
         logger.error("No title found in config.yaml")
         return 1
     output_dir = book_output_dir(book_title)
-    source_dir, source_stage = _resolve_pdf_markdown_source(output_dir, config)
+    try:
+        source_dir, source_stage = _resolve_pdf_markdown_source(output_dir, config)
+    except ValueError as exc:
+        logger.error(str(exc))
+        return 1
     # EPUB terminology is extracted from the compressed translation units so
     # the same book-wide entity contract can be used by both pipelines.
     epub_units = output_dir / "compressed_units"

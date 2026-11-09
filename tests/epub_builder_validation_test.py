@@ -5,6 +5,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from xml.etree import ElementTree as ET
 
+import pytest
+
 from pdf2epub.commands.pdf import _resolve_pdf_markdown_source
 from pdf2epub.build_epub import (
     BuildEpubConfig,
@@ -711,7 +713,7 @@ def test_pdf_source_stage_can_be_auto_selected_or_explicit(tmp_path: Path) -> No
     ) == (ocr_dir, "ocr")
 
 
-def test_pdf_source_stage_ignores_stale_polished_output(tmp_path: Path) -> None:
+def test_pdf_source_stage_blocks_on_stale_polished_output(tmp_path: Path) -> None:
     polished_dir = tmp_path / "polished_markdown" / "validated"
     polished_dir.mkdir(parents=True)
     (polished_dir / "chapter_1.md").write_text("old polished", encoding="utf-8")
@@ -723,9 +725,10 @@ def test_pdf_source_stage_ignores_stale_polished_output(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    assert _resolve_pdf_markdown_source(
-        tmp_path, {"translation": {"source_stage": "auto"}}
-    ) == (ocr_dir, "ocr")
+    with pytest.raises(ValueError, match="polish-validate"):
+        _resolve_pdf_markdown_source(
+            tmp_path, {"translation": {"source_stage": "auto"}}
+        )
 
 
 def test_book_metadata_prefers_explicit_values_and_ignores_unknown(tmp_path: Path) -> None:
