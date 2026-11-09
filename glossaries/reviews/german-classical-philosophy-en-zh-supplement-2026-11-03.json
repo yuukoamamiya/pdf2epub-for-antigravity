@@ -1,0 +1,5103 @@
+{
+  "date": "2026-11-03",
+  "glossary": "glossaries/german-classical-philosophy.yaml",
+  "decision": "Adopt academic standard English translations for all 561 German Classical Philosophy concepts, establishing full trilingual (de, en, zh-Hans) conceptual correspondence without projection conflicts.",
+  "concept_count": 561,
+  "language_pairs": [
+    "de-zh-Hans",
+    "en-zh-Hans"
+  ],
+  "entries": [
+    {
+      "id": "german-classical-philosophy:a-priori",
+      "de": "a priori",
+      "en": "a priori",
+      "zh": "先天",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:abfolge",
+      "de": "Abfolge",
+      "en": "succession",
+      "zh": "先后次序",
+      "variants_en": [
+        "temporal sequence"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:absolutgesetzt",
+      "de": "absolutgesetzt",
+      "en": "absolutized",
+      "zh": "绝对化",
+      "variants_en": [
+        "posited absolutely"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:ableiten",
+      "de": "ableiten",
+      "en": "derive",
+      "zh": "派生",
+      "variants_en": [
+        "derivation"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:abstraktion",
+      "de": "Abstraktion",
+      "en": "abstraction",
+      "zh": "抽象",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:achtung",
+      "de": "Achtung",
+      "en": "respect",
+      "zh": "敬重",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:adiaphoria",
+      "de": "Adiaphoria",
+      "en": "adiaphoria",
+      "zh": "道德上中性的东西",
+      "variants_en": [
+        "morally indifferent thing"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:affektion",
+      "de": "Affektion",
+      "en": "affection",
+      "zh": "刺激",
+      "variants_en": [
+        "affecting"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:affinitat",
+      "de": "Affinität",
+      "en": "affinity",
+      "zh": "亲和性",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:aggregat",
+      "de": "Aggregat",
+      "en": "aggregate",
+      "zh": "堆砌",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:ahnung",
+      "de": "Ahnung",
+      "en": "presentiment",
+      "zh": "预感",
+      "variants_en": [
+        "inkling"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:ather",
+      "de": "Äther",
+      "en": "ether",
+      "zh": "以太",
+      "variants_en": [
+        "aether"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:akosmismus",
+      "de": "Akosmismus",
+      "en": "acosmism",
+      "zh": "无世界论",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:akroamatisch",
+      "de": "akroamatisch",
+      "en": "acroamatic",
+      "zh": "讨论的",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:akzidenz",
+      "de": "Akzidenz",
+      "en": "accident",
+      "zh": "偶性",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:allgemeingultig",
+      "de": "Allgemeingültig",
+      "en": "universally valid",
+      "zh": "普适性",
+      "variants_en": [
+        "universal validity"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:allheit",
+      "de": "Allheit",
+      "en": "allness",
+      "zh": "全体性",
+      "variants_en": [
+        "totality (Allheit)"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:all-einheit",
+      "de": "All-Einheit",
+      "en": "all-unity",
+      "zh": "大全一体",
+      "variants_en": [
+        "hen kai pan"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:als-ob",
+      "de": "Als-Ob",
+      "en": "as-if",
+      "zh": "仿佛",
+      "variants_en": [
+        "as if"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:amphibolie",
+      "de": "Amphibolie",
+      "en": "amphiboly",
+      "zh": "歧义",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:analogie",
+      "de": "Analogie",
+      "en": "analogy",
+      "zh": "类比",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:analysis",
+      "de": "Analysis",
+      "en": "analysis",
+      "zh": "分析",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:anamnesislehre",
+      "de": "Anamnesislehre",
+      "en": "doctrine of anamnesis",
+      "zh": "回忆说",
+      "variants_en": [
+        "theory of recollection"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:anamnesis",
+      "de": "Anamnesis",
+      "en": "anamnesis",
+      "zh": "回忆",
+      "variants_en": [
+        "Platonic recollection"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:andacht",
+      "de": "Andacht",
+      "en": "devotion (Andacht)",
+      "zh": "默祷思忱",
+      "variants_en": [
+        "pious reflection"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:andersheit",
+      "de": "Andersheit",
+      "en": "otherness",
+      "zh": "他异性",
+      "variants_en": [
+        "alterity"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:andersseyn",
+      "de": "Andersseyn",
+      "en": "being-other",
+      "zh": "他者存在",
+      "variants_en": [
+        "other-being"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:anerkennung",
+      "de": "Anerkennung",
+      "en": "recognition",
+      "zh": "承认",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:anfang",
+      "de": "Anfang",
+      "en": "beginning",
+      "zh": "开端",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:angenehmen",
+      "de": "Angenehmen",
+      "en": "agreeable",
+      "zh": "快适",
+      "variants_en": [
+        "the agreeable"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:anlage",
+      "de": "Anlage",
+      "en": "predisposition",
+      "zh": "素质",
+      "variants_en": [
+        "natural endowment"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:an-sich",
+      "de": "an sich",
+      "en": "in itself",
+      "zh": "自在的",
+      "variants_en": [
+        "in-itself (adj)"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:anschauen",
+      "de": "Anschauen",
+      "en": "intuiting",
+      "zh": "直观活动",
+      "variants_en": [
+        "act of intuition"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:anschaulich",
+      "de": "anschaulich",
+      "en": "intuitive",
+      "zh": "直观的",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:anschauung",
+      "de": "Anschauung",
+      "en": "intuition",
+      "zh": "直观",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:ansich",
+      "de": "Ansich",
+      "en": "the in-itself",
+      "zh": "自在体",
+      "variants_en": [
+        "in-itself (noun)"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:anstoss",
+      "de": "Anstoss",
+      "en": "check",
+      "zh": "阻碍",
+      "variants_en": [
+        "impediment",
+        "summons"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:antecedens",
+      "de": "antecedens",
+      "en": "antecedent",
+      "zh": "前件",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:anthropomorphismus",
+      "de": "Anthropomorphismus",
+      "en": "anthropomorphism",
+      "zh": "拟人论",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:antinomie",
+      "de": "Antinomie",
+      "en": "antinomy",
+      "zh": "二律背反",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:antithesis",
+      "de": "Antithesis",
+      "en": "antithesis",
+      "zh": "反题",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:antithese",
+      "de": "Antithese",
+      "en": "antithesis",
+      "zh": "反题",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:antithetik",
+      "de": "Antithetik",
+      "en": "antithetic",
+      "zh": "背反论",
+      "variants_en": [
+        "antithetics"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:antizipation",
+      "de": "Antizipation",
+      "en": "anticipation",
+      "zh": "预测",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:antrieb",
+      "de": "Antrieb",
+      "en": "impulse",
+      "zh": "冲动",
+      "variants_en": [
+        "drive"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:anzahl",
+      "de": "Anzahl",
+      "en": "count",
+      "zh": "数目",
+      "variants_en": [
+        "plurality of units"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:apagogisch",
+      "de": "apagogisch",
+      "en": "apagogic",
+      "zh": "反证法",
+      "variants_en": [
+        "apagogical",
+        "reductio ad absurdum"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:apodiktisch",
+      "de": "apodiktisch",
+      "en": "apodictic",
+      "zh": "无可置疑的",
+      "variants_en": [
+        "apodeictic"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:a-posteriori",
+      "de": "a posteriori",
+      "en": "a posteriori",
+      "zh": "后天的",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:apprehension",
+      "de": "Apprehension",
+      "en": "apprehension",
+      "zh": "领会",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:apperzeption",
+      "de": "Apperzeption",
+      "en": "apperception",
+      "zh": "统觉",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:apriori",
+      "de": "Apriori",
+      "en": "the a priori",
+      "zh": "先天",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:apriorisch",
+      "de": "apriorisch",
+      "en": "aprioristic",
+      "zh": "先天",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:apriorismus",
+      "de": "Apriorismus",
+      "en": "apriorism",
+      "zh": "先天主义",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:architektonik",
+      "de": "Architektonik",
+      "en": "architectonic",
+      "zh": "建筑术",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:aufheben",
+      "de": "aufheben",
+      "en": "sublate",
+      "zh": "扬弃",
+      "variants_en": [
+        "sublation"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:auflosen",
+      "de": "auflösen",
+      "en": "dissolve",
+      "zh": "瓦解",
+      "variants_en": [
+        "disintegration"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:ausdehnung",
+      "de": "Ausdehnung",
+      "en": "extension",
+      "zh": "广延",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:auslegung",
+      "de": "Auslegung",
+      "en": "exegesis",
+      "zh": "展示",
+      "variants_en": [
+        "interpretation"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:aussage",
+      "de": "Aussage",
+      "en": "proposition",
+      "zh": "命题",
+      "variants_en": [
+        "statement"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:autonomie",
+      "de": "Autonomie",
+      "en": "autonomy",
+      "zh": "自律",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:axiom",
+      "de": "Axiom",
+      "en": "axiom",
+      "zh": "公理",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:begehren",
+      "de": "Begehren",
+      "en": "desiring",
+      "zh": "欲求",
+      "variants_en": [
+        "appetite"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:begierde",
+      "de": "Begierde",
+      "en": "desire",
+      "zh": "欲望",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:begreifen",
+      "de": "begreifen",
+      "en": "comprehend",
+      "zh": "把握",
+      "variants_en": [
+        "grasp"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:begriff",
+      "de": "Begriff",
+      "en": "concept",
+      "zh": "概念",
+      "variants_en": [],
+      "aliases_en": [
+        "Notion"
+      ]
+    },
+    {
+      "id": "german-classical-philosophy:begriffsbestimmtheit",
+      "de": "Begriffsbestimmtheit",
+      "en": "conceptual determinacy",
+      "zh": "概念规定性",
+      "variants_en": [
+        "determinacy of the concept"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:begriffslehre",
+      "de": "Begriffslehre",
+      "en": "doctrine of the concept",
+      "zh": "概念学说",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:begrundung",
+      "de": "Begründung",
+      "en": "grounding",
+      "zh": "理据",
+      "variants_en": [
+        "justification"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:beharrlich",
+      "de": "beharrlich",
+      "en": "permanent",
+      "zh": "持存的",
+      "variants_en": [
+        "persisting"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:behaupten",
+      "de": "Behaupten",
+      "en": "assertion",
+      "zh": "断言",
+      "variants_en": [
+        "assert"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:beisich",
+      "de": "Beisich",
+      "en": "being-at-home-with-itself",
+      "zh": "自持",
+      "variants_en": [
+        "being with oneself"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:beschaffenheit",
+      "de": "Beschaffenheit",
+      "en": "constitution",
+      "zh": "性状",
+      "variants_en": [
+        "condition"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:besinnung",
+      "de": "Besinnung",
+      "en": "recollection (Besinnung)",
+      "zh": "回想",
+      "variants_en": [
+        "mindfulness"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:bestehen",
+      "de": "Bestehen",
+      "en": "subsistence",
+      "zh": "持存",
+      "variants_en": [
+        "persistence"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:bestehend",
+      "de": "bestehend",
+      "en": "subsisting",
+      "zh": "持存的",
+      "variants_en": [
+        "existing"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:bestimmen",
+      "de": "bestimmen",
+      "en": "determine",
+      "zh": "规定",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:bestimmt",
+      "de": "bestimmt",
+      "en": "determinate",
+      "zh": "规定",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:bestimmung",
+      "de": "Bestimmung",
+      "en": "determination",
+      "zh": "规定",
+      "variants_en": [
+        "vocation"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:bestimmungsgrund",
+      "de": "Bestimmungsgrund",
+      "en": "determining ground",
+      "zh": "规定根据",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:bestimmtheit",
+      "de": "Bestimmtheit",
+      "en": "determinacy",
+      "zh": "规定性",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:beurteilung",
+      "de": "Beurteilung",
+      "en": "assessment",
+      "zh": "评判",
+      "variants_en": [
+        "appraisal"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:beweis",
+      "de": "Beweis",
+      "en": "proof",
+      "zh": "证明",
+      "variants_en": [
+        "argument"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:bildung",
+      "de": "Bildung",
+      "en": "formation",
+      "zh": "教化",
+      "variants_en": [
+        "culture",
+        "Bildung"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:burger",
+      "de": "Bürger",
+      "en": "citizen",
+      "zh": "公民",
+      "variants_en": [
+        "bourgeois"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:bohme",
+      "de": "Böhme",
+      "en": "Böhme",
+      "zh": "波墨",
+      "variants_en": [
+        "Boehme"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:cassirer",
+      "de": "Cassirer",
+      "en": "Cassirer",
+      "zh": "卡西尔",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:common-sense",
+      "de": "common sense",
+      "en": "common sense",
+      "zh": "常识",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:common-sense-2",
+      "de": "common-sense",
+      "en": "common sense",
+      "zh": "常识",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:common-sense-philosophie",
+      "de": "common-sense-Philosophie",
+      "en": "common sense philosophy",
+      "zh": "常识哲学",
+      "variants_en": [
+        "philosophy of common sense"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:consequens",
+      "de": "consequens",
+      "en": "consequent",
+      "zh": "后件",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:darstellen",
+      "de": "darstellen",
+      "en": "present",
+      "zh": "呈现",
+      "variants_en": [
+        "Darstellen"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:darstellung",
+      "de": "Darstellung",
+      "en": "presentation",
+      "zh": "呈现",
+      "variants_en": [
+        "Darstellung"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:das-absolute",
+      "de": "das Absolute",
+      "en": "the absolute",
+      "zh": "绝对者",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:das-absolute-wissen",
+      "de": "das absolute Wissen",
+      "en": "absolute knowing",
+      "zh": "绝对知识",
+      "variants_en": [
+        "absolute knowledge"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:das-allgemeine",
+      "de": "das Allgemeine",
+      "en": "the universal",
+      "zh": "普遍者",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:das-andere",
+      "de": "das Andere",
+      "en": "the other",
+      "zh": "他者",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:das-apodiktische-urteil",
+      "de": "das apodiktische Urteil",
+      "en": "apodictic judgment",
+      "zh": "必然判断",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:das-assertorische-urteil",
+      "de": "das assertorische Urteil",
+      "en": "assertoric judgment",
+      "zh": "实然判断",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:das-bose",
+      "de": "das Böse",
+      "en": "the evil",
+      "zh": "恶",
+      "variants_en": [
+        "evil"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:das-denken",
+      "de": "das Denken",
+      "en": "activity of thought",
+      "zh": "思维活动",
+      "variants_en": [
+        "das Denken"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:das-disjunktive-urteil",
+      "de": "das disjunktive Urteil",
+      "en": "disjunctive judgment",
+      "zh": "选言判断",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:das-gute",
+      "de": "das Gute",
+      "en": "the good",
+      "zh": "善",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:das-hypothetische-urteil",
+      "de": "das hypothetische Urteil",
+      "en": "hypothetical judgment",
+      "zh": "假言判断",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:das-ideal",
+      "de": "das Ideal",
+      "en": "the ideal",
+      "zh": "理想",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:das-innere",
+      "de": "das Innere",
+      "en": "the inner",
+      "zh": "内核",
+      "variants_en": [
+        "internal core"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:das-kategorische-urteil",
+      "de": "das kategorische Urteil",
+      "en": "categorical judgment",
+      "zh": "直言判断",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:das-partikulare-urteil",
+      "de": "das partikuläre Urteil",
+      "en": "particular judgment",
+      "zh": "特称判断",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:das-problematische-urteil",
+      "de": "das problematische Urteil",
+      "en": "problematic judgment",
+      "zh": "或然判断",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:das-singulare-urteil",
+      "de": "das singuläre Urteil",
+      "en": "singular judgment",
+      "zh": "单称判断",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:das-sollen",
+      "de": "das Sollen",
+      "en": "the ought",
+      "zh": "应当",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:das-universelle-urteil",
+      "de": "das universelle Urteil",
+      "en": "universal judgment",
+      "zh": "全称判断",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:das-unvordenkliches-sein",
+      "de": "das unvordenkliches Sein",
+      "en": "immemorial being",
+      "zh": "不可预思的存在",
+      "variants_en": [
+        "unprethinkable being"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:das-unvordenkliches-seyn",
+      "de": "das unvordenkliches Seyn",
+      "en": "immemorial being",
+      "zh": "不可预思的存在",
+      "variants_en": [
+        "unprethinkable being"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:das-wahre",
+      "de": "das Wahre",
+      "en": "the true",
+      "zh": "真相",
+      "variants_en": [
+        "that which is true"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:der-gemeine-menschenverstand",
+      "de": "der gemeine Menschenverstand",
+      "en": "vulgar understanding",
+      "zh": "庸常知性",
+      "variants_en": [
+        "common human understanding"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:der-gesunde-menschenverstand",
+      "de": "der gesunde Menschenverstand",
+      "en": "sound common sense",
+      "zh": "常人知性",
+      "variants_en": [
+        "healthy human understanding"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:der-junge-hegel",
+      "de": "der junge Hegel",
+      "en": "young Hegel",
+      "zh": "青年黑格尔",
+      "variants_en": [
+        "early Hegel"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:der-sich-vollbringende-skeptizismus",
+      "de": "der sich vollbringende Skeptizismus",
+      "en": "self-fulfilling skepticism",
+      "zh": "自身完成和自身实现的怀疑论",
+      "variants_en": [
+        "self-accomplishing skepticism"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:der-vollbrachte-skeptizismus",
+      "de": "der vollbrachte Skeptizismus",
+      "en": "accomplished skepticism",
+      "zh": "完成了的和实现了的怀疑论",
+      "variants_en": [
+        "consummated skepticism"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:die-bestimmte-negation",
+      "de": "die bestimmte Negation",
+      "en": "determinate negation",
+      "zh": "特定的否定",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:die-offenbare",
+      "de": "die offenbare",
+      "en": "manifest religion",
+      "zh": "启示宗教",
+      "variants_en": [
+        "revealed religion"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:die-positive-religion",
+      "de": "die positive Religion",
+      "en": "positive religion",
+      "zh": "实定宗教",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:die-sitte",
+      "de": "die Sitte",
+      "en": "custom",
+      "zh": "伦常",
+      "variants_en": [
+        "ethical custom",
+        "mores"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:dasein",
+      "de": "Dasein",
+      "en": "determinate being",
+      "zh": "定在",
+      "variants_en": [
+        "Dasein",
+        "being-there"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:deduktion",
+      "de": "Deduktion",
+      "en": "deduction",
+      "zh": "演绎",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:demonstration",
+      "de": "Demonstration",
+      "en": "demonstration",
+      "zh": "演证",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:denken",
+      "de": "Denken",
+      "en": "thought",
+      "zh": "思维活动",
+      "variants_en": [
+        "thinking"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:denkungsart",
+      "de": "Denkungsart",
+      "en": "way of thinking",
+      "zh": "思维方式",
+      "variants_en": [
+        "mode of thought"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:denkbestimmung",
+      "de": "Denkbestimmung",
+      "en": "thought-determination",
+      "zh": "思维规定",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:differenzschrift",
+      "de": "Differenzschrift",
+      "en": "Difference essay",
+      "zh": "《差异论文》",
+      "variants_en": [
+        "Differenzschrift"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:diktion",
+      "de": "Diktion",
+      "en": "diction",
+      "zh": "措辞",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:ding-an-sich",
+      "de": "Ding an sich",
+      "en": "thing in itself",
+      "zh": "自在之物",
+      "variants_en": [
+        "thing-in-itself"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:disjunktiv",
+      "de": "disjunktiv",
+      "en": "disjunctive",
+      "zh": "选言的",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:diskursiv",
+      "de": "diskursiv",
+      "en": "discursive",
+      "zh": "推论的",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:disziplin",
+      "de": "Disziplin",
+      "en": "academic discipline",
+      "zh": "学科训练",
+      "variants_en": [
+        "academic training"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:dogma",
+      "de": "Dogma",
+      "en": "dogma",
+      "zh": "教条",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:dogmatisch",
+      "de": "dogmatisch",
+      "en": "dogmatic",
+      "zh": "独断的",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:dogmatismus",
+      "de": "Dogmatismus",
+      "en": "dogmatism",
+      "zh": "独断论",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:dreieinigkeit",
+      "de": "Dreieinigkeit",
+      "en": "trinity",
+      "zh": "三位一体",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:durchgangig",
+      "de": "durchgängig",
+      "en": "thoroughgoing",
+      "zh": "通盘的",
+      "variants_en": [
+        "pervasive"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:dusing",
+      "de": "Düsing",
+      "en": "Düsing",
+      "zh": "杜辛",
+      "variants_en": [
+        "Duesing"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:egoismus",
+      "de": "Egoismus",
+      "en": "egoism",
+      "zh": "自我主义",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:eigenschaft",
+      "de": "Eigenschaft",
+      "en": "property",
+      "zh": "属性",
+      "variants_en": [
+        "attribute"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:eindruck",
+      "de": "Eindruck",
+      "en": "impression",
+      "zh": "印象",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:eingreifen",
+      "de": "Eingreifen",
+      "en": "intervention",
+      "zh": "介入",
+      "variants_en": [
+        "intervene"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:einheit",
+      "de": "Einheit",
+      "en": "unity",
+      "zh": "统一",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:einzelheit",
+      "de": "Einzelheit",
+      "en": "singularity",
+      "zh": "个别性",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:einzeln",
+      "de": "einzeln",
+      "en": "individual",
+      "zh": "个别的",
+      "variants_en": [
+        "singular"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:element",
+      "de": "Element",
+      "en": "element",
+      "zh": "要素",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:elementar",
+      "de": "elementar",
+      "en": "elementary",
+      "zh": "基础的",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:empfindung",
+      "de": "Empfindung",
+      "en": "sensation",
+      "zh": "感受",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:empirismus",
+      "de": "Empirismus",
+      "en": "empiricism",
+      "zh": "经验论",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:endlich",
+      "de": "endlich",
+      "en": "finite",
+      "zh": "有限",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:endlichkeit",
+      "de": "Endlichkeit",
+      "en": "finitude",
+      "zh": "有限性",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:endzweck",
+      "de": "Endzweck",
+      "en": "final purpose",
+      "zh": "终极目的",
+      "variants_en": [
+        "ultimate end"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:entfremdung",
+      "de": "Entfremdung",
+      "en": "estrangement",
+      "zh": "异化",
+      "variants_en": [
+        "alienation"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:entsprechen",
+      "de": "entsprechen",
+      "en": "correspond",
+      "zh": "契合",
+      "variants_en": [
+        "correspondence"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:entzweiung",
+      "de": "Entzweiung",
+      "en": "diremption",
+      "zh": "分裂",
+      "variants_en": [
+        "bifurcation",
+        "division"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:enzyklopadie",
+      "de": "Enzyklopädie",
+      "en": "encyclopaedia",
+      "zh": "全面教学纲要",
+      "variants_en": [
+        "encyclopedia"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:enzyklopadie-der-philosophischen-wissenschaften",
+      "de": "Enzyklopädie der philosophischen Wissenschaften",
+      "en": "Encyclopaedia of the Philosophical Sciences",
+      "zh": "哲学科学全面教学",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:enzyklopadie-der-philosophischen-wissenschaften-im-grundriss",
+      "de": "Enzyklopädie der philosophischen Wissenschaften im Grundriss",
+      "en": "Encyclopaedia of the Philosophical Sciences in Outline",
+      "zh": "哲学科学全面教学纲要",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:enzyklopadisch",
+      "de": "enzyklopädisch",
+      "en": "encyclopaedic",
+      "zh": "全面教学式",
+      "variants_en": [
+        "encyclopedic"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:erde",
+      "de": "Erde",
+      "en": "earth",
+      "zh": "地界",
+      "variants_en": [
+        "terrestrial realm"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:erfahrung",
+      "de": "Erfahrung",
+      "en": "experience",
+      "zh": "经验",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:erinnerung",
+      "de": "Erinnerung",
+      "en": "recollection",
+      "zh": "回忆",
+      "variants_en": [
+        "Erinnerung",
+        "inwardizing"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:erkennen",
+      "de": "Erkennen",
+      "en": "act of cognition",
+      "zh": "认识活动",
+      "variants_en": [
+        "cognizing"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:erkenntnis",
+      "de": "Erkenntnis",
+      "en": "cognition",
+      "zh": "认识",
+      "variants_en": [
+        "knowledge (Erkenntnis)"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:erlebnis",
+      "de": "Erlebnis",
+      "en": "lived experience",
+      "zh": "体验",
+      "variants_en": [
+        "Erlebnis"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:eschatologie",
+      "de": "Eschatologie",
+      "en": "eschatology",
+      "zh": "末世论",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:erscheinen",
+      "de": "erscheinen",
+      "en": "to appear",
+      "zh": "显现",
+      "variants_en": [
+        "appear"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:erscheinend",
+      "de": "erscheinend",
+      "en": "appearing",
+      "zh": "显现的",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:erscheinung",
+      "de": "Erscheinung",
+      "en": "appearance",
+      "zh": "显象",
+      "variants_en": [
+        "phenomenon"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:ethik",
+      "de": "Ethik",
+      "en": "ethics",
+      "zh": "伦理学",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:eudamonismus",
+      "de": "Eudämonismus",
+      "en": "eudaemonism",
+      "zh": "幸福论",
+      "variants_en": [
+        "eudaimonism"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:evidenz",
+      "de": "Evidenz",
+      "en": "self-evidence",
+      "zh": "自明性",
+      "variants_en": [
+        "evidence"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:exponieren",
+      "de": "exponieren",
+      "en": "expound",
+      "zh": "展示",
+      "variants_en": [
+        "expose"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:exposition",
+      "de": "Exposition",
+      "en": "exposition",
+      "zh": "展示",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:extrem",
+      "de": "Extrem",
+      "en": "extreme",
+      "zh": "端项",
+      "variants_en": [
+        "extreme term"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:fatalismus",
+      "de": "Fatalismus",
+      "en": "fatalism",
+      "zh": "宿命论",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:figur",
+      "de": "Figur",
+      "en": "figure",
+      "zh": "形象",
+      "variants_en": [
+        "configuration"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:folge",
+      "de": "Folge",
+      "en": "sequence",
+      "zh": "次序",
+      "variants_en": [
+        "consequence"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:fragment",
+      "de": "Fragment",
+      "en": "fragment",
+      "zh": "残篇",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:fulda",
+      "de": "Fulda",
+      "en": "Fulda",
+      "zh": "富尔达",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:fundierung",
+      "de": "Fundierung",
+      "en": "founding",
+      "zh": "奠基",
+      "variants_en": [
+        "grounding (Fundierung)"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:fundierungsfunktion",
+      "de": "Fundierungsfunktion",
+      "en": "foundational function",
+      "zh": "奠基功能",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:fursich",
+      "de": "Fürsich",
+      "en": "the for-itself",
+      "zh": "自为体",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:fur-sich",
+      "de": "für sich",
+      "en": "for itself",
+      "zh": "自为的",
+      "variants_en": [
+        "for-itself (adj)"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:fursichsein",
+      "de": "Fürsichsein",
+      "en": "being-for-itself",
+      "zh": "自为存在",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:furwahrhalten",
+      "de": "Fürwahrhalten",
+      "en": "holding-to-be-true",
+      "zh": "据信为真",
+      "variants_en": [
+        "assent"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:fromm",
+      "de": "fromm",
+      "en": "pious",
+      "zh": "虔诚的",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:frommigkeit",
+      "de": "Frömmigkeit",
+      "en": "piety",
+      "zh": "虔诚",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:ganzheit",
+      "de": "Ganzheit",
+      "en": "wholeness",
+      "zh": "整体性",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:gebot",
+      "de": "Gebot",
+      "en": "command",
+      "zh": "命令",
+      "variants_en": [
+        "commandment"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:gedankenbestimmung",
+      "de": "Gedankenbestimmung",
+      "en": "determination of thought",
+      "zh": "思想规定",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:gedachtnis",
+      "de": "Gedächtnis",
+      "en": "memory",
+      "zh": "记忆",
+      "variants_en": [
+        "Gedächtnis"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:gediegenheit",
+      "de": "Gediegenheit",
+      "en": "genuineness",
+      "zh": "纯真性",
+      "variants_en": [
+        "solidity"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:gefuhl",
+      "de": "Gefühl",
+      "en": "feeling",
+      "zh": "感觉",
+      "variants_en": [
+        "sentiment"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:gegensatz",
+      "de": "Gegensatz",
+      "en": "opposition",
+      "zh": "对立",
+      "variants_en": [
+        "antithesis (Gegensatz)"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:gegenstand",
+      "de": "Gegenstand",
+      "en": "object (Gegenstand)",
+      "zh": "对象",
+      "variants_en": [
+        "objective counterpart"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:gehalt",
+      "de": "Gehalt",
+      "en": "import",
+      "zh": "意蕴",
+      "variants_en": [
+        "inner import",
+        "Gehalt"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:geist",
+      "de": "Geist",
+      "en": "spirit",
+      "zh": "精神",
+      "variants_en": [],
+      "aliases_en": [
+        "mind"
+      ]
+    },
+    {
+      "id": "german-classical-philosophy:geistig",
+      "de": "geistig",
+      "en": "spiritual",
+      "zh": "精神的",
+      "variants_en": [
+        "geistig"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:geistlich",
+      "de": "geistlich",
+      "en": "clerical",
+      "zh": "属灵的",
+      "variants_en": [
+        "ecclesiastical"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:geistphilosophie",
+      "de": "Geistphilosophie",
+      "en": "philosophy of spirit",
+      "zh": "精神哲学",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:geisteswissenschaft",
+      "de": "Geisteswissenschaft",
+      "en": "humanities",
+      "zh": "精神科学",
+      "variants_en": [
+        "geisteswissenschaften",
+        "human sciences"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:gemeinschaft",
+      "de": "Gemeinschaft",
+      "en": "community",
+      "zh": "共同体",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:gemeinsinn",
+      "de": "Gemeinsinn",
+      "en": "sensus communis",
+      "zh": "常理",
+      "variants_en": [
+        "common sense (Gemeinsinn)"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:gemut",
+      "de": "Gemüt",
+      "en": "Gemüt",
+      "zh": "内心",
+      "variants_en": [
+        "inner mind",
+        "soul (Gemüt)"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:genealogie",
+      "de": "Genealogie",
+      "en": "genealogy",
+      "zh": "谱系学",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:genese",
+      "de": "Genese",
+      "en": "genesis",
+      "zh": "起源",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:genesis",
+      "de": "Genesis",
+      "en": "genesis",
+      "zh": "起源",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:genetisch",
+      "de": "genetisch",
+      "en": "genetic",
+      "zh": "发生论的",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:gesetz",
+      "de": "Gesetz",
+      "en": "law",
+      "zh": "法则",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:gesetze",
+      "de": "Gesetze",
+      "en": "laws",
+      "zh": "法则",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:gesetzgeben",
+      "de": "Gesetzgeben",
+      "en": "legislation",
+      "zh": "立法",
+      "variants_en": [
+        "lawgiving"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:gesetztsein",
+      "de": "Gesetztsein",
+      "en": "being-posited",
+      "zh": "被设定状态",
+      "variants_en": [
+        "positedness"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:gesetzmassigkeit",
+      "de": "Gesetzmäßigkeit",
+      "en": "lawfulness",
+      "zh": "合法则性",
+      "variants_en": [
+        "conformity to law"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:gesinnung",
+      "de": "Gesinnung",
+      "en": "disposition",
+      "zh": "情意",
+      "variants_en": [
+        "conviction"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:gestalt",
+      "de": "Gestalt",
+      "en": "shape",
+      "zh": "形态",
+      "variants_en": [
+        "Gestalt",
+        "shape of consciousness"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:gemeiner-menschenverstand",
+      "de": "gemeiner Menschenverstand",
+      "en": "common understanding",
+      "zh": "庸常知性",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:gesunder-menschenverstand",
+      "de": "gesunder Menschenverstand",
+      "en": "sound understanding",
+      "zh": "常人知性",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:gewissen",
+      "de": "Gewissen",
+      "en": "conscience",
+      "zh": "良知",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:gewissheit",
+      "de": "Gewissheit",
+      "en": "certainty",
+      "zh": "确知",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:gewissheit-2",
+      "de": "Gewißheit",
+      "en": "certainty",
+      "zh": "确知",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:glaube",
+      "de": "Glaube",
+      "en": "faith",
+      "zh": "信仰",
+      "variants_en": [
+        "belief"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:gleichgultig",
+      "de": "gleichgültig",
+      "en": "indifferent",
+      "zh": "漠不相关",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:gleichgultigkeit",
+      "de": "Gleichgültigkeit",
+      "en": "unconcern",
+      "zh": "漠不相关",
+      "variants_en": [
+        "apathy"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:gleichheit",
+      "de": "Gleichheit",
+      "en": "sameness",
+      "zh": "一致",
+      "variants_en": [
+        "equality"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:gnosis",
+      "de": "Gnosis",
+      "en": "gnosis",
+      "zh": "灵知",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:grenze",
+      "de": "Grenze",
+      "en": "boundary",
+      "zh": "界限",
+      "variants_en": [
+        "limit",
+        "Grenze"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:grosse",
+      "de": "Größe",
+      "en": "magnitude",
+      "zh": "大小",
+      "variants_en": [
+        "greatness"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:grund",
+      "de": "Grund",
+      "en": "ground",
+      "zh": "根据",
+      "variants_en": [
+        "reason"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:grundlage",
+      "de": "Grundlage",
+      "en": "foundation",
+      "zh": "基础",
+      "variants_en": [
+        "basis"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:grundriss",
+      "de": "Grundriß",
+      "en": "outline",
+      "zh": "纲要",
+      "variants_en": [
+        "compendium"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:gw",
+      "de": "GW",
+      "en": "Gesammelte Werke",
+      "zh": "黑格尔历史考订版全集",
+      "variants_en": [
+        "GW"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:habilitation",
+      "de": "Habilitation",
+      "en": "habilitation",
+      "zh": "大学授课资格考核",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:habilitationsthese",
+      "de": "Habilitationsthese",
+      "en": "habilitation thesis",
+      "zh": "大学授课资格考核论纲",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:hang",
+      "de": "Hang",
+      "en": "propensity",
+      "zh": "偏好",
+      "variants_en": [
+        "inclination"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:henologie",
+      "de": "Henologie",
+      "en": "henology",
+      "zh": "太一学",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:herz",
+      "de": "Herz",
+      "en": "heart",
+      "zh": "心",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:hen-kai-pan",
+      "de": "Hen Kai Pan",
+      "en": "Hen Kai Pan",
+      "zh": "大全一体",
+      "variants_en": [
+        "One and All"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:himmel",
+      "de": "Himmel",
+      "en": "heaven",
+      "zh": "天界",
+      "variants_en": [
+        "celestial realm"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:hingabe",
+      "de": "Hingabe",
+      "en": "surrender",
+      "zh": "献身",
+      "variants_en": [
+        "dedication"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:hypostasieren",
+      "de": "hypostasieren",
+      "en": "hypostatize",
+      "zh": "实体化",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:hypothetisch",
+      "de": "hypothetisch",
+      "en": "hypothetical",
+      "zh": "假言的",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:ideal",
+      "de": "ideal",
+      "en": "ideal (normative)",
+      "zh": "理想的",
+      "variants_en": [
+        "normatively ideal"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:idee",
+      "de": "Idee",
+      "en": "idea",
+      "zh": "理念",
+      "variants_en": [],
+      "aliases_en": [
+        "Idea"
+      ]
+    },
+    {
+      "id": "german-classical-philosophy:ideell",
+      "de": "ideell",
+      "en": "ideational",
+      "zh": "观念的",
+      "variants_en": [
+        "ideal (conceptual)"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:idealismus",
+      "de": "Idealismus",
+      "en": "idealism",
+      "zh": "观念论",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:idealist",
+      "de": "Idealist",
+      "en": "idealist",
+      "zh": "观念论的",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:idealitat",
+      "de": "Idealität",
+      "en": "ideality",
+      "zh": "观念性",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:idealistisch",
+      "de": "idealistisch",
+      "en": "idealistic",
+      "zh": "观念论的",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:identitat",
+      "de": "Identität",
+      "en": "identity",
+      "zh": "同一性",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:identitatsphilosophie",
+      "de": "Identitätsphilosophie",
+      "en": "philosophy of identity",
+      "zh": "同一性哲学",
+      "variants_en": [
+        "identity philosophy"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:immaterialitat",
+      "de": "Immaterialität",
+      "en": "immateriality",
+      "zh": "非物质性",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:immortalitat",
+      "de": "Immortalität",
+      "en": "immortality",
+      "zh": "不死性",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:imperativ",
+      "de": "Imperativ",
+      "en": "imperative",
+      "zh": "命令",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:inbegriff",
+      "de": "Inbegriff",
+      "en": "sum total",
+      "zh": "总括",
+      "variants_en": [
+        "quintessence",
+        "comprehension"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:indifferenz",
+      "de": "Indifferenz",
+      "en": "indifference",
+      "zh": "无差别",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:individualitat",
+      "de": "Individualität",
+      "en": "individuality",
+      "zh": "个体性",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:induktion",
+      "de": "Induktion",
+      "en": "induction",
+      "zh": "归纳",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:inhalt",
+      "de": "Inhalt",
+      "en": "content",
+      "zh": "内容",
+      "variants_en": [
+        "Inhalt"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:intellektuell",
+      "de": "intellektuell",
+      "en": "intellectual",
+      "zh": "理智的",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:intelligenz",
+      "de": "Intelligenz",
+      "en": "intelligence",
+      "zh": "理智",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:intelligibel",
+      "de": "Intelligibel",
+      "en": "intelligible",
+      "zh": "理知的",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:ironie",
+      "de": "Ironie",
+      "en": "irony",
+      "zh": "反讽",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:isosthenia",
+      "de": "Isosthenia",
+      "en": "isosthenia",
+      "zh": "均势",
+      "variants_en": [
+        "equipollence"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:jasche-logik",
+      "de": "Jäsche Logik",
+      "en": "Jäsche Logic",
+      "zh": "耶舍《逻辑学》",
+      "variants_en": [
+        "Jäsche Logik"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:jaeschke",
+      "de": "Jaeschke",
+      "en": "Jaeschke",
+      "zh": "耶什克",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:jenseits",
+      "de": "Jenseits",
+      "en": "beyond",
+      "zh": "彼岸",
+      "variants_en": [
+        "the beyond",
+        "hereafter"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:kampf",
+      "de": "Kampf",
+      "en": "struggle",
+      "zh": "斗争",
+      "variants_en": [
+        "battle",
+        "conflict"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:kanon",
+      "de": "Kanon",
+      "en": "canon",
+      "zh": "法规",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:kategorie",
+      "de": "Kategorie",
+      "en": "category",
+      "zh": "范畴",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:kategorisch",
+      "de": "Kategorisch",
+      "en": "categorical",
+      "zh": "定言的",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:kausalitat",
+      "de": "Kausalität",
+      "en": "causality",
+      "zh": "原因性",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:klugheit",
+      "de": "Klugheit",
+      "en": "prudence",
+      "zh": "明智",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:knecht",
+      "de": "Knecht",
+      "en": "bondsman",
+      "zh": "奴隶",
+      "variants_en": [
+        "servant",
+        "slave"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:kopula",
+      "de": "Kopula",
+      "en": "copula",
+      "zh": "系词",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:korper",
+      "de": "Körper",
+      "en": "body",
+      "zh": "身体",
+      "variants_en": [
+        "physical body"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:koyre",
+      "de": "Koyré",
+      "en": "Koyré",
+      "zh": "柯瓦雷",
+      "variants_en": [
+        "Koyre"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:korrespondenztheorie",
+      "de": "Korrespondenztheorie",
+      "en": "correspondence theory",
+      "zh": "符合论",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:kreis",
+      "de": "Kreis",
+      "en": "circle",
+      "zh": "圆圈",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:kritizismus",
+      "de": "Kritizismus",
+      "en": "criticism",
+      "zh": "批判主义",
+      "variants_en": [
+        "critical philosophy"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:kultus",
+      "de": "Kultus",
+      "en": "cultus",
+      "zh": "崇拜活动",
+      "variants_en": [
+        "cultic worship"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:lebendig",
+      "de": "lebendig",
+      "en": "living",
+      "zh": "鲜活的",
+      "variants_en": [
+        "alive"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:lebendigkeit",
+      "de": "Lebendigkeit",
+      "en": "vitality",
+      "zh": "鲜活性",
+      "variants_en": [
+        "liveliness"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:leer",
+      "de": "Leer",
+      "en": "empty",
+      "zh": "空洞的",
+      "variants_en": [
+        "vacuous"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:lehre",
+      "de": "Lehre",
+      "en": "doctrine",
+      "zh": "学说",
+      "variants_en": [
+        "teaching"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:leib",
+      "de": "Leib",
+      "en": "lived body",
+      "zh": "活的身体",
+      "variants_en": [
+        "living body",
+        "Leib"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:leidend",
+      "de": "leidend",
+      "en": "passive",
+      "zh": "受动",
+      "variants_en": [
+        "suffering"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:leidenschaft",
+      "de": "Leidenschaft",
+      "en": "passion",
+      "zh": "激情",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:list",
+      "de": "List",
+      "en": "cunning",
+      "zh": "狡计",
+      "variants_en": [
+        "ruse"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:list-der-vernunft",
+      "de": "List der Vernunft",
+      "en": "cunning of reason",
+      "zh": "理性的狡计",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:macht",
+      "de": "Macht",
+      "en": "power",
+      "zh": "权能",
+      "variants_en": [
+        "might"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:manifestation",
+      "de": "Manifestation",
+      "en": "manifestation",
+      "zh": "显示",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:mannigfaltigkeit",
+      "de": "Mannigfaltigkeit",
+      "en": "manifold",
+      "zh": "杂多",
+      "variants_en": [
+        "multiplicity"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:massstab",
+      "de": "Maßstab",
+      "en": "criterion",
+      "zh": "尺度",
+      "variants_en": [
+        "standard",
+        "measure"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:materialismus",
+      "de": "Materialismus",
+      "en": "materialism",
+      "zh": "唯物论",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:materie",
+      "de": "Materie",
+      "en": "matter (material)",
+      "zh": "质料",
+      "variants_en": [
+        "physical matter"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:maxime",
+      "de": "Maxime",
+      "en": "maxim",
+      "zh": "准则",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:meinung",
+      "de": "Meinung",
+      "en": "opinion",
+      "zh": "意见",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:merkmal",
+      "de": "Merkmal",
+      "en": "characteristic",
+      "zh": "特征",
+      "variants_en": [
+        "mark",
+        "feature"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:methode",
+      "de": "Methode",
+      "en": "method",
+      "zh": "方法",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:metaphysica-specialis",
+      "de": "metaphysica specialis",
+      "en": "metaphysica specialis",
+      "zh": "特殊形而上学",
+      "variants_en": [
+        "special metaphysics"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:metaphysica-generalis",
+      "de": "metaphysica generalis",
+      "en": "metaphysica generalis",
+      "zh": "一般形而上学",
+      "variants_en": [
+        "general metaphysics"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:metaphysische-anfangsgrunde-der-rechtslehre",
+      "de": "metaphysische Anfangsgründe der Rechtslehre",
+      "en": "Metaphysical First Principles of the Doctrine of Right",
+      "zh": "《权利学说的形而上学初始根据》",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:mitte",
+      "de": "Mitte",
+      "en": "middle term",
+      "zh": "中项",
+      "variants_en": [
+        "center"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:mittel",
+      "de": "Mittel",
+      "en": "means",
+      "zh": "中介",
+      "variants_en": [
+        "medium",
+        "intermediary"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:modalitat",
+      "de": "Modalität",
+      "en": "modality",
+      "zh": "模态",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:modus",
+      "de": "Modus",
+      "en": "mode",
+      "zh": "模式",
+      "variants_en": [
+        "modus"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:modi",
+      "de": "Modi",
+      "en": "modes",
+      "zh": "模式",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:moment",
+      "de": "Moment",
+      "en": "moment",
+      "zh": "环节",
+      "variants_en": [
+        "Moment"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:monistisch",
+      "de": "monistisch",
+      "en": "monistic",
+      "zh": "一元论",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:monstration",
+      "de": "Monstration",
+      "en": "monstration",
+      "zh": "展现",
+      "variants_en": [
+        "showing"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:mysterien",
+      "de": "Mysterien",
+      "en": "mysteries",
+      "zh": "秘仪",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:mysterium",
+      "de": "Mysterium",
+      "en": "mystery",
+      "zh": "奥秘",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:mythologie",
+      "de": "Mythologie",
+      "en": "mythology",
+      "zh": "神话学",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:nation",
+      "de": "Nation",
+      "en": "nationality",
+      "zh": "族群",
+      "variants_en": [
+        "ethnic nation"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:naturrechtsaufsatz",
+      "de": "Naturrechtsaufsatz",
+      "en": "Natural Law essay",
+      "zh": "《自然法》论文",
+      "variants_en": [
+        "Naturrechtsaufsatz"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:negative",
+      "de": "negative",
+      "en": "negative",
+      "zh": "否定的",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:negatives-erkennen",
+      "de": "negatives Erkennen",
+      "en": "negative cognition",
+      "zh": "否定认识活动",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:negative-philosophie",
+      "de": "negative Philosophie",
+      "en": "negative philosophy",
+      "zh": "否定哲学",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:nichtiges",
+      "de": "Nichtiges",
+      "en": "nullity",
+      "zh": "虚无缥缈之物",
+      "variants_en": [
+        "null thing",
+        "vanity"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:niethammer",
+      "de": "Niethammer",
+      "en": "Niethammer",
+      "zh": "尼特哈默",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:noologie",
+      "de": "Noologie",
+      "en": "noology",
+      "zh": "精神学",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:normativitat",
+      "de": "Normativität",
+      "en": "normativity",
+      "zh": "规范性",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:noumenon",
+      "de": "Noumenon",
+      "en": "noumenon",
+      "zh": "本体",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:objekt",
+      "de": "Objekt",
+      "en": "object",
+      "zh": "客体",
+      "variants_en": [],
+      "aliases_en": [
+        "Object"
+      ]
+    },
+    {
+      "id": "german-classical-philosophy:objektivation",
+      "de": "Objektivation",
+      "en": "objectivation",
+      "zh": "客观化",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:objektivieren",
+      "de": "objektivieren",
+      "en": "objectify",
+      "zh": "客观化",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:objektivierung",
+      "de": "Objektivierung",
+      "en": "objectification",
+      "zh": "客观化",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:offenbaren",
+      "de": "Offenbaren",
+      "en": "reveal",
+      "zh": "启示",
+      "variants_en": [
+        "manifest"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:offenbarung",
+      "de": "Offenbarung",
+      "en": "revelation",
+      "zh": "启示",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:ontologie",
+      "de": "Ontologie",
+      "en": "ontology",
+      "zh": "本体论",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:ontotheologie",
+      "de": "Ontotheologie",
+      "en": "onto-theology",
+      "zh": "本体论神学",
+      "variants_en": [
+        "ontotheology"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:opfer",
+      "de": "Opfer",
+      "en": "sacrifice",
+      "zh": "献祭",
+      "variants_en": [
+        "offering"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:opus-postumum",
+      "de": "Opus Postumum",
+      "en": "Opus Postumum",
+      "zh": "《遗著》",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:organisation",
+      "de": "Organisation",
+      "en": "organization",
+      "zh": "组织",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:organismus",
+      "de": "Organismus",
+      "en": "organism",
+      "zh": "有机体",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:organon",
+      "de": "Organon",
+      "en": "organon",
+      "zh": "工具论",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:offentliches-recht",
+      "de": "Öffentliches Recht",
+      "en": "public right",
+      "zh": "公法",
+      "variants_en": [
+        "public law"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:pantheismus",
+      "de": "Pantheismus",
+      "en": "pantheism",
+      "zh": "泛神论",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:paralogismus",
+      "de": "Paralogismus",
+      "en": "paralogism",
+      "zh": "谬误推理",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:pathologisch",
+      "de": "pathologisch",
+      "en": "pathological",
+      "zh": "病理学的",
+      "variants_en": [
+        "affective"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:pathos",
+      "de": "Pathos",
+      "en": "pathos",
+      "zh": "情致",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:peripatos",
+      "de": "Peripatos",
+      "en": "Peripatos",
+      "zh": "逍遥学派",
+      "variants_en": [
+        "Peripatetic school"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:personlichkeit",
+      "de": "Persönlichkeit",
+      "en": "personality",
+      "zh": "人格性",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:pflicht",
+      "de": "Pflicht",
+      "en": "duty",
+      "zh": "义务",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:phanomenologie-des-geistes",
+      "de": "Phänomenologie des Geistes",
+      "en": "Phenomenology of Spirit",
+      "zh": "《精神现象学》",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:philologie",
+      "de": "Philologie",
+      "en": "philology",
+      "zh": "语文学",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:philosophieren",
+      "de": "philosophieren",
+      "en": "philosophize",
+      "zh": "哲思",
+      "variants_en": [
+        "philosophizing"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:physiognomie",
+      "de": "Physiognomie",
+      "en": "physiognomy",
+      "zh": "面相学",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:physikotheologie",
+      "de": "Physikotheologie",
+      "en": "physico-theology",
+      "zh": "自然神学",
+      "variants_en": [
+        "physicotheology"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:poetische",
+      "de": "poetische",
+      "en": "poetic",
+      "zh": "诗性",
+      "variants_en": [
+        "the poetic"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:positiv",
+      "de": "positiv",
+      "en": "positive",
+      "zh": "实定的",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:positivitat",
+      "de": "Positivität",
+      "en": "positivity",
+      "zh": "实定性",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:positive-philosophie",
+      "de": "positive Philosophie",
+      "en": "positive philosophy",
+      "zh": "肯定哲学",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:postulat",
+      "de": "Postulat",
+      "en": "postulate",
+      "zh": "公设",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:potenz",
+      "de": "Potenz",
+      "en": "potency",
+      "zh": "潜能阶次",
+      "variants_en": [
+        "Potenz"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:pobel",
+      "de": "Pöbel",
+      "en": "rabble",
+      "zh": "贱民",
+      "variants_en": [
+        "mob"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:poggeler",
+      "de": "Pöggeler",
+      "en": "Pöggeler",
+      "zh": "珀格勒",
+      "variants_en": [
+        "Poeggeler"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:pragmatisch",
+      "de": "pragmatisch",
+      "en": "pragmatic",
+      "zh": "实用的",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:pradikat",
+      "de": "Prädikat",
+      "en": "predicate",
+      "zh": "谓词",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:pramisse",
+      "de": "Prämisse",
+      "en": "premise",
+      "zh": "前提",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:prinzip",
+      "de": "Prinzip",
+      "en": "principle",
+      "zh": "原则",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:privativ",
+      "de": "privativ",
+      "en": "privative",
+      "zh": "缺乏性的",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:privatrecht",
+      "de": "Privatrecht",
+      "en": "private right",
+      "zh": "私法",
+      "variants_en": [
+        "private law"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:problematisch",
+      "de": "problematisch",
+      "en": "problematic",
+      "zh": "或然的",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:prolegomena",
+      "de": "Prolegomena",
+      "en": "Prolegomena",
+      "zh": "《未来形而上学导论》",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:propadeutik",
+      "de": "Propädeutik",
+      "en": "preparatory training",
+      "zh": "预备训练",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:propadeutisch",
+      "de": "propädeutisch",
+      "en": "propaedeutic",
+      "zh": "预备的",
+      "variants_en": [
+        "preparatory"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:qualifikation",
+      "de": "Qualifikation",
+      "en": "qualification",
+      "zh": "资质",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:quantum",
+      "de": "Quantum",
+      "en": "quantum",
+      "zh": "定量",
+      "variants_en": [
+        "determinate quantity"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:quantitat",
+      "de": "Quantität",
+      "en": "quantity",
+      "zh": "（纯）量",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:quine",
+      "de": "Quine",
+      "en": "Quine",
+      "zh": "蒯因",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:rasonnement",
+      "de": "Räsonnement",
+      "en": "ratiocination",
+      "zh": "知性推理",
+      "variants_en": [
+        "reasoning"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:realismus",
+      "de": "Realismus",
+      "en": "realism",
+      "zh": "实在论",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:realitat",
+      "de": "Realität",
+      "en": "reality (Realität)",
+      "zh": "实在性",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:realphilosophie",
+      "de": "Realphilosophie",
+      "en": "real philosophy",
+      "zh": "实在哲学",
+      "variants_en": [
+        "Realphilosophie"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:recht",
+      "de": "Recht",
+      "en": "right",
+      "zh": "法权",
+      "variants_en": [
+        "Recht"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:rechte",
+      "de": "Rechte",
+      "en": "rights",
+      "zh": "权利",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:rechtschaffenheit",
+      "de": "Rechtschaffenheit",
+      "en": "rectitude",
+      "zh": "正直",
+      "variants_en": [
+        "uprightness"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:reflexion",
+      "de": "Reflexion",
+      "en": "reflection",
+      "zh": "反思",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:reflexionsbestimmung",
+      "de": "Reflexionsbestimmung",
+      "en": "determination of reflection",
+      "zh": "反映规定",
+      "variants_en": [
+        "reflection-determination"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:reflektieren",
+      "de": "reflektieren",
+      "en": "reflect",
+      "zh": "反映",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:reflektiertseyn-in-sich-selbst",
+      "de": "reflektiertseyn in sich selbst",
+      "en": "reflectedness into itself",
+      "zh": "折返回自身",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:reflektirtseyn-in-sich",
+      "de": "reflektirtseyn in sich",
+      "en": "being-reflected-into-itself",
+      "zh": "折返回自身",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:reformatorisch",
+      "de": "reformatorisch",
+      "en": "reforming",
+      "zh": "宗教改革的",
+      "variants_en": [
+        "reformational"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:regulativ",
+      "de": "Regulativ",
+      "en": "regulative",
+      "zh": "范导性",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:relatum",
+      "de": "Relatum",
+      "en": "relatum",
+      "zh": "关联项",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:repulsion",
+      "de": "Repulsion",
+      "en": "repulsion",
+      "zh": "排斥",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:rezeptivitat",
+      "de": "Rezeptivität",
+      "en": "receptivity",
+      "zh": "接受性",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:sache",
+      "de": "Sache",
+      "en": "matter",
+      "zh": "事情",
+      "variants_en": [
+        "issue",
+        "Sache"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:sache-selbst",
+      "de": "Sache selbst",
+      "en": "matter itself",
+      "zh": "事情本身",
+      "variants_en": [
+        "matter at issue",
+        "Sache selbst"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:schadellehre",
+      "de": "Schädellehre",
+      "en": "phrenology",
+      "zh": "颅相学",
+      "variants_en": [
+        "doctrine of the skull"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:schein",
+      "de": "Schein",
+      "en": "semblance",
+      "zh": "映象",
+      "variants_en": [
+        "shine (Schein)",
+        "show"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:scheinen",
+      "de": "scheinen",
+      "en": "shine",
+      "zh": "映现",
+      "variants_en": [
+        "seem"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:schema",
+      "de": "Schema",
+      "en": "schema",
+      "zh": "图型",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:schematismus",
+      "de": "Schematismus",
+      "en": "schematism",
+      "zh": "图型法",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:schicksal",
+      "de": "Schicksal",
+      "en": "fate",
+      "zh": "命运",
+      "variants_en": [
+        "destiny"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:schlusse",
+      "de": "Schlüsse",
+      "en": "syllogisms",
+      "zh": "推论",
+      "variants_en": [
+        "inferences"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:scholastik",
+      "de": "Scholastik",
+      "en": "scholasticism",
+      "zh": "经院哲学",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:schrank",
+      "de": "Schrank",
+      "en": "limitation",
+      "zh": "限制",
+      "variants_en": [
+        "Schranke"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:schulmetaphysik",
+      "de": "Schulmetaphysik",
+      "en": "school metaphysics",
+      "zh": "学院形而上学",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:schulphilosophie",
+      "de": "Schulphilosophie",
+      "en": "school philosophy",
+      "zh": "学院哲学",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:seele",
+      "de": "Seele",
+      "en": "soul",
+      "zh": "灵魂",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:sehnsucht",
+      "de": "Sehnsucht",
+      "en": "longing",
+      "zh": "渴慕",
+      "variants_en": [
+        "yearning",
+        "Sehnsucht"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:selbstanschauung",
+      "de": "Selbstanschauung",
+      "en": "self-intuition",
+      "zh": "自身直观",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:selbstandigkeit",
+      "de": "Selbständigkeit",
+      "en": "independence",
+      "zh": "独立性",
+      "variants_en": [
+        "self-sufficiency"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:selbstbestimmung",
+      "de": "Selbstbestimmung",
+      "en": "self-determination",
+      "zh": "自身规定",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:selbstbewusstsein",
+      "de": "Selbstbewusstsein",
+      "en": "self-consciousness",
+      "zh": "自我意识",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:selbstbezuglichkeit",
+      "de": "Selbstbezüglichkeit",
+      "en": "self-referentiality",
+      "zh": "自我关联性",
+      "variants_en": [
+        "self-relation"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:selbstgefuhl",
+      "de": "Selbstgefühl",
+      "en": "self-feeling",
+      "zh": "自身感觉",
+      "variants_en": [
+        "feeling of self"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:selbstsein",
+      "de": "Selbstsein",
+      "en": "selfhood",
+      "zh": "独立",
+      "variants_en": [
+        "being-oneself"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:seligkeit",
+      "de": "Seligkeit",
+      "en": "blessedness",
+      "zh": "极乐",
+      "variants_en": [
+        "beatitude"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:setzen",
+      "de": "Setzen",
+      "en": "positing",
+      "zh": "设定",
+      "variants_en": [
+        "posit"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:sextus-empiricus",
+      "de": "Sextus Empiricus",
+      "en": "Sextus Empiricus",
+      "zh": "塞克斯都·恩披里柯",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:sichselbstgleichheit",
+      "de": "Sichselbstgleichheit",
+      "en": "self-sameness",
+      "zh": "自身一致性",
+      "variants_en": [
+        "self-equality"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:sinnlich",
+      "de": "sinnlich",
+      "en": "sensible",
+      "zh": "感性的",
+      "variants_en": [
+        "sensuous"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:sinnlichkeit",
+      "de": "Sinnlichkeit",
+      "en": "sensibility",
+      "zh": "感性",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:sittengesetz",
+      "de": "Sittengesetz",
+      "en": "moral law",
+      "zh": "伦理法则",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:sittlich",
+      "de": "sittlich",
+      "en": "ethical",
+      "zh": "伦理的",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:sittlichkeit",
+      "de": "Sittlichkeit",
+      "en": "ethical life",
+      "zh": "伦理",
+      "variants_en": [
+        "ethicality",
+        "Sittlichkeit"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:skeptizismus",
+      "de": "Skeptizismus",
+      "en": "skepticism",
+      "zh": "怀疑论",
+      "variants_en": [
+        "scepticism"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:sollen",
+      "de": "sollen",
+      "en": "ought",
+      "zh": "应当",
+      "variants_en": [
+        "Sollen"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:sophist",
+      "de": "Sophist",
+      "en": "sophist",
+      "zh": "智术师",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:sophistik",
+      "de": "Sophistik",
+      "en": "sophistry",
+      "zh": "诡辩术",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:spatidealismus",
+      "de": "Spätidealismus",
+      "en": "late idealism",
+      "zh": "晚期观念论",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:spiritualismus",
+      "de": "Spiritualismus",
+      "en": "spiritualism",
+      "zh": "唯灵论",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:spontaneitat",
+      "de": "Spontaneität",
+      "en": "spontaneity",
+      "zh": "自发性",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:spekulativ",
+      "de": "spekulativ",
+      "en": "speculative",
+      "zh": "思辨的",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:spekulativer-idealismus",
+      "de": "spekulativer Idealismus",
+      "en": "speculative idealism",
+      "zh": "思辨观念论",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:spekulation",
+      "de": "Spekulation",
+      "en": "speculation",
+      "zh": "思辨",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:spezifisch",
+      "de": "spezifisch",
+      "en": "specific",
+      "zh": "特定的",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:stand",
+      "de": "Stand",
+      "en": "estate",
+      "zh": "阶层",
+      "variants_en": [
+        "social estate",
+        "class"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:station",
+      "de": "Station",
+      "en": "station",
+      "zh": "站点",
+      "variants_en": [
+        "stopping place"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:status",
+      "de": "Status",
+      "en": "status",
+      "zh": "状态",
+      "variants_en": [
+        "state"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:strafe",
+      "de": "Strafe",
+      "en": "punishment",
+      "zh": "惩罚",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:streben",
+      "de": "Streben",
+      "en": "striving",
+      "zh": "努力",
+      "variants_en": [
+        "endeavor"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:streit-der-fakultaten",
+      "de": "Streit der Fakultäten",
+      "en": "Conflict of the Faculties",
+      "zh": "《系科之争》",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:stufe",
+      "de": "Stufe",
+      "en": "stage",
+      "zh": "阶段",
+      "variants_en": [
+        "level",
+        "step"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:subjektivitat",
+      "de": "Subjektivität",
+      "en": "subjectivity",
+      "zh": "主观性",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:subsumtion",
+      "de": "Subsumtion",
+      "en": "subsumption",
+      "zh": "归摄",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:subsumieren",
+      "de": "subsumieren",
+      "en": "subsume",
+      "zh": "归摄",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:substanz",
+      "de": "Substanz",
+      "en": "substance",
+      "zh": "实体",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:substantialitat",
+      "de": "Substantialität",
+      "en": "substantiality",
+      "zh": "实体性",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:substantiell",
+      "de": "substantiell",
+      "en": "substantial",
+      "zh": "实体性",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:substrat",
+      "de": "Substrat",
+      "en": "substrate",
+      "zh": "基体",
+      "variants_en": [
+        "substratum"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:summe",
+      "de": "Summe",
+      "en": "sum",
+      "zh": "总和",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:symbol",
+      "de": "Symbol",
+      "en": "symbol",
+      "zh": "象征",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:symbolisch",
+      "de": "symbolisch",
+      "en": "symbolic",
+      "zh": "象征的",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:system",
+      "de": "System",
+      "en": "system",
+      "zh": "体系",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:systematik",
+      "de": "Systematik",
+      "en": "systematics",
+      "zh": "体系构想",
+      "variants_en": [
+        "systematicity"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:systementwurf",
+      "de": "Systementwurf",
+      "en": "system draft",
+      "zh": "体系草稿",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:systemfragment",
+      "de": "Systemfragment",
+      "en": "system fragment",
+      "zh": "体系残篇",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:systemprogramm",
+      "de": "Systemprogramm",
+      "en": "system programme",
+      "zh": "体系纲领",
+      "variants_en": [
+        "system program"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:systematisch",
+      "de": "systematisch",
+      "en": "systematic",
+      "zh": "体系性",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:synthesis",
+      "de": "Synthesis",
+      "en": "synthesis",
+      "zh": "综合",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:szientismus",
+      "de": "Szientismus",
+      "en": "scientism",
+      "zh": "科学至上主义",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:szientifisch",
+      "de": "szientifisch",
+      "en": "scientistic",
+      "zh": "科学至上主义的",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:tatig",
+      "de": "tätig",
+      "en": "active",
+      "zh": "能动的",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:tatige",
+      "de": "Tätige",
+      "en": "active agent",
+      "zh": "活动者",
+      "variants_en": [
+        "actor"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:tatigkeit",
+      "de": "Tätigkeit",
+      "en": "activity",
+      "zh": "活动性",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:topik",
+      "de": "Topik",
+      "en": "topics",
+      "zh": "正位论",
+      "variants_en": [
+        "topica",
+        "topic"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:totalitat",
+      "de": "Totalität",
+      "en": "totality",
+      "zh": "整体性",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:thatig",
+      "de": "thätig",
+      "en": "active",
+      "zh": "能动的",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:these",
+      "de": "These",
+      "en": "thesis",
+      "zh": "论点",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:tilgen",
+      "de": "tilgen",
+      "en": "annihilate",
+      "zh": "消灭",
+      "variants_en": [
+        "eradicate",
+        "extinguish"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:tilgung",
+      "de": "Tilgung",
+      "en": "annihilation",
+      "zh": "消灭",
+      "variants_en": [
+        "extinction"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:transzendent",
+      "de": "transzendent",
+      "en": "transcendent",
+      "zh": "超验的",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:transzendental",
+      "de": "transzendental",
+      "en": "transcendental",
+      "zh": "先验",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:transzendentale-anschauung",
+      "de": "transzendentale Anschauung",
+      "en": "transcendental intuition",
+      "zh": "先验直观",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:transzendentale-analytik",
+      "de": "transzendentale Analytik",
+      "en": "transcendental analytic",
+      "zh": "先验分析论",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:transzendentale-asthetik",
+      "de": "transzendentale Ästhetik",
+      "en": "transcendental aesthetic",
+      "zh": "先验感性论",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:transzendentale-dialektik",
+      "de": "transzendentale Dialektik",
+      "en": "transcendental dialectic",
+      "zh": "先验辩证论",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:trieb",
+      "de": "Trieb",
+      "en": "drive",
+      "zh": "冲动",
+      "variants_en": [
+        "instinct"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:triebfeder",
+      "de": "Triebfeder",
+      "en": "incentive",
+      "zh": "动机",
+      "variants_en": [
+        "spring of action"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:tropen",
+      "de": "Tropen",
+      "en": "tropes",
+      "zh": "论式",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:tugend",
+      "de": "Tugend",
+      "en": "virtue",
+      "zh": "德行",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:tugendlehre",
+      "de": "Tugendlehre",
+      "en": "doctrine of virtue",
+      "zh": "德行论",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:tun-oder-lassen",
+      "de": "Tun oder Lassen",
+      "en": "action or omission",
+      "zh": "所为所不为",
+      "variants_en": [
+        "doing or forbearing"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:twa",
+      "de": "TWA",
+      "en": "Theorie-Werkausgabe",
+      "zh": "黑格尔理论著作集",
+      "variants_en": [
+        "TWA"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:tw",
+      "de": "TW",
+      "en": "Theorie-Werkausgabe",
+      "zh": "黑格尔理论著作集",
+      "variants_en": [
+        "TW"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:unaufhebbar",
+      "de": "unaufhebbar",
+      "en": "irremovable",
+      "zh": "不可扬弃",
+      "variants_en": [
+        "insurmountable",
+        "unsublatable"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:unendlich",
+      "de": "unendlich",
+      "en": "infinite",
+      "zh": "无限",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:unendlichkeit",
+      "de": "Unendlichkeit",
+      "en": "infinitude",
+      "zh": "无限性",
+      "variants_en": [
+        "infinity"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:unendlicher-progress",
+      "de": "unendlicher Progreß",
+      "en": "infinite progress",
+      "zh": "无限进展",
+      "variants_en": [
+        "infinite regress"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:ungleichheit",
+      "de": "Ungleichheit",
+      "en": "disparity",
+      "zh": "不一致",
+      "variants_en": [
+        "inequality",
+        "difference"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:unmittelbares",
+      "de": "Unmittelbares",
+      "en": "the immediate",
+      "zh": "直接的东西",
+      "variants_en": [
+        "immediate thing"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:unmittelbarkeit",
+      "de": "Unmittelbarkeit",
+      "en": "immediacy",
+      "zh": "直接性",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:unorganisches",
+      "de": "Unorganisches",
+      "en": "inorganic nature",
+      "zh": "无机物",
+      "variants_en": [
+        "inorganic body"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:unphilosophie",
+      "de": "Unphilosophie",
+      "en": "pseudo-philosophy",
+      "zh": "假哲学",
+      "variants_en": [
+        "un-philosophy"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:unphilosophische",
+      "de": "unphilosophische",
+      "en": "unphilosophical",
+      "zh": "假哲学的",
+      "variants_en": [
+        "pseudo-philosophical"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:unterwelt",
+      "de": "Unterwelt",
+      "en": "underworld",
+      "zh": "地下世界",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:unverstandlichkeit",
+      "de": "Unverständlichkeit",
+      "en": "incomprehensibility",
+      "zh": "不可理解性",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:unwissen",
+      "de": "Unwissen",
+      "en": "ignorance",
+      "zh": "无知",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:urbild",
+      "de": "Urbild",
+      "en": "archetype",
+      "zh": "原型",
+      "variants_en": [
+        "original model"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:urteilskraft",
+      "de": "Urteilskraft",
+      "en": "power of judgment",
+      "zh": "判断力",
+      "variants_en": [
+        "judgment",
+        "Urteilskraft"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:ursachverhalt",
+      "de": "Ursachverhalt",
+      "en": "primal state of affairs",
+      "zh": "原初事态",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:ubereinstimmung",
+      "de": "Übereinstimmung",
+      "en": "harmony",
+      "zh": "和谐一致",
+      "variants_en": [
+        "concordance",
+        "agreement"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:ubergang",
+      "de": "Übergang",
+      "en": "transition",
+      "zh": "过渡",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:ubergehen",
+      "de": "Übergehen",
+      "en": "transitioning",
+      "zh": "过渡",
+      "variants_en": [
+        "passing over"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:ubergehen-2",
+      "de": "übergehen",
+      "en": "pass over",
+      "zh": "过渡",
+      "variants_en": [
+        "transition"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:ubersinnlich",
+      "de": "übersinnlich",
+      "en": "supersensible",
+      "zh": "超感性的",
+      "variants_en": [
+        "supersensuous"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:verbindung",
+      "de": "Verbindung",
+      "en": "combination",
+      "zh": "结合",
+      "variants_en": [
+        "connection"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:vereinigen",
+      "de": "vereinigen",
+      "en": "unite",
+      "zh": "联结",
+      "variants_en": [
+        "join"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:vereinigung",
+      "de": "Vereinigung",
+      "en": "unification",
+      "zh": "联结",
+      "variants_en": [
+        "union"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:verein-von-freunden-des-verewigten",
+      "de": "Verein von Freunden des Verewigten",
+      "en": "Society of Friends of the Immortalized",
+      "zh": "往生者之友协会",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:verfahren",
+      "de": "Verfahren",
+      "en": "procedure",
+      "zh": "操作流程",
+      "variants_en": [
+        "proceedings"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:vermeintlich",
+      "de": "vermeintlich",
+      "en": "supposed",
+      "zh": "假定的",
+      "variants_en": [
+        "presumed"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:vermitteln",
+      "de": "vermitteln",
+      "en": "mediate",
+      "zh": "某物被中介）",
+      "variants_en": [
+        "mediated"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:vermittlung",
+      "de": "Vermittlung",
+      "en": "mediation",
+      "zh": "中介",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:verneinung",
+      "de": "Verneinung",
+      "en": "negation",
+      "zh": "否认",
+      "variants_en": [
+        "denial"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:vernichten",
+      "de": "vernichten",
+      "en": "annihilate",
+      "zh": "消灭",
+      "variants_en": [
+        "destroy"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:vernunftigkeit",
+      "de": "Vernünftigkeit",
+      "en": "rationality",
+      "zh": "合理性",
+      "variants_en": [
+        "reasonableness"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:versohnen",
+      "de": "versöhnen",
+      "en": "reconcile",
+      "zh": "令……和解",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:versohnung",
+      "de": "Versöhnung",
+      "en": "reconciliation",
+      "zh": "和解",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:verstand",
+      "de": "Verstand",
+      "en": "understanding",
+      "zh": "知性",
+      "variants_en": [],
+      "aliases_en": [
+        "intellect"
+      ]
+    },
+    {
+      "id": "german-classical-philosophy:verstandig",
+      "de": "verständig",
+      "en": "judicious",
+      "zh": "知性的",
+      "variants_en": [
+        "of the understanding"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:verschieden",
+      "de": "verschieden",
+      "en": "different",
+      "zh": "有差别的",
+      "variants_en": [
+        "distinct"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:verzweiflung",
+      "de": "Verzweiflung",
+      "en": "despair",
+      "zh": "彻底怀疑",
+      "variants_en": [
+        "radical skepticism"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:volk",
+      "de": "Volk",
+      "en": "people",
+      "zh": "民族",
+      "variants_en": [
+        "nation"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:volksgeist",
+      "de": "Volksgeist",
+      "en": "spirit of a people",
+      "zh": "民族精神",
+      "variants_en": [
+        "national spirit",
+        "Volksgeist"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:volksreligion",
+      "de": "Volksreligion",
+      "en": "folk religion",
+      "zh": "人民宗教",
+      "variants_en": [
+        "people's religion"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:vollendet",
+      "de": "vollendet",
+      "en": "consummated",
+      "zh": "完满的",
+      "variants_en": [
+        "completed",
+        "perfected"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:voraussetzung",
+      "de": "Voraussetzung",
+      "en": "presupposition",
+      "zh": "前提预设",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:vorbegriff",
+      "de": "Vorbegriff",
+      "en": "preliminary concept",
+      "zh": "先行概念",
+      "variants_en": [
+        "Vorbegriff"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:vorlesung",
+      "de": "Vorlesung",
+      "en": "lecture",
+      "zh": "讲授课",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:vormarz",
+      "de": "Vormärz",
+      "en": "Vormärz",
+      "zh": "“三月革命前”时期",
+      "variants_en": [
+        "pre-March era"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:vorstellung",
+      "de": "Vorstellung",
+      "en": "representation",
+      "zh": "表象",
+      "variants_en": [
+        "Vorstellung"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:wahrheit",
+      "de": "Wahrheit",
+      "en": "truth",
+      "zh": "真理",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:wahrnehmung",
+      "de": "Wahrnehmung",
+      "en": "perception",
+      "zh": "知觉",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:wechsel",
+      "de": "Wechsel",
+      "en": "change",
+      "zh": "更替",
+      "variants_en": [
+        "alternation",
+        "vicissitude"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:weise",
+      "de": "Weise",
+      "en": "manner",
+      "zh": "方式",
+      "variants_en": [
+        "way"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:weltanschauung",
+      "de": "Weltanschauung",
+      "en": "worldview",
+      "zh": "世界观",
+      "variants_en": [
+        "Weltanschauung"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:weltbild",
+      "de": "Weltbild",
+      "en": "world picture",
+      "zh": "世界观",
+      "variants_en": [
+        "view of the world"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:weltlauf",
+      "de": "Weltlauf",
+      "en": "course of the world",
+      "zh": "世界进程",
+      "variants_en": [
+        "Weltlauf"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:weltseele",
+      "de": "Weltseele",
+      "en": "world soul",
+      "zh": "世界灵魂",
+      "variants_en": [
+        "anima mundi"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:weltweisheit",
+      "de": "Weltweisheit",
+      "en": "worldly wisdom",
+      "zh": "世俗智慧",
+      "variants_en": [
+        "philosophy"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:werden",
+      "de": "Werden",
+      "en": "becoming",
+      "zh": "转变",
+      "variants_en": [
+        "becoming process"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:wesen",
+      "de": "Wesen",
+      "en": "essence",
+      "zh": "本质",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:widerspruch",
+      "de": "Widerspruch",
+      "en": "contradiction",
+      "zh": "矛盾",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:wille",
+      "de": "Wille",
+      "en": "will",
+      "zh": "意志",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:willkur",
+      "de": "Willkür",
+      "en": "arbitrary choice",
+      "zh": "任意",
+      "variants_en": [
+        "free will",
+        "arbitrariness",
+        "Willkür"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:willkurlich",
+      "de": "willkürlich",
+      "en": "arbitrary",
+      "zh": "任意的",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:wirklichkeit",
+      "de": "Wirklichkeit",
+      "en": "actuality",
+      "zh": "现实性",
+      "variants_en": [
+        "reality",
+        "Wirklichkeit"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:wirksamkeit",
+      "de": "Wirksamkeit",
+      "en": "efficacy",
+      "zh": "作用性",
+      "variants_en": [
+        "effectiveness"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:wissen",
+      "de": "Wissen",
+      "en": "knowledge",
+      "zh": "知识",
+      "variants_en": [
+        "knowing"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:wissenschaftslehre",
+      "de": "Wissenschaftslehre",
+      "en": "doctrine of science",
+      "zh": "知识学",
+      "variants_en": [
+        "science of knowledge",
+        "Wissenschaftslehre"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:wissenschaft-der-logik",
+      "de": "Wissenschaft der Logik",
+      "en": "Science of Logic",
+      "zh": "《逻辑科学》",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:zahl",
+      "de": "Zahl",
+      "en": "number",
+      "zh": "数",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:zauberei",
+      "de": "Zauberei",
+      "en": "sorcery",
+      "zh": "巫术",
+      "variants_en": [
+        "magic"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:zeichen",
+      "de": "Zeichen",
+      "en": "sign",
+      "zh": "符号",
+      "variants_en": [
+        "semiotic sign"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:zeitgeist",
+      "de": "Zeitgeist",
+      "en": "spirit of the age",
+      "zh": "时代精神",
+      "variants_en": [
+        "Zeitgeist"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:zeugnis-des-geistes",
+      "de": "Zeugnis des Geistes",
+      "en": "testimony of the spirit",
+      "zh": "精神的见证",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:zucht",
+      "de": "Zucht",
+      "en": "moral discipline",
+      "zh": "管教",
+      "variants_en": [
+        "chastisement"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:zugrundliegendes",
+      "de": "Zugrundliegendes",
+      "en": "underlying substrate",
+      "zh": "载体",
+      "variants_en": [
+        "that which lies at the foundation"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:zweckmassig",
+      "de": "zweckmäßig",
+      "en": "purposive",
+      "zh": "合目的的",
+      "variants_en": [
+        "teleological",
+        "expedient"
+      ],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:zweifel",
+      "de": "Zweifel",
+      "en": "doubt",
+      "zh": "怀疑",
+      "variants_en": [],
+      "aliases_en": []
+    },
+    {
+      "id": "german-classical-philosophy:zwist",
+      "de": "Zwist",
+      "en": "strife",
+      "zh": "纷争",
+      "variants_en": [
+        "dispute",
+        "discord"
+      ],
+      "aliases_en": []
+    }
+  ]
+}
