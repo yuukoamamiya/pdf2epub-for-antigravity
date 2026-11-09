@@ -279,6 +279,38 @@ _special_role_numeric_markers = special_role_numeric_markers
 _validate_special_role_markers = validate_special_role_markers
 
 
+def _describe_footnote_marker_mismatch(
+    source_markers: list[str], target_markers: list[str]
+) -> str:
+    """Summarize a footnote marker mismatch without dumping the full sequences."""
+    source_counts = Counter(source_markers)
+    target_counts = Counter(target_markers)
+    if source_counts == target_counts:
+        for index, (expected, actual) in enumerate(zip(source_markers, target_markers)):
+            if expected != actual:
+                return (
+                    "footnote markers are out of order "
+                    f"(first divergence at position {index + 1}: "
+                    f"expected {expected!r}, found {actual!r}); "
+                    "rephrase the sentence so the footnote sequence matches the source"
+                )
+        return (
+            "footnote markers are out of order; "
+            "rephrase the sentence so the footnote sequence matches the source"
+        )
+    missing = list(
+        dict.fromkeys(
+            key for key in source_markers if source_counts[key] > target_counts[key]
+        )
+    )
+    extra = list(
+        dict.fromkeys(
+            key for key in target_markers if target_counts[key] > source_counts[key]
+        )
+    )
+    return f"footnote markers do not match: missing={missing!r}, extra={extra!r}"
+
+
 def validate_footnote_markers(source_text: str, target_text: str) -> list[str]:
     """Require translated Markdown to preserve exact footnote marker syntax."""
     source_visible = _mask_markdown_code_and_comments(source_text)
@@ -289,7 +321,7 @@ def validate_footnote_markers(source_text: str, target_text: str) -> list[str]:
     if source_markers != target_markers:
         return [
             "translate footnote marker mismatch: "
-            f"source={source_markers!r}, target={target_markers!r}"
+            + _describe_footnote_marker_mismatch(source_markers, target_markers)
         ]
     if source_markers:
         for key in dict.fromkeys(source_markers):

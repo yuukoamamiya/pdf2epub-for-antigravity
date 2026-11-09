@@ -38,6 +38,22 @@ def test_unrelated_raw_superscripts_are_preserved_without_footnote_conversion():
     assert validate_footnote_markers(source, target) == []
 
 
+def test_footnote_marker_mismatch_reports_order_and_delta():
+    source = "Text [^47] and [^48]."
+    reordered = "Text [^48] and [^47]."
+    reordered_errors = validate_footnote_markers(source, reordered)
+    assert reordered_errors
+    assert "out of order" in reordered_errors[0]
+    assert "expected '47'" in reordered_errors[0]
+    assert "source=[" not in reordered_errors[0]
+
+    missing = "Text [^47]."
+    missing_errors = validate_footnote_markers(source, missing)
+    assert missing_errors
+    assert "missing" in missing_errors[0]
+    assert "'48'" in missing_errors[0]
+
+
 def _source_book(note_count: int = NOTE_COUNT) -> str:
     references = " ".join(f"<sup>{number}</sup>" for number in range(1, note_count + 1))
     notes = "\n\n".join(
