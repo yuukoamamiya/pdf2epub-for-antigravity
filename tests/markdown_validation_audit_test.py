@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+from pdf2epub.markdown_validation import detect_markdown_syntax_issues
 from pdf2epub.markdown_validation_audit import MarkdownFileInput, audit_markdown_file
 from pdf2epub.markdown_validation_context import load_markdown_validation_context
 
@@ -45,6 +46,26 @@ def test_single_file_audit_structures_decode_errors(tmp_path: Path):
     assert result.invalid[0]["file"] == "unit.md"
     assert "UTF-8 decode error" in result.invalid[0]["reason"]
     assert result.valid_files == []
+
+
+def test_detect_markdown_syntax_issues():
+    assert detect_markdown_syntax_issues("good line") == []
+    assert detect_markdown_syntax_issues("use `code` here") == []
+    assert any(
+        "unclosed inline code span" in issue
+        for issue in detect_markdown_syntax_issues("``foo")
+    )
+    assert any(
+        "unclosed inline code span" in issue
+        for issue in detect_markdown_syntax_issues("Text [^22]` and more")
+    )
+    assert detect_markdown_syntax_issues("$A = \\neg B$") == []
+    assert any(
+        "unbalanced inline math" in issue
+        for issue in detect_markdown_syntax_issues("$A = B")
+    )
+    assert detect_markdown_syntax_issues("price $5") == []
+    assert detect_markdown_syntax_issues("```\n` not code\n```") == []
 
 
 def test_unknown_file_role_is_an_explicit_audit_failure(tmp_path: Path):

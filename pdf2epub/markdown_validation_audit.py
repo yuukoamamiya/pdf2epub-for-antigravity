@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 from .document_roles import DENSITY_EXEMPT_ROLES
 from .footnote_normalization import validate_polish_footnote_normalization
-from .markdown_validation import (validate_footnote_markers, detect_bilingual_output, detect_polish_page_furniture, fix_reference_heading_mismatch, is_bibliography_text, is_front_matter_text, polish_content_integrity_check, polish_structure_audit, strip_outer_markdown_fences, target_language_ratio_check, translation_diff_summary)
+from .markdown_validation import (validate_footnote_markers, detect_bilingual_output, detect_markdown_syntax_issues, detect_polish_page_furniture, fix_reference_heading_mismatch, is_bibliography_text, is_front_matter_text, polish_content_integrity_check, polish_structure_audit, strip_outer_markdown_fences, target_language_ratio_check, translation_diff_summary)
 from .special_role_audit import validate_special_role_markers
 from .subagent_safety import detect_refusal
 from .utils.ocr_artifacts import clean_ocr_page_artifacts
@@ -359,6 +359,13 @@ def audit_markdown_file(
                         reference_heading_fixes.extend(
                             {"file": file.name, **fix} for fix in fixes
                         )
+                if task in {"polish", "translate"}:
+                    syntax_issues = detect_markdown_syntax_issues(target_text)
+                    if syntax_issues:
+                        invalid.extend(
+                            {"file": file.name, "reason": issue} for issue in syntax_issues
+                        )
+                        continue
                 if task == "translate":
                     escaped_number_re = re.compile(r"^(\d+)\\\.\s", re.MULTILINE)
                     source_numbered_prose = escaped_number_re.findall(source_text)

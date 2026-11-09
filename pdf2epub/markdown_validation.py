@@ -372,6 +372,75 @@ def _blank_preserving_newlines(chars: list[str], start: int, end: int) -> None:
             chars[index] = " "
 
 
+def _mask_balanced_code_spans(line: str) -> str:
+    """Blank paired backtick code spans while leaving unpaired runs intact."""
+    chars = list(line)
+    n = len(line)
+    i = 0
+    while i < n:
+        if line[i] != "`":
+            i += 1
+            continue
+        start = i
+        while i < n and line[i] == "`":
+            i += 1
+        run_len = i - start
+        search = i
+        while search < n:
+            if line[search] != "`":
+                search += 1
+                continue
+            close_start = search
+            while search < n and line[search] == "`":
+                search += 1
+            if search - close_start == run_len:
+                for index in range(start, search):
+                    chars[index] = " "
+                i = search
+                break
+        # Unpaired run: leave untouched and continue past it.
+    return "".join(chars)
+
+
+def detect_markdown_syntax_issues(text: str) -> list[str]:
+    """Detect unclosed inline code spans and unbalanced inline math delimiters."""
+    errors: list[str] = []
+    fence_char: str | None = None
+    fence_size = 0
+    for line_no, line in enumerate(text.splitlines(), 1):
+        fence = re.match(r"^\s{0,3}(`{3,}|~{3,})", line)
+        if fence_char is not None:
+            if fence and fence.group(1)[0] == fence_char and len(fence.group(1)) >= fence_size:
+                fence_char = None
+                fence_size = 0
+            continue
+        if fence:
+            fence_char = fence.group(1)[0]
+            fence_size = len(fence.group(1))
+            continue
+        runs = [m.group(1) for m in re.finditer(r"(?<!\\)(`+)", line)]
+        counts = Counter(len(run) for run in runs)
+        if any(value % 2 == 1 for value in counts.values()):
+            errors.append(f"line {line_no}: unclosed inline code span (backtick)")
+            continue
+        masked = _mask_balanced_code_spans(line)
+        dollars = [
+            index
+            for index, char in enumerate(masked)
+            if char == "$" and (index == 0 or masked[index - 1] != "\\")
+        ]
+        if len(dollars) % 2 == 1:
+            if len(dollars) == 1:
+                pos = dollars[0]
+                rest = masked[pos + 1:]
+                if rest and rest[0].isdigit() and not re.search(r"[\\^_{}=]", masked):
+                    continue
+            errors.append(f"line {line_no}: unbalanced inline math delimiter ($)")
+    if fence_char is not None:
+        errors.append("unclosed Markdown code fence")
+    return errors
+
+
 def _raw_superscript_markers(text: str) -> list[str]:
     """Capture raw sup contents without assigning citation/math semantics."""
     markers = []
@@ -918,6 +987,7 @@ def detect_bilingual_output(source_text: str, target_text: str) -> Optional[Dict
 
 __all__ = [
     "detect_bilingual_output",
+    "detect_markdown_syntax_issues",
     "detect_polish_page_furniture",
     "fix_reference_heading_mismatch",
     "polish_content_integrity_check",
