@@ -20,6 +20,7 @@ from loguru import logger
 from .epub.builder import EpubBuilder, localized_toc_label
 from .epub.converter import ContentConverter
 from .utils.unit_id import generate_unit_id
+from .utils.language import language_code
 from .utils.pdf_utils import extract_cover_image
 from .toc_navigation import (
     ResolvedNavigationNode,
@@ -1625,9 +1626,11 @@ def build_epub(config: BuildEpubConfig) -> Path:
     )
     author = metadata["author"] or "Unknown"
     publisher = metadata["publisher"]
-    language = 'zh' if config.translated else toc_tree.get('language', 'en')
-    if language.lower() in ['english', 'japanese', 'chinese']:
-        language = {'english': 'en', 'japanese': 'ja', 'chinese': 'zh'}.get(language.lower(), 'en')
+    language = (
+        language_code(config.target_language)
+        if config.translated
+        else language_code(config.target_language or toc_tree.get("language", "en"))
+    )
 
     minimal_config = MinimalConfig(
         config.book_title, author, language, config.markdown_dir, publisher

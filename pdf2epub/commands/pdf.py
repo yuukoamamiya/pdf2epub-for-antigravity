@@ -15,6 +15,7 @@ from pdf2epub.commands.sources import (
     _resolve_pdf_polish_source,
 )
 from pdf2epub.pipeline_policy import PipelinePolicy
+from pdf2epub.utils.language import language_code
 from pdf2epub.utils.paths import sanitize_filename
 from pdf2epub.validation_receipts import validation_receipt_is_current
 
@@ -285,11 +286,11 @@ def build_epub_command(args):
         else (policy.target_language or "Chinese")
     )
 
+    source_language = policy.source_language or "English"
     stages = []
     if build_english:
-        source_language = policy.source_language or "English"
         safe_title = sanitize_filename(book_title)
-        english_epub = output_dir / f"{safe_title}_en.epub"
+        english_epub = output_dir / f"{safe_title}_{language_code(source_language)}.epub"
         english_config = BuildEpubConfig(
             book_title=book_title,
             output_dir=output_dir,
@@ -302,7 +303,7 @@ def build_epub_command(args):
             config=config,
             output_epub=english_epub,
         )
-        stages.append(("English", english_config))
+        stages.append((source_language, english_config))
 
     # Create config
     build_config = BuildEpubConfig(
@@ -313,7 +314,7 @@ def build_epub_command(args):
         images_dir=images_dir,
         cover_image=cover_image,
         translated=build_translated,
-        target_language=target_language,
+        target_language=target_language if build_translated else source_language,
         config=config,
     )
 

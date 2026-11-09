@@ -864,12 +864,15 @@ Bibliography 仅翻译标题，条目正文
    uv run pdf2epub -c config.yaml build-epub --only-translated
    ```
 
-   第一条重建使用正式书名的原稿英文 EPUB；第二条只生成使用译名的译文 EPUB，不生成
-   英文 `_en.epub`。需要额外英文 `_en.epub` 时可改用 `build-epub --translated`，它生成
-   英文 `_en.epub` 和使用译名的译文 EPUB，不会生成正式书名的原稿 EPUB；要交付三种产物，
+   第一条重建使用正式书名的原稿 EPUB；第二条只生成使用译名的译文 EPUB，不生成
+   源语言 `<code>.epub`（如 `_en.epub`、`_de.epub`，由 `source_language` 决定）。需要额外的
+   源语言 `<code>.epub` 时可改用 `build-epub --translated`，它生成
+   源语言 `<code>.epub`（如 `_en.epub`、`_de.epub`，由 `source_language` 决定）和使用译名的
+   译文 EPUB，不会生成正式书名的原稿 EPUB；要交付三种产物，
    必须已有此前构建的正式书名原稿 EPUB。
-   英文版失败时不会中止，仍会继续尝试译文版。`--only-translated`（别名
-   `--target-only`）不触发英文 `_en.epub`，与 `--translated` 同时出现时以
+   源语言版失败时不会中止，仍会继续尝试译文版。`--only-translated`（别名
+   `--target-only`）不触发源语言 `<code>.epub`（如 `_en.epub`、`_de.epub`，由
+   `source_language` 决定），与 `--translated` 同时出现时以
    `--only-translated` 为准，但仍要求当前有效的 polish 和 translate checkpoint。任一
    请求的构建失败时命令最终返回非 0，已成功的产物保留。单独运行
    `build-epub --only-translated` 只构建译文 EPUB；若原稿尚未构建或已过期，应先重建并检查原稿。

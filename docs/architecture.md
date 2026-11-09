@@ -641,15 +641,18 @@ build-epub --only-translated → 最终译文 EPUB
 并重建原稿，再准备或恢复翻译；按当前哈希和校验结果重处理失效项。`scripts/build_all_epubs.sh` 是
 翻译验收后的可选两版本重建工具。
 
-`build-epub --translated` 是双语构建：先尝试英文 `_en.epub`，再构建译文；英文构建失败时
-记录 `[English Build Failed]` 并继续尝试译文，译文失败记录 `[Translated Build Failed]`，
+`build-epub --translated` 是双语构建：先尝试源语言 `<code>.epub`（如 `_en.epub`/`_de.epub`），
+再构建译文；源语言构建失败时记录 `[<source> Build Failed]` 并继续尝试译文，译文失败记录
+`[Translated Build Failed]`，
 原稿模式失败记录 `[Original Build Failed]`。任一请求的构建失败时命令返回非 0，已成功
 的产物保留。只构建译文版可使用 `build-epub --only-translated`（别名 `--target-only`），
-它不触发英文 `_en.epub`；与 `--translated` 同时出现时以 `--only-translated` 为准，但仍
+它不触发源语言 `<code>.epub`（如 `_en.epub`/`_de.epub`）；与 `--translated` 同时出现时以
+`--only-translated` 为准，但仍
 要求当前有效的 polish 和 translate checkpoint。`pipeline: epub_conversion` 拒绝这两个
 译文构建开关。
 
-`build-epub --translated` 只生成英文 `_en.epub` 和译文 EPUB，不生成正式书名的原稿；如需三种产物，
+`build-epub --translated` 只生成源语言 `<code>.epub`（如 `_en.epub`/`_de.epub`）和译文 EPUB，
+不生成正式书名的原稿；如需三种产物，
 正式书名原稿必须已由先前的 `build-epub` 构建。
 
 翻译流程中，若 `translate_validation.json` 对当前 `polished_markdown/validated/` 和

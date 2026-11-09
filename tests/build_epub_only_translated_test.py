@@ -186,3 +186,29 @@ def test_epub_conversion_rejects_only_translated(
         "--only-translated is not available" in message
         for message in log_messages
     )
+
+
+def test_source_language_controls_source_epub_suffix_and_label(
+    tmp_path: Path, monkeypatch, log_messages
+):
+    captured = []
+
+    def build(config):
+        captured.append(config)
+        return tmp_path / "book.epub"
+
+    _prepare_command(
+        tmp_path,
+        monkeypatch,
+        build,
+        config={
+            "title": "Book",
+            "pipeline": "translation",
+            "translation": {"source_language": "German", "target_language": "Chinese"},
+        },
+    )
+    result = pdf_commands.build_epub_command(_args(translated=True))
+    assert result == 0
+    source_config = next(c for c in captured if not c.translated)
+    assert source_config.output_epub.name == "Book_de.epub"
+    assert any("German EPUB created" in message for message in log_messages)
