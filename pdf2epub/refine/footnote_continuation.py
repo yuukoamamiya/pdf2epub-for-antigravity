@@ -32,6 +32,17 @@ _SEMANTIC_TOKEN_RE = re.compile(
     r"[^\W\d_][\w’'’\-]{2,}",
     re.UNICODE,
 )
+_ABBREVIATION_TRAILING_RE = re.compile(
+    r"(?<!\w)(?:p|pp|s|f|ff|ed|eds|edn|trans|vol|nr|no|n|vgl|cf|ibid|ebd|anm|bd|aufl|hrsg|ders|dies|u|o)\."
+    r"\s*\d{0,4}\.?$",
+    re.IGNORECASE,
+)
+_CITATION_CONTINUATION_RE = re.compile(
+    r"^\s*"
+    r"(?:[A-Za-zÄÖÜäöüß][\w'’\-]*(?:\s+[A-Za-zÄÖÜäöüß][\w'’\-]*){0,3}\s*[,;:.]?\s*)?"
+    r"(?:18|19|20)\d{2}[a-z]?\s*[,;:]?\s*\d{0,4}",
+    re.UNICODE,
+)
 _SEMANTIC_STOPWORDS = frozenset(
     """
     a about above after again against all also am an and any are as at be because
@@ -134,6 +145,8 @@ def _text_looks_unfinished(text: str) -> bool:
     if not value:
         return False
     if re.search(r"(?:[-–—,:;([{]|\.\.\.)$", value):
+        return True
+    if _ABBREVIATION_TRAILING_RE.search(value):
         return True
     return not bool(re.search(r"[.!?。！？…][\"'”’)\]]*$", value))
 
@@ -459,6 +472,9 @@ def _score_cross_page_continuation(
     if _text_starts_as_continuation(current_text):
         score += 1
         positive.append("current_text_starts_as_continuation")
+    if _CITATION_CONTINUATION_RE.match(current_text):
+        score += 3
+        positive.append("citation_continuation_marker")
     semantic_winner = semantic_comparison.get("winner")
     if semantic_winner == "body":
         # The body hypothesis is allowed to overrule a strong-looking
@@ -612,6 +628,16 @@ def _suppress_soft_continuation_candidates(
         elif not isinstance(evidence, Mapping):
             suppress_reason = "ordinary_text_without_cross_page_evidence"
         elif (
+            candidate.get("review_reason") == "orphan_continuation"
+            and isinstance(evidence, Mapping)
+            and "previous_text_looks_complete"
+            in evidence.get("negative_signals", [])
+            and evidence.get("confidence") == "low"
+            and "citation_continuation_marker"
+            not in evidence.get("positive_signals", [])
+        ):
+            suppress_reason = "complete_previous_note_without_strong_continuation"
+        elif (
             confidence in {"low", "medium"}
             and has_explicit_note_labels
             and "current_text_starts_as_continuation"
@@ -682,21 +708,22 @@ def _expand_orphan_continuation_candidates(
     previous_page_context: Optional[Mapping[str, Any]] = None,
     excluded_block_indexes: Optional[Iterable[int]] = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Add review-only blocks that continue an unfinished previous-page note.
+    """Add review-only blocks that may continue the previous page's last note.
 
     The continuous numeric region path requires at least two numbered notes on
     the current page.  A page can instead begin with a bare continuation line
     (``body -> continuation`` with no new numbered note, or only one new note).
     That orphan continuation has no numeric region to anchor it, so this entry
-    point uses only the previous page's unfinished physical tail as the trigger.
-    Scoring itself stays in :func:`_annotate_cross_page_continuations`.
+    point scans whenever the previous page has any final physical note.  A last
+    note that *looks* closed is no longer a hard rejection: it is only a soft
+    scoring penalty (``previous_text_looks_complete``) that a concrete
+    continuation signal can outweigh, and weak unscored orphans are demoted to
+    context afterwards.  Scoring itself stays in
+    :func:`_annotate_cross_page_continuations`.
     """
     if not isinstance(previous_page_context, Mapping):
         return candidates, []
-    previous = previous_page_context.get("last_physical_footnote")
-    if not isinstance(previous, Mapping):
-        return candidates, []
-    if not _text_looks_unfinished(str(previous.get("text") or "")):
+    if not isinstance(previous_page_context.get("last_physical_footnote"), Mapping):
         return candidates, []
 
     from .footnote_candidates import (

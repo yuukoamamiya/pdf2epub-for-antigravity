@@ -1339,7 +1339,38 @@ def test_orphan_continuation_without_new_numbered_note_is_reviewed(tmp_path: Pat
     assert report["review_required"] is True
 
 
-def test_orphan_continuation_does_not_fire_when_previous_note_complete(
+def test_orphan_continuation_flags_citation_continuation_after_complete_note(
+    tmp_path: Path,
+):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [_block("36 See Anton Friedrich Koch und Friedrike Schick.", 0, label="Footnote", y0=820)],
+    )
+    _write_sidecar(
+        tmp_path,
+        2,
+        [
+            _block("Body text on page two", 0, y0=120),
+            _block("Berlin 2002, 243–264; Konrad Utz, Absolute Methode?", 1, y0=820),
+        ],
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    page = next(item for item in report["pages"] if item["page"] == 2)
+    candidate = next(item for item in page["candidates"] if item["block"] == 1)
+    assert candidate["review_reason"] == "orphan_continuation"
+    assert "citation_continuation_marker" in candidate["continuation_evidence"][
+        "positive_signals"
+    ]
+    assert all(
+        item["block"] != 1 for item in page["suppressed_continuation_candidates"]
+    )
+    assert report["review_required"] is True
+
+
+def test_orphan_continuation_complete_note_body_block_is_suppressed(
     tmp_path: Path,
 ):
     _write_sidecar(
@@ -1352,18 +1383,27 @@ def test_orphan_continuation_does_not_fire_when_previous_note_complete(
         2,
         [
             _block("Body text on page two", 0, y0=120),
-            _block("Ordinary body paragraph", 1, y0=820),
+            _block("The ordinary body paragraph concludes here.", 1, y0=820),
         ],
     )
 
     report = prepare_footnote_candidates(tmp_path)
 
     page = next((item for item in report["pages"] if item["page"] == 2), None)
-    if page is not None:
-        assert all(
-            item.get("review_reason") != "orphan_continuation"
-            for item in page["candidates"]
-        )
+    if page is None:
+        return
+    assert all(
+        item.get("review_reason") != "orphan_continuation"
+        for item in page["candidates"]
+    )
+    suppressed = {
+        item["block"]: item for item in page["suppressed_continuation_candidates"]
+    }
+    if 1 in suppressed:
+        assert suppressed[1]["suppression_reason"] in {
+            "complete_previous_note_without_strong_continuation",
+            "body_context_outvotes_cross_page_continuation",
+        }
 
 
 def test_page_footer_inside_a_confirmed_numeric_region_is_reviewed_not_dropped(
