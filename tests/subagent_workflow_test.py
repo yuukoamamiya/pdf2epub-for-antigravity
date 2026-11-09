@@ -2927,6 +2927,7 @@ def test_prepare_refine_subagent_writes_manifest_and_prompt(tmp_path: Path):
     prompt = paths["prompt"].read_text(encoding="utf-8")
     assert 'type: "copyright"' in prompt
     assert 'type: "frontmatter"' in prompt
+    assert "or preface that is not ordinary chapter" not in prompt
     assert 'type: "cover"' in prompt
     assert 'type: "metadata"' in prompt
     assert "CIP" in prompt

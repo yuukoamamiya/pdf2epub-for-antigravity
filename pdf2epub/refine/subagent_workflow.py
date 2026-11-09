@@ -291,9 +291,11 @@ Rules:
   author/publisher note, `type: "catalog"` for a publisher catalog or
   advertisement section, and `type: "ad"` for a standalone advertisement.
   Use `type: "copyright"` for a copyright page or CIP (Cataloging-in-Publication)
-  page and `type: "frontmatter"` for other clearly identifiable front-matter
-  pages such as a dedication, epigraph, or preface that is not ordinary chapter
-  prose. Use `type: "cover"` only for an actual cover unit and
+  page and `type: "frontmatter"` for other clearly identifiable decorative
+  front-matter pages such as a dedication, epigraph, motto, or half-title.
+  A preface, foreword, or introduction is ordinary prose (often with its own
+  page footnotes) and must omit `type` like any other chapter.
+  Use `type: "cover"` only for an actual cover unit and
   `type: "metadata"` only when a unit consists of bibliographic metadata;
   do not use these roles without clear evidence.
   Omit `type` for ordinary prose chapters and sections. These are AI-assigned

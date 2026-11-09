@@ -513,9 +513,11 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    并为每个候选记录唯一处置。未决候选、缺失页审阅、节点起始位置与接受候选不一致都会阻断。
    `toc_tree.json` 使用 schema 2，每个节点有稳定唯一 `node_id`；结构数组路径仅用于定位。
    Subagent 应从书名页/版权页提取作者和出版社，并按内容标注 `notes`、`bibliography`、
-   `index`；版权页/CIP 页标注 `type: "copyright"`，其他明确的前置页（如献词、题词、
-   前言）标注 `type: "frontmatter"`，仅在证据明确时才使用 `type: "cover"` 或
-   `type: "metadata"`。这些角色会贯通到 translate/polish 的特殊单元隔离；普通正文节点
+   `index`；版权页/CIP 页标注 `type: "copyright"`，其他装饰性前置页（如献词、题词、
+   书名页）标注 `type: "frontmatter"`，仅在证据明确时才使用 `type: "cover"` 或
+   `type: "metadata"`。前言/导论（Vorrede/Einleitung 等含正文与脚注的说明性文字）属于
+   普通正文，不写 `type`，以便脚注阶段正常提取其页脚注；只有献词、题词、书名页等
+   装饰性前置页才用 `frontmatter`。这些角色会贯通到 translate/polish 的特殊单元隔离；普通正文节点
    不写 `type`，也不得为了规避普通正文规则而滥用这些角色。普通 `chapter` 子节点不打断上述四种
    可继承角色；TOC/progress 显式特殊类型冲突会阻断。
 6. 在 `refine-local` 前处理整页插图候选：

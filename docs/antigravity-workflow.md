@@ -732,7 +732,8 @@ mode，命令 handler 不再复制这些默认值或自行读取 TOC。
 如果 TOC 单元属于集中尾注、作者说明、出版社目录或广告，分别使用
 `type: "notes"`、`type: "author_notes"`、
 `type: "toc"`、`type: "catalog"` 或 `type: "ad"`；版权页/CIP 页使用
-`type: "copyright"`，其他明确的前置页使用 `type: "frontmatter"`，只有证据明确时才使用
+`type: "copyright"`，装饰性前置页（献词/题词/书名页）使用 `type: "frontmatter"`，
+前言/导论属普通正文，不写 `type`；只有证据明确时才使用
 `type: "cover"` 或 `type: "metadata"`。这些单元的页底数字不会被当作随页脚注；角色会经
 `pdf_unit_roles.py` 投影到 translate/polish，版权页和前置页在 polish 中必须保持短行、
 ISBN/CIP 等标识符的独立性，不得当作页边装饰删除。
