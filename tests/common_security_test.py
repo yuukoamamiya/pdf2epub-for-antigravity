@@ -13,6 +13,14 @@ def test_sanitize_filename_replaces_separators_and_reserved_names() -> None:
     assert sanitize_filename("...") == "untitled"
 
 
+def test_german_title_with_colon_is_sanitized_without_losing_accents() -> None:
+    title = "Das Absolute: Ein Essay über Einheit"
+    assert sanitize_filename(title) == "Das Absolute_ Ein Essay über Einheit"
+    result = book_output_dir(title, Path("output"))
+    assert ":" not in result.name
+    assert result.name.startswith("Das Absolute_")
+
+
 def test_book_output_dir_stays_under_output_root(tmp_path: Path) -> None:
     result = book_output_dir("../outside", tmp_path / "output")
     assert result.parent == (tmp_path / "output").resolve()
