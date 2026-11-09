@@ -470,10 +470,11 @@ def test_two_column_numeric_marker_requires_context_and_applies_per_lane(tmp_pat
         json.dumps({"schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION, "region_audits": region_audits, "decisions": decisions}),
         encoding="utf-8",
     )
-    assert validate_footnote_decisions(tmp_path)["valid"] is True
+    result = validate_footnote_decisions(tmp_path)
+    assert result["valid"] is False
+    assert any("marker" in error and "not unique" in error for error in result["errors"])
     rejected = apply_footnote_normalization(tmp_path)
     assert rejected["valid"] is False
-    assert any("marker" in error for error in rejected["errors"])
     assert (tmp_path / "footnote_normalized" / source.name).read_text(
         encoding="utf-8"
     ) == normalized

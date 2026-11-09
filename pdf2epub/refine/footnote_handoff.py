@@ -532,6 +532,7 @@ def prepare_footnote_subagent(
         "`marker_label` preserves printed spelling and case (`*`, `**`, `†`, `‡`, `a`, `A`); `key` is internal ASCII identity. "
         "Never substitute one for the other. A bare `a)` may be a list item, and bare `*` may be multiplication or Markdown emphasis; "
         "classify only with explicit note syntax/label and page-image evidence. If multiple body markers could match, provide an exact short `marker_context`; apply refuses to guess. "
+        "If the same chapter contains multiple identical non-numeric markers (for example several `*`, `**`, or `†`), every `footnote_start`/`footnote_definition` decision must include a precise `marker_context` with the surrounding text that locates its marker uniquely; otherwise `footnote-validate` fails immediately. "
         "Continuations use the start's internal `key`.\n\n"
     )
     prompt += (

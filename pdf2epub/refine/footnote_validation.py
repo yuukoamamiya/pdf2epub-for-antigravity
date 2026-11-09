@@ -97,6 +97,53 @@ def _persist_result(
     return result
 
 
+def _preflight_footnote_apply(
+    output_dir: Path,
+    report: Mapping[str, Any],
+    normalized_decisions: list[dict[str, Any]],
+) -> list[str]:
+    """Run the pure apply bindings so binding errors surface at validate time.
+
+    The apply stage resolves page decisions and binds body markers without
+    writing anything.  Reusing those pure functions here keeps ``footnote-validate``
+    and ``footnote-apply`` in agreement instead of accepting decisions that the
+    next command rejects.
+    """
+    from .footnote_apply_resolution import bind_note_markers, resolve_page_decisions
+    from .footnote_edit_plan import split_multi_superscripts
+    from .footnote_status import unit_records
+
+    try:
+        records = unit_records(output_dir)
+    except Exception:
+        return []
+    source_dir = output_dir / "ocr_markdown"
+    source_texts: dict[str, str] = {}
+    for record in records:
+        try:
+            text = (source_dir / record["name"]).read_text(encoding="utf-8")
+        except (OSError, UnicodeError, KeyError):
+            continue
+        source_texts[record["name"]] = split_multi_superscripts(
+            text.replace("\r\n", "\n").replace("\r", "\n")
+        )
+    if not source_texts:
+        return []
+    validation = {"decisions": list(normalized_decisions)}
+    resolution = resolve_page_decisions(
+        output_dir,
+        report,
+        validation,
+        source_texts,
+        list(records),
+        str(report.get("footnote_mode") or "footnotes"),
+    )
+    errors = list(resolution.errors)
+    if not errors:
+        errors = list(bind_note_markers(resolution, source_texts, list(records)))
+    return errors
+
+
 def validate_footnote_decisions(
     output_dir: Path,
     *,
@@ -227,6 +274,16 @@ def validate_footnote_decisions(
         decisions_data.get("continuation_reviews") if isinstance(decisions_data, dict) else None,
     )
     errors.extend(continuation_errors)
+
+    if (
+        report.get("footnote_mode") == "footnotes"
+        and not errors
+        and not human_review_required
+    ):
+        try:
+            errors.extend(_preflight_footnote_apply(output_dir, report, normalized))
+        except Exception as exc:
+            errors.append(f"footnote apply preflight failed: {exc}")
 
     if human_review_required:
         status = "human_review_required"

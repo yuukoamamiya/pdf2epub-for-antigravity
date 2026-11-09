@@ -641,8 +641,13 @@ def bind_note_markers(
                     if len(marker_candidates) > 1
                     else ""
                 )
+                origin = (
+                    "secondary-only OCR"
+                    if str(note.get("source") or "").strip().lower() == "secondary"
+                    else "primary OCR"
+                )
                 errors.append(
-                    f"{note['source_page']}:{note['source_file']}: secondary-only "
+                    f"{note['source_page']}:{note['source_file']}: {origin} "
                     f"footnote marker for key {note['key']} is not unique"
                     f"{context_hint}"
                 )

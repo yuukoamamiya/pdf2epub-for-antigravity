@@ -2746,6 +2746,80 @@ def test_secondary_only_repeated_marker_fails_closed(tmp_path: Path):
     assert "not unique" in result["errors"][0]
 
 
+def test_validate_rejects_duplicate_marker_without_context(tmp_path: Path):
+    source = tmp_path / "ocr_markdown"
+    source.mkdir()
+    (source / "chapter_1.md").write_text(
+        "First <sup>36</sup> and second <sup>36</sup>\n", encoding="utf-8"
+    )
+    (source / "tree_progress.json").write_text(
+        json.dumps(
+            {
+                "units": [
+                    {
+                        "unit_id": "chapter_1",
+                        "file": "chapter_1.md",
+                        "page_range": [1, 1],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "footnote_candidates.json").write_text(
+        json.dumps(
+            {
+                "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
+                "source_kind": "ocr",
+                "ocr_evidence_mode": "two_ocr",
+                "footnote_mode": "footnotes",
+                "continuation_reviews": [],
+                "pages": [
+                    {
+                        "page": 1,
+                        "candidates": [],
+                        "secondary_only_candidates": [
+                            {
+                                "page": 1,
+                                "source": "secondary",
+                                "block": 0,
+                                "key": "36",
+                                "confidence": "review",
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "footnote_decisions.json").write_text(
+        json.dumps(
+            {
+                "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
+                "decisions": [
+                    {
+                        "page": 1,
+                        "source": "secondary",
+                        "block": 0,
+                        "role": "footnote_start",
+                        "key": "36",
+                        "source_file": "chapter_1.md",
+                        "text": "36 recovered note",
+                        "primary_disposition": "absent",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = validate_footnote_decisions(tmp_path)
+
+    assert result["valid"] is False
+    assert any("not unique" in error for error in result["errors"])
+
+
 def test_secondary_only_can_remove_an_explicit_primary_duplicate(tmp_path: Path):
     _write_sidecar(
         tmp_path,
