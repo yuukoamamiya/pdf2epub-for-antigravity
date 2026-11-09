@@ -60,6 +60,13 @@ _ADDRESS_LINE_RE = re.compile(
 )
 _ISBN_EAN_DIGITS_RE = re.compile(r"^97[89]\d{10}$")
 _DIAGRAM_MARKS_RE = re.compile(r"^[I|/\\_\-–—·•.\s]+$", re.IGNORECASE)
+_SECTION_HEADING_RE = re.compile(
+    r"^(?:§{1,3}\s*(?:\d{1,4}|[ivxlcdm]{1,8})"
+    r"|(?:Lehrsatz|Aufgabe|Satz|Theorem|Proposition|Korollar|Korollarium|Lemma|"
+    r"Hilfssatz|Definition|Anmerkung|Bemerkung|Zusatz|Folgesatz|Beweis)"
+    r"\s+(?:\d{1,4}|[ivxlcdm]{1,8}))$",
+    re.IGNORECASE,
+)
 _MAX_COMBINED_LINE_LENGTH = 96
 
 
@@ -111,6 +118,9 @@ def candidate_for_line(line: str) -> Optional[dict[str, Any]]:
         r"[。！？；.!?;]", title_line
     ):
         return {"kind": "running_header", "text": stripped, "confidence": "high"}
+
+    if _SECTION_HEADING_RE.fullmatch(title_line):
+        return None
 
     match = _COMBINED_PAGE_LABEL_RE.fullmatch(title_line)
     if not match:

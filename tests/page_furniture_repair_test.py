@@ -172,3 +172,23 @@ def test_validate_page_furniture_repair_tolerates_furniture_deletion_in_special_
     )
     assert report["all_passed"] is True
     assert report["repaired_files"] == ["chapter_8.2.1.md"]
+
+
+def test_section_and_proposition_headings_are_not_page_furniture():
+    for line in (
+        "§ 1",
+        "§ 52",
+        "§§ 3",
+        "## § 52",
+        "### Lehrsatz II",
+        "Lehrsatz II",
+        "Aufgabe I",
+        "Theorem 12",
+        "Beweis III",
+    ):
+        assert candidate_for_line(line) is None
+
+
+def test_plain_running_titles_remain_page_furniture_candidates():
+    for line in ("PART I", "Hegel-Handbuch 212"):
+        assert candidate_for_line(line) is not None
