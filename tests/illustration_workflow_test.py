@@ -131,6 +131,18 @@ def test_illustration_decision_is_hash_bound_and_applied(tmp_path: Path):
         load_current_illustration_pages(tmp_path)
 
 
+def test_manifest_candidate_pages_mismatch_blocks_validation(tmp_path: Path):
+    _write_candidate_fixture(tmp_path)
+    prepare_illustration_subagent(tmp_path, book_title="Book", config={})
+    manifest_path = tmp_path / "illustration_subagent_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["candidate_pages"] = [999]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    result = validate_illustration_decisions(tmp_path)
+    assert result["valid"] is False
+    assert any("candidate_pages do not match" in e for e in result["errors"])
+
+
 def test_explicit_cover_full_page_is_auto_resolved(tmp_path: Path):
     pages = tmp_path / "pages"
     pages.mkdir()

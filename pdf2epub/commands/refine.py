@@ -169,21 +169,27 @@ def illustration_prepare_command(args):
         return 1
 
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    candidate_count = len(manifest.get("candidate_pages", []) or [])
+    review_count = len(manifest.get("review_pages", []) or [])
     logger.success(f"Wrote illustration candidate report: {paths['report']}")
     logger.success(f"Wrote illustration subagent manifest: {paths['manifest']}")
     logger.success(f"Wrote illustration subagent prompt: {paths['prompt']}")
     if manifest.get("status") == "pending_review":
         logger.info(
+            f"候选整页插图 {candidate_count} 页（复核窗口 review_pages {review_count} 页）："
             "请让工作区 Subagent 只复核 illustration_subagent_prompt.md 列出的候选页，"
             "并写入 illustration_decisions.json。"
         )
     elif manifest.get("status") == "auto_resolved":
         logger.info(
-            "封面候选满足确定性规则，已生成带哈希绑定的 illustration_decisions.json；"
-            "无需启动 Subagent。"
+            f"封面候选 {candidate_count} 页满足确定性规则，已生成带哈希绑定的 "
+            "illustration_decisions.json；无需启动 Subagent。"
         )
     else:
-        logger.info("没有发现需要复核的整页插图候选，本次不需要 Subagent。")
+        logger.info(
+            f"没有需要复核的整页插图候选（candidate_pages {candidate_count} 页）；"
+            "illustration-validate 将生成空绑定，无需 illustration_decisions.json。"
+        )
     return 0
 
 

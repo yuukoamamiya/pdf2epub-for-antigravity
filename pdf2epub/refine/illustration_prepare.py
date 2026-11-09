@@ -668,6 +668,16 @@ def validate_illustration_decisions(
                 errors.append(str(exc))
 
     expected_pages = sorted(int(item["page"]) for item in report.get("candidate_pages", []) if isinstance(item, Mapping) and str(item.get("page", "")).isdigit())
+    manifest_candidate_pages = sorted(
+        int(page)
+        for page in (manifest.get("candidate_pages") or [])
+        if isinstance(page, int) or str(page).isdigit()
+    )
+    if manifest_candidate_pages != expected_pages:
+        errors.append(
+            "illustration manifest candidate_pages do not match the candidate report; "
+            "rerun illustration-prepare"
+        )
     source_pages, source_sidecars, source_secondary = _current_source_hashes(output_dir, report)
     if source_pages != dict(report.get("source_page_hashes", {})):
         errors.append("one or more source Markdown pages changed or disappeared")
