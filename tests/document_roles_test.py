@@ -6,6 +6,7 @@ from pdf2epub.document_roles import infer_translation_file_role, is_bibliography
 @pytest.mark.parametrize("heading", [
     "3. Primary literature", "## 4) Secondary literature", "# Primärliteratur",
     "5. Literaturverzeichnis", "3. Bibliografía", "Works Cited",
+    "Nachweise", "Quellennachweise", "Textnachweise",
 ])
 def test_standalone_numbered_multilingual_reference_headings_are_bibliography(heading):
     assert is_bibliography_text(heading + "\n\nSmith, John. Book, 1999.")
