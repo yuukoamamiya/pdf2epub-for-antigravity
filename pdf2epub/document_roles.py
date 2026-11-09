@@ -139,7 +139,9 @@ def infer_translation_file_role(
     stem = re.sub(r"\.part\d+$", "", stem)
     normalized = re.sub(r"[^a-z0-9]+", "_", stem).strip("_")
     tokens = set(normalized.split("_"))
-    if "author" in tokens and "notes" in tokens:
+    if any(re.match(r"^author\d*$", t) for t in tokens) and any(
+        re.match(r"^notes\d*$", t) for t in tokens
+    ):
         return "author_notes"
     role_tokens = (
         ("bibliography", "bibliography"),
@@ -154,7 +156,7 @@ def infer_translation_file_role(
         ("ad", "ad"),
     )
     for token, role in role_tokens:
-        if token in tokens:
+        if any(re.match(rf"^{re.escape(token)}\d*$", t) for t in tokens):
             return role
     if text and is_bibliography_text(text):
         return "bibliography"

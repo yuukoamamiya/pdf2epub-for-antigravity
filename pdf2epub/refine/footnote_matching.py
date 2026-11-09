@@ -247,7 +247,7 @@ def _expand_markdown_definition_prefix(
     prefix = re.match(r"\[\^[A-Za-z0-9_-]+\]\s*:\s*", source[line_start:])
     if prefix and line_start <= start <= line_start + len(prefix.group(0)):
         return line_start, end
-    marker_prefix = re.match(r"^\\?\*{1,3}[ \t]+", source[line_start:])
+    marker_prefix = re.match(r"^\\?\*{1,4}[ \t]+", source[line_start:])
     if marker_prefix and line_start <= start <= line_start + len(marker_prefix.group(0)):
         return line_start, end
     return start, end
@@ -290,12 +290,14 @@ def _is_signature_boundary(text: str, start: int, end: int) -> bool:
         or (not text[start - 1].isalnum())
         or _is_cjk(text[start - 1])
         or (start < len(text) and _is_cjk(text[start]))
+        or (start < len(text) and not text[start].isalnum())
     )
     right_ok = (
         (end >= len(text))
         or (not text[end].isalnum())
         or _is_cjk(text[end])
         or (end > 0 and _is_cjk(text[end - 1]))
+        or (end > 0 and not text[end - 1].isalnum())
     )
     return left_ok and right_ok
 
@@ -601,19 +603,44 @@ def block_text_variants(
 
             page_text = raw_md_path.read_text(encoding="utf-8")
             raw_key = _extract_delimited_key(raw_text)
-            for line in page_text.splitlines():
-                line = line.strip()
-                if not line:
+            raw_payload = re.sub(
+                r"^(?:\[\^\w+\]|[①-⑳]|\d+|<sup\b[^>]*>\d+</sup>)[.)、，:：\s]*",
+                "",
+                raw_text,
+            ).strip()
+            raw_sig, _ = signature_with_map(raw_text)
+            raw_payload_sig, _ = signature_with_map(raw_payload) if raw_payload else ("", [])
+            raw_payload_clean = re.sub(r"\s+([\u4e00-\u9fff])", r"\1", re.sub(r"([\u4e00-\u9fff])\s+", r"\1", raw_payload_sig)) if raw_payload_sig else ""
+            candidates_to_check = list(page_text.splitlines())
+            for b_def in re.split(r"(?:\n|^)(?=\[\^)", page_text):
+                b_def = b_def.strip()
+                if b_def.startswith("[^") and "\n" in b_def and b_def not in candidates_to_check:
+                    candidates_to_check.append(b_def)
+            for item in candidates_to_check:
+                item = item.strip()
+                if not item:
                     continue
-                line_key = _extract_delimited_key(line)
-                if raw_key and line_key and raw_key != line_key:
+                item_key = _extract_delimited_key(item)
+                if raw_key and item_key and raw_key != item_key:
                     continue
-                if not line_key:
+                if not item_key:
                     continue
-                payload = re.sub(r"^(?:\[\^\w+\]|\d+|<sup\b[^>]*>\d+</sup>)[.)、，:：\s]*", "", line).strip()
-                if payload and signature_with_map(payload)[0] == signature_with_map(raw_text)[0]:
-                    if line not in variants:
-                        variants.append(line)
+                payload = re.sub(
+                    r"^(?:\[\^\w+\]|[①-⑳]|\d+|<sup\b[^>]*>\d+</sup>)[.)、，:：\s]*",
+                    "",
+                    item,
+                ).strip()
+                payload_sig, _ = signature_with_map(payload) if payload else ("", [])
+                payload_clean = re.sub(r"\s+([\u4e00-\u9fff])", r"\1", re.sub(r"([\u4e00-\u9fff])\s+", r"\1", payload_sig)) if payload_sig else ""
+                item_sig, _ = signature_with_map(item)
+                if (
+                    (payload_sig and raw_payload_sig and (payload_sig == raw_payload_sig or payload_clean == raw_payload_clean))
+                    or (payload_sig and payload_sig == raw_sig)
+                    or (item_sig and item_sig == raw_sig)
+                ):
+                    if item in variants:
+                        variants.remove(item)
+                    variants.insert(0, item)
         except (OSError, UnicodeDecodeError):
             pass
     return variants
@@ -691,10 +718,10 @@ def marker_spans(
                 if not is_inside_html_sup(match.start()) and not is_inside_definition_line(match.start()):
                     append_span(match.start(), match.end(), "unicode_circled")
         if printed_label.startswith("*"):
-            escaped_pattern = re.compile(r"\\(?P<label>\*{1,3})")
+            escaped_pattern = re.compile(r"(?:\\\*){1,4}|\\(?P<label>\*{1,4})")
             marker_matches.extend(
                 match for match in escaped_pattern.finditer(source)
-                if match.group("label") == printed_label
+                if match.group(0).replace("\\", "") == printed_label
                 and not is_inside_definition_line(match.start())
             )
     else:

@@ -51,7 +51,7 @@ def marker_from_label(label: str) -> Optional[FootnoteMarker]:
     numeric = canonical_numeric_label(value)
     if numeric is not None:
         return FootnoteMarker("numeric", value, numeric)
-    if re.fullmatch(r"\*{1,3}", value):
+    if re.fullmatch(r"\*{1,4}", value):
         return FootnoteMarker("star", value, f"fnm-star-{len(value)}")
     if value in {"†", "††"}:
         return FootnoteMarker("dagger", value, "fnm-dagger" if value == "†" else "fnm-dagger-2")
@@ -78,7 +78,7 @@ def marker_label_from_key(key: str) -> Optional[str]:
     if number:
         return number.group(1)
     match = re.fullmatch(
-        r"fnm-(?:star-(?P<stars>[123])|dagger(?P<daggers>-2)?|"
+        r"fnm-(?:star-(?P<stars>[1234])|dagger(?P<daggers>-2)?|"
         r"double-dagger(?P<double>-2)?|letter-(?P<letter>[A-Za-z]))",
         value,
     )

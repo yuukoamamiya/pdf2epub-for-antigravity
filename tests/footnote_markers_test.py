@@ -477,3 +477,22 @@ def test_two_column_numeric_marker_requires_context_and_applies_per_lane(tmp_pat
     assert (tmp_path / "footnote_normalized" / source.name).read_text(
         encoding="utf-8"
     ) == normalized
+
+
+def test_edition_superscripts_ignored_during_polish_validation():
+    from pdf2epub.footnote_normalization import (
+        _is_math_or_formula_superscript,
+        validate_polish_footnote_normalization,
+    )
+
+    text = "Werke (1847), Königsberg 1856<sup>2</sup>, p. 444 and <sup>2</sup>1961."
+    assert _is_math_or_formula_superscript(text, text.index("1856<sup>2</sup>") + 4) is True
+    assert _is_math_or_formula_superscript(text, text.index("<sup>2</sup>1961")) is True
+
+    source = (
+        "Text with footnote[^1].\n\n"
+        "[^1]: Citations: 1856<sup>2</sup>, 1972<sup>3</sup>, 1957<sup>2</sup>, 1830<sup>3</sup>.\n"
+    )
+    target = source
+    errors = validate_polish_footnote_normalization(source, target)
+    assert errors == []

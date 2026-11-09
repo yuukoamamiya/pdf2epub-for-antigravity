@@ -290,6 +290,13 @@ def add_subchapter_anchors_to_parts(
                 evidence = toc_markdown_visible_title_candidates(
                     source_text, title, info.get("source_candidate_kind")
                 )
+                if not evidence:
+                    cleaned_title = re.sub(r"<sup>\s*[^<>]+\s*</sup>", "", title, flags=re.I)
+                    cleaned_title = re.sub(r"\s+\d{1,4}\s*$", "", cleaned_title).strip()
+                    if cleaned_title != title:
+                        evidence = toc_markdown_visible_title_candidates(
+                            source_text, cleaned_title, info.get("source_candidate_kind")
+                        )
                 evidence_keys = {toc_title_match_key(value) for value in evidence}
                 if (
                     type(source_occurrence) is int
@@ -300,7 +307,7 @@ def add_subchapter_anchors_to_parts(
                 ):
                     expected_visible_title = evidence[source_occurrence - 1]
         has_inline_formatting = bool(re.search(
-            r"(?<!\\)(?:\*\*|__|(?<!\*)\*(?!\*)|(?<!_)_(?!_)|`|\]\(|</?(?:em|strong|i|b|code|a)\b)",
+            r"(?<!\\)(?:\*\*|__|(?<!\*)\*(?!\*)|(?<!_)_(?!_)|`|\]\(|</?(?:em|strong|i|b|code|a|sup|sub)\b)",
             title,
             re.I,
         ))

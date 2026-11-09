@@ -355,7 +355,9 @@ def _build_notes_spans(
         for key in scope_order
         if scopes[key].get("unit_type") not in FOOTNOTE_STRUCTURE_EXEMPT_TYPES
     ]
-    current: Optional[str] = None
+    current: Optional[str] = (
+        str(candidates[0]["scope_key"]) if len(candidates) == 1 else None
+    )
     for unit in units:
         if _unit_type(unit) != "notes":
             continue

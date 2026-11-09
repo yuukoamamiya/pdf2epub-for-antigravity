@@ -8,6 +8,7 @@ from typing import Any, Mapping, Optional, Protocol
 
 from .endnote_normalization import normalize_endnotes
 from .endnote_scopes import build_endnote_scope_directory
+from ..footnote_keys import CIRCLED_LABELS
 
 
 def split_multi_superscripts(text: str) -> str:
@@ -17,8 +18,14 @@ def split_multi_superscripts(text: str) -> str:
         symbol = re.fullmatch(r"([A-Za-z0-9_-]+)\s*(\\\*+|\*+|[†‡§]+)", inner.strip())
         if symbol:
             return f"<sup>{symbol.group(1)}</sup>{symbol.group(2)}"
+        stripped = inner.strip()
+        if len(stripped) > 1 and all(c in CIRCLED_LABELS for c in stripped):
+            return "".join(f"<sup>{c}</sup>" for c in stripped)
         parts = [part.strip() for part in re.split(r"[,;]\s*", inner) if part.strip()]
-        if len(parts) > 1 and all(re.fullmatch(r"[A-Za-z0-9_-]+", part) for part in parts):
+        if len(parts) > 1 and all(
+            re.fullmatch(r"[A-Za-z0-9_-]+", part) or (len(part) == 1 and part in CIRCLED_LABELS)
+            for part in parts
+        ):
             return "".join(f"<sup>{part}</sup>" for part in parts)
         return match.group(0)
 

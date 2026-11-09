@@ -35,7 +35,8 @@ def visible_heading_text(value: str) -> str:
     value = html_module.unescape(value)
     # This is already rendered HTML text. Running source Markdown cleanup here
     # would reinterpret literal rendered symbols such as *A* as emphasis.
-    return toc_title_match_key(re.sub(r"\s+", " ", value).strip())
+    cleaned = normalize_toc_source_label(re.sub(r"\s+", " ", value).strip(), markdown_source=False)
+    return toc_title_match_key(cleaned)
 
 
 class ContentConverter:

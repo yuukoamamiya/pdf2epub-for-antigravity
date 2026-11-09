@@ -51,6 +51,7 @@ def _candidate_decisions(
 
     decisions_by_address: dict[tuple[int, str, int], dict[str, Any]] = {}
     high_confidence_addresses: set[tuple[int, str, int]] = set()
+    candidates_by_address: dict[tuple[int, str, int], Mapping[str, Any]] = {}
     for page_report in report.get("pages", []) or []:
         if not isinstance(page_report, Mapping):
             continue
@@ -58,13 +59,13 @@ def _candidate_decisions(
             if not isinstance(candidate, Mapping) or candidate.get("confidence") != "high":
                 continue
             try:
-                high_confidence_addresses.add(
-                    (
-                        int(candidate["page"]),
-                        str(candidate.get("source") or "primary").strip().lower(),
-                        int(candidate["block"]),
-                    )
+                addr = (
+                    int(candidate["page"]),
+                    str(candidate.get("source") or "primary").strip().lower(),
+                    int(candidate["block"]),
                 )
+                candidates_by_address[addr] = candidate
+                high_confidence_addresses.add(addr)
             except (KeyError, TypeError, ValueError):
                 continue
     for item in validation.get("decisions", []) or []:
@@ -82,7 +83,14 @@ def _candidate_decisions(
         # deterministic rule.  Older handoffs sometimes repeated them as
         # ``body`` decisions; allowing that stale review output to override the
         # local result silently dropped valid page footnotes.
-        if address not in high_confidence_addresses or item.get("role") == "footnote_continuation":
+        cand = candidates_by_address.get(address, {})
+        if (
+            address not in high_confidence_addresses
+            or item.get("role") == "footnote_continuation"
+            or (item.get("role") in _MOVED_ROLES and bool(item.get("marker_context")))
+            or item.get("override") is True
+            or (item.get("role") in _NON_MOVED_ROLES and cand.get("same_page_marker") is False)
+        ):
             decisions_by_address[address] = dict(item)
 
     for page_report in report.get("pages", []) or []:
@@ -591,15 +599,18 @@ def bind_note_markers(
                             old_chapter_id = note["chapter_id"]
                             new_chapter_id = prec_record["chapter_id"]
                             if old_chapter_id != new_chapter_id:
-                                if note in notes_by_chapter[old_chapter_id]:
+                                if note in notes_by_chapter.get(old_chapter_id, []):
                                     notes_by_chapter[old_chapter_id].remove(note)
-                                new_occurrence = len(active_by_chapter_key[(new_chapter_id, note["key"])]) + 1
+                                current_active = active_by_chapter_key.setdefault(
+                                    (new_chapter_id, note["key"]), []
+                                )
+                                new_occurrence = len(current_active) + 1
                                 note["output_key"] = output_marker_key(
                                     note["key"], note["marker_label"], new_occurrence
                                 )
                                 note["chapter_id"] = new_chapter_id
-                                active_by_chapter_key[(new_chapter_id, note["key"])].append(note)
-                                notes_by_chapter[new_chapter_id].append(note)
+                                current_active.append(note)
+                                notes_by_chapter.setdefault(new_chapter_id, []).append(note)
                                 for res_item in resolved:
                                     if (
                                         res_item.get("file") == note["source_file"]

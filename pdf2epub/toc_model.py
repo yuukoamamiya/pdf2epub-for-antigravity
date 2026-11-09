@@ -290,13 +290,27 @@ def toc_markdown_visible_title_candidates(
     if literal:
         resolved_key = expected
     else:
-        exact = [row for row in inventory
+        stripped_key = toc_title_match_key(
+            normalize_toc_source_label(
+                re.sub(r"<sup\b[^>]*>\d+</sup>", "", title, flags=re.IGNORECASE),
+                markdown_source=False,
+            )
+        )
+        stripped = [
+            row for row in inventory
+            if (candidate_kind is None or row["kind"] == candidate_kind)
+            and toc_title_match_key(row["visible"]) == stripped_key
+        ]
+        if stripped:
+            resolved_key = stripped_key
+        else:
+            exact = [row for row in inventory
                  if (candidate_kind is None or row["kind"] == candidate_kind)
                  and row["raw"] == title]
-        visible_keys = {toc_title_match_key(row["visible"]) for row in exact}
-        if len(visible_keys) != 1:
-            return []
-        resolved_key = next(iter(visible_keys))
+            visible_keys = {toc_title_match_key(row["visible"]) for row in exact}
+            if len(visible_keys) != 1:
+                return []
+            resolved_key = next(iter(visible_keys))
     matching = [row for row in inventory
                 if toc_title_match_key(row["visible"]) == resolved_key]
     if candidate_kind is not None:
@@ -514,17 +528,33 @@ def project_toc_ownership(
         if any(literal_matches.values()):
             resolved_key = literal_key
         else:
-            # A marked legacy TOC label is interpreted as Markdown only when
-            # the owning source contains that exact raw label.
-            exact_matches = {
-                name: [candidate for candidate in inventory if candidate["raw"] == source_title]
+            stripped_key = toc_title_match_key(
+                normalize_toc_source_label(
+                    re.sub(r"<sup\b[^>]*>\d+</sup>", "", source_title, flags=re.IGNORECASE),
+                    markdown_source=False,
+                )
+            )
+            stripped_matches = {
+                name: [
+                    candidate for candidate in inventory
+                    if toc_title_match_key(candidate["visible"]) == stripped_key
+                ]
                 for name, inventory in inventories.items()
             }
-            visible_keys = {
-                toc_title_match_key(candidate["visible"])
-                for rows in exact_matches.values() for candidate in rows
-            }
-            resolved_key = next(iter(visible_keys)) if len(visible_keys) == 1 else None
+            if any(stripped_matches.values()):
+                resolved_key = stripped_key
+            else:
+                # A marked legacy TOC label is interpreted as Markdown only when
+                # the owning source contains that exact raw label.
+                exact_matches = {
+                    name: [candidate for candidate in inventory if candidate["raw"] == source_title]
+                    for name, inventory in inventories.items()
+                }
+                visible_keys = {
+                    toc_title_match_key(candidate["visible"])
+                    for rows in exact_matches.values() for candidate in rows
+                }
+                resolved_key = next(iter(visible_keys)) if len(visible_keys) == 1 else None
         matched = {
             name: [candidate for candidate in inventory
                    if resolved_key is not None

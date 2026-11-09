@@ -956,3 +956,57 @@ def test_scoped_footnotes_render_display_numbers_in_epub(tmp_path) -> None:
     )
     assert report["forward_hrefs"] == 2
     assert report["unlinked_sup_count"] == 0
+
+
+def test_single_body_scope_centralized_notes_without_chapter_subheadings() -> None:
+    toc = {
+        "chapters": [
+            {
+                "title": "Single Article Title",
+                "start_page": 1,
+                "end_page": 10,
+            },
+            {
+                "title": "Notes",
+                "start_page": 11,
+                "end_page": 12,
+                "type": "notes",
+            },
+        ]
+    }
+    progress = {
+        "units": [
+            {
+                "unit_id": "chapter_1",
+                "index_path": [1],
+                "title": "Single Article Title",
+                "page_range": [1, 10],
+                "file": "chapter_1.md",
+            },
+            {
+                "unit_id": "chapter_2",
+                "index_path": [2],
+                "title": "Notes",
+                "page_range": [11, 12],
+                "file": "chapter_2.md",
+                "type": "notes",
+            },
+        ]
+    }
+    texts = {
+        "chapter_1.md": "# Single Article Title\n\nSome claim.<sup>1</sup> Another.<sup>2</sup>\n",
+        "chapter_2.md": "# Notes\n\n1. 1. First note text.\n2. 2. Second note text.\n",
+    }
+    directory = build_endnote_scope_directory(toc, progress, texts)
+    assert directory["notes_spans"]["chapter_2.md"][0]["scope_key"] == "u1"
+
+    normalized, report = normalize_endnotes(
+        texts,
+        {"chapter_1.md": "", "chapter_2.md": "notes"},
+        scopes=directory,
+    )
+    assert "[^1]" in normalized["chapter_1.md"]
+    assert "[^2]" in normalized["chapter_1.md"]
+    assert "[^1]: First note text." in normalized["chapter_2.md"]
+    assert "[^2]: Second note text." in normalized["chapter_2.md"]
+    assert report["valid"] is True
