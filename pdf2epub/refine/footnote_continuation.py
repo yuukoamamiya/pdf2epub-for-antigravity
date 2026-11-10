@@ -9,10 +9,15 @@ lazily to keep this module independent at import time.
 from __future__ import annotations
 
 import re
+from statistics import median as _median
 from typing import Any, Iterable, Mapping, Optional
 
 from .layout_evidence import normalized_bbox as _normalise_bbox
 from .layout_evidence import text_from_block as _text_from_block
+from .footnote_layout import (
+    is_ordinary_body_block as _is_ordinary_body_block,
+    layout_records as _layout_records,
+)
 from .footnote_signals import (
     _CITATION_LABEL_RE,
     _FOOTNOTE_LABEL_RE,
@@ -149,6 +154,31 @@ def _text_looks_unfinished(text: str) -> bool:
     if _ABBREVIATION_TRAILING_RE.search(value):
         return True
     return not bool(re.search(r"[.!?。！？…][\"'”’)\]]*$", value))
+
+
+def _body_geometry_reference(sidecar: Mapping[str, Any]) -> Optional[dict[str, float]]:
+    """Return the page's ordinary body column (median left edge and width).
+
+    Only blocks above the bottom half of the page count as body, so bottom
+    footnote blocks cannot pollute the reference.  Returns None when no
+    ordinary body block is available.
+    """
+    blocks = sidecar.get("blocks", [])
+    x0s: list[float] = []
+    widths: list[float] = []
+    for record in _layout_records(sidecar):
+        index = int(record["index"])
+        block = blocks[index] if 0 <= index < len(blocks) else None
+        if not isinstance(block, Mapping) or not _is_ordinary_body_block(block):
+            continue
+        bbox = record["bbox"]
+        if not bbox or float(bbox[3]) >= 0.5:
+            continue
+        x0s.append(float(bbox[0]))
+        widths.append(max(0.0, float(bbox[2]) - float(bbox[0])))
+    if not x0s:
+        return None
+    return {"x0": float(_median(x0s)), "width": float(_median(widths))}
 
 
 def _text_starts_as_continuation(text: str) -> bool:
@@ -436,6 +466,23 @@ def _score_cross_page_continuation(
             score += 1
             positive.append("line_width_similar")
 
+    body_ref = _body_geometry_reference(sidecar)
+    if current_bbox and body_ref:
+        indent = float(current_bbox[0]) - float(body_ref["x0"])
+        width = float(current_bbox[2]) - float(current_bbox[0])
+        body_width = float(body_ref["width"])
+        if indent >= 0.02:
+            score += 2
+            positive.append("indented_relative_to_body")
+        if body_width > 0 and width / body_width <= 0.85:
+            score += 1
+            positive.append("narrower_than_body")
+        if indent <= 0.008 and body_width > 0 and width / body_width >= 0.95:
+            # Flag only: the demotion is scoped to the orphan path in
+            # _suppress_soft_continuation_candidates so the existing
+            # continuous-region scoring is unchanged.
+            negative.append("flush_with_body_geometry")
+
     previous_font_size = _safe_float(previous.get("font_size"))
     if current_font_size and previous_font_size:
         font_delta = abs(current_font_size - previous_font_size) / max(
@@ -638,6 +685,18 @@ def _suppress_soft_continuation_candidates(
         ):
             suppress_reason = "complete_previous_note_without_strong_continuation"
         elif (
+            candidate.get("review_reason") == "orphan_continuation"
+            and isinstance(evidence, Mapping)
+            and "flush_with_body_geometry" in evidence.get("negative_signals", [])
+            and "indented_relative_to_body" not in evidence.get("positive_signals", [])
+            and "narrower_than_body" not in evidence.get("positive_signals", [])
+            and "citation_continuation_marker" not in evidence.get("positive_signals", [])
+            and "current_text_starts_as_continuation"
+            not in evidence.get("positive_signals", [])
+            and evidence.get("confidence") == "low"
+        ):
+            suppress_reason = "flush_with_body_geometry"
+        elif (
             confidence in {"low", "medium"}
             and has_explicit_note_labels
             and "current_text_starts_as_continuation"
@@ -807,6 +866,7 @@ def _expand_orphan_continuation_candidates(
 __all__ = [
     "_aggregate_continuation_evidence",
     "_annotate_cross_page_continuations",
+    "_body_geometry_reference",
     "_build_footnote_page_context",
     "_expand_orphan_continuation_candidates",
     "_has_footnote_evidence",

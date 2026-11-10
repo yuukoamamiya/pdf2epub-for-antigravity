@@ -517,11 +517,12 @@ def _write_native_sidecar(
     )
 
 
-def _block(text: str, order: int, *, label: str = "Text", y0: int = 100) -> dict:
+def _block(text: str, order: int, *, label: str = "Text", y0: int = 100,
+           x0: int = 80, x1: int = 920) -> dict:
     return {
         "order": order,
         "label": label,
-        "bbox": [80, y0, 920, min(1000, y0 + 50)],
+        "bbox": [x0, y0, x1, min(1000, y0 + 50)],
         "html": text,
     }
 
@@ -1404,6 +1405,72 @@ def test_orphan_continuation_complete_note_body_block_is_suppressed(
             "complete_previous_note_without_strong_continuation",
             "body_context_outvotes_cross_page_continuation",
         }
+
+
+def test_orphan_continuation_indented_block_gets_geometry_positive_signals(
+    tmp_path: Path,
+):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [_block("36 See Koch und Schick,", 0, label="Footnote", y0=820)],
+    )
+    _write_sidecar(
+        tmp_path,
+        2,
+        [
+            _block("Body text on page two", 0, y0=120),
+            _block("Berlin 2002, 243–264", 1, y0=820, x0=140, x1=840),
+        ],
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    page = next(item for item in report["pages"] if item["page"] == 2)
+    candidate = next(item for item in page["candidates"] if item["block"] == 1)
+    positive_signals = candidate["continuation_evidence"]["positive_signals"]
+    assert "indented_relative_to_body" in positive_signals
+    assert "narrower_than_body" in positive_signals
+    assert "flush_with_body_geometry" not in positive_signals
+    assert all(
+        item["block"] != 1 for item in page["suppressed_continuation_candidates"]
+    )
+
+
+def test_orphan_continuation_flush_block_records_body_geometry_flag(
+    tmp_path: Path,
+):
+    _write_sidecar(
+        tmp_path,
+        1,
+        [_block("36 See Koch und Schick,", 0, label="Footnote", y0=820)],
+    )
+    _write_sidecar(
+        tmp_path,
+        2,
+        [
+            _block("Body text on page two", 0, y0=120),
+            _block("The argument develops further here", 1, y0=820),
+        ],
+    )
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    page = next(item for item in report["pages"] if item["page"] == 2)
+    candidate = next(
+        (
+            item
+            for item in (
+                page["candidates"] + page["suppressed_continuation_candidates"]
+            )
+            if item["block"] == 1
+        ),
+        None,
+    )
+    assert candidate is not None
+    assert "flush_with_body_geometry" in candidate["continuation_evidence"][
+        "negative_signals"
+    ]
 
 
 def test_page_footer_inside_a_confirmed_numeric_region_is_reviewed_not_dropped(
