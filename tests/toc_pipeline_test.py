@@ -17,7 +17,8 @@ from pdf2epub.toc_model import TOC_TREE_SCHEMA_VERSION
 from tests.toc_review_test_support import install_toc_review_contract
 
 
-def test_review_to_refine_to_translation_handoff_and_epub_roundtrip(tmp_path):
+@pytest.mark.parametrize("granularity", ["leaf", "top_level"])
+def test_review_to_refine_to_translation_handoff_and_epub_roundtrip(tmp_path, granularity):
     output = tmp_path / "output"
     pages = output / "pages"
     pages.mkdir(parents=True)
@@ -51,9 +52,9 @@ def test_review_to_refine_to_translation_handoff_and_epub_roundtrip(tmp_path):
     )
     (output / "toc_structure_decisions.json").write_text(json.dumps(review), encoding="utf-8")
 
-    units = RefinedBreakdown(config={}, max_tokens=8000).process_from_toc(
-        output / "input.pdf", output, "Synthetic Book"
-    )
+    units = RefinedBreakdown(
+        config={"refine": {"unit_granularity": granularity}}, max_tokens=8000
+    ).process_from_toc(output / "input.pdf", output, "Synthetic Book")
     assert units
     progress = json.loads((output / "ocr_markdown" / "tree_progress.json").read_text(encoding="utf-8"))
     assert all(unit.get("node_id") for unit in progress["units"])
@@ -156,3 +157,64 @@ def test_review_to_refine_to_translation_handoff_and_epub_roundtrip(tmp_path):
             toc_tree_path=output / "toc_tree.json", translated=True,
             target_language="Chinese", config={"footnotes": {"mode": "disabled"}},
         ))
+
+
+def test_top_level_unit_granularity_keeps_children_as_navigation_nodes(tmp_path):
+    from pdf2epub.toc_model import project_toc_ownership
+
+    output = tmp_path / "output"
+    pages = output / "pages"
+    pages.mkdir(parents=True)
+    (output / "input.pdf").write_bytes(b"synthetic PDF bytes")
+    page_texts = [
+        "1. *Parent*\n\nParent body retained.\n",
+        "## Child\n\nChild body retained.\n",
+        "### Grandchild\n\nGrandchild body retained.\n",
+    ]
+    for index, text in enumerate(page_texts, 1):
+        (pages / f"page_{index:03d}.md").write_text(text, encoding="utf-8")
+    tree = {"schema_version": TOC_TREE_SCHEMA_VERSION, "chapters": [{
+        "title": "1. Parent", "level": 1, "start_page": 1, "end_page": 3,
+        "numbering_label": "1",
+        "numbering_evidence": {"page": 1, "line": 1, "excerpt": "1. *Parent*"},
+        "boundary_info": {"start_line": 1}, "children": [{
+            "title": "Child", "level": 2, "start_page": 2, "end_page": 3,
+            "boundary_info": {"start_line": 1}, "children": [{
+                "title": "Grandchild", "level": 3, "start_page": 3, "end_page": 3,
+                "boundary_info": {"start_line": 1},
+            }],
+        }],
+    }]}
+    (output / "toc_tree.json").write_text(json.dumps(tree), encoding="utf-8")
+    install_toc_review_contract(output, pages)
+    review = json.loads((output / "toc_structure_decisions.json").read_text(encoding="utf-8"))
+    reviewed_tree = json.loads((output / "toc_tree.json").read_text(encoding="utf-8"))
+    root_node_id = reviewed_tree["chapters"][0]["node_id"]
+    next(record for record in review["candidate_decisions"] if record.get("node_id") == root_node_id).update(
+        numbering_label="1", numbering_evidence={"page": 1, "line": 1, "excerpt": "1. *Parent*"}
+    )
+    (output / "toc_structure_decisions.json").write_text(json.dumps(review), encoding="utf-8")
+
+    RefinedBreakdown(
+        config={"refine": {"unit_granularity": "top_level"}}, max_tokens=8000
+    ).process_from_toc(output / "input.pdf", output, "Synthetic Book")
+
+    progress = json.loads(
+        (output / "ocr_markdown" / "tree_progress.json").read_text(encoding="utf-8")
+    )
+    assert len(progress["units"]) == 1
+    unit = progress["units"][0]
+    assert unit["index_path"] == [1]
+    source = (output / "ocr_markdown" / unit["file"]).read_text(encoding="utf-8")
+    assert "Child" in source and "Grandchild" in source
+
+    reviewed_tree = json.loads((output / "toc_tree.json").read_text(encoding="utf-8"))
+    assert len(reviewed_tree["chapters"][0]["children"]) == 1
+    projection = project_toc_ownership(
+        reviewed_tree["chapters"], progress, {unit["file"]: source}
+    )
+    assert {heading["node_id"] for heading in projection[unit["file"]]["headings"]} >= {
+        reviewed_tree["chapters"][0]["node_id"],
+        reviewed_tree["chapters"][0]["children"][0]["node_id"],
+        reviewed_tree["chapters"][0]["children"][0]["children"][0]["node_id"],
+    }

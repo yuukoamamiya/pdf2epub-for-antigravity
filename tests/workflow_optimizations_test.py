@@ -730,7 +730,11 @@ def test_continuation_worker_manifest_forbids_synthetic_opening_heading(
 
     assert scoped["is_continuation"] is True
     assert scoped["continuation_files"] == {
-        "chapter_3.part2.md": {"is_continuation": True, "part_number": 2}
+        "chapter_3.part2.md": {
+            "is_continuation": True,
+            "part_number": 2,
+            "previous_file": "chapter_3.part1.md",
+        }
     }
     assert "do not add any Markdown heading at the file start" in prompt
     assert "'(continued)'" in prompt

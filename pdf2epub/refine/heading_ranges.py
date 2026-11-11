@@ -6,6 +6,19 @@ from typing import Sequence
 
 from ..toc_model import normalize_toc_source_label
 
+_ATX_HEADING = re.compile(r"^\s{0,3}(#{1,6})[ \t]+(?=\S)")
+
+
+def atx_heading_level(line: str) -> int | None:
+    """Return the Markdown ATX heading level of a source line, if any.
+
+    The OCR Markdown records a line as a heading by emitting an ATX marker.
+    That marker is evidence the reviewer must see; it is never proof that the
+    line belongs in the book's navigation tree.
+    """
+    match = _ATX_HEADING.match(str(line or ""))
+    return len(match.group(1)) if match else None
+
 
 def source_range_matches_title(
     lines: Sequence[str], start_line: int, end_line: int, title: str, *, anchor_line: int | None = None

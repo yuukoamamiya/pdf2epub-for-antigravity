@@ -30,7 +30,34 @@ class MarkdownHandoffPlan:
     task_max_files: int
     recommended_batches: list[list[str]]
     oversized_files: list[str]
+    preceding_contexts: Dict[str, Dict[str, str]] = field(default_factory=dict)
     role_sources: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+
+
+def _preceding_context_tail(text: str, limit: int = 600) -> str:
+    """Return the last readable paragraphs of a previous source part."""
+    from .footnote_markdown import collect_footnote_definition_blocks
+
+    lines = text.splitlines()
+    definitions, consumed = collect_footnote_definition_blocks(lines)
+    body_lines = [
+        line
+        for index, line in enumerate(lines)
+        if index not in consumed and index not in definitions
+    ]
+    body = "\n".join(body_lines).strip()
+    if not body:
+        return ""
+    paragraphs = [part.strip() for part in re.split(r"\n\s*\n", body) if part.strip()]
+    tail = ""
+    for paragraph in reversed(paragraphs):
+        candidate = paragraph if not tail else f"{paragraph}\n\n{tail}"
+        if len(candidate) > limit:
+            break
+        tail = candidate
+    if not tail:
+        tail = body[-limit:]
+    return tail.strip()
 
 
 def plan_markdown_handoff(
@@ -120,6 +147,27 @@ def plan_markdown_handoff(
                 "is_continuation": True,
                 "part_number": int(match.group("number")),
             }
+    for name, metadata in continuation_metadata.items():
+        previous = str(metadata.get("previous_file") or "").strip()
+        if previous and previous in source_texts:
+            continue
+        match = re.match(r"^(?P<base>.+)\.part(?P<number>[2-9][0-9]*)\.md$", name, re.IGNORECASE)
+        if not match:
+            continue
+        inferred = f"{match.group('base')}.part{int(match.group('number')) - 1}.md"
+        if inferred in source_texts:
+            metadata["previous_file"] = inferred
+    preceding_contexts: dict[str, dict[str, str]] = {}
+    for name, metadata in continuation_metadata.items():
+        previous = str(metadata.get("previous_file") or "").strip()
+        if not previous or previous not in source_texts:
+            continue
+        tail = _preceding_context_tail(source_texts[previous])
+        if tail:
+            preceding_contexts[name] = {
+                "source_file": previous,
+                "text": tail,
+            }
     batches = recommended_batches(
         file_stats,
         task_max_files,
@@ -140,5 +188,6 @@ def plan_markdown_handoff(
         controlled_files=controlled, continuation_files=continuation_metadata,
         isolated_files=isolated_files, task_max_files=task_max_files,
         recommended_batches=batches, oversized_files=oversized,
+        preceding_contexts=preceding_contexts,
         role_sources=role_sources,
     )

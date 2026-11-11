@@ -486,3 +486,125 @@ def test_title_stays_separate_from_first_chapter_over_30000_bytes(tmp_path: Path
 
     assert len(handoffs) == 2
     assert [item["files"] for item in handoffs] == [["title.md"], ["chapter_1.md"]]
+
+
+def test_pdf_chapter_mode_keeps_every_special_role_out_of_ordinary_workers():
+    from pdf2epub.worker_grouping import _chapter_worker_groups
+
+    manifest = {
+        "pending_files": ["ordinary.md", "toc.md", "notes.md"],
+        "file_stats": {
+            "ordinary.md": {"estimated_tokens": 100, "size_bytes": 100, "nonempty_line_count": 2},
+            "toc.md": {"estimated_tokens": 100, "size_bytes": 100, "nonempty_line_count": 2},
+            "notes.md": {"estimated_tokens": 100, "size_bytes": 100, "nonempty_line_count": 2},
+        },
+        "batching": {
+            "pack_adjacent_chapters": True,
+            "max_chapters_per_worker": 3,
+            "max_tiny_chapters_per_worker": 6,
+            "tiny_chapter_max_tokens": 2000,
+        },
+        "chapter_groups": {
+            "ordinary": ["ordinary.md"],
+            "toc": ["toc.md"],
+            "notes": ["notes.md"],
+        },
+        "file_roles": {"toc.md": "toc", "notes.md": "notes"},
+    }
+
+    groups = _chapter_worker_groups(manifest)
+    groups_by_file = {
+        name: group["files"]
+        for group in groups
+        for name in group["files"]
+    }
+
+    assert groups_by_file["ordinary.md"] == ["ordinary.md"]
+    assert "ordinary.md" not in groups_by_file["toc.md"]
+    assert "ordinary.md" not in groups_by_file["notes.md"]
+
+
+def _special_manifest(pack_tiny_special_units: bool):
+    return {
+        "pending_files": ["toc.md", "notes.md"],
+        "file_stats": {
+            "toc.md": {"estimated_tokens": 100, "size_bytes": 100, "nonempty_line_count": 2},
+            "notes.md": {"estimated_tokens": 100, "size_bytes": 100, "nonempty_line_count": 2},
+        },
+        "batching": {
+            "pack_adjacent_chapters": True,
+            "pack_tiny_special_units": pack_tiny_special_units,
+            "max_chapters_per_worker": 3,
+            "max_tiny_chapters_per_worker": 6,
+            "tiny_chapter_max_tokens": 2000,
+        },
+        "chapter_groups": {"toc": ["toc.md"], "notes": ["notes.md"]},
+        "file_roles": {"toc.md": "toc", "notes.md": "notes"},
+    }
+
+
+def test_tiny_special_units_stay_separate_by_default():
+    from pdf2epub.worker_grouping import _chapter_worker_groups
+
+    groups = _chapter_worker_groups(_special_manifest(False))
+    assert [group["files"] for group in groups] == [["toc.md"], ["notes.md"]]
+
+
+def test_tiny_special_units_can_share_one_worker_when_enabled():
+    from pdf2epub.worker_grouping import _chapter_worker_groups
+
+    groups = _chapter_worker_groups(_special_manifest(True))
+    assert [group["files"] for group in groups] == [["toc.md", "notes.md"]]
+
+
+def test_continuation_worker_receives_read_only_preceding_source_context(tmp_path):
+    source = tmp_path / "source"
+    target = tmp_path / "target"
+    source.mkdir()
+    target.mkdir()
+    (source / "chapter_1.part1.md").write_text(
+        "First paragraph.\n\nSecond paragraph.\n\n[^1]: Footnote text.\n",
+        encoding="utf-8",
+    )
+    (source / "chapter_1.part2.md").write_text(
+        "Continued paragraph.\n", encoding="utf-8"
+    )
+    paths = prepare_markdown_subagent(
+        tmp_path,
+        "translate",
+        source,
+        target,
+        "English",
+        "Chinese",
+        continuation_files={
+            "chapter_1.part2.md": {
+                "is_continuation": True,
+                "part_number": 2,
+                "part_count": 2,
+                "previous_file": "chapter_1.part1.md",
+            }
+        },
+        config={"subagent": {"batching": {"max_concurrency": 1}}},
+    )
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    context = manifest["preceding_context"]["chapter_1.part2.md"]
+    assert context["source_file"] == "chapter_1.part1.md"
+    assert "Second paragraph." in context["text"]
+    assert "Footnote text." not in context["text"]
+    assert "chapter_1.part1.md" not in manifest["preceding_context"]
+
+    handoffs = write_worker_handoffs(tmp_path, paths["manifest"], paths["prompt"])
+    part2 = next(item for item in handoffs if "chapter_1.part2.md" in item["files"])
+    prompt = (tmp_path / part2["prompt"]).read_text(encoding="utf-8")
+    assert "Preceding source context (read-only)" in prompt
+    assert "Second paragraph." in prompt
+    assert "do not translate, copy" in prompt.lower()
+
+
+def test_non_tiny_special_unit_never_packs_with_a_tiny_special_unit():
+    from pdf2epub.worker_grouping import _chapter_worker_groups
+
+    manifest = _special_manifest(True)
+    manifest["file_stats"]["toc.md"]["estimated_tokens"] = 5000
+    groups = _chapter_worker_groups(manifest)
+    assert [group["files"] for group in groups] == [["toc.md"], ["notes.md"]]

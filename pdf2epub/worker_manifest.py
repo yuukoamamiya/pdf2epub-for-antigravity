@@ -95,6 +95,7 @@ def _worker_manifest_projection(
         "file_contexts",
         "toc_heading_contexts",
         "repair_candidates",
+        "preceding_context",
     ):
         value = manifest.get(key)
         if isinstance(value, Mapping):

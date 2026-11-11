@@ -101,6 +101,7 @@ def _load_pdf_continuation_files(output_dir: Path, source_dir: Path) -> dict:
                     "is_continuation": True,
                     "part_number": index,
                     "part_count": part_count,
+                    "previous_file": names[index - 2],
                 }
     return metadata
 

@@ -451,6 +451,7 @@ def _empty_report(status: str, note_files: set[str]) -> dict[str, Any]:
         "double_numbered_definition_count": 0,
         "duplicate_definition_occurrences": [],
         "orphan_scoped_definitions": [],
+        "inherited_reference_scopes": [],
         "endnote_definition_decisions_sha256": None,
         "errors": [],
     }
@@ -615,6 +616,80 @@ def _scope_summary(
     return summary
 
 
+def _scope_parent_key(scope_key: str) -> Optional[str]:
+    """Return the parent scope key for a descendant scope (``u4c1`` -> ``u4``)."""
+    match = re.match(r"^(.*)c\d+$", str(scope_key or ""))
+    return match.group(1) if match else None
+
+
+def _definitions_by_scope(
+    occurrences: list[dict[str, Any]],
+) -> dict[tuple[Optional[str], str], list[dict[str, Any]]]:
+    grouped: dict[tuple[Optional[str], str], list[dict[str, Any]]] = defaultdict(list)
+    for occurrence in occurrences:
+        grouped[(occurrence["scope_key"], occurrence["key"])].append(occurrence)
+    return grouped
+
+
+def _resolve_inherited_scope_refs(
+    scopes: Mapping[str, Any],
+    scope_refs: Mapping[str, dict[str, list[dict[str, Any]]]],
+    definitions_by_scope_key: Mapping[tuple[Optional[str], str], list[dict[str, Any]]],
+) -> tuple[
+    dict[str, dict[str, list[dict[str, Any]]]],
+    list[dict[str, Any]],
+    list[str],
+]:
+    """Let a descendant reference use its nearest ancestor's note pool.
+
+    Centralized endnotes often attach to a chapter title while the body
+    reference sits in a nested section.  When the reference's own scope has no
+    definition for the key, walk the scope hierarchy and bind it to the nearest
+    ancestor that does.  More than one candidate ancestor is ambiguous and
+    fails closed.
+    """
+    known_scopes = set((scopes.get("scopes") or {}).keys())
+    resolved: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    inherited: list[dict[str, Any]] = []
+    errors: list[str] = []
+    for scope_key, by_key in scope_refs.items():
+        for key, references in by_key.items():
+            target = scope_key
+            if not definitions_by_scope_key.get((scope_key, key)):
+                candidates = []
+                current = scope_key
+                while True:
+                    parent = _scope_parent_key(current)
+                    if not parent:
+                        break
+                    if known_scopes and parent not in known_scopes:
+                        break
+                    if definitions_by_scope_key.get((parent, key)):
+                        candidates.append(parent)
+                    current = parent
+                if len(candidates) > 1:
+                    errors.append(
+                        f"endnote key {key} referenced in scope {scope_key} is "
+                        "defined in multiple ancestor scopes "
+                        f"({', '.join(candidates)}); check the TOC and chapter headings"
+                    )
+                elif candidates:
+                    target = candidates[0]
+                    inherited.append(
+                        {
+                            "reference_scope": scope_key,
+                            "definition_scope": target,
+                            "key": key,
+                            "reference_count": len(references),
+                        }
+                    )
+            if target != scope_key:
+                resolved.setdefault(target, {}).setdefault(key, []).extend(references)
+            else:
+                resolved.setdefault(scope_key, {}).setdefault(key, []).extend(references)
+    return resolved, inherited, errors
+
+
 def _normalize_scoped(
     source_texts: Mapping[str, str],
     note_files: set[str],
@@ -677,24 +752,18 @@ def _normalize_scoped(
                 scopes=scopes,
                 scope_key=scope_key,
             )
-            key, content, double_numbered = _apply_double_numbering(
-                key=raw_key,
-                content=content,
-                scope_key=scope_key,
-                ref_keys=scope_refs,
-            )
             occurrences.append(
                 {
                     "file": name,
                     "line": line_number,
                     "raw_key": raw_key,
-                    "key": key,
+                    "key": raw_key,
                     "content": content,
                     "continuation_lines": continuation_indexes,
                     "kind": kind,
                     "scope_key": scope_key,
-                    "double_numbered": double_numbered,
-                    "output_key": key,
+                    "double_numbered": False,
+                    "output_key": raw_key,
                 }
             )
 
@@ -709,17 +778,45 @@ def _normalize_scoped(
         report["endnote_definition_decisions_sha256"] = _decision_digest(decisions)
         return dict(source_texts), report
 
+    provisional_definitions = _definitions_by_scope(occurrences)
+    scope_refs, inherited_scopes, scope_errors = _resolve_inherited_scope_refs(
+        scopes, scope_refs, provisional_definitions
+    )
+    for occurrence in occurrences:
+        key, content, double_numbered = _apply_double_numbering(
+            key=occurrence["raw_key"],
+            content=occurrence["content"],
+            scope_key=occurrence["scope_key"],
+            ref_keys=scope_refs,
+        )
+        occurrence["key"] = key
+        occurrence["content"] = content
+        occurrence["double_numbered"] = double_numbered
+        occurrence["output_key"] = key
+
+    definitions_by_scope_key = _definitions_by_scope(occurrences)
+    scope_refs, inherited_more, more_errors = _resolve_inherited_scope_refs(
+        scopes, scope_refs, definitions_by_scope_key
+    )
+    inherited_scopes.extend(inherited_more)
+    scope_errors.extend(more_errors)
+    deduplicated_inherited: list[dict[str, Any]] = []
+    seen_inherited: set[tuple[Any, ...]] = set()
+    for item in inherited_scopes:
+        identity = (
+            item.get("reference_scope"),
+            item.get("definition_scope"),
+            item.get("key"),
+        )
+        if identity in seen_inherited:
+            continue
+        seen_inherited.add(identity)
+        deduplicated_inherited.append(item)
+    inherited_scopes = deduplicated_inherited
+
     scoped_keys = _scoped_keys(occurrences)
     scope_mode = "per_chapter" if scoped_keys else "global"
-    errors: list[str] = []
-
-    definitions_by_scope_key: dict[
-        tuple[Optional[str], str], list[dict[str, Any]]
-    ] = defaultdict(list)
-    for occurrence in occurrences:
-        definitions_by_scope_key[
-            (occurrence["scope_key"], occurrence["key"])
-        ].append(occurrence)
+    errors: list[str] = list(scope_errors)
 
     if scoped_keys:
         for occurrence in occurrences:
@@ -759,8 +856,8 @@ def _normalize_scoped(
                         f"only {len(definitions)} definitions in scope "
                         f"{scope_key}; check the scope assignment"
                     )
-        if errors:
-            raise EndnoteNormalizationError("; ".join(errors))
+    if errors:
+        raise EndnoteNormalizationError("; ".join(errors))
 
     scoped_definitions = sorted(
         occurrences,
@@ -909,6 +1006,7 @@ def _normalize_scoped(
         ),
         "duplicate_definition_occurrences": duplicate_occurrences,
         "orphan_scoped_definitions": orphan_scoped,
+        "inherited_reference_scopes": inherited_scopes,
         "endnote_definition_decisions_sha256": _decision_digest(decisions),
         "errors": [],
     }

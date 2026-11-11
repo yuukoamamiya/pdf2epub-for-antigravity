@@ -19,7 +19,7 @@ from pdf2epub.toc_model import (
 )
 from pdf2epub.workflow_contracts import atomic_write_json
 from pdf2epub.numbering import standalone_number_label
-from .heading_ranges import source_range_matches_title
+from .heading_ranges import atx_heading_level, source_range_matches_title
 
 SCHEMA_VERSION = 2
 DISPOSITIONS = {"toc_node", "body_text", "page_number", "running_header", "ornament", "unresolved"}
@@ -76,15 +76,19 @@ def _heading_like_text_regions(page: int, lines: list[str]) -> list[dict[str, An
         if fence is not None or line.startswith(("    ", "\t")) or _MARKDOWN_LIST.match(line):
             line_no += 1
             continue
+        atx_level = atx_heading_level(stripped)
         number_text = standalone_number_label(stripped)
         if number_text:
             digest_source = f"{page}:{line_no}:{line_no}:{stripped}"
-            rows.append({
+            row = {
                 "candidate_id": "cand-" + _sha(digest_source.encode())[:20],
                 "kind": "explicit_page_label" if re.match(r"(?i)^(?:pdf\s+)?page\b", stripped) else "standalone_number",
                 "page": page, "line": line_no,
                 "end_line": line_no, "excerpt": stripped[:300],
-            })
+            }
+            if atx_level is not None:
+                row["atx_level"] = atx_level
+            rows.append(row)
             line_no += 1
             continue
         standalone_title = bool(
@@ -111,11 +115,14 @@ def _heading_like_text_regions(page: int, lines: list[str]) -> list[dict[str, An
                         excerpt = " ".join(value.strip() for value in lines[line_no - 1:end_line])
                         break
             digest_source = f"{page}:{start_line}:{end_line}:{excerpt}"
-            rows.append({
+            row = {
                 "candidate_id": "cand-" + _sha(digest_source.encode())[:20],
                 "kind": "text_line", "page": page, "line": start_line,
                 "end_line": end_line, "excerpt": excerpt[:300],
-            })
+            }
+            if atx_level is not None:
+                row["atx_level"] = atx_level
+            rows.append(row)
             line_no = end_line + 1
             continue
         line_no += 1
@@ -367,6 +374,10 @@ def _validate_candidate_decisions_and_evidence(output_dir: Path, candidates: lis
             errors.append(f"invalid disposition for {cid}")
             continue
         if disp == "unresolved": errors.append(f"unresolved candidate: {cid}")
+        if "reason" in record and (
+            not isinstance(record["reason"], str) or not record["reason"].strip()
+        ):
+            errors.append(f"candidate {cid} reason must be a non-empty string")
         if disp == "page_number" and (
             cid not in allowed or allowed[cid].get("kind") not in {"standalone_number", "explicit_page_label"}
         ):
@@ -759,6 +770,138 @@ def _validate_toc_node_source_correspondence(output_dir: Path, tree: Any, toc_li
     return errors
 
 
+def _validate_atx_heading_acceptance(
+    tree: Any,
+    candidates: list[Any],
+    records: list[Any],
+    valid_pages: dict[int, dict[str, Any]],
+) -> list[str]:
+    """Keep reviewed navigation in step with ATX headings in the body.
+
+    An OCR Markdown line that carries an ATX marker is structural evidence.
+    Inside an accepted node's page range it must either become a TOC node or
+    keep a non-navigation disposition with an explicit reviewer reason. This
+    is what stops a flat tree from silently hiding a multi-level body from the
+    EPUB navigation.
+    """
+    errors: list[str] = []
+    if not isinstance(tree, dict) or not isinstance(tree.get("chapters"), list):
+        return errors
+    accepted_heading_lines: set[tuple[int, int]] = set()
+    node_ranges: list[tuple[int, int, str, str]] = []
+    for _, node in iter_toc_nodes(tree["chapters"]):
+        page = node.get("start_page")
+        end_page = node.get("end_page")
+        node_id = node.get("node_id")
+        title = node.get("title")
+        if type(page) is int and type(end_page) is int:
+            node_ranges.append((page, end_page, str(node_id or ""), str(title or "")))
+        if node.get("binding_mode", "visible") != "visible":
+            continue
+        boundary = node.get("boundary_info") if isinstance(node.get("boundary_info"), dict) else {}
+        start = boundary.get("start_line")
+        end = boundary.get("heading_end_line")
+        if type(page) is not int or type(start) is not int:
+            continue
+        accepted_heading_lines.add((page, start))
+        if type(end) is int and end > start:
+            accepted_heading_lines.update((page, line) for line in range(start, end))
+    decisions_by_id = {
+        record.get("candidate_id"): record
+        for record in records
+        if isinstance(record, dict) and isinstance(record.get("candidate_id"), str)
+    }
+    unmodeled: dict[tuple[str, str], list[str]] = {}
+    numeral_candidates: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        page = candidate.get("page")
+        line = candidate.get("line")
+        if type(page) is not int or type(line) is not int or page not in valid_pages:
+            continue
+        owner = next(
+            ((node_id, title) for start_page, end_page, node_id, title in node_ranges
+             if start_page <= page <= end_page),
+            None,
+        )
+        if owner is None:
+            continue
+        decision = decisions_by_id.get(candidate.get("candidate_id"))
+        disposition = decision.get("disposition") if isinstance(decision, dict) else None
+        if candidate.get("kind") == "standalone_number":
+            numeral_candidates.setdefault(owner, []).append(candidate)
+        level = candidate.get("atx_level")
+        if type(level) is int and 1 <= level <= 6:
+            if (page, line) in accepted_heading_lines:
+                continue
+            if disposition == "toc_node":
+                continue
+            reason = decision.get("reason") if isinstance(decision, dict) else None
+            if isinstance(reason, str) and reason.strip():
+                continue
+            unmodeled.setdefault(owner, []).append(
+                f"page {page} line {line} (level {level}, candidate "
+                f"{candidate.get('candidate_id')}, {disposition})"
+            )
+    for (node_id, title), entries in unmodeled.items():
+        shown = ", ".join(entries[:8])
+        more = f", and {len(entries) - 8} more" if len(entries) > 8 else ""
+        errors.append(
+            f"TOC node {node_id!r} ({title!r}) leaves {len(entries)} ATX heading "
+            f"candidate(s) accepted without an explicit reason: {shown}{more}; "
+            "model them as TOC nodes or add a per-candidate `reason` explaining why "
+            "they are not part of the book structure"
+        )
+
+    # A run of standalone numerals can be a section sequence whose OCR marks
+    # only some entries as headings (``## I`` next to a plain ``II``).  Once at
+    # least one numeral in the same node is a reviewed TOC node, the remaining
+    # body-text numerals need an explicit reason; otherwise the flattened tree
+    # silently drops the missing sections.
+    for (node_id, title), entries in numeral_candidates.items():
+        accepted_positions = sorted(
+            (item.get("page"), item.get("line"))
+            for item in entries
+            if isinstance(decisions_by_id.get(item.get("candidate_id")), dict)
+            and decisions_by_id[item.get("candidate_id")].get("disposition") == "toc_node"
+        )
+        if not accepted_positions:
+            continue
+        unreasoned = []
+        for item in sorted(
+            entries, key=lambda value: (value.get("page"), value.get("line"))
+        ):
+            decision = decisions_by_id.get(item.get("candidate_id"))
+            if not isinstance(decision, dict):
+                continue
+            if decision.get("disposition") != "body_text":
+                continue
+            reason = decision.get("reason")
+            if isinstance(reason, str) and reason.strip():
+                continue
+            position = (item.get("page"), item.get("line"))
+            if not (
+                any(candidate < position for candidate in accepted_positions)
+                and any(candidate > position for candidate in accepted_positions)
+            ):
+                continue
+            unreasoned.append(
+                f"page {item.get('page')} line {item.get('line')} "
+                f"(candidate {item.get('candidate_id')})"
+            )
+        if unreasoned:
+            shown = ", ".join(unreasoned[:8])
+            more = f", and {len(unreasoned) - 8} more" if len(unreasoned) > 8 else ""
+            errors.append(
+                f"TOC node {node_id!r} ({title!r}) mixes accepted numbered "
+                f"headings with {len(unreasoned)} body-text numeral candidate(s): "
+                f"{shown}{more}; model the sequence consistently or add a "
+                "per-candidate `reason` explaining why the numeral is not a heading"
+            )
+    return errors
+
+
 def validate_structure_review(output_dir: Path, tree: Any = None,
                               *, expected_snapshot: tuple[dict[str, Any], dict[str, Any]]) -> list[str]:
     """Validate candidate coverage, decision bijection, freshness and tree IDs."""
@@ -838,6 +981,7 @@ def validate_structure_review(output_dir: Path, tree: Any = None,
     errors.extend(_validate_toc_node_source_correspondence(
         output_dir, tree, toc_links, records, decisions_by_node, allowed, valid_pages
     ))
+    errors.extend(_validate_atx_heading_acceptance(tree, candidates, records, valid_pages))
     return errors
 
 

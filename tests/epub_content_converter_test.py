@@ -3,10 +3,21 @@ from types import SimpleNamespace
 from lxml import etree
 
 from pdf2epub.epub.converter import ContentConverter
+from pdf2epub.epub.footnotes import FootnoteManager
 from pdf2epub.markdown_to_html import (
     _normalize_ordered_list_starts,
     convert_markdown_to_html,
 )
+
+
+def _convert_with_footnotes(tmp_path, name: str, text: str) -> str:
+    (tmp_path / name).write_text(text, encoding="utf-8")
+    return convert_markdown_to_html(
+        text,
+        standalone=False,
+        footnote_manager=FootnoteManager(tmp_path),
+        source_chapter=name,
+    )
 
 
 def test_duplicate_title_cleanup_preserves_repeated_symbolic_section_breaks(
@@ -262,6 +273,74 @@ def test_currency_prefixed_math_keeps_the_currency_sign() -> None:
 
     assert "PDF2EPUBESCAPEDDOLLARTOKEN" not in html
     assert "$1.1" in html
+
+
+def test_display_math_trailing_footnote_moves_outside_mathml(tmp_path) -> None:
+    html = _convert_with_footnotes(
+        tmp_path,
+        "display_inside.md",
+        "$$\\Omega = X [^1]$$\n\n[^1]: Note text",
+    )
+
+    math_start = html.index("math-display")
+    math_end = html.index("</div>", math_start)
+    assert "[^1]" not in html[math_start:math_end]
+    assert "<sup" not in html[math_start:math_end]
+    assert "<sup" in html[math_end:]
+    assert 'id="fn-1"' in html
+
+
+def test_paragraph_footnote_before_display_math_stays_in_prose(tmp_path) -> None:
+    html = _convert_with_footnotes(
+        tmp_path,
+        "para_before_display.md",
+        "引导至如下表达式：[^1]\n\n$$\\Omega = X$$\n\n[^1]: Note text",
+    )
+
+    first_paragraph = html.split("</p>", 1)[0]
+    assert "<sup" in first_paragraph
+    math_start = html.index("math-display")
+    math_end = html.index("</div>", math_start)
+    assert "<sup" not in html[math_start:math_end]
+
+
+def test_inline_math_trailing_footnote_moves_outside_math_markup(tmp_path) -> None:
+    html = _convert_with_footnotes(
+        tmp_path,
+        "inline_inside.md",
+        "where $x = 1[^2]$ holds.\n\n[^2]: Inline note",
+    )
+
+    formula_end = html.index("=1") + len("=1")
+    footnote_at = html.index("<sup", formula_end)
+    assert footnote_at >= formula_end
+    assert html.index("holds.") > footnote_at
+    assert 'id="fn-2"' in html
+
+
+def test_multiple_display_math_trailing_footnotes_preserve_order(tmp_path) -> None:
+    html = _convert_with_footnotes(
+        tmp_path,
+        "display_many.md",
+        "$$\\Omega = X [^2][^1]$$\n\n[^1]: First\n\n[^2]: Second",
+    )
+
+    math_start = html.index("math-display")
+    math_end = html.index("</div>", math_start)
+    assert "<sup" not in html[math_start:math_end]
+    trailing = html[math_end:]
+    assert trailing.index("[2]") < trailing.index("[1]")
+
+
+def test_math_without_footnotes_is_unchanged(tmp_path) -> None:
+    html = _convert_with_footnotes(
+        tmp_path,
+        "display_plain.md",
+        "$$\\Omega = X$$",
+    )
+
+    assert "<sup" not in html
+    assert "math-display" in html
 
 
 def test_generated_html_removes_active_content_and_escapes_title() -> None:

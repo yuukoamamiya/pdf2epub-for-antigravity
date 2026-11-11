@@ -293,6 +293,24 @@ def process_ruby_text(markdown_content: str) -> str:
     return markdown_content
 
 
+def _pop_trailing_footnote_refs(value: str) -> tuple[str, list[str]]:
+    """Remove footnote references stuck at the end of a math expression.
+
+    OCR often places ``[^n]`` inside ``$...$`` or ``$$...$$`` even though the
+    marker belongs to the surrounding prose.  Returning it separately lets the
+    caller reattach the reference outside the stashed MathML fragment, keeping
+    the bidirectional footnote link intact.
+    """
+    trailing_footnotes: list[str] = []
+    while True:
+        match = re.search(r'\s*(\[\^[^\]\n]+\])\s*$', value)
+        if not match:
+            break
+        trailing_footnotes.insert(0, match.group(1))
+        value = value[:match.start()].rstrip()
+    return value, trailing_footnotes
+
+
 def preprocess_markdown(markdown_content: str, footnote_manager=None, source_chapter: Optional[str] = None, image_mapping: Optional[dict] = None) -> str:
     """
     Pre-process markdown to fix various issues before conversion.
@@ -459,10 +477,12 @@ def preprocess_markdown(markdown_content: str, footnote_manager=None, source_cha
         Display math is rendered as block-level centered mathematical expressions.
         """
         latex_code = match.group(1).strip()
+        latex_code, trailing_footnotes = _pop_trailing_footnote_refs(latex_code)
+        trailing_suffix = ("\n\n" + "".join(trailing_footnotes)) if trailing_footnotes else ""
 
         if not latex_code:
             # Empty display math block, return placeholder
-            return '<div class="math-display"></div>'
+            return '<div class="math-display"></div>' + trailing_suffix
 
         try:
             # Convert LaTeX to MathML
@@ -471,13 +491,13 @@ def preprocess_markdown(markdown_content: str, footnote_manager=None, source_cha
             # Wrap in a centered div for display math
             return stash_math(
                 f'<div class="math-display" style="text-align: center; margin: 1em 0;">{mathml}</div>'
-            )
+            ) + trailing_suffix
         except Exception as e:
             logger.warning(f"Failed to convert display math to MathML: {latex_code[:50]}... Error: {e}")
             # Fallback: keep original LaTeX in a styled div
             return stash_math(
                 f'<div class="math-display" style="text-align: center; margin: 1em 0; font-style: italic;">$${latex_code}$$</div>'
-            )
+            ) + trailing_suffix
 
     # Match $$...$$ blocks (multiline, non-greedy)
     # Use DOTALL flag to allow matching across newlines
@@ -516,6 +536,8 @@ def preprocess_markdown(markdown_content: str, footnote_manager=None, source_cha
         - Complex expressions that unicodeitplus can't handle
         """
         content = match.group(1)  # Get content between $ and $
+        content, trailing_footnotes = _pop_trailing_footnote_refs(content)
+        trailing_suffix = ("".join(trailing_footnotes)) if trailing_footnotes else ""
         original_content = content  # Keep original for fallback
 
         # Plain Latin variables in economic circulation formulas do not need
@@ -524,7 +546,7 @@ def preprocess_markdown(markdown_content: str, footnote_manager=None, source_cha
         math_variable = r"[A-Za-z](?:(?:['′])|(?:\^\{?\\prime\}?))?"
         if re.fullmatch(rf"\s*{math_variable}(?:\s*[-=+]\s*{math_variable})*\s*", content):
             safe_expression = re.sub(r"\^\{?\\prime\}?", "′", content.strip())
-            return stash_math(f'<i>{html_module.escape(safe_expression)}</i>')
+            return stash_math(f'<i>{html_module.escape(safe_expression)}</i>') + trailing_suffix
 
         # === Preprocessing for patterns unicodeitplus doesn't handle well ===
 
@@ -558,20 +580,20 @@ def preprocess_markdown(markdown_content: str, footnote_manager=None, source_cha
                 logger.debug(f"Unicode conversion incomplete for: {original_content[:50]}... Trying MathML")
                 raise ValueError("Incomplete conversion, use MathML")
 
-            return stash_math(result)
+            return stash_math(result) + trailing_suffix
 
         except Exception as e:
             # === Fallback to MathML for complex expressions ===
             try:
                 mathml = converter.convert(original_content)
                 logger.debug(f"Using MathML for inline math: {original_content[:50]}...")
-                return stash_math(f'<span class="math-inline">{mathml}</span>')
+                return stash_math(f'<span class="math-inline">{mathml}</span>') + trailing_suffix
             except Exception as e2:
                 # Last resort: keep original LaTeX with styling
                 logger.warning(f"Failed to convert inline math: {original_content[:50]}... Error: {e2}")
                 return stash_math(
                     f'<span style="font-style: italic;">${original_content}$</span>'
-                )
+                ) + trailing_suffix
 
     # Apply the callback to all $...$ blocks (inline only, not across newlines)
     # Use [^$\n]+ to match only within a single line

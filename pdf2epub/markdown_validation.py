@@ -590,9 +590,20 @@ def _strip_trailing_references(text: str) -> str:
     return text
 
 
+def _strip_footnote_definitions(text: str) -> str:
+    lines = text.splitlines(keepends=True)
+    raw_lines = [line.rstrip("\r\n") for line in lines]
+    definitions, consumed = collect_footnote_definition_blocks(raw_lines)
+    if not definitions:
+        return text
+    footnote_lines = consumed | set(definitions)
+    return "".join(line for i, line in enumerate(lines) if i not in footnote_lines)
+
+
 def _language_audit_text(text: str) -> str:
     """Remove non-prose regions before measuring target-language density."""
     text = _strip_trailing_references(text)
+    text = _strip_footnote_definitions(text)
     text = re.sub(r"```.*?```", " ", text, flags=re.DOTALL)
     text = re.sub(r"!?\[[^\]]*\]\([^)]*\)", " ", text)
     text = re.sub(r"https?://\S+|www\.\S+", " ", text, flags=re.IGNORECASE)

@@ -73,6 +73,23 @@ def test_resolve_subagent_model_supports_configured_and_task_overrides():
     assert resolve_subagent_model(config, "refine") == "refine-custom"
 
 
+def test_resolve_subagent_model_falls_back_to_default_for_translation():
+    config = {"subagent": {"models": {"default": "flash-custom"}}}
+    assert resolve_subagent_model(config, "translate") == "flash-custom"
+    assert resolve_subagent_model(config, "translate-html") == "flash-custom"
+    assert resolve_subagent_model(config, "refine") == "flash-custom"
+
+
+def test_resolve_subagent_model_keeps_explicit_translation_override():
+    config = {
+        "subagent": {
+            "models": {"translation": "pro-custom", "default": "flash-custom"},
+        }
+    }
+    assert resolve_subagent_model(config, "translate") == "pro-custom"
+    assert resolve_subagent_model(config, "refine") == "flash-custom"
+
+
 def test_detect_refusal_flags_model_text_but_allows_matching_source_dialogue():
     assert detect_refusal(
         "This is an ordinary paragraph.",
@@ -2034,6 +2051,29 @@ def test_prepare_markdown_translation_prompt_has_immutable_heading_guard(tmp_pat
     assert "must begin with exactly the same number" in prompt
     assert "Never keep the original-language heading" in prompt
     assert "parent heading may be structural-only" in prompt
+    assert "first occurrence of a person or place name" in prompt
+    assert "康德（Kant）" in prompt
+    assert "Ancient Greek" in prompt and "Latin transliteration" in prompt
+    assert "ἀρχή（archē）" in prompt
+
+
+def test_polish_prompt_does_not_include_translation_language_rules(tmp_path: Path):
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    (source_dir / "unit.md").write_text("# Heading\nBody\n", encoding="utf-8")
+
+    paths = prepare_markdown_subagent(
+        tmp_path,
+        "polish",
+        source_dir,
+        tmp_path / "target",
+        "German",
+        "Chinese",
+    )
+    prompt = paths["prompt"].read_text(encoding="utf-8")
+
+    assert "康德（Kant）" not in prompt
+    assert "Ancient Greek and Latin" not in prompt
 
 
 def test_prepare_markdown_subagent_records_file_sizes_and_batches(tmp_path: Path):

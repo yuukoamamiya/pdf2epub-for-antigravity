@@ -41,11 +41,13 @@ translation:
 #   publisher: "Publisher Name"
 
 # Antigravity Subagent 模型（只作为 IDE 子 Agent 的任务提示，不调用任何 API）
-# 翻译类任务默认使用 Pro，其余任务（结构分析、润色、实体提取）默认使用 Flash。
+# 默认使用 inherit，让子 Agent 继承主会话已验证的模型；需要固定模型时再显式填写。
+# 翻译任务依次读取 task_models -> models.translation -> models.default；
+# 其他任务依次读取 task_models -> models.default。
 subagent:
   models:
-    translation: gemini-3.1-pro-preview
-    default: gemini-3.6-flash
+    translation: inherit
+    default: inherit
   # Subagent 批处理建议；仅生成 manifest 和提示，不由 Python 自动调用模型。
   batching:
     max_files: 5
@@ -57,6 +59,9 @@ subagent:
     # per-chapter terminology scopes.
     pack_adjacent_chapters: true
     max_chapters_per_worker: 3
+    # 可选：允许极短特殊单元（toc/notes/bibliography 等）彼此共用 worker；
+    # 特殊单元仍绝不与普通章节混排。默认 false。
+    pack_tiny_special_units: false
   # 可选：按任务覆盖上面的默认值，例如 refine / polish / translate-html。
   # task_models:
   #   refine: gemini-3.6-flash
@@ -115,6 +120,9 @@ illustration:
 refine:
   # TOC analysis is done by an Antigravity workspace subagent.
   max_tokens: 8000
+  # leaf（默认）为每个 TOC 叶子生成独立单元；top_level 或正整数 N 在指定
+  # 树深度合并单元，子标题仍作为多级导航节点投影到所属单元。
+  unit_granularity: leaf
   # Split every very large refined unit after merging. Content roles such as
   # notes/bibliography/index are assigned by the TOC Subagent, not here.
   # The split files use the existing chapter_N.partM.md contract.

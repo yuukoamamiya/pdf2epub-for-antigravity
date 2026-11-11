@@ -30,7 +30,15 @@ def install_toc_review_contract(output_dir: Path, pages_dir: Path | None = None)
         if c.get("kind") in {"text_line", "standalone_number", "explicit_page_label"} and type(c.get("line")) is int
     }
     used = set()
-    decisions = [{"candidate_id": c["candidate_id"], "disposition": "body_text"} for c in candidates]
+    decisions = [
+        {
+            "candidate_id": c["candidate_id"],
+            "disposition": "body_text",
+            **({"reason": "synthetic fixture: heading intentionally not in navigation"}
+               if c.get("atx_level") else {}),
+        }
+        for c in candidates
+    ]
     ids = set()
 
     def visit(nodes):

@@ -65,6 +65,8 @@ subagent:
     global_toc_tokens: 1200
     pack_adjacent_chapters: true
     max_chapters_per_worker: 3
+    # Opt-in: let tiny special units share one special-only worker.
+    pack_tiny_special_units: false
     # Conservative default; up to 6 independent hand-offs may be enabled when
     # the IDE/model quota permits it.
     max_concurrency: 3
@@ -76,7 +78,7 @@ subagent:
   #   refine: <configured task model>
 ```
 
-默认规则是：正文、元数据、目录、小说和 TeX 翻译使用配置中的 `translation`；结构分析、OCR 润色和实体提取使用 `default`。每个生成的 `*_subagent_manifest.json` 和提示词都会明确写出推荐模型，供 Antigravity 中的 Subagent 选择。具体模型版本以当前配置文件为准，本文档不固定版本号。这里是任务合同，不是 Python 对模型 API 的调用或强制切换。
+默认规则是：翻译任务依次读取 `task_models`、`models.translation`、`models.default`；其他任务依次读取 `task_models`、`models.default`。未配置时推荐值是 `inherit`，让 Antigravity 子 Agent 继承主会话已验证的模型；只有显式配置才写具体模型名。每个生成的 `*_subagent_manifest.json` 和提示词都会写出推荐模型，供 Antigravity 中的 Subagent 选择。这里是任务合同，不是 Python 对模型 API 的调用或强制切换。
 
 ## 额度耗尽与断点续传
 
@@ -86,7 +88,7 @@ PDF `translate`/`polish` 的全量报告和逐文件 ledger 会保存 validation
 
 脚注 handoff 的 unit context 使用独立的 `projection_version`。加载时以候选报告和 review packet 的页来源重新核对侧车路径；context 自身的页/fact/hash 不能作为来源证明。旧 context 缺少当前 projection version 时，重新运行 `footnote-prepare` 与 `footnote-validate`；原有 decision 文件保留，只有当前证据身份仍一致且校验通过时才可复用。此刷新不会调用 OCR，也不会放宽语义决定门禁。
 
-PDF/EPUB 的 `translate` manifest 会在 `worker_handoffs/` 按 TOC 顺序为相邻短章节装箱，生成隔离的最小 manifest 和提示词；父级 manifest 保留完整审计索引，worker 只接收自己的文件、批次、上下文哈希和必要的章节元数据，不重复携带全书文件统计、章节映射或审计快照路径；
+PDF/EPUB 的 `translate` manifest 会在 `worker_handoffs/` 按 TOC 顺序为相邻短章节装箱，生成隔离的最小 manifest 和提示词；拆分单元的后续 part 会收到只读的 `preceding_context`（前一分片的源文尾部，已剔除脚注定义），仅用于承接代词和论证语气，不计入输出、不得翻译或复制；父级 manifest 保留完整审计索引，worker 只接收自己的文件、批次、上下文哈希和必要的章节元数据，不重复携带全书文件统计、章节映射或审计快照路径；
 `polish` 使用独立的 `polish_worker_handoffs/`，避免不同阶段的任务被误认。每个 Subagent
 只读取自己 handoff 的 `assigned_files`；超过 30,000 字节的单元自动独立成批，但不能与
 其他章节合并。polish 的普通章节仍可适度打包，文件预算使用独立的
@@ -198,6 +200,10 @@ assignment 时只保留旧的 `assigned`/`running` lease 元数据；它是文�
 
 ## 章节组与 worker 装箱合同
 
+正文翻译 prompt 还包含两条编辑规则：人名地名首次出现时附源语言原文（如`康德（Kant）`），
+古希腊语标注原文和拉丁化拼写、拉丁语标注原文。并行 part worker 按 assigned unit 和
+scoped context 判断首次出现；跨 unit 的绝对首次以实体表或上下文证据为准。
+
 PDF 和 EPUB 的正文翻译有两个不能混淆的范围：`chapter_groups` 是语义范围，
 `worker_handoffs` 是执行范围。一个章节组可以包含一个章节的多个 Markdown/HTML 单元；
 一个 worker handoff 可以包含多个相邻的短章节组，但不能因此改变源文件、TOC 或输出文件
@@ -218,6 +224,7 @@ PDF 和 EPUB 的正文翻译有两个不能混淆的范围：`chapter_groups` �
 | `max_source_tokens` | 一个 worker 的源 token 预算 |
 | `max_packed_source_tokens` | 相邻完整章节合并 worker 的源 token 总预算；默认是 `max_source_tokens` 的两倍 |
 | `single_file_max_bytes` | 单个文件超过该值时必须独立成批，默认 `30000` |
+| `pack_tiny_special_units` | PDF chapter 模式下允许极短特殊单元彼此共用 worker；默认 `false`，特殊单元仍绝不与普通章节混排 |
 | `max_concurrency` | 独立 hand-off 的并发提示上限；默认 `3`，硬上限为 `6`，仍受大文件降速规则约束 |
 
 装箱具有以下硬边界：
@@ -234,10 +241,12 @@ PDF 和 EPUB 的正文翻译有两个不能混淆的范围：`chapter_groups` �
    重新拼成一个 worker。
 5. 若当前批次和新增章节都属于 tiny，章节数可放宽到 `max_tiny_chapters_per_worker`；
    新增普通章节、超大章节或拆分章节时不适用该放宽。
-6. polish 中 `index`、`bibliography`、`notes`、`author_notes`、`toc`、`catalog`、
-   `ad`、`copyright`、`frontmatter`、`metadata` 和 `cover` 是 isolated batch；
-   每个此类 batch 生成一个只含该特殊单元的 worker，普通 batch 不能与之合并。
-   scoped prompt 只对当前 worker 命中的角色追加规则，不向其他 worker 广播。
+6. `index`、`bibliography`、`notes`、`author_notes`、`toc`、`catalog`、`ad`、
+   `copyright`、`frontmatter`、`metadata` 和 `cover` 是 isolated batch；PDF chapter
+   模式和 polish 都按此隔离，普通 batch 不能与之合并。默认每个特殊单元独立 worker；
+   显式启用 `pack_tiny_special_units` 时，只有彼此都低于 `tiny_chapter_max_tokens`
+   的特殊单元可以合包，且仍不得混入普通章节。scoped prompt 只对当前 worker 命中的
+   角色追加规则，不向其他 worker 广播。
 
 父级 `translate_subagent_manifest.json` 保留完整的 `chapter_groups`、`pending_files`、
 `batch_queue` 和审计信息。真正交给 Subagent 的 scoped manifest 只保留当前 worker 的
@@ -435,15 +444,18 @@ uv run pdf2epub -c config.yaml footnote-apply
 `footnote-prepare` 必须后于 `refine-local`，因为脚注归并范围取自实际生成的
 `tree_progress.json` 单元，而不是抽象的顶层 TOC。
 
-`refine-prepare` 同时生成 schema 1 的 `toc_heading_candidates.json` 和
+`refine-prepare` 同时生成 schema 2 的 `toc_heading_candidates.json` 和
 `toc_structure_review_manifest.json`。前者按源哈希记录每页行数、候选清单及有限的版面事实；后者
-固定 OCR/页面证据模式，并列出允许读取的 PDF 页或页图。Subagent 为每个候选在
+固定 OCR/页面证据模式，并列出允许读取的 PDF 页或页图。候选行带 `atx_level` 时表示源 Markdown
+本身标出了 ATX 标题，Reviewer 必须解释这一证据；`## I` 这类纯数字标题同时是独立数字候选，不能
+因为“只是数字”就按正文放行。Subagent 为每个候选在
 `toc_structure_decisions.json` 中作唯一处置，为所有源页写 `page_coverage`（
 `reviewed: true` 和 `visual`/`page_text` 证据），并输出 schema 2 的 `toc_tree.json`。
 每个 TOC 节点需要唯一 `node_id`、明确的 `visible`/`container_only` 绑定；可见节点必须对应
 已接受的候选及其确切页/行，容器节点必须给出审阅理由。新增候选只能引用 allowlist 中精确的
-页、行和原文摘录。`unresolved`、候选漏审、任一页未覆盖或证据变更都会使 `refine-local` 失败；
-此时重新准备并完成整套审阅，不能复用旧树和旧决定。
+页、行和原文摘录。已接受节点页码范围内的 ATX 标题候选必须成为 `toc_node`，或以非空 `reason`
+说明为何不进入阅读目录。`unresolved`、候选漏审、未解释的 ATX 标题、任一页未覆盖或证据变更都会使
+`refine-local` 失败；此时重新准备并完成整套审阅，不能复用旧树和旧决定。
 
 OCR 完成不是“有几个 `page_*.md` 文件”就算通过。`ocr_progress.json` 会记录源 PDF
 哈希、真实物理页数、已处理页、失败页、缺失页和空结果页；失败、缺页或未确认的空结果
@@ -591,9 +603,12 @@ pipeline: epub_conversion
 - 校验页码范围、层级、父子包含关系和兄弟节点重叠；
 - 用本地 tokenizer 估算单元大小；
 - 用 `PageMerger` 合并页面并生成 `ocr_markdown/`；
-- 结构 review schema 2 逐项决定独立数字的语义；每个可见标题须显式绑定起始行和 exclusive
-  结束行，布局侧车补充的标题须显式声明插入证据和局部 absence-check range。程序不会因数字
-  值或页边位置自动定级/删行；页码投影按源页原始行号消费，当前决策哈希进入 refine progress；
+- 结构 review schema 2 逐项决定独立数字和 ATX 标题候选的语义；每个可见标题须显式绑定起始行和
+  exclusive 结束行，布局侧车补充的标题须显式声明插入证据和局部 absence-check range；已接受节点
+  范围内未建模的 ATX 标题必须带非空 `reason`。同一节点内只要有一个独立数字被接受为 TOC 节点，
+  夹在已接受数字标题之间的纯文本数字若仍判为 `body_text`，也必须写 `reason`，避免 OCR 只把
+  部分罗马数字标成标题时静默丢节。同一父节点下的兄弟必须使用同一逻辑 level；程序不会因数字值、
+  `atx_level` 或页边位置自动定级/删行；页码投影按源页原始行号消费，当前决策哈希进入 refine progress；
 - 每个源范围只编辑一次并返回源行、标题位置和章节边界映射；多行标题去除每行 ATX 标记后物化一次，
   保留 inline markup、脚注引用、作者 ID 和后续正文。页眉/页脚清理保护当前审阅的标题；漏掉的布局
   标题只能由 reviewer 显式插入，程序不再模糊查找或自动恢复；
@@ -604,6 +619,9 @@ pipeline: epub_conversion
   `page_XXX.md` 的 1-based 行号，`end_line` 是不包含该行的结束位置。若新章节从
   下一页的中部开始，上一章节会自动拥有该页标题之前的前缀；若父章节标题和首个
   子章节同页，父标题/导语会保留在首个子章节单元中，不会被前一章节吞并或丢失；
+- `refine.unit_granularity` 控制逻辑单元粒度：默认 `leaf` 为每个 TOC 叶子生成独立单元；
+  `top_level` 或正整数 N 在指定树深度合并单元。子标题仍保留在 TOC 中，由 ownership
+  projection 绑定到父单元的 part 并生成多级导航锚点，适合“章末尾注与正文同属一章”的书；
 - 对超过 15,000 tokens 的 Notes、Bibliography 和 Index 单元按完整条目/段落
   自动生成 `chapter_N.partM.md` 分片，默认目标为 12,000 tokens；
 - 不创建 LLM client、不发送 PDF、不消耗 API 配额。
@@ -842,6 +860,10 @@ Markdown 脚注语法会被保留，页脚脚注仍按上一节的页面候选�
 
 - 顶层 unit 使用 `u<unit_order>`，后代使用 `u4c1`、`u4c1c2`；scope 保存源标题和保守的
   `title_variants`（剥离 `Chapter N:`、`Part N:`、前导 `N.` 和冒号后的副标题）。
+- 后代 scope 的正文引用若在本 scope 没有对应定义，会向最近祖先 scope 查找同一 key；
+  恰好一个祖先有定义时使用该祖先的 note pool，并写入
+  `inherited_reference_scopes`。多个祖先都有定义时 fail closed，不猜测。这样嵌套 TOC
+  与集中尾注可以共存，不需要把 TOC 拍平成一级。
 - 正文只按 `^#{1,6}\s` 标题行切分 span；第一个 part 从 unit scope 开始，后续 part 继承
   上一个 part 的最后一个 scope。匹配多个 scope 的标题只记录 ambiguity，匹配不到的普通
   小节标题不改变当前 scope。

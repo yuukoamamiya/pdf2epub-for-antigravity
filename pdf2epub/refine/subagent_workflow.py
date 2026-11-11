@@ -96,7 +96,10 @@ Read `refine_subagent_manifest.json`, `pagination_map.json`,
 `toc_heading_candidates.json`, `toc_structure_review_manifest.json`, every
 page in the manifest allowlist, the outline draft, and bounded visual evidence
 listed by the manifest (source PDF or listed page images). Candidate rows are
-locations to inspect, not claims that a line is a heading. Review every page, including pages with no
+locations to inspect, not claims that a line is a heading. A row with
+`atx_level` means the OCR Markdown itself emitted an ATX marker for that line;
+that marker is heading evidence you must explain, but not proof of structure.
+Review every page, including pages with no
 candidates. Never infer hierarchy automatically from numbering, typography,
 or candidate order. Establish part → chapter → section from the original TOC
 and body together; a flattened printed outline may omit sections and is not
@@ -107,8 +110,21 @@ sole canonical hierarchy. The companion contains decisions and evidence
 pointers only, never a second tree. Give every candidate exactly one
 disposition: `toc_node`, `body_text`, `page_number`, `running_header`, `ornament`, or
 `unresolved`. Every independent Arabic, Roman, or Chinese numeral candidate
-requires an explicit disposition. A number alone never establishes a heading,
-page number, or hierarchy; uncertain numbers remain body text or unresolved.
+requires an explicit disposition. A numeral-only line that also has
+`atx_level` is an ATX heading candidate (for example `## I`) and usually is a
+real section heading; decide its level from the book's own structure instead of
+copying the OCR marker depth. A numeral without `atx_level` never establishes a
+heading, page number, or hierarchy; uncertain numbers remain body text or
+unresolved.
+
+ATX headings are part of the body's structure, not page decoration. Inside an
+accepted node's page range, every candidate with `atx_level` must either become
+a `toc_node` or keep its non-navigation disposition with a short explicit
+`reason` in the same decision record. The local step rejects an unreasoned ATX
+heading there, so a flat tree cannot silently hide nested body headings from
+the EPUB navigation. Give the reason only when the line really is furniture
+(for example a repeated running head that OCR mistakenly marked as a heading)
+or a decorative line that does not belong in the book structure.
 `page_number` applies only to that exact source line. A `toc_node` maps to exactly one tree node using stable
 `node_id`; set it to the ID of the canonical visible line candidate. Supporting
 outline or layout-region evidence maps to that same ID. Every tree node maps back to one or more
@@ -161,7 +177,7 @@ Decision JSON shape:
   "candidate_decisions": [
     {{"candidate_id":"cand-p12-l8-a1b2c3d4e5f6a7b8c9d0", "disposition":"toc_node", "node_id":"cand-p12-l8-a1b2c3d4e5f6a7b8c9d0", "binding_mode":"visible"}},
     {{"candidate_id":"outline-a1b2c3d4e5f678901234", "disposition":"toc_node", "node_id":"cand-p12-l8-a1b2c3d4e5f6a7b8c9d0"}},
-    {{"candidate_id":"cand-...", "disposition":"body_text"}}
+    {{"candidate_id":"cand-...", "disposition":"body_text", "reason":"repeated running head; OCR marked it as a heading"}}
   ],
   "page_coverage": [{{"page":1,"reviewed":true,"evidence":["visual"]}}]
 }}
@@ -173,7 +189,8 @@ page. Copy `candidate_inventory_sha256` from the candidate inventory into the
 decisions object as well as copying `source_fingerprint` from its manifest.
 Replace sample IDs with IDs copied from actual evidence. A visible node ID is
 the canonical heading line candidate ID; outline candidates supporting that
-same node reuse the ID. The local step checks coverage, IDs and source fingerprints before merging;
+same node reuse the ID. The local step checks coverage, IDs, source fingerprints and
+whether every body ATX heading was either modeled or explicitly reasoned before merging;
 it does not decide heading semantics for you.
 
 ## Security boundary
@@ -372,6 +389,7 @@ def validate_toc_tree_data(
 
         previous: Optional[Dict[str, Any]] = None
         previous_path = ""
+        sibling_levels: set[int] = set()
         for index, node in enumerate(nodes):
             node_path = f"{path}[{index}]"
             if not isinstance(node, dict):
@@ -413,6 +431,8 @@ def validate_toc_tree_data(
                 errors.append(f"{node_path}.title must be a non-empty string")
             if not isinstance(level, int) or isinstance(level, bool) or level < 1:
                 errors.append(f"{node_path}.level must be a positive integer")
+            else:
+                sibling_levels.add(level)
             if not all(isinstance(value, int) and not isinstance(value, bool) for value in (start, end)):
                 errors.append(f"{node_path} page range must use integer values")
                 continue
@@ -525,6 +545,12 @@ def validate_toc_tree_data(
             visit(
                 node.get("children", []), node, f"{node_path}.children",
                 next_sibling if isinstance(next_sibling, dict) else None,
+            )
+
+        if len(sibling_levels) > 1:
+            errors.append(
+                f"{path} sibling nodes must share one logical level; found "
+                f"{sorted(sibling_levels)}"
             )
 
     visit(chapters, None, "chapters")

@@ -107,6 +107,11 @@ footnotes:
   mode: auto
 ```
 
+`subagent.models` 未显式配置时默认推荐 `inherit`；翻译任务按
+`task_models[task]` → `models.translation` → `models.default` 回退，其他任务按
+`task_models[task]` → `models.default` 回退。不要依赖硬编码模型名，配额紧张时优先继承
+主会话已验证的模型。
+
 新建或复制配置时应显式保留 `footnotes.mode: auto`。`auto` 根据 TOC 结构判断处理方式；只有确认该书是集中尾注而非页底脚注时，才可考虑 `disabled`，其他情况或判断不确定时均使用 `auto`。确认存在尾注本身不代表应禁用：通常让 `auto` 将其判为 `endnotes_only`。
 
 所有 PDF 新运行一律使用视觉 OCR，不存在 `pdf_text.mode` 或其他页面来源开关。`pdf_text`
@@ -224,8 +229,10 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
   `subagent.batching.polish_max_files`（默认 `min(max_files, 4)`，有效上限为 8）。
   `index`、`bibliography`、`notes`、`author_notes`、`toc`、`catalog`、`ad`、
   `copyright`、`frontmatter`、`metadata` 和 `cover` 等特殊角色会强制隔离为独立
-  batch 和 worker，不与普通章节或其他特殊角色混排；对应 worker 的 prompt 会高亮
-  条目 1:1、短行和标识符保留规则。
+  batch 和 worker，不与普通章节混排；对应 worker 的 prompt 会高亮条目 1:1、短行和
+  标识符保留规则。默认特殊角色彼此也不合包；显式启用
+  PDF chapter 模式显式启用 `subagent.batching.pack_tiny_special_units: true` 时，
+  只有都低于 `tiny_chapter_max_tokens` 的特殊单元可以共用一个仅含特殊单元的 worker。
   `max_nonempty_lines` 默认值为 350；EPUB 的密集单元超过该值时在准备阶段生成有序的
   `.partN.md`，每个 part 单独交给 worker，最终构建前再按原 mapping 合并。`index` 和
   `bibliography` 即使未超行数预算也不得与相邻章节合并。
@@ -273,7 +280,9 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
   包含所有正在运行的 worker 和 metadata。完成整波且主 Agent 验收后才能开始下一波。禁止把新 assignment
   或后续 wave 顺延到旧 worker 会话。`subagent.batching.max_concurrency`（有效上限 6）是全局上限；
   普通波不超过配置额度，大单元波不超过 2，极大单元波不超过 1。元数据任务也占用同一波额度，不能与极大单元波重叠。这是操作员合同，不会启动模型
-  或强制 IDE 的实际并发信号量，也不授权 worker 调度其他 worker。主 Agent 完成后保留结果和审计记录，
+  或强制 IDE 的实际并发信号量，也不授权 worker 调度其他 worker。波次数量由 worker 数和
+  wave cap 决定（`ceil(worker_count / cap)`）；装箱只能减少 worker 数，不能在不减少
+  worker 的情况下压缩波次。主 Agent 完成后保留结果和审计记录，
   确认会话终止再调用 `release_dispatch_lease`；恢复时检查真实活动会话，避免重复派发，也不得盲目释放活跃 lease。
 - 不删除源文件、输出目录或已有中间结果。额度中断或失败时先校验，再使用原命令的
   `--resume`，只处理 pending 项。
@@ -283,7 +292,9 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
   的兼容兜底。
 - 中文目标语言的普通正文翻译必须通过目标语言内容审计：高置信度的原文长段落未变化、
   中文密度明显不足或模型敷衍套话都会进入失败报告。`bibliography` 和 `index` 文件
-  不使用中文密度门禁，但仍保留数字标记与拒答检测。
+  不使用中文密度门禁，但仍保留数字标记与拒答检测。密度审计会先剥离
+  `[^n]: ...` 脚注定义及其续行，再统计正文；不要因为某个 part 尾注较多就把它自动
+  标成 `notes`/`reference` 角色，角色必须由 TOC/结构证据决定。
 - 本地校验报告中的 `safety_blocked`、拒答或免责声明不得进入 `validated`，也不得通过打包。
 - 阻断必须区分处理：`retry_required` 是 Subagent 通常可以修复的明确错误，主 Agent 应直接按清单
   重新派发；首次出现的 `review_required`（疑似原文引用、疑似页边装饰等）也先用 `--resume`
@@ -510,7 +521,10 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    `ocr_corrected_pages/validated/`，旧原生运行使用 `pages/`，写入 `toc_tree.json`。
    同时读取 `toc_heading_candidates.json` 与 `toc_structure_review_manifest.json`，只依据 manifest
    允许的页面/图像/正文证据完成全页审阅；写入 `toc_structure_decisions.json`，为每页记录覆盖证据，
-   并为每个候选记录唯一处置。未决候选、缺失页审阅、节点起始位置与接受候选不一致都会阻断。
+   并为每个候选记录唯一处置。候选带 `atx_level` 时表示源 Markdown 自身标成了 ATX 标题；
+   `## I` 这类纯数字标题必须按标题证据复核，不能仅因它是数字就判为正文。已接受节点的页码范围内，
+   每个 ATX 标题候选必须成为 `toc_node`，或在决定中写入非空 `reason` 说明为何不进入阅读目录。
+   未决候选、缺失页审阅、未解释的 ATX 标题、节点起始位置与接受候选不一致都会阻断。
    `toc_tree.json` 使用 schema 2，每个节点有稳定唯一 `node_id`；结构数组路径仅用于定位。
    Subagent 应从书名页/版权页提取作者和出版社，并按内容标注 `notes`、`bibliography`、
    `index`；版权页/CIP 页标注 `type: "copyright"`，其他装饰性前置页（如献词、题词、
@@ -554,7 +568,11 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    保留 inline markup、脚注引用和作者 ID；矛盾、重叠、超出源页或陈旧范围阻断。每个独立阿拉伯、
    罗马和中文数字候选必须明确判为 TOC 节点、正文、页码或页边装饰；数字值和靠近页边都不能证明
    页码。所有数字页码都必须有当前 review 的精确 `page_number` 行决定；布局/几何证据只用于
-   其他已确认的页边装饰，不能单独授权删除数字。无法确定时保留。
+   其他已确认的页边装饰，不能单独授权删除数字。无法确定时保留。同一节点内已有独立数字被接受
+   为 TOC 节点时，夹在已接受数字标题之间的纯文本数字若仍判为 `body_text`，必须写非空
+   `reason`；同一父节点下的兄弟必须使用同一逻辑 level，禁止把 OCR 的 `#` 深度直接当作树层级。
+   `refine.unit_granularity` 默认 `leaf`；设为 `top_level` 或正整数 N 时在指定树深度生成
+   合并单元，子标题仍作为多级导航节点绑定到父单元的 part，不再为了导航而强制切碎文件。
    新章节从页面中部开始时，上一单元保留同页标题前的前缀；父标题和首个子标题同页时，
    两者都必须提供 `start_line`，本地步骤把父标题/导语放入首个子章节单元。
    `refine-local` 还会从当前页面生成 `pagination_map.json`，并以页码候选加起始页正文标题
@@ -603,7 +621,10 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    相关事实写入 `footnote_normalization.json` 报告字段。Notes 的“外层页计数器 +
    内层真实注释号”只在当前 scope 的正文引用集合
    包含内层数字且内层不小于外层时采用内层，否则保留外层，避免把 `3. 2005 was...` 误判为
-   第 2005 条。重复 key 没有章标题、引用所在 scope 没有定义、定义 scope 没有正文 span
+   第 2005 条。后代 scope 的正文引用若在本 scope 没有对应定义，会向最近祖先 scope 查找同一
+   key；恰好一个祖先有定义时继承其 note pool 并写入 `inherited_reference_scopes`，多个祖先
+   都有定义时 fail closed。这样嵌套 TOC 与章末集中尾注可以共存，不需要把 TOC 拍平。
+   重复 key 没有章标题、引用所在 scope 没有定义、定义 scope 没有正文 span
    或同一 key 有多个定义且引用数超过定义数时必须 fail closed，并提示修复 TOC/章标题后重跑 `footnote-prepare → footnote-validate →
    footnote-apply`；不得改用 `footnotes.mode: disabled` 绕过。一个作用域内只有一个
    定义时可供多个正文引用共同使用；多个定义仍按出现顺序保守配对，超出定义数时停止归一化，
@@ -833,7 +854,9 @@ Bibliography 仅翻译标题，条目正文
    `translated/`，不得读取或修改其他 worker 的文件。超过 30,000 字节的大单元仍必须
    独立派发；相邻短章节可以在预算内共享一个 worker，但不能把大章节与其他章节合并。
    Prompt 会同时提供一次按预算稀释的全书 TOC 轮廓，以及当前 assigned 文件精确的已翻译
-   TOC 标题/子标题上下文；后者对输出标题具有最高权威。术语上下文按 handoff 类型读取：
+   TOC 标题/子标题上下文；后者对输出标题具有最高权威。拆分单元的后续 part 会在 scoped
+   manifest 中收到只读 `preceding_context`（前一分片源文尾部，已剔除脚注定义），只用于
+   承接代词和论证语气，不计入输出、不得翻译或复制。术语上下文按 handoff 类型读取：
    合并章节使用 `files` 映射并按文件应用，完整快照只用于审计，不能修改。标题绑定允许
    安全的格式规范化，但不允许近义词替换。
 6. 每完成一个单元可运行：
@@ -903,6 +926,9 @@ Prompt、manifest 和 worker handoff。准备阶段会扫描译文和对应润�
 ### 2.3 PDF 翻译保真规则
 
 - 保持 Markdown 标题层级、公式 `$...$`、脚注 `[^...]`、图片链接和表格结构。
+- 正文翻译 prompt 要求人名地名首次出现附原文、古希腊语标注原文和拉丁化拼写、拉丁语标注
+  原文；这些是编辑规则，不改变结构、术语优先级或校验门禁。并行 part worker 按 assigned
+  unit 和 scoped context 判断首次出现，跨 unit 的绝对首次以实体表或上下文证据为准。
 - EPUB 公式目前使用 Unicode 优先、`latex2mathml` 复杂公式回退的 MathML 路径；不要默认引入
   XeLaTeX/`dvisvgm` SVG 渲染或新增系统依赖。只有用户明确要求并完成独立依赖设计时，才可另立任务评估。
 - 源文件末尾的 `REFERENCES`、`Literatur`、`Notes` 等若不是标题，译文也不得升级为标题；

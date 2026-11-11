@@ -122,3 +122,10 @@ def test_native_outline_cross_page_inferred_child_range_warns_for_review(tmp_pat
     assert "'Sub'" in warning and "page 3" in warning
     assert "'Parent'" in warning and "ends page 1" in warning
     assert "OCR" in warning and "same-page line boundaries" in warning
+
+
+def test_sibling_nodes_must_share_one_logical_level():
+    errors = validate_toc_tree_data(
+        {"chapters": [_node("A", 2, 1, 1), _node("B", 3, 2, 2)]}, 2
+    )
+    assert any("sibling nodes must share one logical level" in error for error in errors)

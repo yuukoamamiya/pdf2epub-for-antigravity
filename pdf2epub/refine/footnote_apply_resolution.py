@@ -204,6 +204,29 @@ def _locate_block(
                     max_s = max(file_scores.values()) if file_scores else 0
                     if max_s > 0:
                         matches = [m for m in matches if file_scores[m[0]["name"]] == max_s]
+                    if len(matches) > 1 and len({m[0]["name"] for m in matches}) > 1:
+                        adjacent_scores: dict[str, int] = {m[0]["name"]: 0 for m in matches}
+                        for adj_page in (page + 1, page - 1):
+                            if adj_page > 0:
+                                adj_md = Path(pages_dir) / f"page_{adj_page:03d}.md"
+                                if adj_md.is_file():
+                                    try:
+                                        adj_lines = [
+                                            l.strip()
+                                            for l in adj_md.read_text(encoding="utf-8").splitlines()
+                                            if len(l.strip()) > 15
+                                            and not l.startswith("#")
+                                            and not l.startswith(("①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"))
+                                        ]
+                                    except (OSError, UnicodeDecodeError):
+                                        adj_lines = []
+                                    for r, _span in matches:
+                                        fn = r["name"]
+                                        st = source_texts[fn]
+                                        adjacent_scores[fn] += sum(1 for l in adj_lines[:5] if l[:20] in st)
+                        max_adj = max(adjacent_scores.values()) if adjacent_scores else 0
+                        if max_adj > 0:
+                            matches = [m for m in matches if adjacent_scores[m[0]["name"]] == max_adj]
                     if len(matches) > 1 and all(m[0]["name"] == matches[0][0]["name"] for m in matches):
                         target_text = source_texts[matches[0][0]["name"]]
                         page_positions = [target_text.find(l[:20]) for l in other_lines if target_text.find(l[:20]) != -1]

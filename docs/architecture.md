@@ -65,7 +65,7 @@ Subagent 合同层
 ├── pdf_unit_roles.py                PDF 精修单元角色的只读投影
 ├── toc_translation_workflow.py      PDF TOC handoff、合并和校验
 ├── batching_service.py              公共批次配置、token 估算和文件批次规划
-├── subagent_runtime.py              模型选择、scoped worker handoff 和 dispatch 编排
+├── subagent_runtime.py              模型回退（translation → default → inherit）、scoped worker handoff 和 dispatch 编排
 ├── subagent_dispatch.py             assignment digest、原子 lease 和冲突检测
 └── subagent_safety.py               拒答/免责声明检测
 ```
@@ -110,12 +110,18 @@ Subagent 合同层
 - `refine/toc_structure_review.py`：生成 `toc_heading_candidates.json` 和
   `toc_structure_review_manifest.json`，固定源页、OCR/layout 证据与视觉证据 allowlist；验证
   `toc_structure_decisions.json` 的逐候选处置、schema-2 节点身份/源范围和逐页覆盖。
-  候选清单、review 决定和 TOC 树使用 schema 2。全页覆盖必须逐页标注
-  `reviewed: true` 及 `visual` 或 `page_text` 证据；`unresolved` 候选阻断 refine-local。
+  候选清单、review 决定和 TOC 树使用 schema 2。候选行用 `atx_level` 记录源 Markdown 自身的
+  ATX 标题级别；该标记是必须解释的标题证据，不是层级或导航身份的证明。全页覆盖必须逐页标注
+  `reviewed: true` 及 `visual` 或 `page_text` 证据；`unresolved` 候选、以及已接受单元页码范围内
+  未建模且未写明 `reason` 的 ATX 标题候选都会阻断 refine-local。同一节点内已有数字被接受为
+  TOC 节点时，夹在已接受数字标题之间的纯文本数字若仍判为 `body_text` 也必须写 `reason`；
+  同一父节点下的兄弟必须使用同一逻辑 level。
 - `refine/layout_evidence.py`：统一加载 layout sidecar、清理 block 文本和归一化 bbox；它只
   处理几何/文本证据，不包含脚注或插图的语义判断。
 - `pdf2epub/commands/refine.py`：编排 TOC、整页插图和脚注的结构闸门；`pdf2epub/refine/main.py`
-  负责本地分页和单元合并；页内章节
+  负责本地分页和单元合并；`refine.unit_granularity` 为 `leaf` 时每个 TOC 叶子生成单元，
+  `top_level` 或正整数 N 在指定深度合并单元，子标题仍由 ownership projection 绑定到父单元
+  part 的导航锚点。页内章节
   边界通过 `boundary_info.start_line`/`end_line` 保留，避免把同页标题前的句子误归入新章节。
 - `markdown.py`：PDF Markdown 的 polish、translate、readiness 和 validation 编排。
 - readiness 对派生源稿使用显式依赖诊断：脚注归一化过期时只报告其哈希/证据根因，
@@ -233,7 +239,9 @@ TOC 中标记为
   上标引用的确定性归一化，并提供构建前的残留检查；不参与页面脚注候选识别。存在重复
   打印编号时，它消费 `endnote_scopes.py` 的目录，只把需要去重的 key 改写为
   `fnc-<scope>-<number>`（第 N 个定义再加 `-oN`），并支持“外层页计数器 + 内层真实
-  注释号”的双层编号判定。无 scope 目录或无重复 key 时保持原有全局行为。明确的 numbered
+  注释号”的双层编号判定。后代 scope 的引用在本 scope 无定义时向最近祖先 scope 查找同一
+  key；恰好一个祖先有定义时继承其 note pool 并写入 `inherited_reference_scopes`，多个祖先
+  都有定义时 fail closed。无 scope 目录或无重复 key 时保持原有全局行为。明确的 numbered
   punctuation 定义仍由本地接受；边界歧义行必须带已校验的 `definition`/`continuation`
   决定，`continuation` 不创建定义，未决定时在错误中给出 `file:line` 并 fail closed。
 - `refine/footnote_consensus.py`：只读取当前双 OCR 共识中的视觉复核页并解析匹配的次 OCR
@@ -357,7 +365,7 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
 这些模块是格式无关或 Markdown/TOC 专用的本地合同实现：
 
 - `markdown_handoff.py`：协调规划、上下文、恢复、manifest 和 prompt 服务，写入本次 handoff 产物。
-- `markdown_handoff_planning.py`：以 `MarkdownHandoffPlan` 返回已校验的源文件 inventory、哈希、统计、有效角色及来源、续文信息和默认批次计划；显式角色优先于共享推断，推断角色也参与普通/特殊 worker 隔离；不读写 manifest/prompt，也不导入 handoff 编排器。
+- `markdown_handoff_planning.py`：以 `MarkdownHandoffPlan` 返回已校验的源文件 inventory、哈希、统计、有效角色及来源、续文信息、只读 `preceding_contexts` 和默认批次计划；`preceding_contexts` 取前一分片的源文尾部并剔除脚注定义，只用于译风承接。显式角色优先于共享推断，推断角色也参与普通/特殊 worker 隔离；不读写 manifest/prompt，也不导入 handoff 编排器。
 - `markdown_handoff_context.py`：将已声明的上下文文件投影为 handoff 可用路径和 hash；不读取未声明上下文。
 - `markdown_handoff_resume.py`：读取旧 manifest 和校验检查点，判断单元上下文、有效角色与角色来源是否仍可复用，并生成恢复决定。PDF `translate`/`polish` validation receipt 按文件记录验证时的 `unit_context_sha256`、TOC heading context、语言及角色来源；准备 manifest 更新不会刷新该 receipt。已有上下文而旧 receipt 缺少快照时，先 prepare、正式 validate，再 resume；无上下文的旧普通 receipt 仍可兼容复用。
 - `markdown_handoff_manifest.py`：组装 manifest 数据，并检查可选视觉复核、次 OCR、review 输出目录相对 output 的边界；不负责协调器提供的 source/target/scratch 字符串，也不渲染 prompt。
@@ -428,8 +436,11 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
 - `batching_service.py`：公共拥有 batch 配置、token 估算、文件安全批次算法和 pending queue；
   worker 文件数的有效上限为 8。`markdown_handoff`、`page_furniture_repair`、HTML builder
   和 Markdown command 应依赖该服务，不应导入 `subagent_runtime` 的私有 batching helper。
-- `subagent_runtime.py`：保留模型选择、handoff 生命周期与旧调用兼容入口；生产装箱、manifest
-  投影、提示词渲染和术语上下文各由下列窄服务拥有。它只为实际旧调用重导出必要 helper。
+- `subagent_runtime.py`：保留模型选择、handoff 生命周期与旧调用兼容入口。`resolve_subagent_model`
+  对翻译任务按 `task_models[task]` → `models[task]` → `models.translation` → `models.default`
+  回退，其他任务按 `task_models[task]` → `models[task]` → `models.default` 回退；都未配置时
+  返回 `inherit`，避免硬编码模型触发配额问题。生产装箱、manifest 投影、提示词渲染和术语
+  上下文各由下列窄服务拥有。它只为实际旧调用重导出必要 helper。
 - `worker_grouping.py`：纯 worker 分组和章节装箱；输入是父 manifest/queue 与额度，不读写文件。
 - `worker_manifest.py`：把一个 worker assignment 投影成最小 scoped manifest，不读取工作流状态。
 - `worker_prompt.py`：按显式 assignment/context 数据渲染 worker prompt 文本，不写文件。
@@ -517,14 +528,20 @@ Subagent 实际读写哪些文件。两者不能互相替代。
 并发配置的默认值保持保守；`max_concurrency` 是配置和调度的全局上限（运行时硬上限 6），
 不会绕过模型或 IDE 的额度。只有 dispatch wave 的并发额度会按最大单个文件大小降低，
 不按 worker 聚合 token 或字节总量降低全局上限。
-索引、参考文献和需要内部拆分的章节继续保持语义隔离，不因提高并发而跨章节合批。
+索引、参考文献、notes/author_notes/toc 等所有特殊角色和需要内部拆分的章节继续保持
+语义隔离，不因提高并发而跨章节合批；PDF chapter 模式与 polish 使用同一组
+`POLISH_ISOLATED_ROLES`。默认每个特殊单元独立 worker；显式启用
+`pack_tiny_special_units` 时，只有都低于 `tiny_chapter_max_tokens` 的特殊单元可以合包，
+且绝不能混入普通章节。
 
 最终 worker handoff 还可按 wave 生成父级 `dispatch_plan`（`wave`、`worker_ids`、
 `max_concurrency`、`reason`），并在每个 handoff 写入 `dispatch_wave`、
 `dispatch_wave_max_concurrency` 和 `dispatch_wave_reason`。配置并发是全局上限（最多 6）；普通
 波使用配置值；按最大单文件的 `estimated_tokens`，达到 `large_file_token_threshold`
 （默认 12,000 tokens）时 worker 波限为 2，达到 `extreme_file_token_threshold`
-（默认 24,000 tokens）时该单元独占波限为 1。
+（默认 24,000 tokens）时该单元独占波限为 1。波次数量由 worker 数和 wave cap 决定
+（`ceil(worker_count / cap)`）；装箱只能减少 worker 数，不能在不减少 worker 的情况下
+压缩波次。
 metadata 也占同一波额度，且不与极大单元波重叠。父级 `dispatch_contract` 与每个 scoped prompt
 共用 `worker_prompt.py` 的单一操作员合同。不同 assignment 使用独立新会话；同一 assignment 的修复
 重试可保留原会话。同波必须按可用 IDE 槽位和 wave cap 并发派发独立 worker；有空槽时不得通过旧会话
@@ -554,7 +571,9 @@ translate/polish。`translate-html_dispatch_prompt.md` 是主 Agent 专用静态
 `bibliography`、`notes`、`author_notes`、`toc`、`catalog`、`ad`、`copyright`、
 `frontmatter`、`metadata` 和 `cover` 等特殊角色，把它们标记为 `isolated` batch。
 `_worker_groups()` 先为每个 isolated batch 建立只含该批次的独立 worker，再把其余普通
-batch 交给 LPT 分组；普通 batch 不会进入隔离 worker。`max_concurrency` 仍是同时运行
+batch 交给 LPT 分组；普通 batch 不会进入隔离 worker。PDF chapter 模式的
+`_chapter_worker_groups()` 使用同一角色集合隔离；`pack_tiny_special_units` 只允许特殊
+单元之间合包。`max_concurrency` 仍是同时运行
 上限，不限制 handoff 总数，因此特殊角色可能产生更多 handoff。`write_worker_handoffs()`
 只为当前 worker 的 `assigned_files` 追加对应 special-unit 规则，不把其他角色的规则
 广播给所有 worker。
@@ -1198,7 +1217,9 @@ sidecar 哈希；旧原生文字运行还必须保留 `coordinate_system: page_p
 ### 5.0 PDF 标题范围与独立数字合同
 
 结构 review inventory 收集 heading-like 候选与独立 Arabic、Roman、中文数字行。代码块、缩进代码、
-真实 Markdown 列表和脚注定义不作为裸数字候选。Reviewer 对每个候选逐项决定 `toc_node`、
+真实 Markdown 列表和脚注定义不作为裸数字候选。任何源行若带 ATX 标记，候选会额外记录
+`atx_level`；纯数字 ATX 标题（如 `## I`）因此同时保留“独立数字”和“ATX 标题”两类证据，
+Reviewer 不能仅因它是数字就当作普通正文。Reviewer 对每个候选逐项决定 `toc_node`、
 `body_text`、`page_number`、`running_header` 或 `ornament`；数字、字号、所在页边都不能自动决定
 语义。只有显式 Page/PDF Page 标签、已审核 `page_number` 的精确源行或经校验几何证据允许删除，
 其他独立数字保留。
@@ -1213,6 +1234,12 @@ sidecar 哈希；旧原生文字运行还必须保留 `coordinate_system: page_p
 目录层级必须依据原目录和正文共同复核；印刷目录可能省略小节，扁平 outline 不能自动接受。独立裸
 数字只能采用 Reviewer 结合上下文明确给定的同级层级。前置封面或编委会可按 review 排除导航，前言
 保留。程序不从旧 flat tree 推断缺失语义，也不再从 HTML/sidecar 自动恢复被漏掉的标题。
+
+ATX 标题是正文结构的直接证据，不能被静默降级为普通正文。已接受 TOC 节点的页码范围内，每个带
+`atx_level` 的候选必须成为 `toc_node`，或在该候选决定中写明非空的 `reason`（例如 OCR 误把重复
+页眉标成标题的局部噪声）。缺少理由时 `refine-local` 直接阻断，避免正文存在多级标题而阅读目录被
+压成一级。本地校验只比较源页 ATX 标题、候选决定和树范围，不根据编号值或 `atx_level` 自动生成
+层级；是否接受仍是 Reviewer 的语义决定。
 
 ### 5.1 原生文字脚注的恢复合同
 

@@ -369,6 +369,31 @@ def render_worker_prompt(
             "and do not invent a '(continued)' or equivalent heading. Preserve "
             "the first source block at the same structural level."
         )
+    preceding_notice = ""
+    scoped_preceding = scoped.get("preceding_context", {})
+    if isinstance(scoped_preceding, Mapping) and scoped_preceding:
+        sections = []
+        for filename, context in scoped_preceding.items():
+            if not isinstance(context, Mapping):
+                continue
+            text = str(context.get("text") or "").strip()
+            source_file = str(context.get("source_file") or "").strip()
+            if not text:
+                continue
+            sections.append(
+                f"### `{filename}` (from `{source_file}`)\n\n"
+                f"--- BEGIN PRECEDING CONTEXT ---\n{text}\n--- END PRECEDING CONTEXT ---"
+            )
+        if sections:
+            preceding_notice = (
+                "\n\n## Preceding source context (read-only)\n\n"
+                "The following source tails come from the immediately preceding "
+                "part of the same logical unit. Use them only to keep pronouns, "
+                "terminology, and argument flow coherent. Do not translate, copy, "
+                "or reproduce this context in the target file; it is not part of "
+                "the assigned output.\n\n"
+                + "\n\n".join(sections)
+            )
     scoped_prompt = _scope_worker_prompt(
         prompt,
         {} if chapter_mode else scoped.get("unit_context_files", {}),
@@ -432,6 +457,7 @@ def render_worker_prompt(
         + "Do not process files from any other worker. "
         + heading_anchor_instruction
         + continuation_notice
+        + preceding_notice
         + "\n"
         + task_boundary_instruction
         + worker_context_instruction

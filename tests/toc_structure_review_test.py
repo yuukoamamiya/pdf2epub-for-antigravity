@@ -238,6 +238,165 @@ def test_valid_reviewer_added_candidate_uses_exact_allowlisted_line(tmp_path):
     assert validate_structure_review(tmp_path, expected_snapshot=_snapshot(tmp_path, pages, outline, pdf)) == []
 
 
+def _atx_fixture(tmp_path, pages_text):
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    for page, text in pages_text.items():
+        (pages / f"page_{page:03d}.md").write_text(text, encoding="utf-8")
+    outline = tmp_path / "outline_toc_draft.json"
+    outline.write_text(json.dumps({"chapters": []}), encoding="utf-8")
+    pdf = tmp_path / "input.pdf"
+    pdf.write_bytes(b"synthetic pdf source")
+    manifest = build_structure_review(tmp_path, pages, "ocr", outline, pdf)
+    candidates = json.loads((tmp_path / "toc_heading_candidates.json").read_text())
+    return pages, outline, pdf, manifest, candidates, candidates["candidates"]
+
+
+def _write_atx_review(tmp_path, manifest, candidates, rows, tree, toc_rows=(), reasons=None):
+    reasons = reasons or {}
+    decisions = [
+        {
+            "candidate_id": row["candidate_id"],
+            "disposition": "toc_node" if (row["page"], row["line"]) in toc_rows else "body_text",
+            **({"node_id": row["candidate_id"], "binding_mode": "visible"}
+               if (row["page"], row["line"]) in toc_rows else {}),
+            **({"reason": reasons[(row["page"], row["line"])]}
+               if (row["page"], row["line"]) in reasons else {}),
+        }
+        for row in rows
+    ]
+    (tmp_path / "toc_tree.json").write_text(json.dumps(tree), encoding="utf-8")
+    pages = sorted({row["page"] for row in rows})
+    document = {
+        "schema_version": 2,
+        "source_fingerprint": manifest["source_fingerprint"],
+        "candidate_inventory_sha256": candidates["inventory_sha256"],
+        "candidate_decisions": decisions,
+        "page_coverage": [
+            {"page": page, "reviewed": True, "evidence": ["visual"]} for page in pages
+        ],
+    }
+    (tmp_path / "toc_structure_decisions.json").write_text(json.dumps(document), encoding="utf-8")
+
+
+def test_atx_heading_level_is_preserved_on_candidates():
+    lines = ["## I", "", "### Anmerkungen", "", "2", "## Postskriptum"]
+    rows = {row["line"]: row for row in _heading_like_text_regions(1, lines)}
+    assert rows[1]["kind"] == "standalone_number"
+    assert rows[1]["atx_level"] == 2
+    assert rows[3]["kind"] == "text_line"
+    assert rows[3]["atx_level"] == 3
+    assert "atx_level" not in rows[5]
+    assert rows[6]["atx_level"] == 2
+
+
+def test_unreasoned_atx_subheading_inside_chapter_blocks(tmp_path):
+    pages, outline, pdf, manifest, candidates, rows = _atx_fixture(
+        tmp_path, {1: "# Chapter One\n\nBody paragraph.\n\n## Section A\n\nMore body.\n"}
+    )
+    chapter = next(row for row in rows if row["line"] == 1)
+    section = next(row for row in rows if row["line"] == 5)
+    assert section["atx_level"] == 2
+    tree = {"schema_version": 2, "chapters": [{
+        "title": "Chapter One", "level": 1, "start_page": 1, "end_page": 1,
+        "node_id": chapter["candidate_id"], "binding_mode": "visible",
+        "boundary_info": {"start_line": 1, "heading_end_line": 2, "heading_action": "bind"},
+        "children": [],
+    }]}
+    _write_atx_review(tmp_path, manifest, candidates, rows, tree, toc_rows={(1, 1)})
+    errors = validate_structure_review(
+        tmp_path, tree, expected_snapshot=_snapshot(tmp_path, pages, outline, pdf)
+    )
+    assert any("without an explicit reason" in error for error in errors)
+    assert any(section["candidate_id"] in error for error in errors)
+
+
+def test_reasoned_atx_subheading_inside_chapter_is_accepted(tmp_path):
+    pages, outline, pdf, manifest, candidates, rows = _atx_fixture(
+        tmp_path, {1: "# Chapter One\n\nBody paragraph.\n\n## Section A\n\nMore body.\n"}
+    )
+    chapter = next(row for row in rows if row["line"] == 1)
+    tree = {"schema_version": 2, "chapters": [{
+        "title": "Chapter One", "level": 1, "start_page": 1, "end_page": 1,
+        "node_id": chapter["candidate_id"], "binding_mode": "visible",
+        "boundary_info": {"start_line": 1, "heading_end_line": 2, "heading_action": "bind"},
+        "children": [],
+    }]}
+    _write_atx_review(
+        tmp_path, manifest, candidates, rows, tree, toc_rows={(1, 1)},
+        reasons={(1, 5): "OCR promoted a repeated running head to a heading"},
+    )
+    assert validate_structure_review(
+        tmp_path, tree, expected_snapshot=_snapshot(tmp_path, pages, outline, pdf)
+    ) == []
+
+
+def test_blank_atx_reason_does_not_excuse_a_heading(tmp_path):
+    pages, outline, pdf, manifest, candidates, rows = _atx_fixture(
+        tmp_path, {1: "# Chapter One\n\nBody paragraph.\n\n## Section A\n\nMore body.\n"}
+    )
+    chapter = next(row for row in rows if row["line"] == 1)
+    tree = {"schema_version": 2, "chapters": [{
+        "title": "Chapter One", "level": 1, "start_page": 1, "end_page": 1,
+        "node_id": chapter["candidate_id"], "binding_mode": "visible",
+        "boundary_info": {"start_line": 1, "heading_end_line": 2, "heading_action": "bind"},
+        "children": [],
+    }]}
+    _write_atx_review(
+        tmp_path, manifest, candidates, rows, tree, toc_rows={(1, 1)},
+        reasons={(1, 5): "   "},
+    )
+    errors = validate_structure_review(
+        tmp_path, tree, expected_snapshot=_snapshot(tmp_path, pages, outline, pdf)
+    )
+    assert any("without an explicit reason" in error for error in errors)
+
+
+def test_atx_heading_outside_reviewed_nodes_needs_no_reason(tmp_path):
+    pages, outline, pdf, manifest, candidates, rows = _atx_fixture(
+        tmp_path, {
+            1: "# Chapter One\n\nBody paragraph.\n",
+            2: "## Front matter heading\n\nMore body.\n",
+        }
+    )
+    chapter = next(row for row in rows if row["page"] == 1 and row["line"] == 1)
+    tree = {"schema_version": 2, "chapters": [{
+        "title": "Chapter One", "level": 1, "start_page": 1, "end_page": 1,
+        "node_id": chapter["candidate_id"], "binding_mode": "visible",
+        "boundary_info": {"start_line": 1, "heading_end_line": 2, "heading_action": "bind"},
+        "children": [],
+    }]}
+    _write_atx_review(tmp_path, manifest, candidates, rows, tree, toc_rows={(1, 1)})
+    assert validate_structure_review(
+        tmp_path, tree, expected_snapshot=_snapshot(tmp_path, pages, outline, pdf)
+    ) == []
+
+
+def test_numeral_atx_heading_can_model_a_nested_section(tmp_path):
+    pages, outline, pdf, manifest, candidates, rows = _atx_fixture(
+        tmp_path, {1: "# Chapter One\n\n## I\n\nBody paragraph.\n"}
+    )
+    chapter = next(row for row in rows if row["line"] == 1)
+    section = next(row for row in rows if row["line"] == 3)
+    assert section["kind"] == "standalone_number"
+    assert section["atx_level"] == 2
+    tree = {"schema_version": 2, "chapters": [{
+        "title": "Chapter One", "level": 1, "start_page": 1, "end_page": 1,
+        "node_id": chapter["candidate_id"], "binding_mode": "visible",
+        "boundary_info": {"start_line": 1, "heading_end_line": 2, "heading_action": "bind"},
+        "children": [{
+            "title": "I", "level": 2, "start_page": 1, "end_page": 1,
+            "node_id": section["candidate_id"], "binding_mode": "visible",
+            "boundary_info": {"start_line": 3, "heading_end_line": 4, "heading_action": "bind"},
+            "children": [],
+        }],
+    }]}
+    _write_atx_review(tmp_path, manifest, candidates, rows, tree, toc_rows={(1, 1), (1, 3)})
+    assert validate_structure_review(
+        tmp_path, tree, expected_snapshot=_snapshot(tmp_path, pages, outline, pdf)
+    ) == []
+
+
 def test_node_id_roundtrip_is_independent_of_title_and_tree_path():
     node = TOCNode(title="Original", level=1, start_page=1, end_page=2, node_id="source-p1-l1-deadbeef")
     encoded = node.to_dict()
@@ -278,3 +437,83 @@ def test_malformed_review_artifacts_fail_closed_without_crashing(tmp_path, tampe
         path.write_text(json.dumps(manifest), encoding="utf-8")
     errors = validate_structure_review(tmp_path, tree, expected_snapshot=expected)
     assert errors
+
+
+def test_plain_numeral_between_accepted_numbered_headings_needs_a_reason(tmp_path):
+    pages, outline, pdf, manifest, candidates, rows = _atx_fixture(
+        tmp_path,
+        {1: "# Chapter One\n\n## I\n\nBody one.\n\nII\n\nBody two.\n\n## III\n\nBody three.\n"},
+    )
+    chapter = next(row for row in rows if row["line"] == 1)
+    first = next(row for row in rows if row["line"] == 3)
+    second = next(row for row in rows if row["line"] == 7)
+    third = next(row for row in rows if row["line"] == 11)
+    assert second["kind"] == "standalone_number"
+    assert "atx_level" not in second
+    children = [
+        {
+            "title": "I", "level": 2, "start_page": 1, "end_page": 1,
+            "node_id": first["candidate_id"], "binding_mode": "visible",
+            "boundary_info": {"start_line": 3, "heading_end_line": 4, "heading_action": "bind"},
+            "children": [],
+        },
+        {
+            "title": "III", "level": 2, "start_page": 1, "end_page": 1,
+            "node_id": third["candidate_id"], "binding_mode": "visible",
+            "boundary_info": {"start_line": 11, "heading_end_line": 12, "heading_action": "bind"},
+            "children": [],
+        },
+    ]
+    tree = {"schema_version": 2, "chapters": [{
+        "title": "Chapter One", "level": 1, "start_page": 1, "end_page": 1,
+        "node_id": chapter["candidate_id"], "binding_mode": "visible",
+        "boundary_info": {"start_line": 1, "heading_end_line": 2, "heading_action": "bind"},
+        "children": children,
+    }]}
+    _write_atx_review(
+        tmp_path, manifest, candidates, rows, tree,
+        toc_rows={(1, 1), (1, 3), (1, 11)},
+    )
+    errors = validate_structure_review(
+        tmp_path, tree, expected_snapshot=_snapshot(tmp_path, pages, outline, pdf)
+    )
+    assert any("mixes accepted numbered headings" in error for error in errors)
+    assert any(second["candidate_id"] in error for error in errors)
+
+
+def test_reasoned_plain_numeral_is_not_treated_as_a_heading(tmp_path):
+    pages, outline, pdf, manifest, candidates, rows = _atx_fixture(
+        tmp_path,
+        {1: "# Chapter One\n\n## I\n\nBody one.\n\nII\n\nBody two.\n\n## III\n\nBody three.\n"},
+    )
+    chapter = next(row for row in rows if row["line"] == 1)
+    first = next(row for row in rows if row["line"] == 3)
+    third = next(row for row in rows if row["line"] == 11)
+    children = [
+        {
+            "title": "I", "level": 2, "start_page": 1, "end_page": 1,
+            "node_id": first["candidate_id"], "binding_mode": "visible",
+            "boundary_info": {"start_line": 3, "heading_end_line": 4, "heading_action": "bind"},
+            "children": [],
+        },
+        {
+            "title": "III", "level": 2, "start_page": 1, "end_page": 1,
+            "node_id": third["candidate_id"], "binding_mode": "visible",
+            "boundary_info": {"start_line": 11, "heading_end_line": 12, "heading_action": "bind"},
+            "children": [],
+        },
+    ]
+    tree = {"schema_version": 2, "chapters": [{
+        "title": "Chapter One", "level": 1, "start_page": 1, "end_page": 1,
+        "node_id": chapter["candidate_id"], "binding_mode": "visible",
+        "boundary_info": {"start_line": 1, "heading_end_line": 2, "heading_action": "bind"},
+        "children": children,
+    }]}
+    _write_atx_review(
+        tmp_path, manifest, candidates, rows, tree,
+        toc_rows={(1, 1), (1, 3), (1, 11)},
+        reasons={(1, 7): "This II is a body enumeration label, not a section heading"},
+    )
+    assert validate_structure_review(
+        tmp_path, tree, expected_snapshot=_snapshot(tmp_path, pages, outline, pdf)
+    ) == []

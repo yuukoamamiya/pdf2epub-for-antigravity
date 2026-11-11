@@ -331,8 +331,10 @@ def test_continuation_metadata_uses_refinement_part_order(tmp_path: Path):
         "is_continuation": True,
         "part_number": 2,
         "part_count": 3,
+        "previous_file": "chapter.part1.md",
     }
     assert metadata["chapter.part3.md"]["part_number"] == 3
+    assert metadata["chapter.part3.md"]["previous_file"] == "chapter.part2.md"
 
     paths = prepare_markdown_subagent(
         tmp_path,

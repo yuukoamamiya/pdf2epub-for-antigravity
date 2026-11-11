@@ -1010,3 +1010,77 @@ def test_single_body_scope_centralized_notes_without_chapter_subheadings() -> No
     assert "[^1]: First note text." in normalized["chapter_2.md"]
     assert "[^2]: Second note text." in normalized["chapter_2.md"]
     assert report["valid"] is True
+
+
+def test_descendant_references_inherit_the_parent_chapter_note_pool() -> None:
+    toc, progress, texts = _simple_book(
+        body=(
+            "# Part 1: Roots\n"
+            "## 1. First Chapter\n"
+            "A<sup>1</sup>.\n"
+            "## 2. Second Chapter\n"
+            "B<sup>1</sup>.\n"
+        ),
+        notes=(
+            "# Notes\n"
+            "## Part 1: Roots\n"
+            "1. First shared note.\n"
+            "1. Second shared note.\n"
+        ),
+        children=[
+            {"title": "1. First Chapter", "start_page": 2, "end_page": 5},
+            {"title": "2. Second Chapter", "start_page": 6, "end_page": 10},
+        ],
+    )
+    scopes = build_endnote_scope_directory(toc, progress, texts)
+
+    normalized, report = normalize_endnotes(
+        texts,
+        {"chapter_1.md": "", "chapter_2.md": "", "chapter_3.md": "notes"},
+        scopes=scopes,
+    )
+
+    assert "A[^fnc-u2-1]." in normalized["chapter_2.md"]
+    assert "B[^fnc-u2-1-o2]." in normalized["chapter_2.md"]
+    assert normalized["chapter_3.md"].count("[^fnc-u2-1") == 2
+    assert report["scoped_keys"] == ["1"]
+    assert {
+        (item["reference_scope"], item["definition_scope"])
+        for item in report["inherited_reference_scopes"]
+    } == {("u2c1", "u2"), ("u2c2", "u2")}
+
+
+def test_ambiguous_ancestor_note_pools_fail_closed() -> None:
+    toc, progress, texts = _simple_book(
+        body=(
+            "# Part 1: Roots\n"
+            "## 1. First Chapter\n"
+            "### Section A\n"
+            "Body <sup>1</sup>.\n"
+        ),
+        notes=(
+            "# Notes\n"
+            "## Chapter 1: First Chapter\n"
+            "1. Child-scoped note.\n"
+            "## Part 1: Roots\n"
+            "1. Parent-scoped note.\n"
+        ),
+        children=[
+            {
+                "title": "1. First Chapter",
+                "start_page": 2,
+                "end_page": 5,
+                "children": [
+                    {"title": "Section A", "start_page": 2, "end_page": 3},
+                ],
+            },
+        ],
+    )
+    scopes = build_endnote_scope_directory(toc, progress, texts)
+
+    with pytest.raises(EndnoteNormalizationError, match="multiple ancestor scopes"):
+        normalize_endnotes(
+            texts,
+            {"chapter_1.md": "", "chapter_2.md": "", "chapter_3.md": "notes"},
+            scopes=scopes,
+        )

@@ -99,6 +99,15 @@ def render_markdown_prompt(data: PromptRenderData) -> str:
                 "For poetry, verse, drama/dialogue, epigraphs, or line-by-line quotations, preserve intentional line boundaries instead of merging them into prose, but keep the complete item in one Markdown block and use explicit `<br />` between lines. Do not emit a chain of ordinary one-line paragraphs for an intentional line structure.",
             ]
 
+    translation_language_rules = (
+        [
+            "Proper names and places: At the first occurrence of a person or place name in the book, add the source-language original in parentheses, for example 康德（Kant）. Use only the established target-language name on later occurrences. If the scoped context or entity table shows that the name was already introduced earlier, do not repeat the original.",
+            "Ancient Greek and Latin: For Ancient Greek, give the original form and a Latin transliteration, for example ἀρχή（archē）. For Latin, give the original form next to the translated term. Annotate at least the first occurrence in the assigned unit and preserve the original script and diacritics exactly.",
+        ]
+        if task in {"translate", "translate-html", "translate-novel", "translate-arxiv"}
+        else []
+    )
+
     rules = [
         "Read each source file and write a same-named target file; do not skip files.",
         "Write files directly in the target directory, with no Markdown code fences around the file contents.",
@@ -110,6 +119,7 @@ def render_markdown_prompt(data: PromptRenderData) -> str:
         "A parent heading may be structural-only: when it is immediately followed by a child heading with no intervening prose, keep the parent heading once and do not copy any descendant paragraph under the empty parent. Every source prose block must appear exactly once in the output, under its original nearest heading.",
         "For Markdown footnotes, keep the definition's first line as `[^n]: ...`; indent every continuation line, continuation paragraph, table, formula, or quotation block by one additional level (four spaces or one tab). Preserve blank lines between note paragraphs and any deeper nested indentation. In translation, keep each continuation attached to the same source footnote definition; do not move content between notes or into body text.",
         "When the scoped manifest marks a file as a continuation unit, preserve the source opening exactly and never add a Markdown heading at the beginning of that file. Do not invent labels such as '(continued)' or '参考文献（续）'.",
+        *translation_language_rules,
         *polish_boundary_rules,
         *(
             [

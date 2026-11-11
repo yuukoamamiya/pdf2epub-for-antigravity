@@ -92,6 +92,22 @@ class RefinedBreakdown:
             refine_config = {}
         self.max_tokens = max_tokens or refine_config.get("max_tokens", 8000)
 
+        raw_granularity = refine_config.get("unit_granularity", "leaf")
+        if raw_granularity in (None, "leaf"):
+            self.unit_depth: int | None = None
+        elif raw_granularity == "top_level":
+            self.unit_depth = 1
+        else:
+            try:
+                unit_depth = int(raw_granularity)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    "refine.unit_granularity must be 'leaf', 'top_level', or a positive integer"
+                ) from exc
+            if unit_depth < 1:
+                raise ValueError("refine.unit_granularity must be at least 1")
+            self.unit_depth = unit_depth
+
         self.page_merger = PageMerger()
         split_config = refine_config.get("oversized_unit_split", {})
         if not isinstance(split_config, dict):
@@ -459,6 +475,12 @@ class RefinedBreakdown:
         # the child's heading and silently dropping the intervening lines.
         if inherited_start_line is not None:
             node = self._node_with_start_line(node, inherited_start_line)
+
+        # A configured unit depth keeps all descendant headings in one logical
+        # unit.  Children stay in the TOC as navigation-only nodes and the
+        # build projects them onto the owning unit's rendered parts.
+        if self.unit_depth is not None and len(index_path) >= self.unit_depth:
+            return [self._create_unit(node, index_path, include_children=True)]
 
         # Case 1: Leaf node
         if node.is_leaf():

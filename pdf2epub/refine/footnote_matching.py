@@ -19,7 +19,7 @@ from ..footnote_keys import CIRCLED_LABELS, marker_from_label, marker_label_from
 
 
 _MARKDOWN_REF_RE = re.compile(r"\[\^(?P<key>[A-Za-z0-9_-]+)\]")
-_HTML_SUP_RE_TEMPLATE = r"<sup\b[^>]*>\s*{key}\s*</sup>"
+_HTML_SUP_RE_TEMPLATE = r"<sup\b[^>]*>[\s<«»\"'>]*{key}[\s<«»\"'>]*</sup>"
 _HTML_SUP_BLOCK_RE = re.compile(
     r"<sup\b[^>]*>.*?</sup>", re.IGNORECASE | re.DOTALL
 )
@@ -727,6 +727,9 @@ def marker_spans(
     else:
         marker_matches = list(re.finditer(
             _HTML_SUP_RE_TEMPLATE.format(key=escaped), source, flags=re.IGNORECASE
+        ))
+        marker_matches.extend(re.finditer(
+            r"(?:\\text\{\s*\})?\^\{" + escaped + r"\}", source
         ))
     for match in marker_matches:
         if not is_inside_definition_line(match.start()):

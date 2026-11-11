@@ -17,11 +17,13 @@ translation:
   #     id: german-classical-philosophy
 
 # Antigravity Subagent 模型（只作为 IDE 子 Agent 的任务提示，不调用任何 API）
-# 正文、元数据和目录翻译默认使用 Pro；其他任务默认使用 Flash。
+# 默认使用 inherit，让子 Agent 继承主会话已验证的模型；需要固定模型时再显式填写。
+# 翻译任务依次读取 task_models -> models.translation -> models.default；
+# 其他任务依次读取 task_models -> models.default。
 subagent:
   models:
-    translation: gemini-3.1-pro-preview
-    default: gemini-3.6-flash
+    translation: inherit
+    default: inherit
   # Subagent 批处理建议；长文件仍应按完整翻译单元拆分。
   batching:
     max_files: 5
@@ -31,6 +33,8 @@ subagent:
     # per-chapter terminology scopes.
     pack_adjacent_chapters: true
     max_chapters_per_worker: 3
+    # 可选：允许极短特殊单元彼此共用 worker；特殊单元仍不与普通章节混排。
+    pack_tiny_special_units: false
   # 可选的单任务覆盖：
   # task_models:
   #   translate-html: gemini-3.1-pro-preview

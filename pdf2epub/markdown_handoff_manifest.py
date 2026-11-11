@@ -100,6 +100,12 @@ def build_markdown_manifest(data: ManifestBuild) -> dict[str, Any]:
     continuation_files = {name: value for name, value in plan.continuation_files.items() if name in plan.file_stats}
     if continuation_files:
         manifest["continuation_files"] = continuation_files
+    preceding_contexts = {
+        name: value for name, value in plan.preceding_contexts.items()
+        if name in plan.file_stats
+    }
+    if preceding_contexts:
+        manifest["preceding_context"] = preceding_contexts
     if data.visual_review_dir is not None:
         manifest["visual_review_dir"] = data.visual_review_dir
     if data.secondary_source_dir is not None:
