@@ -90,10 +90,11 @@ PDF 结构复核还要求逐项处置独立数字，明确绑定标题的源行�
 PDF 的页脚注抽取会复核疑似跨页断词缺口；需要时会把相邻两页图像交给工作区 Subagent，
 由图像证据确认原文截断或恢复缺失续文。`footnotes.mode: disabled` 会关闭页脚注自动提取和链接创建；
 若与 TOC 的脚注判断冲突，准备、校验和应用阶段都会显示警告。集中尾注的 Markdown 链接仍可能生成。
+页脚注应用后还会生成 `footnote_result_audit.json`，复核残留上标、疑似编号注释、适用范围内的编号缺口和注释边界。需要判断的发现会回到既有视觉复核、校验和应用流程；结果审计未通过时，不会生成有效脚注检查点或继续到 polish/EPUB 构建。`endnotes_only` 跳过页脚注候选扫描，但仍审计适用的尾注定义、截断和物化完整性；`disabled` 会记录为不适用。审计输出复核信号，语义决定由既有审阅流程完成。
 维护者可运行 `uv run pdf2epub -c config.yaml footnote-review-summary --json` 汇总既有脚注复核的页面、区域、候选块和决定覆盖；该命令纯只读，输出是成本诊断，不代表生产校验通过。
 脚注 worker 的精简 unit context 由候选报告、精确页侧车映射和当前 refined unit mapping 重算校验；侧车哈希变化或旧 projection 版本会要求重跑 `footnote-prepare` 与 `footnote-validate`，既有语义决定文件会保留。
 PDF 润色/翻译校验规则升级可能使旧验证记录或脚注归一化 checkpoint 失效；恢复时按 [AGENTS.md](AGENTS.md)
-重跑对应校验或脚注准备/校验/应用，不需要仅因规则版本变化而重新 OCR。
+重跑对应校验或脚注准备/校验/应用，不需要仅因规则版本变化而重新 OCR。脚注结果审计合同升级后，旧 normalization receipt 也须按该流程重建；该合同升级本身不要求重新 OCR。原始 OCR 与原稿保留，应用阶段重建归一化派生稿；之后按当前性报告恢复受影响的 polish、翻译或构建检查点。
 
 PDF 和 EPUB 的结果通常位于 `output/<书名>/`：PDF 翻译生成原语言 EPUB 和译文 EPUB，PDF 只转换时生成原语言 EPUB，
 EPUB 翻译生成译文 EPUB。

@@ -131,7 +131,7 @@ def validate_continuation_review_decisions(
             if not text or len(text) > 4000:
                 errors.append(f"continuation review {task_id} needs exact recovered image text (1..4000 chars)")
                 continue
-            if not re.match(r"^[a-zà-öø-ÿ]", text):
+            if task.get("boundary_kind", "hyphen") == "hyphen" and not re.match(r"^[a-zà-öø-ÿ]", text):
                 errors.append(f"continuation review {task_id} must begin with the visible lowercase word suffix")
                 continue
             normalized_text = re.sub(r"\s+", " ", text).strip().casefold()

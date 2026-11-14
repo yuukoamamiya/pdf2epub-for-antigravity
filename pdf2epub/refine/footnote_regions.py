@@ -459,9 +459,15 @@ def build_page_footnote_regions(
             local_acceptance_evidence.append("native_marker_font_and_detached_tail")
         if all_numbered and not local_acceptance_evidence:
             reasons.append("insufficient_independent_footnote_evidence")
+        forced_visual_review = any(
+            item.get("leading_superscript_review") is True for item in item_candidates
+        )
+        if forced_visual_review:
+            reasons.append("leading_superscript_recall_requires_visual_review")
         locally_clear = bool(
             auto_accept
             and not reasons
+            and not forced_visual_review
             and all_numbered
             and bool(local_acceptance_evidence)
         )

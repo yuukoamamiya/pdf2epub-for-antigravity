@@ -40,12 +40,13 @@ def build_cross_page_windows(
 def build_missing_continuation_reviews(
     page_reports: list[dict[str, Any]], *, page_count: int
 ) -> list[dict[str, Any]]:
-    """Flag the final labelled note candidate when it ends in an open word and
+    """Flag the final labelled note candidate when it has an open boundary and
     no traceable continuation candidate covers the following physical page.
 
     Only the last physical candidate on a page is eligible.  This deliberately
-    avoids general prose/math hyphen heuristics. The final PDF page still gets
-    an exception-only review when its last note ends in an open word.
+    avoids general prose/math heuristics. Non-hyphen signals are limited to
+    unmatched delimiters and explicit unfinished clauses. The final PDF page
+    still gets exception-only review.
     """
     by_page = {int(item["page"]): item for item in page_reports}
     result: list[dict[str, Any]] = []
@@ -62,7 +63,14 @@ def build_missing_continuation_reviews(
         if candidate.get("confidence") not in {"high", "review"}:
             continue
         text = str(candidate.get("text_ending") or candidate.get("text") or "").rstrip()
-        if not re.search(r"[A-Za-zÀ-ÖØ-öø-ÿ]{2,}[-‐‑]$", text):
+        dangling_hyphen = bool(re.search(r"[A-Za-zÀ-ÖØ-öø-ÿ]{2,}[-‐‑]$", text))
+        # A broken OCR block can lose the hyphen entirely. Require a strong
+        # open-boundary cue (unbalanced delimiter or a clause-ending marker)
+        # on the last labelled note; ordinary sentence-final text is ignored.
+        open_paren = text.count("(") > text.count(")")
+        open_bracket = text.count("[") > text.count("]")
+        dangling_clause = text.endswith((",", ":", ";", "—", "…"))
+        if not (dangling_hyphen or open_paren or open_bracket or dangling_clause):
             continue
         terminal_page = page >= page_count
         following = by_page.get(page + 1)
@@ -89,10 +97,15 @@ def build_missing_continuation_reviews(
                 "key": str(candidate.get("key") or ""),
                 "text_ending": text[-100:],
             },
+            "boundary_kind": "hyphen" if dangling_hyphen else "open_boundary",
             "pages": [page] if terminal_page else [page, page + 1],
             "expected_next_page": None if terminal_page else page + 1,
             "terminal_page": terminal_page,
-            "reason": "last_physical_footnote_ends_with_dangling_word_hyphen_without_a_traceable_continuation_candidate",
+            "reason": (
+                "last_physical_footnote_ends_with_dangling_word_hyphen_without_a_traceable_continuation_candidate"
+                if dangling_hyphen else
+                "last_physical_footnote_has_an_open_boundary_without_a_traceable_continuation_candidate"
+            ),
             "status": "pending_review",
         })
     return result

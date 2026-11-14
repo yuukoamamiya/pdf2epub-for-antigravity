@@ -30,6 +30,38 @@ from pdf2epub.refine.footnote_status import footnote_normalization_status
 from pdf2epub.refine.footnote_validation import validate_footnote_decisions
 
 
+def _write_current_result_audit(
+    output_dir: Path,
+    source_texts: dict[str, str],
+    target_texts: dict[str, str],
+) -> dict:
+    from pdf2epub.refine.footnote_result_audit import audit_footnote_result
+
+    audit = audit_footnote_result(
+        source_texts,
+        target_texts=target_texts,
+        mode="footnotes",
+    )
+    audit["source_sha256"] = {
+        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in sorted((output_dir / "ocr_markdown").glob("*.md"))
+    }
+    audit["target_sha256"] = {
+        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in sorted((output_dir / "footnote_normalized").glob("*.md"))
+    }
+    audit["candidate_report_sha256"] = hashlib.sha256(
+        (output_dir / "footnote_candidates.json").read_bytes()
+    ).hexdigest()
+    audit["decision_validation_sha256"] = hashlib.sha256(
+        (output_dir / "footnote_decision_validation.json").read_bytes()
+    ).hexdigest()
+    (output_dir / "footnote_result_audit.json").write_text(
+        json.dumps(audit), encoding="utf-8"
+    )
+    return audit
+
+
 def test_footnote_signature_does_not_match_number_inside_larger_number():
     source = "15 Auflage der Ausgabe\n\n5 Auflage der Ausgabe"
 
@@ -333,6 +365,9 @@ def test_footnote_status_reports_candidate_hash_as_root_cause(tmp_path: Path):
         }),
         encoding="utf-8",
     )
+    result_audit = _write_current_result_audit(
+        tmp_path, {"unit.md": "body\n"}, {"unit.md": "body\n"}
+    )
     normalization = tmp_path / "footnote_normalization.json"
     normalization.write_text(
         json.dumps(
@@ -353,6 +388,10 @@ def test_footnote_status_reports_candidate_hash_as_root_cause(tmp_path: Path):
                 "decision_validation_sha256": hashlib.sha256(
                     decisions.read_bytes()
                 ).hexdigest(),
+                "result_audit_sha256": hashlib.sha256(
+                    (tmp_path / "footnote_result_audit.json").read_bytes()
+                ).hexdigest(),
+                "result_audit_version": result_audit["schema_version"],
             }
         ),
         encoding="utf-8",
@@ -365,6 +404,15 @@ def test_footnote_status_reports_candidate_hash_as_root_cause(tmp_path: Path):
         }),
         encoding="utf-8",
     )
+    result_audit = _write_current_result_audit(
+        tmp_path, {"unit.md": "body\n"}, {"unit.md": "body\n"}
+    )
+    checkpoint = json.loads(normalization.read_text(encoding="utf-8"))
+    checkpoint["result_audit_sha256"] = hashlib.sha256(
+        (tmp_path / "footnote_result_audit.json").read_bytes()
+    ).hexdigest()
+    checkpoint["result_audit_version"] = result_audit["schema_version"]
+    normalization.write_text(json.dumps(checkpoint), encoding="utf-8")
 
     status = footnote_normalization_status(tmp_path)
 
@@ -403,6 +451,9 @@ def test_footnote_status_requires_current_toc_for_scoped_endnotes(tmp_path: Path
         }),
         encoding="utf-8",
     )
+    result_audit = _write_current_result_audit(
+        tmp_path, {"unit.md": "body\n"}, {"unit.md": "body\n"}
+    )
     toc_tree = tmp_path / "toc_tree.json"
 
     def write_checkpoint(endnotes: dict, toc_hash=None, schema_version=None) -> None:
@@ -425,6 +476,10 @@ def test_footnote_status_requires_current_toc_for_scoped_endnotes(tmp_path: Path
                     "decision_validation_sha256": hashlib.sha256(
                         decisions.read_bytes()
                     ).hexdigest(),
+                    "result_audit_sha256": hashlib.sha256(
+                        (tmp_path / "footnote_result_audit.json").read_bytes()
+                    ).hexdigest(),
+                    "result_audit_version": result_audit["schema_version"],
                     "endnotes": endnotes,
                     **({"toc_tree_sha256": toc_hash} if toc_hash else {}),
                 }

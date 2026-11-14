@@ -81,6 +81,19 @@ def candidate_for_block(
         str(block.get("html") or "")
     )
     key = marker.key if marker else None
+    # Some OCR backends label a detached note paragraph as generic ``Text``
+    # and place it outside the footer geometry. Admit a leading superscript
+    # only as a visual-review candidate; this does not classify the block.
+    raw_block_html = str(block.get("html") or block.get("text") or "")
+    leading_sup_numeric = bool(
+        marker and marker.kind == "numeric"
+        and re.match(
+            rf"^\s*(?:<(?:p|div|span)\b[^>]*>\s*)*<sup\b[^>]*>\s*{re.escape(marker.label)}\s*</sup>",
+            raw_block_html,
+            re.IGNORECASE,
+        )
+    )
+    leading_sup_review = bool(leading_sup_numeric and label.casefold() == "text")
     layout_profile = (
         dict(layout_profile)
         if isinstance(layout_profile, Mapping)
@@ -106,7 +119,7 @@ def candidate_for_block(
     # Lists that follow a nearby prose sentence and still sit above the page
     # tail are body content, not page notes.  Keep explicitly labelled notes
     # reviewable even when their text happens to look like a list item.
-    if not label_is_footnote and _inline_ordered_list_warning(
+    if not label_is_footnote and not leading_sup_review and _inline_ordered_list_warning(
         sidecar,
         block_index,
         bbox,
@@ -154,12 +167,12 @@ def candidate_for_block(
         and reliable_nonbottom_location
         and not (is_bottom or relative_tail or region_evidence)
     )
-    if not (is_bottom or relative_tail or region_evidence or explicit_label_review or table_adjacent):
+    if not (is_bottom or relative_tail or region_evidence or explicit_label_review or table_adjacent or leading_sup_review):
         return None
     if not (label_is_footnote or key or region_evidence):
         return None
 
-    if label_is_footnote and is_bottom and key and not force_review and not region_evidence:
+    if label_is_footnote and is_bottom and key and not force_review and not region_evidence and not leading_sup_review:
         confidence = "high"
         disposition = "local_candidate"
     else:
@@ -197,6 +210,9 @@ def candidate_for_block(
         "text": text[:240],
         "text_ending": text[-120:],
     }
+    if leading_sup_review:
+        candidate["leading_superscript_review"] = True
+        candidate["review_reason"] = "leading_numeric_superscript_in_layout_block"
     if key and page_markdown:
         candidate["same_page_marker"] = marker_before_block(
             page_markdown,

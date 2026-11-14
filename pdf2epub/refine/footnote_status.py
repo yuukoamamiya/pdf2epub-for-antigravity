@@ -15,11 +15,12 @@ from .footnote_options import (
 from .footnote_continuation_review import validate_continuation_review_decisions
 from .footnote_contracts import FOOTNOTE_PREPARE_SCHEMA_VERSION
 from .pdf_evidence import pdf_evidence_mode, require_current_consensus
+from .footnote_result_review import validate_result_audit_reviews
+from .footnote_validation_evidence import validate_candidate_evidence
 
 
-# Version 8 invalidates normalized output created before HTML visible-text
-# matching retained entity provenance and block boundaries.
-FOOTNOTE_NORMALIZATION_SCHEMA_VERSION = 8
+# Version 9 binds the normalization receipt to the post-apply result audit.
+FOOTNOTE_NORMALIZATION_SCHEMA_VERSION = 9
 _SAFE_FILENAME_RE = re.compile(r"^[^/\\]+\.md$")
 
 
@@ -66,6 +67,7 @@ def unit_records(output_dir: Path) -> list[dict[str, Any]]:
         else:
             chapter_id = f"unit:{unit.get('file')}"
         names = unit.get("part_files") or [unit.get("file")]
+        part_count = len(names)
         for part_index, raw_name in enumerate(names, 1):
             name = _safe_name(raw_name)
             records.append(
@@ -76,6 +78,7 @@ def unit_records(output_dir: Path) -> list[dict[str, Any]]:
                     "chapter_id": chapter_id,
                     "unit_order": unit_order,
                     "part_index": part_index,
+                    "part_count": part_count,
                     "type": str(unit.get("type") or "").strip().lower(),
                     "index_path": index_path,
                 }
@@ -109,6 +112,10 @@ def footnote_normalization_status(
             output_dir / "footnote_candidates.json",
             "footnote_candidates.json",
         )
+        audit_report = _load_json(
+            output_dir / "footnote_result_audit.json",
+            "footnote_result_audit.json",
+        )
     except (OSError, UnicodeError, ValueError, TypeError) as exc:
         fail("checkpoint_missing_or_invalid", str(exc))
         return {
@@ -135,10 +142,50 @@ def footnote_normalization_status(
             "decision_validation_failed",
             "footnote_decision_validation.json is missing or invalid",
         )
+    expected_audit_status = (
+        "not_applicable" if str(report.get("footnote_mode") or "") == "disabled"
+        else "validated"
+    )
+    if audit_report.get("schema_version") != 1 or audit_report.get("valid") is not True or audit_report.get("status") != expected_audit_status:
+        fail("result_audit_failed", "footnote_result_audit.json is missing, stale, or has unresolved findings")
+    if report.get("result_audit_sha256") != sha256_file(output_dir / "footnote_result_audit.json"):
+        fail("result_audit_stale", "footnote result audit changed after normalization")
+    if audit_report.get("source_sha256") != markdown_inventory(output_dir / "ocr_markdown"):
+        fail("result_audit_source_stale", "footnote result audit is bound to different source Markdown")
+    if audit_report.get("target_sha256") != markdown_inventory(output_dir / "footnote_normalized"):
+        fail("result_audit_target_stale", "footnote result audit is bound to different normalized Markdown")
+    if audit_report.get("candidate_report_sha256") != sha256_file(output_dir / "footnote_candidates.json"):
+        fail("result_audit_candidate_stale", "footnote result audit is bound to a different candidate report")
+    if audit_report.get("decision_validation_sha256") != sha256_file(output_dir / "footnote_decision_validation.json"):
+        fail("result_audit_validation_stale", "footnote result audit is bound to a different decision validation")
     if candidate_report.get("schema_version") != FOOTNOTE_PREPARE_SCHEMA_VERSION:
         fail(
             "candidate_report_schema_mismatch",
             "footnote_candidates.json uses an older or missing prepare contract; rerun footnote-prepare",
+        )
+    candidate_evidence = validate_candidate_evidence(output_dir, candidate_report, config)
+    if candidate_evidence.get("errors"):
+        fail(
+            "candidate_page_evidence_stale",
+            "footnote sidecar, consensus, or image evidence changed after preparation: "
+            + "; ".join(str(item) for item in candidate_evidence.get("errors", [])[:5]),
+        )
+    prepared_audit = candidate_report.get("result_audit") if isinstance(candidate_report.get("result_audit"), Mapping) else {}
+    current_audit_tasks = [
+        *(prepared_audit.get("findings", []) if isinstance(prepared_audit.get("findings"), list) else []),
+        *(prepared_audit.get("reviewed_candidate_tasks", []) if isinstance(prepared_audit.get("reviewed_candidate_tasks"), list) else []),
+    ]
+    audit_reviews, audit_errors = validate_result_audit_reviews(
+        output_dir,
+        current_audit_tasks,
+        validation.get("result_audit_reviews", []),
+        ordinary_decisions=validation.get("decisions", []),
+    )
+    if audit_errors or audit_reviews != validation.get("result_audit_reviews", []):
+        fail(
+            "result_audit_review_stale",
+            "supplementary footnote visual decisions are stale or incomplete: "
+            + "; ".join(audit_errors[:5] or ["review records no longer match validation"]),
         )
     if validation.get("schema_version") != FOOTNOTE_PREPARE_SCHEMA_VERSION:
         fail(
@@ -269,6 +316,8 @@ def footnote_normalization_status(
             "candidate_report_stale",
             "footnote_candidates.json changed after footnote-apply",
         )
+    if report.get("result_audit_version") != audit_report.get("schema_version"):
+        fail("result_audit_version_mismatch", "normalization receipt uses a different result audit version")
     if validation_candidate_hash != sha256_file(output_dir / "footnote_candidates.json"):
         fail(
             "decision_validation_candidate_hash_stale",

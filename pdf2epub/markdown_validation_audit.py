@@ -1,17 +1,81 @@
 """Pure single-file Markdown content audits."""
 from __future__ import annotations
 import hashlib, re
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List
 from .document_roles import DENSITY_EXEMPT_ROLES
 from .footnote_normalization import validate_polish_footnote_normalization
+from .footnote_markdown import collect_footnote_definition_blocks
+from .refine.footnote_result_audit import _visible as _visible_footnote_text
+from .footnote_normalization import _is_math_or_formula_superscript
 from .markdown_validation import (validate_footnote_markers, detect_bilingual_output, detect_markdown_syntax_issues, detect_polish_page_furniture, fix_reference_heading_mismatch, is_bibliography_text, is_front_matter_text, polish_content_integrity_check, polish_structure_audit, strip_outer_markdown_fences, target_language_ratio_check, translation_diff_summary)
 from .special_role_audit import validate_special_role_markers
 from .subagent_safety import detect_refusal
 from .utils.ocr_artifacts import clean_ocr_page_artifacts
 from .toc_model import normalize_toc_source_label, toc_title_match_key
 from .markdown_validation_context import MarkdownAuditOptions, MarkdownValidationContext
+
+
+def audit_polish_note_integrity(source_text: str, target_text: str) -> list[str]:
+    """Catch newly introduced note markers and note text escaping its definition."""
+    errors: list[str] = []
+    source_visible = _visible_footnote_text(source_text)
+    target_visible = _visible_footnote_text(target_text)
+    raw_sup = re.compile(r"<sup\b[^>]*>\s*(?P<key>\d+)\s*</sup>", re.IGNORECASE)
+
+    def nonmath_superscripts(text: str) -> Counter[str]:
+        values: Counter[str] = Counter()
+        for match in raw_sup.finditer(text):
+            key = match.group("key")
+            if not _is_math_or_formula_superscript(text, match.start(), match.end(), key=key):
+                values[key] += 1
+        return values
+
+    source_markers = nonmath_superscripts(source_visible)
+    target_markers = nonmath_superscripts(target_visible)
+    introduced = target_markers - source_markers
+    if introduced:
+        errors.append(f"polish introduced numeric superscript markers: {dict(introduced)}")
+    unicode_sup = re.compile(r"[⁰¹²³⁴⁵⁶⁷⁸⁹]+")
+    source_unicode = Counter(match.group(0) for match in unicode_sup.finditer(source_visible))
+    target_unicode = Counter(match.group(0) for match in unicode_sup.finditer(target_visible))
+    introduced_unicode = target_unicode - source_unicode
+    if introduced_unicode:
+        errors.append(f"polish introduced Unicode superscript markers: {dict(introduced_unicode)}")
+
+    source_defs, _ = collect_footnote_definition_blocks(source_visible.splitlines())
+    target_defs, _ = collect_footnote_definition_blocks(target_visible.splitlines())
+    source_by_key: dict[str, list[str]] = {}
+    target_by_key: dict[str, list[str]] = {}
+    for _, (key, body) in source_defs.items():
+        source_by_key.setdefault(str(key), []).append(body)
+    for _, (key, body) in target_defs.items():
+        target_by_key.setdefault(str(key), []).append(body)
+    for key, source_bodies in source_by_key.items():
+        target_bodies = target_by_key.get(key, [])
+        if len(target_bodies) != len(source_bodies):
+            errors.append(f"polish changed definition count for footnote {key}")
+            continue
+        for occurrence, source_body in enumerate(source_bodies):
+            source_signature = "".join(char.casefold() for char in source_body if char.isalnum())
+            target_signature = "".join(char.casefold() for char in target_bodies[occurrence] if char.isalnum())
+            if source_signature and source_signature not in target_signature:
+                errors.append(f"polish moved or truncated text outside footnote definition {key}")
+            source_body = source_bodies[occurrence].strip()
+            target_body = target_bodies[occurrence].strip()
+            for left, right, signal in (("(", ")", "parenthesis"), ("[", "]", "bracket")):
+                source_open = source_body.count(left) - source_body.count(right)
+                target_open = target_body.count(left) - target_body.count(right)
+                if source_open <= 0 < target_open:
+                    errors.append(f"polish introduced an unclosed {signal} in footnote definition {key}")
+            if (
+                not source_body.endswith(("-", "‐", "‑", "—", "…"))
+                and target_body.endswith(("-", "‐", "‑", "—", "…"))
+            ):
+                errors.append(f"polish introduced a truncated ending in footnote definition {key}")
+    return errors
 
 def _structural_mismatch_reason(pattern: str, source_text: str, target_text: str, source_count: int, target_count: int) -> str:
     if pattern == r"^#{1,6}\s":
@@ -470,6 +534,13 @@ def audit_markdown_file(
                     valid_files.remove(file.name)
 
                 if task == "polish":
+                    polish_note_errors = audit_polish_note_integrity(source_text, target_text)
+                    invalid.extend(
+                        {"file": file.name, "reason": error}
+                        for error in polish_note_errors
+                    )
+                    if polish_note_errors and file.name in valid_files:
+                        valid_files.remove(file.name)
                     polish = audit_polish_content(
                         file.name, source_text, target_text, role,
                         tuple(normalized_protected_toc_titles),

@@ -668,7 +668,7 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    重跑 `footnote-prepare`；只有 decisions 改变时重跑 `footnote-validate`，再运行 apply。
 
    当前脚注 prepare/decision validation 使用 schema 4；尾注边界歧义及其决定使用独立 schema 2，
-   normalization 使用 schema 8。旧 normalization schema 1–7 和旧 prepare checkpoint 不能复用；
+   normalization 使用 schema 9，结果审计使用独立 schema 1。旧 normalization schema 1–8 和旧 prepare checkpoint 不能复用；
    endnote decision schema 1 仅兼容没有 inline 候选的旧式行边界清单，当前新决定文件使用 schema 2：
    重新执行 prepare，只派发新 manifest 的 pending 项，再 validate/apply；无需重新 OCR。apply 会重建
    `footnote_normalized/` 和成功 checkpoint，需保留旧派生版本时先备份。
@@ -748,6 +748,14 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    `primary_blocks`；当同编号 marker 不止一个时附带 `marker_context`。不满足合同的决定属于
    `retry_required`/阻断，不得靠 `--allow-review-warnings` 放行。
 
+   `footnote-apply` 会在生成 `footnote_normalized/` 后写入 `footnote_result_audit.json`，再决定是否写有效 normalization checkpoint。该结果审计报告残留数字上标/疑似编号注释、明确 scope 内的编号缺口、疑似未闭合或截断定义，以及归一化后的注释边界和物化完整性问题。编号顺序按 TOC/refinement scope 逐项核对，覆盖单文件和多分片章节；有精确页面边界或不同 `section_id` 的下降序列作为重启，不跨该边界推断缺号，缺少这类边界证据时生成 `scoped_numbering_reset_uncertain` 视觉复核。审计产生的语义疑问由视觉复核决定，apply 不移动未确认内容或翻译内容。
+
+   另有一项上游候选召回改进：首次 `footnote-prepare` 会把通用 `Text` 块中的行首数字 `<sup>…</sup>` 作为视觉复核候选，即使常规候选逻辑会把该块压制为普通编号列表上下文，也按精确页/来源/block 和侧车哈希交给 Subagent。图像复核该块角色。apply 后的结果审计只检查转换后的稿件；若仍需复核，下一次 `footnote-prepare` 会把当前结果报告中的任务投影为补充视觉任务，且仅在报告绑定的源稿与归一化稿哈希仍匹配时复用。代码/注释、Markdown 脚注定义及其续行等结构会排除在对应残留标记扫描之外。主/次 OCR 及旧原生 layout 沿用各自当前证据模式；`endnotes_only` 不扫描页脚注候选，但会审计尾注定义、截断及归一化物化完整性；`disabled` 的状态为 `not_applicable`。
+
+   Subagent 在既有 `footnote_decisions.json` 中写 `result_audit_reviews`，逐项绑定当前 `task_id` 和 `evidence_sha256`，并提供所有指定页的图像依据。结果可以确认为合法非脚注、图像确认的原文截断，或确认某个精确候选为脚注；确认脚注还必须在普通 `decisions` 中有匹配的页/来源/block 决定。校验会验证地址、页图和哈希；apply 还会确认已确认的候选确实进入转换计划。审计任务缺决定或仍有歧义时，不得继续成功 checkpoint。
+
+   若 `footnote-validate` 提示某个结果审计任务仍需复核，重跑同一 `footnote-prepare` 以生成带当前证据的补充视觉任务，再由 Subagent 处理并重复 validate/apply。决定只对相同任务和证据哈希有效；同一任务再次仍不确定时升级为 `human_review_required`，停止自动重试。视觉复核提交角色决定；编号规则不负责移动定义或补写翻译。
+
    脚注阶段至少核对以下产物后才能继续 polish：
 
    - `footnote_candidates.json`：`source_kind`、`ocr_evidence_mode`、`sidecar_sha256`、
@@ -765,8 +773,9 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
      或明确的 `no_subagent_review_required`；`retry_required` 和 `human_review_required`
      都阻断；有尾注歧义时还要检查 `endnote_definitions.valid` 和
      `endnote_definition_validation.json`；
+   - `footnote_result_audit.json`：`footnotes` 与 `endnotes_only` 模式在没有未决 findings 时必须是 `valid: true`、`status: validated`；`endnotes_only` 不运行页脚注候选扫描，但仍审计适用的尾注定义、截断和物化完整性。存在 findings 时须完成 scoped 视觉复核；`disabled` 模式为 `not_applicable`。适用时报告必须绑定当前源稿、归一化稿、候选报告和决定校验；存在 findings 时不能继续。
    - `footnote_normalization.json`：必须存在且 `valid: true`、`status: validated`，其源稿、
-     候选报告、决定校验和尾注歧义/决定哈希必须通过当前性检查；不能只凭
+     候选报告、决定校验、结果审计和尾注歧义/决定哈希必须通过当前性检查；不能只凭
      `footnote_normalized/` 中有文件判断完成。
 9. 所有 PDF 都必须执行 `polish`，打开工作区 Subagent 读取
    `polish_subagent_prompt.md`，并按 `polish_worker_handoffs/` 中各 manifest 的

@@ -25,6 +25,7 @@ from .footnote_validation_evidence import (
     validate_candidate_evidence,
 )
 from .footnote_continuation_review import validate_continuation_review_decisions
+from .footnote_result_review import validate_result_audit_reviews
 
 
 def _endnote_definition_result(output_dir: Path) -> dict[str, Any]:
@@ -79,6 +80,7 @@ def _persist_result(
     if validated_decisions:
         updated_report = dict(report)
         updated_report["decisions"] = result["decisions"]
+        updated_report["result_audit_reviews"] = result.get("result_audit_reviews", [])
         updated_report["decisions_status"] = "validated"
         atomic_write_json(report_path, updated_report)
         manifest_path = output_dir / "footnote_subagent_manifest.json"
@@ -205,7 +207,14 @@ def validate_footnote_decisions(
 
     required = required_review_addresses(report)
     continuation_tasks = report.get("continuation_reviews", [])
-    if not required and not continuation_tasks:
+    audit_data = report.get("result_audit") if isinstance(report.get("result_audit"), Mapping) else {}
+    result_audit_tasks = audit_data.get("findings", []) if isinstance(audit_data, Mapping) else []
+    if isinstance(audit_data, Mapping) and isinstance(audit_data.get("reviewed_candidate_tasks"), list):
+        result_audit_tasks = [
+            *(result_audit_tasks if isinstance(result_audit_tasks, list) else []),
+            *audit_data["reviewed_candidate_tasks"],
+        ]
+    if not required and not continuation_tasks and not result_audit_tasks:
         result = {
             **base_fields,
             "valid": True,
@@ -274,6 +283,31 @@ def validate_footnote_decisions(
         decisions_data.get("continuation_reviews") if isinstance(decisions_data, dict) else None,
     )
     errors.extend(continuation_errors)
+    result_audit_reviews, result_audit_errors = validate_result_audit_reviews(
+        output_dir,
+        result_audit_tasks,
+        decisions_data.get("result_audit_reviews") if isinstance(decisions_data, Mapping) else None,
+        ordinary_decisions=normalized,
+    )
+    errors.extend(result_audit_errors)
+    audit_task_index = {
+        str(item.get("task_id")): item
+        for item in result_audit_tasks if isinstance(item, Mapping) and item.get("task_id")
+    }
+    audit_human_review_required = []
+    audit_review_required = []
+    for item in result_audit_reviews:
+        if item.get("outcome") != "review_required":
+            continue
+        task = audit_task_index.get(str(item.get("task_id")), {})
+        if int(task.get("review_attempt") or 1) >= 2:
+            audit_human_review_required.append(str(item.get("task_id")))
+        else:
+            audit_review_required.append(str(item.get("task_id")))
+            errors.append(
+                f"result audit task {item.get('task_id')} remains ambiguous; rerun footnote-prepare for another scoped visual review"
+            )
+    human_review_required.extend(audit_human_review_required)
 
     if (
         report.get("footnote_mode") == "footnotes"
@@ -287,6 +321,8 @@ def validate_footnote_decisions(
 
     if human_review_required:
         status = "human_review_required"
+    elif audit_review_required:
+        status = "review_required"
     elif errors:
         status = "retry_required"
     else:
@@ -300,6 +336,8 @@ def validate_footnote_decisions(
         "region_audits": sorted(region_ids),
         "decisions": normalized,
         "continuation_reviews": continuation_decisions,
+        "result_audit_reviews": result_audit_reviews,
+        "result_audit_version": audit_data.get("schema_version") if isinstance(audit_data, Mapping) else None,
     }
     _attach_endnote_result(result, endnote_result)
     return _persist_result(

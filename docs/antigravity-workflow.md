@@ -962,13 +962,34 @@ validation 收据一致，任何一项变化都会阻断 apply，apply 不会静
 `footnote_status` 对已记录的文件做 freshness 检查，缺失或变化时 stale，并提示重跑相应阶段。
 没有歧义时不要求 ambiguity/decision 哈希。
 
+脚注决定、视觉校验与 apply 后还会运行只读结果审计，报告写入
+`footnote_result_audit.json`（schema 1）。审计检查正文残留数字上标或疑似编号定义、明确多分片
+scope 内的编号缺口、可能未闭合/截断的注释定义，以及 apply 后的边界和物化完整性。数字上标、编号样式
+或标点只构成线索，审计不会替 Subagent 决定语义、移动注释或生成译文。Markdown 代码/注释、已识别的
+脚注定义及其续行不会作为普通正文残留标记扫描。编号范围依据 TOC/refinement unit 与章节映射，单文件章节和多分片章节均按实际顺序检查。下降序列仅在精确页面边界分隔记录或 `section_id` 明确变化时作为编号重启；缺少边界证据时生成 `scoped_numbering_reset_uncertain` 视觉复核，不跨重启推断缺号。
+
+首次准备时会额外把通用 OCR `Text` 块中行首数字 `<sup>…</sup>` 纳入视觉复核，即便常规页面候选
+此前将它压制为普通编号上下文。这是上游候选召回改进，只判读图像中的块角色，不把原始上标视为
+漏检注释。后续准备还会投影当前 apply 结果报告中的未决 findings，使其进入同一 scoped 视觉审阅流程。
+每项绑定精确源文件/行或页/来源/block、证据哈希和当前完整页图；主 OCR、双 OCR
+和 legacy native-text 仍使用各自当前的证据模式。`endnotes_only` 不扫描页脚注候选，但仍审计适用的
+尾注定义、截断和物化完整性；`disabled` 的结果审计状态为 `not_applicable`。
+
+Subagent 将结果放入既有 `footnote_decisions.json` 的 `result_audit_reviews`，校验其任务 ID、证据哈希、
+指定页图和结果。可将条目标记为图像确认的合法非脚注、原文确实截断，或确认一个精确候选为脚注；
+最后一种结果还要求同一页/来源/block 在普通决定中具有相符角色，apply 必须确认候选已写入归一化计划。
+遗漏或未解决的发现会阻止有效 `footnote_normalization.json` checkpoint，因而不能通过 polish 和构建门禁。
+校验要求再次复核时，重跑同一 `footnote-prepare` 生成按源地址和哈希绑定的补充视觉任务，再运行
+`footnote-validate → footnote-apply`。相同任务第二次仍不确定时升级为 `human_review_required`，停止自动循环。
+不要以规则自动迁移上标、猜测注释归属或补译内容。
+
 `footnote_candidates.json`、`footnote_decisions.json` 和 `footnote_decision_validation.json`
 使用 prepare/decision schema 4；`endnote_definition_ambiguities.json`、其 decisions 与 validation
-使用独立 schema 2；`footnote_normalization.json` 使用 schema 8，TOC 使用 schema 2。版本号彼此独立。
+使用独立 schema 2；`footnote_result_audit.json` 使用独立 schema 1，`footnote_normalization.json` 使用 schema 9，TOC 使用 schema 2。版本号彼此独立。
 prepare manifest 另以 SHA-256 绑定 compact `footnote_review_packet.json`；Reviewer 使用 packet，完整
 candidate report 留作审计/恢复。validation 写回决定不会重建 packet。packet 缺失或哈希不符时须重跑
 `footnote-prepare`，旧 handoff 不得静默加载。
-旧 normalization schema 1–7 checkpoint 升级后需要重新运行 `footnote-prepare → footnote-validate →
+旧 normalization schema 1–8 checkpoint 升级后需要重新运行 `footnote-prepare → footnote-validate →
 footnote-apply`，不需要重新 OCR。
 旧 prepare checkpoint 不能复用；schema 1 的 endnote decisions 只兼容没有 inline 候选的旧式行边界
 清单，当前 inline/line decisions 使用 schema 2。运行

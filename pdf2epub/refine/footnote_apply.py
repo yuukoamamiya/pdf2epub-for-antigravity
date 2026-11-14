@@ -27,12 +27,13 @@ from .footnote_apply_resolution import (
 )
 from .footnote_apply_inputs import FootnoteApplyInputError, load_footnote_apply_inputs
 from .footnote_status import FOOTNOTE_NORMALIZATION_SCHEMA_VERSION, markdown_inventory
+from .footnote_result_audit import AUDIT_FILENAME, AUDIT_VERSION, audit_footnote_result
 
 
-def _write_failure(output_dir: Path, errors: list[str]) -> dict[str, Any]:
+def _write_failure(output_dir: Path, errors: list[str], *, status: str = "human_review_required") -> dict[str, Any]:
     result = {
         "schema_version": FOOTNOTE_NORMALIZATION_SCHEMA_VERSION,
-        "status": "human_review_required",
+        "status": status,
         "valid": False,
         "errors": errors,
     }
@@ -103,6 +104,12 @@ def apply_footnote_normalization(
 
     report = inputs.report
     validation = inputs.validation
+    candidate_report_hash_at_start = sha256_file(output_dir / "footnote_candidates.json")
+    decision_validation_hash_at_start = sha256_file(output_dir / "footnote_decision_validation.json")
+    tree_progress_path = output_dir / "ocr_markdown" / "tree_progress.json"
+    toc_tree_path = output_dir / "toc_tree.json"
+    tree_progress_hash_at_start = sha256_file(tree_progress_path) if tree_progress_path.is_file() else None
+    toc_tree_hash_at_start = sha256_file(toc_tree_path) if toc_tree_path.is_file() else None
     report_mode = inputs.report_mode
     report_footnote_mode = inputs.footnote_mode
     endnote_definition_decisions = inputs.endnote_definition_decisions
@@ -134,12 +141,18 @@ def apply_footnote_normalization(
             ), None) if isinstance(continuation_results, list) else None
             if matching_review:
                 candidate_copy["confidence"] = "review"
+                candidate_page = int(candidate_copy["page"])
+                candidate_scope = next((
+                    str(record.get("chapter_id") or "") for record in records
+                    if int(record.get("start_page", 0)) <= candidate_page <= int(record.get("end_page", 0))
+                ), "")
                 body_exception_decisions.append({
-                    "page": int(candidate_copy["page"]),
+                    "page": candidate_page,
                     "source": str(candidate_copy.get("source") or "primary"),
                     "block": int(candidate_copy["block"]),
                     "role": "body",
                     "key": str(candidate_copy.get("key") or ""),
+                    "chapter_id": candidate_scope,
                 })
             candidates.append(candidate_copy)
         adjusted["candidates"] = candidates
@@ -179,15 +192,31 @@ def apply_footnote_normalization(
             ])
         note = matches[0]
         text = str(review.get("text") or "").strip()
-        if not note.get("parts") or not re.search(r"[A-Za-zÀ-ÖØ-öø-ÿ]{2,}[-‐‑]$", str(note["parts"][-1]).rstrip()):
+        boundary_kind = str(source_task.get("boundary_kind") or "") if isinstance(source_task, Mapping) else ""
+        if not boundary_kind:
+            ending_hint = str(source_note.get("text_ending") or "")
+            boundary_kind = "hyphen" if re.search(r"[A-Za-zÀ-ÖØ-öø-ÿ]{2,}[-‐‑]$", ending_hint) else "open_boundary"
+        if not note.get("parts"):
             return _write_failure(output_dir, [
-                f"{review.get('task_id')}: source note no longer ends with its reviewed broken word; rerun footnote-prepare"
+                f"{review.get('task_id')}: source note has no reviewed continuation boundary; rerun footnote-prepare"
             ])
-        if not re.match(r"^[a-zà-öø-ÿ]", text):
+        if boundary_kind == "hyphen" and not re.match(r"^[a-zà-öø-ÿ]", text):
             return _write_failure(output_dir, [
                 f"{review.get('task_id')}: recovered continuation must begin with the visible lowercase word suffix"
             ])
-        note["parts"][-1] = str(note["parts"][-1]).rstrip()[:-1] + text
+        ending = str(note["parts"][-1]).rstrip()
+        if re.search(r"[A-Za-zÀ-ÖØ-öø-ÿ]{2,}[-‐‑]$", ending):
+            note["parts"][-1] = ending[:-1] + text
+        elif ending.count("(") > ending.count(")") or ending.count("[") > ending.count("]"):
+            matching_close = ")" if ending.count("(") > ending.count(")") else "]"
+            joiner = "" if text.startswith(matching_close) else " "
+            note["parts"][-1] = ending + joiner + text
+        elif ending.endswith((",", ":", ";", "—", "…")):
+            note["parts"][-1] = ending + " " + text
+        else:
+            return _write_failure(output_dir, [
+                f"{review.get('task_id')}: source note no longer has its reviewed open boundary; rerun footnote-prepare"
+            ])
         note.setdefault("recovered_continuations", []).append(str(review.get("task_id")))
     bind_note_markers(decision_plan, source_texts, records)
     edit_plan = create_footnote_edit_plan(
@@ -214,6 +243,147 @@ def apply_footnote_normalization(
         )
     except (OSError, UnicodeError, ValueError) as exc:
         return _write_failure(output_dir, [f"could not write normalized source: {exc}"])
+
+    # Audit only after every unit has been freshly transformed from the
+    # original OCR source. The audit report is written before the success
+    # receipt; unresolved findings leave no valid normalization checkpoint.
+    materialized_targets = {}
+    for name in source_texts:
+        target_path = target_dir / name
+        if target_path.is_file():
+            try:
+                materialized_targets[name] = target_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeError):
+                continue
+    final_file_by_chapter = {}
+    for record in records:
+        chapter = str(record.get("chapter_id") or "")
+        current = final_file_by_chapter.get(chapter)
+        if current is None or (record.get("unit_order", 0), record.get("part_index", 0)) >= (
+            current.get("unit_order", 0), current.get("part_index", 0)
+        ):
+            final_file_by_chapter[chapter] = record
+    expected_notes = [
+        {
+            "chapter_id": chapter,
+            "target_file": str(final_file_by_chapter.get(chapter, {}).get("name") or ""),
+            "output_key": str(note.get("output_key") or note.get("key") or ""),
+            "parts": list(note.get("parts") or []),
+            "candidate_refs": [
+                {
+                    "page": int(block["page"]),
+                    "source": str(block.get("source") or "primary"),
+                    "block": int(block["block"]),
+                }
+                for block in edit_plan.resolved_blocks
+                if isinstance(block, Mapping)
+                and str(block.get("key") or "") == str(note.get("key") or "")
+                and str(block.get("chapter_id") or chapter) == chapter
+                and str(block.get("page", "")).lstrip("-").isdigit()
+                and str(block.get("block", "")).lstrip("-").isdigit()
+            ],
+        }
+        for chapter, notes in edit_plan.notes_by_chapter.items()
+        for note in notes
+    ]
+    result_audit = audit_footnote_result(
+        source_texts,
+        records=records,
+        target_texts=materialized_targets,
+        mode=report_footnote_mode,
+        decisions=validation_for_resolution.get("decisions", []),
+        expected_notes=expected_notes,
+        current_exceptions=validation.get("result_audit_reviews", []),
+    )
+    # Bind to byte-level inventories (including original newline convention)
+    # that status checks on disk, rather than normalized in-memory strings.
+    result_audit["source_sha256"] = source_hashes
+    result_audit["target_sha256"] = target_hashes
+    prepared_audit = report.get("result_audit") if isinstance(report.get("result_audit"), Mapping) else {}
+    candidate_audit_tasks = prepared_audit.get("findings", []) if isinstance(prepared_audit, Mapping) else []
+    reviewed_audit_tasks = validation.get("result_audit_reviews", [])
+    resolved_addresses = {
+        (int(item.get("page", -1)), str(item.get("source") or "primary"), int(item.get("block", -1)))
+        for item in edit_plan.resolved_blocks if isinstance(item, Mapping)
+        and str(item.get("page", "")).lstrip("-").isdigit()
+        and str(item.get("block", "")).lstrip("-").isdigit()
+    }
+    review_by_id = {
+        str(item.get("task_id")): item for item in reviewed_audit_tasks
+        if isinstance(item, Mapping) and item.get("task_id")
+    }
+    for task in candidate_audit_tasks if isinstance(candidate_audit_tasks, list) else []:
+        if not isinstance(task, Mapping):
+            continue
+        review = review_by_id.get(str(task.get("task_id")), {})
+        if review.get("outcome") == "confirmed_footnote":
+            ref = review.get("candidate_ref") if isinstance(review.get("candidate_ref"), Mapping) else {}
+            try:
+                address = (int(ref["page"]), str(ref.get("source") or "primary"), int(ref["block"]))
+            except (KeyError, TypeError, ValueError):
+                address = None
+            if address is None or address not in resolved_addresses:
+                result_audit.setdefault("findings", []).append({
+                    "task_id": str(task.get("task_id")),
+                    "code": "confirmed_note_not_materialized",
+                    "file": str(task.get("file") or ""),
+                    "line": task.get("line"),
+                    "page": task.get("page"),
+                    "evidence_sha256": str(task.get("evidence_sha256") or ""),
+                    "detail": "The reviewed note candidate was not found in the applied edit plan; it must remain unresolved.",
+                })
+    prior_reviewed_tasks = prepared_audit.get("reviewed_candidate_tasks", []) if isinstance(prepared_audit, Mapping) else []
+    newly_admitted = [
+        {
+            **dict(task),
+            **({"candidate_ref": dict(review_by_id[str(task.get("task_id"))].get("candidate_ref", {}))}
+               if isinstance(review_by_id.get(str(task.get("task_id"))), Mapping)
+               and isinstance(review_by_id[str(task.get("task_id"))].get("candidate_ref"), Mapping)
+               else {}),
+            **({"outcome": str(review_by_id[str(task.get("task_id"))].get("outcome") or "")}
+               if isinstance(review_by_id.get(str(task.get("task_id"))), Mapping)
+               else {}),
+            **({"review_reason": str(review_by_id[str(task.get("task_id"))].get("reason") or "")}
+               if isinstance(review_by_id.get(str(task.get("task_id"))), Mapping)
+               else {}),
+        } for task in candidate_audit_tasks
+        if isinstance(task, Mapping)
+        and task.get("context_status") == "supplemental_candidate_admitted"
+        and isinstance(task.get("source_address"), Mapping)
+    ] if isinstance(candidate_audit_tasks, list) else []
+    result_audit["reviewed_candidate_tasks"] = [
+        *(prior_reviewed_tasks if isinstance(prior_reviewed_tasks, list) else []),
+        *newly_admitted,
+    ]
+    result_audit["admitted_candidates"] = newly_admitted
+    result_audit["applied_result_audit_reviews"] = list(reviewed_audit_tasks) if isinstance(reviewed_audit_tasks, list) else []
+    if result_audit.get("findings"):
+        result_audit["valid"] = False
+        result_audit["status"] = "review_required"
+    result_audit["candidate_report_sha256"] = sha256_file(output_dir / "footnote_candidates.json")
+    result_audit["decision_validation_sha256"] = sha256_file(output_dir / "footnote_decision_validation.json")
+    audit_path = output_dir / AUDIT_FILENAME
+    atomic_write_json(audit_path, result_audit)
+    if result_audit.get("valid") is not True:
+        findings = result_audit.get("findings", [])
+        repeated_review = any(
+            isinstance(item, Mapping) and int(item.get("review_attempt") or 1) >= 2
+            for item in findings
+        )
+        technical_retry = any(
+            isinstance(item, Mapping) and str(item.get("code") or "").startswith("applied_note_")
+            for item in findings
+        )
+        failure_status = "human_review_required" if repeated_review else "retry_required" if technical_retry else "review_required"
+        return _write_failure(
+            output_dir,
+            [
+                f"{item.get('task_id')}: {item.get('detail')} (rerun footnote-prepare for scoped visual review)"
+                for item in result_audit.get("findings", [])
+            ] or ["footnote result audit requires review"],
+            status=failure_status,
+        )
+
     result = {
         "schema_version": FOOTNOTE_NORMALIZATION_SCHEMA_VERSION,
         "source_kind": report.get("source_kind", "ocr"),
@@ -232,6 +402,8 @@ def apply_footnote_normalization(
         "decision_validation_sha256": sha256_file(
             output_dir / "footnote_decision_validation.json"
         ),
+        "result_audit_sha256": sha256_file(audit_path),
+        "result_audit_version": AUDIT_VERSION,
         "endnote_definition_ambiguities_sha256": endnote_ambiguities_sha256,
         "endnote_definition_decisions_sha256": endnote_decisions_sha256,
         "moved_count": len(edit_plan.resolved_blocks),
@@ -274,6 +446,25 @@ def apply_footnote_normalization(
             else None
         ),
     }
+    # Revalidate the complete evidence snapshot immediately before committing
+    # the final success receipt. Hashes captured only at this point would let a
+    # mid-run edit certify a plan made against older evidence.
+    try:
+        current_inputs = load_footnote_apply_inputs(output_dir, config)
+    except FootnoteApplyInputError as exc:
+        return _write_failure(output_dir, [f"evidence changed during footnote apply: {exc}"])
+    if (
+        sha256_file(output_dir / "footnote_candidates.json") != candidate_report_hash_at_start
+        or sha256_file(output_dir / "footnote_decision_validation.json") != decision_validation_hash_at_start
+        or markdown_inventory(source_dir) != source_hashes
+        or markdown_inventory(target_dir) != target_hashes
+        or (sha256_file(tree_progress_path) if tree_progress_path.is_file() else None) != tree_progress_hash_at_start
+        or (sha256_file(toc_tree_path) if toc_tree_path.is_file() else None) != toc_tree_hash_at_start
+        or dict(current_inputs.source_hashes) != source_hashes
+    ):
+        return _write_failure(output_dir, [
+            "footnote source, target, decision, candidate, TOC, or page evidence changed during apply; rerun footnote-prepare and footnote-validate"
+        ])
     return _write_success_report(output_dir, result)
 
 

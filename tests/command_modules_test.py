@@ -470,6 +470,20 @@ def test_polish_prefers_current_footnote_normalized_source(tmp_path: Path):
         ),
         encoding="utf-8",
     )
+    from pdf2epub.refine.footnote_result_audit import audit_footnote_result
+
+    result_audit = audit_footnote_result(
+        {"chapter_1.md": "source"},
+        target_texts={"chapter_1.md": "normalized"},
+        mode="footnotes",
+    )
+    result_audit["candidate_report_sha256"] = sha256_file(candidates_path)
+    result_audit["decision_validation_sha256"] = sha256_file(
+        tmp_path / "footnote_decision_validation.json"
+    )
+    (tmp_path / "footnote_result_audit.json").write_text(
+        json.dumps(result_audit), encoding="utf-8"
+    )
     from pdf2epub.workflow_contracts import atomic_write_text
 
     atomic_write_text(
@@ -490,6 +504,10 @@ def test_polish_prefers_current_footnote_normalized_source(tmp_path: Path):
                 "decision_validation_sha256": sha256_file(
                     tmp_path / "footnote_decision_validation.json"
                 ),
+                "result_audit_sha256": sha256_file(
+                    tmp_path / "footnote_result_audit.json"
+                ),
+                "result_audit_version": result_audit["schema_version"],
             }
         ),
     )

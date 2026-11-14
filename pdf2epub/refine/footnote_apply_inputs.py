@@ -22,6 +22,8 @@ from .endnote_review import (
 )
 from .pdf_evidence import pdf_evidence_mode, require_current_consensus
 from .footnote_continuation_review import validate_continuation_review_decisions
+from .footnote_result_review import validate_result_audit_reviews
+from .footnote_validation_evidence import validate_candidate_evidence
 
 
 @dataclass(frozen=True)
@@ -160,6 +162,28 @@ def load_footnote_apply_inputs(
     if validation.get("candidate_report_sha256") != sha256_file(output_dir / "footnote_candidates.json"):
         raise FootnoteApplyInputError(
             "footnote candidate report changed after decision validation; rerun footnote-validate"
+        )
+    evidence = validate_candidate_evidence(output_dir, report, config)
+    if evidence.get("errors"):
+        raise FootnoteApplyInputError(
+            "footnote page/layout evidence changed after validation: "
+            + "; ".join(str(item) for item in evidence.get("errors", [])[:5])
+        )
+    audit_data = report.get("result_audit") if isinstance(report.get("result_audit"), Mapping) else {}
+    current_audit_tasks = [
+        *(audit_data.get("findings", []) if isinstance(audit_data.get("findings"), list) else []),
+        *(audit_data.get("reviewed_candidate_tasks", []) if isinstance(audit_data.get("reviewed_candidate_tasks"), list) else []),
+    ]
+    audit_reviews, audit_errors = validate_result_audit_reviews(
+        output_dir,
+        current_audit_tasks,
+        validation.get("result_audit_reviews", []),
+        ordinary_decisions=validation.get("decisions", []),
+    )
+    if audit_errors or audit_reviews != validation.get("result_audit_reviews", []):
+        raise FootnoteApplyInputError(
+            "footnote result audit evidence is stale or incomplete: "
+            + "; ".join(audit_errors[:5] or ["review records no longer match validation"])
         )
     _, continuation_errors = validate_continuation_review_decisions(
         output_dir,

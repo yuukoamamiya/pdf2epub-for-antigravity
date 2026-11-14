@@ -247,6 +247,7 @@ def test_prepare_handoff_validate_apply_and_status_require_explicit_resolution(t
     assert "von vorn-" in (tmp_path / "ocr_markdown" / "chapter_1.md").read_text(encoding="utf-8")
     assert footnote_normalization_status(tmp_path)["current"] is True
 
+
     report_path = tmp_path / "footnote_candidates.json"
     validation_path = tmp_path / "footnote_decision_validation.json"
     normalization_path = tmp_path / "footnote_normalization.json"
@@ -589,3 +590,45 @@ def test_readiness_report_carries_disabled_warning_without_turning_it_into_error
     assert report["warnings"][0]["code"] == "page_footnote_linking_disabled_toc_footnotes"
     assert all("page_footnote_linking_disabled_toc_footnotes" not in error for error in report["errors"])
     assert json.loads((tmp_path / "readiness.json").read_text(encoding="utf-8"))["warnings"] == report["warnings"]
+
+
+def test_open_parenthetical_continuation_accepts_uppercase_recovery(tmp_path, monkeypatch):
+    _prepare_continuation_book(tmp_path, monkeypatch)
+    source_path = tmp_path / "ocr_markdown" / "chapter_1.md"
+    source_path.write_text(
+        source_path.read_text(encoding="utf-8").replace("von vorn-", "opens (5.435"),
+        encoding="utf-8",
+    )
+    (tmp_path / "pages" / "page_001.md").write_text(
+        source_path.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    sidecar_path = tmp_path / "pages" / "page_001.ocr.json"
+    sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    sidecar["blocks"][0]["html"] = "36 Footnote continues opens (5.435"
+    sidecar_path.write_text(json.dumps(sidecar), encoding="utf-8")
+
+    paths = prepare_footnote_subagent(tmp_path, book_title="Open Parenthetical")
+    report = json.loads(paths["report"].read_text(encoding="utf-8"))
+    task = report["continuation_reviews"][0]
+    assert task["boundary_kind"] == "open_boundary"
+    (tmp_path / "footnote_decisions.json").write_text(json.dumps({
+        "schema_version": report["schema_version"],
+        "decisions": [{
+            "page": 1, "source": "primary", "block": 0,
+            "role": "footnote_start", "key": "36",
+        }],
+        "continuation_reviews": [{
+            "task_id": task["task_id"],
+            "outcome": "recovered_continuation",
+            "key": "36",
+            "text": "Hegel closes the parenthetical).",
+            "reason": "The next page image shows the same note continuing.",
+            "evidence_pages": [1, 2],
+        }],
+    }), encoding="utf-8")
+    validation = validate_footnote_decisions(tmp_path)
+    assert validation["valid"] is True, validation["errors"]
+    applied = apply_footnote_normalization(tmp_path)
+    assert applied["valid"] is True, applied.get("errors")
+    target = (tmp_path / "footnote_normalized" / "chapter_1.md").read_text(encoding="utf-8")
+    assert "Hegel closes the parenthetical)." in target
