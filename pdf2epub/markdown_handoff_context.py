@@ -39,6 +39,7 @@ class MarkdownHandoffRequest:
     protected_toc_titles: Optional[Iterable[str]] = None
     config_path: Optional[str | Path] = None
     controlled_files: Optional[Mapping[str, str]] = None
+    footnote_semantics_enabled: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "output_dir", Path(self.output_dir))

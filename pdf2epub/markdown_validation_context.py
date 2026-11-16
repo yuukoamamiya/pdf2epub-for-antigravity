@@ -42,6 +42,7 @@ class MarkdownAuditOptions:
     protected_toc_titles: tuple[str, ...]
     continuation_toc_titles: Mapping[str, frozenset[str]]
     expected_endnote_keys: frozenset[str]
+    require_footnote_semantic_review: bool
 
 
 @dataclass(frozen=True)
@@ -102,6 +103,7 @@ def load_markdown_validation_context(
     allow_review_warnings: bool = False,
     protected_toc_titles: Iterable[str] = (),
     continuation_toc_titles: Mapping[str, Iterable[str]] | None = None,
+    require_footnote_semantic_review: bool = False,
 ) -> MarkdownValidationContext:
     output_dir, source_dir, target_dir = map(Path, (output_dir, source_dir, target_dir))
     all_sources = markdown_files(source_dir)
@@ -159,7 +161,7 @@ def load_markdown_validation_context(
     options = MarkdownAuditOptions(
         task, tuple(structural_patterns), roles, role_sources, invalid_roles,
         validate_footnote_normalization, fix_reference_headings, target_language,
-        titles, continuation, frozenset(expected),
+        titles, continuation, frozenset(expected), require_footnote_semantic_review,
     )
     return MarkdownValidationContext(
         paths, sources, selected is not None, create_validated_copy,

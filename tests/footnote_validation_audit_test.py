@@ -120,3 +120,87 @@ def test_secondary_moved_decision_requires_explicit_text_and_safe_filename():
     ]
     assert review == []
     assert seen == {address}
+
+
+def test_reviewed_segments_must_be_unique_and_non_overlapping():
+    address = (1, "primary", 0)
+    candidates = {address: {
+        "page": 1, "block": 0, "text": "Body sentence. 1 Note text.",
+        "confidence": "high", "key": "1",
+    }}
+    base = {
+        "page": 1, "source": "primary", "block": 0,
+        "role": "body", "override": True,
+    }
+    valid, errors, _, _ = normalize_decisions([{
+        **base,
+        "segments": [
+            {"role": "body", "text": "Body sentence."},
+            {"role": "footnote_start", "key": "1", "text": "1 Note text."},
+        ],
+    }], candidates)
+    assert errors == []
+    assert len(valid) == 1
+
+    _, errors, _, _ = normalize_decisions([{
+        **base,
+        "segments": [
+            {"role": "body", "text": "Body sentence."},
+            {"role": "footnote_start", "key": "1", "text": "sentence. 1"},
+        ],
+    }], candidates)
+    assert errors == [
+        "segmented decision has overlapping excerpts for 1:0"
+    ]
+
+    _, errors, _, _ = normalize_decisions([{
+        **base,
+        "segments": [{"role": "footnote_start", "key": "1", "text": "Note text."}],
+    }], candidates)
+    assert errors == []  # the exact reviewed note range may be narrower than the OCR block
+
+
+def test_reviewed_body_override_splits_mixed_ocr_block_without_moving_body(tmp_path: Path):
+    import json
+
+    from pdf2epub.refine.footnote_apply_resolution import resolve_page_decisions
+
+    text = "1 First note. Body sentence. 2 Second note."
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    (pages / "page_001.ocr.json").write_text(json.dumps({
+        "page_number": 1,
+        "blocks": [{"order": 1, "label": "Footnote", "html": text}],
+    }), encoding="utf-8")
+    report = {"pages": [{"page": 1, "candidates": [{
+        "page": 1, "source": "primary", "block": 0, "text": text,
+        "confidence": "high", "key": "1", "local_role": "footnote_start",
+    }]}]}
+    decisions = [{
+        "page": 1, "source": "primary", "block": 0,
+        "role": "body", "override": True,
+        "segments": [
+            # Deliberately reversed. Apply order must follow exact source spans.
+            {"role": "footnote_start", "key": "2", "text": "2 Second note."},
+            {"role": "footnote_start", "key": "1", "text": "1 First note."},
+            {"role": "body", "text": "Body sentence."},
+        ],
+    }]
+    normalized, errors, _, _ = normalize_decisions(decisions, candidate_index(report))
+    assert errors == []
+    source_texts = {"chapter.md": text}
+    result = resolve_page_decisions(
+        tmp_path, report, {"decisions": normalized}, source_texts,
+        [{"name": "chapter.md", "start_page": 1, "end_page": 1,
+          "chapter_id": "chapter-1", "type": "chapter"}],
+        "footnotes",
+    )
+    assert result.errors == []
+    assert result.edits_by_file["chapter.md"] == [
+        (0, len("1 First note."), ""),
+        (len("1 First note. Body sentence. "), len(text), ""),
+    ]
+    assert [note["key"] for note in result.notes_by_chapter["chapter-1"]] == ["1", "2"]
+    assert [note["parts"] for note in result.notes_by_chapter["chapter-1"]] == [
+        ["First note."], ["Second note."],
+    ]

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -31,11 +32,15 @@ class MarkdownHandoffPlan:
     recommended_batches: list[list[str]]
     oversized_files: list[str]
     preceding_contexts: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    succeeding_contexts: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    boundary_context_sha256: Dict[str, str] = field(default_factory=dict)
+    boundary_context_mapping_sha256: Dict[str, str] = field(default_factory=dict)
+    boundary_context_sources: Dict[str, list[Dict[str, str]]] = field(default_factory=dict)
     role_sources: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
 
-def _preceding_context_tail(text: str, limit: int = 600) -> str:
-    """Return the last readable paragraphs of a previous source part."""
+def _body_blocks(text: str) -> list[str]:
+    """Return complete body blocks, excluding footnote definitions and continuations."""
     from .footnote_markdown import collect_footnote_definition_blocks
 
     lines = text.splitlines()
@@ -43,6 +48,20 @@ def _preceding_context_tail(text: str, limit: int = 600) -> str:
     body_lines = [
         line
         for index, line in enumerate(lines)
+        if index not in consumed and index not in definitions
+    ]
+    body = "\n".join(body_lines).strip()
+    return [part.strip() for part in re.split(r"\n\s*\n", body) if part.strip()]
+
+
+def _preceding_context_tail(text: str, limit: int = 600) -> str:
+    """Return the historical translation context tail, unchanged."""
+    from .footnote_markdown import collect_footnote_definition_blocks
+
+    lines = text.splitlines()
+    definitions, consumed = collect_footnote_definition_blocks(lines)
+    body_lines = [
+        line for index, line in enumerate(lines)
         if index not in consumed and index not in definitions
     ]
     body = "\n".join(body_lines).strip()
@@ -58,6 +77,98 @@ def _preceding_context_tail(text: str, limit: int = 600) -> str:
     if not tail:
         tail = body[-limit:]
     return tail.strip()
+
+
+def _clip_boundary_block(block: str, *, direction: str, token_budget: int) -> str:
+    """Clip an oversized block at sentence boundaries, then at word boundaries."""
+    if token_budget <= 0:
+        return ""
+    sentences = [part.strip() for part in re.findall(
+        r".+?(?:[.!?。！？](?:[\"'”’）)]*)?(?=\s|$)|.+$)", block
+    ) if part.strip()]
+    ordered = list(reversed(sentences)) if direction == "preceding" else sentences
+    selected: list[str] = []
+    used = 0
+    for sentence in ordered:
+        cost = estimate_tokens(sentence)
+        if used + cost > token_budget:
+            break
+        selected.append(sentence)
+        used += cost
+    if selected:
+        if direction == "preceding":
+            selected.reverse()
+        return " ".join(selected)
+
+    words = block.split()
+    ordered_words = list(reversed(words)) if direction == "preceding" else words
+    selected_words: list[str] = []
+    used = 0
+    for word in ordered_words:
+        cost = estimate_tokens(word)
+        if used + cost > token_budget:
+            break
+        selected_words.append(word)
+        used += cost
+    if direction == "preceding":
+        selected_words.reverse()
+    return " ".join(selected_words)
+
+
+def _boundary_projection(text: str, *, direction: str, token_budget: int) -> tuple[str, bool]:
+    """Select complete blocks first, then a clearly marked context fragment."""
+    if token_budget <= 0:
+        return "", False
+    blocks = _body_blocks(text)
+    ordered = reversed(blocks) if direction == "preceding" else iter(blocks)
+    selected: list[str] = []
+    used = 0
+    clipped = False
+    for block in ordered:
+        cost = estimate_tokens(block)
+        if used + cost > token_budget:
+            fragment = _clip_boundary_block(
+                block, direction=direction, token_budget=token_budget - used
+            )
+            if fragment:
+                selected.append(fragment)
+                clipped = True
+            break
+        selected.append(block)
+        used += cost
+    if direction == "preceding":
+        selected.reverse()
+    return "\n\n".join(selected), clipped
+
+
+def _boundary_mapping_projection(
+    name: str, continuation_metadata: Mapping[str, Mapping[str, Any]]
+) -> dict[str, Any]:
+    """Return only the explicit part links that can affect this file's halo."""
+    def compact(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
+        if not isinstance(metadata, Mapping):
+            return {}
+        return {
+            key: metadata[key]
+            for key in ("is_continuation", "part_number", "part_count", "previous_file")
+            if key in metadata
+        }
+
+    own = compact(continuation_metadata.get(name))
+    previous = str(own.get("previous_file") or "").strip()
+    following = sorted(
+        other for other, metadata in continuation_metadata.items()
+        if str(metadata.get("previous_file") or "").strip() == name
+    )
+    return {
+        "file": name,
+        "self": own,
+        "previous": {"file": previous, "metadata": compact(continuation_metadata.get(previous))} if previous else None,
+        "succeeding": [
+            {"file": other, "metadata": compact(continuation_metadata.get(other))}
+            for other in following
+        ],
+    }
 
 
 def plan_markdown_handoff(
@@ -139,7 +250,7 @@ def plan_markdown_handoff(
         if str(name).strip() and isinstance(value, Mapping)
     }
     for source in sources:
-        if source.name in continuation_metadata:
+        if task == "polish" or source.name in continuation_metadata:
             continue
         match = re.search(r"\.part(?P<number>[2-9][0-9]*)\.md$", source.name, re.IGNORECASE)
         if match:
@@ -158,16 +269,117 @@ def plan_markdown_handoff(
         if inferred in source_texts:
             metadata["previous_file"] = inferred
     preceding_contexts: dict[str, dict[str, str]] = {}
-    for name, metadata in continuation_metadata.items():
-        previous = str(metadata.get("previous_file") or "").strip()
-        if not previous or previous not in source_texts:
-            continue
-        tail = _preceding_context_tail(source_texts[previous])
-        if tail:
-            preceding_contexts[name] = {
-                "source_file": previous,
-                "text": tail,
-            }
+    succeeding_contexts: dict[str, dict[str, str]] = {}
+    boundary_context_sha256: dict[str, str] = {}
+    boundary_context_mapping_sha256: dict[str, str] = {}
+    boundary_context_sources: dict[str, list[dict[str, str]]] = {}
+    # Translation retains its historical preceding-context behavior. Polish
+    # uses only explicit part links; chapter groups can contain independent
+    # child chapters and therefore are not sufficient evidence of continuity.
+    if task == "polish":
+        previous_by_file: dict[str, str] = {}
+        next_by_file: dict[str, str] = {}
+        for name, metadata in continuation_metadata.items():
+            previous = str(metadata.get("previous_file") or "").strip()
+            if not previous:
+                continue
+            if name == previous:
+                raise ValueError(f"polish continuation mapping cannot self-link: {name}")
+            if name not in source_texts or previous not in source_texts:
+                raise ValueError(f"polish continuation mapping references an undeclared source: {name} -> {previous}")
+            if name in previous_by_file and previous_by_file[name] != previous:
+                raise ValueError(f"polish continuation mapping has multiple predecessors for {name}")
+            if previous in next_by_file and next_by_file[previous] != name:
+                raise ValueError(f"polish continuation mapping forks after {previous}")
+            previous_by_file[name] = previous
+            next_by_file[previous] = name
+        for start in previous_by_file:
+            seen: set[str] = set()
+            current = start
+            while current in previous_by_file:
+                if current in seen:
+                    raise ValueError(f"polish continuation mapping contains a cycle at {current}")
+                seen.add(current)
+                current = previous_by_file[current]
+        for name, metadata in continuation_metadata.items():
+            previous = previous_by_file.get(name)
+            if not previous:
+                continue
+            previous_meta = continuation_metadata.get(previous, {})
+            current_part = metadata.get("part_number")
+            previous_part = previous_meta.get("part_number") if isinstance(previous_meta, Mapping) else None
+            if current_part is not None and previous_part is not None:
+                try:
+                    current_number = int(current_part)
+                    previous_number = int(previous_part)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f"polish continuation part numbers are malformed: {previous} -> {name}") from exc
+                if current_number != previous_number + 1:
+                    raise ValueError(f"polish continuation part numbers are not consecutive: {previous} -> {name}")
+        for name in source_texts:
+            own_tokens = file_stats[name]["estimated_tokens"]
+            remaining = max(0, int(batching["max_source_tokens"]) - own_tokens)
+            has_previous = name in previous_by_file
+            has_next = name in next_by_file
+            remaining = min(remaining, 512)
+            if has_previous and has_next:
+                before_budget = remaining // 2
+                after_budget = remaining - before_budget
+            elif has_previous:
+                before_budget, after_budget = min(256, remaining), 0
+            elif has_next:
+                before_budget, after_budget = 0, min(256, remaining)
+            else:
+                before_budget, after_budget = 0, 0
+            projection: dict[str, Any] = {"file": name, "links": []}
+            source_links: list[dict[str, str]] = []
+            if has_previous:
+                neighbor = previous_by_file[name]
+                text, clipped = _boundary_projection(
+                    source_texts[neighbor], direction="preceding", token_budget=before_budget
+                )
+                preceding_contexts[name] = {"source_file": neighbor, "text": text, "clipped": clipped}
+                projection["links"].append({
+                    "direction": "preceding", "source_file": neighbor,
+                    "source_sha256": source_sha256[neighbor], "text": text, "clipped": clipped,
+                })
+                source_links.append({
+                    "direction": "preceding", "source_file": neighbor,
+                    "source_sha256": source_sha256[neighbor],
+                })
+            if has_next:
+                neighbor = next_by_file[name]
+                text, clipped = _boundary_projection(
+                    source_texts[neighbor], direction="succeeding", token_budget=after_budget
+                )
+                succeeding_contexts[name] = {"source_file": neighbor, "text": text, "clipped": clipped}
+                projection["links"].append({
+                    "direction": "succeeding", "source_file": neighbor,
+                    "source_sha256": source_sha256[neighbor], "text": text, "clipped": clipped,
+                })
+                source_links.append({
+                    "direction": "succeeding", "source_file": neighbor,
+                    "source_sha256": source_sha256[neighbor],
+                })
+            payload = json.dumps(projection, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            boundary_context_sha256[name] = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+            boundary_context_sources[name] = source_links
+            mapping_projection = _boundary_mapping_projection(name, continuation_metadata)
+            mapping_payload = json.dumps(mapping_projection, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            boundary_context_mapping_sha256[name] = hashlib.sha256(mapping_payload.encode("utf-8")).hexdigest()
+            context_tokens = sum(estimate_tokens(link["text"]) for link in projection["links"])
+            file_stats[name]["source_estimated_tokens"] = own_tokens
+            file_stats[name]["boundary_context_tokens"] = context_tokens
+            file_stats[name]["estimated_tokens"] = own_tokens + context_tokens
+    else:
+        # Keep the previous translation behavior byte-for-byte compatible.
+        for name, metadata in continuation_metadata.items():
+            previous = str(metadata.get("previous_file") or "").strip()
+            if not previous or previous not in source_texts:
+                continue
+            tail = _preceding_context_tail(source_texts[previous])
+            if tail:
+                preceding_contexts[name] = {"source_file": previous, "text": tail}
     batches = recommended_batches(
         file_stats,
         task_max_files,
@@ -178,7 +390,7 @@ def plan_markdown_handoff(
     )
     oversized = [
         name for name, stats in file_stats.items()
-        if stats["estimated_tokens"] > batching["max_source_tokens"]
+        if stats.get("source_estimated_tokens", stats["estimated_tokens"]) > batching["max_source_tokens"]
         or stats["size_bytes"] > batching["single_file_max_bytes"]
         or stats["nonempty_line_count"] > batching["max_nonempty_lines"]
     ]
@@ -189,5 +401,9 @@ def plan_markdown_handoff(
         isolated_files=isolated_files, task_max_files=task_max_files,
         recommended_batches=batches, oversized_files=oversized,
         preceding_contexts=preceding_contexts,
+        succeeding_contexts=succeeding_contexts,
+        boundary_context_sha256=boundary_context_sha256,
+        boundary_context_mapping_sha256=boundary_context_mapping_sha256,
+        boundary_context_sources=boundary_context_sources,
         role_sources=role_sources,
     )

@@ -183,6 +183,75 @@ def normalize_decisions(
                 f"unsupported decision role for {address[0]}:{address[1]}:{address[2]}: {role}"
             )
             continue
+
+        # A reviewed segmentation replaces the block-level role.  Each
+        # excerpt must occur exactly once in the prepared OCR candidate and
+        # excerpts may not overlap; apply will bind the same excerpt inside
+        # the corresponding refined source span before removing any text.
+        raw_segments = item.get("segments")
+        if raw_segments is not None:
+            if item.get("override") is not True or role != "body":
+                errors.append(f"segmented OCR blocks require an explicit body override for {address[0]}:{address[2]}")
+                continue
+            if not isinstance(raw_segments, list) or not raw_segments:
+                errors.append(f"segmented decision needs a non-empty segments array for {address[0]}:{address[2]}")
+                continue
+            candidate_text = str(candidate.get("text") or "")
+            segment_spans: list[tuple[int, int]] = []
+            normalized_segments: list[tuple[int, dict[str, Any]]] = []
+            invalid_segment = False
+            for segment_index, segment in enumerate(raw_segments):
+                if not isinstance(segment, Mapping):
+                    errors.append(f"segment {segment_index} must be an object for {address[0]}:{address[2]}")
+                    invalid_segment = True
+                    continue
+                excerpt = str(segment.get("text") or "")
+                segment_role = str(segment.get("role") or "").strip()
+                if not excerpt or segment_role not in DECISION_ROLES - {"review_required"}:
+                    errors.append(f"segment {segment_index} needs exact text and a resolved role for {address[0]}:{address[2]}")
+                    invalid_segment = True
+                    continue
+                first = candidate_text.find(excerpt)
+                if first < 0 or candidate_text.find(excerpt, first + 1) >= 0:
+                    errors.append(f"segment {segment_index} text must occur exactly once in its OCR candidate for {address[0]}:{address[2]}")
+                    invalid_segment = True
+                    continue
+                span = (first, first + len(excerpt))
+                if any(span[0] < end and start < span[1] for start, end in segment_spans):
+                    errors.append(f"segmented decision has overlapping excerpts for {address[0]}:{address[2]}")
+                    invalid_segment = True
+                    continue
+                segment_spans.append(span)
+                segment_key = segment.get("key")
+                if segment_role in MOVED_ROLES and not str(segment_key or item.get("key") or "").strip():
+                    errors.append(f"moved segment {segment_index} is missing a key for {address[0]}:{address[2]}")
+                    invalid_segment = True
+                    continue
+                segment_copy = dict(segment)
+                if segment_role in MOVED_ROLES:
+                    normalized_key = str(segment_key or item.get("key") or "").strip()
+                    if not re.fullmatch(r"[A-Za-z0-9_-]+", normalized_key):
+                        canonical = canonical_numeric_label(normalized_key)
+                        if canonical is not None:
+                            normalized_key = canonical
+                    if not re.fullmatch(r"[A-Za-z0-9_-]+", normalized_key):
+                        errors.append(f"segment {segment_index} has an invalid footnote key for {address[0]}:{address[2]}")
+                        invalid_segment = True
+                        continue
+                    if segment_role in {"footnote_start", "footnote_definition"} and candidate.get("marker_label"):
+                        marker_identity = candidate.get("marker_identity")
+                        marker_kind = str(marker_identity.get("kind") or "") if isinstance(marker_identity, Mapping) else ""
+                        segment_label = str(segment.get("marker_label") or "")
+                        if marker_kind != "numeric" and segment_label != str(candidate.get("marker_label")):
+                            errors.append(f"segment {segment_index} must preserve the printed marker label for {address[0]}:{address[2]}")
+                            invalid_segment = True
+                            continue
+                    segment_copy["key"] = normalized_key
+                normalized_segments.append((first, segment_copy))
+            if invalid_segment:
+                continue
+            item = dict(item)
+            item["segments"] = [segment for _, segment in sorted(normalized_segments, key=lambda pair: pair[0])]
         key = item.get("key")
         if key is not None:
             key = str(key).strip()

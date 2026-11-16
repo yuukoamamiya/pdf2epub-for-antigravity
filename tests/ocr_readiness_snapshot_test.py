@@ -113,8 +113,37 @@ def _write_current_translation_readiness_fixture(output_dir: Path) -> dict:
     polished_path = polished_dir / "chapter_001.md"
     polished_path.write_text("Current polished source.", encoding="utf-8")
     normalized_path = output_dir / "footnote_normalized" / "chapter_001.md"
+    from pdf2epub.polish_footnote_semantics import build_semantic_review_contract
+    from pdf2epub.workflow_contracts import markdown_validation_schema_version
+
+    source_text = normalized_path.read_bytes().decode("utf-8")
+    target_text = polished_path.read_bytes().decode("utf-8")
+    contract = build_semantic_review_contract(normalized_path.name, source_text)
+    semantic_sidecar = output_dir / contract["sidecar"]
+    semantic_sidecar.parent.mkdir(parents=True)
+    semantic_record = {
+        "schema_version": 1, "file": normalized_path.name,
+        "source_sha256": contract["source_sha256"],
+        "target_sha256": hashlib.sha256(target_text.encode("utf-8")).hexdigest(),
+        "context_sha256": contract["context_sha256"],
+        "status": "clear", "reviewed_all": True,
+        "reviewed_note_ids": contract["expected_note_ids"],
+        "coverage": {
+            "body_reviewed": {"status": "reviewed"},
+            "definitions_reviewed": {"status": "reviewed"},
+            "cross_boundary_reviewed": {"status": "not_applicable", "reason": "Fixture has no split boundary."},
+        },
+        "issues": [],
+    }
+    semantic_sidecar.write_text(json.dumps(semantic_record), encoding="utf-8")
+    sidecar_hash = hashlib.sha256(semantic_sidecar.read_bytes()).hexdigest()
+    (output_dir / "polish_subagent_manifest.json").write_text(json.dumps({
+        "task": "polish", "source_language": "English", "target_language": "Chinese",
+        "source_sha256": {normalized_path.name: contract["source_sha256"]},
+        "footnote_semantics": {"schema_version": 1, "enabled": True, "files": {normalized_path.name: contract}},
+    }), encoding="utf-8")
     polished_receipt = {
-        "schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION,
+        "schema_version": markdown_validation_schema_version("polish"),
         "task": "polish",
         "scope": "full",
         "all_passed": True,
@@ -124,6 +153,13 @@ def _write_current_translation_readiness_fixture(output_dir: Path) -> dict:
         "target_sha256": {
             polished_path.name: hashlib.sha256(polished_path.read_bytes()).hexdigest()
         },
+        "polish_footnote_semantic_reviews": {normalized_path.name: {
+            "valid": True, "contract_valid": True, "status": "clear",
+            "sidecar_sha256": sidecar_hash, "source_sha256": contract["source_sha256"],
+            "target_sha256": semantic_record["target_sha256"],
+            "context_sha256": contract["context_sha256"], "errors": [], "issues": [],
+        }},
+        "polish_footnote_semantic_review_sha256": {normalized_path.name: sidecar_hash},
     }
     (output_dir / "polish_validation.json").write_text(
         json.dumps(polished_receipt), encoding="utf-8"

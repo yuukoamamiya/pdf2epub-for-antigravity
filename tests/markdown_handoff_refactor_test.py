@@ -155,8 +155,10 @@ def test_old_per_file_validation_ledger_is_not_reused_after_policy_version_bump(
         encoding="utf-8",
     )
     current_decision = decide_resume(request, plan, context)
-    assert current_decision.completed_files == ("unit.md",)
-    assert current_decision.pending_files == ()
+    # Polish receipts created before the per-file boundary projection existed
+    # cannot establish that their read-only neighbor context was current.
+    assert current_decision.completed_files == ()
+    assert current_decision.pending_files == ("unit.md",)
 
 
 def test_existing_translate_html_schema_three_ledger_remains_reusable(tmp_path):

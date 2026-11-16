@@ -16,7 +16,7 @@ from .endnote_review import _inside_inline_code_or_math
 from .endnote_scopes import markdown_fence_mask
 from .footnote_structure import FOOTNOTE_STRUCTURE_EXEMPT_TYPES
 
-AUDIT_VERSION = 1
+AUDIT_VERSION = 2
 AUDIT_FILENAME = "footnote_result_audit.json"
 
 _HTML_COMMENT_RE = re.compile(r"(?s)<!--.*?-->")
@@ -130,6 +130,37 @@ def audit_footnote_result(
     )
     record_by_file = {str(item.get("name")): item for item in records if item.get("name")}
     record_order = {str(item.get("name")): index for index, item in enumerate(records) if item.get("name")}
+    next_part_by_file: dict[str, Mapping[str, Any]] = {}
+    ordered_records = [item for item in records if item.get("name")]
+    for current, following in zip(ordered_records, ordered_records[1:]):
+        if (
+            str(current.get("chapter_id") or "") == str(following.get("chapter_id") or "")
+            and int(following.get("part_index") or 1) == int(current.get("part_index") or 1) + 1
+            and int(current.get("end_page") or 0) > 0
+            and int(following.get("start_page") or 0) == int(current.get("end_page") or 0) + 1
+        ):
+            next_part_by_file[str(current["name"])] = following
+    expected_by_target_key: dict[tuple[str, str], Mapping[str, Any]] = {}
+    physical_note_refs: list[tuple[int, int, str, str, str]] = []
+    for expected in expected_notes:
+        if not isinstance(expected, Mapping):
+            continue
+        target_file = str(expected.get("target_file") or "")
+        output_key = str(expected.get("output_key") or "")
+        if target_file and output_key:
+            expected_by_target_key[(target_file, output_key)] = expected
+        for ref in expected.get("candidate_refs", []) or []:
+            if not isinstance(ref, Mapping):
+                continue
+            try:
+                physical_note_refs.append((int(ref["page"]), int(ref["block"]), str(ref.get("source_file") or ""), target_file, output_key))
+            except (KeyError, TypeError, ValueError):
+                continue
+    last_physical_note_ref_by_page: dict[int, tuple[int, int, str, str, str]] = {}
+    for ref in physical_note_refs:
+        current_last = last_physical_note_ref_by_page.get(ref[0])
+        if current_last is None or ref > current_last:
+            last_physical_note_ref_by_page[ref[0]] = ref
     reviewed_body_keys: dict[str, set[str]] = defaultdict(set)
     for item in decisions:
         if isinstance(item, Mapping) and item.get("role") == "body" and item.get("key"):
@@ -442,6 +473,65 @@ def audit_footnote_result(
                         key=key,
                         origin="normalized_target",
                     ))
+                expected = expected_by_target_key.get((file, str(key)))
+                candidate_refs = expected.get("candidate_refs", []) if isinstance(expected, Mapping) else []
+                exact_ref = max(
+                    (
+                        (int(ref.get("page", 0)), int(ref.get("block", -1)), str(ref.get("source_file") or ""), str(expected.get("target_file") or ""), str(expected.get("output_key") or ""))
+                        for ref in candidate_refs if isinstance(ref, Mapping)
+                        and str(ref.get("page", "")).isdigit()
+                        and str(ref.get("block", "")).isdigit()
+                    ),
+                    default=None,
+                ) if isinstance(expected, Mapping) else None
+                source_record = next_part_source = None
+                if exact_ref is not None:
+                    physical_page = exact_ref[0]
+                    source_filename = exact_ref[2]
+                    if source_filename:
+                        source_record = record_by_file.get(source_filename)
+                        if source_record is not None and not (
+                            int(source_record.get("start_page") or 0)
+                            <= physical_page
+                            <= int(source_record.get("end_page") or 0)
+                        ):
+                            source_record = None
+                    else:
+                        source_record = next((
+                            row for row in records
+                            if int(row.get("start_page") or 0) <= physical_page <= int(row.get("end_page") or 0)
+                            and str(row.get("chapter_id") or "") == str(expected.get("chapter_id") or "")
+                        ), None)
+                    if source_record is not None:
+                        next_part_source = next_part_by_file.get(str(source_record.get("name") or ""))
+                open_punctuation = value.endswith((",", ":", ";"))
+                if (
+                    mode != "endnotes_only"
+                    and source_record is not None
+                    and str(source_record.get("type") or "") not in FOOTNOTE_STRUCTURE_EXEMPT_TYPES
+                    and open_punctuation
+                    and next_part_source is not None
+                    and exact_ref == last_physical_note_ref_by_page.get(exact_ref[0])
+                    and int(source_record.get("end_page") or 0) == exact_ref[0]
+                ):
+                    finding = _finding(
+                        "normalized_note_open_boundary_at_physical_page_break",
+                        file,
+                        0,
+                        f"[^{key}]: {body}",
+                        detail=(
+                            f"Normalized note {key} ends with open punctuation exactly at a mapped physical page/part boundary. "
+                            "This is only a visual-review cue; confirm the neighboring page images before changing ownership."
+                        ),
+                        key=str(key),
+                        origin="normalized_target",
+                    )
+                    finding["pages"] = [
+                        exact_ref[0],
+                        int(next_part_source.get("start_page") or 0),
+                    ]
+                    finding["evidence_target_sha256"] = _sha(target)
+                    record_finding(finding)
             covered = set(target_consumed)
             covered.update(target_defs)
             for index in target_defs:

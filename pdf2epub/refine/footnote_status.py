@@ -16,6 +16,7 @@ from .footnote_continuation_review import validate_continuation_review_decisions
 from .footnote_contracts import FOOTNOTE_PREPARE_SCHEMA_VERSION
 from .pdf_evidence import pdf_evidence_mode, require_current_consensus
 from .footnote_result_review import validate_result_audit_reviews
+from .footnote_result_audit import AUDIT_VERSION
 from .footnote_validation_evidence import validate_candidate_evidence
 
 
@@ -146,7 +147,7 @@ def footnote_normalization_status(
         "not_applicable" if str(report.get("footnote_mode") or "") == "disabled"
         else "validated"
     )
-    if audit_report.get("schema_version") != 1 or audit_report.get("valid") is not True or audit_report.get("status") != expected_audit_status:
+    if audit_report.get("schema_version") != AUDIT_VERSION or audit_report.get("valid") is not True or audit_report.get("status") != expected_audit_status:
         fail("result_audit_failed", "footnote_result_audit.json is missing, stale, or has unresolved findings")
     if report.get("result_audit_sha256") != sha256_file(output_dir / "footnote_result_audit.json"):
         fail("result_audit_stale", "footnote result audit changed after normalization")

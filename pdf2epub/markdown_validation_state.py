@@ -48,7 +48,7 @@ def resolve_review_state(
     ]
     for item in invalid:
         value = dict(item)
-        if value.get("kind") == "prepared_context" and value.get("action"):
+        if value.get("kind") in {"prepared_context", "polish_footnote_semantics"} and value.get("action"):
             retry.append(value)
         else:
             retry.append({**value, "kind": "invalid_output", "action": "retry_subagent"})

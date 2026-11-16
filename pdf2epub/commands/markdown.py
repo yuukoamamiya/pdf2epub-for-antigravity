@@ -363,6 +363,7 @@ def _prepare_pdf_markdown_task(args, task: str):
             ),
             config_path=context.config_path,
             controlled_files=controlled_files or None,
+            footnote_semantics_enabled=(task == "polish" and footnote_mode != "disabled"),
         )
         from pdf2epub.subagent_runtime import write_worker_handoffs
 
@@ -524,13 +525,28 @@ def _validate_translation_entities(output_dir: Path, config: dict) -> dict:
 
 
 def _validate_pdf_markdown_task(args, task: str):
+    check_only = bool(getattr(args, "check_only", False))
+    if check_only:
+        return _validate_pdf_markdown_task_impl(args, task)
+
+    context = load_book_context(args, f"{task}-validate", init_logging=True)
+    if context is None:
+        return 1
+    from pdf2epub.state_lock import state_lock
+
+    report_path = context.output_dir / f"{task}_validation.json"
+    with state_lock(report_path):
+        return _validate_pdf_markdown_task_impl(args, task, context=context)
+
+
+def _validate_pdf_markdown_task_impl(args, task: str, *, context=None):
     from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
     check_only = bool(getattr(args, "check_only", False))
     if check_only and not getattr(args, "file", None):
         logger.error("--check-only requires --file")
         return 1
-    context = load_book_context(args, f"{task}-validate", init_logging=not check_only)
+    context = context or load_book_context(args, f"{task}-validate", init_logging=not check_only)
     if context is None:
         return 1
     config = context.config
@@ -636,6 +652,7 @@ def _validate_pdf_markdown_task(args, task: str):
             getattr(args, "allow_review_warnings", False)
         ),
         dynamic_terminology_config=config if task == "translate" else None,
+        require_footnote_semantic_review=(task == "polish" and footnote_validation_enabled),
     )
     selected_scope = bool(getattr(args, "file", None))
     book_outputs_complete = not selected_scope and not report.get("missing")
@@ -959,6 +976,12 @@ def _persist_file_validation_checkpoint(output_dir: Path, report: dict, task: st
             "file_role": report.get("file_roles", {}).get(name),
             "file_role_source": report.get("file_role_sources", {}).get(name),
             "resume_context": report.get("resume_contexts", {}).get(name),
+            "polish_footnote_semantic_review": report.get("polish_footnote_semantic_reviews", {}).get(name),
+            "polish_footnote_semantic_review_sha256": (
+                report.get("polish_footnote_semantic_reviews", {}).get(name, {}).get("sidecar_sha256")
+                if isinstance(report.get("polish_footnote_semantic_reviews", {}).get(name), dict)
+                else None
+            ),
             **({"dynamic_unit_context_sha256": dynamic_context_hash} if dynamic_context_hash else {}),
             "validated_at": datetime.now(timezone.utc).isoformat(),
             "invalid": [

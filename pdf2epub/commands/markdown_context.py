@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Mapping
 
+from pdf2epub.refine.unit_mapping import load_pdf_continuation_files
+
 
 def _load_pdf_file_contexts(output_dir: Path) -> dict:
     """Map each generated unit to its human-readable TOC hierarchy."""
@@ -76,34 +78,7 @@ def _load_pdf_toc_titles(output_dir: Path) -> list[str]:
     return titles
 
 
-def _load_pdf_continuation_files(output_dir: Path, source_dir: Path) -> dict:
-    """Read continuation metadata from refinement rather than filenames."""
-    progress_path = Path(output_dir) / "ocr_markdown" / "tree_progress.json"
-    if not progress_path.is_file():
-        return {}
-    try:
-        progress = json.loads(progress_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        return {}
-
-    available = {path.name for path in Path(source_dir).glob("*.md")}
-    metadata: dict[str, dict[str, Any]] = {}
-    for unit in progress.get("units", []) or []:
-        if not isinstance(unit, dict):
-            continue
-        names = [str(name) for name in (unit.get("part_files") or []) if name]
-        if len(names) < 2:
-            continue
-        part_count = len(names)
-        for index, name in enumerate(names, 1):
-            if index > 1 and name in available:
-                metadata[name] = {
-                    "is_continuation": True,
-                    "part_number": index,
-                    "part_count": part_count,
-                    "previous_file": names[index - 2],
-                }
-    return metadata
+_load_pdf_continuation_files = load_pdf_continuation_files
 
 
 def _load_pdf_continuation_toc_titles(output_dir: Path) -> dict[str, list[str]]:

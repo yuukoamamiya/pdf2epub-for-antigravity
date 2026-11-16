@@ -380,20 +380,64 @@ def render_worker_prompt(
             source_file = str(context.get("source_file") or "").strip()
             if not text:
                 continue
+            clipped = bool(context.get("clipped"))
             sections.append(
-                f"### `{filename}` (from `{source_file}`)\n\n"
+                f"### `{filename}` (from `{source_file}`)"
+                f"{' — clipped context-only fragment' if clipped else ''}\n\n"
                 f"--- BEGIN PRECEDING CONTEXT ---\n{text}\n--- END PRECEDING CONTEXT ---"
             )
         if sections:
             preceding_notice = (
                 "\n\n## Preceding source context (read-only)\n\n"
-                "The following source tails come from the immediately preceding "
-                "part of the same logical unit. Use them only to keep pronouns, "
-                "terminology, and argument flow coherent. Do not translate, copy, "
+                "The following source tails come from the explicitly linked preceding "
+                "part. Use them only to keep pronouns, terminology, and argument flow coherent. Do not translate, copy, "
                 "or reproduce this context in the target file; it is not part of "
-                "the assigned output.\n\n"
+                "the assigned output. Clipped fragments are context-only and do not "
+                "establish paragraph boundaries or authorize merging blocks.\n\n"
                 + "\n\n".join(sections)
             )
+    succeeding_notice = ""
+    scoped_succeeding = scoped.get("succeeding_context", {})
+    if isinstance(scoped_succeeding, Mapping) and scoped_succeeding:
+        sections = []
+        for filename, context in scoped_succeeding.items():
+            if not isinstance(context, Mapping):
+                continue
+            text = str(context.get("text") or "").strip()
+            source_file = str(context.get("source_file") or "").strip()
+            if not text:
+                continue
+            clipped = bool(context.get("clipped"))
+            sections.append(
+                f"### `{filename}` (from `{source_file}`)"
+                f"{' — clipped context-only fragment' if clipped else ''}\n\n"
+                f"--- BEGIN SUCCEEDING CONTEXT ---\n{text}\n--- END SUCCEEDING CONTEXT ---"
+            )
+        if sections:
+            succeeding_notice = (
+                "\n\n## Succeeding source context (read-only)\n\n"
+                "The following source heads come from the explicitly linked succeeding "
+                "part. Use them only to keep references and terminology coherent. Do not "
+                "translate, copy, or reproduce this context in the target file; it is "
+                "not part of the assigned output. Clipped fragments are context-only "
+                "and do not establish paragraph boundaries or authorize merging blocks.\n\n"
+                + "\n\n".join(sections)
+            )
+    footnote_semantics_notice = ""
+    scoped_semantics = scoped.get("footnote_semantics", {})
+    semantic_files = scoped_semantics.get("files", {}) if isinstance(scoped_semantics, Mapping) else {}
+    if not isinstance(semantic_files, Mapping):
+        semantic_files = {}
+    if task == "polish" and semantic_files:
+        footnote_semantics_notice = (
+            "\n\n## Footnote semantic review sidecars (required)\n\n"
+            "For each assigned file listed below, write its required JSON review sidecar "
+            "to the exact `sidecar` path. Bind it to the provided source/context hashes, "
+            "review every listed note identity and required coverage category, and record "
+            "status, `reviewed_all`, `coverage`, and any issues. The sidecar is review "
+            "metadata, not translated output. Do not alter its expected hashes.\n\n"
+            + json.dumps(semantic_files, ensure_ascii=False, indent=2)
+        )
     scoped_prompt = _scope_worker_prompt(
         prompt,
         {} if chapter_mode else scoped.get("unit_context_files", {}),
@@ -458,6 +502,8 @@ def render_worker_prompt(
         + heading_anchor_instruction
         + continuation_notice
         + preceding_notice
+        + succeeding_notice
+        + footnote_semantics_notice
         + "\n"
         + task_boundary_instruction
         + worker_context_instruction

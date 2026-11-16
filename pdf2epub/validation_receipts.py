@@ -180,12 +180,51 @@ def _build_inputs_are_complete(snapshot: Mapping[str, Any], *, translated: bool)
     return (
         special_contracts_complete
         and dynamic_snapshot_complete
-        and
-        isinstance(toc_hash, str)
+        and isinstance(toc_hash, str)
         and fingerprint.get("toc_sha256") == toc_hash
         and isinstance(pages_hash, str)
         and fingerprint.get("pages_sha256") == pages_hash
     )
+
+
+def _has_resume_context_evidence(value: Any) -> bool:
+    if not isinstance(value, Mapping):
+        return False
+    return any(
+        isinstance(value.get(key), Mapping) and bool(value[key])
+        for key in (
+            "unit_context_sha256", "boundary_context_sha256", "toc_heading_contexts",
+            "special_unit_modes", "file_roles", "file_role_sources", "context_sha256",
+        )
+    )
+
+
+def _polish_resume_contexts_are_current(
+    output_dir: Path, source_files: list[str], recorded_contexts: Any
+) -> bool:
+    """Recheck prepared context evidence at every polish receipt read."""
+    from .markdown_validation_persistence import capture_pdf_resume_contexts
+
+    current, errors = capture_pdf_resume_contexts(output_dir, "polish", source_files)
+    if errors:
+        return False
+    if not isinstance(recorded_contexts, Mapping):
+        recorded_contexts = {}
+    for name in source_files:
+        actual = current.get(name)
+        recorded = recorded_contexts.get(name)
+        if not (_has_resume_context_evidence(actual) or _has_resume_context_evidence(recorded)):
+            continue
+        if not isinstance(actual, Mapping) or not isinstance(recorded, Mapping):
+            return False
+        try:
+            if json.dumps(actual, ensure_ascii=False, sort_keys=True, separators=(",", ":")) != json.dumps(
+                recorded, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            ):
+                return False
+        except (TypeError, ValueError):
+            return False
+    return True
 
 
 def validation_receipt_is_current(
@@ -196,6 +235,7 @@ def validation_receipt_is_current(
     task: str,
     output_dir: Path | None = None,
     config_path: Path | None = None,
+    config: Mapping[str, Any] | None = None,
     require_build_inputs: bool = False,
 ) -> bool:
     """Check whether a full receipt still covers both build input directories."""
@@ -222,6 +262,54 @@ def validation_receipt_is_current(
     )
     if not current:
         return current
+    if task == "polish":
+        semantic_output_dir = Path(output_dir) if output_dir is not None else Path(report_path).parent
+        try:
+            from .refine.footnote_options import resolve_footnote_options
+            from .utils.configuration import load_config
+
+            current_config = dict(config) if isinstance(config, Mapping) else (
+                load_config(str(config_path)) if config_path is not None else None
+            )
+            semantics_required = (
+                resolve_footnote_options(current_config).mode != "disabled"
+                if current_config is not None
+                else True
+            )
+            if semantics_required:
+                manifest = json.loads((semantic_output_dir / "polish_subagent_manifest.json").read_text(encoding="utf-8"))
+                semantic = manifest.get("footnote_semantics") if isinstance(manifest, Mapping) else None
+                reviews = report.get("polish_footnote_semantic_reviews")
+                if not isinstance(semantic, Mapping) or semantic.get("enabled") is not True or not isinstance(reviews, Mapping):
+                    return False
+                from .polish_footnote_semantics import validate_prepared_file_review
+
+                for source in sorted(Path(source_dir).glob("*.md")):
+                    name = source.name
+                    try:
+                        source_text = source.read_bytes().decode("utf-8")
+                        target_text = (Path(target_dir) / name).read_bytes().decode("utf-8")
+                    except (OSError, UnicodeError):
+                        return False
+                    current_review = validate_prepared_file_review(
+                        semantic_output_dir, name, source_text=source_text,
+                        target_text=target_text, required=True,
+                    )
+                    recorded_review = reviews.get(name)
+                    if (
+                        not isinstance(current_review, Mapping)
+                        or current_review.get("valid") is not True
+                        or not isinstance(recorded_review, Mapping)
+                        or recorded_review.get("sidecar_sha256") != current_review.get("sidecar_sha256")
+                    ):
+                        return False
+            source_files = sorted(path.name for path in Path(source_dir).glob("*.md"))
+            if not _polish_resume_contexts_are_current(
+                semantic_output_dir, source_files, report.get("resume_contexts")
+            ):
+                return False
+        except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError, KeyError):
+            return False
     if task == "translate" and output_dir is not None:
         try:
             configured_dynamic = False

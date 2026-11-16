@@ -207,6 +207,25 @@ def test_current_apply_receipt_rejects_changed_markdown_inventory(tmp_path, chan
     assert any("result_audit" in item["code"] or "source" in item["code"] or "target" in item["code"] for item in status["failures"])
 
 
+def test_current_apply_receipt_rejects_older_result_audit_schema(tmp_path):
+    _validate_ready_case(tmp_path)
+    applied = apply_footnote_normalization(tmp_path)
+    assert applied["valid"] is True, applied.get("errors")
+
+    audit_path = tmp_path / "footnote_result_audit.json"
+    audit = json.loads(audit_path.read_text(encoding="utf-8"))
+    audit["schema_version"] = 1
+    audit_path.write_text(json.dumps(audit), encoding="utf-8")
+    checkpoint_path = tmp_path / "footnote_normalization.json"
+    checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    checkpoint["result_audit_sha256"] = sha256_file(audit_path)
+    checkpoint_path.write_text(json.dumps(checkpoint), encoding="utf-8")
+
+    status = footnote_normalization_status(tmp_path)
+    assert status["current"] is False
+    assert any(item["code"] == "result_audit_failed" for item in status["failures"])
+
+
 @pytest.mark.parametrize("changed_artifact", ["source", "candidate"])
 def test_mid_apply_evidence_change_cannot_commit_success_receipt(
     tmp_path, monkeypatch, changed_artifact

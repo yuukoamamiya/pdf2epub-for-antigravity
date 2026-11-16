@@ -606,12 +606,57 @@ def test_prepare_apply_and_build_gate_accepts_exact_reviewed_inline_continuation
         encoding="utf-8",
     )
     def write_receipt(task: str, source_dir: Path, target_dir: Path) -> None:
-        (tmp_path / f"{task}_validation.json").write_text(json.dumps({
+        report = {
             "schema_version": markdown_validation_schema_version(task),
             "task": task, "scope": "full", "all_passed": True,
             "source_sha256": markdown_directory_sha256(source_dir),
             "target_sha256": markdown_directory_sha256(target_dir),
-        }), encoding="utf-8")
+        }
+        if task == "polish":
+            from pdf2epub.polish_footnote_semantics import build_semantic_review_contract
+
+            contracts, reviews = {}, {}
+            for source in sorted(source_dir.glob("*.md")):
+                name = source.name
+                source_text = source.read_bytes().decode("utf-8")
+                target_text = (target_dir / name).read_bytes().decode("utf-8")
+                contract = build_semantic_review_contract(name, source_text)
+                contracts[name] = contract
+                sidecar = tmp_path / contract["sidecar"]
+                sidecar.parent.mkdir(parents=True, exist_ok=True)
+                payload = {
+                    "schema_version": 1, "file": name,
+                    "source_sha256": contract["source_sha256"],
+                    "target_sha256": hashlib.sha256(target_text.encode("utf-8")).hexdigest(),
+                    "context_sha256": contract["context_sha256"],
+                    "status": "clear", "reviewed_all": True,
+                    "reviewed_note_ids": contract["expected_note_ids"],
+                    "coverage": {
+                        "body_reviewed": {"status": "reviewed"},
+                        "definitions_reviewed": {"status": "reviewed"},
+                        "cross_boundary_reviewed": {"status": "not_applicable", "reason": "Fixture has no cross-file boundary."},
+                    },
+                    "issues": [],
+                }
+                sidecar.write_text(json.dumps(payload), encoding="utf-8")
+                sidecar_hash = hashlib.sha256(sidecar.read_bytes()).hexdigest()
+                reviews[name] = {
+                    "valid": True, "contract_valid": True, "status": "clear",
+                    "sidecar": contract["sidecar"], "sidecar_sha256": sidecar_hash,
+                    "source_sha256": contract["source_sha256"],
+                    "target_sha256": payload["target_sha256"],
+                    "context_sha256": contract["context_sha256"], "errors": [], "issues": [],
+                }
+            (tmp_path / "polish_subagent_manifest.json").write_text(json.dumps({
+                "task": "polish", "source_language": "English", "target_language": "Chinese",
+                "source_sha256": report["source_sha256"],
+                "footnote_semantics": {"schema_version": 1, "enabled": True, "files": contracts},
+            }), encoding="utf-8")
+            report["polish_footnote_semantic_reviews"] = reviews
+            report["polish_footnote_semantic_review_sha256"] = {
+                name: item["sidecar_sha256"] for name, item in reviews.items()
+            }
+        (tmp_path / f"{task}_validation.json").write_text(json.dumps(report), encoding="utf-8")
     write_receipt("polish", tmp_path / "footnote_normalized", polished_dir)
     write_receipt("translate", polished_dir, translated_dir)
     translated_result = validate_centralized_endnotes_for_build(

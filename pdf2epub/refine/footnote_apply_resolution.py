@@ -133,8 +133,26 @@ def _candidate_decisions(
                 },
             )
 
+    expanded: list[dict[str, Any]] = []
+    for decision in decisions_by_address.values():
+        segments = decision.get("segments")
+        if isinstance(segments, list):
+            for segment in segments:
+                if not isinstance(segment, Mapping):
+                    continue  # normalize_decisions rejects malformed segments
+                expanded.append({
+                    **{key: value for key, value in decision.items() if key != "segments"},
+                    "role": str(segment.get("role") or ""),
+                    "key": segment.get("key", decision.get("key")),
+                    "marker_label": segment.get("marker_label", decision.get("marker_label")),
+                    "segment_text": str(segment.get("text") or ""),
+                    "marker_context": segment.get("marker_context", decision.get("marker_context")),
+                })
+        else:
+            expanded.append(dict(decision))
+
     return sorted(
-        decisions_by_address.values(),
+        expanded,
         key=lambda item: (int(item.get("page", 0)), int(item.get("block", 0))),
     )
 
@@ -153,6 +171,7 @@ def _locate_block(
     *,
     claimed_spans: Optional[set[tuple[str, int, int]]] = None,
     pages_dir: Optional[Path] = None,
+    allow_segment_container: bool = False,
 ) -> tuple[dict[str, Any], tuple[int, int]]:
     expected = _records_for_page(records, page)
     if not expected:
@@ -174,7 +193,12 @@ def _locate_block(
                 ):
                     continue
                 identity = (record["name"], span[0], span[1])
-                if claimed_spans and identity in claimed_spans:
+                if claimed_spans and any(
+                    rec_name == record["name"]
+                    and (s < span[1] and span[0] < e)
+                    and not (allow_segment_container and span[0] <= s and e <= span[1])
+                    for rec_name, s, e in claimed_spans
+                ):
                     continue
                 if identity not in seen:
                     seen.add(identity)
@@ -321,14 +345,28 @@ def resolve_page_decisions(
                 block_texts = _block_text_variants(output_dir, page, block)
                 if not block_texts:
                     raise ValueError("OCR block is empty")
-                record, span = _locate_block(
+                record, block_span = _locate_block(
                     source_texts,
                     records,
                     page,
                     block_texts,
                     claimed_spans=claimed_primary_spans,
                     pages_dir=output_dir / "pages",
+                    allow_segment_container=bool(decision.get("segment_text")),
                 )
+                segment_text = str(decision.get("segment_text") or "")
+                if segment_text:
+                    segment_spans = _find_exact_signature_spans(
+                        source_texts[record["name"]][block_span[0]:block_span[1]],
+                        segment_text,
+                    )
+                    if len(segment_spans) != 1:
+                        raise ValueError("reviewed segment does not uniquely match its located OCR block in refined source")
+                    relative_start, relative_end = segment_spans[0]
+                    span = (block_span[0] + relative_start, block_span[0] + relative_end)
+                else:
+                    span = block_span
+                    claimed_primary_spans.add((record["name"], span[0], span[1]))
                 claimed_primary_spans.add((record["name"], span[0], span[1]))
             except ValueError as exc:
                 errors.append(f"{page}:{block_index}: {exc}")

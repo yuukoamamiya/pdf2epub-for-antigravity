@@ -85,6 +85,7 @@ def unit_context_is_current(
     resume: bool,
     file_roles: Mapping[str, str] | None = None,
     file_role_sources: Mapping[str, Mapping[str, Any]] | None = None,
+    boundary_context_sha256: Mapping[str, str] | None = None,
 ) -> bool:
     """Decide whether the context projection for one source unit is unchanged."""
     previous_special_modes = previous_manifest.get("special_unit_modes", {})
@@ -118,6 +119,14 @@ def unit_context_is_current(
         if previous_unit_hashes.get(name) != unit_context_sha256[name]:
             return False
     elif name in previous_unit_hashes:
+        return False
+    previous_boundary = previous_manifest.get("boundary_context_sha256", {})
+    if not isinstance(previous_boundary, Mapping):
+        previous_boundary = {}
+    if name in (boundary_context_sha256 or {}):
+        if previous_boundary.get(name) != (boundary_context_sha256 or {}).get(name):
+            return False
+    elif name in previous_boundary:
         return False
     previous_heading_contexts = previous_manifest.get("toc_heading_contexts", {})
     if not isinstance(previous_heading_contexts, Mapping):
@@ -334,6 +343,7 @@ def decide_resume(
             heading_contexts=context.heading_contexts,
             file_roles=context.file_roles,
             file_role_sources=context.file_role_sources,
+            boundary_context_sha256=plan.boundary_context_sha256,
             resume=request.resume,
         )
         html_fingerprint = None
@@ -353,6 +363,7 @@ def decide_resume(
                         heading_contexts=context.heading_contexts,
                         file_roles=context.file_roles,
                         file_role_sources=context.file_role_sources,
+                        boundary_context_sha256=plan.boundary_context_sha256,
                         resume=True,
                     )
                 )
@@ -390,6 +401,30 @@ def decide_resume(
         checkpoint_current = request.resume and context_current and is_reusable_checkpoint(
             target, name, source_hash, validated_files or (), validation_hashes, target_hashes
         )
+        if checkpoint_current and task == "polish" and request.footnote_semantics_enabled:
+            try:
+                from .polish_footnote_semantics import validate_prepared_file_review
+
+                source_text = source.read_bytes().decode("utf-8")
+                target_text = target.read_bytes().decode("utf-8")
+                semantic_review = validate_prepared_file_review(
+                    request.output_dir, name, source_text=source_text,
+                    target_text=target_text, required=True,
+                )
+                records = validation.get("files", {})
+                record = records.get(name, {}) if isinstance(records, Mapping) else {}
+                review_hashes = validation.get("polish_footnote_semantic_review_sha256", {})
+                recorded_review = (
+                    review_hashes.get(name) if isinstance(review_hashes, Mapping) else None
+                ) or (record.get("polish_footnote_semantic_review_sha256") if isinstance(record, Mapping) else None)
+                checkpoint_current = bool(
+                    isinstance(semantic_review, Mapping)
+                    and semantic_review.get("valid") is True
+                    and recorded_review
+                    and recorded_review == semantic_review.get("sidecar_sha256")
+                )
+            except (OSError, UnicodeError, ValueError):
+                checkpoint_current = False
         if checkpoint_current:
             receipt_roles = validation.get("file_roles", {})
             receipt_sources = validation.get("file_role_sources", {})

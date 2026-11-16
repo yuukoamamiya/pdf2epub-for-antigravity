@@ -482,7 +482,8 @@ def validate_centralized_endnotes_for_build(
                             hashes_match = False
             else:
                 hashes_match = hashes_match and validation_receipt_is_current(
-                    output_dir / "polish_validation.json", normalized_dir, polished_dir, task="polish"
+                    output_dir / "polish_validation.json", normalized_dir, polished_dir,
+                    task="polish", output_dir=output_dir, config=config,
                 )
                 expected_dir = polished_dir
                 if translated:

@@ -53,6 +53,23 @@ def validate_result_audit_reviews(
         if str(review.get("evidence_sha256") or "") != str(task.get("evidence_sha256") or ""):
             errors.append(f"result audit review {task_id} is not bound to the exact source block")
             continue
+        if task.get("evidence_origin") == "source_markdown":
+            name = str(task.get("file") or "")
+            source_path = root / "ocr_markdown" / name
+            if not name or Path(name).name != name or not source_path.is_file() or sha256_file(source_path) != task.get("evidence_file_sha256"):
+                errors.append(f"result audit review {task_id} source Markdown changed")
+                continue
+            if task.get("code") == "polish_semantic_issue":
+                excerpt = str(task.get("evidence_excerpt") or "")
+                try:
+                    source_text = source_path.read_text(encoding="utf-8")
+                except (OSError, UnicodeError):
+                    source_text = ""
+                polish_issue = task.get("polish_issue") if isinstance(task.get("polish_issue"), Mapping) else {}
+                raw_excerpt_hash = polish_issue.get("raw_source_excerpt_sha256")
+                if not excerpt or source_text.count(excerpt) != 1 or _sha(excerpt) != raw_excerpt_hash:
+                    errors.append(f"result audit review {task_id} no longer identifies its exact semantic source excerpt")
+                    continue
         source_address = task.get("source_address")
         if isinstance(source_address, Mapping):
             sidecar_relative = str(source_address.get("sidecar") or "")
@@ -192,7 +209,15 @@ def validate_result_audit_reviews(
                 errors.append(f"confirmed footnote {task_id} candidate_ref is outside its exact scoped audit task")
                 continue
             approved = decision_addresses.get(address)
-            if approved is None or str(approved.get("role") or "") not in {"footnote_start", "footnote_definition", "footnote_continuation"}:
+            approved_footnote = approved is not None and str(approved.get("role") or "") in {"footnote_start", "footnote_definition", "footnote_continuation"}
+            if approved is not None and approved.get("override") is True:
+                segments = approved.get("segments")
+                approved_footnote = isinstance(segments, list) and any(
+                    isinstance(segment, Mapping)
+                    and str(segment.get("role") or "") in {"footnote_start", "footnote_definition", "footnote_continuation"}
+                    for segment in segments
+                )
+            if not approved_footnote:
                 errors.append(f"confirmed footnote {task_id} needs a matching validated page/block decision in decisions")
                 continue
             record["candidate_ref"] = {"page": address[0], "source": address[1], "block": address[2]}

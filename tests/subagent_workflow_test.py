@@ -18,7 +18,7 @@ from pdf2epub.refine.unit_splitter import split_markdown_unit
 from pdf2epub.entity_extractor import validate_entities
 from pdf2epub.entity_context import prepare_entity_subagent_task
 from pdf2epub.markdown_handoff import prepare_markdown_subagent
-from pdf2epub.workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION
+from pdf2epub.workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION, markdown_validation_schema_version
 from pdf2epub.markdown_validation import (
     detect_bilingual_output,
     fix_reference_heading_mismatch,
@@ -2418,8 +2418,9 @@ def test_partial_polish_validation_persists_task_scoped_receipt(tmp_path: Path):
         (tmp_path / "polish_file_validation.json").read_text(encoding="utf-8")
     )
     assert ledger["task"] == "polish"
-    assert ledger["schema_version"] == MARKDOWN_VALIDATION_SCHEMA_VERSION
-    assert ledger["files"]["one.md"]["schema_version"] == MARKDOWN_VALIDATION_SCHEMA_VERSION
+    from pdf2epub.workflow_contracts import markdown_validation_schema_version
+    assert ledger["schema_version"] == markdown_validation_schema_version("polish")
+    assert ledger["files"]["one.md"]["schema_version"] == markdown_validation_schema_version("polish")
     assert ledger["files"]["one.md"]["valid"] is True
 
 
@@ -2488,7 +2489,7 @@ def test_extract_entities_uses_configured_language_and_selected_source_stage(
     monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        "title: Book\ntranslation:\n  source_language: French\n"
+        "title: Book\nfootnotes:\n  mode: disabled\ntranslation:\n  source_language: French\n"
         "  target_language: Chinese\n  source_stage: polished\n",
         encoding="utf-8",
     )
@@ -2501,7 +2502,7 @@ def test_extract_entities_uses_configured_language_and_selected_source_stage(
     (tmp_path / "output" / "Book" / "polish_validation.json").write_text(
         json.dumps(
             {
-                "schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION,
+                "schema_version": markdown_validation_schema_version("polish"),
                 "task": "polish",
                 "scope": "full",
                 "all_passed": True,
@@ -2623,7 +2624,7 @@ def test_translate_skip_entities_is_recorded_in_prompt_and_manifest(
 ):
     monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("title: Book\n", encoding="utf-8")
+    config_path.write_text("title: Book\nfootnotes:\n  mode: disabled\n", encoding="utf-8")
     output_dir = tmp_path / "output" / "Book"
     source_dir = output_dir / "ocr_markdown"
     source_dir.mkdir(parents=True)
@@ -2634,7 +2635,7 @@ def test_translate_skip_entities_is_recorded_in_prompt_and_manifest(
     (output_dir / "polish_validation.json").write_text(
         json.dumps(
             {
-                "schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION,
+                "schema_version": markdown_validation_schema_version("polish"),
                 "task": "polish",
                 "scope": "full",
                 "all_passed": True,

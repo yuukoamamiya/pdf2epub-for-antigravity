@@ -23,7 +23,7 @@ from pdf2epub.build_epub import (
 )
 from pdf2epub.epub.builder import EpubBuilder
 from pdf2epub.epub.converter import ContentConverter
-from pdf2epub.workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION
+from pdf2epub.workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION, markdown_validation_schema_version
 
 
 def _set_navigation_binding(entries, mode):
@@ -692,7 +692,7 @@ def test_pdf_source_stage_can_be_auto_selected_or_explicit(tmp_path: Path) -> No
     (tmp_path / "polish_validation.json").write_text(
         json.dumps(
                 {
-                    "schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION,
+                    "schema_version": markdown_validation_schema_version("polish"),
                     "task": "polish",
                     "scope": "full",
                     "all_passed": True,
@@ -707,9 +707,10 @@ def test_pdf_source_stage_can_be_auto_selected_or_explicit(tmp_path: Path) -> No
         encoding="utf-8",
     )
 
-    assert _resolve_pdf_markdown_source(tmp_path, {}) == (polished_dir, "polished")
+    disabled_footnote_config = {"footnotes": {"mode": "disabled"}}
+    assert _resolve_pdf_markdown_source(tmp_path, disabled_footnote_config) == (polished_dir, "polished")
     assert _resolve_pdf_markdown_source(
-        tmp_path, {"translation": {"source_stage": "ocr"}}
+        tmp_path, {"translation": {"source_stage": "ocr"}, "footnotes": {"mode": "disabled"}}
     ) == (ocr_dir, "ocr")
 
 

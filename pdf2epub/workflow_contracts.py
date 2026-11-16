@@ -20,12 +20,15 @@ from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 # heading preservation to the polish validation contract. Unrelated OCR and HTML
 # validation contracts remain at version 3.
 MARKDOWN_VALIDATION_SCHEMA_VERSION = 5
+POLISH_VALIDATION_SCHEMA_VERSION = 6
 LEGACY_MARKDOWN_VALIDATION_SCHEMA_VERSION = 3
 
 
 def markdown_validation_schema_version(task: str) -> int:
     """Return the validation receipt version for a task's actual contract."""
-    if str(task).strip().lower() in {"polish", "translate"}:
+    if str(task).strip().lower() == "polish":
+        return POLISH_VALIDATION_SCHEMA_VERSION
+    if str(task).strip().lower() == "translate":
         return MARKDOWN_VALIDATION_SCHEMA_VERSION
     return LEGACY_MARKDOWN_VALIDATION_SCHEMA_VERSION
 

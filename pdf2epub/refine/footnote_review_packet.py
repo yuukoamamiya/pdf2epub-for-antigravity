@@ -50,6 +50,22 @@ def build_review_packet(report: Mapping[str, Any]) -> dict[str, Any]:
                 if isinstance(candidate, Mapping):
                     refs.append(f"{int(candidate.get('page', 0))}:{candidate.get('source', 'primary')}:{int(candidate.get('block', -1))}")
         windows.append({"pages": window_pages, "candidate_refs": sorted(set(refs)), "reason": window.get("reason")})
+    continuation_chains = []
+    for chain in report.get("continuation_chains", []) or []:
+        if not isinstance(chain, Mapping):
+            continue
+        chain_pages = [int(page) for page in chain.get("pages", [])]
+        evidence_pages.update(chain_pages)
+        refs = [
+            f"{int(ref.get('page', 0))}:{ref.get('source', 'primary')}:{int(ref.get('block', -1))}"
+            for ref in chain.get("candidate_refs", []) or [] if isinstance(ref, Mapping)
+        ]
+        continuation_chains.append({
+            "pages": chain_pages,
+            "key": str(chain.get("key") or ""),
+            "candidate_refs": refs,
+            "reason": chain.get("reason"),
+        })
     gaps = [dict(item) for item in report.get("continuation_reviews", []) or [] if isinstance(item, Mapping)]
     for task in gaps:
         evidence_pages.update(int(page) for page in task.get("pages", []) or [])
@@ -118,6 +134,7 @@ def build_review_packet(report: Mapping[str, Any]) -> dict[str, Any]:
         "regions": regions,
         "candidates": address_map,
         "cross_page_windows": windows,
+        "continuation_chains": continuation_chains,
         "continuation_reviews": gaps,
         "bottom_detection": report.get("bottom_detection", {}),
     }
@@ -171,6 +188,10 @@ def validate_review_packet(output_dir, manifest: Mapping[str, Any]) -> dict[str,
         for ref in window.get("candidate_refs", []) if isinstance(window, Mapping) else []:
             if ref not in candidates:
                 raise ValueError(f"footnote review packet has dangling candidate reference {ref}")
+    for chain in packet.get("continuation_chains", []) or []:
+        for ref in chain.get("candidate_refs", []) if isinstance(chain, Mapping) else []:
+            if ref not in candidates:
+                raise ValueError(f"footnote review packet has dangling continuation reference {ref}")
     for region in packet.get("regions", []) or []:
         for ref in region.get("candidate_refs", []) if isinstance(region, Mapping) else []:
             if ref not in candidates:

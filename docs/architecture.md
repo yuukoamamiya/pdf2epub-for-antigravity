@@ -367,22 +367,22 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
 这些模块是格式无关或 Markdown/TOC 专用的本地合同实现：
 
 - `markdown_handoff.py`：协调规划、上下文、恢复、manifest 和 prompt 服务，写入本次 handoff 产物。
-- `markdown_handoff_planning.py`：以 `MarkdownHandoffPlan` 返回已校验的源文件 inventory、哈希、统计、有效角色及来源、续文信息、只读 `preceding_contexts` 和默认批次计划；`preceding_contexts` 取前一分片的源文尾部并剔除脚注定义，只用于译风承接。显式角色优先于共享推断，推断角色也参与普通/特殊 worker 隔离；不读写 manifest/prompt，也不导入 handoff 编排器。
+- `markdown_handoff_planning.py`：以 `MarkdownHandoffPlan` 返回已校验的源文件 inventory、哈希、统计、有效角色及来源、续文信息、只读前后边界上下文和默认批次计划。polish 只按显式 part mapping 选择邻片，前后各最多 256 token、合计最多 512 token，并受单文件剩余 token 预算约束。优先投影完整正文块，超预算时回退到完整句或完整词片段并标记为 context-only。裁剪片段不能决定段落边界或授权合并块。脚注定义及其续行会排除。上下文哈希绑定映射、邻片身份、源哈希和投影文本。translation 保持原 preceding context 行为。显式角色优先于共享推断，推断角色也参与普通/特殊 worker 隔离。不读写 manifest/prompt，也不导入 handoff 编排器。
 - `markdown_handoff_context.py`：将已声明的上下文文件投影为 handoff 可用路径和 hash；不读取未声明上下文。
-- `markdown_handoff_resume.py`：读取旧 manifest 和校验检查点，判断单元上下文、有效角色与角色来源是否仍可复用，并生成恢复决定。PDF `translate`/`polish` validation receipt 按文件记录验证时的 `unit_context_sha256`、TOC heading context、语言及角色来源；准备 manifest 更新不会刷新该 receipt。已有上下文而旧 receipt 缺少快照时，先 prepare、正式 validate，再 resume；无上下文的旧普通 receipt 仍可兼容复用。
+- `markdown_handoff_resume.py`：读取旧 manifest 和校验检查点，判断单元上下文、有效角色与角色来源是否仍可复用，并生成恢复决定。PDF `translate`/`polish` validation receipt 按文件记录验证时的 `unit_context_sha256`、TOC heading context、语言及角色来源；polish 还绑定 `boundary_context_sha256`。准备 manifest 更新不会刷新该 receipt。已有上下文而旧 receipt 缺少快照时，先 prepare、正式 validate，再 resume；旧 polish receipt 缺少边界投影哈希时重新进入 pending。
 - `markdown_handoff_manifest.py`：组装 manifest 数据，并检查可选视觉复核、次 OCR、review 输出目录相对 output 的边界；不负责协调器提供的 source/target/scratch 字符串，也不渲染 prompt。
 - `markdown_handoff_prompt.py`：从明确的 prompt identity、batching 和路径数据渲染提示词，不读取工作区文件。
 - `markdown_subagent_validation.py`：负责校验命令的协调，按顺序调用上下文加载、内容审计、review 状态决策和持久化服务；不承载规则实现。
 - `markdown_validation_context.py`：只读加载 manifest review/protected-workspace 快照，解析选中文件范围，并构造路径、审计选项和上下文类型。
 - `markdown_validation_audit.py`：`load_file_input()` 负责读取一次源/目标字节快照；`audit_markdown_file()` 接收 typed 字节输入和审计选项，不读写路径，执行 TOC 标签、结构标记、目标语言、特殊角色、脚注、拒答及 polish 内容/版面审计。普通上标文字、星号和匕首号必须保留；显式 Markdown 脚注引用和生成的 HTML 脚注引用不重复计入普通上标审计；批次入口仅聚合逐文件结果。
 - `markdown_validation_state.py`：纯函数决定首次 review 的 Subagent 重试和同一 review 信号持续后的人工升级。
-- `markdown_validation_persistence.py`：formal 校验的唯一副作用层，清理 assigned 文件的遗留临时文件，应用规范化计划、维护 validated staging、合并局部 ledger、写报告并隔离无效目标。`prepared_context` 证据过期时清除对应 validated 副本并要求刷新上下文后重新校验，但保留 target 原文；若同一文件还有内容错误，仍按普通无效输出隔离。Full PDF validation supersede 旧 partial ledger 前，将原始 bytes 按内容哈希归档到 `scratch/<task>/superseded_checkpoints/`，并在 full report 记录归档路径与哈希；check-only 不创建归档。
+- `markdown_validation_persistence.py`：formal 校验的唯一副作用层，清理 assigned 文件的遗留临时文件，应用规范化计划、维护 validated staging、合并局部 ledger、写报告并隔离无效目标。polish 还会核对当前 tree_progress 的相关 part 邻接映射和邻片源哈希，映射或源内容变化会作为 `prepared_context` 失效。过期时清除对应 validated 副本并要求刷新上下文后重新校验，但保留 target 原文；若同一文件还有内容错误，仍按普通无效输出隔离。Full PDF validation supersede 旧 partial ledger 前，将原始 bytes 按内容哈希归档到 `scratch/<task>/superseded_checkpoints/`，并在 full report 记录归档路径与哈希；check-only 不创建归档。
 - `markdown_validation_checkpoint.py`：清理 atomic-write 遗留临时文件、隔离无效输出供恢复诊断；不执行内容审计，也不导入 validator。
 - 依赖方向保持单向：handoff/validation 协调入口调用各自的 context、planning/resume、audit/state、manifest/prompt 或 persistence 服务；纯审计和状态服务不导入协调器，checkpoint 工具也不反向导入 validator。Markdown 校验报告和 manifest 保持既有字段结构；校验规则改变时仍须提升版本以使旧 checkpoint 失效。
 - `markdown_validation.py`：提供纯函数式的 Markdown 风险检测、目标语言审计、规范化辅助
   函数和 polish 内容保真检查；它会阻断结构性空父标题导致的重复正文，并对 `notes`
   单元中的标准尾注章节标题提供窄范围页眉误报豁免。PDF polish/translate 的 Markdown validation
-  schema 5 使有序、规范化标题保真规则变更前的全量 receipt 和逐文件 ledger 失效；OCR correction 与
+  translate schema 5 和 polish schema 6 分别维护 PDF validation receipt。polish schema 6 还要求当前脚注语义 sidecar。有序标题保真规则变更前的全量 receipt 和逐文件 ledger 失效。OCR correction 与
   HTML validation 仍使用 schema 3。必须用当前校验器
   重新校验后才能作为 checkpoint。polish 按标题层级及共享 TOC Markdown 语义规范化后的文本序列
   保留每次出现，因此删除重复标题和交换同级标题都会阻断；translate 仍验证译文结构，不比较源语言标题文字。已登记的 TOC Part/Chapter
@@ -394,6 +394,7 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
 - `special_role_audit.py`：为 PDF/EPUB 共用的 bibliography/index 单元审计数字与条目身份标记；不依赖 Markdown validator 或 HTML builder。
 - `footnote_normalization.py`：提供 polish 阶段的尾注引用/定义迁移校验；它只校验
   Subagent 输出，不负责识别页面脚注或修改源稿。
+- `polish_footnote_semantics.py`：构造和校验 polish 脚注语义 sidecar。schema 1 sidecar 将每个 assigned 文件的检查绑定到源、目标及 context 哈希，并记录正文扫描、脚注定义和跨分片关联的覆盖情况与精确 issue 摘录。该模块不改变脚注归属，也不修改 Markdown。
 - `commands/markdown_context.py`：只读加载 TOC、续文和章节分组上下文；准备、校验和
   worker 装箱共享同一份 PDF 单元投影，`commands.markdown` 不再承载这组状态读取细节。
 - `document_roles.py`：集中维护特殊翻译角色、参考文献/前置内容识别、目标语言密度豁免和
@@ -779,7 +780,7 @@ polish 或 translate Subagent。原始 OCR 单元不覆盖。
 存在多个定义时仍按顺序逐次配对，额外引用不猜测目标。
 当前 `footnote_candidates.json`、`footnote_decisions.json` 和
 `footnote_decision_validation.json` 使用 prepare/decision schema 4；尾注边界歧义及其决定独立使用
-schema 2。该输出合同已更新到 `footnote_normalization.json` schema 9，并绑定 schema 1 的结果审计；旧 schema 1–8 checkpoint 会失效，
+schema 2。该输出合同已更新到 `footnote_normalization.json` schema 9，并绑定 schema 2 的结果审计；旧 schema 1–8 checkpoint 会失效，
 须重新运行 `footnote-prepare`，按新 manifest 的 pending 状态复核并写决定，再运行
 `footnote-validate → footnote-apply`。无需重跑 OCR。本次文档/代码维护不自动处理书稿产物；
 恢复命令会更新准备合同，并由 apply 重建 `footnote_normalized/` 与成功 checkpoint，用户需按需
@@ -1022,13 +1023,13 @@ PDF 结构阶段采用“共享证据、分离语义”的边界：
 | `footnote_result_review.py` | 读取并验证视觉结果审查的精确地址、决定、源/目标/sidecar 哈希与页图 freshness | 生成审计 findings、修改源/归一化稿、决定脚注语义 |
 
 脚注 apply 按“前置门禁/证据快照 → block 定位和 unit/lane 归属 → 引用与定义绑定 → 编辑冲突校验 → 内存纯转换 → 原子写入派生稿 → 结果审计 → success checkpoint”的顺序运行。计划和所有绑定必须完整通过后才允许写入；源 unit 的哈希在读取原始字节时快照，写入前重新扫描 `ocr_markdown/*.md` 并与该快照逐项比较，同时先检查 `footnote_normalized/` 是否有不属于当前源 inventory 的 stale Markdown。
-apply 写入 `footnote_normalized/` 后运行 `footnote_result_audit.json`（schema 1），并把其文件哈希/版本绑定到 `footnote_normalization.json`（schema 9）。该报告也绑定源稿、归一化稿、候选报告和决定校验的当前哈希。只有审计通过，apply 才写有效 normalization checkpoint；未解决 findings 不会通过 `footnote_normalization_status()`，因此 polish/readiness/build 门禁也会阻断。即使派生 Markdown 已写出，它仍是未验证结果，不能据文件存在推断阶段完成。
+apply 写入 `footnote_normalized/` 后运行 `footnote_result_audit.json`（schema 2），并把其文件哈希/版本绑定到 `footnote_normalization.json`（schema 9）。该报告也绑定源稿、归一化稿、候选报告和决定校验的当前哈希。只有审计通过，apply 才写有效 normalization checkpoint；未解决 findings 不会通过 `footnote_normalization_status()`，因此 polish/readiness/build 门禁也会阻断。即使派生 Markdown 已写出，它仍是未验证结果，不能据文件存在推断阶段完成。
 
 apply 后的结果审计输出需视觉判读的线索，包括归一化稿中残留数字上标/疑似编号注释、可能截断或未闭合的定义、定义后的正文边界污染，以及确认候选未进入应用计划。编号范围依据 TOC/refinement unit 与章节映射，单文件章节和多分片章节均按实际顺序检查。下降序列仅在精确页面边界分隔记录或 `section_id` 明确变化时作为编号重启；缺少边界证据时生成 `scoped_numbering_reset_uncertain` 视觉复核，不跨重启推断缺号。另一项独立的上游候选召回改进会在首次 prepare 时，把通用 OCR `Text` 块行首 `<sup>…</sup>` 补入视觉任务，图像复核候选块角色。后续 prepare 会把当前 apply 报告中的未决结果任务投影到同一审阅流程，仅在源稿与归一化稿哈希匹配时复用。已识别的脚注定义和缩进行续段、代码及注释排除在相应正文标记扫描外。
 
 结果审计由现有 `footnote-prepare → footnote-validate → footnote-apply` 循环处理，不增加 operator 命令或独立生产阶段。Reviewer 在 `footnote_decisions.json.result_audit_reviews` 对每个任务提交当前 task ID、证据哈希、全部指定页图和图像理由。确认脚注还要引用精确候选，并在普通决定中具有匹配角色；apply 再验证物化结果。validate 对未决任务要求重新 prepare 生成补充任务，任务仍按源地址和哈希绑定；同一任务第二轮仍不确定则为 `human_review_required`。`disabled` 下审计状态为 `not_applicable`；`endnotes_only` 跳过页脚注候选扫描，但仍审计适用的尾注定义、截断和物化完整性；单/双 OCR 和 legacy native-text 继续按当前证据模式处理。
 
-任一计划、绑定、冲突或写前 inventory 校验失败时只写无效诊断 checkpoint，不写有效 checkpoint。`footnote_candidates.json`/决定验证使用 prepare schema 4，`footnote_result_audit.json` 使用 schema 1，`footnote_normalization.json` 使用 schema 9；旧 prepare handoff 和旧 schema 1–8 normalization checkpoint 需重跑 `footnote-prepare → footnote-validate → footnote-apply`，无需重新 OCR。旧原始 Markdown、原 OCR 与已有归一化产物不由升级说明授权覆盖或清理；apply 按当前源重建正式派生稿。
+任一计划、绑定、冲突或写前 inventory 校验失败时只写无效诊断 checkpoint，不写有效 checkpoint。`footnote_candidates.json`/决定验证使用 prepare schema 4，`footnote_result_audit.json` 使用 schema 2，`footnote_normalization.json` 使用 schema 9；旧 prepare handoff 和旧 schema 1–8 normalization checkpoint 需重跑 `footnote-prepare → footnote-validate → footnote-apply`，无需重新 OCR。结果审计 version 1 的旧 normalization receipt 同样失效。apply 后还需 `polish --resume` 刷新 semantic sidecar，再运行正式 `polish-validate`。旧原始 Markdown、原 OCR 与已有归一化产物不由升级说明授权覆盖或清理；apply 按当前源重建正式派生稿。
 
 新增 PDF 结构信号时，先判断它是共享的几何/证据事实还是某个领域的语义规则。前者进入
 共享模块并补一组跨阶段测试，后者只进入对应的 prepare/apply 模块。命令 handler 只读取

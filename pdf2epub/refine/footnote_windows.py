@@ -37,6 +37,71 @@ def build_cross_page_windows(
     return windows
 
 
+def build_linked_continuation_windows(
+    page_reports: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Keep every page in an explicitly linked, multi-page note chain.
+
+    A link must come from the continuation classifier/evidence; matching
+    punctuation or a repeated key alone never extends a chain. There is no
+    fixed page cap, so long open chains remain visible to the reviewer.
+    """
+    by_page = {int(row["page"]): row for row in page_reports}
+    chains: list[dict[str, Any]] = []
+    for page, report in sorted(by_page.items()):
+        starts = [
+            row for row in report.get("candidates", []) or []
+            if isinstance(row, dict)
+            and row.get("key")
+            and row.get("local_role") == "footnote_start"
+        ]
+        for start in starts:
+            key = str(start["key"])
+            linked = [start]
+            current_page = page + 1
+            while current_page in by_page:
+                continuations = [
+                    row for row in by_page[current_page].get("candidates", []) or []
+                    if isinstance(row, dict)
+                    and row.get("local_role") == "footnote_continuation"
+                    and (
+                        str(row.get("key") or "") == key
+                        or str((row.get("continuation_evidence") or {}).get("matched_previous_key") or "") == key
+                    )
+                ]
+                if not continuations:
+                    break
+                linked.extend(continuations)
+                current_page += 1
+            if current_page - page < 3:
+                continue
+            # Preserve any separately labeled note that shares a page with
+            # the continuation chain; it is essential context when notes are
+            # interleaved across pages.
+            for chain_page in range(page, current_page):
+                for item in by_page[chain_page].get("candidates", []) or []:
+                    if (
+                        isinstance(item, dict)
+                        and item.get("local_role") in {"footnote_start", "footnote_continuation", "footnote_definition"}
+                        and item not in linked
+                    ):
+                        linked.append(item)
+            chains.append({
+                "pages": list(range(page, current_page)),
+                "key": key,
+                "candidate_refs": [
+                    {
+                        "page": int(row.get("page", page)),
+                        "source": str(row.get("source") or "primary"),
+                        "block": int(row.get("block", -1)),
+                    }
+                    for row in linked
+                ],
+                "reason": "explicitly_linked_footnote_continuation_spans_three_or_more_pages",
+            })
+    return chains
+
+
 def build_missing_continuation_reviews(
     page_reports: list[dict[str, Any]], *, page_count: int
 ) -> list[dict[str, Any]]:
@@ -114,4 +179,4 @@ def build_missing_continuation_reviews(
 _build_cross_page_windows = build_cross_page_windows
 
 
-__all__ = ["build_cross_page_windows", "build_missing_continuation_reviews"]
+__all__ = ["build_cross_page_windows", "build_linked_continuation_windows", "build_missing_continuation_reviews"]

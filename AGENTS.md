@@ -399,6 +399,12 @@ ocr-pages
 `polish-validate` 通过后，才能提取实体表或准备正文翻译。旧原生文字运行也必须通过
 `polish` 判断视觉换行与真实段落边界；其 polish 不得进行无依据的拼写或字形改写，重点是
 合并软换行并保留真实段落、标题和块级结构。
+polish handoff 按显式 part mapping 为每个单元提供前后各最多 256 token、合计最多 512 token 且不超过单文件剩余预算的只读正文上下文。优先使用完整块，超预算时使用带明确裁剪标记的句子或完整词片段；裁剪片段不能用来判断段落边界或要求合并块。只读取 scoped manifest
+列出的投影，不打开邻片全文，也不把上下文写入目标。源文或相关 refined mapping 变化会使 polish 验收和
+resume 失效。脚注模式启用时，每个文件还必须生成 schema 1 的 `polish_footnote_reviews/<stem>.json`，
+覆盖正文、脚注定义及跨分片关联；无脚注定义的文件也要完成正文扫描。sidecar 报告 issue 时，按报告回到
+`footnote-prepare` 的视觉复核、`footnote-validate` 和 `footnote-apply`。正式 `polish-validate` 会更新
+当前 receipt 和 validated 副本；不得手工重算哈希恢复旧检查点。
 `refine-local` 的页面合并器会保守地拼接跨页未完的普通正文；完整句子、标题、列表、脚注、
 图片和表格仍保持块边界。Markdown→XHTML 默认遵循标准 Markdown 语义：单换行是软换行，
 空行才创建新段落；只有显式 `<br />` 才生成硬换行。
@@ -668,7 +674,7 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    重跑 `footnote-prepare`；只有 decisions 改变时重跑 `footnote-validate`，再运行 apply。
 
    当前脚注 prepare/decision validation 使用 schema 4；尾注边界歧义及其决定使用独立 schema 2，
-   normalization 使用 schema 9，结果审计使用独立 schema 1。旧 normalization schema 1–8 和旧 prepare checkpoint 不能复用；
+   normalization 使用 schema 9，结果审计使用独立 schema 2。旧 normalization schema 1–8、旧 result audit version 1 和旧 prepare checkpoint 不能复用；
    endnote decision schema 1 仅兼容没有 inline 候选的旧式行边界清单，当前新决定文件使用 schema 2：
    重新执行 prepare，只派发新 manifest 的 pending 项，再 validate/apply；无需重新 OCR。apply 会重建
    `footnote_normalized/` 和成功 checkpoint，需保留旧派生版本时先备份。
@@ -783,7 +789,8 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    每个 Worker 写完一个 assigned file 后，必须先运行只读自检
    `uv run pdf2epub -c <config> polish-validate --file <file> --check-only`；该命令只校验，
    不规范化写回目标 Markdown、不写报告或 checkpoint、不创建或清理 `validated/`，因此多个 Worker 可安全并发。自检不通过时
-   Worker 必须在原地修复并重跑。自检通过不等于完成：Worker 全部结束后，主 Agent 仍须运行
+   格式或检查记录错误由 Worker 在原地修复并重跑。脚注语义 issue 须保留目标和 sidecar，报告主 Agent 回到脚注视觉复核流程。
+   Worker 全部结束后，主 Agent 仍须运行
    正式的 `polish-validate --file`（或全量 `polish-validate`）写入权威 checkpoint。
    若启用第二套 OCR，对 OCR/混合型 PDF，前置 `ocr-correct` 通过校验后的字符、词语和符号视为权威；
    该步骤只处理残留换行、段落边界和块级结构，不再纠正 OCR 字符、拼写或措辞。普通正文段落内部不得为了视觉排版新增换行；若仍疑似有 OCR 错误，应退回
@@ -792,9 +799,10 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    原文字符和块级结构。`polish-validate` 还会将源稿与润色稿按忽略换行、Markdown 外层标记和已确认页边装饰的
    方式做内容保真比较；正文 token 或数字标记大量丢失时会阻断。未通过
    `polish-validate` 不得继续实体提取或翻译。
-   PDF polish/translate 使用 Markdown validation schema 5，使有序标题保真规则更新前的全量 receipt
-   与逐文件 ledger 失效；OCR correction 和 HTML translation 仍用 schema 3，不因该规则变化失效。
-   对旧 polish receipt，先运行 `polish-validate` 校验已有目标；只把实际失败项交回 Subagent。
+   PDF translate 使用 Markdown validation schema 5，polish 使用 schema 6；OCR correction 和 HTML translation 仍用 schema 3。
+   schema 6 要求当前脚注语义 sidecar 和双向上下文 freshness。恢复旧 polish 目标时先运行 `polish --resume`，
+   让 worker 复核已有目标并写入当前 semantic sidecar，再运行正式 `polish-validate` 更新 receipt 与 validated 副本。
+   只把内容或语义复核实际失败的目标重新润色；旧目标可作为复核输入保留。
    若 translation context/receipt 旧，先运行 `translate --resume` 刷新 manifest/context，但不要按首轮
    pending 立即派发；接着 `translate-validate` 校验现有译文，然后第二次 `translate --resume`，再按
    当前报告只派发仍失效的 assignment，并完成全量 `translate-validate`。逐文件 ledger 若单独作为恢复

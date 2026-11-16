@@ -238,7 +238,7 @@ def run_readiness_check(
                 output_dir, config, ocr_evidence
             )
             source_ready = source_ready and _polished_stage_is_current(
-                output_dir, source_dir, polish_input_dir
+                output_dir, source_dir, polish_input_dir, config=config
             )
         except ValueError as exc:
             source_ready = False

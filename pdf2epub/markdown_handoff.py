@@ -54,6 +54,7 @@ def prepare_markdown_subagent(
     protected_toc_titles: Optional[Iterable[str]] = None,
     config_path: Optional[str | Path] = None,
     controlled_files: Optional[Mapping[str, str]] = None,
+    footnote_semantics_enabled: bool = False,
 ) -> Dict[str, Path]:
     """Adapt the stable public signature to the focused hand-off services."""
     request = MarkdownHandoffRequest(
@@ -85,6 +86,7 @@ def prepare_markdown_subagent(
         protected_toc_titles=protected_toc_titles,
         config_path=config_path,
         controlled_files=controlled_files,
+        footnote_semantics_enabled=footnote_semantics_enabled,
     )
     plan = plan_markdown_handoff(
         request.source_dir,
@@ -118,6 +120,32 @@ def prepare_markdown_subagent(
             ),
         )
     )
+    if request.task == "polish" and request.footnote_semantics_enabled:
+        from .polish_footnote_semantics import build_semantic_review_contract
+
+        boundary_hashes = manifest.get("boundary_context_sha256", {})
+        boundary_sources = manifest.get("boundary_context_sources", {})
+        if not isinstance(boundary_hashes, Mapping):
+            boundary_hashes = {}
+        if not isinstance(boundary_sources, Mapping):
+            boundary_sources = {}
+        semantic_contracts = {}
+        for source in plan.sources:
+            source_text = source.read_bytes().decode("utf-8")
+            semantic_contracts[source.name] = build_semantic_review_contract(
+                source.name,
+                source_text,
+                unit_context_sha256=context.unit_context_sha256.get(source.name),
+                boundary_context_sha256=boundary_hashes.get(source.name),
+                has_boundary_context=bool(boundary_sources.get(source.name, [])),
+            )
+        manifest["footnote_semantics"] = {
+            "schema_version": 1,
+            "enabled": True,
+            "sidecar_directory": "polish_footnote_reviews",
+            "files": semantic_contracts,
+            "recovery": "footnote-prepare, footnote-validate, footnote-apply",
+        }
     manifest_path = request.output_dir / f"{request.task}_subagent_manifest.json"
     atomic_write_json(manifest_path, manifest)
     prompt_path = request.output_dir / f"{request.task}_subagent_prompt.md"

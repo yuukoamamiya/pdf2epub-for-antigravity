@@ -11,7 +11,10 @@ from pdf2epub.refine.footnote_handoff import load_footnote_unit_contexts
 from pdf2epub.refine.footnote_validation import validate_footnote_decisions
 from pdf2epub.refine.footnote_apply import apply_footnote_normalization
 from pdf2epub.refine.footnote_status import footnote_normalization_status
-from pdf2epub.refine.footnote_windows import build_missing_continuation_reviews
+from pdf2epub.refine.footnote_windows import (
+    build_linked_continuation_windows,
+    build_missing_continuation_reviews,
+)
 
 
 def test_old_footnote_handoff_contract_requires_regeneration(tmp_path):
@@ -89,6 +92,46 @@ def test_missing_continuation_detector_skips_prose_nonfinal_and_last_page():
     assert len(reviews) == 1
     assert reviews[0]["terminal_page"] is True
     assert reviews[0]["pages"] == [2]
+
+
+def test_explicit_continuation_chain_keeps_all_pages_without_a_window_cap():
+    pages = [{"page": 1, "candidates": [{
+        "page": 1, "block": 4, "key": "36", "local_role": "footnote_start",
+    }]}]
+    for page in range(2, 6):
+        pages.append({"page": page, "candidates": [{
+            "page": page, "block": page, "key": "36",
+            "local_role": "footnote_continuation",
+            "continuation_evidence": {"matched_previous_key": "36"},
+        }]})
+    chains = build_linked_continuation_windows(pages)
+    assert len(chains) == 1
+    assert chains[0]["pages"] == [1, 2, 3, 4, 5]
+    assert [item["page"] for item in chains[0]["candidate_refs"]] == [1, 2, 3, 4, 5]
+
+
+def test_three_page_chain_keeps_interleaved_new_note_as_visual_context():
+    pages = [
+        {"page": 1, "candidates": [{
+            "page": 1, "block": 1, "key": "36", "local_role": "footnote_start",
+        }]},
+        {"page": 2, "candidates": [
+            {"page": 2, "block": 2, "key": "36", "local_role": "footnote_continuation",
+             "continuation_evidence": {"matched_previous_key": "36"}},
+            {"page": 2, "block": 3, "key": "37", "local_role": "footnote_start"},
+        ]},
+        {"page": 3, "candidates": [
+            {"page": 3, "block": 1, "key": "36", "local_role": "footnote_continuation",
+             "continuation_evidence": {"matched_previous_key": "36"}},
+            {"page": 3, "block": 2, "key": "38", "local_role": "footnote_start"},
+        ]},
+    ]
+    chains = build_linked_continuation_windows(pages)
+    assert len(chains) == 1
+    assert chains[0]["pages"] == [1, 2, 3]
+    assert {(ref["page"], ref["block"]) for ref in chains[0]["candidate_refs"]} == {
+        (1, 1), (2, 2), (2, 3), (3, 1), (3, 2),
+    }
 
 
 def test_report_uses_all_scanned_sidecars_for_last_physical_page(monkeypatch, tmp_path):

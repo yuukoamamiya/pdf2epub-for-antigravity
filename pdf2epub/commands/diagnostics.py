@@ -153,7 +153,7 @@ def _current_polish(output_dir: Path, config: Mapping[str, Any]) -> bool:
 
         polish_dir = output_dir / "polished_markdown" / "validated"
         source_dir, _ = _resolve_pdf_polish_source(output_dir, dict(config))
-        return _polished_stage_is_current(output_dir, polish_dir, source_dir)
+        return _polished_stage_is_current(output_dir, polish_dir, source_dir, config=dict(config))
     except (OSError, TypeError, ValueError):
         return False
 

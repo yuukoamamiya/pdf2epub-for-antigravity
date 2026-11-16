@@ -30,6 +30,8 @@ from .footnote_status import unit_records
 from .footnote_status import markdown_inventory
 from .footnote_structure import FOOTNOTE_STRUCTURE_EXEMPT_TYPES
 from .footnote_visual import ensure_visual_review_images
+from .footnote_matching import block_text_variants
+from .footnote_result_audit import AUDIT_VERSION
 
 def _unit_context_path(output_dir: Path, source_name: str) -> Path:
     safe_name = Path(str(source_name)).name
@@ -41,6 +43,175 @@ def _unit_context_path(output_dir: Path, source_name: str) -> Path:
     ):
         raise ValueError(f"Invalid refinement unit filename: {source_name}")
     return output_dir / "footnote_contexts" / f"{safe_name}.json"
+
+
+def _polish_semantic_issue_tasks(
+    output_dir: Path,
+    records: list[Mapping[str, Any]],
+    source_texts: Mapping[str, str],
+    sidecar_index: Mapping[int, Mapping[str, Mapping[str, Any]]],
+    page_report: Mapping[str, Any],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Route current polish semantic issues back to exact OCR evidence.
+
+    Polish sidecars identify a source excerpt but do not decide ownership. An
+    issue is admitted only when that exact excerpt maps to one current OCR
+    block; ambiguous mappings fail closed rather than widening to a unit/page
+    range.
+    """
+    manifest_path = output_dir / "polish_subagent_manifest.json"
+    if not manifest_path.is_file():
+        return [], []
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        return [], [f"polish_subagent_manifest.json (unreadable: {exc})"]
+    source_dir = str(manifest.get("source_dir") or "") if isinstance(manifest, Mapping) else ""
+    target_dir = str(manifest.get("target_dir") or "") if isinstance(manifest, Mapping) else ""
+    polish_source_root = (output_dir / source_dir).resolve()
+    target_root = (output_dir / target_dir).resolve()
+    try:
+        polish_source_root.relative_to(output_dir.resolve())
+        target_root.relative_to(output_dir.resolve())
+    except ValueError as exc:
+        return [], ["polish_subagent_manifest.json (source or target directory escapes output workspace)"]
+    from ..polish_footnote_semantics import validate_prepared_file_review
+
+    tasks: list[dict[str, Any]] = []
+    stale_files: list[str] = []
+    semantic = manifest.get("footnote_semantics") if isinstance(manifest, Mapping) else None
+    semantic_files = semantic.get("files") if isinstance(semantic, Mapping) else None
+    for record in records:
+        filename = str(record.get("name") or "")
+        if not isinstance(semantic_files, Mapping) or filename not in semantic_files:
+            continue
+        raw_source = source_texts.get(filename)
+        polish_source_path = polish_source_root / filename
+        target_path = target_root / filename
+        if raw_source is None or not polish_source_path.is_file() or not target_path.is_file():
+            stale_files.append(filename)
+            continue
+        polish_source = polish_source_path.read_text(encoding="utf-8")
+        target = target_path.read_text(encoding="utf-8")
+        review = validate_prepared_file_review(
+            output_dir, filename, source_text=polish_source, target_text=target, required=False,
+        )
+        if review is None:
+            continue
+        if review.get("contract_valid") is not True:
+            stale_files.append(filename)
+            continue
+        for issue in review.get("issues", []) or []:
+            excerpt = str(issue.get("source_excerpt") or "")
+            polish_first = polish_source.find(excerpt)
+            if not excerpt or polish_first < 0 or polish_source.find(excerpt, polish_first + 1) >= 0:
+                stale_files.append(f"{filename} ({issue.get('issue_id')}: source excerpt is not unique)")
+                continue
+            from .footnote_matching import find_exact_signature_spans
+            raw_spans = find_exact_signature_spans(raw_source, excerpt)
+            if len(raw_spans) != 1:
+                stale_files.append(f"{filename} ({issue.get('issue_id')}: source excerpt does not map uniquely to raw refined source)")
+                continue
+            raw_start, raw_end = raw_spans[0]
+            raw_excerpt = raw_source[raw_start:raw_end]
+            primary_matches: list[tuple[int, str, int, Mapping[str, Any], Mapping[str, Any]]] = []
+            for page in range(int(record.get("start_page") or 0), int(record.get("end_page") or 0) + 1):
+                for source_kind, entry in sidecar_index.get(page, {}).items():
+                    if str(source_kind) != "primary":
+                        continue
+                    if not isinstance(entry, Mapping):
+                        continue
+                    try:
+                        data = json.loads((output_dir / str(entry["path"])).read_text(encoding="utf-8"))
+                    except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError):
+                        continue
+                    for block_index, block in enumerate(data.get("blocks", [])):
+                        if not isinstance(block, Mapping):
+                            continue
+                        variants = block_text_variants(output_dir, page, block)
+                        if any(variant.count(excerpt) == 1 for variant in variants):
+                            primary_matches.append((page, str(source_kind), block_index, entry, block))
+            unique_matches = {(page, kind, block) for page, kind, block, _, _ in primary_matches}
+            if len(unique_matches) != 1:
+                stale_files.append(
+                    f"{filename} ({issue.get('issue_id')}: excerpt maps to {len(unique_matches)} primary OCR blocks; edit source_excerpt to a unique single-block excerpt, then rerun footnote-prepare)"
+                )
+                continue
+            page, source_kind, block_index = next(iter(unique_matches))
+            _, _, _, entry, block_data = next(row for row in primary_matches if row[:3] == (page, source_kind, block_index))
+            evidence_hash = hashlib.sha256(json.dumps(
+                {"sidecar_sha256": entry["sha256"], "block": block_data},
+                ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+            ).encode("utf-8")).hexdigest()
+            line = raw_source.count("\n", 0, raw_start) + 1
+            issue_identity = "\0".join((filename, str(issue.get("issue_id") or ""), str(issue.get("source_sha256") or ""), str(issue.get("target_sha256") or ""), str(issue.get("context_sha256") or "")))
+            task_id = "fra-" + hashlib.sha256(issue_identity.encode("utf-8")).hexdigest()[:20]
+            linked_pages = {page}
+            linked_refs = {(page, source_kind, block_index)}
+            for collection in ("continuation_chains", "cross_page_windows"):
+                for window in page_report.get(collection, []) or []:
+                    if not isinstance(window, Mapping):
+                        continue
+                    refs: list[Mapping[str, Any]] = []
+                    if collection == "continuation_chains":
+                        refs.extend(ref for ref in window.get("candidate_refs", []) or [] if isinstance(ref, Mapping))
+                    else:
+                        for side in ("left_candidates", "right_candidates"):
+                            refs.extend(ref for ref in window.get(side, []) or [] if isinstance(ref, Mapping))
+                    window_refs = set()
+                    for ref in refs:
+                        try:
+                            window_refs.add((int(ref.get("page", 0)), str(ref.get("source") or "primary"), int(ref.get("block", -1))))
+                        except (TypeError, ValueError):
+                            continue
+                    if (page, source_kind, block_index) in window_refs:
+                        linked_refs.update(window_refs)
+                        linked_pages.update(int(value) for value in window.get("pages", []) if str(value).isdigit())
+            for gap in page_report.get("continuation_reviews", []) or []:
+                if not isinstance(gap, Mapping):
+                    continue
+                source_note = gap.get("source_note")
+                if isinstance(source_note, Mapping) and (
+                    int(source_note.get("page", -1)) == page
+                    and str(source_note.get("source") or "primary") == source_kind
+                    and int(source_note.get("block", -1)) == block_index
+                ):
+                    linked_pages.update(int(value) for value in gap.get("pages", []) if str(value).isdigit())
+            tasks.append({
+                "task_id": task_id,
+                "code": "polish_semantic_issue",
+                "file": filename,
+                "line": line,
+                "page": page,
+                "key": "",
+                "evidence_origin": "source_markdown",
+                "evidence_sha256": evidence_hash,
+                "evidence_excerpt": raw_excerpt,
+                "evidence_file_sha256": sha256_file(output_dir / "ocr_markdown" / filename),
+                "evidence_target_sha256": review.get("target_sha256"),
+                "polish_issue": {
+                    key: issue.get(key) for key in (
+                        "issue_id", "code", "source_excerpt", "target_excerpt", "reason",
+                        "unit_id", "file", "source_sha256", "target_sha256", "context_sha256",
+                    ) if issue.get(key) is not None
+                } | {
+                    "polish_source_sha256": review.get("source_sha256"),
+                    "raw_source_excerpt_sha256": hashlib.sha256(raw_excerpt.encode("utf-8")).hexdigest(),
+                },
+                "detail": str(issue.get("reason") or "Polish reviewer flagged a footnote semantic boundary for image review."),
+                "requires_visual_review": True,
+                "source_address": {
+                    "page": page, "source": source_kind, "block": block_index,
+                    "sidecar": str(entry["path"]), "sidecar_sha256": str(entry["sha256"]),
+                },
+                "candidate_refs": [
+                    {"page": ref_page, "source": ref_source, "block": ref_block}
+                    for ref_page, ref_source, ref_block in sorted(linked_refs)
+                ],
+                "pages": sorted(linked_pages),
+                "context_status": "exact_source_excerpt_mapped_to_current_ocr_block",
+            })
+    return tasks, stale_files
 
 
 def _project_unit_contexts(
@@ -86,8 +257,12 @@ def _project_unit_contexts(
             _compact_window_context(item) for item in report.get("continuation_reviews", [])
             if any(start_page <= int(page) <= end_page for page in item.get("pages", []))
         ]
+        continuation_chains = [
+            _compact_window_context(item) for item in report.get("continuation_chains", [])
+            if any(start_page <= int(page) <= end_page for page in item.get("pages", []))
+        ]
         evidence_pages = set(range(start_page, end_page + 1))
-        for window in [*windows, *continuation_reviews]:
+        for window in [*windows, *continuation_reviews, *continuation_chains]:
             evidence_pages.update(
                 int(page) for page in window.get("pages", [])
                 if str(page).lstrip("-").isdigit()
@@ -134,6 +309,7 @@ def _project_unit_contexts(
                 refs.update(str(ref) for ref in window.get(key, []))
             if window.get("source_note_ref"):
                 refs.add(str(window["source_note_ref"]))
+            refs.update(str(ref) for ref in window.get("candidate_refs", []))
         packet_candidates = packet_data.get("candidates", {})
         page_by_number = {int(page["page"]): page for page in pages if str(page.get("page", "")).isdigit()}
         local_facts = {}
@@ -165,6 +341,7 @@ def _project_unit_contexts(
             "pages": pages,
             "cross_page_windows": windows,
             "continuation_reviews": continuation_reviews,
+            "continuation_chains": continuation_chains,
             "decisions": [
                 item
                 for item in report.get("decisions", [])
@@ -270,6 +447,7 @@ def _compact_window_context(window: Mapping[str, Any]) -> dict[str, Any]:
         "source_note_ref",
         "sidecars", "reason", "task_id", "expected_next_page",
         "terminal_page", "continuation_evidence", "gap_evidence",
+        "key", "candidate_refs",
     ) if key in window}
     for field in ("left_candidates", "right_candidates"):
         rows = window.get(field)
@@ -403,7 +581,7 @@ def prepare_footnote_subagent(
         pass
     prior_audit_reviews = prior_review_data.get("result_audit_reviews", []) if isinstance(prior_review_data, Mapping) else []
     audit = {
-        "schema_version": 1,
+        "schema_version": AUDIT_VERSION,
         "status": "validated",
         "valid": True,
         "mode": str(report.get("footnote_mode") or "footnotes"),
@@ -471,6 +649,47 @@ def prepare_footnote_subagent(
         ):
             raise ValueError(f"cannot resolve exact result-audit sidecar inventory: {exc}") from exc
         exact_sidecars = {}
+    if records and exact_sidecars:
+        polish_tasks, stale_semantic_files = _polish_semantic_issue_tasks(
+            output_dir, records, source_texts, exact_sidecars, report,
+        )
+        audit["findings"].extend(polish_tasks)
+        audit["polish_semantic_stale_files"] = sorted(set(stale_semantic_files))
+        if stale_semantic_files:
+            audit.setdefault("warnings", []).append(
+                "Ignored stale polish semantic sidecars for "
+                + ", ".join(sorted(set(stale_semantic_files)))
+                + "; rerun polish --resume, then footnote-prepare to refresh visual tasks."
+            )
+        for task in polish_tasks:
+            address = task.get("source_address", {})
+            page = int(address.get("page", 0))
+            page_row = next((row for row in report.get("pages", []) or [] if int(row.get("page", -1)) == page), None)
+            if not isinstance(page_row, dict):
+                continue
+            try:
+                sidecar_data = json.loads((output_dir / str(address["sidecar"])).read_text(encoding="utf-8"))
+                block = sidecar_data["blocks"][int(address["block"])]
+            except (OSError, UnicodeError, json.JSONDecodeError, KeyError, IndexError, TypeError):
+                continue
+            candidate = {
+                "page": page,
+                "source": str(address.get("source") or "primary"),
+                "block": int(address.get("block", -1)),
+                "order": block.get("order", int(address.get("block", -1))),
+                "label": str(block.get("label") or "Text"),
+                "bbox": block.get("bbox"),
+                "key": "",
+                "confidence": "review",
+                "disposition": "review_required",
+                "text": (block_text_variants(output_dir, page, block) or [str(task.get("evidence_excerpt") or "")])[0],
+                "result_audit_admitted": True,
+                "review_reason": "polish_semantic_issue_requires_visual_ownership_review",
+            }
+            field = "secondary_only_candidates" if candidate["source"] == "secondary" else "candidates"
+            rows = page_row.setdefault(field, [])
+            if not any(isinstance(row, Mapping) and int(row.get("block", -1)) == candidate["block"] and str(row.get("source") or "primary") == candidate["source"] for row in rows):
+                rows.append(candidate)
     if (
         isinstance(prior_result_audit, Mapping)
         and prior_result_audit.get("source_sha256") == markdown_inventory(output_dir / "ocr_markdown")
@@ -525,14 +744,22 @@ def prepare_footnote_subagent(
     # the following physical page when available. Reassociate by the complete
     # source definition signature, never by a chapter-wide page range.
     for audit_task in audit.get("findings", []):
-        if not isinstance(audit_task, dict) or audit_task.get("code") != "normalized_note_truncated":
+        if not isinstance(audit_task, dict) or audit_task.get("code") not in {
+            "normalized_note_truncated",
+            "normalized_note_open_boundary_at_physical_page_break",
+        }:
             continue
         if audit_task.get("source_address"):
             continue
         file = str(audit_task.get("file") or "")
         key = str(audit_task.get("key") or "")
         source_text = source_texts.get(file, "")
-        definitions, _ = collect_footnote_definition_blocks(source_text.splitlines())
+        evidence_text = source_text
+        if audit_task.get("evidence_origin") == "normalized_target":
+            normalized_path = output_dir / "footnote_normalized" / file
+            if normalized_path.is_file():
+                evidence_text = normalized_path.read_text(encoding="utf-8")
+        definitions, _ = collect_footnote_definition_blocks(evidence_text.splitlines())
         body = next((body for _, (definition_key, body) in definitions.items() if str(definition_key) == key), "")
         signature = "".join(char.casefold() for char in body if char.isalnum())
         if not signature:
@@ -580,7 +807,7 @@ def prepare_footnote_subagent(
             "sidecar": sidecar_entry["path"], "sidecar_sha256": sidecar_entry["sha256"],
         }
         audit_task["candidate_refs"] = [{"page": page, "source": source, "block": block_index}]
-        audit_task["pages"] = [page]
+        audit_task["pages"] = sorted({page, *(int(value) for value in audit_task.get("pages", []) if str(value).isdigit())})
         audit_task["context_status"] = "exact_truncated_definition_page_resolved"
     known_task_ids = {str(item.get("task_id")) for item in audit.get("findings", [])}
     for page_row in report.get("pages", []) or []:
@@ -1074,6 +1301,14 @@ def prepare_footnote_subagent(
             + "\n".join(task_lines)
             + "\n\nUse these objects in the existing `footnote_decisions.json`; keep its normal schema_version.\n"
         )
+        if any(task.get("code") == "polish_semantic_issue" for task in audit.get("findings", [])):
+            prompt += (
+                "\n\nFor a `polish_semantic_issue`, compare the exact source excerpt, OCR sidecar, and cited page image. "
+                "If one OCR block mixes body and footnote text, replace that block's whole-block decision with `role: \"body\", override: true` and a `segments` array. "
+                "Each segment must contain its exact OCR `text` and a `role`; moved segments also need their exact `key` and visible `marker_label` when applicable. "
+                "List segments in physical reading order. The apply stage moves only exact footnote segments and leaves body text at its source position; it rejects duplicate, overlapping, stale, or non-unique excerpts. "
+                "Do not use the polished target excerpt to infer source ownership.\n"
+            )
     prompt_path = output_dir / "footnote_subagent_prompt.md"
     atomic_write_text(prompt_path, prompt)
     return {

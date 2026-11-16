@@ -18,7 +18,11 @@ from .footnote_visual import (
     ensure_visual_review_images,
     write_visual_audit_manifest,
 )
-from .footnote_windows import build_cross_page_windows, build_missing_continuation_reviews
+from .footnote_windows import (
+    build_cross_page_windows,
+    build_linked_continuation_windows,
+    build_missing_continuation_reviews,
+)
 from .footnote_options import footnote_mode_warnings
 
 
@@ -104,6 +108,24 @@ def build_footnote_report(
 ) -> dict[str, Any]:
     """Attach final evidence, summarize counts, and atomically write JSON."""
     page_reports.sort(key=lambda item: item["page"])
+    continuation_chains = build_linked_continuation_windows(page_reports)
+    for chain in continuation_chains:
+        for ref in chain.get("candidate_refs", []):
+            page_report = next((row for row in page_reports if int(row.get("page", -1)) == int(ref.get("page", -2))), None)
+            if not isinstance(page_report, dict):
+                continue
+            for candidate in page_report.get("candidates", []) or []:
+                if (
+                    int(candidate.get("block", -1)) == int(ref.get("block", -2))
+                    and str(candidate.get("source") or "primary") == str(ref.get("source") or "primary")
+                ):
+                    candidate["confidence"] = "review"
+                    candidate["disposition"] = "review_required"
+                    reasons = candidate.get("review_reason")
+                    reasons = list(reasons) if isinstance(reasons, list) else ([str(reasons)] if reasons else [])
+                    if "multi_page_linked_continuation_visual_review" not in reasons:
+                        reasons.append("multi_page_linked_continuation_visual_review")
+                    candidate["review_reason"] = reasons
     cross_page_windows = build_cross_page_windows(page_reports)
     page_count = 0
     try:
@@ -124,6 +146,8 @@ def build_footnote_report(
     )
     for window in cross_page_windows:
         review_pages.update(int(page) for page in window["pages"])
+    for chain in continuation_chains:
+        review_pages.update(int(page) for page in chain["pages"])
     for review in continuation_reviews:
         review_pages.update(int(page) for page in review["pages"])
 
@@ -179,6 +203,7 @@ def build_footnote_report(
         "secondary_sidecar_sha256": dict(secondary_sidecar_hashes),
         "pages": page_reports,
         "cross_page_windows": cross_page_windows,
+        "continuation_chains": continuation_chains,
         "continuation_reviews": continuation_reviews,
         "continuation_evidence_summary": aggregate_continuation_evidence(page_reports),
         "review_pages": sorted(review_pages),

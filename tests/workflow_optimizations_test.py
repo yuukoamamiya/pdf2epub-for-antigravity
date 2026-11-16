@@ -1260,6 +1260,202 @@ def test_resume_only_invalidates_units_with_changed_context(tmp_path: Path):
     assert manifest["completed_files"] == ["b.md"]
 
 
+def test_polish_halo_uses_only_explicit_parts_and_projects_both_directions(tmp_path: Path):
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    (source_dir / "part-a.md").write_text(
+        "First paragraph.\n\n[^1]: private note text", encoding="utf-8"
+    )
+    (source_dir / "part-b.md").write_text("Middle paragraph.", encoding="utf-8")
+    (source_dir / "part-c.md").write_text("Final paragraph.", encoding="utf-8")
+    (source_dir / "unrelated.md").write_text("Unrelated chapter.", encoding="utf-8")
+    part_links = {
+        "part-b.md": {"is_continuation": True, "part_number": 2, "previous_file": "part-a.md"},
+        "part-c.md": {"is_continuation": True, "part_number": 3, "previous_file": "part-b.md"},
+    }
+
+    paths = prepare_markdown_subagent(
+        tmp_path, "polish", source_dir, tmp_path / "target", "English", "Chinese",
+        continuation_files=part_links,
+        chapter_groups={"a-top-level-group": ["part-a.md", "part-b.md", "part-c.md", "unrelated.md"]},
+    )
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+
+    assert manifest["preceding_context"]["part-b.md"]["source_file"] == "part-a.md"
+    assert manifest["succeeding_context"]["part-b.md"]["source_file"] == "part-c.md"
+    assert "First paragraph." in manifest["preceding_context"]["part-b.md"]["text"]
+    assert "private note text" not in manifest["preceding_context"]["part-b.md"]["text"]
+    assert "unrelated.md" not in manifest["succeeding_context"]
+    assert "unrelated.md" not in manifest["preceding_context"]
+    assert manifest["boundary_context_sha256"]["part-b.md"]
+    assert manifest["boundary_context_mapping_source"] == "explicit"
+
+
+def test_polish_boundary_context_is_included_in_token_budget(tmp_path: Path):
+    from pdf2epub.batching_service import estimate_tokens
+
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    (source_dir / "part-a.md").write_text("A short lead block.", encoding="utf-8")
+    (source_dir / "part-b.md").write_text("A target body block.", encoding="utf-8")
+    paths = prepare_markdown_subagent(
+        tmp_path, "polish", source_dir, tmp_path / "target", "English", "Chinese",
+        continuation_files={
+            "part-b.md": {"is_continuation": True, "part_number": 2, "previous_file": "part-a.md"}
+        },
+        config={"subagent": {"batching": {"max_source_tokens": 12}}},
+    )
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    used = estimate_tokens((source_dir / "part-b.md").read_text(encoding="utf-8"))
+    context = manifest.get("preceding_context", {}).get("part-b.md", {}).get("text", "")
+    assert used + estimate_tokens(context) <= 12
+
+
+def test_polish_halo_clips_oversized_boundary_blocks_for_context_only(tmp_path: Path):
+    from pdf2epub.batching_service import estimate_tokens
+
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    long_sentence = "Averylongwordwithoutwhitespace " * 180 + "The next sentence gives context."
+    (source_dir / "part-a.md").write_text(long_sentence, encoding="utf-8")
+    (source_dir / "part-b.md").write_text("A short assigned continuation.", encoding="utf-8")
+    paths = prepare_markdown_subagent(
+        tmp_path, "polish", source_dir, tmp_path / "target", "English", "Chinese",
+        continuation_files={
+            "part-b.md": {"is_continuation": True, "part_number": 2, "previous_file": "part-a.md"}
+        },
+        config={"subagent": {"batching": {"polish_max_files": 1}}},
+    )
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    context = manifest["preceding_context"]["part-b.md"]
+
+    assert context["text"]
+    assert context["clipped"] is True
+    assert estimate_tokens(context["text"]) <= 256
+    handoffs = write_worker_handoffs(tmp_path, paths["manifest"], paths["prompt"])
+    part_b = next(item for item in handoffs if item["files"] == ["part-b.md"])
+    worker_prompt = (tmp_path / part_b["prompt"]).read_text(encoding="utf-8")
+    assert "clipped context-only fragment" in worker_prompt
+    assert "do not establish paragraph boundaries" in worker_prompt
+
+
+def test_polish_halo_neighbor_change_invalidates_validation_checkpoint(tmp_path: Path):
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "part-a.md").write_text("Old preceding context.", encoding="utf-8")
+    (source_dir / "part-b.md").write_text("Assigned source.", encoding="utf-8")
+    continuation_files = {
+        "part-b.md": {"is_continuation": True, "part_number": 2, "previous_file": "part-a.md"}
+    }
+    prepare_markdown_subagent(
+        tmp_path, "polish", source_dir, target_dir, "English", "Chinese",
+        continuation_files=continuation_files,
+    )
+    target = target_dir / "part-b.md"
+    target.write_text("Polished output.", encoding="utf-8")
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
+    report = validate_markdown_subagent(tmp_path, "polish", source_dir, target_dir)
+    assert "part-b.md" in report["valid_files"], report
+
+    (source_dir / "part-a.md").write_text("Changed preceding context.", encoding="utf-8")
+    from pdf2epub.markdown_validation_persistence import capture_pdf_resume_contexts
+    _, stale = capture_pdf_resume_contexts(tmp_path, "polish", ["part-b.md"])
+    assert stale["part-b.md"] == "prepared boundary context source changed after preparation"
+    resumed = prepare_markdown_subagent(
+        tmp_path, "polish", source_dir, target_dir, "English", "Chinese",
+        continuation_files=continuation_files, resume=True,
+    )
+    manifest = json.loads(resumed["manifest"].read_text(encoding="utf-8"))
+    assert "part-b.md" in manifest["pending_files"]
+    assert manifest["completed_files"] == []
+
+
+def test_pdf_progress_mapping_change_stales_validation_and_cannot_be_washed_by_resume(tmp_path: Path):
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    progress_path = tmp_path / "ocr_markdown" / "tree_progress.json"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    progress_path.parent.mkdir(parents=True)
+    for name in ("part-a.md", "part-b.md", "part-c.md"):
+        (source_dir / name).write_text(f"Stable source block {name}.", encoding="utf-8")
+    progress_path.write_text(
+        json.dumps({"units": [{"part_files": ["part-a.md", "part-b.md"]}]}),
+        encoding="utf-8",
+    )
+    from pdf2epub.commands.markdown_context import _load_pdf_continuation_files
+    mappings = _load_pdf_continuation_files(tmp_path, source_dir)
+    prepare_markdown_subagent(
+        tmp_path, "polish", source_dir, target_dir, "English", "Chinese",
+        continuation_files=mappings,
+    )
+    for name in ("part-a.md", "part-b.md", "part-c.md"):
+        (target_dir / name).write_text(f"Stable source block {name}.", encoding="utf-8")
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
+    initial = validate_markdown_subagent(tmp_path, "polish", source_dir, target_dir)
+    assert "part-a.md" in initial["valid_files"]
+    assert "part-b.md" in initial["valid_files"]
+
+    # The source bytes stay fixed while the refined unit boundary changes.
+    progress_path.write_text(
+        json.dumps({"units": [{"part_files": ["part-b.md", "part-c.md"]}]}),
+        encoding="utf-8",
+    )
+    stale = validate_markdown_subagent(tmp_path, "polish", source_dir, target_dir)
+    assert any(item.get("kind") == "prepared_context" for item in stale["invalid"])
+    resumed = prepare_markdown_subagent(
+        tmp_path, "polish", source_dir, target_dir, "English", "Chinese",
+        continuation_files=_load_pdf_continuation_files(tmp_path, source_dir), resume=True,
+    )
+    manifest = json.loads(resumed["manifest"].read_text(encoding="utf-8"))
+    assert "part-b.md" in manifest["pending_files"]
+    repeated = prepare_markdown_subagent(
+        tmp_path, "polish", source_dir, target_dir, "English", "Chinese",
+        continuation_files=_load_pdf_continuation_files(tmp_path, source_dir), resume=True,
+    )
+    repeated_manifest = json.loads(repeated["manifest"].read_text(encoding="utf-8"))
+    assert "part-b.md" in repeated_manifest["pending_files"]
+
+
+def test_worker_manifest_projects_boundary_context_only_for_assigned_files(tmp_path: Path):
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    for name in ("part-a.md", "part-b.md", "part-c.md"):
+        (source_dir / name).write_text(f"Source {name}.", encoding="utf-8")
+    paths = prepare_markdown_subagent(
+        tmp_path, "polish", source_dir, tmp_path / "target", "English", "Chinese",
+        continuation_files={
+            "part-b.md": {"is_continuation": True, "part_number": 2, "previous_file": "part-a.md"},
+            "part-c.md": {"is_continuation": True, "part_number": 3, "previous_file": "part-b.md"},
+        },
+        config={"subagent": {"batching": {"polish_max_files": 1}}},
+    )
+    parent_manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    parent_manifest["footnote_semantics"] = {
+        "schema_version": 1,
+        "enabled": True,
+        "files": {
+            name: {"sidecar": f"polish_footnote_reviews/{name}.json", "context_sha256": f"hash-{name}"}
+            for name in ("part-a.md", "part-b.md", "part-c.md")
+        },
+    }
+    paths["manifest"].write_text(json.dumps(parent_manifest), encoding="utf-8")
+    handoffs = write_worker_handoffs(tmp_path, paths["manifest"], paths["prompt"])
+    handoff = next(item for item in handoffs if item["files"] == ["part-b.md"])
+    scoped = json.loads((tmp_path / handoff["manifest"]).read_text(encoding="utf-8"))
+    assert list(scoped["preceding_context"]) == ["part-b.md"]
+    assert list(scoped["succeeding_context"]) == ["part-b.md"]
+    assert list(scoped["boundary_context_sha256"]) == ["part-b.md"]
+    assert scoped["boundary_context_mapping_source"] == "explicit"
+    assert "part-a.md" not in scoped["files"] and "part-c.md" not in scoped["files"]
+    assert list(scoped["footnote_semantics"]["files"]) == ["part-b.md"]
+    worker_prompt = (tmp_path / handoff["prompt"]).read_text(encoding="utf-8")
+    assert "polish_footnote_reviews/part-b.md.json" in worker_prompt
+    assert "polish_footnote_reviews/part-a.md.json" not in worker_prompt
+
+
 def test_polish_worker_handoffs_are_task_scoped(tmp_path: Path):
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"

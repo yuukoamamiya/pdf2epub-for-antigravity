@@ -106,6 +106,20 @@ def build_markdown_manifest(data: ManifestBuild) -> dict[str, Any]:
     }
     if preceding_contexts:
         manifest["preceding_context"] = preceding_contexts
+    succeeding_contexts = {
+        name: value for name, value in plan.succeeding_contexts.items()
+        if name in plan.file_stats
+    }
+    if succeeding_contexts:
+        manifest["succeeding_context"] = succeeding_contexts
+    if plan.boundary_context_sha256:
+        manifest["boundary_context_sha256"] = dict(plan.boundary_context_sha256)
+        manifest["boundary_context_sources"] = dict(plan.boundary_context_sources)
+        manifest["boundary_context_mapping_sha256"] = dict(plan.boundary_context_mapping_sha256)
+        refined_mapping = request.output_dir / "ocr_markdown" / "tree_progress.json"
+        manifest["boundary_context_mapping_source"] = (
+            "tree_progress" if refined_mapping.is_file() else "explicit"
+        )
     if data.visual_review_dir is not None:
         manifest["visual_review_dir"] = data.visual_review_dir
     if data.secondary_source_dir is not None:

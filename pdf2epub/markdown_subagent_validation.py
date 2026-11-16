@@ -13,6 +13,7 @@ from .markdown_validation_state import resolve_review_state
 from .markdown_validation_persistence import (
     begin_validation_io,
     capture_pdf_resume_contexts,
+    validation_snapshot_changes,
     stage_normalized_and_validated_targets,
     persist_validation_report,
 )
@@ -41,6 +42,7 @@ def validate_markdown_subagent(
         Mapping[str, Iterable[str]]
     ] = None,
     dynamic_terminology_config: Optional[Mapping[str, Any]] = None,
+    require_footnote_semantic_review: bool = False,
 ) -> Dict:
     """Validate a Subagent markdown hand-off and optionally stage it."""
     context = load_markdown_validation_context(
@@ -56,6 +58,7 @@ def validate_markdown_subagent(
         allow_review_warnings=allow_review_warnings,
         protected_toc_titles=protected_toc_titles or (),
         continuation_toc_titles=continuation_toc_titles,
+        require_footnote_semantic_review=require_footnote_semantic_review,
     )
     target_dir = context.paths.target_dir
     validated_dir = context.paths.validated_dir
@@ -96,6 +99,40 @@ def validate_markdown_subagent(
     review_required = audit.review_required
     bilingual_warnings = audit.bilingual_warnings
     normalized_roles = audit.file_roles
+
+    semantic_reviews: dict[str, Any] = {}
+    semantic_blocked_names: set[str] = set()
+    if task == "polish" and context.options.require_footnote_semantic_review:
+        from .polish_footnote_semantics import validate_prepared_file_review
+
+        for source in sources:
+            name = source.name
+            try:
+                source_text = source.read_bytes().decode("utf-8")
+                target_text = audit.normalized_targets.get(name)
+                if target_text is None:
+                    target_text = (target_dir / name).read_bytes().decode("utf-8")
+            except (OSError, UnicodeError) as exc:
+                result = {"valid": False, "contract_valid": False, "status": "missing", "errors": [f"source or target unavailable: {exc}"], "issues": []}
+            else:
+                result = validate_prepared_file_review(
+                    context.paths.output_dir, name, source_text=source_text,
+                    target_text=target_text, required=True,
+                ) or {"valid": False, "contract_valid": False, "status": "missing", "errors": ["semantic review unavailable"], "issues": []}
+            semantic_reviews[name] = result
+            if not result.get("valid"):
+                semantic_blocked_names.add(name)
+                valid_files = [item for item in valid_files if item != name]
+                semantic_issue = result.get("contract_valid") is True and result.get("status") == "issues"
+                invalid.append({
+                    "file": name,
+                    "kind": "polish_footnote_semantics",
+                    "action": "footnote_prepare_validate_apply" if semantic_issue else "refresh_polish_semantic_review",
+                    "reason": "; ".join(result.get("errors", [])) or "semantic issues were reported; preserve this polish output and return to the footnote workflow",
+                    "status": result.get("status"),
+                    "issues": result.get("issues", []),
+                    "recovery": "footnote-prepare -> footnote-validate -> footnote-apply" if semantic_issue else "rerun the assigned Polish semantic review and refresh its sidecar",
+                })
 
     resume_contexts, stale_contexts = capture_pdf_resume_contexts(
         context.paths.output_dir, task, [source.name for source in sources]
@@ -166,13 +203,37 @@ def validate_markdown_subagent(
     if protected_workspace_blocked:
         # A guard failure is never allowed to appear as a successful file checkpoint.
         valid_files.clear()
+    snapshot_changes = validation_snapshot_changes(
+        context.paths.output_dir, task, context.paths.source_dir, target_dir,
+        source_sha256, audit.target_sha256, semantic_reviews,
+        target_texts=normalized_targets,
+    ) if context.create_validated_copy else {}
+    for name, (changed_kind, reason) in snapshot_changes.items():
+        valid_files = [item for item in valid_files if item != name]
+        normalized_targets.pop(name, None)
+        if changed_kind == "semantic_sidecar":
+            action = "refresh_polish_semantic_review"
+        elif changed_kind == "target":
+            action = "revalidate_current_target"
+        else:
+            action = "refresh_context_and_revalidate"
+        finding = {
+            "file": name,
+            "kind": "validation_snapshot_changed",
+            "action": action,
+            "reason": reason,
+        }
+        invalid.append(finding)
+        retry_required.append(dict(finding))
+        if name not in retry_required_files:
+            retry_required_files.append(name)
     invalid_names = {str(item.get("file")) for item in invalid if item.get("file")}
     target_hashes = stage_normalized_and_validated_targets(
         context, normalized_targets, sources, invalid_names, set(review_required_files),
         missing=missing, invalid=invalid, safety_blocked=safety_blocked,
         review_required=review_required,
         protected_workspace_blocked=bool(protected_workspace_blocked),
-        hard_blocked_names=dynamic_blocked_names,
+        hard_blocked_names=dynamic_blocked_names | semantic_blocked_names,
     )
     target_sha256.update(target_hashes)
 
@@ -192,6 +253,12 @@ def validate_markdown_subagent(
         "polish_toc_label_exemptions": polish_toc_label_exemptions,
         "polish_content_integrity": polish_content_integrity,
         "polish_structure_audits": polish_structure_audits,
+        "polish_footnote_semantic_reviews": semantic_reviews,
+        "polish_footnote_semantic_review_sha256": {
+            name: item.get("sidecar_sha256")
+            for name, item in semantic_reviews.items()
+            if isinstance(item, Mapping) and item.get("sidecar_sha256")
+        },
         "review_required": review_required,
         "review_required_files": review_required_files,
         "retry_required": retry_required,

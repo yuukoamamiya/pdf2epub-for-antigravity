@@ -274,10 +274,11 @@ def apply_footnote_normalization(
                     "page": int(block["page"]),
                     "source": str(block.get("source") or "primary"),
                     "block": int(block["block"]),
+                    "source_file": str(block.get("file") or ""),
                 }
                 for block in edit_plan.resolved_blocks
                 if isinstance(block, Mapping)
-                and str(block.get("key") or "") == str(note.get("key") or "")
+                and str(block.get("output_key") or "") == str(note.get("output_key") or note.get("key") or "")
                 and str(block.get("chapter_id") or chapter) == chapter
                 and str(block.get("page", "")).lstrip("-").isdigit()
                 and str(block.get("block", "")).lstrip("-").isdigit()

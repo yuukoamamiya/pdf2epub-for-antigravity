@@ -46,10 +46,14 @@ def _resolve_pdf_markdown_source(
     )
     ocr_dir = output_dir / "ocr_markdown"
     polished_available = _polished_stage_is_current(
-        output_dir, polished_dir, polish_input_dir
+        output_dir, polished_dir, polish_input_dir, config=config
     )
 
     if requested_stage == "polished":
+        if not polished_available:
+            raise ValueError(
+                "translation.source_stage: polished requires a current polish validation receipt; run polish-validate"
+            )
         return polished_dir, "polished"
     if requested_stage == "ocr":
         return ocr_dir, "ocr"
@@ -118,6 +122,9 @@ def _polished_stage_is_current(
     output_dir: Path,
     polished_dir: Path,
     ocr_dir: Path,
+    *,
+    config: dict | None = None,
+    config_path: Path | None = None,
 ) -> bool:
     """Reject a polished stage left behind after OCR/refine inputs changed."""
     if not polished_dir.is_dir() or not any(polished_dir.glob("*.md")):
@@ -130,6 +137,9 @@ def _polished_stage_is_current(
         ocr_dir,
         polished_dir,
         task="polish",
+        output_dir=output_dir,
+        config=config,
+        config_path=config_path,
     )
 
 

@@ -165,16 +165,18 @@ prompt 使用“本次 hand-off 使用的同一配置”措辞，不编造路径
 只审计内存中的规范化候选，不写回目标 Markdown；它也不清理临时文件、不写 partial ledger、
 验证报告或 checkpoint。formal 校验才应用规范化；写入后重新计算目标 SHA-256，并以实际落盘
 内容写入 validated 副本和 checkpoint。
-Markdown validator schema 5 使版本升级前的全量 receipts 和逐文件 ledgers 失效。保留已有目标时，
-重新运行对应的正式 `polish-validate` / `translate-validate` 建立当前记录；单文件 ledger 需按文件
-重新校验。只有新报告列出 pending/invalid 或源上下文确实变化时才重新派发 worker。该规则更新本身
-不要求重跑 OCR。
+PDF translate 使用 Markdown validator schema 5，polish 使用 schema 6。各自的版本升级会使旧 receipt 和逐文件 ledger 失效。
+保留已有目标时，旧 translate 目标可由正式 `translate-validate` 重新验收；单文件 ledger 需按文件重新校验。
+旧 polish 目标要先运行 `polish --resume`，交 worker 完成当前脚注语义检查并写入 sidecar，再运行正式
+`polish-validate` 建立 receipt 和 validated 副本。旧目标可作为复核输入保留。只有新报告列出 pending/invalid
+或源上下文确实变化时才重新润色。规则升级本身不要求重跑 OCR。
 对于旧 TOC projection，先运行一次 `translate --resume` 刷新 manifest/context，但不要按这次准备输出
 立即派发 pending；schema 3 的旧验证 receipt 本来就不会被复用，第一次可能把现有目标都标成 pending。
 然后先运行 `translate-validate` 校验现有译文并建立 schema 5 receipt，再运行第二次
 `translate --resume`。这时 current receipt 与 `projection_version: 5` context 会让有效目标重新成为
 completed；只派发仍列为 pending/invalid 的 assignment，完成后再做全量 `translate-validate`。
-对旧 polish receipt，先直接校验现有文本；只把实际失败的目标交回 Subagent。
+旧 polish receipt 需先用 `polish --resume` 刷新 sidecar 合同并完成 worker 语义复核，再运行正式 `polish-validate`。
+当前有效的旧目标可在校验后进入 validated 副本；只把内容或 semantic review 实际失败的文件交回 Subagent。
 Markdown worker 的提示词还明确禁止修改 `pdf2epub/`、`tests/`、`docs/`、`glossaries/` 和项目
 配置。准备阶段会对这些受保护文件记录哈希；校验阶段发现 Worker 改动其中任何文件时，
 本轮会进入 `safety_blocked`，不会生成可恢复的内容 checkpoint，必须先由主 Agent 处理代码变更。
@@ -963,7 +965,7 @@ validation 收据一致，任何一项变化都会阻断 apply，apply 不会静
 没有歧义时不要求 ambiguity/decision 哈希。
 
 脚注决定、视觉校验与 apply 后还会运行只读结果审计，报告写入
-`footnote_result_audit.json`（schema 1）。审计检查正文残留数字上标或疑似编号定义、明确多分片
+`footnote_result_audit.json`（schema 2）。审计检查正文残留数字上标或疑似编号定义、明确多分片
 scope 内的编号缺口、可能未闭合/截断的注释定义，以及 apply 后的边界和物化完整性。数字上标、编号样式
 或标点只构成线索，审计不会替 Subagent 决定语义、移动注释或生成译文。Markdown 代码/注释、已识别的
 脚注定义及其续行不会作为普通正文残留标记扫描。编号范围依据 TOC/refinement unit 与章节映射，单文件章节和多分片章节均按实际顺序检查。下降序列仅在精确页面边界分隔记录或 `section_id` 明确变化时作为编号重启；缺少边界证据时生成 `scoped_numbering_reset_uncertain` 视觉复核，不跨重启推断缺号。
@@ -983,9 +985,63 @@ Subagent 将结果放入既有 `footnote_decisions.json` 的 `result_audit_revie
 `footnote-validate → footnote-apply`。相同任务第二次仍不确定时升级为 `human_review_required`，停止自动循环。
 不要以规则自动迁移上标、猜测注释归属或补译内容。
 
+### 混合 OCR 块的精确分段决定
+
+当一条 OCR block 同时包含正文与脚注时，Reviewer 可用该 block 的一条显式 `body` override 替换整块角色，
+再用 `segments` 指定其中需要移动的精确片段。下面的决定保留正文并移动编号注释。
+
+```json
+{
+  "page": 125,
+  "source": "primary",
+  "block": 8,
+  "role": "body",
+  "override": true,
+  "segments": [
+    {"role": "body", "text": "This sentence remains in the paragraph."},
+    {"role": "footnote_start", "key": "36", "marker_label": "36", "text": "36 Exact note text."}
+  ]
+}
+```
+
+`segments` 中的 `text` 必须是该候选 OCR block 中唯一出现的精确原文摘录；不同片段不能重叠。移动角色
+（`footnote_start`、`footnote_definition`、`footnote_continuation`）还必须有对应脚注 key；起始定义保留
+候选上的 printed marker label。validate 按源文位置规范化 segment 顺序，apply 只移走移动角色对应的精确片段，
+其余正文片段留在原位置。该 override 会替代同地址候选原有的自动角色，不能同时再提交一条整块脚注决定。
+摘录重复、重叠、marker 冲突或无法唯一映射到 refinement Markdown 时会失败关闭；对照页图缩小或修正摘录后，
+重新执行 `footnote-validate → footnote-apply`。apply 会重新生成 `footnote_normalized/`，不得直接编辑该派生目录或
+手工修改 checkpoint。
+
+### 页边界线索与精确物理页证据
+
+脚注结果审计的标点提示只在脚注定义末尾为逗号、冒号或分号，且 apply 的 `expected_notes` 能通过精确
+`candidate_refs` 找到该注释的来源页/block 时才考虑。只有该注释确实是来源物理页上的最后一条脚注、来源
+refinement unit 的末页与紧邻下一 part 的首页物理连续时，才会建立跨页视觉任务；单元页范围或归一化后注释
+被追加到的目标文件本身不能证明来源页。编号重启按不同 `output_key` 分开绑定，references 同时保留
+`source_file`、页、OCR 来源和 block。普通正文逗号、尾注模式、非页末脚注或缺少精确映射都不会因标点单独
+生成该视觉任务。明确关联的三页及以上续注链保留全链页和其中交错的新注候选，不按固定两页窗口截断；
+所有关联页图都进入同一个视觉 handoff。
+
+### Polish 语义问题回流
+
+Polish sidecar 中的 `issues[]` 只报告疑点，不决定脚注归属。`footnote-prepare` 依据当前 Polish manifest 的
+`source_dir`（通常为 `footnote_normalized/`）和 `target_dir` 校验 sidecar 的 source、target、context 哈希，再将
+精确 `source_excerpt` 映射到原始 refinement Markdown 和 primary OCR sidecar。Polished target excerpt 只作问题定位
+证据，不用来推断原文归属；secondary OCR 可以作为已有视觉证据，但不能代替 primary 来源映射。成功映射的任务
+会携带当前 primary sidecar block 哈希、source file、block 地址和图像清单哈希，进入现有
+`footnote-prepare → footnote-validate → footnote-apply` 决定链。需要改归属时按上一节给出精确 segments；apply
+重建 `footnote_normalized/` 后，旧 Polish semantic sidecar 会因源哈希过期，先运行 `polish --resume` 刷新受影响
+文件的 review，再运行正式 `polish-validate`。
+
+当前回流要求 source excerpt 在 Polish 输入、raw refinement Markdown 和一个 primary OCR block 中都能唯一定位。
+摘录跨多个 OCR block/page、重复出现或无法回映时，不会合并多个 block 或猜测归属；prepare 保留 stale/recovery
+提示并跳过该 issue 的视觉决定，不阻断其他当前任务。恢复时通过 `polish --resume` 让 Worker 提交一个仍能精确说明
+疑点、且唯一落在单个 primary block 内的连续 `source_excerpt`，随后重跑 `footnote-prepare`。如果原文确实跨 block，
+先按每个确切 OCR block 分别报告可定位的 issue；没有唯一映射时保持人工复核，不得手工伪造视觉地址或 checkpoint。
+
 `footnote_candidates.json`、`footnote_decisions.json` 和 `footnote_decision_validation.json`
 使用 prepare/decision schema 4；`endnote_definition_ambiguities.json`、其 decisions 与 validation
-使用独立 schema 2；`footnote_result_audit.json` 使用独立 schema 1，`footnote_normalization.json` 使用 schema 9，TOC 使用 schema 2。版本号彼此独立。
+使用独立 schema 2；`footnote_result_audit.json` 使用独立 schema 2，`footnote_normalization.json` 使用 schema 9，TOC 使用 schema 2。版本号彼此独立。
 prepare manifest 另以 SHA-256 绑定 compact `footnote_review_packet.json`；Reviewer 使用 packet，完整
 candidate report 留作审计/恢复。validation 写回决定不会重建 packet。packet 缺失或哈希不符时须重跑
 `footnote-prepare`，旧 handoff 不得静默加载。
@@ -1000,13 +1056,16 @@ manifest/prompt，并由 apply 重建 `footnote_normalized/` 与成功 checkpoin
 应在恢复前备份。归一化源变化可能
 使 polish、翻译或 EPUB 构建 checkpoint 过期；先查看 `status` 与 pending/invalid 报告，按门禁
 恢复，不要直接构建。仅合同升级本身不要求重跑 OCR；只有源页或证据实际过期时才回到 OCR。
+结果审计 version 1 的 normalization receipt 因 version 2 不再 current。保留原始 OCR 与原稿，运行
+`footnote-prepare`，处理新 manifest 的待复核任务，再运行 `footnote-validate` 和 `footnote-apply` 重建归一化派生稿。
+随后运行 `polish --resume` 刷新受影响单元的 semantic review，再正式 `polish-validate`；不手工改 receipt 哈希。
 
-PDF `polish`/`translate` 使用 Markdown validation schema 5，同时用于全量 receipt 和逐文件
-ledger；它使 有序标题保真规则升级前写入的 PDF 记录失效。OCR correction 和 HTML 翻译仍使用
-schema 3，不因这次规则变化失效。旧 PDF 报告不能支撑后续打包或 `--resume` 完成状态。若已存在有效的
-polish/translation 目标，只需重新运行相应的 `polish-validate` / `translate-validate` 建立当前
-校验记录；旧逐文件 ledger 需要按文件重新校验。只有校验报告列出 pending/invalid 或源上下文
-确实变化时，才把对应 assignment 交回 Subagent。归一化重建后先完成 polish 校验，再检查受影响
+PDF `translate` 使用 Markdown validation schema 5，`polish` 使用 schema 6，分别用于全量 receipt 和逐文件
+ledger。polish schema 6 还绑定脚注语义 sidecar 和双向 halo freshness，因此升级前写入的 polish 记录失效。OCR correction 和 HTML 翻译仍使用
+schema 3，不因这次规则变化失效。旧 PDF 报告不能支撑后续打包或 `--resume` 完成状态。若已有旧 polish 目标，
+先运行 `polish --resume` 生成新 semantic review assignment，worker 复核现有目标后再正式运行 `polish-validate`；
+translate 目标仍可直接运行 `translate-validate`。polish 只有通过当前 sidecar 验收后才写入 validated 副本，
+旧逐文件 ledger 需要按文件重新校验。只有校验报告列出 pending/invalid 或源上下文确实变化时，才把对应 assignment 交回 Subagent。归一化重建后先完成 polish 校验，再检查受影响
 的翻译 gate。规则升级本身不要求重新 OCR。
 
 EPUB 构建时，`pdf2epub/epub/footnotes/keys.py` 的 `display_footnote_key()` 负责把
@@ -1142,6 +1201,21 @@ Markdown 脚注定义的缩进续段保留在同一条目下；结构审计复�
 PDF 翻译、实体提取和打包都必须以当前且通过 `polish-validate` 的
 `polished_markdown/validated/` 为源稿；如果润色稿缺失、校验失败或与当前源稿不匹配，
 本地门禁会拒绝继续。
+
+polish handoff 按 refined unit 的显式 part mapping 提供相邻边界正文作为双向只读 halo。每侧上限为 256 token，
+前后合计上限为 512 token，并受当前文件剩余源文预算约束。优先投影完整 Markdown 块，超预算时回退到完整句或完整词片段并明确标为 context-only。裁剪片段不能决定段落边界或授权合并块。脚注定义与缩进续行会排除。
+worker 只能读取 scoped manifest 中 assigned 文件的 halo 投影。准备、校验和 resume 会绑定边界投影、邻片源哈希和相关
+part mapping；mapping 或邻片源内容变化后，正式校验会拒绝陈旧上下文，resume 只会让受影响单元回到 pending。
+
+脚注模式启用时，polish worker 为每个 assigned 文件写 schema 1 sidecar 到
+`polish_footnote_reviews/<stem>.json`。Sidecar 记录 `source_sha256`、`target_sha256`、`context_sha256`、
+`status`、`reviewed_all`、`reviewed_note_ids`、三类 coverage 和 issues。coverage 要求覆盖正文、脚注定义以及跨分片关系；
+没有脚注定义的文件仍要完成正文扫描。正式 `polish-validate` 会校验 sidecar 与当前内容和 context 的绑定，并更新
+receipt、文件 ledger 与 validated 副本。格式、缺失或 freshness 错误先刷新 polish handoff，不能手工改哈希。
+
+`status: issues` 的 sidecar finding 会携带精确源文和目标摘录。主 Agent 应先核对脚注 unit 与分配状态，再刷新
+`footnote-prepare` 的结果审计任务，交工作区 Subagent 进行视觉复核，随后运行 `footnote-validate` 和
+`footnote-apply`。finding 本身不改变脚注归属。脚注模式为 `disabled` 时不要求 polish semantic sidecar。
 
 polish handoff 会附带源语言 TOC 标签保护清单。唯一出现且匹配 TOC 的源行被删除时，
 校验会生成 `polish_unique_toc_label_removed` 的 `review_required`；重复页眉只有在

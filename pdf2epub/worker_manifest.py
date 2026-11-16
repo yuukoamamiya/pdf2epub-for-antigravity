@@ -96,12 +96,34 @@ def _worker_manifest_projection(
         "toc_heading_contexts",
         "repair_candidates",
         "preceding_context",
+        "succeeding_context",
+        "boundary_context_sha256",
+        "boundary_context_sources",
     ):
         value = manifest.get(key)
         if isinstance(value, Mapping):
             subset = {name: value[name] for name in files if name in value}
             if subset:
                 projected[key] = subset
+
+    if "boundary_context_sha256" in projected:
+        mapping_source = manifest.get("boundary_context_mapping_source")
+        if isinstance(mapping_source, str):
+            projected["boundary_context_mapping_source"] = mapping_source
+
+    footnote_semantics = manifest.get("footnote_semantics")
+    if isinstance(footnote_semantics, Mapping):
+        semantic_files = footnote_semantics.get("files")
+        if isinstance(semantic_files, Mapping):
+            subset = {name: semantic_files[name] for name in files if name in semantic_files}
+            if subset:
+                projected["footnote_semantics"] = {
+                    key: value for key, value in footnote_semantics.items() if key != "files"
+                } | {"files": subset}
+        else:
+            subset = {name: footnote_semantics[name] for name in files if name in footnote_semantics}
+            if subset:
+                projected["footnote_semantics"] = subset
 
     continuation = manifest.get("continuation_files")
     if isinstance(continuation, Mapping):

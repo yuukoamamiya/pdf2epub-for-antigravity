@@ -33,7 +33,10 @@ def _validate_pdf_source_stage(
             from pdf2epub.commands.sources import _polished_stage_is_current
 
             polished_dir = output_dir / "polished_markdown" / "validated"
-            if _polished_stage_is_current(output_dir, polished_dir, ocr_dir):
+            if _polished_stage_is_current(
+                output_dir, polished_dir, ocr_dir,
+                config_path=config_path,
+            ):
                 if config_path is not None and validation_receipt_is_current(
                     output_dir / "polish_validation.json",
                     ocr_dir,

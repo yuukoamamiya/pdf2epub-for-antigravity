@@ -16,7 +16,7 @@ from pdf2epub.commands.registry import register_command_parsers
 from pdf2epub.commands.runtime import load_book_context
 from pdf2epub.refine.footnote_status import FOOTNOTE_NORMALIZATION_SCHEMA_VERSION
 from pdf2epub.refine.footnote_contracts import FOOTNOTE_PREPARE_SCHEMA_VERSION
-from pdf2epub.workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION, sha256_file
+from pdf2epub.workflow_contracts import markdown_validation_schema_version, sha256_file
 
 
 def test_command_package_exposes_workflow_modules_without_eager_exports():
@@ -374,14 +374,12 @@ def test_polish_revalidation_replaces_old_schema_receipt(
     monkeypatch.setattr(markdown_commands, "load_pdf_file_roles", lambda output: {})
     monkeypatch.setattr(markdown_commands, "_load_pdf_toc_titles", lambda output: [])
     monkeypatch.setattr(markdown_commands, "_load_pdf_continuation_toc_titles", lambda output: {})
-    from pdf2epub.workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION, sha256_file
-
     report_path = output_dir / "polish_validation.json"
-    report_path.write_text(json.dumps({"schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION - 1}), encoding="utf-8")
+    report_path.write_text(json.dumps({"schema_version": markdown_validation_schema_version("polish") - 1}), encoding="utf-8")
 
     def validate(*args, **kwargs):
         return {
-            "schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION,
+            "schema_version": markdown_validation_schema_version("polish"),
             "task": "polish", "scope": "full", "all_passed": True,
             "valid_files": ["unit.md"], "files_checked": ["unit.md"],
             "source_sha256": {"unit.md": sha256_file(source_dir / "unit.md")},
@@ -397,9 +395,9 @@ def test_polish_revalidation_replaces_old_schema_receipt(
         SimpleNamespace(file=None, check_only=False, allow_review_warnings=False), "polish"
     ) == 0
     stored = json.loads(report_path.read_text(encoding="utf-8"))
-    assert stored["schema_version"] == MARKDOWN_VALIDATION_SCHEMA_VERSION
+    assert stored["schema_version"] == markdown_validation_schema_version("polish")
     assert validation_receipt_is_current(
-        report_path, source_dir, target_dir, task="polish"
+        report_path, source_dir, target_dir, task="polish", config_path=config_path
     )
 
 
@@ -413,14 +411,18 @@ def test_pdf_source_stage_selects_only_current_polished_output(tmp_path: Path):
     source.write_text("source", encoding="utf-8")
 
     assert _resolve_pdf_markdown_source(
-        tmp_path, {"translation": {"source_stage": "auto"}}
+        tmp_path, {"translation": {"source_stage": "auto"}, "footnotes": {"mode": "disabled"}}
     ) == (ocr_dir, "ocr")
+    with pytest.raises(ValueError, match="requires a current polish validation receipt"):
+        _resolve_pdf_markdown_source(
+            tmp_path, {"translation": {"source_stage": "polished"}, "footnotes": {"mode": "auto"}}
+        )
 
     polished.write_text("polished", encoding="utf-8")
     (tmp_path / "polish_validation.json").write_text(
         json.dumps(
             {
-                "schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION,
+                "schema_version": markdown_validation_schema_version("polish"),
                 "task": "polish",
                 "scope": "full",
                 "all_passed": True,
@@ -431,7 +433,7 @@ def test_pdf_source_stage_selects_only_current_polished_output(tmp_path: Path):
         encoding="utf-8",
     )
     assert _resolve_pdf_markdown_source(
-        tmp_path, {"translation": {"source_stage": "auto"}}
+        tmp_path, {"translation": {"source_stage": "auto"}, "footnotes": {"mode": "disabled"}}
     ) == (polished_dir, "polished")
 
 

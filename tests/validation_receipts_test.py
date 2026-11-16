@@ -10,7 +10,10 @@ from pdf2epub.validation_receipts import (
 from pdf2epub.commands.markdown import _sync_subagent_manifest_progress
 from pdf2epub.commands.markdown_context import _load_pdf_continuation_files
 from pdf2epub.markdown_handoff import prepare_markdown_subagent
-from pdf2epub.workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION
+from pdf2epub.workflow_contracts import (
+    MARKDOWN_VALIDATION_SCHEMA_VERSION,
+    markdown_validation_schema_version,
+)
 
 
 def _pages_fingerprint(pages_dir: Path) -> str:
@@ -110,7 +113,7 @@ def test_receipt_from_old_superscript_policy_is_not_current(tmp_path: Path):
     (target_dir / "unit.md").write_text("Citations: 1856<sup>2</sup>, p. 4.", encoding="utf-8")
     receipt = tmp_path / "polish_validation.json"
     report = {
-        "schema_version": MARKDOWN_VALIDATION_SCHEMA_VERSION - 1,
+        "schema_version": markdown_validation_schema_version("polish") - 1,
         "task": "polish",
         "scope": "full",
         "all_passed": True,
@@ -123,10 +126,11 @@ def test_receipt_from_old_superscript_policy_is_not_current(tmp_path: Path):
         receipt, source_dir, target_dir, task="polish"
     )
 
-    # A revalidation receipt using the current contract restores currentness.
-    report["schema_version"] = MARKDOWN_VALIDATION_SCHEMA_VERSION
+    # A current hash/schema receipt without a semantic sidecar contract cannot
+    # attest the required Polish footnote review.
+    report["schema_version"] = markdown_validation_schema_version("polish")
     receipt.write_text(json.dumps(report), encoding="utf-8")
-    assert validation_receipt_is_current(
+    assert not validation_receipt_is_current(
         receipt, source_dir, target_dir, task="polish"
     )
 
