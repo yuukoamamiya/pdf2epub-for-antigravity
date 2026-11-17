@@ -56,9 +56,10 @@ note pool，因此不需要为了注释作用域把目录拍平。
 首次使用时，按输入类型从模板创建配置：PDF 将 [config.yaml.example](config.yaml.example) 复制为 `config.yaml`；
 EPUB、MOBI、AZW3 将 [config_epub.yaml.example](config_epub.yaml.example) 复制为 `config_epub.yaml`。
 已有配置请直接编辑并保留现有设置。
-填写书名、输入文件、源语言和目标语言；处理 PDF 时还要配置 OCR 服务。未配置模型时，翻译任务
-默认推荐 `gemini-4-hydrogen`，其他 Subagent 任务默认推荐 `inherit`（继承主会话已验证的模型）；
-可在配置中为不同任务指定覆盖值。
+填写书名、输入文件、源语言和目标语言；处理 PDF 时还要配置 OCR 服务。模板为翻译配置
+`gemini-4-hydrogen`，TOC/结构判断和脚注准备配置 `gemini-4-hydrogen`，常规润色、实体初筛和
+简单整页插图判断配置 `gemini-3.8-flash`。复杂脚注、多栏或段落边界润色可在该书配置中将
+`task_models.polish` 设为 `gemini-4-hydrogen`，依据是操作员确认的书页结构证据。
 
 ### 在 Antigravity 中开始
 

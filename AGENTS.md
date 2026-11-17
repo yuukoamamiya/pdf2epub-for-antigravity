@@ -107,11 +107,12 @@ footnotes:
   mode: auto
 ```
 
-`subagent.models` 未显式配置时，翻译任务默认推荐 `gemini-4-hydrogen`，其他任务默认推荐
-`inherit`；翻译任务按
-`task_models[task]` → `models.translation` → `models.default` 回退，其他任务按
-`task_models[task]` → `models.default` 回退。不要依赖硬编码模型名，配额紧张时优先继承
-主会话已验证的模型。
+模型推荐按 `task_models[task]` → `models[task]` → 通用模型配置回退；翻译任务的通用顺序为
+`models.translation` → `models.default`，其他任务为 `models.default`。配置均未命中时，翻译默认
+推荐 `gemini-4-hydrogen`；TOC/结构判断 `refine` 和 `footnote-prepare` 默认推荐
+`gemini-4-hydrogen`，常规 `polish`、`extract-entities` 和 `illustration-prepare` 默认推荐
+`gemini-3.8-flash`，其余任务推荐 `inherit`。复杂脚注、多栏或段落边界等润色任务，由操作员依据
+结构证据在该书配置中显式设置 `task_models.polish: gemini-4-hydrogen`。
 
 新建或复制配置时应显式保留 `footnotes.mode: auto`。`auto` 根据 TOC 结构判断处理方式；只有确认该书是集中尾注而非页底脚注时，才可考虑 `disabled`，其他情况或判断不确定时均使用 `auto`。确认存在尾注本身不代表应禁用：通常让 `auto` 将其判为 `endnotes_only`。
 

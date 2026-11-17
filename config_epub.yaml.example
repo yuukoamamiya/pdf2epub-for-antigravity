@@ -17,9 +17,10 @@ translation:
   #     id: german-classical-philosophy
 
 # Antigravity Subagent 模型（只作为 IDE 子 Agent 的任务提示，不调用任何 API）
-# 翻译默认使用 gemini-4-hydrogen；其他任务默认使用 inherit，继承主会话已验证的模型。
-# 翻译任务依次读取 task_models -> models.translation -> models.default；
-# 其他任务依次读取 task_models -> models.default。
+# 翻译、TOC/结构判断和脚注准备使用 gemini-4-hydrogen；常规润色、实体初筛和简单整页插图判断
+# 使用 gemini-3.8-flash。复杂脚注、多栏或段落边界润色由操作员根据结构证据设置单书覆盖。
+# 翻译优先级：task_models -> models[task] -> models.translation -> models.default。
+# 其他任务优先级：task_models -> models[task] -> models.default。
 subagent:
   models:
     translation: gemini-4-hydrogen
@@ -35,9 +36,12 @@ subagent:
     max_chapters_per_worker: 3
     # 可选：允许极短特殊单元彼此共用 worker；特殊单元仍不与普通章节混排。
     pack_tiny_special_units: false
-  # 可选的单任务覆盖：
-  # task_models:
-  #   translate-html: gemini-4-hydrogen
+  task_models:
+    refine: gemini-4-hydrogen
+    footnote-prepare: gemini-4-hydrogen
+    polish: gemini-3.8-flash
+    extract-entities: gemini-3.8-flash
+    illustration-prepare: gemini-3.8-flash
 
 # EPUB 构建与校验选项
 html_translation:

@@ -98,7 +98,9 @@ def test_illustration_decision_is_hash_bound_and_applied(tmp_path: Path):
     _write_candidate_fixture(tmp_path)
     paths = prepare_illustration_subagent(tmp_path, book_title="Book", config={})
     report = json.loads(paths["report"].read_text(encoding="utf-8"))
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
     assert report["status"] == "pending_review"
+    assert manifest["model"] == "gemini-3.8-flash"
     assert report["candidate_pages"]
     assert report["candidate_pages"][0]["previous_page"] == 1
     assert report["candidate_pages"][0]["next_page"] == 3
@@ -205,9 +207,22 @@ def test_no_candidate_does_not_require_subagent(tmp_path: Path):
     pages = tmp_path / "pages"
     pages.mkdir()
     (pages / "page_001.md").write_text("Ordinary body text.", encoding="utf-8")
-    paths = prepare_illustration_subagent(tmp_path, book_title="Book", config={})
+    config = {
+        "subagent": {
+            "models": {"default": "default-model"},
+            "task_models": {
+                "refine": "directory-model",
+                "illustration-prepare": "custom-illustration",
+            },
+        }
+    }
+    paths = prepare_illustration_subagent(tmp_path, book_title="Book", config=config)
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
     assert manifest["status"] == "no_review_required"
+    assert manifest["model"] == "custom-illustration"
+    assert "Recommended model: `custom-illustration`" in paths["prompt"].read_text(
+        encoding="utf-8"
+    )
     assert validate_illustration_decisions(tmp_path)["valid"] is True
     assert apply_illustration_bindings(tmp_path)["bindings"] == []
 

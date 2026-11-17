@@ -59,8 +59,12 @@ def test_resolve_subagent_model_uses_translation_and_default_defaults():
     assert DEFAULT_SUBAGENT_MODEL == "inherit"
     assert resolve_subagent_model({}, "translate") == DEFAULT_TRANSLATION_MODEL
     assert resolve_subagent_model({}, "translate-html") == DEFAULT_TRANSLATION_MODEL
-    assert resolve_subagent_model({}, "refine") == DEFAULT_SUBAGENT_MODEL
-    assert resolve_subagent_model({}, "polish") == DEFAULT_SUBAGENT_MODEL
+    assert resolve_subagent_model({}, "refine") == "gemini-4-hydrogen"
+    assert resolve_subagent_model({}, "footnote-prepare") == "gemini-4-hydrogen"
+    assert resolve_subagent_model({}, "polish") == "gemini-3.8-flash"
+    assert resolve_subagent_model({}, "extract-entities") == "gemini-3.8-flash"
+    assert resolve_subagent_model({}, "illustration-prepare") == "gemini-3.8-flash"
+    assert resolve_subagent_model({}, "unknown-task") == DEFAULT_SUBAGENT_MODEL
 
 
 def test_metadata_translation_prompt_defaults_to_hydrogen():
@@ -103,6 +107,20 @@ def test_resolve_subagent_model_keeps_explicit_translation_override():
     assert resolve_subagent_model(config, "translate") == "pro-custom"
     assert resolve_subagent_model(config, "translate-html") == "task-translation-custom"
     assert resolve_subagent_model(config, "refine") == "flash-custom"
+
+
+def test_task_defaults_follow_all_explicit_configuration_layers():
+    config = {
+        "subagent": {
+            "models": {"polish": "model-task", "default": "model-default"},
+            "task_models": {"polish": "task-model"},
+        }
+    }
+    assert resolve_subagent_model(config, "polish") == "task-model"
+    del config["subagent"]["task_models"]["polish"]
+    assert resolve_subagent_model(config, "polish") == "model-task"
+    del config["subagent"]["models"]["polish"]
+    assert resolve_subagent_model(config, "polish") == "model-default"
 
 
 def test_detect_refusal_flags_model_text_but_allows_matching_source_dialogue():

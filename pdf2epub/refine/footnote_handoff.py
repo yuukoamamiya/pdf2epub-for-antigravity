@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from ..workflow_contracts import atomic_write_json, atomic_write_text, sha256_file
+from ..subagent_runtime import resolve_subagent_model
 from ..footnote_markdown import collect_footnote_definition_blocks
 from .endnote_review import (
     AMBIGUITIES_FILENAME,
@@ -131,6 +132,7 @@ def prepare_footnote_subagent(
         auto_accept=auto_accept,
         native_max_font_ratio=native_max_font_ratio,
     )
+    model = resolve_subagent_model(config, "footnote-prepare")
     # Re-run the deterministic result audit on every prepare. Existing review
     # resolutions are reusable only for the exact task and source block hash.
     try:
@@ -650,6 +652,7 @@ def prepare_footnote_subagent(
     manifest = {
         "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
         "task": "footnote-prepare",
+        "model": model,
         "book_title": book_title,
         "source_kind": report["source_kind"],
         "ocr_evidence_mode": report["ocr_evidence_mode"],
@@ -883,6 +886,7 @@ def prepare_footnote_subagent(
                 "List segments in physical reading order. The apply stage moves only exact footnote segments and leaves body text at its source position; it rejects duplicate, overlapping, stale, or non-unique excerpts. "
                 "Do not use the polished target excerpt to infer source ownership.\n"
             )
+    prompt += f"\nRecommended model: `{model}`.\n"
     prompt_path = output_dir / "footnote_subagent_prompt.md"
     atomic_write_text(prompt_path, prompt)
     return {

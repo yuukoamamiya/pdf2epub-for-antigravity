@@ -41,9 +41,10 @@ translation:
 #   publisher: "Publisher Name"
 
 # Antigravity Subagent 模型（只作为 IDE 子 Agent 的任务提示，不调用任何 API）
-# 翻译默认使用 gemini-4-hydrogen；其他任务默认使用 inherit，继承主会话已验证的模型。
-# 翻译任务依次读取 task_models -> models.translation -> models.default；
-# 其他任务依次读取 task_models -> models.default。
+# 翻译、TOC/结构判断和脚注准备使用 gemini-4-hydrogen；常规润色、实体初筛和简单整页插图判断
+# 使用 gemini-3.8-flash。复杂脚注、多栏或段落边界润色由操作员根据结构证据设置单书覆盖。
+# 翻译优先级：task_models -> models[task] -> models.translation -> models.default。
+# 其他任务优先级：task_models -> models[task] -> models.default。
 subagent:
   models:
     translation: gemini-4-hydrogen
@@ -62,9 +63,12 @@ subagent:
     # 可选：允许极短特殊单元（toc/notes/bibliography 等）彼此共用 worker；
     # 特殊单元仍绝不与普通章节混排。默认 false。
     pack_tiny_special_units: false
-  # 可选：按任务覆盖上面的默认值，例如 refine / polish / translate-html。
-  # task_models:
-  #   refine: gemini-3.6-flash
+  task_models:
+    refine: gemini-4-hydrogen
+    footnote-prepare: gemini-4-hydrogen
+    polish: gemini-3.8-flash
+    extract-entities: gemini-3.8-flash
+    illustration-prepare: gemini-3.8-flash
 
 # 本地凭据目录（整个目录已加入 .gitignore；不要把密钥写入 YAML）
 credentials:

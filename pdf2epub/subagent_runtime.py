@@ -50,6 +50,13 @@ from .worker_glossary_context import build_worker_glossary_context
 
 DEFAULT_TRANSLATION_MODEL = "gemini-4-hydrogen"
 DEFAULT_SUBAGENT_MODEL = "inherit"
+DEFAULT_TASK_MODELS = {
+    "refine": "gemini-4-hydrogen",
+    "footnote-prepare": "gemini-4-hydrogen",
+    "polish": "gemini-3.8-flash",
+    "extract-entities": "gemini-3.8-flash",
+    "illustration-prepare": "gemini-3.8-flash",
+}
 
 _TRANSLATION_TASKS = {
     "translate",
@@ -70,9 +77,8 @@ def resolve_subagent_model(
     task overrides are supported for exceptional cases.  Translation tasks
     prefer ``models.translation`` but fall back to ``models.default`` so a
     single configured model applies to every task; other tasks use
-    ``models.default``.  When nothing is configured, translation tasks
-    recommend ``gemini-4-hydrogen`` and other tasks recommend ``inherit`` so
-    the operator can reuse the main session's verified model.
+    ``models.default``. Known non-translation tasks use a task-specific built-in
+    recommendation only when no configuration value applies.
     """
     subagent = config.get("subagent", {}) if isinstance(config, Mapping) else {}
     if not isinstance(subagent, Mapping):
@@ -94,7 +100,9 @@ def resolve_subagent_model(
         if isinstance(value, str) and value.strip():
             return value.strip()
 
-    return DEFAULT_TRANSLATION_MODEL if is_translation else DEFAULT_SUBAGENT_MODEL
+    if is_translation:
+        return DEFAULT_TRANSLATION_MODEL
+    return DEFAULT_TASK_MODELS.get(task, DEFAULT_SUBAGENT_MODEL)
 
 def write_batch_handoffs(
     output_dir: Path,

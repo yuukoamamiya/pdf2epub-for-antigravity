@@ -900,12 +900,19 @@ def test_native_footnote_decision_reuses_existing_normalization_pipeline(
         encoding="utf-8",
     )
 
-    config = {"ocr": {"secondary": {"enabled": True, "backend": "vision"}}}
+    config = {
+        "ocr": {"secondary": {"enabled": True, "backend": "vision"}},
+        "subagent": {"task_models": {"footnote-prepare": "custom-footnote"}},
+    }
     manifest_paths = prepare_footnote_subagent(
         tmp_path, book_title="Native Test", config=config
     )
     manifest = json.loads(manifest_paths["manifest"].read_text(encoding="utf-8"))
     assert manifest["status"] == "no_subagent_review_required"
+    assert manifest["model"] == "custom-footnote"
+    assert "Recommended model: `custom-footnote`" in manifest_paths["prompt"].read_text(
+        encoding="utf-8"
+    )
 
     validation = validate_footnote_decisions(tmp_path, config=config)
     assert validation["valid"] is True
@@ -2105,6 +2112,14 @@ def test_endnotes_only_mode_preserves_source_without_page_footnote_candidates(
     report = prepare_footnote_candidates(tmp_path, config=config)
     assert report["footnote_mode"] == "endnotes_only"
     assert report["pages"] == []
+    handoff = prepare_footnote_subagent(
+        tmp_path, book_title="Endnotes", config=config
+    )
+    manifest = json.loads(handoff["manifest"].read_text(encoding="utf-8"))
+    assert manifest["model"] == "gemini-4-hydrogen"
+    assert "Recommended model: `gemini-4-hydrogen`" in handoff["prompt"].read_text(
+        encoding="utf-8"
+    )
 
     validation = validate_footnote_decisions(tmp_path, config=config)
     assert validation["valid"] is True
@@ -2213,12 +2228,14 @@ def test_prepare_subagent_writes_compact_contract(tmp_path: Path):
     prompt = paths["prompt"].read_text(encoding="utf-8")
 
     assert manifest["task"] == "footnote-prepare"
+    assert manifest["model"] == "gemini-4-hydrogen"
     assert manifest["review_pages"] == [1]
     assert manifest["candidate_report"] == "footnote_candidates.json"
     assert "Do not reread or rewrite the whole book" in prompt
     assert "open the full-page `visual` PNG first" in prompt
     assert "never use the crop alone" in prompt
     assert "footnote_decisions.json" in prompt
+    assert "Recommended model: `gemini-4-hydrogen`" in prompt
 
 
 def test_validated_decisions_are_projected_to_sparse_unit_context(tmp_path: Path):

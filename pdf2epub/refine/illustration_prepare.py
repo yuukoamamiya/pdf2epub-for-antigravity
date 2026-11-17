@@ -476,7 +476,7 @@ def prepare_illustration_subagent(
     report_path = _write_report(output_dir, report)
     report_hash = report["report_sha256"]
 
-    model = resolve_subagent_model(config, "refine")
+    model = resolve_subagent_model(config, "illustration-prepare")
     manifest = {
         "schema_version": ILLUSTRATION_PREPARE_SCHEMA_VERSION,
         "task": "illustration-prepare",

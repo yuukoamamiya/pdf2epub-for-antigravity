@@ -449,7 +449,10 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
 - `subagent_runtime.py`：保留模型选择、handoff 生命周期与旧调用兼容入口。`resolve_subagent_model`
   对翻译任务按 `task_models[task]` → `models[task]` → `models.translation` → `models.default`
   回退，其他任务按 `task_models[task]` → `models[task]` → `models.default` 回退；都未配置时
-  翻译返回 `gemini-4-hydrogen`，其他任务返回 `inherit`。生产装箱、manifest 投影、提示词渲染和术语
+  翻译返回 `gemini-4-hydrogen`，`refine`/`footnote-prepare` 返回 `gemini-4-hydrogen`，
+  `polish`/`extract-entities`/`illustration-prepare` 返回 `gemini-3.8-flash`，其他任务返回
+  `inherit`。复杂润色由操作员依据已确认的书页结构证据，通过单书 `task_models.polish` 覆盖。
+  生产装箱、manifest 投影、提示词渲染和术语
   上下文各由下列窄服务拥有。它只为实际旧调用重导出必要 helper。
 - `worker_grouping.py`：纯 worker 分组和章节装箱；输入是父 manifest/queue 与额度，不读写文件。
 - `worker_manifest.py`：把一个 worker assignment 投影成最小 scoped manifest，不读取工作流状态。
