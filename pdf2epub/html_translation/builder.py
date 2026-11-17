@@ -18,6 +18,7 @@ from .epub_parser import EPUBParser, EPUBResourceNotFoundError
 from .compressed_cache import CompressedExtractionCache
 from .unit_files import PART_FILE_RE
 from pdf2epub.document_roles import infer_translation_file_role, infer_translation_file_role_with_reason
+from pdf2epub.subagent_runtime import DEFAULT_TRANSLATION_MODEL
 
 
 from .build_contracts import (
@@ -461,7 +462,7 @@ class HTMLEpubPipeline:
 
 
     @staticmethod
-    def _metadata_translation_prompt(source_filename: str, model: str = "gemini-3.1-pro-preview") -> str:
+    def _metadata_translation_prompt(source_filename: str, model: str = DEFAULT_TRANSLATION_MODEL) -> str:
         from .metadata_preparation import MetadataTranslationPreparer
         return MetadataTranslationPreparer._metadata_translation_prompt(source_filename, model)
 

@@ -55,10 +55,23 @@ from pdf2epub.commands.toc import (
 
 
 def test_resolve_subagent_model_uses_translation_and_default_defaults():
+    assert DEFAULT_TRANSLATION_MODEL == "gemini-4-hydrogen"
+    assert DEFAULT_SUBAGENT_MODEL == "inherit"
     assert resolve_subagent_model({}, "translate") == DEFAULT_TRANSLATION_MODEL
     assert resolve_subagent_model({}, "translate-html") == DEFAULT_TRANSLATION_MODEL
     assert resolve_subagent_model({}, "refine") == DEFAULT_SUBAGENT_MODEL
     assert resolve_subagent_model({}, "polish") == DEFAULT_SUBAGENT_MODEL
+
+
+def test_metadata_translation_prompt_defaults_to_hydrogen():
+    from pdf2epub.html_translation.metadata_preparation import MetadataTranslationPreparer
+
+    prompt = MetadataTranslationPreparer._metadata_translation_prompt("metadata.json")
+    assert "Recommended Antigravity model: `gemini-4-hydrogen`" in prompt
+    assert "Recommended Antigravity model: `gemini-3.1-pro-preview`" not in prompt
+
+    compatibility_prompt = HTMLEpubPipeline._metadata_translation_prompt("metadata.json")
+    assert "Recommended Antigravity model: `gemini-4-hydrogen`" in compatibility_prompt
 
 
 def test_resolve_subagent_model_supports_configured_and_task_overrides():
@@ -84,9 +97,11 @@ def test_resolve_subagent_model_keeps_explicit_translation_override():
     config = {
         "subagent": {
             "models": {"translation": "pro-custom", "default": "flash-custom"},
+            "task_models": {"translate-html": "task-translation-custom"},
         }
     }
     assert resolve_subagent_model(config, "translate") == "pro-custom"
+    assert resolve_subagent_model(config, "translate-html") == "task-translation-custom"
     assert resolve_subagent_model(config, "refine") == "flash-custom"
 
 

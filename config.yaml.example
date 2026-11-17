@@ -41,12 +41,12 @@ translation:
 #   publisher: "Publisher Name"
 
 # Antigravity Subagent 模型（只作为 IDE 子 Agent 的任务提示，不调用任何 API）
-# 默认使用 inherit，让子 Agent 继承主会话已验证的模型；需要固定模型时再显式填写。
+# 翻译默认使用 gemini-4-hydrogen；其他任务默认使用 inherit，继承主会话已验证的模型。
 # 翻译任务依次读取 task_models -> models.translation -> models.default；
 # 其他任务依次读取 task_models -> models.default。
 subagent:
   models:
-    translation: inherit
+    translation: gemini-4-hydrogen
     default: inherit
   # Subagent 批处理建议；仅生成 manifest 和提示，不由 Python 自动调用模型。
   batching:

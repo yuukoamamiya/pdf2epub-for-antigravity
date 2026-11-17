@@ -78,7 +78,7 @@ subagent:
   #   refine: <configured task model>
 ```
 
-默认规则是：翻译任务依次读取 `task_models`、`models.translation`、`models.default`；其他任务依次读取 `task_models`、`models.default`。未配置时推荐值是 `inherit`，让 Antigravity 子 Agent 继承主会话已验证的模型；只有显式配置才写具体模型名。每个生成的 `*_subagent_manifest.json` 和提示词都会写出推荐模型，供 Antigravity 中的 Subagent 选择。这里是任务合同，不是 Python 对模型 API 的调用或强制切换。
+默认规则是：翻译任务依次读取 `task_models`、`models.translation`、`models.default`；其他任务依次读取 `task_models`、`models.default`。全部未配置时，翻译推荐 `gemini-4-hydrogen`，其他任务推荐 `inherit`（继承主会话已验证的模型）。显式配置仍可覆盖相应任务。每个生成的 `*_subagent_manifest.json` 和提示词都会写出推荐模型，供 Antigravity 中的 Subagent 选择。这里是任务合同，不是 Python 对模型 API 的调用或强制切换。
 
 ## 额度耗尽与断点续传
 

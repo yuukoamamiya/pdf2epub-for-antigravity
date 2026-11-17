@@ -65,7 +65,7 @@ Subagent 合同层
 ├── pdf_unit_roles.py                PDF 精修单元角色的只读投影
 ├── toc_translation_workflow.py      PDF TOC handoff、合并和校验
 ├── batching_service.py              公共批次配置、token 估算和文件批次规划
-├── subagent_runtime.py              模型回退（translation → default → inherit）、scoped worker handoff 和 dispatch 编排
+├── subagent_runtime.py              任务模型选择、scoped worker handoff 和 dispatch 编排
 ├── subagent_dispatch.py             assignment digest、原子 lease 和冲突检测
 └── subagent_safety.py               拒答/免责声明检测
 ```
@@ -449,7 +449,7 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
 - `subagent_runtime.py`：保留模型选择、handoff 生命周期与旧调用兼容入口。`resolve_subagent_model`
   对翻译任务按 `task_models[task]` → `models[task]` → `models.translation` → `models.default`
   回退，其他任务按 `task_models[task]` → `models[task]` → `models.default` 回退；都未配置时
-  返回 `inherit`，避免硬编码模型触发配额问题。生产装箱、manifest 投影、提示词渲染和术语
+  翻译返回 `gemini-4-hydrogen`，其他任务返回 `inherit`。生产装箱、manifest 投影、提示词渲染和术语
   上下文各由下列窄服务拥有。它只为实际旧调用重导出必要 helper。
 - `worker_grouping.py`：纯 worker 分组和章节装箱；输入是父 manifest/queue 与额度，不读写文件。
 - `worker_manifest.py`：把一个 worker assignment 投影成最小 scoped manifest，不读取工作流状态。

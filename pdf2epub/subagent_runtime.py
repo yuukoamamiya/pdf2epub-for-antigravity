@@ -48,7 +48,7 @@ from .worker_prompt import (
 )
 from .worker_glossary_context import build_worker_glossary_context
 
-DEFAULT_TRANSLATION_MODEL = "inherit"
+DEFAULT_TRANSLATION_MODEL = "gemini-4-hydrogen"
 DEFAULT_SUBAGENT_MODEL = "inherit"
 
 _TRANSLATION_TASKS = {
@@ -70,9 +70,9 @@ def resolve_subagent_model(
     task overrides are supported for exceptional cases.  Translation tasks
     prefer ``models.translation`` but fall back to ``models.default`` so a
     single configured model applies to every task; other tasks use
-    ``models.default``.  When nothing is configured the recommendation is
-    ``inherit`` so the operator can reuse the main session's verified model
-    instead of a hard-coded quota-sensitive model name.
+    ``models.default``.  When nothing is configured, translation tasks
+    recommend ``gemini-4-hydrogen`` and other tasks recommend ``inherit`` so
+    the operator can reuse the main session's verified model.
     """
     subagent = config.get("subagent", {}) if isinstance(config, Mapping) else {}
     if not isinstance(subagent, Mapping):

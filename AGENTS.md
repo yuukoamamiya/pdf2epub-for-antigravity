@@ -107,7 +107,8 @@ footnotes:
   mode: auto
 ```
 
-`subagent.models` 未显式配置时默认推荐 `inherit`；翻译任务按
+`subagent.models` 未显式配置时，翻译任务默认推荐 `gemini-4-hydrogen`，其他任务默认推荐
+`inherit`；翻译任务按
 `task_models[task]` → `models.translation` → `models.default` 回退，其他任务按
 `task_models[task]` → `models.default` 回退。不要依赖硬编码模型名，配额紧张时优先继承
 主会话已验证的模型。

@@ -10,7 +10,7 @@ from typing import Any, Mapping, Optional
 from loguru import logger
 
 from .metadata_values import sort_author_for_library, sort_title_for_library
-from pdf2epub.subagent_runtime import resolve_subagent_model
+from pdf2epub.subagent_runtime import DEFAULT_TRANSLATION_MODEL, resolve_subagent_model
 from pdf2epub.workflow_contracts import atomic_write_json
 
 
@@ -170,7 +170,7 @@ class MetadataTranslationPreparer:
         return source_path
 
     @staticmethod
-    def _metadata_translation_prompt(source_filename: str, model: str = "gemini-3.1-pro-preview") -> str:
+    def _metadata_translation_prompt(source_filename: str, model: str = DEFAULT_TRANSLATION_MODEL) -> str:
         """Return a concise, copyable subagent instruction."""
         return f"""# EPUB metadata translation
 
