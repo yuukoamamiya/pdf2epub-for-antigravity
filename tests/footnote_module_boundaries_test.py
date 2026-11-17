@@ -114,3 +114,27 @@ def test_old_compatibility_exports_are_removed():
         "prepare_footnote_subagent",
         "validate_footnote_decisions",
     }
+
+
+def test_source_snapshot_does_not_depend_on_status_or_coordinators():
+    imports = _module_imports("pdf2epub.refine.footnote_source")
+    assert "pdf2epub.refine.footnote_status" not in imports
+    assert not (imports & {
+        "pdf2epub.refine.footnote_prepare",
+        "pdf2epub.refine.footnote_handoff",
+        "pdf2epub.refine.footnote_validation",
+        "pdf2epub.refine.footnote_apply",
+    })
+
+
+def test_unit_context_api_is_separate_from_handoff():
+    from pdf2epub.refine import footnote_handoff
+
+    assert "pdf2epub.refine.footnote_handoff" not in _module_imports(
+        "pdf2epub.refine.footnote_unit_contexts"
+    )
+    assert "load_footnote_unit_contexts" not in vars(footnote_handoff)
+    assert "write_footnote_unit_contexts" not in vars(footnote_handoff)
+    assert set(__import__("pdf2epub.refine.footnote_unit_contexts", fromlist=["__all__"]).__all__) == {
+        "load_footnote_unit_contexts", "write_footnote_unit_contexts"
+    }

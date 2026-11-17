@@ -13,9 +13,11 @@ from pdf2epub.refine.footnote_contracts import FOOTNOTE_PREPARE_SCHEMA_VERSION
 from pdf2epub.refine.footnote_status import FOOTNOTE_NORMALIZATION_SCHEMA_VERSION
 from pdf2epub.refine.footnote_candidates import candidate_for_block
 from pdf2epub.refine.footnote_handoff import prepare_footnote_subagent
-from pdf2epub.refine.footnote_apply import (
+from pdf2epub.refine.footnote_apply_resolution import (
     _locate_block,
     _candidate_decisions,
+)
+from pdf2epub.refine.footnote_apply import (
     apply_footnote_normalization,
 )
 from pdf2epub.epub.footnotes import FootnoteManager
@@ -2239,6 +2241,10 @@ def test_validated_decisions_are_projected_to_sparse_unit_context(tmp_path: Path
                 ]
             }
         ),
+        encoding="utf-8",
+    )
+    (progress_dir / "chapter_1.md").write_text(
+        "The claim<sup>36</sup> is discussed.\n\n36 Possibly a footnote\n",
         encoding="utf-8",
     )
     prepare_footnote_subagent(tmp_path, book_title="Test Book")

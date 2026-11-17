@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from ..workflow_contracts import sha256_file
 from .footnote_matching import _load_json
+from .footnote_source import markdown_inventory
 from .footnote_options import (
     EFFECTIVE_FOOTNOTE_MODES,
     resolve_effective_footnote_mode,
@@ -22,73 +22,6 @@ from .footnote_validation_evidence import validate_candidate_evidence
 
 # Version 9 binds the normalization receipt to the post-apply result audit.
 FOOTNOTE_NORMALIZATION_SCHEMA_VERSION = 9
-_SAFE_FILENAME_RE = re.compile(r"^[^/\\]+\.md$")
-
-
-def markdown_inventory(directory: Path) -> dict[str, str]:
-    """Return the hash inventory used by normalization checkpoints."""
-    return {
-        path.name: sha256_file(path)
-        for path in sorted(Path(directory).glob("*.md"))
-        if path.is_file()
-    }
-
-
-def _safe_name(value: Any) -> str:
-    name = str(value or "")
-    if not _SAFE_FILENAME_RE.fullmatch(name):
-        raise ValueError(f"invalid Markdown unit filename: {name!r}")
-    return name
-
-
-def unit_records(output_dir: Path) -> list[dict[str, Any]]:
-    """Load refinement units and expand oversized units into ordered parts."""
-    progress = _load_json(
-        output_dir / "ocr_markdown" / "tree_progress.json",
-        "ocr_markdown/tree_progress.json",
-    )
-    records: list[dict[str, Any]] = []
-    for unit_order, unit in enumerate(progress.get("units", []) or []):
-        if not isinstance(unit, Mapping):
-            continue
-        page_range = unit.get("page_range")
-        if not isinstance(page_range, list) or len(page_range) != 2:
-            raise ValueError("tree_progress unit has an invalid page_range")
-        try:
-            start_page, end_page = int(page_range[0]), int(page_range[1])
-        except (TypeError, ValueError) as exc:
-            raise ValueError("tree_progress unit has a non-integer page_range") from exc
-        index_path = unit.get("index_path")
-        unit_id = str(unit.get("unit_id") or "").strip()
-        if unit_id:
-            chapter_id = f"toc-unit:{unit_id}"
-        elif isinstance(index_path, list) and index_path:
-            path_key = ".".join(str(value) for value in index_path)
-            chapter_id = f"toc-path:{path_key}"
-        else:
-            chapter_id = f"unit:{unit.get('file')}"
-        names = unit.get("part_files") or [unit.get("file")]
-        part_count = len(names)
-        for part_index, raw_name in enumerate(names, 1):
-            name = _safe_name(raw_name)
-            records.append(
-                {
-                    "name": name,
-                    "start_page": start_page,
-                    "end_page": end_page,
-                    "chapter_id": chapter_id,
-                    "unit_order": unit_order,
-                    "part_index": part_index,
-                    "part_count": part_count,
-                    "type": str(unit.get("type") or "").strip().lower(),
-                    "index_path": index_path,
-                }
-            )
-    if not records:
-        raise ValueError("tree_progress.json contains no Markdown units")
-    return records
-
-
 def footnote_normalization_status(
     output_dir: Path,
     config: Optional[Mapping[str, Any]] = None,
@@ -420,6 +353,4 @@ __all__ = [
     "FOOTNOTE_NORMALIZATION_SCHEMA_VERSION",
     "footnote_normalization_is_current",
     "footnote_normalization_status",
-    "markdown_inventory",
-    "unit_records",
 ]

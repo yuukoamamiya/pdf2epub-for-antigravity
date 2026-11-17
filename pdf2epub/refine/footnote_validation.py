@@ -60,15 +60,6 @@ def _attach_endnote_result(
     return result
 
 
-def _write_footnote_unit_contexts(
-    output_dir: Path, report: Mapping[str, Any]
-) -> dict[str, str]:
-    """Write validated sparse contexts without importing the hand-off eagerly."""
-    from .footnote_handoff import _write_unit_contexts
-
-    return _write_unit_contexts(output_dir, report)
-
-
 def _persist_result(
     output_dir: Path,
     report_path: Path,
@@ -85,7 +76,9 @@ def _persist_result(
         atomic_write_json(report_path, updated_report)
         manifest_path = output_dir / "footnote_subagent_manifest.json"
         if manifest_path.is_file():
-            context_files = _write_footnote_unit_contexts(output_dir, updated_report)
+            from .footnote_unit_contexts import write_footnote_unit_contexts
+
+            context_files = write_footnote_unit_contexts(output_dir, updated_report)
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             manifest["unit_context_files"] = context_files
             manifest["unit_context_sha256"] = {
@@ -103,47 +96,47 @@ def _preflight_footnote_apply(
     output_dir: Path,
     report: Mapping[str, Any],
     normalized_decisions: list[dict[str, Any]],
+    continuation_reviews: Optional[list[dict[str, Any]]] = None,
+    endnote_definition_decisions: Optional[list[dict[str, Any]]] = None,
 ) -> list[str]:
-    """Run the pure apply bindings so binding errors surface at validate time.
-
-    The apply stage resolves page decisions and binds body markers without
-    writing anything.  Reusing those pure functions here keeps ``footnote-validate``
-    and ``footnote-apply`` in agreement instead of accepting decisions that the
-    next command rejects.
-    """
-    from .footnote_apply_resolution import bind_note_markers, resolve_page_decisions
-    from .footnote_edit_plan import split_multi_superscripts
-    from .footnote_status import unit_records
+    """Build the same complete normalization plan that apply will materialize."""
+    from .footnote_normalization_plan import (
+        FootnoteNormalizationPlanningInput,
+        build_footnote_normalization_plan,
+    )
+    from .footnote_source import load_footnote_source_snapshot
 
     try:
-        records = unit_records(output_dir)
-    except Exception:
-        return []
-    source_dir = output_dir / "ocr_markdown"
-    source_texts: dict[str, str] = {}
-    for record in records:
-        try:
-            text = (source_dir / record["name"]).read_text(encoding="utf-8")
-        except (OSError, UnicodeError, KeyError):
-            continue
-        source_texts[record["name"]] = split_multi_superscripts(
-            text.replace("\r\n", "\n").replace("\r", "\n")
-        )
-    if not source_texts:
-        return []
-    validation = {"decisions": list(normalized_decisions)}
-    resolution = resolve_page_decisions(
-        output_dir,
-        report,
-        validation,
-        source_texts,
-        list(records),
-        str(report.get("footnote_mode") or "footnotes"),
-    )
-    errors = list(resolution.errors)
-    if not errors:
-        errors = list(bind_note_markers(resolution, source_texts, list(records)))
-    return errors
+        source = load_footnote_source_snapshot(output_dir)
+    except (OSError, UnicodeError, ValueError, KeyError) as exc:
+        return [f"could not load current footnote source snapshot: {exc}"]
+    try:
+        toc_tree = json.loads((output_dir / "toc_tree.json").read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        toc_tree = None
+    try:
+        progress = json.loads((source.source_dir / "tree_progress.json").read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        progress = None
+    scope_error = None
+    if toc_tree is None or progress is None:
+        scope_error = "toc_tree.json or ocr_markdown/tree_progress.json is unavailable"
+    decisions: dict[str, Any] = {
+        "decisions": list(normalized_decisions),
+        "continuation_reviews": list(continuation_reviews or []),
+    }
+    plan = build_footnote_normalization_plan(FootnoteNormalizationPlanningInput(
+        output_dir=output_dir,
+        report=report,
+        decisions=decisions,
+        source=source,
+        footnote_mode=str(report.get("footnote_mode") or "footnotes"),
+        toc_tree=toc_tree if isinstance(toc_tree, Mapping) else None,
+        progress=progress if isinstance(progress, Mapping) else None,
+        scope_error=scope_error,
+        endnote_definition_decisions=endnote_definition_decisions,
+    ))
+    return list(plan.errors)
 
 
 def validate_footnote_decisions(
@@ -215,17 +208,29 @@ def validate_footnote_decisions(
             *audit_data["reviewed_candidate_tasks"],
         ]
     if not required and not continuation_tasks and not result_audit_tasks:
+        preflight_errors = []
+        if str(report.get("footnote_mode") or "footnotes") != "disabled":
+            endnote_decisions = (
+                endnote_result.get("decisions", [])
+                if endnote_result.get("valid") is True
+                and isinstance(endnote_result.get("decisions"), list)
+                else None
+            )
+            preflight_errors = _preflight_footnote_apply(
+                output_dir, report, [], [], endnote_decisions
+            )
         result = {
             **base_fields,
-            "valid": True,
-            "status": "no_subagent_review_required",
-            "errors": [],
+            "valid": not preflight_errors,
+            "status": "retry_required" if preflight_errors else "no_subagent_review_required",
+            "errors": preflight_errors,
             "decisions": [],
             "continuation_reviews": [],
         }
         _attach_endnote_result(result, endnote_result)
         return _persist_result(
-            output_dir, report_path, report, result, validated_decisions=True
+            output_dir, report_path, report, result,
+            validated_decisions=result["valid"],
         )
 
     try:
@@ -310,12 +315,21 @@ def validate_footnote_decisions(
     human_review_required.extend(audit_human_review_required)
 
     if (
-        report.get("footnote_mode") == "footnotes"
+        report.get("footnote_mode") != "disabled"
         and not errors
         and not human_review_required
     ):
         try:
-            errors.extend(_preflight_footnote_apply(output_dir, report, normalized))
+            endnote_decisions = (
+                endnote_result.get("decisions", [])
+                if endnote_result.get("valid") is True
+                and isinstance(endnote_result.get("decisions"), list)
+                else None
+            )
+            errors.extend(_preflight_footnote_apply(
+                output_dir, report, normalized, continuation_decisions,
+                endnote_decisions,
+            ))
         except Exception as exc:
             errors.append(f"footnote apply preflight failed: {exc}")
 

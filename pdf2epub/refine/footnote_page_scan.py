@@ -85,6 +85,92 @@ class FootnotePageScanResult:
     bottom_detection: dict[str, int]
 
 
+@dataclass(frozen=True)
+class CandidateEnhancementResult:
+    """Shared geometric and continuation enrichment for one OCR source."""
+
+    candidates: list[dict[str, Any]]
+    continuous_regions: list[dict[str, Any]]
+    orphan_regions: list[dict[str, Any]]
+    continuation_evidence: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class PrimaryCandidateScanResult:
+    candidates: list[dict[str, Any]]
+    suppressed: list[dict[str, Any]]
+    audit_candidates: list[dict[str, Any]]
+    continuous_regions: list[dict[str, Any]]
+    continuation_evidence: dict[str, Any]
+    bottom_stats: dict[str, Any]
+    soft_context_count: int
+    suppressed_native_citations: list[dict[str, Any]]
+    orphan_regions: list[dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class SecondaryCandidateScanResult:
+    candidates: list[dict[str, Any]]
+    continuous_regions: list[dict[str, Any]]
+    continuation_evidence: dict[str, Any]
+    orphan_regions: list[dict[str, Any]]
+
+
+def _enhance_candidates(
+    page_number: int,
+    sidecar: Mapping[str, Any],
+    candidates: list[dict[str, Any]],
+    *,
+    options: FootnotePrepareOptions,
+    native_text_source: bool,
+    auto_accept: bool,
+    page_markdown: str,
+    layout_profile: Mapping[str, Any],
+    previous_page_footnote_evidence: bool,
+    previous_page_context: Optional[Mapping[str, Any]],
+    excluded_block_indexes: set[int],
+) -> CandidateEnhancementResult:
+    """Apply the common numeric-region and continuation pipeline in order."""
+    candidates, continuous_regions = expand_continuous_region_candidates(
+        page_number,
+        sidecar,
+        candidates,
+        bottom_ratio=options.bottom_ratio,
+        bottom_intersection_ratio=options.bottom_intersection_ratio,
+        native_text_source=native_text_source,
+        page_markdown=page_markdown,
+        auto_accept=auto_accept,
+        native_max_font_ratio=options.native_max_font_ratio,
+        layout_profile=layout_profile,
+        previous_page_footnote_evidence=previous_page_footnote_evidence,
+        excluded_block_indexes=excluded_block_indexes,
+    )
+    candidates, orphan_regions = expand_orphan_continuation_candidates(
+        page_number,
+        sidecar,
+        candidates,
+        bottom_ratio=options.bottom_ratio,
+        bottom_intersection_ratio=options.bottom_intersection_ratio,
+        native_text_source=native_text_source,
+        page_markdown=page_markdown,
+        auto_accept=auto_accept,
+        native_max_font_ratio=options.native_max_font_ratio,
+        layout_profile=layout_profile,
+        previous_page_context=previous_page_context,
+        excluded_block_indexes=excluded_block_indexes,
+    )
+    continuation_evidence = annotate_cross_page_continuations(
+        sidecar,
+        candidates,
+        [*continuous_regions, *orphan_regions],
+        previous_page_context,
+    )
+    candidates.sort(key=lambda item: (item["order"], item["block"]))
+    return CandidateEnhancementResult(
+        candidates, continuous_regions, orphan_regions, continuation_evidence
+    )
+
+
 def _candidate_for_audit_block(
     page_number: int,
     block_index: int,
@@ -146,17 +232,7 @@ def _scan_primary_candidates(
     previous_page_context: Optional[Mapping[str, Any]],
     structure_excluded_blocks: set[int],
     native_font_profile: Mapping[str, Any],
-) -> tuple[
-    list[dict[str, Any]],
-    list[dict[str, Any]],
-    list[dict[str, Any]],
-    list[dict[str, Any]],
-    dict[str, Any],
-    dict[str, Any],
-    int,
-    list[dict[str, Any]],
-    list[dict[str, Any]],
-]:
+) -> PrimaryCandidateScanResult:
     """Build primary candidates, continuation context, and audit misses."""
     candidates: list[dict[str, Any]] = []
     blocks = sidecar.get("blocks", [])
@@ -224,42 +300,23 @@ def _scan_primary_candidates(
         if candidate is not None:
             candidates.append(candidate)
 
-    candidates, continuous_regions = expand_continuous_region_candidates(
+    enhanced = _enhance_candidates(
         page_number,
         sidecar,
         candidates,
-        bottom_ratio=options.bottom_ratio,
-        bottom_intersection_ratio=options.bottom_intersection_ratio,
+        options=options,
         native_text_source=native_text_source,
-        page_markdown=page_markdown,
         auto_accept=options.auto_accept,
-        native_max_font_ratio=options.native_max_font_ratio,
+        page_markdown=page_markdown,
         layout_profile=layout_profile,
         previous_page_footnote_evidence=previous_page_footnote_evidence,
-        excluded_block_indexes=excluded_block_indexes,
-    )
-    candidates, orphan_regions = expand_orphan_continuation_candidates(
-        page_number,
-        sidecar,
-        candidates,
-        bottom_ratio=options.bottom_ratio,
-        bottom_intersection_ratio=options.bottom_intersection_ratio,
-        native_text_source=native_text_source,
-        page_markdown=page_markdown,
-        auto_accept=options.auto_accept,
-        native_max_font_ratio=options.native_max_font_ratio,
-        layout_profile=layout_profile,
         previous_page_context=previous_page_context,
         excluded_block_indexes=excluded_block_indexes,
     )
-    continuation_evidence = annotate_cross_page_continuations(
-        sidecar,
-        candidates,
-        [*continuous_regions, *orphan_regions],
-        previous_page_context,
-    )
-    candidates, suppressed = suppress_soft_continuation_candidates(candidates)
-    candidates.sort(key=lambda item: (item["order"], item["block"]))
+    candidates, suppressed = suppress_soft_continuation_candidates(enhanced.candidates)
+    continuous_regions = enhanced.continuous_regions
+    orphan_regions = enhanced.orphan_regions
+    continuation_evidence = enhanced.continuation_evidence
     candidate_indexes = {
         int(index)
         for candidate in candidates
@@ -296,16 +353,16 @@ def _scan_primary_candidates(
             )
         )
     ]
-    return (
-        candidates,
-        suppressed,
-        audit_candidates,
-        continuous_regions,
-        continuation_evidence,
-        bottom_stats,
-        len(suppressed),
-        suppressed_native_citations,
-        orphan_regions,
+    return PrimaryCandidateScanResult(
+        candidates=candidates,
+        suppressed=suppressed,
+        audit_candidates=audit_candidates,
+        continuous_regions=continuous_regions,
+        continuation_evidence=continuation_evidence,
+        bottom_stats=bottom_stats,
+        soft_context_count=len(suppressed),
+        suppressed_native_citations=suppressed_native_citations,
+        orphan_regions=orphan_regions,
     )
 
 
@@ -318,13 +375,7 @@ def _scan_secondary_candidates(
     structure_exclusion: Mapping[str, Any],
     previous_page_footnote_evidence: bool,
     previous_page_context: Optional[Mapping[str, Any]],
-) -> tuple[
-    list[dict[str, Any]],
-    list[dict[str, Any]],
-    dict[str, Any],
-    set[int],
-    list[dict[str, Any]],
-]:
+) -> SecondaryCandidateScanResult:
     """Build gated secondary candidates and compare them with primary later."""
     layout_profile = page_layout_profile(secondary)
     excluded_blocks = structure_excluded_block_indexes(
@@ -349,42 +400,25 @@ def _scan_secondary_candidates(
         )
         if candidate is not None:
             candidates.append(candidate)
-    candidates, regions = expand_continuous_region_candidates(
+    enhanced = _enhance_candidates(
         page_number,
         secondary,
         candidates,
-        bottom_ratio=options.bottom_ratio,
-        bottom_intersection_ratio=options.bottom_intersection_ratio,
+        options=options,
         native_text_source=False,
-        page_markdown="",
         auto_accept=False,
-        native_max_font_ratio=options.native_max_font_ratio,
+        page_markdown="",
         layout_profile=layout_profile,
         previous_page_footnote_evidence=previous_page_footnote_evidence,
-        excluded_block_indexes=excluded_blocks,
-    )
-    candidates, orphan_regions = expand_orphan_continuation_candidates(
-        page_number,
-        secondary,
-        candidates,
-        bottom_ratio=options.bottom_ratio,
-        bottom_intersection_ratio=options.bottom_intersection_ratio,
-        native_text_source=False,
-        page_markdown="",
-        auto_accept=False,
-        native_max_font_ratio=options.native_max_font_ratio,
-        layout_profile=layout_profile,
         previous_page_context=previous_page_context,
         excluded_block_indexes=excluded_blocks,
     )
-    continuation_evidence = annotate_cross_page_continuations(
-        secondary,
-        candidates,
-        [*regions, *orphan_regions],
-        previous_page_context,
+    return SecondaryCandidateScanResult(
+        candidates=enhanced.candidates,
+        continuous_regions=enhanced.continuous_regions,
+        continuation_evidence=enhanced.continuation_evidence,
+        orphan_regions=enhanced.orphan_regions,
     )
-    candidates.sort(key=lambda item: (item["order"], item["block"]))
-    return candidates, regions, continuation_evidence, excluded_blocks, orphan_regions
 
 
 def scan_footnote_page(
@@ -464,34 +498,31 @@ def scan_footnote_page(
         if structure_exclusion["roles"]
         else None
     )
-    (
-        candidates,
-        suppressed,
-        audit_candidates,
-        continuous_regions,
-        continuation_evidence,
-        bottom_stats,
-        soft_count,
-        suppressed_native_citations,
-        orphan_regions,
-    ) = (
-        _scan_primary_candidates(
-            page_number,
-            sidecar,
-            options=options,
-            native_text_source=native_text_source,
-            page_markdown=page_markdown,
-            layout_profile=layout_profile,
-            previous_page_footnote_evidence=(
-                state.page_number == page_number - 1 and state.footnote_evidence
-            ),
-            previous_page_context=(
-                state.page_context if state.page_number == page_number - 1 else None
-            ),
-            structure_excluded_blocks=excluded_blocks,
-            native_font_profile=native_font_profile or {},
-        )
+    primary_scan = _scan_primary_candidates(
+        page_number,
+        sidecar,
+        options=options,
+        native_text_source=native_text_source,
+        page_markdown=page_markdown,
+        layout_profile=layout_profile,
+        previous_page_footnote_evidence=(
+            state.page_number == page_number - 1 and state.footnote_evidence
+        ),
+        previous_page_context=(
+            state.page_context if state.page_number == page_number - 1 else None
+        ),
+        structure_excluded_blocks=excluded_blocks,
+        native_font_profile=native_font_profile or {},
     )
+    candidates = primary_scan.candidates
+    suppressed = primary_scan.suppressed
+    audit_candidates = primary_scan.audit_candidates
+    continuous_regions = primary_scan.continuous_regions
+    continuation_evidence = primary_scan.continuation_evidence
+    bottom_stats = primary_scan.bottom_stats
+    soft_count = primary_scan.soft_context_count
+    suppressed_native_citations = primary_scan.suppressed_native_citations
+    orphan_regions = primary_scan.orphan_regions
 
     secondary_candidates: list[dict[str, Any]] = []
     secondary_regions: list[dict[str, Any]] = []
@@ -508,13 +539,7 @@ def scan_footnote_page(
     secondary_only_candidates: list[dict[str, Any]] = []
     if evidence_mode == "two_ocr":
         secondary = load_layout_sidecar(secondary_sidecar)
-        (
-            secondary_candidates,
-            secondary_regions,
-            secondary_continuation_evidence,
-            _secondary_excluded_blocks,
-            secondary_orphan_regions,
-        ) = _scan_secondary_candidates(
+        secondary_scan = _scan_secondary_candidates(
             page_number,
             secondary,
             options=options,
@@ -530,6 +555,10 @@ def scan_footnote_page(
                 else None
             ),
         )
+        secondary_candidates = secondary_scan.candidates
+        secondary_regions = secondary_scan.continuous_regions
+        secondary_continuation_evidence = secondary_scan.continuation_evidence
+        secondary_orphan_regions = secondary_scan.orphan_regions
         matched_secondary_blocks = {
             int(candidate["block"])
             for candidate in secondary_candidates

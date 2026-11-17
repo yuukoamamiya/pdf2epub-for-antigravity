@@ -9,6 +9,7 @@ import pytest
 
 from pdf2epub import ocr_correction
 from pdf2epub.refine import footnote_apply
+from pdf2epub.refine import footnote_normalization_plan
 from pdf2epub.refine.footnote_apply import apply_footnote_normalization
 from pdf2epub.refine.footnote_contracts import FOOTNOTE_PREPARE_SCHEMA_VERSION
 from pdf2epub.refine.footnote_handoff import prepare_footnote_subagent
@@ -160,8 +161,8 @@ def test_apply_result_audit_rejects_mutated_multiline_note_materialization(
     source_bytes = _prepare_book(tmp_path)
     original_write = footnote_apply._write_normalized_units
     resolved_address_seen: list[tuple[int, str, int]] = []
-    original_resolution = footnote_apply.resolve_page_decisions
-    original_transform = footnote_apply.transform_footnote_edit_plan
+    original_resolution = footnote_normalization_plan.resolve_page_decisions
+    original_transform = footnote_normalization_plan.transform_footnote_edit_plan
 
     def observe_resolution(*args, **kwargs):
         resolution = original_resolution(*args, **kwargs)
@@ -208,12 +209,12 @@ def test_apply_result_audit_rejects_mutated_multiline_note_materialization(
             return replace(plan, transformed_texts=corrupted_texts)
 
         monkeypatch.setattr(
-            footnote_apply, "transform_footnote_edit_plan", transform_then_corrupt
+            footnote_normalization_plan, "transform_footnote_edit_plan", transform_then_corrupt
         )
     else:
         monkeypatch.setattr(footnote_apply, "_write_normalized_units", write_then_corrupt)
 
-    monkeypatch.setattr(footnote_apply, "resolve_page_decisions", observe_resolution)
+    monkeypatch.setattr(footnote_normalization_plan, "resolve_page_decisions", observe_resolution)
     result = apply_footnote_normalization(tmp_path)
 
     assert (1, "primary", 1) in resolved_address_seen

@@ -3,7 +3,7 @@ import pytest
 from pdf2epub.refine.footnote_layout import body_flow_warning, region_layout_evidence
 from pdf2epub.refine.footnote_regions import build_page_footnote_regions
 from pdf2epub.refine.footnote_review_packet import build_review_packet, write_review_packet
-from pdf2epub.refine.footnote_handoff import _write_unit_contexts
+from pdf2epub.refine.footnote_unit_contexts import write_footnote_unit_contexts
 import json
 
 
@@ -146,7 +146,7 @@ def test_multi_part_polish_contexts_are_small_and_part_scoped(tmp_path):
         "page": 1, "source": "primary", "block": 3,
     }], "right_candidates": []}], "decisions": []}
     packet_path, packet_sha, _ = write_review_packet(tmp_path, report)
-    files = _write_unit_contexts(
+    files = write_footnote_unit_contexts(
         tmp_path, report, review_packet=packet_path, review_packet_sha256=packet_sha,
     )
     contexts = {name: json.loads((tmp_path / relative).read_text(encoding="utf-8")) for name, relative in files.items()}
@@ -156,7 +156,7 @@ def test_multi_part_polish_contexts_are_small_and_part_scoped(tmp_path):
     assert set(contexts["chapter.part1.md"]["candidates"]) == {"1:primary:3"}
     assert all(len((tmp_path / relative).read_bytes()) < 10000 for relative in files.values())
     from pdf2epub.refine.footnote_contracts import FOOTNOTE_PREPARE_SCHEMA_VERSION
-    from pdf2epub.refine.footnote_handoff import load_footnote_unit_contexts
+    from pdf2epub.refine.footnote_unit_contexts import load_footnote_unit_contexts
     from pdf2epub.workflow_contracts import sha256_file
     evidence_hash = json.loads((tmp_path / packet_path).read_text(encoding="utf-8"))["preparation_evidence_sha256"]
     context_hashes = {name: sha256_file(tmp_path / relative) for name, relative in files.items()}
@@ -236,22 +236,22 @@ def test_non_review_page_27_is_kept_in_scoped_unit_evidence(tmp_path, monkeypatc
         "cross_page_windows": [], "continuation_reviews": [], "decisions": [],
     }
     packet_path, packet_sha, _ = write_review_packet(tmp_path, report)
-    files = _write_unit_contexts(tmp_path, report, review_packet=packet_path, review_packet_sha256=packet_sha)
+    files = write_footnote_unit_contexts(tmp_path, report, review_packet=packet_path, review_packet_sha256=packet_sha)
     context = json.loads((tmp_path / files["chapter.md"]).read_text(encoding="utf-8"))
     assert context["pages"][0]["page"] == 27
     assert context["pages"][0]["candidate_refs"] == []
     assert "secondary_sidecar" not in context["pages"][0]
     assert "secondary_sidecar_sha256" not in context["pages"][0]
-    from pdf2epub.refine import footnote_handoff
+    from pdf2epub.refine import footnote_unit_contexts
     from pdf2epub.refine.footnote_page_evidence import page_sidecar_index
     packet = json.loads((tmp_path / packet_path).read_text(encoding="utf-8"))
-    units = footnote_handoff._load_refined_units(tmp_path)
+    units = footnote_unit_contexts.load_refined_units(tmp_path)
     index = page_sidecar_index(tmp_path, report)
     def fail_io(*_args, **_kwargs):
         raise AssertionError("canonical projector performed I/O")
-    monkeypatch.setattr(footnote_handoff, "_load_refined_units", fail_io)
-    monkeypatch.setattr(footnote_handoff, "page_sidecar_index", fail_io)
-    projected = footnote_handoff._project_unit_contexts(report, packet, units, index, packet_path)
+    monkeypatch.setattr(footnote_unit_contexts, "load_refined_units", fail_io)
+    monkeypatch.setattr(footnote_unit_contexts, "page_sidecar_index", fail_io)
+    projected = footnote_unit_contexts._project_unit_contexts(report, packet, units, index, packet_path)
     assert projected["chapter.md"] == context
 
 
@@ -336,7 +336,7 @@ def test_malformed_refined_page_range_is_rejected_before_expansion(tmp_path):
     }
     packet_path, packet_hash, _ = write_review_packet(tmp_path, report)
     with pytest.raises(ValueError, match="invalid refined page range"):
-        _write_unit_contexts(
+        write_footnote_unit_contexts(
             tmp_path, report, review_packet=packet_path,
             review_packet_sha256=packet_hash,
         )
@@ -345,7 +345,7 @@ def test_malformed_refined_page_range_is_rejected_before_expansion(tmp_path):
 def test_page_evidence_change_keeps_unrelated_unit_projection_bytes_stable(tmp_path):
     import hashlib
     from pdf2epub.refine.footnote_contracts import FOOTNOTE_PREPARE_SCHEMA_VERSION
-    from pdf2epub.refine.footnote_handoff import load_footnote_unit_contexts
+    from pdf2epub.refine.footnote_unit_contexts import load_footnote_unit_contexts
     from pdf2epub.workflow_contracts import sha256_file
 
     source = tmp_path / "ocr_markdown"
@@ -368,7 +368,7 @@ def test_page_evidence_change_keeps_unrelated_unit_projection_bytes_stable(tmp_p
     }
     def refresh():
         packet_path, packet_sha, _ = write_review_packet(tmp_path, report)
-        files = _write_unit_contexts(tmp_path, report, review_packet=packet_path, review_packet_sha256=packet_sha)
+        files = write_footnote_unit_contexts(tmp_path, report, review_packet=packet_path, review_packet_sha256=packet_sha)
         (tmp_path / "footnote_candidates.json").write_text(json.dumps(report), encoding="utf-8")
         hashes = {name: sha256_file(tmp_path / relative) for name, relative in files.items()}
         manifest = {

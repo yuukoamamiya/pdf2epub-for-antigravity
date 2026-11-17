@@ -1050,7 +1050,7 @@ footnote-apply`，不需要重新 OCR。
 旧 prepare checkpoint 不能复用；schema 1 的 endnote decisions 只兼容没有 inline 候选的旧式行边界
 清单，当前 inline/line decisions 使用 schema 2。运行
 `uv run pdf2epub -c <配置> footnote-prepare`；只把新 manifest 列出的 pending/review 项交给
-工作区 Subagent。随后必须运行 `footnote-validate` 和 `footnote-apply`，即使没有待复核项也要执行。
+工作区 Subagent。随后必须运行 `footnote-validate` 和 `footnote-apply`，即使没有待复核项也要执行。`footnote-validate` 会为适用的页脚注和集中尾注输入构造完整 normalization plan，检查续注恢复、引用绑定、编辑冲突与尾注转换；该预演也覆盖无 review 项的路径。`disabled` 模式不生成计划。缺少源稿或 refined mapping 时验证失败；修复输入后重跑 validate。
 保留旧产物和 checkpoint，不手工改 schema 或哈希。该合同升级不要求重跑 OCR；恢复命令会更新准备
 manifest/prompt，并由 apply 重建 `footnote_normalized/` 与成功 checkpoint。若需保留旧派生结果，
 应在恢复前备份。归一化源变化可能

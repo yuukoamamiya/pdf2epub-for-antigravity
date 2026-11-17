@@ -154,7 +154,7 @@ def _prepare_pdf_markdown_task(args, task: str):
             rules.append(
                 "When a Notes/注释 section contains numbered endnotes, convert only verified footnote superscripts from <sup>N</sup> to [^N], and convert the matching endnote lines to [^N]: text. Do not convert mathematical, table, ordinal, citation, bibliography, or other non-footnote superscripts."
             )
-        from pdf2epub.refine.footnote_handoff import load_footnote_unit_contexts
+        from pdf2epub.refine.footnote_unit_contexts import load_footnote_unit_contexts
 
         footnote_unit_contexts = load_footnote_unit_contexts(output_dir)
         if footnote_unit_contexts:

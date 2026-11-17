@@ -168,7 +168,12 @@ PDF 精修的核心领域模块如下：
 - `refine/footnote_prepare.py`：只编排按页面 layout sidecar 生成脚注候选、结构排除和双 OCR
   比较，不负责页面扫描细节、区域策略、视觉证据或报告持久化；这些职责分别由
   `footnote_page_scan.py`、`footnote_continuation_regions.py`、`footnote_regions.py` 和
-  `footnote_report.py` 承担。worker unit context 使用独立 projection version，并由当前 report、精确页侧车路径/哈希索引和 refined unit mapping 重算；父 manifest 保留全书 packet freshness，单元 context 只携带本单元的局部证据。旧 projection 要求重新 prepare/validate，decision 文件保留且仍须通过原语义校验。视觉 OCR 先用
+  `footnote_report.py` 承担。`footnote_handoff.py` 负责 Subagent manifest 与 Prompt；
+  `footnote_unit_contexts.py` 独立负责稀疏 unit projection 的写入、读取和 freshness 校验。
+  projection 使用独立版本，并根据当前 report、精确页侧车路径/哈希索引和 refined unit mapping 重算；
+  父 manifest 保留全书 packet freshness，单元 context 只携带本单元的局部证据。旧 projection 要求重新
+  prepare/validate，decision 文件保留且仍须通过原语义校验。`commands/markdown.py` 和 validation
+  直接调用 context API，不依赖 handoff coordinator。视觉 OCR 先用
   宽松的页底召回地板收集候选，再结合页面自身的内容尾部、相对块间距和独立语义证据决定是否本地接受；
   全书固定的 `bbox[3]` 不再是自动判定条件。标签只能作为辅助证据，不能单独绕过几何条件。它排除
   页眉、页脚、纯页码和引用标签，把连续数字开头块（例如
@@ -246,8 +251,10 @@ TOC 中标记为
   决定，`continuation` 不创建定义，未决定时在错误中给出 `file:line` 并 fail closed。
 - `refine/footnote_consensus.py`：只读取当前双 OCR 共识中的视觉复核页并解析匹配的次 OCR
   sidecar 路径；不决定候选，也不绕过 `pdf_evidence.py` 的 freshness 闸门。
-- `refine/footnote_page_scan.py`：封装单页 primary/secondary OCR 扫描、连续区域展开、续文
-  证据、漏检审计、候选差异和 page report；只返回事实与有限的 review 标记，不写最终脚注角色。
+- `refine/footnote_page_scan.py`：统一 primary/secondary OCR 的区域扩展、孤立续注召回、跨页
+  评分与候选排序，并返回带类型的扫描结果；来源信任和复核要求仍分别处理，不写最终脚注角色。
+- `refine/footnote_polish_review.py`：把 polish semantic issues 映射到唯一的当前 OCR block，生成
+  精确页图复核任务；映射不唯一或证据过期时记录 stale finding，不扩大到整页或整单元。
 - `refine/footnote_continuation_regions.py`：只负责连续数字区域的几何识别、相邻块回溯和
   续文候选扩展；不评估跨页语义、不写 Markdown，也不决定最终脚注角色。
 - `refine/footnote_report.py`：汇总跨页窗口、视觉页面/区域证据、统计和哈希快照，并原子写入
@@ -957,8 +964,12 @@ secondary-only 的 moved decision 必须包含：
 `footnote-apply` 生成阻断报告，不写 `footnote_normalized/`。这是防止复杂脚注被重复追加或
 错误绑定到另一处引用的故意 fail-closed 设计。
 
-- `refine/footnote_handoff.py`：生成脚注 Subagent 的 manifest、Prompt 和按 refinement unit
-  分片的稀疏上下文，并集中执行交接文件名和路径安全校验；不重新识别页面候选。
+- `refine/footnote_handoff.py`：生成脚注 Subagent 的 manifest 和 Prompt，并调度候选报告、review
+  packet 与 context API；不持有 projection 或 freshness 实现。
+- `refine/footnote_unit_contexts.py`：集中实现 canonical sparse projection、上下文写入/加载、投影重算、
+  manifest 哈希核对和输出路径安全校验，供 validation 与 Markdown handoff 直接使用。
+- `refine/footnote_polish_review.py`：负责 polish 脚注语义问题的证据定位和 scoped review task 构造；
+  handoff 只消费其结果，不承载该映射规则。
 - `refine/footnote_validation.py`：编排证据加载、纯决策审计与结果持久化；只有已验证结果才会
   更新候选报告并写入稀疏 unit context，不修改原始 Markdown。
 - `refine/footnote_validation_evidence.py`：读取并核对当前页面来源/OCR 模式、配置脚注模式、
@@ -996,7 +1007,7 @@ PDF 结构阶段采用“共享证据、分离语义”的边界：
 | `footnote_prepare.py` | 脚注阶段编排 | 页面扫描、区域策略、报告写入、Subagent 交接、决定校验、插图分类、页面物理合并 |
 | `footnote_options.py` | 配置默认值、模式和选项解析 | 页面扫描、候选判定、Subagent 决定、Markdown 修改 |
 | `footnote_consensus.py` | 共识复核页和次 OCR sidecar 路径解析 | freshness 校验、候选判定、Subagent 决定 |
-| `footnote_page_scan.py` | 单页 primary/secondary 证据扫描和 page report | 最终脚注角色、报告写入、Markdown 修改 |
+| `footnote_page_scan.py` | 主次 OCR 区域扩展、孤立续注召回、跨页评分和有类型的扫描结果 | 最终脚注角色、报告写入、Markdown 修改 |
 | `footnote_continuation_regions.py` | 连续数字区域、几何回溯和候选扩展 | 跨页语义评分、最终脚注角色、Markdown 修改 |
 | `footnote_report.py` | 跨页窗口、视觉证据、统计和候选报告持久化 | sidecar 扫描、候选语义、脚注角色决定 |
 | `footnote_contracts.py` | 决定角色和可移动角色集合 | 候选识别、视觉渲染、Markdown 修改 |
@@ -1006,14 +1017,18 @@ PDF 结构阶段采用“共享证据、分离语义”的边界：
 | `footnote_structure.py` | refinement unit/TOC 角色和 sidecar 排除映射 | 候选语义、视觉渲染、Subagent 决定、Markdown 修改 |
 | `footnote_windows.py` | 相邻页面 review window 的有序构造 | 续文角色判断、候选修改、Markdown 修改 |
 | `footnote_visual.py` | 整页/区域视觉证据和审计 manifest | 候选识别、脚注角色决定、Markdown 修改 |
-| `footnote_handoff.py` | 脚注 manifest、Prompt 和稀疏 unit context | 候选识别、决定校验、插图分类 |
+| `footnote_handoff.py` | 脚注 manifest、Prompt 和准备阶段调度 | 候选识别、context projection/freshness、决定校验、插图分类 |
+| `footnote_unit_contexts.py` | 稀疏 unit context 的规范投影、持久化、加载和 freshness/path 校验 | 决定角色、候选识别、Subagent Prompt 编排 |
+| `footnote_polish_review.py` | polish issue 到精确 OCR block 的证据定位 | 页面扫描、最终脚注角色、Markdown 修改 |
 | `footnote_validation.py` | 编排证据读取、纯决策审计和验证结果持久化 | 候选识别、Markdown 修改、插图分类 |
 | `footnote_validation_evidence.py` | 配置/页面来源、哈希 freshness、共识和视觉 manifest 读取 | 决策角色归一化、Markdown 修改 |
 | `footnote_validation_audit.py` | 必需地址、区域/决定合同、continuation key 的纯审计 | 文件读取/写入、候选识别、Markdown 修改 |
 | `footnote_continuation.py` | 跨页续文版面/语义证据和汇总 | 连续区域发现、最终脚注角色、Markdown 修改、插图分类 |
 | `footnote_signals.py` | 共用标签、编号和上标识别信号 | 页面候选编排、Subagent 决策、Markdown 修改 |
 | `illustration_prepare.py` | 整页插图候选、图片复核窗口和页面角色 handoff | 脚注归并、章节末尾注释 |
-| `footnote_apply_inputs.py` | 脚注决定合同、模式和共识 freshness 门禁；读取 unit 源文本、TOC/tree 与 endnote 决定，并记录原始 Markdown 字节哈希 | OCR block 定位、脚注归属、编辑或写派生稿 |
+| `footnote_source.py` | 快照只读 refined unit mapping 与原始 Markdown 字节哈希 | TOC JSON 解析、OCR block 定位、脚注归属、编辑或写派生稿 |
+| `footnote_apply_inputs.py` | 脚注决定合同、模式和共识 freshness 门禁，并组合 source snapshot 与 endnote 决定 | OCR block 定位、脚注归属、编辑或写派生稿 |
+| `footnote_normalization_plan.py` | 读取当前 sidecar evidence，将已验证决定和源快照解析为完整计划，再执行内存转换 | 写派生稿/checkpoint、扫描候选、推断未提供的决定 |
 | `footnote_apply_resolution.py` | 将候选与已验证决定按 page/block 定位到源 unit，处理 primary/secondary 来源、`primary_disposition`、章节归属、续注和 `marker_context` 引用绑定 | 修改 Markdown、写 normalization checkpoint |
 | `footnote_edit_plan.py` | 持有纯内存 `FootnoteEditPlan`，验证越界/重叠编辑，应用编辑、放置章节末脚注并按已给 TOC scope 归一化 endnotes | 文件读取/写入、决定脚注语义或猜测缺失引用 |
 | `footnote_apply.py` / `page_merger.py` | apply 协调器先完成计划与转换，再检查源 Markdown inventory 和目标 stale unit，原子写派生稿，最后写有效 normalization checkpoint；page merger 消费已验证决定并生成派生源稿 | 再次猜测 Subagent 决定、在验证计划前写派生正文 |
@@ -1022,7 +1037,7 @@ PDF 结构阶段采用“共享证据、分离语义”的边界：
 | `footnote_result_audit.py` | 纯函数生成源稿/归一化稿残留标记、scope 编号信号、疑似截断/未闭合定义及 apply 完整性任务 | 文件 IO、校验审核提交、推断脚注语义、移动块、自动补注或翻译 |
 | `footnote_result_review.py` | 读取并验证视觉结果审查的精确地址、决定、源/目标/sidecar 哈希与页图 freshness | 生成审计 findings、修改源/归一化稿、决定脚注语义 |
 
-脚注 apply 按“前置门禁/证据快照 → block 定位和 unit/lane 归属 → 引用与定义绑定 → 编辑冲突校验 → 内存纯转换 → 原子写入派生稿 → 结果审计 → success checkpoint”的顺序运行。计划和所有绑定必须完整通过后才允许写入；源 unit 的哈希在读取原始字节时快照，写入前重新扫描 `ocr_markdown/*.md` 并与该快照逐项比较，同时先检查 `footnote_normalized/` 是否有不属于当前源 inventory 的 stale Markdown。
+脚注识别规则或评分发生变化时，应修改 `footnote_page_scan.py`、`footnote_continuation_regions.py` 或 `footnote_regions.py` 对应层，并覆盖主次 OCR 差异与跨页边界；候选到决定的物化规则应进入 `footnote_normalization_plan.py`，由统一计划承接；该 planner 可以读取当前证据以完成定位和计划校验，但不得写派生稿或 checkpoint。Context consumers 依赖 `footnote_unit_contexts.py` 的公开 API，不从 handoff coordinator 取 context。脚注 apply 按“前置门禁/证据快照 → block 定位和 unit/lane 归属 → 引用与定义绑定 → 编辑冲突校验 → 内存纯转换 → 原子写入派生稿 → 结果审计 → success checkpoint”的顺序运行。计划和所有绑定必须完整通过后才允许写入；源 unit 的哈希在读取原始字节时快照，写入前重新扫描 `ocr_markdown/*.md` 并与该快照逐项比较，同时先检查 `footnote_normalized/` 是否有不属于当前源 inventory 的 stale Markdown。
 apply 写入 `footnote_normalized/` 后运行 `footnote_result_audit.json`（schema 2），并把其文件哈希/版本绑定到 `footnote_normalization.json`（schema 9）。该报告也绑定源稿、归一化稿、候选报告和决定校验的当前哈希。只有审计通过，apply 才写有效 normalization checkpoint；未解决 findings 不会通过 `footnote_normalization_status()`，因此 polish/readiness/build 门禁也会阻断。即使派生 Markdown 已写出，它仍是未验证结果，不能据文件存在推断阶段完成。
 
 apply 后的结果审计输出需视觉判读的线索，包括归一化稿中残留数字上标/疑似编号注释、可能截断或未闭合的定义、定义后的正文边界污染，以及确认候选未进入应用计划。编号范围依据 TOC/refinement unit 与章节映射，单文件章节和多分片章节均按实际顺序检查。下降序列仅在精确页面边界分隔记录或 `section_id` 明确变化时作为编号重启；缺少边界证据时生成 `scoped_numbering_reset_uncertain` 视觉复核，不跨重启推断缺号。另一项独立的上游候选召回改进会在首次 prepare 时，把通用 OCR `Text` 块行首 `<sup>…</sup>` 补入视觉任务，图像复核候选块角色。后续 prepare 会把当前 apply 报告中的未决结果任务投影到同一审阅流程，仅在源稿与归一化稿哈希匹配时复用。已识别的脚注定义和缩进行续段、代码及注释排除在相应正文标记扫描外。

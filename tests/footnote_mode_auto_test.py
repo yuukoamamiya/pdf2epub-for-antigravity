@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-import pdf2epub.refine.footnote_apply as footnote_apply
+import pdf2epub.refine.footnote_normalization_plan as footnote_normalization_plan
 from pdf2epub.refine.footnote_apply import apply_footnote_normalization
 from pdf2epub.refine.footnote_options import (
     DEFAULT_FOOTNOTE_MODE,
@@ -258,6 +258,58 @@ def test_auto_mode_prepares_endnotes_from_toc_decision(tmp_path: Path):
     assert status["current"] is True
 
 
+def test_no_review_local_high_candidate_missing_marker_fails_validation(
+    tmp_path: Path,
+):
+    _write_minimal_book(tmp_path, "footnotes")
+    source_dir = tmp_path / "ocr_markdown"
+    (source_dir / "chapter_12.md").unlink()
+    source = source_dir / "chapter_1.md"
+    source.write_text("Body has no footnote marker.\n\n1 Endnote entry\n", encoding="utf-8")
+    (source_dir / "tree_progress.json").write_text(
+        json.dumps({"units": [{
+            "unit_id": "chapter_1", "file": "chapter_1.md",
+            "page_range": [1, 1], "type": "chapter",
+        }]}),
+        encoding="utf-8",
+    )
+
+    report = prepare_footnote_candidates(
+        tmp_path, config={"footnotes": {"mode": "footnotes"}}
+    )
+    candidates = [
+        candidate for page in report["pages"] for candidate in page["candidates"]
+    ]
+    assert candidates
+    assert all(candidate["confidence"] == "high" for candidate in candidates)
+
+    validation = validate_footnote_decisions(
+        tmp_path, config={"footnotes": {"mode": "footnotes"}}
+    )
+
+    assert validation["valid"] is False
+    assert any("marker" in error.lower() for error in validation["errors"])
+
+
+def test_endnotes_only_validation_runs_full_transform_preflight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _write_minimal_book(tmp_path, "endnotes_only")
+    config = {"footnotes": {"mode": "endnotes_only"}}
+    prepare_footnote_candidates(tmp_path, config=config)
+
+    def reject_transform(*_args, **_kwargs):
+        raise ValueError("centralized endnote transform rejected")
+
+    monkeypatch.setattr(
+        footnote_normalization_plan, "transform_footnote_edit_plan", reject_transform
+    )
+    validation = validate_footnote_decisions(tmp_path, config=config)
+
+    assert validation["valid"] is False
+    assert any("centralized endnote transform rejected" in error for error in validation["errors"])
+
+
 def test_auto_mode_defaults_to_page_footnotes_without_toc_field(tmp_path: Path):
     _write_minimal_book(tmp_path, None)
     config = {"footnotes": {"mode": "auto"}}
@@ -324,7 +376,7 @@ def test_apply_rejects_source_change_after_planning_before_write(
     target = tmp_path / "footnote_normalized"
     target.mkdir()
     (target / "chapter_1.md").write_text("previous derived text", encoding="utf-8")
-    original_planner = footnote_apply.resolve_page_decisions
+    original_planner = footnote_normalization_plan.resolve_page_decisions
 
     def planner_then_mutate(*args, **kwargs):
         resolution = original_planner(*args, **kwargs)
@@ -333,7 +385,7 @@ def test_apply_rejects_source_change_after_planning_before_write(
         )
         return resolution
 
-    monkeypatch.setattr(footnote_apply, "resolve_page_decisions", planner_then_mutate)
+    monkeypatch.setattr(footnote_normalization_plan, "resolve_page_decisions", planner_then_mutate)
     result = apply_footnote_normalization(tmp_path, config=config)
 
     assert result["valid"] is False

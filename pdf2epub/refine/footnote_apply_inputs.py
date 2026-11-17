@@ -4,16 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
-import hashlib
 from pathlib import Path
 from pathlib import PurePosixPath
 from typing import Any, Mapping, Optional
 
 from ..workflow_contracts import sha256_file
 from .footnote_contracts import FOOTNOTE_PREPARE_SCHEMA_VERSION
-from .footnote_edit_plan import split_multi_superscripts
 from .footnote_options import EFFECTIVE_FOOTNOTE_MODES, resolve_effective_footnote_mode
-from .footnote_status import unit_records
+from .footnote_source import FootnoteSourceSnapshot, load_footnote_source_snapshot
 from .endnote_review import (
     AMBIGUITIES_FILENAME,
     DECISIONS_FILENAME,
@@ -33,11 +31,8 @@ class FootnoteApplyInputs:
     report_mode: str
     footnote_mode: str
     configured_mode: str
-    source_dir: Path
     target_dir: Path
-    records: tuple[dict[str, Any], ...]
-    source_texts: Mapping[str, str]
-    source_hashes: Mapping[str, str]
+    source_snapshot: FootnoteSourceSnapshot
     endnote_definition_decisions: Optional[list[dict[str, Any]]]
     endnote_ambiguities_sha256: Optional[str]
     endnote_decisions_sha256: Optional[str]
@@ -266,30 +261,12 @@ def load_footnote_apply_inputs(
             raise
         raise FootnoteApplyInputError(str(exc)) from exc
 
-    source_dir = output_dir / "ocr_markdown"
     target_dir = output_dir / "footnote_normalized"
-    if not source_dir.is_dir():
-        raise FootnoteApplyInputError(f"source directory is missing: {source_dir}")
     try:
-        records = unit_records(output_dir)
-        source_bytes = {
-            record["name"]: (source_dir / record["name"]).read_bytes()
-            for record in records
-        }
-        source_hashes = {
-            name: hashlib.sha256(data).hexdigest()
-            for name, data in source_bytes.items()
-        }
-        source_texts = {
-            name: split_multi_superscripts(
-                data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
-            )
-            for name, data in source_bytes.items()
-        }
-        if len(source_texts) != len(records):
-            raise ValueError("tree_progress contains duplicate Markdown unit filenames")
+        source = load_footnote_source_snapshot(output_dir)
     except (OSError, UnicodeError, ValueError) as exc:
         raise FootnoteApplyInputError(str(exc)) from exc
+    source_dir = source.source_dir
 
     toc_tree: Optional[Mapping[str, Any]] = None
     progress: Optional[Mapping[str, Any]] = None
@@ -307,11 +284,8 @@ def load_footnote_apply_inputs(
         report_mode=report_mode,
         footnote_mode=footnote_mode,
         configured_mode=resolution["configured"],
-        source_dir=source_dir,
         target_dir=target_dir,
-        records=tuple(records),
-        source_texts=source_texts,
-        source_hashes=source_hashes,
+        source_snapshot=source,
         endnote_definition_decisions=endnote_decisions,
         endnote_ambiguities_sha256=ambiguity_hash,
         endnote_decisions_sha256=decisions_hash,

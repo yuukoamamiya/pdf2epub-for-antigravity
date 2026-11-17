@@ -7,7 +7,7 @@ from pdf2epub.refine.footnote_continuation_review import (
 from pdf2epub.refine.footnote_options import footnote_mode_warnings
 from pdf2epub.refine.footnote_report import build_footnote_report
 from pdf2epub.refine.footnote_handoff import prepare_footnote_subagent
-from pdf2epub.refine.footnote_handoff import load_footnote_unit_contexts
+from pdf2epub.refine.footnote_unit_contexts import load_footnote_unit_contexts
 from pdf2epub.refine.footnote_validation import validate_footnote_decisions
 from pdf2epub.refine.footnote_apply import apply_footnote_normalization
 from pdf2epub.refine.footnote_status import footnote_normalization_status
@@ -354,7 +354,7 @@ def test_validate_rejects_modified_preparation_evidence_before_decisions(tmp_pat
 
 
 def test_unit_context_cannot_self_certify_changed_page_and_candidate_sidecar(tmp_path, monkeypatch):
-    from pdf2epub.refine.footnote_handoff import load_footnote_unit_contexts
+    from pdf2epub.refine.footnote_unit_contexts import load_footnote_unit_contexts
     from pdf2epub.workflow_contracts import sha256_file
 
     paths, _ = _prepare_continuation_book(tmp_path, monkeypatch)
@@ -372,7 +372,7 @@ def test_unit_context_cannot_self_certify_changed_page_and_candidate_sidecar(tmp
 
 @pytest.mark.parametrize("remove", [False, True])
 def test_unit_context_load_requires_current_reported_sidecar_bytes(tmp_path, monkeypatch, remove):
-    from pdf2epub.refine.footnote_handoff import load_footnote_unit_contexts
+    from pdf2epub.refine.footnote_unit_contexts import load_footnote_unit_contexts
 
     paths, _ = _prepare_continuation_book(tmp_path, monkeypatch)
     report = json.loads(paths["report"].read_text(encoding="utf-8"))
@@ -387,7 +387,7 @@ def test_unit_context_load_requires_current_reported_sidecar_bytes(tmp_path, mon
 
 
 def test_unit_context_projection_version_upgrade_preserves_decisions_for_refresh(tmp_path, monkeypatch):
-    from pdf2epub.refine.footnote_handoff import load_footnote_unit_contexts
+    from pdf2epub.refine.footnote_unit_contexts import load_footnote_unit_contexts
     from pdf2epub.workflow_contracts import sha256_file
 
     paths, _ = _prepare_continuation_book(tmp_path, monkeypatch)
@@ -406,7 +406,7 @@ def test_unit_context_projection_version_upgrade_preserves_decisions_for_refresh
 
 
 def test_unit_context_projection_rejects_deleted_page_after_hash_refresh(tmp_path, monkeypatch):
-    from pdf2epub.refine.footnote_handoff import load_footnote_unit_contexts
+    from pdf2epub.refine.footnote_unit_contexts import load_footnote_unit_contexts
     from pdf2epub.workflow_contracts import sha256_file
 
     paths, _ = _prepare_continuation_book(tmp_path, monkeypatch)
