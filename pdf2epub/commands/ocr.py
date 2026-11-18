@@ -63,13 +63,21 @@ def _load_current_probe(
     return probe
 
 
-def _require_complete_ocr_pages(output_dir: Path) -> bool:
+def _require_complete_ocr_pages(
+    output_dir: Path, *, expected_source_sha256: str | None = None
+) -> bool:
     """Stop correction until the raw page-level OCR checkpoint is complete."""
     probe = _load_probe(output_dir)
+    expected_hash = expected_source_sha256 or probe.get("source_sha256")
+    if expected_source_sha256 and probe.get("source_sha256") != expected_source_sha256:
+        logger.error(
+            "OCR page probe does not match the current source PDF; rerun ocr-pages --resume"
+        )
+        return False
     report = assess_progress(
         Path(output_dir) / "pages",
         expected_total_pages=probe.get("page_count"),
-        expected_source_sha256=probe.get("source_sha256"),
+        expected_source_sha256=expected_hash,
         require_sidecars=True,
     )
     if report["ready"]:
@@ -78,6 +86,28 @@ def _require_complete_ocr_pages(output_dir: Path) -> bool:
     for error in report["errors"][:10]:
         logger.error(f"OCR readiness: {error}")
     return False
+
+
+def _current_source_pdf_for_context(context, args) -> Path:
+    """Resolve the configured PDF and reject a workspace bound to another source."""
+    output_dir = Path(context.output_dir)
+    pdf_path = resolve_book_input_path(
+        getattr(args, "input", None),
+        config_value=context.config.get("input_pdf") or context.config.get("input"),
+        config_path=context.config_path,
+        output_dir=output_dir,
+        extensions=(".pdf",),
+        output_names=("input_original.pdf", "input.pdf"),
+    )
+    if not pdf_path.is_file():
+        raise ValueError(f"Source PDF not found: {pdf_path}")
+    original = output_dir / "input_original.pdf"
+    if original.is_file() and sha256_file(original) != sha256_file(pdf_path):
+        raise ValueError(
+            "The configured input PDF differs from output/input_original.pdf; "
+            "run ocr-pages with the current source before visual correction"
+        )
+    return pdf_path
 
 
 def _primary_backend(output_dir: Path) -> str:
@@ -336,6 +366,13 @@ def ocr_correct_command(args):
     if context is None:
         return 1
     output_dir = context.output_dir
+    from pdf2epub.ocr_review_selection import (
+        manual_review_selection_state,
+        update_manual_review_selection,
+    )
+    supplied_files = list(getattr(args, "file", None) or [])
+    selection_state = manual_review_selection_state(output_dir)
+    had_manual_selection = selection_state["present"]
     from pdf2epub.ocr_source import is_legacy_native_source
     try:
         legacy_native = is_legacy_native_source(output_dir)
@@ -343,11 +380,45 @@ def ocr_correct_command(args):
         logger.error(str(exc))
         return 1
     if legacy_native:
+        if supplied_files or selection_state["present"]:
+            logger.error("Explicit visual OCR correction cannot be used with legacy native-text pages")
+            return 1
         logger.info(
             "This PDF uses a high-confidence native text layer; visual OCR correction is not applicable."
         )
         return 0
-    if not _require_complete_ocr_pages(output_dir):
+    manual_files: list[str] = []
+    current_pdf_path = None
+    if supplied_files or selection_state["present"]:
+        try:
+            current_pdf_path = _current_source_pdf_for_context(context, args)
+            expected_pdf_sha256 = sha256_file(current_pdf_path)
+        except (OSError, ValueError) as exc:
+            logger.error(str(exc))
+            return 1
+        if not _require_complete_ocr_pages(
+            output_dir, expected_source_sha256=expected_pdf_sha256
+        ):
+            return 1
+        try:
+            if supplied_files:
+                manual_contract = update_manual_review_selection(
+                    output_dir, supplied_files
+                )
+                selection_state = {
+                    "present": True,
+                    "current": True,
+                    "files": manual_contract["requested_files"],
+                    "selection_sha256": manual_contract["selection_sha256"],
+                    "detail": "",
+                }
+            elif not selection_state["current"]:
+                raise ValueError(selection_state["detail"])
+            manual_files = list(selection_state["files"])
+        except ValueError as exc:
+            logger.error(str(exc))
+            return 1
+    elif not _require_complete_ocr_pages(output_dir):
         return 1
 
     consensus_enabled = bool(secondary_backend_name(context.config))
@@ -360,10 +431,11 @@ def ocr_correct_command(args):
             logger.error("OCR anomaly scan could not read every raw page; correction preparation is blocked")
             return 1
         anomaly_files = anomaly_scan["review_required_files"]
-        if not anomaly_files:
+        if not anomaly_files and not manual_files:
             logger.info("No OCR commentary anomalies found; visual correction is not needed.")
             return 0
-        logger.warning(f"Visual review is required for OCR anomaly page(s): {', '.join(anomaly_files)}")
+        if anomaly_files:
+            logger.warning(f"Visual review is required for OCR anomaly page(s): {', '.join(anomaly_files)}")
     consensus_review_files = anomaly_files if not consensus_enabled else None
     if consensus_enabled:
         if not _consensus_is_current_for_context(output_dir, context.config):
@@ -372,23 +444,25 @@ def ocr_correct_command(args):
             )
             return 1
         consensus_review_files = review_required_files(output_dir)
-        auto_files = auto_accepted_files(output_dir)
+        auto_files = sorted(set(auto_accepted_files(output_dir)) - set(manual_files))
         from pdf2epub.ocr_correction import materialize_auto_accepted_pages
 
         materialize_auto_accepted_pages(output_dir, auto_files)
-        if not consensus_review_files:
+        if not consensus_review_files and not manual_files:
             _write_auto_accepted_validation(output_dir, auto_files)
             logger.success(
                 "All pages agreed between primary and secondary OCR; visual Subagent review was skipped."
             )
             return 0
     else:
-        consensus_review_files = anomaly_files
+        consensus_review_files = anomaly_files or []
         from pdf2epub.ocr_correction import materialize_auto_accepted_pages
 
         all_pages = sorted(p.name for p in (output_dir / "pages").glob("page_*.md"))
-        unaffected = sorted(set(all_pages) - set(anomaly_files or []))
+        unaffected = sorted(set(all_pages) - set(consensus_review_files) - set(manual_files))
         materialize_auto_accepted_pages(output_dir, unaffected)
+
+    review_files = sorted(set(consensus_review_files or []) | set(manual_files))
 
     correction_config = context.config.get("ocr_correction", {})
     if not isinstance(correction_config, dict):
@@ -410,6 +484,7 @@ def ocr_correct_command(args):
             "For pages listed as OCR commentary anomalies, the raw OCR may be an explanation generated by the OCR model rather than transcription. Read the page image as authoritative and transcribe visible source content; do not preserve the explanation or hallucinated headings. If the image does not support a confident transcription, mark the review uncertain so validation blocks the page.",
             "For each anomaly page, add anomaly_decision='transcribed' when replacing commentary with image-supported text, or anomaly_decision='confirmed_source' only when the image confirms the apparent commentary is genuine printed source text. Include source_sha256, target_sha256, and image_sha256 matching the current files. Preserve and transcribe all visible real text on mixed pages; do not use the anomaly flag as permission to omit page content.",
             "Keep the physical page boundary, filename, reading order, line order, and Markdown block structure. Do not merge pages, split pages, summarize, or add prose.",
+            "For every assigned page, bind the visual review record to the exact source, target, and image by recording source_sha256, target_sha256, and image_sha256 from the current files.",
             "Preserve Markdown heading markers and levels, image links and destinations, tables, formulas, footnote markers, list markers, citations, and page furniture exactly unless the page image proves that an OCR character in them is wrong.",
             "Do not remove headers, footers, printed page numbers, or repeated running titles; the later polish stage handles confirmed page furniture.",
             "Never translate, rewrite for style, normalize spelling, expand abbreviations, or silently repair content that is not visible on the page.",
@@ -418,11 +493,21 @@ def ocr_correct_command(args):
             rules.extend(
                 [
                     "A local secondary OCR candidate is available for each assigned page. Use it only as comparison evidence; the page image is authoritative.",
-                    "This hand-off contains only pages whose primary and secondary OCR outputs materially differ. Do not process or create review records for any other page.",
+                    (
+                        "This hand-off contains pages whose primary and secondary OCR outputs materially differ, plus any explicitly selected pages identified below. Do not process or create review records for pages outside the hand-off."
+                        if manual_files
+                        else "This hand-off contains only pages whose primary and secondary OCR outputs materially differ. Do not process or create review records for any other page."
+                    ),
                 ]
             )
         else:
-            rules.append("Only the listed anomaly pages require visual review. Other pages are pass-through copies and are not claimed to have been visually reviewed.")
+            rules.append("Only pages assigned in this hand-off require visual review. Other pages are pass-through copies and are not claimed to have been visually reviewed.")
+        if manual_files:
+            rules.append(
+                "The following pages were explicitly selected for a character-level visual audit: "
+                + ", ".join(manual_files)
+                + ". Review them even when they are not listed as OCR commentary anomalies."
+            )
         source_language = (
             (context.config.get("translation", {}) or {}).get(
                 "source_language", "Original"
@@ -438,14 +523,20 @@ def ocr_correct_command(args):
             "Original",
             rules,
             config=context.config,
-            resume=bool(getattr(args, "resume", False)),
-            declared_files=consensus_review_files,
+            resume=bool(getattr(args, "resume", False) or had_manual_selection),
+            declared_files=review_files,
             secondary_source_dir=(
                 output_dir / "ocr_secondary" if consensus_enabled else None
             ),
             visual_review_dir=review_image_dir(output_dir),
             review_output_dir=review_record_dir(output_dir),
         )
+        manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+        manifest["manual_review_files"] = manual_files
+        manifest["manual_review_selection_sha256"] = (
+            selection_state["selection_sha256"] if manual_files else None
+        )
+        atomic_write_json(paths["manifest"], manifest)
         handoffs = write_worker_handoffs(
             output_dir,
             paths["manifest"],
@@ -477,12 +568,43 @@ def ocr_correct_validate_command(args):
         review_images_are_current,
         validate_ocr_correction_reviews,
     )
-    from pdf2epub.workflow_contracts import atomic_write_text
-
     context = load_book_context(args, "ocr-correct-validate")
     if context is None:
         return 1
     output_dir = context.output_dir
+    from pdf2epub.ocr_review_selection import manual_review_selection_state
+    selection_state = manual_review_selection_state(output_dir)
+    manual_files = list(selection_state["files"])
+    if selection_state["present"]:
+        if not selection_state["current"]:
+            logger.error(selection_state["detail"])
+            return 1
+        try:
+            current_pdf = _current_source_pdf_for_context(context, args)
+        except (OSError, ValueError) as exc:
+            logger.error(str(exc))
+            return 1
+        if not _require_complete_ocr_pages(
+            output_dir, expected_source_sha256=sha256_file(current_pdf)
+        ):
+            return 1
+        try:
+            manifest = json.loads(
+                (output_dir / "ocr-correct_subagent_manifest.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            manifest = {}
+        if (
+            manifest.get("manual_review_files") != manual_files
+            or manifest.get("manual_review_selection_sha256")
+            != selection_state["selection_sha256"]
+        ):
+            logger.error(
+                "Manual OCR selection has no matching current hand-off; rerun ocr-correct --resume"
+            )
+            return 1
     from pdf2epub.ocr_source import is_legacy_native_source
     try:
         legacy_native = is_legacy_native_source(output_dir)
@@ -503,7 +625,7 @@ def ocr_correct_validate_command(args):
             logger.error("OCR anomaly scan could not read every raw page; validation is blocked")
             return 1
         consensus_review_files = anomaly_scan["review_required_files"]
-        if not consensus_review_files:
+        if not consensus_review_files and not manual_files:
             logger.info("No OCR commentary anomalies remain; correction validation is not needed.")
             return 0
     if consensus_enabled:
@@ -515,13 +637,20 @@ def ocr_correct_validate_command(args):
         consensus_review_files = review_required_files(output_dir)
         from pdf2epub.ocr_correction import materialize_auto_accepted_pages
 
-        materialize_auto_accepted_pages(output_dir, auto_accepted_files(output_dir))
+        materialize_auto_accepted_pages(
+            output_dir,
+            sorted(set(auto_accepted_files(output_dir)) - set(manual_files)),
+        )
     else:
         from pdf2epub.ocr_correction import materialize_auto_accepted_pages
 
         all_pages = sorted(p.name for p in (output_dir / "pages").glob("page_*.md"))
-        materialize_auto_accepted_pages(output_dir, sorted(set(all_pages) - set(consensus_review_files)))
-    if consensus_review_files and not review_images_are_current(output_dir):
+        materialize_auto_accepted_pages(
+            output_dir,
+            sorted(set(all_pages) - set(consensus_review_files) - set(manual_files)),
+        )
+    review_files = sorted(set(consensus_review_files or []) | set(manual_files))
+    if review_files and not review_images_are_current(output_dir):
         logger.error(
             "OCR review images are missing or stale; rerun ocr-correct before validation"
         )
@@ -553,10 +682,10 @@ def ocr_correct_validate_command(args):
     )
     review_selection = (
         [selected_file]
-        if selected_file and selected_file in set(consensus_review_files or [])
+        if selected_file and selected_file in set(review_files)
         else []
         if selected_file
-        else consensus_review_files
+        else review_files
     )
     review_report = (
         validate_ocr_correction_reviews(
@@ -569,12 +698,18 @@ def ocr_correct_validate_command(args):
         else {"valid": True, "files_checked": [], "errors": []}
     )
     report["ocr_correction_review"] = review_report
+    report["manual_review_files"] = manual_files
+    report["manual_review_selection_sha256"] = (
+        selection_state["selection_sha256"] if manual_files else None
+    )
     if consensus_enabled:
-        report["auto_accepted_files"] = auto_accepted_files(output_dir)
-        report["visual_review_files"] = consensus_review_files or []
+        report["auto_accepted_files"] = sorted(
+            set(auto_accepted_files(output_dir)) - set(review_files)
+        )
+        report["visual_review_files"] = review_files
     else:
-        report["pass_through_files"] = sorted(set(report.get("valid_files", [])) - set(consensus_review_files or []))
-        report["visual_review_files"] = consensus_review_files or []
+        report["pass_through_files"] = sorted(set(report.get("valid_files", [])) - set(review_files))
+        report["visual_review_files"] = review_files
         report["evidence_mode"] = "single_ocr_anomaly_review"
         report["anomaly_files"] = consensus_review_files or []
     if selected_file and review_report["valid"]:

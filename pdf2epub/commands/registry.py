@@ -204,6 +204,16 @@ def register_command_parsers(subparsers) -> None:
         default=None,
         help="Review-image resolution (default: ocr_correction.review_dpi or 150)",
     )
+    ocr_correct_parser.add_argument(
+        "--file",
+        action="append",
+        default=[],
+        metavar="PAGE.md",
+        help=(
+            "Also request visual review of this OCR page; repeat to select multiple pages. "
+            "Selections accumulate across runs."
+        ),
+    )
     ocr_correct_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.ocr", "ocr_correct_command"))
 
     ocr_correct_validate_parser = subparsers.add_parser(

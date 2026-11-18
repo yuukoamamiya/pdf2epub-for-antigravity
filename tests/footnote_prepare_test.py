@@ -11,6 +11,7 @@ from pdf2epub.refine.footnote_prepare import (
 )
 from pdf2epub.refine.footnote_contracts import FOOTNOTE_PREPARE_SCHEMA_VERSION
 from pdf2epub.refine.footnote_status import FOOTNOTE_NORMALIZATION_SCHEMA_VERSION
+from pdf2epub.refine.footnote_effective_decisions import EFFECTIVE_DECISIONS_VERSION
 from pdf2epub.refine.footnote_candidates import candidate_for_block
 from pdf2epub.refine.footnote_handoff import prepare_footnote_subagent
 from pdf2epub.refine.footnote_apply_resolution import (
@@ -62,6 +63,23 @@ def _write_current_result_audit(
         json.dumps(audit), encoding="utf-8"
     )
     return audit
+
+
+def _effective_receipt_fields(output_dir: Path, decisions: list[dict]) -> dict:
+    from pdf2epub.refine.footnote_effective_decisions import (
+        EFFECTIVE_DECISIONS_VERSION, compile_effective_decisions,
+    )
+    from pdf2epub.refine.footnote_source import load_footnote_source_snapshot
+
+    report = json.loads((output_dir / "footnote_candidates.json").read_text(encoding="utf-8"))
+    compiled = compile_effective_decisions(report, decisions)
+    assert compiled["errors"] == []
+    source = load_footnote_source_snapshot(output_dir)
+    return {
+        "effective_decisions_version": EFFECTIVE_DECISIONS_VERSION,
+        "effective_decisions": compiled["decisions"],
+        "source_sha256": dict(source.source_hashes),
+    }
 
 
 def test_footnote_signature_does_not_match_number_inside_larger_number():
@@ -363,6 +381,9 @@ def test_footnote_status_reports_candidate_hash_as_root_cause(tmp_path: Path):
             "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
             "ocr_evidence_mode": "single_ocr",
             "continuation_reviews": [],
+            "effective_decisions_version": EFFECTIVE_DECISIONS_VERSION,
+            "effective_decisions": [],
+            "source_sha256": {"unit.md": hashlib.sha256(source.read_bytes()).hexdigest()},
             "candidate_report_sha256": hashlib.sha256(candidates.read_bytes()).hexdigest(),
         }),
         encoding="utf-8",
@@ -378,6 +399,8 @@ def test_footnote_status_reports_candidate_hash_as_root_cause(tmp_path: Path):
                 "valid": True,
                 "status": "validated",
                 "ocr_evidence_mode": "single_ocr",
+                "effective_decisions_version": EFFECTIVE_DECISIONS_VERSION,
+                "effective_decisions": [],
                 "source_sha256": {
                     "unit.md": hashlib.sha256(source.read_bytes()).hexdigest()
                 },
@@ -449,6 +472,9 @@ def test_footnote_status_requires_current_toc_for_scoped_endnotes(tmp_path: Path
             "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
             "ocr_evidence_mode": "single_ocr",
             "continuation_reviews": [],
+            "effective_decisions_version": EFFECTIVE_DECISIONS_VERSION,
+            "effective_decisions": [],
+            "source_sha256": {"unit.md": hashlib.sha256(source.read_bytes()).hexdigest()},
             "candidate_report_sha256": hashlib.sha256(candidates.read_bytes()).hexdigest(),
         }),
         encoding="utf-8",
@@ -466,6 +492,8 @@ def test_footnote_status_requires_current_toc_for_scoped_endnotes(tmp_path: Path
                     "valid": True,
                     "status": "validated",
                     "ocr_evidence_mode": "single_ocr",
+                    "effective_decisions_version": EFFECTIVE_DECISIONS_VERSION,
+                    "effective_decisions": [],
                     "source_sha256": {
                         "unit.md": hashlib.sha256(source.read_bytes()).hexdigest()
                     },
@@ -914,9 +942,41 @@ def test_native_footnote_decision_reuses_existing_normalization_pipeline(
         encoding="utf-8"
     )
 
+    decision_path = tmp_path / "footnote_decisions.json"
+    decision_path.write_text(json.dumps({
+        "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
+        "decisions": [{"page": 1, "block": 1, "role": "body"}],
+    }), encoding="utf-8")
+    ignored_decisions = validate_footnote_decisions(tmp_path, config=config)
+    assert ignored_decisions["valid"] is False
+    assert any("override=true" in error for error in ignored_decisions["errors"])
+    decision_path.write_text(json.dumps({
+        "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
+        "decisions": [{
+            "page": 1, "block": 1, "role": "body", "key": "36", "override": True,
+            "review_note": "confirmed as ordinary body",
+        }],
+    }), encoding="utf-8")
+    override_validation = validate_footnote_decisions(tmp_path, config=config)
+    assert override_validation["valid"] is True
+    accepted = override_validation["effective_decisions"][0]
+    assert accepted["local_role"] == "footnote_start"
+    assert accepted["review_role"] == "body"
+    assert accepted["effective_role"] == "body"
+    assert accepted["override"] is True
+    override_result = apply_footnote_normalization(tmp_path, config=config)
+    assert override_result["valid"] is False
+    assert override_result["status"] == "review_required"
+    override_text = (tmp_path / "footnote_normalized" / "chapter_1.md").read_text(encoding="utf-8")
+    assert "Native footnote text" in override_text
+    assert "<sup>36</sup>" in override_text
+    assert any("Raw superscript 36 remains" in error for error in override_result["errors"])
+
+    decision_path.unlink()
     validation = validate_footnote_decisions(tmp_path, config=config)
     assert validation["valid"] is True
     assert validation["status"] == "no_subagent_review_required"
+    assert validation["effective_decisions"]
 
     result = apply_footnote_normalization(tmp_path, config=config)
 
@@ -957,9 +1017,12 @@ def test_repeated_body_decision_cannot_override_local_high_confidence_candidate(
         ]
     }
 
-    decisions = _candidate_decisions(report, validation)
+    with pytest.raises(ValueError, match="override=true"):
+        _candidate_decisions(report, validation)
 
-    assert decisions[0]["role"] == "footnote_start"
+    validation["decisions"][0]["override"] = True
+    decisions = _candidate_decisions(report, validation)
+    assert decisions[0]["role"] == "body"
     assert decisions[0]["key"] == "36"
 
 
@@ -1276,7 +1339,7 @@ def test_cross_page_body_semantics_outvote_note_without_inline_marker(
     assert report["visual_audit_task_count"] == 0
 
 
-def test_cross_page_footnote_semantics_can_auto_link_continuation(
+def test_cross_page_footnote_semantics_alone_requires_visual_review(
     tmp_path: Path,
 ):
     _write_sidecar(
@@ -1309,12 +1372,16 @@ def test_cross_page_footnote_semantics_can_auto_link_continuation(
     report = prepare_footnote_candidates(tmp_path)
 
     page = report["pages"][1]
-    continuation = page["candidates"][0]
+    continuation = next(item for item in page["candidates"] if item["block"] == 1)
     evidence = continuation["continuation_evidence"]
     assert evidence["semantic_comparison"]["winner"] == "footnote"
-    assert continuation["key"] == "36"
-    assert continuation["local_role"] == "footnote_continuation"
-    assert report["visual_audit_task_count"] == 0
+    assert continuation.get("key") is None
+    assert continuation.get("auto_continuation") is not True
+    assert continuation.get("local_role") is None
+    assert continuation["confidence"] == "review"
+    assert page["footnote_regions"][0]["disposition"] == "visual_audit_required"
+    assert report["visual_audit_task_count"] == 1
+    assert report["continuation_reviews"] == []
 
 
 def test_cross_page_complete_last_footnote_stays_visual_review(
@@ -2782,6 +2849,12 @@ def test_secondary_only_footnote_decision_materializes_explicit_text(
                         "primary_disposition": "absent",
                     }
                 ],
+                **_effective_receipt_fields(tmp_path, [{
+                    "page": 1, "source": "secondary", "block": 0,
+                    "role": "footnote_start", "key": "36",
+                    "source_file": "chapter_1.md", "text": "36 recovered note",
+                    "primary_disposition": "absent",
+                }]),
             }
         ),
         encoding="utf-8",
@@ -2904,6 +2977,12 @@ def test_secondary_only_repeated_marker_fails_closed(tmp_path: Path):
                         "primary_disposition": "absent",
                     }
                 ],
+                **_effective_receipt_fields(tmp_path, [{
+                    "page": 1, "source": "secondary", "block": 0,
+                    "role": "footnote_start", "key": "36",
+                    "source_file": "chapter_1.md", "text": "36 recovered note",
+                    "primary_disposition": "absent",
+                }]),
             }
         ),
         encoding="utf-8",
@@ -3066,6 +3145,12 @@ def test_secondary_only_can_remove_an_explicit_primary_duplicate(tmp_path: Path)
                         "primary_blocks": [1],
                     }
                 ],
+                **_effective_receipt_fields(tmp_path, [{
+                    "page": 1, "source": "secondary", "block": 0,
+                    "role": "footnote_start", "key": "36",
+                    "source_file": "chapter_1.md", "text": "36 Recovered note",
+                    "primary_disposition": "remove", "primary_blocks": [1],
+                }]),
             }
         ),
         encoding="utf-8",

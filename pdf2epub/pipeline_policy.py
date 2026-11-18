@@ -40,15 +40,22 @@ class PipelinePolicy:
         self, output_dir: Any = None, ocr_evidence=None
     ) -> bool:
         """Whether workflow policy or current raw pages require visual review."""
+        from pdf2epub.ocr_review_selection import has_manual_review_selection
+
+        manual_selection = (
+            has_manual_review_selection(output_dir) if output_dir is not None else False
+        )
         if output_dir is not None:
             from pdf2epub.ocr_source import is_legacy_native_source
 
             if is_legacy_native_source(output_dir):
-                return False
+                return manual_selection
         if self.requires_ocr_correction:
             return True
         if output_dir is None:
             return False
+        if manual_selection:
+            return True
         from pdf2epub.ocr_anomalies import evidence_report_for_output, scan_ocr_pages
 
         report = evidence_report_for_output(ocr_evidence, output_dir)

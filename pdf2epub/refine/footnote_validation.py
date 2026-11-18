@@ -26,6 +26,7 @@ from .footnote_validation_evidence import (
 )
 from .footnote_continuation_review import validate_continuation_review_decisions
 from .footnote_result_review import validate_result_audit_reviews
+from .footnote_effective_decisions import EFFECTIVE_DECISIONS_VERSION
 
 
 def _endnote_definition_result(output_dir: Path) -> dict[str, Any]:
@@ -98,7 +99,7 @@ def _preflight_footnote_apply(
     normalized_decisions: list[dict[str, Any]],
     continuation_reviews: Optional[list[dict[str, Any]]] = None,
     endnote_definition_decisions: Optional[list[dict[str, Any]]] = None,
-) -> list[str]:
+) -> tuple[list[str], list[dict[str, Any]], dict[str, str]]:
     """Build the same complete normalization plan that apply will materialize."""
     from .footnote_normalization_plan import (
         FootnoteNormalizationPlanningInput,
@@ -109,7 +110,7 @@ def _preflight_footnote_apply(
     try:
         source = load_footnote_source_snapshot(output_dir)
     except (OSError, UnicodeError, ValueError, KeyError) as exc:
-        return [f"could not load current footnote source snapshot: {exc}"]
+        return [f"could not load current footnote source snapshot: {exc}"], [], {}
     try:
         toc_tree = json.loads((output_dir / "toc_tree.json").read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError):
@@ -136,7 +137,17 @@ def _preflight_footnote_apply(
         scope_error=scope_error,
         endnote_definition_decisions=endnote_definition_decisions,
     ))
-    return list(plan.errors)
+    return list(plan.errors), list(plan.effective_decisions), dict(plan.source_sha256)
+
+
+def _current_source_hashes(output_dir: Path) -> tuple[dict[str, str], Optional[str]]:
+    from .footnote_source import load_footnote_source_snapshot
+
+    try:
+        snapshot = load_footnote_source_snapshot(output_dir)
+    except (OSError, UnicodeError, ValueError, KeyError) as exc:
+        return {}, f"could not load current footnote source snapshot: {exc}"
+    return dict(snapshot.source_hashes), None
 
 
 def validate_footnote_decisions(
@@ -198,6 +209,8 @@ def validate_footnote_decisions(
         _attach_endnote_result(result, endnote_result)
         return _persist_result(output_dir, report_path, report, result)
 
+    effective_decisions: list[dict[str, Any]] = []
+    source_sha256: dict[str, str] = {}
     required = required_review_addresses(report)
     continuation_tasks = report.get("continuation_reviews", [])
     audit_data = report.get("result_audit") if isinstance(report.get("result_audit"), Mapping) else {}
@@ -207,8 +220,10 @@ def validate_footnote_decisions(
             *(result_audit_tasks if isinstance(result_audit_tasks, list) else []),
             *audit_data["reviewed_candidate_tasks"],
         ]
-    if not required and not continuation_tasks and not result_audit_tasks:
+    if not required and not continuation_tasks and not result_audit_tasks and not decision_path.exists():
         preflight_errors = []
+        effective_decisions: list[dict[str, Any]] = []
+        source_sha256: dict[str, str] = {}
         if str(report.get("footnote_mode") or "footnotes") != "disabled":
             endnote_decisions = (
                 endnote_result.get("decisions", [])
@@ -216,15 +231,22 @@ def validate_footnote_decisions(
                 and isinstance(endnote_result.get("decisions"), list)
                 else None
             )
-            preflight_errors = _preflight_footnote_apply(
+            preflight_errors, effective_decisions, source_sha256 = _preflight_footnote_apply(
                 output_dir, report, [], [], endnote_decisions
             )
+        else:
+            source_sha256, source_error = _current_source_hashes(output_dir)
+            if source_error:
+                preflight_errors.append(source_error)
         result = {
             **base_fields,
             "valid": not preflight_errors,
             "status": "retry_required" if preflight_errors else "no_subagent_review_required",
             "errors": preflight_errors,
             "decisions": [],
+            "effective_decisions_version": EFFECTIVE_DECISIONS_VERSION,
+            "effective_decisions": effective_decisions,
+            "source_sha256": source_sha256,
             "continuation_reviews": [],
         }
         _attach_endnote_result(result, endnote_result)
@@ -326,12 +348,18 @@ def validate_footnote_decisions(
                 and isinstance(endnote_result.get("decisions"), list)
                 else None
             )
-            errors.extend(_preflight_footnote_apply(
+            preflight_errors, effective_decisions, source_sha256 = _preflight_footnote_apply(
                 output_dir, report, normalized, continuation_decisions,
                 endnote_decisions,
-            ))
+            )
+            errors.extend(preflight_errors)
         except Exception as exc:
             errors.append(f"footnote apply preflight failed: {exc}")
+
+    if not source_sha256:
+        source_sha256, source_error = _current_source_hashes(output_dir)
+        if source_error:
+            errors.append(source_error)
 
     if human_review_required:
         status = "human_review_required"
@@ -349,6 +377,9 @@ def validate_footnote_decisions(
         "human_review_required": human_review_required,
         "region_audits": sorted(region_ids),
         "decisions": normalized,
+        "effective_decisions_version": EFFECTIVE_DECISIONS_VERSION,
+        "effective_decisions": effective_decisions,
+        "source_sha256": source_sha256,
         "continuation_reviews": continuation_decisions,
         "result_audit_reviews": result_audit_reviews,
         "result_audit_version": audit_data.get("schema_version") if isinstance(audit_data, Mapping) else None,

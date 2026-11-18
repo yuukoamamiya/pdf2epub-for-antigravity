@@ -257,6 +257,8 @@ TOC 中标记为
   精确页图复核任务；映射不唯一或证据过期时记录 stale finding，不扩大到整页或整单元。
 - `refine/footnote_continuation_regions.py`：只负责连续数字区域的几何识别、相邻块回溯和
   续文候选扩展；不评估跨页语义、不写 Markdown，也不决定最终脚注角色。
+- `refine/footnote_effective_decisions.py`：按精确 page/source/block 地址索引候选，并编译带 provenance
+  的有效决定集，`footnote_validation_audit.py` 复用同一索引规则，避免 validate 与 apply 对重复候选地址理解不一致。
 - `refine/footnote_report.py`：汇总跨页窗口、视觉页面/区域证据、统计和哈希快照，并原子写入
   `footnote_candidates.json`；不重新扫描 sidecar 或推断脚注语义。
 - `refine/footnote_contracts.py`：集中维护决定角色和可移动角色集合，供准备、校验和应用阶段
@@ -358,6 +360,13 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
 要求异常决定绑定原始页、纠正稿和页图哈希；下游还要求纠正检查点与 `refine-local` 页面指纹当前。
 启发式只提供复核信号，不能推断正确转录，也可能漏报或误报。
 
+手动 OCR 纠错请求由 `ocr-correct --file PAGE.md` 显式选择，可重复传入并累积，无 `--file` 的 `--resume` 恢复原选择。
+请求合同绑定 PDF、数字排序的完整原始页清单及逐页 Markdown/sidecar 哈希。单文件 validate 只写单页检查点。全量
+`ocr-correct-validate` 才生成允许 refine 读取 validated 副本的整书收据。handoff 的非空
+`manual_review_files` 或 `manual_review_selection_sha256` 即表示存在 manual contract 依赖，缺失/损坏合同仍禁止
+raw fallback，即使 validation receipt 不在。恢复时保留 handoff/receipt 中可恢复的安全页名并合并新增选择。只有选择哈希
+而无法还原文件名时，需显式重选全部目标页。复核决定同时绑定当前 source、target 和 image 哈希。
+
 `local_credentials.py` 负责读取被 Git 忽略的本地凭据；各 OCR 后端不共享运行时状态。
 
 `commands/diagnostics.py` 提供只读的 `status` 和 `doctor`。`commands/footnote_diagnostics.py`
@@ -374,8 +383,8 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
 这些模块是格式无关或 Markdown/TOC 专用的本地合同实现：
 
 - `markdown_handoff.py`：协调规划、上下文、恢复、manifest 和 prompt 服务，写入本次 handoff 产物。
-- `markdown_handoff_planning.py`：以 `MarkdownHandoffPlan` 返回已校验的源文件 inventory、哈希、统计、有效角色及来源、续文信息、只读前后边界上下文和默认批次计划。polish 只按显式 part mapping 选择邻片，前后各最多 256 token、合计最多 512 token，并受单文件剩余 token 预算约束。优先投影完整正文块，超预算时回退到完整句或完整词片段并标记为 context-only。裁剪片段不能决定段落边界或授权合并块。脚注定义及其续行会排除。上下文哈希绑定映射、邻片身份、源哈希和投影文本。translation 保持原 preceding context 行为。显式角色优先于共享推断，推断角色也参与普通/特殊 worker 隔离。不读写 manifest/prompt，也不导入 handoff 编排器。
-- `markdown_handoff_context.py`：将已声明的上下文文件投影为 handoff 可用路径和 hash；不读取未声明上下文。
+- `markdown_handoff_planning.py`：以 `MarkdownHandoffPlan` 返回已校验的源文件 inventory、哈希、统计、有效角色及来源、续文信息、只读前后边界上下文和默认批次计划。polish 只按显式 part mapping 选择邻片，前后各最多 256 token、合计最多 512 token，并受单文件剩余 token 预算约束。优先投影完整正文块，超预算时回退到完整句或完整词片段并标记为 context-only。裁剪片段不能决定段落边界或授权合并块。脚注定义及其续行会排除。unit context hash 表示该单元实际使用的映射、邻片和 halo 投影，全书 context/source hash 保留作 provenance 与 inventory 审计，不扩大单元依赖。重新 prepare 后，halo 外邻片内容变化可复用未受影响的 sidecar/receipt，但仍核对完整 source provenance。translation 保持原 preceding context 行为。显式角色优先于共享推断，推断角色也参与普通/特殊 worker 隔离。不读写 manifest/prompt，也不导入 handoff 编排器。
+- `markdown_handoff_context.py`：将已声明的上下文文件投影为 handoff 可用路径和 hash，不读取未声明上下文。
 - `markdown_handoff_resume.py`：读取旧 manifest 和校验检查点，判断单元上下文、有效角色与角色来源是否仍可复用，并生成恢复决定。PDF `translate`/`polish` validation receipt 按文件记录验证时的 `unit_context_sha256`、TOC heading context、语言及角色来源；polish 还绑定 `boundary_context_sha256`。准备 manifest 更新不会刷新该 receipt。已有上下文而旧 receipt 缺少快照时，先 prepare、正式 validate，再 resume；旧 polish receipt 缺少边界投影哈希时重新进入 pending。
 - `markdown_handoff_manifest.py`：组装 manifest 数据，并检查可选视觉复核、次 OCR、review 输出目录相对 output 的边界；不负责协调器提供的 source/target/scratch 字符串，也不渲染 prompt。
 - `markdown_handoff_prompt.py`：从明确的 prompt identity、batching 和路径数据渲染提示词，不读取工作区文件。
@@ -790,7 +799,7 @@ polish 或 translate Subagent。原始 OCR 单元不覆盖。
 存在多个定义时仍按顺序逐次配对，额外引用不猜测目标。
 当前 `footnote_candidates.json`、`footnote_decisions.json` 和
 `footnote_decision_validation.json` 使用 prepare/decision schema 4；尾注边界歧义及其决定独立使用
-schema 2。该输出合同已更新到 `footnote_normalization.json` schema 9，并绑定 schema 2 的结果审计；旧 schema 1–8 checkpoint 会失效，
+schema 2。该输出合同已更新到 `footnote_normalization.json` schema 10，并绑定 version 3 的结果审计。旧 schema 1–9 checkpoint 会失效。
 须重新运行 `footnote-prepare`，按新 manifest 的 pending 状态复核并写决定，再运行
 `footnote-validate → footnote-apply`。无需重跑 OCR。本次文档/代码维护不自动处理书稿产物；
 恢复命令会更新准备合同，并由 apply 重建 `footnote_normalized/` 与成功 checkpoint，用户需按需
@@ -970,8 +979,9 @@ secondary-only 的 moved decision 必须包含：
 - `refine/footnote_handoff.py`：生成脚注 Subagent 的 manifest 和 Prompt，并调度候选报告、review
   packet 与 context API；不持有 projection 或 freshness 实现。
 - `refine/footnote_unit_contexts.py`：集中实现 canonical sparse projection、上下文写入/加载、投影重算、
-  manifest 哈希核对和输出路径安全校验，供 validation 与 Markdown handoff 直接使用。
-- `refine/footnote_polish_review.py`：负责 polish 脚注语义问题的证据定位和 scoped review task 构造；
+  manifest 哈希核对和输出路径安全校验，供 validation 与 Markdown handoff 直接使用。脚注证据按 chapter scope 投影，
+  缺少精确 part→page 映射时继续使用章节级证据与失效范围，不推断分片级页范围。
+- `refine/footnote_polish_review.py`：负责 polish 脚注语义问题的证据定位和 scoped review task 构造，
   handoff 只消费其结果，不承载该映射规则。
 - `refine/footnote_validation.py`：编排证据加载、纯决策审计与结果持久化；只有已验证结果才会
   更新候选报告并写入稀疏 unit context，不修改原始 Markdown。
@@ -1041,13 +1051,13 @@ PDF 结构阶段采用“共享证据、分离语义”的边界：
 | `footnote_result_review.py` | 读取并验证视觉结果审查的精确地址、决定、源/目标/sidecar 哈希与页图 freshness | 生成审计 findings、修改源/归一化稿、决定脚注语义 |
 
 脚注识别规则或评分发生变化时，应修改 `footnote_page_scan.py`、`footnote_continuation_regions.py` 或 `footnote_regions.py` 对应层，并覆盖主次 OCR 差异与跨页边界；候选到决定的物化规则应进入 `footnote_normalization_plan.py`，由统一计划承接；该 planner 可以读取当前证据以完成定位和计划校验，但不得写派生稿或 checkpoint。Context consumers 依赖 `footnote_unit_contexts.py` 的公开 API，不从 handoff coordinator 取 context。脚注 apply 按“前置门禁/证据快照 → block 定位和 unit/lane 归属 → 引用与定义绑定 → 编辑冲突校验 → 内存纯转换 → 原子写入派生稿 → 结果审计 → success checkpoint”的顺序运行。计划和所有绑定必须完整通过后才允许写入；源 unit 的哈希在读取原始字节时快照，写入前重新扫描 `ocr_markdown/*.md` 并与该快照逐项比较，同时先检查 `footnote_normalized/` 是否有不属于当前源 inventory 的 stale Markdown。
-apply 写入 `footnote_normalized/` 后运行 `footnote_result_audit.json`（schema 2），并把其文件哈希/版本绑定到 `footnote_normalization.json`（schema 9）。该报告也绑定源稿、归一化稿、候选报告和决定校验的当前哈希。只有审计通过，apply 才写有效 normalization checkpoint；未解决 findings 不会通过 `footnote_normalization_status()`，因此 polish/readiness/build 门禁也会阻断。即使派生 Markdown 已写出，它仍是未验证结果，不能据文件存在推断阶段完成。
+apply 写入 `footnote_normalized/` 后运行 `footnote_result_audit.json`（version 3），并把其文件哈希/版本绑定到 `footnote_normalization.json`（schema 10）。有效决定使用 effective decision version 1，边界上下文投影使用 version 2。该报告也绑定源稿、归一化稿、候选报告和决定校验的当前哈希。只有审计通过，apply 才写有效 normalization checkpoint，未解决 findings 不会通过 `footnote_normalization_status()`，因此 polish/readiness/build 门禁也会阻断。即使派生 Markdown 已写出，它仍是未验证结果，不能据文件存在推断阶段完成。
 
-apply 后的结果审计输出需视觉判读的线索，包括归一化稿中残留数字上标/疑似编号注释、可能截断或未闭合的定义、定义后的正文边界污染，以及确认候选未进入应用计划。编号范围依据 TOC/refinement unit 与章节映射，单文件章节和多分片章节均按实际顺序检查。下降序列仅在精确页面边界分隔记录或 `section_id` 明确变化时作为编号重启；缺少边界证据时生成 `scoped_numbering_reset_uncertain` 视觉复核，不跨重启推断缺号。另一项独立的上游候选召回改进会在首次 prepare 时，把通用 OCR `Text` 块行首 `<sup>…</sup>` 补入视觉任务，图像复核候选块角色。后续 prepare 会把当前 apply 报告中的未决结果任务投影到同一审阅流程，仅在源稿与归一化稿哈希匹配时复用。已识别的脚注定义和缩进行续段、代码及注释排除在相应正文标记扫描外。
+apply 后的结果审计输出需视觉判读的线索，包括归一化稿中残留数字上标/疑似编号注释、可能截断或未闭合的定义、定义后的正文边界污染，以及确认候选未进入应用计划。每个非脚注例外绑定一个精确 marker occurrence identity。同一 key 或同一文本重复出现时仍逐 occurrence 核查。疑似注释内标题只有在 reviewed TOC heading span 与实际 consumed source span 于同一页唯一定位并相交时才标为 `confirmed_toc_heading_in_note`，其他情况都保持 `suspected_heading_in_note` 并交视觉复核。编号范围依据 TOC/refinement unit 与章节映射，单文件章节和多分片章节均按实际顺序检查。下降序列仅在精确页面边界分隔记录或 `section_id` 明确变化时作为编号重启，缺少边界证据时生成 `scoped_numbering_reset_uncertain` 视觉复核，不跨重启推断缺号。上游候选召回会把通用 OCR `Text` 块中行首 `<sup>…</sup>` 补入视觉任务，跨页续词若被 OCR 标为普通 `Text` 且含行内上标，在上一物理脚注开放、文本续接断词、脚注列几何对齐并有独立字号/字体或词汇证据时，也会以无 key 的低置信度精确地址进入 visual audit 和 unit context。它只创建复核任务，不自动分类或移动。后续 prepare 会把当前 apply 报告中的未决结果任务投影到同一审阅流程，仅在源稿与归一化稿哈希匹配时复用。已识别的脚注定义和缩进行续段、代码及注释排除在相应正文标记扫描外。
 
-结果审计由现有 `footnote-prepare → footnote-validate → footnote-apply` 循环处理，不增加 operator 命令或独立生产阶段。Reviewer 在 `footnote_decisions.json.result_audit_reviews` 对每个任务提交当前 task ID、证据哈希、全部指定页图和图像理由。确认脚注还要引用精确候选，并在普通决定中具有匹配角色；apply 再验证物化结果。validate 对未决任务要求重新 prepare 生成补充任务，任务仍按源地址和哈希绑定；同一任务第二轮仍不确定则为 `human_review_required`。`disabled` 下审计状态为 `not_applicable`；`endnotes_only` 跳过页脚注候选扫描，但仍审计适用的尾注定义、截断和物化完整性；单/双 OCR 和 legacy native-text 继续按当前证据模式处理。
+结果审计由现有 `footnote-prepare → footnote-validate → footnote-apply` 循环处理，不增加 operator 命令或独立生产阶段。Reviewer 在 `footnote_decisions.json.result_audit_reviews` 对每个任务提交当前 task ID、证据哈希、全部指定页图和图像理由。确认脚注还要引用精确候选，并在普通决定中具有匹配角色，apply 再验证物化结果。validate 对未决任务要求重新 prepare 生成补充任务，任务仍按源地址和哈希绑定，同一任务第二轮仍不确定则为 `human_review_required`。`disabled` 下审计状态为 `not_applicable`，`endnotes_only` 跳过页脚注候选扫描，但仍审计适用的尾注定义、截断和物化完整性，单/双 OCR 和 legacy native-text 继续按当前证据模式处理。
 
-任一计划、绑定、冲突或写前 inventory 校验失败时只写无效诊断 checkpoint，不写有效 checkpoint。`footnote_candidates.json`/决定验证使用 prepare schema 4，`footnote_result_audit.json` 使用 schema 2，`footnote_normalization.json` 使用 schema 9；旧 prepare handoff 和旧 schema 1–8 normalization checkpoint 需重跑 `footnote-prepare → footnote-validate → footnote-apply`，无需重新 OCR。结果审计 version 1 的旧 normalization receipt 同样失效。apply 后还需 `polish --resume` 刷新 semantic sidecar，再运行正式 `polish-validate`。旧原始 Markdown、原 OCR 与已有归一化产物不由升级说明授权覆盖或清理；apply 按当前源重建正式派生稿。
+任一计划、绑定、冲突或写前 inventory 校验失败时只写无效诊断 checkpoint，不写有效 checkpoint。`footnote_candidates.json`/决定验证使用 prepare schema 4，`footnote_result_audit.json` 使用 version 3，`footnote_normalization.json` 使用 schema 10。旧 prepare handoff 和旧 schema 1–9 normalization checkpoint 需重跑 `footnote-prepare → footnote-validate → footnote-apply`，无需重新 OCR。结果审计 version 1–2 的旧 normalization receipt 同样失效。apply 后还需 `polish --resume` 刷新 semantic sidecar，再运行正式 `polish-validate`。旧原始 Markdown、原 OCR 与已有归一化产物不由升级说明授权覆盖或清理，apply 按当前源重建正式派生稿。
 
 新增 PDF 结构信号时，先判断它是共享的几何/证据事实还是某个领域的语义规则。前者进入
 共享模块并补一组跨阶段测试，后者只进入对应的 prepare/apply 模块。命令 handler 只读取

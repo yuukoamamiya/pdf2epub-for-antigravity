@@ -98,11 +98,14 @@ def test_plan_projects_confirmed_body_review_before_resolution_without_mutation(
     )
 
     assert plan.valid
-    assert captured["report"]["pages"][0]["candidates"][0]["confidence"] == "review"
+    assert captured["report"]["pages"][0]["candidates"][0]["confidence"] == "high"
     assert captured["decisions"]["decisions"] == [{
         "page": 1, "source": "primary", "block": 2, "role": "body",
-        "key": "1", "chapter_id": "toc-unit:chapter",
+        "key": "1", "override": True,
+        "_trusted_decision_source": "confirmed_not_a_footnote",
+        "chapter_id": "toc-unit:chapter",
     }]
+    assert captured["decisions"]["effective_decisions"][0]["decision_source"] == "confirmed_not_a_footnote"
     assert report == original_report
     assert decisions == original_decisions
     assert snapshot.source_texts["chapter.md"] == "Body.\n"
@@ -150,3 +153,36 @@ def test_plan_recovers_only_the_exact_reviewed_continuation(
     assert plan.valid
     assert note["parts"] == ["international"]
     assert note["recovered_continuations"] == ["cont-1"]
+
+
+def test_plan_rejects_source_or_effective_receipt_changes_since_validation(tmp_path: Path):
+    _write_source(tmp_path, b"Body.\n")
+    snapshot = load_footnote_source_snapshot(tmp_path)
+    report = {"footnote_mode": "footnotes", "pages": []}
+    no_decisions = {"decisions": [], "continuation_reviews": []}
+
+    stale_source = planning.build_footnote_normalization_plan(
+        planning.FootnoteNormalizationPlanningInput(
+            output_dir=tmp_path,
+            report=report,
+            decisions=no_decisions,
+            source=snapshot,
+            footnote_mode="footnotes",
+            expected_source_sha256={"chapter.md": "stale"},
+        )
+    )
+    stale_effective = planning.build_footnote_normalization_plan(
+        planning.FootnoteNormalizationPlanningInput(
+            output_dir=tmp_path,
+            report=report,
+            decisions=no_decisions,
+            source=snapshot,
+            footnote_mode="footnotes",
+            expected_effective_decisions=[{"page": 39, "block": 0, "role": "body"}],
+        )
+    )
+
+    assert not stale_source.valid
+    assert any("source Markdown changed since validation" in error for error in stale_source.errors)
+    assert not stale_effective.valid
+    assert any("effective footnote decisions changed since validation" in error for error in stale_effective.errors)

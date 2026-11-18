@@ -18,6 +18,9 @@ from .batching_service import (
 from .document_roles import TRANSLATION_SPECIAL_ROLES, resolve_translation_file_role
 
 
+BOUNDARY_CONTEXT_PROJECTION_VERSION = 2
+
+
 @dataclass(frozen=True)
 class MarkdownHandoffPlan:
     sources: list[Path]
@@ -331,7 +334,11 @@ def plan_markdown_handoff(
                 before_budget, after_budget = 0, min(256, remaining)
             else:
                 before_budget, after_budget = 0, 0
-            projection: dict[str, Any] = {"file": name, "links": []}
+            projection: dict[str, Any] = {
+                "version": BOUNDARY_CONTEXT_PROJECTION_VERSION,
+                "file": name,
+                "links": [],
+            }
             source_links: list[dict[str, str]] = []
             if has_previous:
                 neighbor = previous_by_file[name]
@@ -341,7 +348,7 @@ def plan_markdown_handoff(
                 preceding_contexts[name] = {"source_file": neighbor, "text": text, "clipped": clipped}
                 projection["links"].append({
                     "direction": "preceding", "source_file": neighbor,
-                    "source_sha256": source_sha256[neighbor], "text": text, "clipped": clipped,
+                    "text": text, "clipped": clipped,
                 })
                 source_links.append({
                     "direction": "preceding", "source_file": neighbor,
@@ -355,16 +362,17 @@ def plan_markdown_handoff(
                 succeeding_contexts[name] = {"source_file": neighbor, "text": text, "clipped": clipped}
                 projection["links"].append({
                     "direction": "succeeding", "source_file": neighbor,
-                    "source_sha256": source_sha256[neighbor], "text": text, "clipped": clipped,
+                    "text": text, "clipped": clipped,
                 })
                 source_links.append({
                     "direction": "succeeding", "source_file": neighbor,
                     "source_sha256": source_sha256[neighbor],
                 })
-            payload = json.dumps(projection, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-            boundary_context_sha256[name] = hashlib.sha256(payload.encode("utf-8")).hexdigest()
             boundary_context_sources[name] = source_links
             mapping_projection = _boundary_mapping_projection(name, continuation_metadata)
+            projection["mapping"] = mapping_projection
+            payload = json.dumps(projection, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            boundary_context_sha256[name] = hashlib.sha256(payload.encode("utf-8")).hexdigest()
             mapping_payload = json.dumps(mapping_projection, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
             boundary_context_mapping_sha256[name] = hashlib.sha256(mapping_payload.encode("utf-8")).hexdigest()
             context_tokens = sum(estimate_tokens(link["text"]) for link in projection["links"])

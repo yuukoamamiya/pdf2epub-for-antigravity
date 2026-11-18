@@ -144,7 +144,7 @@ def test_boundary_scan_uses_last_note_per_physical_page_and_per_chapter():
         ],
     )
     findings = [item for item in result["findings"] if item["code"] == "normalized_note_open_boundary_at_physical_page_break"]
-    assert [item["pages"] for item in findings] == [[5, 6], [10, 11]]
+    assert sorted(item["pages"] for item in findings) == [[5, 6], [10, 11]]
 
 
 def test_boundary_scan_binds_restarted_numbering_to_exact_output_key_and_source_unit():
@@ -192,3 +192,122 @@ def test_comma_in_ordinary_body_and_endnote_mode_do_not_create_boundary_tasks():
     )
     assert not any(item["code"] == "normalized_note_open_boundary_at_physical_page_break" for item in normal["findings"])
     assert not any(item["code"] == "normalized_note_open_boundary_at_physical_page_break" for item in endnotes["findings"])
+
+
+
+def _heading_audit(boundary_info, *, page_text="# 4. Old Ideology\nBody\n"):
+    source = "before\n4. Old Ideology\nafter\n"
+    start = source.index("4. Old Ideology")
+    end = start + len("4. Old Ideology")
+    result = audit_footnote_result(
+        {"chapter.md": source},
+        records=[{"name": "chapter.md", "chapter_id": "ch1", "start_page": 4, "end_page": 4}],
+        target_texts={"chapter.md": "[^n]: 4. Old Ideology\n"},
+        expected_notes=[{
+            "target_file": "chapter.md", "chapter_id": "ch1", "output_key": "n",
+            "candidate_refs": [{"page": 4, "source": "primary", "block": 2}],
+        }],
+        resolved_blocks=[{
+            "chapter_id": "ch1", "output_key": "n", "file": "chapter.md",
+            "page": 4, "source": "primary", "block": 2, "span": [start, end],
+        }],
+        toc_tree={"chapters": [{
+            "title": "4. Old Ideology", "node_id": "node-4", "start_page": 4,
+            "boundary_info": boundary_info,
+        }]},
+        page_texts={4: page_text},
+    )
+    return [item for item in result["findings"] if item["code"].endswith("heading_in_note")]
+
+
+def test_toc_heading_in_note_is_confirmed_only_at_bound_page_source_range():
+    finding, = _heading_audit(
+        {"heading_action": "bind", "start_line": 1, "heading_end_line": 2},
+    )
+    assert finding["code"] == "confirmed_toc_heading_in_note"
+
+
+def test_unbound_or_nonmatching_page_heading_stays_suspected():
+    unbound, = _heading_audit({"heading_action": "review", "start_line": 1, "heading_end_line": 2})
+    mismatched, = _heading_audit(
+        {"heading_action": "bind", "start_line": 1, "heading_end_line": 2},
+        page_text="# IV. Old Ideology\nBody\n",
+    )
+    duplicated, = _heading_audit(
+        {"heading_action": "bind", "start_line": 1, "heading_end_line": 2},
+        page_text="# 4. Old Ideology\nordinary note text\n4. Old Ideology\n",
+    )
+    assert unbound["code"] == "suspected_heading_in_note"
+    assert mismatched["code"] == "suspected_heading_in_note"
+    assert duplicated["code"] == "suspected_heading_in_note"
+
+
+def test_corrected_page_lines_override_raw_toc_line_numbers_for_heading_confirmation():
+    finding, = _heading_audit(
+        {"heading_action": "bind", "start_line": 1, "heading_end_line": 2},
+        page_text="# Corrected OCR prefix\n# 4. Old Ideology\nBody\n",
+    )
+    assert finding["code"] == "suspected_heading_in_note"
+
+
+def test_same_title_in_an_unmapped_output_key_does_not_cross_bind():
+    source = "4. Old Ideology\n"
+    result = audit_footnote_result(
+        {"chapter.md": source},
+        records=[{"name": "chapter.md", "chapter_id": "ch1"}],
+        target_texts={"chapter.md": "[^n]: 4. Old Ideology\n"},
+        expected_notes=[{
+            "target_file": "chapter.md", "chapter_id": "ch2", "output_key": "n",
+            "candidate_refs": [{"page": 4, "source": "primary", "block": 2}],
+        }],
+        resolved_blocks=[{
+            "chapter_id": "ch1", "output_key": "n", "file": "chapter.md",
+            "page": 4, "source": "primary", "block": 2, "span": [0, len(source)],
+        }],
+        toc_tree={"chapters": [{"title": "4. Old Ideology", "start_page": 4,
+                                "boundary_info": {"heading_action": "bind", "start_line": 1, "heading_end_line": 2}}]},
+        page_texts={4: "# 4. Old Ideology\n"},
+    )
+    assert not any(item["code"].endswith("heading_in_note") for item in result["findings"])
+
+
+def test_same_context_duplicate_marker_findings_have_independent_exceptions():
+    text = "Repeated context <sup>7</sup> remains unchanged.\n\nRepeated context <sup>7</sup> remains unchanged.\n"
+    base = audit_footnote_result(
+        {"chapter.md": "source"},
+        target_texts={"chapter.md": text},
+        records=[{"name": "chapter.md", "chapter_id": "ch1"}],
+    )
+    findings = [item for item in base["findings"] if item["code"] == "unexplained_numeric_superscript"]
+    assert len(findings) == 2
+    assert findings[0]["task_id"] != findings[1]["task_id"]
+    prefixed = audit_footnote_result(
+        {"chapter.md": "source"},
+        target_texts={"chapter.md": "Unrelated introduction.\n\n" + text},
+        records=[{"name": "chapter.md", "chapter_id": "ch1"}],
+    )
+    prefixed_findings = [item for item in prefixed["findings"] if item["code"] == "unexplained_numeric_superscript"]
+    assert [item["task_id"] for item in prefixed_findings] == [item["task_id"] for item in findings]
+
+    same_line = audit_footnote_result(
+        {"chapter.md": "source"},
+        target_texts={"chapter.md": "Two markers <sup>7</sup> and <sup>7</sup>."},
+        records=[{"name": "chapter.md", "chapter_id": "ch1"}],
+    )
+    same_line_findings = [item for item in same_line["findings"] if item["code"] == "unexplained_numeric_superscript"]
+    assert len({item["task_id"] for item in same_line_findings}) == 2
+
+    one_exception = {
+        "task_id": findings[0]["task_id"],
+        "evidence_sha256": findings[0]["evidence_sha256"],
+        "outcome": "legitimate_non_footnote",
+    }
+    reviewed = audit_footnote_result(
+        {"chapter.md": "source"},
+        target_texts={"chapter.md": text},
+        records=[{"name": "chapter.md", "chapter_id": "ch1"}],
+        current_exceptions=[one_exception],
+    )
+    remaining = [item for item in reviewed["findings"] if item["code"] == "unexplained_numeric_superscript"]
+    assert len(remaining) == 1
+    assert remaining[0]["task_id"] == findings[1]["task_id"]

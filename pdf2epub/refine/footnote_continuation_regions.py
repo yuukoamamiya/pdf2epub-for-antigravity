@@ -301,6 +301,22 @@ def _auto_continuation_key(candidate: Mapping[str, Any]) -> Optional[str]:
         return None
     if evidence.get("confidence") not in {"high", "medium"}:
         return None
+    # Even strong text/layout evidence cannot silently reclassify an
+    # unnumbered Text block carrying an inline body superscript. Preserve it
+    # for visual review when cross-page scoring identified that ambiguity.
+    if "inline_superscript_requires_visual_review" in evidence.get("negative_signals", []):
+        return None
+    semantic = evidence.get("semantic_comparison")
+    if (
+        isinstance(semantic, Mapping)
+        and semantic.get("winner") == "footnote"
+        and not _FOOTNOTE_LABEL_RE.search(str(candidate.get("label") or ""))
+        and not any(
+            signal in evidence.get("positive_signals", [])
+            for signal in ("font_size_matches_previous_note", "font_family_matches_previous_note")
+        )
+    ):
+        return None
     if candidate.get("audit_only"):
         return None
     matched_key = str(evidence.get("matched_previous_key") or "").strip()

@@ -9,6 +9,8 @@ from pdf2epub.ocr_correction import (
     select_refinement_pages,
     validate_ocr_correction_reviews,
 )
+from pdf2epub.ocr_progress import new_progress
+from pdf2epub.ocr_review_selection import update_manual_review_selection
 from pdf2epub.subagent_runtime import write_worker_handoffs
 from pdf2epub.workflow_contracts import LEGACY_MARKDOWN_VALIDATION_SCHEMA_VERSION, sha256_file
 
@@ -47,6 +49,7 @@ def test_ocr_correction_checkpoint_selects_validated_pages(tmp_path: Path):
     _write_current_review_manifest(tmp_path)
     review_dir = tmp_path / "ocr_correction_reviews"
     review_dir.mkdir()
+    image = tmp_path / "ocr_review_images" / "page_001.png"
     (review_dir / "page_001.json").write_text(
         json.dumps(
             {
@@ -60,6 +63,9 @@ def test_ocr_correction_checkpoint_selects_validated_pages(tmp_path: Path):
                 "source_nonempty_line_count": 1,
                 "target_line_count": 1,
                 "target_nonempty_line_count": 1,
+                "source_sha256": sha256_file(source),
+                "target_sha256": sha256_file(target),
+                "image_sha256": sha256_file(image),
             }
         ),
         encoding="utf-8",
@@ -141,6 +147,39 @@ def test_single_ocr_mode_uses_raw_pages_without_correction_checkpoint(tmp_path: 
         tmp_path,
         {"ocr": {"secondary": {"enabled": False, "backend": "vision"}}},
     )
+
+
+def _write_current_visual_ocr_inventory(output_dir: Path) -> None:
+    pdf = output_dir / "input_original.pdf"
+    pdf.write_bytes(b"synthetic source pdf")
+    pages = output_dir / "pages"
+    pages.mkdir()
+    (pages / "page_001.md").write_text("synthetic OCR", encoding="utf-8")
+    (pages / "page_001.ocr.json").write_text(
+        json.dumps({"page_number": 1}), encoding="utf-8"
+    )
+    progress = new_progress(
+        source_sha256=sha256_file(pdf), total_pages=1, backend="synthetic"
+    )
+    progress["pages_processed"] = [1]
+    progress["missing_pages"] = []
+    (pages / "ocr_progress.json").write_text(json.dumps(progress), encoding="utf-8")
+    update_manual_review_selection(output_dir, ["page_001.md"])
+
+
+def test_unvalidated_manual_selection_never_falls_back_to_raw_pages(tmp_path: Path):
+    _write_current_visual_ocr_inventory(tmp_path)
+
+    for config in (
+        None,
+        {"ocr": {"secondary": {"enabled": True, "backend": "vision"}}},
+    ):
+        try:
+            select_refinement_pages(tmp_path, require_correction=False, config=config)
+        except ValueError as exc:
+            assert "manual OCR page review is missing, stale, or unvalidated" in str(exc)
+        else:
+            raise AssertionError("pending explicit OCR selection fell back to raw pages")
 
 
 def test_two_ocr_correction_checkpoint_requires_current_consensus(

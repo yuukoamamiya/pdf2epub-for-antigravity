@@ -204,3 +204,44 @@ def test_reviewed_body_override_splits_mixed_ocr_block_without_moving_body(tmp_p
     assert [note["parts"] for note in result.notes_by_chapter["chapter-1"]] == [
         ["First note."], ["Second note."],
     ]
+
+
+def test_normalize_decisions_preserves_authorized_marker_label_override():
+    from pdf2epub.refine.footnote_effective_decisions import compile_effective_decisions
+
+    address = (1, "primary", 0)
+    candidate = {
+        "page": 1, "block": 0, "source": "primary", "confidence": "review",
+        "local_role": "footnote_start", "key": "a", "marker_label": "α",
+        "marker_identity": {"kind": "numeric"},
+    }
+    normalized, errors, _, _ = normalize_decisions([{
+        "page": 1, "block": 0, "role": "footnote_start", "key": "a",
+        "marker_label": "1", "override": True,
+    }], {address: candidate})
+
+    assert errors == []
+    assert normalized[0]["marker_label"] == "1"
+    assert normalized[0]["local_marker_label"] == "α"
+    result = compile_effective_decisions(
+        {"pages": [{"candidates": [candidate]}]}, normalized
+    )
+    assert result["errors"] == []
+    assert result["decisions"][0]["marker_label"] == "1"
+    assert result["decisions"][0]["override"] is True
+
+
+def test_normalize_decisions_still_protects_non_numeric_printed_marker():
+    address = (1, "primary", 0)
+    candidate = {
+        "page": 1, "block": 0, "source": "primary", "confidence": "review",
+        "key": "roman-i", "marker_label": "i",
+        "marker_identity": {"kind": "roman"},
+    }
+    normalized, errors, _, _ = normalize_decisions([{
+        "page": 1, "block": 0, "role": "footnote_start", "key": "roman-i",
+        "marker_label": "1", "override": True,
+    }], {address: candidate})
+
+    assert normalized == []
+    assert any("preserve printed marker" in error for error in errors)

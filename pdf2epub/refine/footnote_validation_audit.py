@@ -7,33 +7,9 @@ from typing import Any, Mapping, Sequence
 
 from ..footnote_keys import canonical_numeric_label
 from .footnote_contracts import DECISION_ROLES, MOVED_ROLES
+from .footnote_effective_decisions import candidate_index as candidate_index
 
 Address = tuple[int, str, int]
-
-
-def candidate_index(report: Mapping[str, Any]) -> dict[Address, dict[str, Any]]:
-    index: dict[Address, dict[str, Any]] = {}
-    for page in report.get("pages", []) or []:
-        if not isinstance(page, Mapping):
-            continue
-        for field, default_source in (
-            ("candidates", "primary"),
-            ("audit_candidates", "primary"),
-            ("secondary_only_candidates", "secondary"),
-        ):
-            for candidate in page.get(field, []) or []:
-                if not isinstance(candidate, Mapping):
-                    continue
-                try:
-                    address = (
-                        int(candidate["page"]),
-                        str(candidate.get("source") or default_source).strip().lower(),
-                        int(candidate["block"]),
-                    )
-                except (KeyError, TypeError, ValueError):
-                    continue
-                index[address] = dict(candidate)
-    return index
 
 
 def required_review_addresses(report: Mapping[str, Any]) -> set[Address]:
@@ -267,7 +243,12 @@ def normalize_decisions(
                 f"footnote decision is missing a key for {address[0]}:{address[1]}:{address[2]}"
             )
             continue
-        if candidate.get("key") and role in {"footnote_start", "footnote_definition"} and key != candidate["key"]:
+        if (
+            candidate.get("key")
+            and role in {"footnote_start", "footnote_definition"}
+            and key != candidate["key"]
+            and item.get("override") is not True
+        ):
             errors.append(
                 f"decision key does not match OCR key for {address[0]}:{address[1]}:{address[2]}"
             )
@@ -347,13 +328,20 @@ def normalize_decisions(
                 continue
 
         decision = dict(item)
+        for field in (
+            "decision_source", "effective_role", "local_role", "review_role",
+            "candidate_evidence_id", "local_marker_label", "_trusted_decision_source",
+        ):
+            decision.pop(field, None)
         decision["page"], decision["source"], decision["block"], decision["role"] = (
             address[0], address[1], address[2], role
         )
         if key is not None:
             decision["key"] = key
         if candidate_marker_label:
-            decision["marker_label"] = candidate_marker_label
+            decision["local_marker_label"] = candidate_marker_label
+            if not decision_marker_label:
+                decision["marker_label"] = candidate_marker_label
         if candidate.get("requires_marker_context") is True:
             decision["requires_marker_context"] = True
         if source == "secondary" and role in MOVED_ROLES:

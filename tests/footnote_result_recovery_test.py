@@ -155,6 +155,7 @@ def test_missed_nonleading_note_recovers_through_exact_visual_review(tmp_path, m
     admitted = next(
         candidate for candidate in page["candidates"]
         if candidate.get("result_audit_admitted") is True
+        and candidate.get("block") == 1
     )
     assert (admitted["page"], admitted["source"], admitted["block"]) == (1, "primary", 1)
     assert admitted["key"] == "17"
@@ -174,11 +175,30 @@ def test_missed_nonleading_note_recovers_through_exact_visual_review(tmp_path, m
         if audit_task.get("source_address", {}).get("block") == 1
     ]
     assert {review["task_id"] for review in audit_reviews} >= {task["task_id"]}
+    body_marker_task, = [
+        item for item in tasks
+        if item.get("code") == "unexplained_numeric_superscript"
+    ]
+    assert body_marker_task["source_address"]["block"] == 0
+    audit_reviews.append({
+        "task_id": body_marker_task["task_id"],
+        "evidence_sha256": body_marker_task["evidence_sha256"],
+        "outcome": "confirmed_footnote",
+        "candidate_ref": {"page": 1, "source": "primary", "block": 1},
+        "reason": "The page image links this exact in-text marker to the confirmed footnote block.",
+        "evidence_pages": [1],
+    })
     (tmp_path / "footnote_decisions.json").write_text(
         json.dumps(
             {
                 "schema_version": prepared["schema_version"],
                 "decisions": [
+                    {
+                        "page": 1,
+                        "source": "primary",
+                        "block": 0,
+                        "role": "body",
+                    },
                     {
                         "page": 1,
                         "source": "primary",

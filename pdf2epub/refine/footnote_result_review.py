@@ -70,13 +70,44 @@ def validate_result_audit_reviews(
                 if not excerpt or source_text.count(excerpt) != 1 or _sha(excerpt) != raw_excerpt_hash:
                     errors.append(f"result audit review {task_id} no longer identifies its exact semantic source excerpt")
                     continue
+        page_file = str(task.get("evidence_page_file") or "")
+        if page_file:
+            page_path = root / page_file
+            try:
+                page_path.resolve().relative_to(root.resolve())
+                page_within_workspace = True
+            except (OSError, ValueError):
+                page_within_workspace = False
+            if (
+                not (
+                    page_file.startswith("pages/")
+                    or page_file.startswith("ocr_corrected_pages/validated/")
+                )
+                or ".." in Path(page_file).parts
+                or not page_within_workspace
+                or not page_path.is_file() or sha256_file(page_path) != task.get("evidence_page_sha256")
+            ):
+                errors.append(f"result audit review {task_id} page Markdown evidence is missing or stale")
+                continue
         source_address = task.get("source_address")
         if isinstance(source_address, Mapping):
+            source_kind = str(source_address.get("source") or "primary")
+            expected_sidecar_root = {
+                "primary": "pages/",
+                "secondary": "ocr_secondary/",
+            }.get(source_kind)
             sidecar_relative = str(source_address.get("sidecar") or "")
             sidecar_path = root / sidecar_relative
+            try:
+                sidecar_path.resolve().relative_to(root.resolve())
+                sidecar_within_workspace = True
+            except (OSError, ValueError):
+                sidecar_within_workspace = False
             if (
-                not sidecar_relative.startswith("pages/")
+                expected_sidecar_root is None
+                or not sidecar_relative.startswith(expected_sidecar_root)
                 or ".." in Path(sidecar_relative).parts
+                or not sidecar_within_workspace
                 or not sidecar_path.is_file()
                 or sha256_file(sidecar_path) != source_address.get("sidecar_sha256")
             ):
@@ -95,6 +126,27 @@ def validate_result_audit_reviews(
             if computed != task.get("evidence_sha256"):
                 errors.append(f"result audit review {task_id} no longer identifies the prepared sidecar block")
                 continue
+            source_file = str(task.get("evidence_source_file") or "")
+            if source_file:
+                source_path = root / "ocr_markdown" / source_file
+                if (
+                    Path(source_file).name != source_file or not source_path.is_file()
+                    or sha256_file(source_path) != task.get("evidence_file_sha256")
+                ):
+                    errors.append(f"result audit review {task_id} source Markdown changed")
+                    continue
+                try:
+                    span = task.get("source_span")
+                    start, end = int(span[0]), int(span[1])
+                    from .footnote_source import project_footnote_source_text
+
+                    source_text = project_footnote_source_text(source_path.read_bytes())
+                    span_hash = _sha(source_text[start:end])
+                except (OSError, UnicodeError, TypeError, ValueError, IndexError):
+                    span_hash = ""
+                if span_hash != task.get("evidence_source_span_sha256"):
+                    errors.append(f"result audit review {task_id} source span changed")
+                    continue
         elif task.get("evidence_origin") == "source_markdown":
             name = str(task.get("file") or "")
             source_path = root / "ocr_markdown" / name
@@ -184,6 +236,9 @@ def validate_result_audit_reviews(
         outcome = str(review.get("outcome") or "")
         if outcome not in {"legitimate_non_footnote", "truncated_source_exception", "confirmed_footnote", "review_required"}:
             errors.append(f"result audit review {task_id} has unsupported outcome {outcome!r}")
+            continue
+        if outcome in {"legitimate_non_footnote", "truncated_source_exception"} and not isinstance(source_address, Mapping):
+            errors.append(f"result audit review {task_id} needs an exact current page sidecar address for this exception")
             continue
         record = {"task_id": task_id, "evidence_sha256": task["evidence_sha256"], "outcome": outcome, "reason": reason, "evidence_pages": evidence_pages}
         for field in ("source_task_id", "source_evidence_sha256"):

@@ -303,10 +303,14 @@ def test_endnotes_only_reports_dangling_unclosed_declared_definition_without_pag
 
 
 @pytest.mark.parametrize("evidence_origin", ["source_markdown", "normalized_target"])
+@pytest.mark.parametrize("page_source_dir", ["pages", "ocr_corrected_pages/validated"])
+@pytest.mark.parametrize("source_kind", ["primary", "secondary"])
 def test_truncated_note_exception_validates_exact_markdown_evidence(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     evidence_origin: str,
+    page_source_dir: str,
+    source_kind: str,
 ):
     note_line = "[^17]: A declared note remains open ("
     note_bytes = (note_line + "\n").encode("utf-8")
@@ -325,16 +329,35 @@ def test_truncated_note_exception_validates_exact_markdown_evidence(
         json.dumps({"source_sha256": "prepared-pdf-hash"}), encoding="utf-8"
     )
     image_manifest_hash = hashlib.sha256(image_manifest.read_bytes()).hexdigest()
+    sidecar_root = "pages" if source_kind == "primary" else "ocr_secondary"
+    sidecar_path = tmp_path / sidecar_root / "page_001.ocr.json"
+    sidecar_path.parent.mkdir(parents=True)
+    sidecar = {"blocks": [{"text": note_line}]}
+    sidecar_path.write_text(json.dumps(sidecar), encoding="utf-8")
+    sidecar_hash = hashlib.sha256(sidecar_path.read_bytes()).hexdigest()
+    sidecar_block_hash = hashlib.sha256(json.dumps(
+        {"sidecar_sha256": sidecar_hash, "block": sidecar["blocks"][0]},
+        ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
     monkeypatch.setattr(ocr_correction, "review_images_are_current", lambda _root: True)
 
+    page_markdown = tmp_path / page_source_dir / "page_001.md"
+    page_markdown.parent.mkdir(parents=True, exist_ok=True)
+    page_markdown.write_text("Page heading evidence\n", encoding="utf-8")
     task = {
         "task_id": "fra-truncated-note",
+        "evidence_page_file": f"{page_source_dir}/page_001.md",
+        "evidence_page_sha256": hashlib.sha256(page_markdown.read_bytes()).hexdigest(),
         "code": "normalized_note_truncated" if evidence_origin == "normalized_target" else "possibly_truncated_note",
         "file": "notes.md",
         "line": 1,
         "key": "17",
         "evidence_origin": evidence_origin,
-        "evidence_sha256": hashlib.sha256(note_line.encode("utf-8")).hexdigest(),
+        "evidence_sha256": sidecar_block_hash,
+        "source_address": {
+            "page": 1, "source": source_kind, "block": 0,
+            "sidecar": f"{sidecar_root}/page_001.ocr.json", "sidecar_sha256": sidecar_hash,
+        },
         "source_task_id": "fra-original-source-task",
         "source_evidence_sha256": "original-source-evidence-hash",
         "pages": [1],
@@ -370,3 +393,94 @@ def test_truncated_note_exception_validates_exact_markdown_evidence(
         "source_task_id": task["source_task_id"],
         "source_evidence_sha256": task["source_evidence_sha256"],
     }]
+
+    wrong_root = "ocr_secondary" if source_kind == "primary" else "pages"
+    wrong_sidecar = tmp_path / wrong_root / "page_001.ocr.json"
+    wrong_sidecar.parent.mkdir(parents=True, exist_ok=True)
+    wrong_sidecar.write_bytes(sidecar_path.read_bytes())
+    wrong_root_task = dict(task)
+    wrong_root_task["source_address"] = {
+        **task["source_address"],
+        "sidecar": f"{wrong_root}/page_001.ocr.json",
+        "sidecar_sha256": hashlib.sha256(wrong_sidecar.read_bytes()).hexdigest(),
+    }
+    rejected, wrong_root_errors = validate_result_audit_reviews(
+        tmp_path, [wrong_root_task], [review]
+    )
+    assert rejected == []
+    assert any("sidecar evidence is missing or stale" in error for error in wrong_root_errors)
+
+    page_markdown.write_text("Changed page heading evidence\n", encoding="utf-8")
+    stale, stale_errors = validate_result_audit_reviews(tmp_path, [task], [review])
+    assert stale == []
+    assert any("page Markdown evidence is missing or stale" in error for error in stale_errors)
+
+
+def test_heading_source_span_review_uses_the_snapshot_projection_for_crlf_and_multi_sup(tmp_path, monkeypatch):
+    from pdf2epub.refine.footnote_source import project_footnote_source_text
+
+    source_path = tmp_path / "ocr_markdown" / "chapter.md"
+    source_path.parent.mkdir(parents=True)
+    source_bytes = b"Lead <sup>1, 2</sup>\r\n4. Old Ideology\r\n"
+    source_path.write_bytes(source_bytes)
+    projected = project_footnote_source_text(source_bytes)
+    start = projected.index("4. Old Ideology")
+    end = start + len("4. Old Ideology")
+    span_hash = hashlib.sha256(projected[start:end].encode("utf-8")).hexdigest()
+
+    sidecar_path = tmp_path / "pages" / "page_004.ocr.json"
+    sidecar_path.parent.mkdir(parents=True)
+    sidecar = {"blocks": [{"text": "4. Old Ideology"}]}
+    sidecar_path.write_text(json.dumps(sidecar), encoding="utf-8")
+    sidecar_hash = hashlib.sha256(sidecar_path.read_bytes()).hexdigest()
+    block_hash = hashlib.sha256(json.dumps(
+        {"sidecar_sha256": sidecar_hash, "block": sidecar["blocks"][0]},
+        ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+
+    page_path = tmp_path / "pages" / "page_004.md"
+    page_path.write_text("# 4. Old Ideology\n", encoding="utf-8")
+    page_hash = hashlib.sha256(page_path.read_bytes()).hexdigest()
+    image_path = tmp_path / "ocr_review_images" / "page_004.png"
+    image_path.parent.mkdir()
+    image_path.write_bytes(b"synthetic review image")
+    image_hash = hashlib.sha256(image_path.read_bytes()).hexdigest()
+    image_manifest = tmp_path / "ocr_review_images.json"
+    image_manifest.write_text(json.dumps({"source_sha256": "pdf-hash"}), encoding="utf-8")
+    image_manifest_hash = hashlib.sha256(image_manifest.read_bytes()).hexdigest()
+    monkeypatch.setattr(ocr_correction, "review_images_are_current", lambda _root: True)
+
+    task = {
+        "task_id": "fra-projected-heading-span",
+        "code": "suspected_heading_in_note",
+        "file": "chapter.md",
+        "line": 1,
+        "key": "n",
+        "evidence_origin": "source_sidecar",
+        "evidence_sha256": block_hash,
+        "source_address": {
+            "page": 4, "source": "primary", "block": 0,
+            "sidecar": "pages/page_004.ocr.json", "sidecar_sha256": sidecar_hash,
+        },
+        "source_task_id": "fra-heading-semantic-task",
+        "source_evidence_sha256": "heading-semantic-evidence",
+        "evidence_source_file": "chapter.md",
+        "evidence_file_sha256": hashlib.sha256(source_bytes).hexdigest(),
+        "source_span": [start, end],
+        "evidence_source_span_sha256": span_hash,
+        "evidence_page_file": "pages/page_004.md",
+        "evidence_page_sha256": page_hash,
+        "pages": [4],
+        "visual_files": {"4": {"path": "ocr_review_images/page_004.png", "sha256": image_hash}},
+        "visual_image_manifest_sha256": image_manifest_hash,
+        "source_pdf_sha256": "pdf-hash",
+    }
+    review = {
+        "task_id": task["task_id"], "evidence_sha256": block_hash,
+        "outcome": "legitimate_non_footnote",
+        "reason": "The page image confirms this is a heading span, not a note.",
+        "evidence_pages": [4],
+    }
+    normalized, errors = validate_result_audit_reviews(tmp_path, [task], [review])
+    assert errors == []
+    assert normalized[0]["source_task_id"] == task["source_task_id"]

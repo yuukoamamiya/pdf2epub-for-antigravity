@@ -427,6 +427,15 @@ def validate_ocr_correction_reviews(
         if not is_anomaly and target_stats["nonempty_line_count"] < source_stats["nonempty_line_count"]:
             errors.append({"file": name, "reason": "corrected page has fewer non-empty lines than raw OCR"})
             continue
+        image_path = review_image_dir(output_dir) / f"{Path(name).stem}.png"
+        expected_hashes = {
+            "source_sha256": sha256_file(source),
+            "target_sha256": sha256_file(target),
+            "image_sha256": sha256_file(image_path) if image_path.is_file() else "",
+        }
+        if any(record.get(key) != value for key, value in expected_hashes.items()):
+            errors.append({"file": name, "reason": "OCR review record is not bound to the current source, target, and page image"})
+            continue
         checked.append(name)
 
     if selected_files is None and record_dir.is_dir():
@@ -454,12 +463,25 @@ def ocr_correction_is_current(
     ocr_evidence=None,
 ) -> bool:
     """Return whether validated corrections match the current raw OCR pages."""
-    single_ocr_anomalies = []
+    from pdf2epub.ocr_review_selection import manual_review_selection_state
+
+    selection = manual_review_selection_state(output_dir)
+    if selection["present"] and not selection["current"]:
+        return False
+    manual_files = list(selection["files"])
     from pdf2epub.ocr_anomalies import evidence_report_for_output
 
     evidence_report = evidence_report_for_output(ocr_evidence, output_dir)
     if evidence_report is not None and evidence_report.get("scan_errors"):
         return False
+    report = _load_correction_report(output_dir)
+    if (
+        report.get("manual_review_files", []) != manual_files
+        or report.get("manual_review_selection_sha256")
+        != (selection["selection_sha256"] if manual_files else None)
+    ):
+        return False
+    single_ocr_anomalies: list[str] = []
     if config is not None and not secondary_ocr_enabled(config):
         if evidence_report is not None:
             single_ocr_anomalies = evidence_report["review_required_files"]
@@ -467,10 +489,12 @@ def ocr_correction_is_current(
             from pdf2epub.ocr_anomalies import scan_ocr_pages
 
             single_ocr_anomalies = scan_ocr_pages(output_dir, persist=False)["review_required_files"]
-        if not single_ocr_anomalies:
+        if set(report.get("anomaly_files", [])) != set(single_ocr_anomalies):
+            return False
+        if not single_ocr_anomalies and not manual_files:
             return False
     elif config is None:
-        recorded = _load_correction_report(output_dir)
+        recorded = report
         if recorded.get("evidence_mode") == "single_ocr_anomaly_review":
             if evidence_report is not None:
                 single_ocr_anomalies = evidence_report["review_required_files"]
@@ -480,7 +504,6 @@ def ocr_correction_is_current(
                 single_ocr_anomalies = scan_ocr_pages(output_dir, persist=False)["review_required_files"]
             if set(recorded.get("anomaly_files", [])) != set(single_ocr_anomalies):
                 return False
-    report = _load_correction_report(output_dir)
     if (
         report.get("schema_version") != OCR_CORRECTION_VALIDATION_SCHEMA_VERSION
         or report.get("task") != "ocr-correct"
@@ -514,9 +537,11 @@ def ocr_correction_is_current(
             or not consensus_is_current(output_dir, config)
         ):
             return False
-        review_files = review_required_files(output_dir)
+        review_files = sorted(set(review_required_files(output_dir)) | set(manual_files))
     elif single_ocr_anomalies:
-        review_files = single_ocr_anomalies
+        review_files = sorted(set(single_ocr_anomalies) | set(manual_files))
+    elif manual_files:
+        review_files = manual_files
     elif consensus_manifest:
         # Legacy callers without configuration retain old consensus behavior.
         if not consensus_manifest.get("complete"):
@@ -525,6 +550,11 @@ def ocr_correction_is_current(
     else:
         # Compatibility path for callers that do not provide configuration.
         review_files = list(current)
+    if (
+        "visual_review_files" in report
+        and set(report.get("visual_review_files") or []) != set(review_files)
+    ):
+        return False
     # When every page was accepted by the two local OCR results, no visual
     # review image or per-page visual record is needed. The auto-accepted
     # checkpoint still has to contain every current page and matching hashes.
@@ -549,9 +579,19 @@ def select_refinement_pages(
     """Select the page set for TOC/refinement and report its provenance."""
     output_dir = Path(output_dir)
     raw = raw_page_dir(output_dir)
+    from pdf2epub.ocr_review_selection import manual_review_selection_state
+
+    selection = manual_review_selection_state(output_dir)
+    if selection["present"] and not selection["current"]:
+        raise ValueError(
+            selection["detail"]
+            or "manual OCR page selection is stale; rerun ocr-correct"
+        )
     # Only a current legacy page-progress record selects the native evidence path.
     from pdf2epub.ocr_source import is_legacy_native_source
     if is_legacy_native_source(output_dir):
+        if selection["present"]:
+            raise ValueError("manual visual OCR correction cannot apply to legacy native-text pages")
         return raw, "native_text"
     if config is not None and not secondary_ocr_enabled(config):
         from pdf2epub.ocr_anomalies import evidence_report_for_output, scan_ocr_pages
@@ -562,10 +602,15 @@ def select_refinement_pages(
         if anomaly_report.get("scan_errors"):
             raise ValueError("raw OCR pages could not all be scanned for anomalies")
         anomalies = anomaly_report["review_required_files"]
-        if not anomalies:
+        if not anomalies and not selection["present"]:
             return raw, "ocr"
         if ocr_correction_is_current(output_dir, config=config, ocr_evidence=ocr_evidence):
             return corrected_page_dir(output_dir), "ocr_corrected"
+        if selection["present"]:
+            raise ValueError(
+                "manual OCR page review is missing, stale, or unvalidated; run ocr-correct --resume "
+                "and ocr-correct-validate before refinement"
+            )
         if require_correction:
             raise ValueError(
                 "OCR commentary anomaly requires visual review; run ocr-correct and "
@@ -574,6 +619,11 @@ def select_refinement_pages(
         return raw, "ocr"
     if ocr_correction_is_current(output_dir, config=config, ocr_evidence=ocr_evidence):
         return corrected_page_dir(output_dir), "ocr_corrected"
+    if selection["present"]:
+        raise ValueError(
+            "manual OCR page review is missing, stale, or unvalidated; run ocr-correct --resume "
+            "and ocr-correct-validate before refinement"
+        )
     if require_correction:
         raise ValueError(
             "visual OCR correction is not validated; run ocr-correct, let the "

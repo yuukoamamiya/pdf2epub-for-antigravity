@@ -235,6 +235,69 @@ def _previous_body_block(
     return None
 
 
+def _has_strong_open_note_continuation(
+    current: Mapping[str, Any],
+    sidecar: Mapping[str, Any],
+    previous_note: Mapping[str, Any],
+    *,
+    current_text: str,
+    body_similarity: float,
+    footnote_similarity: float,
+) -> tuple[bool, list[str]]:
+    """Recognize an ambiguous body superscript only with independent note evidence.
+
+    An open prior note and a superscript are insufficient by themselves. Require
+    a continuation-shaped line, a matching note-column geometry, and either a
+    font match or a clear lexical relationship to the prior note.
+    """
+    previous_text = str(previous_note.get("text") or "")
+    label = str(current.get("label") or "").strip()
+    if (
+        not _text_looks_unfinished(previous_text)
+        or not _text_starts_as_continuation(current_text)
+        or _FURNITURE_LABEL_RE.search(label)
+        or _CITATION_LABEL_RE.search(label)
+        or _CITATION_CONTINUATION_RE.match(current_text)
+    ):
+        return False, []
+    current_bbox = _normalise_bbox(current, sidecar)
+    previous_bbox = previous_note.get("bbox")
+    if not current_bbox or not isinstance(previous_bbox, (list, tuple)) or len(previous_bbox) != 4:
+        return False, []
+    try:
+        x_delta = abs(float(current_bbox[0]) - float(previous_bbox[0]))
+        current_width = float(current_bbox[2]) - float(current_bbox[0])
+        previous_width = float(previous_bbox[2]) - float(previous_bbox[0])
+    except (TypeError, ValueError):
+        return False, []
+    if x_delta > 0.03 or abs(current_width - previous_width) > 0.08:
+        return False, []
+
+    signals = [
+        "previous_last_note_has_open_boundary",
+        "current_text_starts_as_continuation",
+        "note_column_left_edge_aligned",
+        "note_column_width_matches",
+    ]
+    current_size = _safe_float(current.get("font_size"))
+    previous_size = _safe_float(previous_note.get("font_size"))
+    font_match = False
+    if current_size and previous_size:
+        font_match = abs(current_size - previous_size) / max(current_size, previous_size) <= 0.10
+        if font_match:
+            signals.append("font_size_matches_previous_note")
+    if _font_names(current.get("font_names")) & _font_names(previous_note.get("font_names")):
+        font_match = True
+        signals.append("font_family_matches_previous_note")
+    semantic_match = (
+        footnote_similarity >= DEFAULT_SEMANTIC_MIN_SIMILARITY
+        and footnote_similarity - body_similarity >= DEFAULT_SEMANTIC_WIN_MARGIN
+    )
+    if semantic_match:
+        signals.append("previous_footnote_semantically_closer")
+    return font_match or semantic_match, signals
+
+
 def _compare_continuation_hypotheses(
     sidecar: Mapping[str, Any],
     block_index: int,
@@ -277,14 +340,35 @@ def _compare_continuation_hypotheses(
     inline_superscript = _block_has_inline_superscript(current)
     signals: list[str] = []
 
-    # A superscript marker inside an unnumbered Text block is a strong local
-    # indication that the block is ordinary body prose.  It is not a footnote
-    # definition's leading number and therefore should not be treated as a
-    # continuation merely because the previous note was unfinished.
+    # An inline superscript usually marks body prose. When an open final note,
+    # a continuation-shaped line, aligned note-column geometry, and a font or
+    # semantic match independently support the footnote hypothesis, preserve
+    # the exact candidate for visual review instead of silently suppressing it.
     if inline_superscript and not _FOOTNOTE_LABEL_RE.search(
         str(current.get("label") or "")
     ):
         signals.append("inline_body_superscript")
+        strong_note_support, support_signals = _has_strong_open_note_continuation(
+            current, sidecar, previous_note,
+            current_text=current_text,
+            body_similarity=body_similarity,
+            footnote_similarity=footnote_similarity,
+        )
+        if strong_note_support:
+            signals.extend(support_signals)
+            signals.append("inline_superscript_open_note_requires_visual_review")
+            return {
+                "winner": "inconclusive",
+                "confidence": "low",
+                "body_similarity": body_similarity,
+                "footnote_similarity": footnote_similarity,
+                "margin": margin,
+                "shared_body_terms": shared_body_terms,
+                "shared_footnote_terms": shared_footnote_terms,
+                "previous_body": previous_body,
+                "inline_superscript": True,
+                "signals": signals,
+            }
         return {
             "winner": "body",
             "confidence": "high",
@@ -476,6 +560,10 @@ def _score_cross_page_continuation(
         score += 3
         positive.append("citation_continuation_marker")
     semantic_winner = semantic_comparison.get("winner")
+    semantic_signals = semantic_comparison.get("signals", [])
+    inline_open_note_review = (
+        "inline_superscript_open_note_requires_visual_review" in semantic_signals
+    )
     if semantic_winner == "body":
         # The body hypothesis is allowed to overrule a strong-looking
         # unfinished-note score only when it has a concrete local reason:
@@ -511,10 +599,14 @@ def _score_cross_page_continuation(
         score -= 5
         negative.append("current_block_is_furniture_or_citation")
 
+    if inline_open_note_review:
+        negative.append("inline_superscript_requires_visual_review")
     return {
         "score": score,
         "confidence": (
-            "high"
+            "low"
+            if inline_open_note_review
+            else "high"
             if score >= DEFAULT_CONTINUATION_HIGH_SCORE
             else "medium"
             if score >= DEFAULT_CONTINUATION_MEDIUM_SCORE

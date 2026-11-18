@@ -1,6 +1,7 @@
 """Audits shared by translation pipelines for special-role identity markers."""
 from __future__ import annotations
 import re
+from dataclasses import dataclass, field
 from .page_furniture_rules import candidate_for_line
 
 _SPECIAL_ROLE_NUMERIC_MARKER_RE = re.compile(r"(?<![A-Za-z0-9])\d+(?:[./:]\d+)*(?:[-‐‑‒–—]\d+(?:[./:]\d+)*)*(?![A-Za-z0-9])")
@@ -102,20 +103,44 @@ def validate_special_role_markers(
         )
         if len(source_entries) != len(target_entries):
             return [
-                "index entry count mismatch: "
-                f"source={len(source_entries)}, target={len(target_entries)}"
+                _index_structure_diagnostic(source_entries, target_entries)
             ]
+        errors: list[str] = []
+        source_depths = _index_indent_depths(source_entries)
+        target_depths = _index_indent_depths(target_entries)
+        if source_depths != target_depths:
+            mismatch_at = next(
+                index for index, (source_depth, target_depth)
+                in enumerate(zip(source_depths, target_depths), 1)
+                if source_depth != target_depth
+            )
+            source_entry = source_entries[mismatch_at - 1]
+            target_entry = target_entries[mismatch_at - 1]
+            errors.append(
+                "index indentation hierarchy changed "
+                f"(entry {mismatch_at}; source line {source_entry.start_line}, "
+                f"indent {source_entry.indent}, depth {source_depths[mismatch_at - 1]}; "
+                f"target line {target_entry.start_line}, indent {target_entry.indent}, "
+                f"depth {target_depths[mismatch_at - 1]}; "
+                f"source={source_entry.text[:70]!r}, target={target_entry.text[:70]!r})"
+            )
         for index, (source_entry, target_entry) in enumerate(
             zip(source_entries, target_entries), 1
         ):
-            source_entry_markers = special_role_numeric_markers(source_entry)
-            target_entry_markers = special_role_numeric_markers(target_entry)
+            source_entry_markers = source_entry.markers
+            target_entry_markers = target_entry.markers
             if source_entry_markers != target_entry_markers:
-                return [
-                    f"index numeric marker mismatch (entry {index}): "
+                errors.append(
+                    f"index numeric marker mismatch (entry {index}, "
+                    f"source line {source_entry.start_line}, "
+                    f"target line {target_entry.start_line}; "
+                    f"source text={source_entry.text[:70]!r}, "
+                    f"target text={target_entry.text[:70]!r}): "
                     f"source={source_entry_markers!r}, "
                     f"target={target_entry_markers!r}"
-                ]
+                )
+        if errors:
+            return errors
     if source_markers == target_markers:
         return []
 
@@ -157,22 +182,30 @@ def validate_special_role_markers(
     ]
 
 
+@dataclass
+class _IndexEntry:
+    text: str
+    start_line: int
+    end_line: int
+    indent: int
+    markers: list[str] = field(default_factory=list)
+    group_reason: str = "line boundary"
+
+
 def _index_entry_groups(
     text: str,
     *,
     allow_page_furniture_deletion: bool = False,
-) -> list[str]:
-    """Group an index into stable entries while allowing indented wrapping.
+) -> list[_IndexEntry]:
+    """Parse index lines while retaining evidence used to diagnose drift.
 
-    The translation contract requires a new top-level entry to start at the
-    same indentation boundary as the source. A wrapped target entry may use
-    additional indented lines, which are folded into the preceding entry for
-    marker comparison. This catches omitted prose-only entries as well as
-    entries whose page markers were dropped.
+    Top-level rows, term-plus-locator rows, explicit cross-references, and
+    explicit list markers anchor entries. Page-only rows attach to the previous
+    entry; other indented rows remain continuations until paired structure
+    supplies evidence of a boundary.
     """
-    entries: list[str] = []
-    current: list[str] = []
-    for line in str(text or "").splitlines():
+    entries: list[_IndexEntry] = []
+    for line_number, line in enumerate(str(text or "").splitlines(), 1):
         if not line.strip() or re.match(r"^\s*#{1,6}\s+", line):
             continue
         if allow_page_furniture_deletion:
@@ -184,13 +217,167 @@ def _index_entry_groups(
                 in {"running_header", "running_title_plus_page_label"}
             ):
                 continue
+        indent = len(line) - len(line.lstrip())
         stripped = line.strip()
-        if current and line[:1].isspace():
-            current.append(stripped)
-            continue
-        if current:
-            entries.append(" ".join(current))
-        current = [stripped]
-    if current:
-        entries.append(" ".join(current))
+        markers = special_role_numeric_markers(stripped)
+        cross_reference = bool(re.match(
+            r"(?i)(?:see(?: also)?\b|参见|另见|见|另见条目)", stripped
+        ))
+        explicit_nested_marker = bool(re.match(r"^(?:[-*+]\s+|\d+[.)]\s+)", stripped))
+        # Distinguish a term with a locator from a locator-only continuation.
+        has_term_locator = bool(markers and _index_line_has_term_before_locator(stripped))
+        locator_only = bool(markers and not has_term_locator)
+        is_ambiguous_indented = bool(
+            indent and not markers and not cross_reference and not explicit_nested_marker
+        )
+        is_entry = (
+            indent == 0 or has_term_locator or cross_reference or explicit_nested_marker
+        )
+        if is_entry or (not entries and is_ambiguous_indented):
+            entries.append(_IndexEntry(
+                text=stripped, start_line=line_number, end_line=line_number,
+                indent=indent, markers=markers,
+                group_reason=("explicit nested marker" if explicit_nested_marker else
+                              "term plus locator" if has_term_locator else
+                              "cross-reference cue" if cross_reference else
+                              "top-level line"),
+            ))
+        elif entries:
+            previous = entries[-1]
+            previous.text += " " + stripped
+            previous.end_line = line_number
+            previous.markers.extend(markers)
+            if locator_only:
+                previous.group_reason = "page locator continuation"
     return entries
+
+
+def _index_line_has_term_before_locator(line: str) -> bool:
+    """Return whether a numeric locator is preceded by a visible index term."""
+    match = re.search(r"\d+(?:[./:]\d+)*(?:[-‐‑‒–—]\d+(?:[./:]\d+)*)*", line)
+    if match is None:
+        return False
+    prefix = line[:match.start()].strip(" \t,;:，；：.。()（）[]【】")
+    return bool(prefix)
+
+
+def _index_structure_diagnostic(
+    source_entries: list[_IndexEntry], target_entries: list[_IndexEntry]
+) -> str:
+    source_count, target_count = len(source_entries), len(target_entries)
+    if target_count < source_count:
+        kind = "suspected merge"
+    else:
+        kind = "suspected split"
+    source_anchor_sequence = [marker for entry in source_entries for marker in entry.markers]
+    target_anchor_sequence = [marker for entry in target_entries for marker in entry.markers]
+    if source_anchor_sequence != target_anchor_sequence:
+        kind = "page/sequence marker structure changed"
+    source_line = source_entries[0].start_line if source_entries else 0
+    target_line = target_entries[0].start_line if target_entries else 0
+    if source_entries and target_entries and source_count != target_count:
+        shared_count = min(source_count, target_count)
+        source_unpaged = next((entry for entry in source_entries if not entry.markers), None)
+        target_unpaged = next((entry for entry in target_entries if not entry.markers), None)
+        if source_count > target_count and source_unpaged:
+            kind = "unpaged/prose-only entry boundary changed"
+            source_line, target_line = source_unpaged.start_line, target_entries[0].start_line
+        elif target_count > source_count and target_unpaged:
+            kind = "unpaged/prose-only entry boundary changed"
+            source_line, target_line = source_entries[0].start_line, target_unpaged.start_line
+        source_tail = source_entries[shared_count] if source_count > shared_count else None
+        target_tail = target_entries[shared_count] if target_count > shared_count else None
+        if source_tail and source_tail.group_reason == "cross-reference cue":
+            kind = "cross-reference missing from target"
+            source_line, target_line = source_tail.start_line, target_entries[shared_count - 1].start_line
+        elif target_tail and target_tail.group_reason == "cross-reference cue":
+            kind = "cross-reference added in target"
+            source_line, target_line = source_entries[shared_count - 1].start_line, target_tail.start_line
+    if source_entries and target_entries:
+        for source_entry, target_entry in zip(source_entries, target_entries):
+            if (
+                source_entry.group_reason == "cross-reference cue"
+                and target_entry.group_reason != "cross-reference cue"
+            ):
+                kind = "cross-reference boundary changed"
+                source_line, target_line = source_entry.start_line, target_entry.start_line
+                break
+            if (
+                target_entry.group_reason == "cross-reference cue"
+                and source_entry.group_reason != "cross-reference cue"
+            ):
+                kind = "cross-reference boundary changed"
+                source_line, target_line = source_entry.start_line, target_entry.start_line
+                break
+        source_owners = [
+            (entry_index, entry, marker)
+            for entry_index, entry in enumerate(source_entries)
+            for marker in entry.markers
+        ]
+        target_owners = [
+            (entry_index, entry, marker)
+            for entry_index, entry in enumerate(target_entries)
+            for marker in entry.markers
+        ]
+        for (source_owner, source_entry, source_marker), (
+            target_owner, target_entry, target_marker
+        ) in zip(source_owners, target_owners):
+            if kind.startswith("cross-reference") or kind.startswith("unpaged/prose-only"):
+                break
+            if (
+                source_marker != target_marker
+                or source_owner != target_owner
+            ):
+                source_line, target_line = source_entry.start_line, target_entry.start_line
+                break
+        if source_line == source_entries[0].start_line and target_line == target_entries[0].start_line:
+            for index, (source_entry, target_entry) in enumerate(zip(source_entries, target_entries)):
+                if source_entry.group_reason != target_entry.group_reason:
+                    source_line, target_line = source_entry.start_line, target_entry.start_line
+                    break
+            else:
+                if source_count > target_count:
+                    source_line = source_entries[target_count].start_line
+                    target_line = target_entries[-1].start_line
+                elif target_count > source_count:
+                    source_line = source_entries[-1].start_line
+                    target_line = target_entries[source_count].start_line
+        src = next((entry for entry in source_entries if entry.start_line == source_line), source_entries[0])
+        tgt = next((entry for entry in target_entries if entry.start_line == target_line), target_entries[0])
+        evidence = (
+            f"source line {src.start_line} (indent {src.indent}, {src.group_reason}); "
+            f"target line {tgt.start_line} (indent {tgt.indent}, {tgt.group_reason})"
+        )
+    else:
+        evidence = f"source line {source_line}; target line {target_line}"
+    source_start = max(0, next((i for i, entry in enumerate(source_entries) if entry.start_line == source_line), 0) - 1)
+    target_start = max(0, next((i for i, entry in enumerate(target_entries) if entry.start_line == target_line), 0) - 1)
+    nearby_source = source_entries[source_start:source_start + 3]
+    nearby_target = target_entries[target_start:target_start + 3]
+    source_preview = " | ".join(f"L{e.start_line}: {e.text[:70]}" for e in nearby_source)
+    target_preview = " | ".join(f"L{e.start_line}: {e.text[:70]}" for e in nearby_target)
+    source_indent_pattern = _index_indent_depths(source_entries[:8])
+    target_indent_pattern = _index_indent_depths(target_entries[:8])
+    if any(
+        source_depth != target_depth
+        for source_depth, target_depth in zip(source_indent_pattern, target_indent_pattern)
+    ):
+        kind += " with indentation pattern change"
+    return (
+        f"index entry count mismatch ({kind}): source={source_count}, "
+        f"target={target_count}; {evidence}; "
+        f"nearby source [{source_preview}], target [{target_preview}]"
+    )
+
+
+def _index_indent_depths(entries: list[_IndexEntry]) -> list[int]:
+    """Normalize absolute spaces into a relative hierarchy for entry rows."""
+    stack: list[int] = []
+    depths: list[int] = []
+    for entry in entries:
+        while stack and entry.indent < stack[-1]:
+            stack.pop()
+        if not stack or entry.indent > stack[-1]:
+            stack.append(entry.indent)
+        depths.append(max(0, len(stack) - 1))
+    return depths

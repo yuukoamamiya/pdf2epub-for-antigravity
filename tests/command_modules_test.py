@@ -15,6 +15,7 @@ from pdf2epub.commands.sources import _resolve_pdf_polish_source
 from pdf2epub.commands.registry import register_command_parsers
 from pdf2epub.commands.runtime import load_book_context
 from pdf2epub.refine.footnote_status import FOOTNOTE_NORMALIZATION_SCHEMA_VERSION
+from pdf2epub.refine.footnote_effective_decisions import EFFECTIVE_DECISIONS_VERSION
 from pdf2epub.refine.footnote_contracts import FOOTNOTE_PREPARE_SCHEMA_VERSION
 from pdf2epub.workflow_contracts import markdown_validation_schema_version, sha256_file
 
@@ -444,6 +445,10 @@ def test_polish_prefers_current_footnote_normalized_source(tmp_path: Path):
     normalized_dir.mkdir()
     (source_dir / "chapter_1.md").write_text("source", encoding="utf-8")
     (normalized_dir / "chapter_1.md").write_text("normalized", encoding="utf-8")
+    (source_dir / "tree_progress.json").write_text(json.dumps({"units": [{
+        "unit_id": "chapter_1", "file": "chapter_1.md", "page_range": [1, 1],
+    }]}), encoding="utf-8")
+    (tmp_path / "toc_tree.json").write_text("{}", encoding="utf-8")
     candidates_path = tmp_path / "footnote_candidates.json"
     candidates_path.write_text(
         json.dumps(
@@ -467,6 +472,9 @@ def test_polish_prefers_current_footnote_normalized_source(tmp_path: Path):
                 "continuation_reviews": [],
                 "ocr_evidence_mode": "single_ocr",
                 "footnote_mode": "footnotes",
+                "effective_decisions_version": EFFECTIVE_DECISIONS_VERSION,
+                "effective_decisions": [],
+                "source_sha256": {"chapter_1.md": sha256_file(source_dir / "chapter_1.md")},
                 "candidate_report_sha256": sha256_file(candidates_path),
             }
         ),
@@ -496,6 +504,8 @@ def test_polish_prefers_current_footnote_normalized_source(tmp_path: Path):
                 "valid": True,
                 "status": "validated",
                 "ocr_evidence_mode": "single_ocr",
+                "effective_decisions_version": EFFECTIVE_DECISIONS_VERSION,
+                "effective_decisions": [],
                 "source_sha256": {"chapter_1.md": sha256_file(source_dir / "chapter_1.md")},
                 "target_sha256": {
                     "chapter_1.md": sha256_file(normalized_dir / "chapter_1.md")

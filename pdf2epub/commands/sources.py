@@ -81,8 +81,15 @@ def _require_reviewed_ocr_anomalies(
     pages_dir = Path(output_dir) / "pages"
     if not any(pages_dir.glob("page_*.md")):
         return
+    from pdf2epub.ocr_review_selection import manual_review_selection_state
+
+    selection = manual_review_selection_state(output_dir)
     from pdf2epub.ocr_source import is_legacy_native_source
     if is_legacy_native_source(output_dir):
+        if selection["present"]:
+            raise ValueError(
+                "manual visual OCR selection cannot apply to a legacy native-text run"
+            )
         return
     from pdf2epub.ocr_anomalies import evidence_report_for_output, scan_ocr_pages
     from pdf2epub.ocr_correction import ocr_correction_is_current
@@ -93,15 +100,23 @@ def _require_reviewed_ocr_anomalies(
     anomalies = anomaly_report["review_required_files"]
     if anomaly_report.get("scan_errors"):
         raise ValueError("OCR anomaly scan could not read every raw page")
-    if anomalies and not ocr_correction_is_current(
+    if selection["present"] and not selection["current"]:
+        raise ValueError(selection["detail"])
+    correction_required = bool(anomalies or selection["present"])
+    if correction_required and not ocr_correction_is_current(
         output_dir, config, ocr_evidence=ocr_evidence
     ):
+        if selection["present"] and not anomalies:
+            raise ValueError(
+                "manual OCR page review is missing, stale, or unvalidated before downstream use: "
+                + ", ".join(selection["files"][:10])
+            )
         raise ValueError(
             "OCR commentary anomaly requires visual review before polish or downstream use: "
             + ", ".join(anomalies[:10])
         )
-    if anomalies:
-        from pdf2epub.ocr_correction import corrected_page_dir
+    if correction_required:
+        from pdf2epub.ocr_correction import select_refinement_pages
         from pdf2epub.utils.fingerprints import pages_fingerprint
 
         progress_path = Path(output_dir) / "ocr_markdown" / "tree_progress.json"
@@ -109,12 +124,16 @@ def _require_reviewed_ocr_anomalies(
             import json
 
             progress = json.loads(progress_path.read_text(encoding="utf-8"))
-            current_fingerprint = pages_fingerprint(corrected_page_dir(output_dir))
+            selected_pages, _ = select_refinement_pages(
+                output_dir, require_correction=True, config=config,
+                ocr_evidence=ocr_evidence,
+            )
+            current_fingerprint = pages_fingerprint(selected_pages)
             if progress.get("fingerprint", {}).get("pages_sha256") != current_fingerprint:
                 raise ValueError
         except (OSError, ValueError, TypeError, AttributeError, json.JSONDecodeError):
             raise ValueError(
-                "OCR anomaly correction is current but refined Markdown is stale; rerun refine-local before downstream use"
+                "OCR correction is current but refined Markdown is stale; rerun refine-local before downstream use"
             )
 
 

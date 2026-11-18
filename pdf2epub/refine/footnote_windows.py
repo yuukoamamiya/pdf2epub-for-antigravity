@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Mapping
 
 from .footnote_signals import _FOOTNOTE_LABEL_RE
 
@@ -150,7 +150,20 @@ def build_missing_continuation_reviews(
                 )
                 for item in following.get("candidates", []) or []
             )
-            if matched_continuation:
+            exact_review_candidate = any(
+                isinstance(item, dict)
+                and str(item.get("source") or "primary") == str(candidate.get("source") or "primary")
+                and item.get("confidence") == "review"
+                and isinstance(item.get("continuation_evidence"), Mapping)
+                and str(item["continuation_evidence"].get("matched_previous_key") or "") == key
+                and int(item.get("continuation_evidence", {}).get("matched_previous_block", -1))
+                == int(candidate.get("block", -2))
+                for item in following.get("candidates", []) or []
+            )
+            if matched_continuation or exact_review_candidate:
+                # The following page already has an exact candidate address
+                # queued for visual review; a page-gap task would duplicate it
+                # without identifying the block that may continue the note.
                 continue
         result.append({
             "task_id": f"continuation-gap-{page:03d}-{int(candidate.get('block', -1)):03d}",

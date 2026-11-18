@@ -136,6 +136,7 @@ def test_three_page_chain_keeps_interleaved_new_note_as_visual_context():
 
 def test_report_uses_all_scanned_sidecars_for_last_physical_page(monkeypatch, tmp_path):
     import pdf2epub.refine.footnote_report as report_module
+    import pdf2epub.refine.footnote_handoff as handoff_module
 
     images = {}
     for page in (1, 2):
@@ -143,6 +144,9 @@ def test_report_uses_all_scanned_sidecars_for_last_physical_page(monkeypatch, tm
         path.write_bytes(f"page {page}".encode())
         images[str(page)] = path.relative_to(tmp_path).as_posix()
     monkeypatch.setattr(report_module, "ensure_visual_review_images", lambda *_: {
+        "available": True, "files": images,
+    })
+    monkeypatch.setattr(handoff_module, "ensure_visual_review_images", lambda *_: {
         "available": True, "files": images,
     })
     monkeypatch.setattr(report_module, "ensure_region_review_images", lambda *_: {})
@@ -212,12 +216,15 @@ def _write_ocr_page(output_dir, page, blocks):
 
 def _prepare_continuation_book(tmp_path, monkeypatch):
     import pdf2epub.refine.footnote_report as report_module
+    import pdf2epub.refine.footnote_handoff as handoff_module
     import pdf2epub.ocr_correction
     from pdf2epub.workflow_contracts import sha256_file
 
+    body_block = {"order": 0, "label": "Text", "bbox": [80, 100, 920, 150],
+                  "html": "In text <sup>36</sup>"}
     block = {"order": 1, "label": "Footnote", "bbox": [80, 820, 920, 870],
              "html": "36 Footnote continues von vorn-"}
-    _write_ocr_page(tmp_path, 1, [block])
+    _write_ocr_page(tmp_path, 1, [block, body_block])
     _write_ocr_page(tmp_path, 2, [])
     (tmp_path / "toc_tree.json").write_text("{}", encoding="utf-8")
     source = tmp_path / "ocr_markdown"
@@ -236,6 +243,9 @@ def _prepare_continuation_book(tmp_path, monkeypatch):
     image_manifest = tmp_path / "ocr_review_images.json"
     image_manifest.write_text(json.dumps({"source_sha256": "synthetic-pdf-hash"}), encoding="utf-8")
     monkeypatch.setattr(report_module, "ensure_visual_review_images", lambda *_: {
+        "available": True, "files": images,
+    })
+    monkeypatch.setattr(handoff_module, "ensure_visual_review_images", lambda *_: {
         "available": True, "files": images,
     })
     monkeypatch.setattr(report_module, "ensure_region_review_images", lambda *_: {})
@@ -422,11 +432,12 @@ def test_unit_context_projection_rejects_deleted_page_after_hash_refresh(tmp_pat
 
 
 
-def test_image_confirmed_body_candidate_is_not_moved(tmp_path, monkeypatch):
+def test_image_confirmed_body_candidate_is_not_moved_but_same_key_marker_needs_exact_review(tmp_path, monkeypatch):
     paths, _ = _prepare_continuation_book(tmp_path, monkeypatch)
     report = json.loads(paths["report"].read_text(encoding="utf-8"))
     task = report["continuation_reviews"][0]
-    (tmp_path / "footnote_decisions.json").write_text(json.dumps({
+    decision_file = tmp_path / "footnote_decisions.json"
+    decision_file.write_text(json.dumps({
         "schema_version": report["schema_version"],
         "decisions": [],
         "continuation_reviews": [{
@@ -437,11 +448,47 @@ def test_image_confirmed_body_candidate_is_not_moved(tmp_path, monkeypatch):
         }],
     }), encoding="utf-8")
     assert validate_footnote_decisions(tmp_path)["valid"] is True
+    first_apply = apply_footnote_normalization(tmp_path)
+    assert first_apply["valid"] is False
+    audit = json.loads((tmp_path / "footnote_result_audit.json").read_text(encoding="utf-8"))
+    unresolved, = [item for item in audit["findings"] if item["code"] == "unexplained_numeric_superscript"]
+    assert unresolved["key"] == "36"
+    assert "<sup>36</sup>" in unresolved["evidence_excerpt"]
+
+    # Re-prepare exposes the exact OCR Text block containing this marker. The
+    # reviewer resolves only this occurrence; the separate footer candidate
+    # remains a body classification and is never moved as a note.
+    paths = prepare_footnote_subagent(tmp_path, book_title="Synthetic Review Book")
+    prepared = json.loads(paths["report"].read_text(encoding="utf-8"))
+    result_tasks = prepared["result_audit"]["findings"]
+    superscript_task, = [item for item in result_tasks if item["code"] == "unexplained_numeric_superscript"]
+    assert superscript_task["context_status"] == "supplemental_candidate_admitted"
+    assert superscript_task["source_address"]["block"] == 1
+    decision_file.write_text(json.dumps({
+        "schema_version": prepared["schema_version"],
+        "decisions": [{"page": 1, "source": "primary", "block": 1, "role": "body"}],
+        "continuation_reviews": [{
+            "task_id": prepared["continuation_reviews"][0]["task_id"],
+            "outcome": "confirmed_not_a_footnote",
+            "reason": "The page image shows an ordinary body line, not a page note.",
+            "evidence_pages": [1, 2],
+        }],
+        "result_audit_reviews": [{
+            "task_id": superscript_task["task_id"],
+            "evidence_sha256": superscript_task["evidence_sha256"],
+            "outcome": "legitimate_non_footnote",
+            "reason": "The page image shows this exact marker is an in-text reference, not a page note.",
+            "evidence_pages": [1],
+        }],
+    }), encoding="utf-8")
+    validation = validate_footnote_decisions(tmp_path)
+    assert validation["valid"] is True, validation.get("errors")
     result = apply_footnote_normalization(tmp_path)
-    assert result["valid"] is True
-    assert (tmp_path / "footnote_normalized" / "chapter_1.md").read_text(encoding="utf-8") == (
-        tmp_path / "ocr_markdown" / "chapter_1.md"
-    ).read_text(encoding="utf-8")
+    assert result["valid"] is True, result.get("errors")
+    normalized = (tmp_path / "footnote_normalized" / "chapter_1.md").read_text(encoding="utf-8")
+    assert "In text <sup>36</sup>" in normalized
+    assert "[^36]:" not in normalized
+    assert "von vorn-" in (tmp_path / "ocr_markdown" / "chapter_1.md").read_text(encoding="utf-8")
 
 
 def test_continuation_resolution_requires_explicit_outcome_both_images_and_current_hash(tmp_path, monkeypatch):

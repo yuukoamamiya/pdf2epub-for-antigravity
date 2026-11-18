@@ -21,6 +21,7 @@ from .footnote_apply_inputs import FootnoteApplyInputError, load_footnote_apply_
 from .footnote_status import FOOTNOTE_NORMALIZATION_SCHEMA_VERSION
 from .footnote_source import markdown_inventory
 from .footnote_result_audit import AUDIT_FILENAME, AUDIT_VERSION, audit_footnote_result
+from .footnote_effective_decisions import EFFECTIVE_DECISIONS_VERSION
 
 
 def _write_failure(output_dir: Path, errors: list[str], *, status: str = "human_review_required") -> dict[str, Any]:
@@ -115,6 +116,12 @@ def apply_footnote_normalization(
     source_texts = source.source_texts
     continuation_results = validation.get("continuation_reviews", [])
 
+    if (
+        validation.get("effective_decisions_version") != EFFECTIVE_DECISIONS_VERSION
+        or not isinstance(validation.get("effective_decisions"), list)
+    ):
+        return _write_failure(output_dir, ["footnote validation lacks the current effective decision set; rerun footnote-validate"])
+
     planning = build_footnote_normalization_plan(FootnoteNormalizationPlanningInput(
         output_dir=output_dir,
         report=report,
@@ -125,6 +132,8 @@ def apply_footnote_normalization(
         progress=inputs.progress,
         scope_error=inputs.scope_error,
         endnote_definition_decisions=endnote_definition_decisions,
+        expected_effective_decisions=validation["effective_decisions"],
+        expected_source_sha256=validation.get("source_sha256"),
     ))
     if not planning.valid or planning.edit_plan is None:
         return _write_failure(output_dir, list(planning.errors) or ["footnote normalization plan is invalid"])
@@ -181,6 +190,20 @@ def apply_footnote_normalization(
         for chapter, notes in edit_plan.notes_by_chapter.items()
         for note in notes
     ]
+    page_texts: dict[int, str] = {}
+    try:
+        from ..ocr_correction import select_refinement_pages
+
+        page_dir, _page_source_kind = select_refinement_pages(output_dir, config=config)
+    except (OSError, ValueError, TypeError) as exc:
+        return _write_failure(output_dir, [f"could not load current page evidence for result audit: {exc}"])
+    if page_dir.is_dir():
+        for page_path in page_dir.glob("page_*.md"):
+            try:
+                page_number = int(page_path.stem.removeprefix("page_"))
+                page_texts[page_number] = page_path.read_text(encoding="utf-8")
+            except (ValueError, OSError, UnicodeError):
+                continue
     result_audit = audit_footnote_result(
         source_texts,
         records=records,
@@ -189,6 +212,9 @@ def apply_footnote_normalization(
         decisions=validation_for_resolution.get("decisions", []),
         expected_notes=expected_notes,
         current_exceptions=validation.get("result_audit_reviews", []),
+        resolved_blocks=edit_plan.resolved_blocks,
+        toc_tree=inputs.toc_tree,
+        page_texts=page_texts,
     )
     # Bind to byte-level inventories (including original newline convention)
     # that status checks on disk, rather than normalized in-memory strings.
@@ -291,7 +317,9 @@ def apply_footnote_normalization(
         "valid": True,
         "source_dir": "ocr_markdown",
         "target_dir": "footnote_normalized",
-        "source_sha256": source_hashes,
+        "source_sha256": dict(planning.source_sha256),
+        "effective_decisions_version": planning.effective_decisions_version,
+        "effective_decisions": list(planning.effective_decisions),
         "target_sha256": target_hashes,
         "candidate_report_sha256": sha256_file(output_dir / "footnote_candidates.json"),
         "decision_validation_sha256": sha256_file(

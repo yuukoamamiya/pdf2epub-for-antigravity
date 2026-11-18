@@ -202,6 +202,9 @@ def _pdf_stages(
     input_path: Path,
 ) -> list[dict[str, Any]]:
     policy = PipelinePolicy.from_config(config)
+    from pdf2epub.ocr_review_selection import manual_review_selection_state
+
+    manual_selection = manual_review_selection_state(output_dir)
     stages: list[dict[str, Any]] = []
     ocr_status, ocr_detail = _pdf_ocr_status(output_dir, input_path)
     stages.append(_status_record("ocr-pages", "ocr-pages --resume", ocr_status, ocr_detail))
@@ -217,7 +220,17 @@ def _pdf_stages(
         review_required = True
         if not any(stage["name"] == "ocr-source" for stage in stages):
             stages.append(_status_record("ocr-source", "ocr-pages --resume", "blocked", str(exc)))
-    if native_text or not review_required:
+    if native_text and manual_selection["present"]:
+        stages.append(
+            _status_record(
+                "ocr-correct",
+                "ocr-correct",
+                "blocked",
+                "manual visual OCR selection cannot apply to a legacy native-text run",
+                pending_files=manual_selection["files"],
+            )
+        )
+    elif native_text or not review_required:
         stages.append(
             _status_record(
                 "ocr-correct",
@@ -233,16 +246,41 @@ def _pdf_stages(
             current = ocr_correction_is_current(output_dir, config)
         except (OSError, TypeError, ValueError):
             current = False
-        stages.append(
-            _status_record(
-                "ocr-correct",
-                "ocr-correct",
-                "passed" if current else "pending",
-                "visual OCR correction checkpoint is current"
-                if current
-                else "run ocr-correct for flagged pages, have the Subagent write corrections, then run ocr-correct-validate",
+        if manual_selection["present"]:
+            pending_files = manual_selection["files"]
+            if manual_selection["current"]:
+                correction_command = "ocr-correct --resume"
+                pending_detail = (
+                    "manual visual review is selected for "
+                    + ", ".join(pending_files)
+                    + "; complete the Subagent hand-off and run full ocr-correct-validate"
+                )
+            else:
+                flags = " ".join(f"--file {name}" for name in pending_files)
+                correction_command = "ocr-correct " + flags
+                pending_detail = manual_selection["detail"]
+            stages.append(
+                _status_record(
+                    "ocr-correct",
+                    correction_command,
+                    "passed" if current else "pending",
+                    "manual OCR page review checkpoint is current"
+                    if current
+                    else pending_detail,
+                    pending_files=pending_files,
+                )
             )
-        )
+        else:
+            stages.append(
+                _status_record(
+                    "ocr-correct",
+                    "ocr-correct",
+                    "passed" if current else "pending",
+                    "visual OCR correction checkpoint is current"
+                    if current
+                    else "run ocr-correct for flagged pages, have the Subagent write corrections, then run ocr-correct-validate",
+                )
+            )
 
     toc_status, toc_detail = _pdf_tree_status(output_dir, config)
     stages.append(_status_record("refine-prepare", "refine-prepare", toc_status, toc_detail))

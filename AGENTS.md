@@ -83,7 +83,7 @@ uv run pdf2epub -c config.yaml doctor
 选中的 OCR 依赖和配置兼容性。页面 OCR 只能使用注册表中当前存在的后端；未知、退役或遗留
 的后端配置会在 `doctor` 阶段阻断，不能靠关闭开关绕过。
 维护者可用 `uv run pdf2epub -c config.yaml footnote-review-summary --json` 只读汇总脚注复核成本；它是独立诊断，不能替代 `footnote-validate`，也不建议删除相邻页上下文窗口。
-脚注 unit context 使用独立 projection version；加载时必须依据当前候选报告、精确页侧车哈希索引和 refined unit mapping 重算完整投影。旧版本或证据变化时重跑 `footnote-prepare`、`footnote-validate`；保留原 decision 文件，不把刷新上下文当作语义决定通过。
+脚注 unit context 使用独立 projection version。加载时必须依据当前候选报告、精确页侧车哈希索引和 refined unit mapping 重算完整投影。Polish boundary context projection version 2 首次恢复时用 `polish --resume` 刷新 sidecar/context 并运行正式 `polish-validate`。之后 halo 外邻片变化不使已完成 sidecar/receipt 失效，但完整 source provenance 与 inventory 检查仍须通过。脚注证据始终按 chapter scope 投影，缺少精确 part→page 映射时继续使用章节级证据与失效范围，不推断分片级页范围。旧脚注 unit context 版本或脚注证据变化时，先重跑 `footnote-prepare`、`footnote-validate`，保留原 decision 文件，不把刷新上下文当作语义决定通过。
 
 ## 0.2 依赖和 OCR 后端快速配置
 
@@ -367,13 +367,20 @@ schema 3 的 `recommendation` 始终是 `ocr_required`。
 双 OCR 只作为可选复核通道。主/次 OCR 的文本、数字和 sidecar 差异不能由本地脚本自动选择，
 必须交给工作区 Subagent；次 OCR 的连续物理行可以合并为一个复核窗口。
 
+手动指定页面时，重复 `ocr-correct --file PAGE.md` 会累积请求，源变化后重新指定按当前完整 OCR 页清单确认。无 `--file` 的
+`ocr-correct --resume` 恢复原请求。单文件 validate 只写页检查点，全量 `ocr-correct-validate` 才写整书收据并允许
+refine 读取 `ocr_corrected_pages/validated/`。请求绑定 PDF、数字排序的完整 raw-page inventory 及逐页 Markdown/sidecar
+哈希。变化会使请求过期。若 handoff 的 `manual_review_files` 或 `manual_review_selection_sha256` 非空，即使没有
+validation receipt 或请求合同损坏，仍禁止 raw fallback。用 `--file` 恢复时保留 handoff/receipt 中可恢复的安全页名并合并新页，
+若仅有选择哈希而无文件名，必须显式重选全部目标页。重复选择幂等，视觉复核记录绑定当前 source、target 和 image 哈希。
+
 对视觉 OCR，脚注和整页插图读取同一个开关。旧原生运行使用独立的原生版面证据（legacy
-artifact only）；双 OCR 模式下，`footnote-prepare` 和 `illustration-prepare` 必须看到当前
-共识检查点；主/次 OCR 的候选差异不能由本地脚本自动选择，必须进入工作区 Subagent。切换
+artifact only），双 OCR 模式下，`footnote-prepare` 和 `illustration-prepare` 必须看到当前
+共识检查点，主/次 OCR 的候选差异不能由本地脚本自动选择，必须进入工作区 Subagent。切换
 页面来源或 OCR 模式后，旧的脚注决定、插图绑定和 `refine-local` 检查点不能复用。
 
 脚注和整页插图共享 `pdf2epub/refine/pdf_evidence.py` 的页面来源/证据模式判断，以及
-`pdf2epub/refine/layout_evidence.py` 的 sidecar 文本和坐标归一化；不要在新的 PDF 阶段复制
+`pdf2epub/refine/layout_evidence.py` 的 sidecar 文本和坐标归一化，不要在新的 PDF 阶段复制
 这两类逻辑。共享层只提供坐标和文本事实，脚注/插图模块仍分别负责自己的候选语义和 Subagent
 决定。
 
@@ -393,30 +400,30 @@ ocr-pages
 → polish → polish-validate
 ```
 
-`illustration-prepare` 必须在 `refine-local` 前完成，因为它影响页面合并；
+`illustration-prepare` 必须在 `refine-local` 前完成，因为它影响页面合并，
 `footnote-prepare` 必须在 `refine-local` 后完成，因为它按实际生成的 TOC 单元归并章末脚注。
 没有候选时仍保留本地生成的报告和 manifest，并继续执行下一个阶段。
 
-对所有 PDF，`polish` 都是翻译前的必经质量闸门，不是可选的版式优化；只有
+对所有 PDF，`polish` 都是翻译前的必经质量闸门，不是可选的版式优化，只有
 `polish-validate` 通过后，才能提取实体表或准备正文翻译。旧原生文字运行也必须通过
-`polish` 判断视觉换行与真实段落边界；其 polish 不得进行无依据的拼写或字形改写，重点是
+`polish` 判断视觉换行与真实段落边界，其 polish 不得进行无依据的拼写或字形改写，重点是
 合并软换行并保留真实段落、标题和块级结构。
-polish handoff 按显式 part mapping 为每个单元提供前后各最多 256 token、合计最多 512 token 且不超过单文件剩余预算的只读正文上下文。优先使用完整块，超预算时使用带明确裁剪标记的句子或完整词片段；裁剪片段不能用来判断段落边界或要求合并块。只读取 scoped manifest
+polish handoff 按显式 part mapping 为每个单元提供前后各最多 256 token、合计最多 512 token 且不超过单文件剩余预算的只读正文上下文。优先使用完整块，超预算时使用带明确裁剪标记的句子或完整词片段，裁剪片段不能用来判断段落边界或要求合并块。只读取 scoped manifest
 列出的投影，不打开邻片全文，也不把上下文写入目标。源文或相关 refined mapping 变化会使 polish 验收和
 resume 失效。脚注模式启用时，每个文件还必须生成 schema 1 的 `polish_footnote_reviews/<stem>.json`，
-覆盖正文、脚注定义及跨分片关联；无脚注定义的文件也要完成正文扫描。sidecar 报告 issue 时，按报告回到
+覆盖正文、脚注定义及跨分片关联，无脚注定义的文件也要完成正文扫描。sidecar 报告 issue 时，按报告回到
 `footnote-prepare` 的视觉复核、`footnote-validate` 和 `footnote-apply`。正式 `polish-validate` 会更新
-当前 receipt 和 validated 副本；不得手工重算哈希恢复旧检查点。
-`refine-local` 的页面合并器会保守地拼接跨页未完的普通正文；完整句子、标题、列表、脚注、
+当前 receipt 和 validated 副本，不得手工重算哈希恢复旧检查点。
+`refine-local` 的页面合并器会保守地拼接跨页未完的普通正文，完整句子、标题、列表、脚注、
 图片和表格仍保持块边界。Markdown→XHTML 默认遵循标准 Markdown 语义：单换行是软换行，
-空行才创建新段落；只有显式 `<br />` 才生成硬换行。
-正文若由连续的长编号段落组成，应依据上下文确认它们是普通论述后将数字标记转义为 `17\.`，使每段保留原编号且输出为普通段落；真实枚举仍用 Markdown 列表。明确编号的短注释可在一条编号对应一条注释时规整为有序列表；不得给可能续接前条的作者名/续文补号。已有 Markdown 脚注定义及其缩进续段必须留在原定义下；多章重复编号且没有明确作用域映射时不得改造成同名 `[^N]` 定义，证据不足应报告复核，不能为了通过段落碎片审计凭空造列表或脚注结构。`translate` 必须保留源稿中已转义的编号标记和顺序，校验会核对这些标记。
-视觉 OCR sidecar 若在页顶将跨页重复的 `Section-Header` 标为章节标题，页面合并器会按共享坐标归一化和去除印刷页码后的重复文本识别页眉；只处理至少出现在两页的短块，正文位置的真实标题保留。润色交接还要求标题保持独立，不得把后续正文拼入标题。
-`polish-validate` 还会报告高置信度的残留页码/页边行；这些候选默认进入
-`review_required`；首次出现时必须先让 Subagent 重新判断，复核后仍存在则升级为
+空行才创建新段落，只有显式 `<br />` 才生成硬换行。
+正文若由连续的长编号段落组成，应依据上下文确认它们是普通论述后将数字标记转义为 `17\.`，使每段保留原编号且输出为普通段落，真实枚举仍用 Markdown 列表。明确编号的短注释可在一条编号对应一条注释时规整为有序列表，不得给可能续接前条的作者名/续文补号。已有 Markdown 脚注定义及其缩进续段必须留在原定义下，多章重复编号且没有明确作用域映射时不得改造成同名 `[^N]` 定义，证据不足应报告复核，不能为了通过段落碎片审计凭空造列表或脚注结构。`translate` 必须保留源稿中已转义的编号标记和顺序，校验会核对这些标记。
+视觉 OCR sidecar 若在页顶将跨页重复的 `Section-Header` 标为章节标题，页面合并器会按共享坐标归一化和去除印刷页码后的重复文本识别页眉，只处理至少出现在两页的短块，正文位置的真实标题保留。润色交接还要求标题保持独立，不得把后续正文拼入标题。
+`polish-validate` 还会报告高置信度的残留页码/页边行，这些候选默认进入
+`review_required`，首次出现时必须先让 Subagent 重新判断，复核后仍存在则升级为
 `human_review_required`，不授权本地脚本自动删除或继续。仅在明确确认合法保留后使用
 `--allow-review-warnings`。
-润色还必须保留源稿标题的规范化有序序列和每次出现；删掉重复标题、改变标题文字或交换同级标题都会被校验阻断。
+润色还必须保留源稿标题的规范化有序序列和每次出现，删掉重复标题、改变标题文字或交换同级标题都会被校验阻断。
 EPUB、轻小说和 TeX 流程不使用这一 PDF 润色阶段。
 
 PDF 的具体循环为：`ocr-pages →（若启用第二套 OCR：ocr-correct → ocr-correct-validate）→ refine-prepare → illustration-prepare →（有候选时交给 Subagent）→ illustration-validate → illustration-apply → refine-local → footnote-prepare →（有待复核时交给 Subagent）→ footnote-validate → footnote-apply → polish → polish-validate`。
@@ -428,12 +435,12 @@ translate-validate → build-epub --only-translated`。可搜索但由扫描图�
 PDF 纯转换模式使用 `pipeline: epub_conversion`（兼容别名
 `mode: ocr_to_epub`），循环为：
 `ocr-pages →（若启用第二套 OCR：ocr-correct → ocr-correct-validate）→ refine-prepare → illustration-prepare →（有候选时交给 Subagent）→ illustration-validate → illustration-apply → refine-local → footnote-prepare →（有待复核时交给 Subagent）→ footnote-validate → footnote-apply → polish → polish-validate → build-epub`。
-该模式不读取语言设置，不执行实体提取、翻译 TOC 或正文翻译；但 polish 仍是所有 PDF
+该模式不读取语言设置，不执行实体提取、翻译 TOC 或正文翻译，但 polish 仍是所有 PDF
 必须通过的结构质量门禁。构建时不得使用 `build-epub --translated` 或
 `build-epub --only-translated`。
 
 统一的 pipeline 能力和门禁定义位于 `pdf2epub/pipeline_policy.py`。命令模块不得重新
-实现 `pipeline`/`mode` 的特殊判断；需要新增流程能力时先更新该策略对象，再更新对应
+实现 `pipeline`/`mode` 的特殊判断，需要新增流程能力时先更新该策略对象，再更新对应
 的命令合同和测试。
 
 并发任务必须各自使用 worker handoff 中的 `assigned_files`。超过 30,000 字节的单元必须
@@ -441,58 +448,58 @@ PDF 纯转换模式使用 `pipeline: epub_conversion`（兼容别名
 PDF 正文 Prompt 还会从已验证的 `toc_tree_translated.json` 生成一个全书方向性轮廓：
 它依据实际树深、分支规模和 `subagent.batching.global_toc_tokens`（默认 1,200）
 自适应压缩，不固定保留某几个标题级别。该轮廓只用于理解全书主题推进，当前章节的
-精确 `toc_heading_contexts` 才是可见标题和措辞的权威来源；完整 TOC 不得重复注入每个章节。
+精确 `toc_heading_contexts` 才是可见标题和措辞的权威来源，完整 TOC 不得重复注入每个章节。
 TOC 绑定校验对连续空白、Markdown 外层标记和成对书名号/引号只在运行时匹配时做规范化容差，
-不改写已存标题；近义词或
+不改写已存标题，近义词或
 独立改译仍必须失败。源 ownership 标题计数、分片 occurrence 分配和 HTML 锚点匹配先按 Markdown
-renderer 语义提取可见文本；HTML 已渲染文本只提取可见文本，不再解析为 Markdown。字面转义标记、代码、
-链接、实体、数学和上下标遵循实际渲染结果；legacy TOC 中的强调语法必须有 owning Markdown 的原始标题
+renderer 语义提取可见文本，HTML 已渲染文本只提取可见文本，不再解析为 Markdown。字面转义标记、代码、
+链接、实体、数学和上下标遵循实际渲染结果，legacy TOC 中的强调语法必须有 owning Markdown 的原始标题
 语法证据，不能只靠去标记猜测。标识符下划线和字面 `*A*` 不得误配。投影使用 Unicode `lower()`
-与连续空白归一化，不使用 `casefold()` 扩大等价关系；
+与连续空白归一化，不使用 `casefold()` 扩大等价关系，
 这不放宽译文与 TOC 的逐字标题绑定。worker Prompt 必须把当前文件的标题锚定清单置于 assigned 任务附近，
 要求对应的第一个匹配标题逐字使用 TOC 文本，但不强制其成为物理首行。
-当前 TOC 合同要求每个节点有唯一、显式的 `node_id`；数组路径只表示结构位置，标题文字不作身份。
+当前 TOC 合同要求每个节点有唯一、显式的 `node_id`，数组路径只表示结构位置，标题文字不作身份。
 构建器通过 `tree_progress.json` 和源 Markdown 的共享 ownership projection 确定节点所属的物理文件
 及 `visible`/`container_only` 状态，并记录 `source_candidate_kind`（`heading`、`paragraph`、
-`container_only`）。同一逻辑单元优先使用标题候选，即使其位于后续 part；只有没有标题候选时才用
+`container_only`）。同一逻辑单元优先使用标题候选，即使其位于后续 part，只有没有标题候选时才用
 段落候选。源 Markdown 计数与生成 HTML 锚点匹配必须使用相同候选类别，并严格核对 occurrence 和
-count。可见标题缺少已绑定锚点时必须阻断 EPUB 构建；容器节点按合同落到所属内容文件或首个有内容
-的后代。新 `toc_heading_contexts` 使用 `projection_version: 5`；旧 context 必须先运行一次
+count。可见标题缺少已绑定锚点时必须阻断 EPUB 构建，容器节点按合同落到所属内容文件或首个有内容
+的后代。新 `toc_heading_contexts` 使用 `projection_version: 5`，旧 context 必须先运行一次
 `translate --resume` 刷新 manifest/context，但不能按这次准备结果立即派发 pending，因为旧
 validation receipt 可能失效并暂时把所有现有目标列为 pending。随后运行
-`translate-validate` 校验现有译文并建立当前 receipt，再运行第二次 `translate --resume`；
+`translate-validate` 校验现有译文并建立当前 receipt，再运行第二次 `translate --resume`，
 只派发仍列为 pending/invalid 的 assignment，完成后运行全量 `translate-validate`。
 只重派上下文/源哈希失效的 assignment，不因 projection 升级盲目重译全书，也不迁移旧树或旧翻译结果。
-EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编号格式差异；编号只在一侧缺失时，
+EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编号格式差异，编号只在一侧缺失时，
 仅当去编号后的标题正文精确且全书分片中唯一、没有不同编号冲突时才回退。模糊相似标题不绑定，
 原有 HTML `id` 保留。
   `toc_heading_contexts.binding_mode: container_only` 表示源单元没有可见 TOC 标签（例如
-  纯图片封面或边界片段）；此时 EPUB 构建器负责章节容器标题，Subagent 不得在 Markdown
+  纯图片封面或边界片段），此时 EPUB 构建器负责章节容器标题，Subagent 不得在 Markdown
   中凭空新增标题或纯段落标签。续文分片仍保持原样，不生成“续”标题。大章节拆分时每个 part
   收到独立的 scoped context：子标题只下发到其源标题首次出现的 part，父标题只在可见的 part
-  标记 `visible`；所有 part 都找不到源标题的子标题只挂到第一个 part 并标记 `container_only`。
-  `container_only` 节点不伪造 Markdown 标题锚点；TOC 层级保留，并导航到所属文件或首个有内容的
-  后代。显式 `container_only` 节点在分配可见标题候选前跳过匹配，不消耗同名候选；后续可见节点仍须
+  标记 `visible`，所有 part 都找不到源标题的子标题只挂到第一个 part 并标记 `container_only`。
+  `container_only` 节点不伪造 Markdown 标题锚点，TOC 层级保留，并导航到所属文件或首个有内容的
+  后代。显式 `container_only` 节点在分配可见标题候选前跳过匹配，不消耗同名候选，后续可见节点仍须
   在其实际所属 part 中通过 occurrence/count 与导航锚点校验。`visible` 锚点必须出现在其投影指定的
   part 中并落在对应标题上，缺失时构建阻断。
-  阅读目录是完整书稿结构树的展示投影。`navigation_visibility` 可设 `auto`、`include` 或 `exclude`；
+  阅读目录是完整书稿结构树的展示投影。`navigation_visibility` 可设 `auto`、`include` 或 `exclude`，
   `auto` 仅隐藏明确的 `cover`、`copyright`、`metadata`、`catalog`、`ad`、`toc` 角色，不能整类隐藏
   `frontmatter`。经复核的献辞/题名页可设 `exclude`，前言/年表可设 `include`。隐藏父节点时后代仍进入
   阅读目录，树、spine 和正文文件分配不变。行内标题可在 `boundary_info.heading_prefix` 提供源行精确
-  Markdown 前缀，复核校验可见文本后才可物化；不得按句号或长度猜范围。`numbering_label` 必须附有
+  Markdown 前缀，复核校验可见文本后才可物化，不得按句号或长度猜范围。`numbering_label` 必须附有
   支持它的 `numbering_evidence` 源页、行及原文摘录。
-  HTML TOC 与 NCX 在内容渲染后共用同一份已解析导航树；打包前核对目标文件、fragment 和
-  XHTML id。NCX depth 按实际逻辑层级计算；构建不再注入合成的目录入口。
+  HTML TOC 与 NCX 在内容渲染后共用同一份已解析导航树，打包前核对目标文件、fragment 和
+  XHTML id。NCX depth 按实际逻辑层级计算，构建不再注入合成的目录入口。
 
 ## 2. PDF 翻译流程（扫描/混合稿）
 
 ### 2.1 准备、OCR 和结构
 
-1. 检查 `input/` 中的 PDF，在 `config.yaml` 填写 `title`、`input_pdf` 和 OCR 后端；
-   翻译模式还需填写源语言、目标语言，纯转换模式只需增加 `pipeline: epub_conversion`；
+1. 检查 `input/` 中的 PDF，在 `config.yaml` 填写 `title`、`input_pdf` 和 OCR 后端，
+   翻译模式还需填写源语言、目标语言，纯转换模式只需增加 `pipeline: epub_conversion`，
    不要覆盖用户真实配置。
 2. 如需选择外部术语表，先执行 `uv run pdf2epub -c config.yaml glossary-candidates`，
-   查看 `output/<title>/glossary_candidates.json`，再明确写入配置；没有明确匹配时留空，
+   查看 `output/<title>/glossary_candidates.json`，再明确写入配置，没有明确匹配时留空，
    不得因为目录中存在术语表就自动加载。
 3. 执行：
 
@@ -500,48 +507,48 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    uv run pdf2epub -c config.yaml ocr-pages --resume
    ```
 
-   程序会先生成 `pdf_text_probe.json`。所有新运行都使用视觉 OCR；扫描 PDF、可搜索 OCR
+   程序会先生成 `pdf_text_probe.json`。所有新运行都使用视觉 OCR，扫描 PDF、可搜索 OCR
    PDF 和混合稿都生成视觉 OCR 的 `pages/page_XXX.md`。probe schema 为 3，
    `recommendation` 始终是 `ocr_required`。旧版本可能留下 `source_kind: native_text`
    的原生 layout sidecar（`coordinate_system: page_points`），它们只供旧输出恢复读取，
    新运行不再生成，也没有配置入口。若
-   `pages/ocr_progress.json` 的 `mode` 为 `native_text`，说明这是旧原生运行；不要再执行
+   `pages/ocr_progress.json` 的 `mode` 为 `native_text`，说明这是旧原生运行，不要再执行
    视觉 OCR。若同目录的新 probe 与旧 native 进度冲突，先核对 PDF 哈希、运行标识/时间和逐页
-   sidecar 的 `source_kind`/`backend`；无法确认属于同一运行时人工核对恢复元数据，不得一律重新 OCR；
+   sidecar 的 `source_kind`/`backend`，无法确认属于同一运行时人工核对恢复元数据，不得一律重新 OCR，
    确认是完整旧原生运行后继续只读恢复。当 `ocr.secondary.enabled: true` 且配置了有效次 OCR 时，
    此命令还会逐页复核主 OCR，生成
-   `ocr_secondary/` 和 `ocr_consensus.json`；一致页自动接受，只有两个 OCR 有实质差异，
+   `ocr_secondary/` 和 `ocr_consensus.json`，一致页自动接受，只有两个 OCR 有实质差异，
    或被共同漏检哨兵选中的页面才进入下一步视觉 Subagent。
-   哨兵默认每 20 页抽查一页，并把内部文本密度显著低于相邻页的页面列为风险页；这些规则
+   哨兵默认每 20 页抽查一页，并把内部文本密度显著低于相邻页的页面列为风险页，这些规则
    只增加复核，不会自动改写页面。`enabled: false` 时只运行主 OCR，不进行 OCR 纠错。
    如果只是修改了共识判定规则而已有两套 OCR 产物完整，可运行
-   `uv run pdf2epub -c config.yaml ocr-consensus-rebuild` 离线重建共识；该命令不得重新调用
+   `uv run pdf2epub -c config.yaml ocr-consensus-rebuild` 离线重建共识，该命令不得重新调用
    OCR 后端，也不能绕过当前性校验。
 4. 仅对视觉 OCR PDF 且 `ocr.secondary.enabled: true` 时执行 `ocr-correct`。然后打开工作区 Subagent，读取
-   生成的 Prompt，按 `ocr-correct_worker_handoffs/` 中 manifest 的 `assigned_files` 对照同名页图；
+   生成的 Prompt，按 `ocr-correct_worker_handoffs/` 中 manifest 的 `assigned_files` 对照同名页图，
    该 handoff 自动只包含 `ocr_consensus.json` 标记的差异页。将纠错后的同名文件写入
    `ocr_corrected_pages/`，并为每页写入 `ocr_correction_reviews/page_NNN.json`，再运行
    `ocr-correct-validate`。校验会拒绝缺少审阅记录、标记为不确定、或比原始 OCR 少行的页面。
-   原始 `pages/` 不得覆盖；未通过该校验不得继续。旧 native artifact 且
-   `recommendation == "use_text_layer"` 的运行跳过该阶段；第二套 OCR 开关关闭时也跳过。
+   原始 `pages/` 不得覆盖，未通过该校验不得继续。旧 native artifact 且
+   `recommendation == "use_text_layer"` 的运行跳过该阶段，第二套 OCR 开关关闭时也跳过。
 5. 执行 `refine-prepare`。然后打开工作区 Subagent，读取
    `output/<title>/refine_subagent_prompt.md`，视觉 OCR 使用经过校验的
    `ocr_corrected_pages/validated/`，旧原生运行使用 `pages/`，写入 `toc_tree.json`。
    同时读取 `toc_heading_candidates.json` 与 `toc_structure_review_manifest.json`，只依据 manifest
-   允许的页面/图像/正文证据完成全页审阅；写入 `toc_structure_decisions.json`，为每页记录覆盖证据，
-   并为每个候选记录唯一处置。候选带 `atx_level` 时表示源 Markdown 自身标成了 ATX 标题；
+   允许的页面/图像/正文证据完成全页审阅，写入 `toc_structure_decisions.json`，为每页记录覆盖证据，
+   并为每个候选记录唯一处置。候选带 `atx_level` 时表示源 Markdown 自身标成了 ATX 标题，
    `## I` 这类纯数字标题必须按标题证据复核，不能仅因它是数字就判为正文。已接受节点的页码范围内，
    每个 ATX 标题候选必须成为 `toc_node`，或在决定中写入非空 `reason` 说明为何不进入阅读目录。
    未决候选、缺失页审阅、未解释的 ATX 标题、节点起始位置与接受候选不一致都会阻断。
-   `toc_tree.json` 使用 schema 2，每个节点有稳定唯一 `node_id`；结构数组路径仅用于定位。
+   `toc_tree.json` 使用 schema 2，每个节点有稳定唯一 `node_id`，结构数组路径仅用于定位。
    Subagent 应从书名页/版权页提取作者和出版社，并按内容标注 `notes`、`bibliography`、
-   `index`；版权页/CIP 页标注 `type: "copyright"`，其他装饰性前置页（如献词、题词、
+   `index`，版权页/CIP 页标注 `type: "copyright"`，其他装饰性前置页（如献词、题词、
    书名页）标注 `type: "frontmatter"`，仅在证据明确时才使用 `type: "cover"` 或
    `type: "metadata"`。前言/导论（Vorrede/Einleitung 等含正文与脚注的说明性文字）属于
-   普通正文，不写 `type`，以便脚注阶段正常提取其页脚注；只有献词、题词、书名页等
-   装饰性前置页才用 `frontmatter`。这些角色会贯通到 translate/polish 的特殊单元隔离；普通正文节点
+   普通正文，不写 `type`，以便脚注阶段正常提取其页脚注，只有献词、题词、书名页等
+   装饰性前置页才用 `frontmatter`。这些角色会贯通到 translate/polish 的特殊单元隔离，普通正文节点
    不写 `type`，也不得为了规避普通正文规则而滥用这些角色。普通 `chapter` 子节点不打断上述四种
-   可继承角色；TOC/progress 显式特殊类型冲突会阻断。
+   可继承角色，TOC/progress 显式特殊类型冲突会阻断。
 6. 在 `refine-local` 前处理整页插图候选：
 
    ```text
@@ -557,9 +564,9 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    uv run pdf2epub -c config.yaml illustration-apply
    ```
 
-   `full_page_insert` 才允许改变页面物理顺序；`ordinary_illustration`、`blank_scan` 和
+   `full_page_insert` 才允许改变页面物理顺序，`ordinary_illustration`、`blank_scan` 和
    `body` 不改变顺序。若没有候选，`illustration-validate`/`illustration-apply` 会生成空绑定，
-   仍可继续。双 OCR 模式下，主/次 OCR 的候选存在性或 layout 证据不一致会进入复核；单 OCR
+   仍可继续。双 OCR 模式下，主/次 OCR 的候选存在性或 layout 证据不一致会进入复核，单 OCR
    模式只看主 OCR，且忽略旧共识报告。
 7. 执行：
 
@@ -571,27 +578,27 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    `toc_tree.json` 中的 `boundary_info.start_line`/`end_line` 是对应
    `page_XXX.md` 的 1-based 行号，其中 `start_line` 包含该行、`end_line` 不包含该行。
    每个可见标题必须在 `boundary_info` 明确写入 `heading_action: bind`、`start_line` 和 exclusive
-   `heading_end_line`；布局侧车中 Markdown 缺失的标题只能显式 `heading_action: insert`，同时提供
+   `heading_end_line`，布局侧车中 Markdown 缺失的标题只能显式 `heading_action: insert`，同时提供
    `heading_evidence_id` 和覆盖插入锚点的非空 `heading_checked_range`。源行范围按原始页行号编辑，
-   保留 inline markup、脚注引用和作者 ID；矛盾、重叠、超出源页或陈旧范围阻断。每个独立阿拉伯、
-   罗马和中文数字候选必须明确判为 TOC 节点、正文、页码或页边装饰；数字值和靠近页边都不能证明
-   页码。所有数字页码都必须有当前 review 的精确 `page_number` 行决定；布局/几何证据只用于
+   保留 inline markup、脚注引用和作者 ID，矛盾、重叠、超出源页或陈旧范围阻断。每个独立阿拉伯、
+   罗马和中文数字候选必须明确判为 TOC 节点、正文、页码或页边装饰，数字值和靠近页边都不能证明
+   页码。所有数字页码都必须有当前 review 的精确 `page_number` 行决定，布局/几何证据只用于
    其他已确认的页边装饰，不能单独授权删除数字。无法确定时保留。同一节点内已有独立数字被接受
    为 TOC 节点时，夹在已接受数字标题之间的纯文本数字若仍判为 `body_text`，必须写非空
-   `reason`；同一父节点下的兄弟必须使用同一逻辑 level，禁止把 OCR 的 `#` 深度直接当作树层级。
-   `refine.unit_granularity` 默认 `leaf`；设为 `top_level` 或正整数 N 时在指定树深度生成
+   `reason`，同一父节点下的兄弟必须使用同一逻辑 level，禁止把 OCR 的 `#` 深度直接当作树层级。
+   `refine.unit_granularity` 默认 `leaf`，设为 `top_level` 或正整数 N 时在指定树深度生成
    合并单元，子标题仍作为多级导航节点绑定到父单元的 part，不再为了导航而强制切碎文件。
-   新章节从页面中部开始时，上一单元保留同页标题前的前缀；父标题和首个子标题同页时，
+   新章节从页面中部开始时，上一单元保留同页标题前的前缀，父标题和首个子标题同页时，
    两者都必须提供 `start_line`，本地步骤把父标题/导语放入首个子章节单元。
    `refine-local` 还会从当前页面生成 `pagination_map.json`，并以页码候选加起始页正文标题
-   的双重证据保守清洗 TOC 末尾页码；所有修改、未修改候选和源/目标哈希写入
+   的双重证据保守清洗 TOC 末尾页码，所有修改、未修改候选和源/目标哈希写入
    `toc_title_normalization.json`，证据不足时保持原题名。`tree_progress.json` 会锁定规范化后的
-   TOC/OCR 指纹；输入变化后必须重新生成受影响单元。
-   侧车中漏掉的真实标题必须在结构 review 中绑定到页面布局候选并显式插入；程序不再从页眉/页脚
+   TOC/OCR 指纹，输入变化后必须重新生成受影响单元。
+   侧车中漏掉的真实标题必须在结构 review 中绑定到页面布局候选并显式插入，程序不再从页眉/页脚
    HTML 自动恢复标题。重复页眉清理不得删除当前 review 绑定的标题。
    对旧原生文字运行，`refine-local` 仍会只读当前页的 PDF 坐标 sidecar，在不改写原始
    `pages/` 的前提下处理页边 5% 内的 DOI 和跨页重复短页眉页脚。数字页码只能按当前 TOC
-   structure review 中精确绑定的 `page_number` 行决定移除；sidecar 几何位置不能单独授权删除数字。
+   structure review 中精确绑定的 `page_number` 行决定移除，sidecar 几何位置不能单独授权删除数字。
    唯一正文或书目 DOI 不因单次出现而删除。
 8. `refine-local` 完成后处理脚注：
 
@@ -599,22 +606,22 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    uv run pdf2epub -c config.yaml footnote-prepare
    ```
 
-   新建或复制配置时显式写入 `footnotes.mode: auto`；其他情况或注释类型不确定时也使用 `auto`。
+   新建或复制配置时显式写入 `footnotes.mode: auto`，其他情况或注释类型不确定时也使用 `auto`。
    refine 阶段的 TOC Subagent 在 `toc_tree.json` 顶层写入 `footnote_mode`（`footnotes` 或
    `endnotes_only`），本地按 effective mode 执行。只有确认该书是集中尾注而非页底脚注时，才可考虑
-   `disabled`；确认尾注存在本身不等于应禁用，通常由 `auto` 判为 `endnotes_only`。`disabled` 会同时
-   关闭脚注处理和尾注归一化；仅在确认是纯尾注且用户明确不需要任何脚注/尾注处理时才设置。
-   EPUB 构建中的链接作用域独立于该页面候选模式：Notes 单元仍启用跨文件链接；局部定义按结构 scope
+   `disabled`，确认尾注存在本身不等于应禁用，通常由 `auto` 判为 `endnotes_only`。`disabled` 会同时
+   关闭脚注处理和尾注归一化，仅在确认是纯尾注且用户明确不需要任何脚注/尾注处理时才设置。
+   EPUB 构建中的链接作用域独立于该页面候选模式：Notes 单元仍启用跨文件链接，局部定义按结构 scope
    优先匹配，缺少目标时不得借用其他局部 scope 的同号定义。Markdown 脚注引用在构建产物中未链接时会阻断构建。
-   EPUB 验收按构建前每个源文件/引用 occurrence 的预期映射，对照实际 XHTML 引用和定义目的地；
+   EPUB 验收按构建前每个源文件/引用 occurrence 的预期映射，对照实际 XHTML 引用和定义目的地，
    引用全部消失、没有链接或跳到错误定义都阻断。另有保守的 legacy 复核：未链接的数字 `<sup>N</sup>`
-   位于同一文件的水平分隔线之前，且分隔线后有编号匹配的 `N.`/`N)` 行时阻断构建并要求结构复核；
-   不自动改写正文。扫描排除代码/注释和已链接标记，并用启发式排除部分变量上标；不做通用公式解析。
+   位于同一文件的水平分隔线之前，且分隔线后有编号匹配的 `N.`/`N)` 行时阻断构建并要求结构复核，
+   不自动改写正文。扫描排除代码/注释和已链接标记，并用启发式排除部分变量上标，不做通用公式解析。
    不得为省步骤或规避校验而关闭。也可在配置中显式固定 `footnotes` / `endnotes_only` / `disabled`，
    显式值始终覆盖 TOC 判断。TOC 中标记为
    `toc`、`notes`、`bibliography`、`index`、`author_notes`、`catalog`、`ad`、
    `copyright`、`frontmatter`、`metadata` 或 `cover` 的单元不会把其内容
-   当作页面脚注；若这类单元与正文共用一页，优先依据 `boundary_info.start_line`/
+   当作页面脚注，若这类单元与正文共用一页，优先依据 `boundary_info.start_line`/
    `end_line` 做块级过滤，缺少边界证据时采用保守的整页排除。
 
    `endnotes_only` 支持集中 Notes 中每章从 1 重新编号的“按章作用域尾注”。`footnote-apply`
@@ -622,27 +629,27 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    Markdown 标题或保守识别的独立纯文本标题把正文引用和 Notes 定义配到具体章。纯文本标题
    必须同时满足：strip 后 1..120 字符、前后为空行或文件边界、不以 Markdown/HTML 标记或
    `N.`/`N)`/`N、` 定义开头、不以句末标点结尾，并与正文 scope 的标题变体精确匹配。
-   `Notes to Chapter N` 等页眉和 `Abbreviations` 等未匹配标题不切换 scope；同一标题匹配
+   `Notes to Chapter N` 等页眉和 `Abbreviations` 等未匹配标题不切换 scope，同一标题匹配
    多个 scope 时只记录 ambiguity 并保持当前 scope。scope key 形如 `u4c1`，内部 key 为
    `fnc-<scope>-<key>`，同一 scope 的第 N 个重复定义为 `...-oN`。跨 scope 重复或
-   同一 scope 内重复定义的 key 会改写；未重复 key 保持原 marker key。scope 目录没有独立文件，
+   同一 scope 内重复定义的 key 会改写，未重复 key 保持原 marker key。scope 目录没有独立文件，
    相关事实写入 `footnote_normalization.json` 报告字段。Notes 的“外层页计数器 +
    内层真实注释号”只在当前 scope 的正文引用集合
    包含内层数字且内层不小于外层时采用内层，否则保留外层，避免把 `3. 2005 was...` 误判为
    第 2005 条。后代 scope 的正文引用若在本 scope 没有对应定义，会向最近祖先 scope 查找同一
-   key；恰好一个祖先有定义时继承其 note pool 并写入 `inherited_reference_scopes`，多个祖先
+   key，恰好一个祖先有定义时继承其 note pool 并写入 `inherited_reference_scopes`，多个祖先
    都有定义时 fail closed。这样嵌套 TOC 与章末集中尾注可以共存，不需要把 TOC 拍平。
    重复 key 没有章标题、引用所在 scope 没有定义、定义 scope 没有正文 span
    或同一 key 有多个定义且引用数超过定义数时必须 fail closed，并提示修复 TOC/章标题后重跑 `footnote-prepare → footnote-validate →
-   footnote-apply`；不得改用 `footnotes.mode: disabled` 绕过。一个作用域内只有一个
-   定义时可供多个正文引用共同使用；多个定义仍按出现顺序保守配对，超出定义数时停止归一化，
+   footnote-apply`，不得改用 `footnotes.mode: disabled` 绕过。一个作用域内只有一个
+   定义时可供多个正文引用共同使用，多个定义仍按出现顺序保守配对，超出定义数时停止归一化，
    不作猜测。尾注段落和列表、引文、表格等 Markdown 块应保留边界。
    `endnotes` 报告记录
    `scope_mode`、`scopes`、`scoped_keys`、`double_numbered_definition_count`、
    `duplicate_definition_occurrences` 和 `orphan_scoped_definitions`。EPUB 中的引用和定义
-   显示由内部 key 解码；集中尾注中的数字/圈号别名可规范化为数字，去重后缀不会显示，内部 key 用于链接和锚点。
+   显示由内部 key 解码，集中尾注中的数字/圈号别名可规范化为数字，去重后缀不会显示，内部 key 用于链接和锚点。
 
-   Notes 定义还支持 OCR 产生的可选无序列表标记 `- N.`、`* N.`、`+ N.`；它们与
+   Notes 定义还支持 OCR 产生的可选无序列表标记 `- N.`、`* N.`、`+ N.`，它们与
    `N.`/`N)`/`N：` 等价，由 `footnote-apply` 的本地 normalization 直接改写为
    `[^N]: ...`，不进入 polish 或 translate Subagent。
 
@@ -650,7 +657,7 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    或前一行是 Markdown 标题的 `N.`/`N)`/`N：`（含可选 `-`/`*`/`+` 标记）行由本地直接接受。前一行以 `:`、`,`、
    `;`、`-` 或普通单词结尾的 numbered punctuation 行写入
    `endnote_definition_ambiguities.json`，只把这些少量歧义行交给 Subagent 判断
-   `definition` / `continuation`；`N text` 日期续行仍走既有 `previous_line_blank` 规则，
+   `definition` / `continuation`，`N text` 日期续行仍走既有 `previous_line_blank` 规则，
    Markdown/HTML 定义和 scope 识别不受影响。未对歧义行作出决定时 `footnote-apply`
    fail closed，并在错误中给出 `file:line`，不得把页码或多行引文静默当成新定义。
 
@@ -659,8 +666,8 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    `footnote_decisions.json`。当 manifest 的 `endnote_ambiguity_count` 大于 0 时，
    还要读取 `endnote_definition_ambiguities.json`，为每条歧义写入
    `endnote_definition_decisions.json`（`role` 只能是 `definition` 或
-   `continuation`；`review_required` 视为未解决）。schema 2 决定必须按 manifest 的
-   `file`、`line`、`kind`、`column`、`key` 精确对应；`kind: line` 的列为 1，
+   `continuation`，`review_required` 视为未解决）。schema 2 决定必须按 manifest 的
+   `file`、`line`、`kind`、`column`、`key` 精确对应，`kind: line` 的列为 1，
    `kind: inline` 的列是一基源行位置（`<sup>` 内容首个数字）。行内不同位置不能共用决定。
    随后执行：
 
@@ -671,72 +678,86 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
 
    `footnote_decision_validation.json` 的 `endnote_definitions` 和
    `endnote_definition_validation.json` 都绑定 `manifest_sha256`、`decisions_sha256`、
-   `source_sha256`。validate 会核对当前源与 manifest 记录的源哈希；apply 前会只读核对
+   `source_sha256`。validate 会核对当前源与 manifest 记录的源哈希，apply 前会只读核对
    manifest、decisions、source 仍与 validation 收据一致，不会静默重做验证。准备后源文件改变时
-   重跑 `footnote-prepare`；只有 decisions 改变时重跑 `footnote-validate`，再运行 apply。
+   重跑 `footnote-prepare`，只有 decisions 改变时重跑 `footnote-validate`，再运行 apply。
 
-   当前脚注 prepare/decision validation 使用 schema 4；尾注边界歧义及其决定使用独立 schema 2，
-   normalization 使用 schema 9，结果审计使用独立 schema 2。旧 normalization schema 1–8、旧 result audit version 1 和旧 prepare checkpoint 不能复用；
+   有效脚注决定使用 `effective_decisions_version: 1`。若 Subagent 决定与已接受的
+   `confidence: high` 候选在角色、key 或 marker 上冲突，决定必须显式带
+   `override: true`，validate 会报告本地候选、提议决定和具体地址。对尚待复核的角色决定，
+   Reviewer 可直接确认角色，无需 override。validation receipt 保存带 provenance 和
+   `candidate_evidence_id` 的有效决定集，apply 必须重算并逐项比对该集合。
+
+   当前脚注 prepare/decision validation 使用 schema 4，尾注边界歧义及其决定使用独立 schema 2，
+   normalization 使用 schema 10，结果审计使用独立 version 3。旧 normalization schema 1–9、
+   旧 result audit version 1–2 和旧 prepare checkpoint 不能复用，
    endnote decision schema 1 仅兼容没有 inline 候选的旧式行边界清单，当前新决定文件使用 schema 2：
-   重新执行 prepare，只派发新 manifest 的 pending 项，再 validate/apply；无需重新 OCR。apply 会重建
+   旧 prepare schema 4 保持有效，若旧 validation 缺少有效决定集或 `source_sha256`，重跑
+   `footnote-validate → footnote-apply`。旧 schema 9 normalization 也重跑 validate/apply，
+   再以 `polish --resume` 刷新并正式验证，若源证据或 unit context 本身 stale，先 prepare。
+   不需仅因合同升级重新 OCR。apply 会重建
    `footnote_normalized/` 和成功 checkpoint，需保留旧派生版本时先备份。
 
    标记身份解析分别记录可见标记和内部 key：全角/阿拉伯/上标十进制数字归一到 ASCII 数字逻辑 key，
-   但保留原始可见 label；`①` 至 `㊿` 映射到 1 至 50 的数字 key。星号/匕首号及显式上标字母使用
-   分离的 ASCII key，字母区分大小写。裸 `a)`、乘法星号和 Markdown 强调不因形状相似而自动成为脚注；
+   但保留原始可见 label，`①` 至 `㊿` 映射到 1 至 50 的数字 key。星号/匕首号及显式上标字母使用
+   分离的 ASCII key，字母区分大小写。裸 `a)`、乘法星号和 Markdown 强调不因形状相似而自动成为脚注，
    重复标记跨空间 lane 时必须提供能包含目标标记的精确 `marker_context`，apply 不按“最后一个匹配”猜测。
    明确 `Footnote` 标签在可靠窄边栏或表格邻接位置进入候选后仍需视觉复核。
-   集中尾注的符号/字母扩展仅接受 typed Notes 中显式 `<sup>…</sup>` 定义与正文显式上标引用配对；
+   集中尾注的符号/字母扩展仅接受 typed Notes 中显式 `<sup>…</sup>` 定义与正文显式上标引用配对，
    不从裸 `a)` 或普通段首字母推断尾注。
    对旧原生文字运行，页底以数字开头的文本块只是版面事实：`bbox[3]`、它与页底带的相交比例、相对正文的字号、字体名和
    原生上标都要一起看，不能单独自动判定为脚注。扫描/OCR 与旧原生文字运行都先由本地按块间距、
-   左右对齐、连续编号和跨块连续性推断页面级区域。清晰的底部编号区域可以本地接受；边界不清、
+   左右对齐、连续编号和跨块连续性推断页面级区域。清晰的底部编号区域可以本地接受，边界不清、
    无编号续文、正文/脚注重叠、OCR 证据冲突以及疑似漏检会写入
    `footnote_visual_audit_manifest.json`，交给 Antigravity 视觉 Subagent。连续的递增数字开头块
-   （如 `18、19、20、21`）默认会向上回溯相邻无编号块，形成一个区域任务；但如果这组数字中已经
-   出现明确的 `Footnote` 标签，普通 `Text` 块默认不会再被机械回溯；即使为了覆盖“正文 → 上一脚注续文 →
+   （如 `18、19、20、21`）默认会向上回溯相邻无编号块，形成一个区域任务，但如果这组数字中已经
+   出现明确的 `Footnote` 标签，普通 `Text` 块默认不会再被机械回溯，即使为了覆盖“正文 → 上一脚注续文 →
    新脚注”而保留跨页回溯，低/无跨页证据的普通 `Text` 也只作为 `suppressed_continuation_candidates`
    上下文，不触发视觉任务。明确标注的无编号脚注、具有中/高置信度连续性的块和边界冲突仍交给视觉审核。
-   页眉、页脚和纯页码仍会排除；页面图和可用的区域裁剪图会随任务提供。
+   页眉、页脚和纯页码仍会排除，页面图和可用的区域裁剪图会随任务提供。
    `footnote_candidates.json` 还会记录跨页续文的置信度：它综合上一页最后一个物理脚注、当前页候选前的
    最近正文块、当前/上一页的 bbox 对齐、字号/字体、块间距和句首句末连续性。候选会在“延续上一页脚注”
-   与“当前页正文”两个假设之间做保守的本地词汇连续性比较；正文块中保留的 `<sup>…</sup>` 引用是
-   强反证。只有正文假设有明确优势的普通 `Text` 块才降为上下文，不会静默移动；脚注假设胜出或两者
-   接近时仍交给视觉 Subagent。上一页其他脚注只作为审计背景，不参与续文竞争；中/高置信度且最后一个
+   与“当前页正文”两个假设之间做保守的本地词汇连续性比较，正文块中保留的 `<sup>…</sup>` 引用是
+   强反证。只有正文假设有明确优势的普通 `Text` 块才降为上下文，不会静默移动，脚注假设胜出或两者
+   接近时仍交给视觉 Subagent。上一页其他脚注只作为审计背景，不参与续文竞争，中/高置信度且最后一个
    物理脚注的文本未明显闭合时，可本地归类为该脚注的 `footnote_continuation`。最后一个脚注已闭合、
    版面证据不足或 OCR 顺序有冲突时仍交给视觉 Subagent，因为“上一页只有一个编号”本身不能证明它
    续页，也不能排除续页。
    `suspected_missed_count` 不再只是报告警告：达到回溯审计条件的漏检块会成为 `audit_candidates`，
-   必须由视觉任务确认。默认使用 `footnotes.auto_accept: true`，只把异常区域交给 Subagent；需要
+   必须由视觉任务确认。默认使用 `footnotes.auto_accept: true`，只把异常区域交给 Subagent，需要
    全部候选复核时再设置 `false` 或运行 `footnote-prepare --review-all`。
    如果最后一个明确标注的物理脚注候选（包括 review-all 产生的 review 项）以断词连字符结束，且下一张实际 PDF 页没有可追溯的续文候选，
+   若下一页是未编号的普通 `Text` 块，块中有行内 `<sup>…</sup>` 通常支持正文判断，但当上一页最后一条脚注
+   以断词连字符结束，且当前块续接该词、与脚注列左右边缘及宽度对齐，并有字号/字体或词汇连续性等独立脚注证据时，
+   不得静默排除该块。它保留为无 key 的低置信度精确候选，进入相邻页视觉复核及 scoped unit context，只看语义相似度
+   仍不足以自动移动。普通正文更相似、列不对齐、上一脚注已闭合、页眉页脚或引用标签等反例仍应排除。
    `footnote-prepare` 会将前后两页加入 `continuation_reviews` 并提供两页图像。Subagent 必须
-   明确记录图像支持的 `truncated_source_exception`、`confirmed_not_a_footnote` 或从下一页图像恢复出的续文；普通
+   明确记录图像支持的 `truncated_source_exception`、`confirmed_not_a_footnote` 或从下一页图像恢复出的续文，普通
    `footnote_start` 决定不能代替该结论。PDF 末页也会检查最后一个物理脚注，但只允许确认
    原文截断/合法连字符，不允许从不存在的后页恢复续文。缺少页图、续文键或显式结果时，
    `footnote-validate` 和 `footnote-apply` 均阻断。
-   显式 `footnotes.mode: disabled` 仍覆盖 TOC 决定；若 TOC 标记页底脚注，prepare、validate、
-   apply 会在机器报告和 CLI 中警告本次关闭页脚注自动提取/链接创建；既有 Markdown 脚注链接仍可能构建。若 TOC 标记集中尾注，警告会说明
-   Markdown 尾注链接仍可能生成；`auto` 或无冲突时不产生该警告。
+   显式 `footnotes.mode: disabled` 仍覆盖 TOC 决定，若 TOC 标记页底脚注，prepare、validate、
+   apply 会在机器报告和 CLI 中警告本次关闭页脚注自动提取/链接创建，既有 Markdown 脚注链接仍可能构建。若 TOC 标记集中尾注，警告会说明
+   Markdown 尾注链接仍可能生成，`auto` 或无冲突时不产生该警告。
    Subagent 必须输出区域级审计和其中每个 review block 的角色，在脚注、引用、参考文献、普通正文和
-   不确定项之间作出决定；区域或 block 使用 `review_required` 时校验阻断。原生上标引用在 `pages/`
+   不确定项之间作出决定，区域或 block 使用 `review_required` 时校验阻断。原生上标引用在 `pages/`
    中保留为 `<sup>…</sup>`，后续只有确认存在对应脚注定义时才转换为 `[^N]`。
 
    `footnote-apply` 只移动已确认的 `footnote_start`、`footnote_continuation` 和
-   `footnote_definition`；`citation`、`bibliography` 和 `body` 保持原位。脚注按实际
+   `footnote_definition`，`citation`、`bibliography` 和 `body` 保持原位。脚注按实际
    `tree_progress.json` 单元的完整 `unit_id` 归并到单元末尾，不使用顶层 TOC 作为唯一范围，
    因而能处理同一章内脚注编号重启。跨页脚注按页面实际顺序拼接，允许出现“正文 → 上一脚注续文
    → 新脚注”，不会默认把续文放到下一页开头。双 OCR 模式会再次检查当前共识报告和次 OCR
-   sidecar；旧原生文字运行的 `ocr_evidence_mode` 虽为兼容性的 `single_ocr`，但其实际
+   sidecar，旧原生文字运行的 `ocr_evidence_mode` 虽为兼容性的 `single_ocr`，但其实际
    证据是 native layout，不能读取旧的双 OCR 报告。切换页面来源、OCR 模式或 PDF 后，旧的
    脚注决定不能复用。
    双 OCR 下若只有次 OCR 发现脚注，Subagent 必须在决定中写入最终可见的 `text`、目标
    `source_file` 和 `primary_disposition`：`absent` 表示主 OCR 确实缺失，`remove` 表示
    主 OCR 有重复块并必须同时给出 `primary_block(s)`。同一脚注编号存在多个正文引用时还要
-   给出唯一 `marker_context`；缺少这些信息时 `footnote-apply` 必须阻断，不能静默追加或
+   给出唯一 `marker_context`，缺少这些信息时 `footnote-apply` 必须阻断，不能静默追加或
    选择最后一个编号。
    `secondary_only_candidates` 会把连续次 OCR 物理行合并成一个窗口：`block` 是窗口首行的
-   锚点，`block_indices`/`block_span` 记录覆盖的物理行；决定仍只引用这个首行 `block`，不要
+   锚点，`block_indices`/`block_span` 记录覆盖的物理行，决定仍只引用这个首行 `block`，不要
    为窗口内每一行重复写决定。最小的次 OCR 独有脚注决定形状为：
 
    ```json
@@ -753,77 +774,79 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    }
    ```
    当 `primary_disposition` 为 `remove` 时，必须改为附带 `primary_block` 或
-   `primary_blocks`；当同编号 marker 不止一个时附带 `marker_context`。不满足合同的决定属于
+   `primary_blocks`，当同编号 marker 不止一个时附带 `marker_context`。不满足合同的决定属于
    `retry_required`/阻断，不得靠 `--allow-review-warnings` 放行。
 
-   `footnote-apply` 会在生成 `footnote_normalized/` 后写入 `footnote_result_audit.json`，再决定是否写有效 normalization checkpoint。该结果审计报告残留数字上标/疑似编号注释、明确 scope 内的编号缺口、疑似未闭合或截断定义，以及归一化后的注释边界和物化完整性问题。编号顺序按 TOC/refinement scope 逐项核对，覆盖单文件和多分片章节；有精确页面边界或不同 `section_id` 的下降序列作为重启，不跨该边界推断缺号，缺少这类边界证据时生成 `scoped_numbering_reset_uncertain` 视觉复核。审计产生的语义疑问由视觉复核决定，apply 不移动未确认内容或翻译内容。
+   `footnote-apply` 会在生成 `footnote_normalized/` 后写入 `footnote_result_audit.json`，再决定是否写有效 normalization checkpoint。该结果审计报告残留数字上标/疑似编号注释、明确 scope 内的编号缺口、疑似未闭合或截断定义，以及归一化后的注释边界和物化完整性问题。编号顺序按 TOC/refinement scope 逐项核对，覆盖单文件和多分片章节，有精确页面边界或不同 `section_id` 的下降序列作为重启，不跨该边界推断缺号，缺少这类边界证据时生成 `scoped_numbering_reset_uncertain` 视觉复核。审计产生的语义疑问由视觉复核决定，apply 不移动未确认内容或翻译内容。
 
-   另有一项上游候选召回改进：首次 `footnote-prepare` 会把通用 `Text` 块中的行首数字 `<sup>…</sup>` 作为视觉复核候选，即使常规候选逻辑会把该块压制为普通编号列表上下文，也按精确页/来源/block 和侧车哈希交给 Subagent。图像复核该块角色。apply 后的结果审计只检查转换后的稿件；若仍需复核，下一次 `footnote-prepare` 会把当前结果报告中的任务投影为补充视觉任务，且仅在报告绑定的源稿与归一化稿哈希仍匹配时复用。代码/注释、Markdown 脚注定义及其续行等结构会排除在对应残留标记扫描之外。主/次 OCR 及旧原生 layout 沿用各自当前证据模式；`endnotes_only` 不扫描页脚注候选，但会审计尾注定义、截断及归一化物化完整性；`disabled` 的状态为 `not_applicable`。
+   另有一项上游候选召回改进：首次 `footnote-prepare` 会把通用 `Text` 块中的行首数字 `<sup>…</sup>` 作为视觉复核候选，即使常规候选逻辑会把该块压制为普通编号列表上下文，也按精确页/来源/block 和侧车哈希交给 Subagent。图像复核该块角色。apply 后的结果审计只检查转换后的稿件，若仍需复核，下一次 `footnote-prepare` 会把当前结果报告中的任务投影为补充视觉任务，且仅在报告绑定的源稿与归一化稿哈希仍匹配时复用。代码/注释、Markdown 脚注定义及其续行等结构会排除在对应残留标记扫描之外。主/次 OCR 及旧原生 layout 沿用各自当前证据模式，`endnotes_only` 不扫描页脚注候选，但会审计尾注定义、截断及归一化物化完整性，`disabled` 的状态为 `not_applicable`。
 
-   Subagent 在既有 `footnote_decisions.json` 中写 `result_audit_reviews`，逐项绑定当前 `task_id` 和 `evidence_sha256`，并提供所有指定页的图像依据。结果可以确认为合法非脚注、图像确认的原文截断，或确认某个精确候选为脚注；确认脚注还必须在普通 `decisions` 中有匹配的页/来源/block 决定。校验会验证地址、页图和哈希；apply 还会确认已确认的候选确实进入转换计划。审计任务缺决定或仍有歧义时，不得继续成功 checkpoint。
+   Subagent 在既有 `footnote_decisions.json` 中写 `result_audit_reviews`，逐项绑定当前 `task_id` 和 `evidence_sha256`，并提供所有指定页的图像依据。结果可以确认为合法非脚注、图像确认的原文截断，或确认某个精确候选为脚注，确认脚注还必须在普通 `decisions` 中有匹配的页/来源/block 决定。校验会验证地址、页图和哈希，apply 还会确认已确认的候选确实进入转换计划。审计任务缺决定或仍有歧义时，不得继续成功 checkpoint。
 
-   若 `footnote-validate` 提示某个结果审计任务仍需复核，重跑同一 `footnote-prepare` 以生成带当前证据的补充视觉任务，再由 Subagent 处理并重复 validate/apply。决定只对相同任务和证据哈希有效；同一任务再次仍不确定时升级为 `human_review_required`，停止自动重试。视觉复核提交角色决定；编号规则不负责移动定义或补写翻译。
+   非脚注例外绑定到具体 marker occurrence。相同 key 或相同文本的重复位置必须逐项复核。疑似脚注定义内的标题只有在 TOC 已复核标题范围与 consumed source span 于同一页精确、唯一定位并实际相交时才标为 confirmed，其他情况保留为 suspected 并交图像复核，不自动挪出注释。
+
+   若 `footnote-validate` 提示某个结果审计任务仍需复核，重跑同一 `footnote-prepare` 以生成带当前证据的补充视觉任务，再由 Subagent 处理并重复 validate/apply。决定只对相同任务和证据哈希有效，同一任务再次仍不确定时升级为 `human_review_required`，停止自动重试。视觉复核提交角色决定，编号规则不负责移动定义或补写翻译。
 
    脚注阶段至少核对以下产物后才能继续 polish：
 
    - `footnote_candidates.json`：`source_kind`、`ocr_evidence_mode`、`sidecar_sha256`、
-     `review_pages`、页面区域、`audit_candidates` 与候选数量；旧原生稿还要确认候选带有
-     `font_size_ratio`/`font_names` 等可用的版面证据；
+     `review_pages`、页面区域、`audit_candidates` 与候选数量，旧原生稿还要确认候选带有
+     `font_size_ratio`/`font_names` 等可用的版面证据，
    - `footnote_visual_audit_manifest.json`：异常区域、区域 bbox、审计原因、页面图/裁剪图和
-     review block 清单；有 `pending_review` 任务时不能跳过视觉 Subagent；
+     review block 清单，有 `pending_review` 任务时不能跳过视觉 Subagent，
    - `footnote_subagent_manifest.json`：`status`、`review_candidate_count` 和
      `visual_audit_task_count`、`review_packet`/`review_packet_sha256`、`unit_context_files`、`endnote_ambiguity_count` 和审计
-     manifest；`pending_review` 时不能跳过 Subagent；
-   - `footnote_review_packet.json`：Reviewer 的紧凑输入，必须与 manifest 哈希一致；完整
-     `footnote_candidates.json` 保留作审计和恢复，不能代替 packet；相邻页窗口、primary/secondary
+     manifest，`pending_review` 时不能跳过 Subagent，
+   - `footnote_review_packet.json`：Reviewer 的紧凑输入，必须与 manifest 哈希一致，完整
+     `footnote_candidates.json` 保留作审计和恢复，不能代替 packet，相邻页窗口、primary/secondary
      sidecar、整页图和 gap review 图都必须保留并检查。
    - `footnote_decision_validation.json`：必须是 `valid: true` 且 `status: validated`，
-     或明确的 `no_subagent_review_required`；`retry_required` 和 `human_review_required`
-     都阻断；有尾注歧义时还要检查 `endnote_definitions.valid` 和
-     `endnote_definition_validation.json`；
-   - `footnote_result_audit.json`：`footnotes` 与 `endnotes_only` 模式在没有未决 findings 时必须是 `valid: true`、`status: validated`；`endnotes_only` 不运行页脚注候选扫描，但仍审计适用的尾注定义、截断和物化完整性。存在 findings 时须完成 scoped 视觉复核；`disabled` 模式为 `not_applicable`。适用时报告必须绑定当前源稿、归一化稿、候选报告和决定校验；存在 findings 时不能继续。
+     或明确的 `no_subagent_review_required`，`retry_required` 和 `human_review_required`
+     都阻断，有尾注歧义时还要检查 `endnote_definitions.valid` 和
+     `endnote_definition_validation.json`，
+   - `footnote_result_audit.json`：`footnotes` 与 `endnotes_only` 模式在没有未决 findings 时必须是 `valid: true`、`status: validated`，`endnotes_only` 不运行页脚注候选扫描，但仍审计适用的尾注定义、截断和物化完整性。存在 findings 时须完成 scoped 视觉复核，`disabled` 模式为 `not_applicable`。适用时报告必须绑定当前源稿、归一化稿、候选报告和决定校验，存在 findings 时不能继续。
    - `footnote_normalization.json`：必须存在且 `valid: true`、`status: validated`，其源稿、
-     候选报告、决定校验、结果审计和尾注歧义/决定哈希必须通过当前性检查；不能只凭
+     候选报告、决定校验、结果审计和尾注歧义/决定哈希必须通过当前性检查，不能只凭
      `footnote_normalized/` 中有文件判断完成。
 9. 所有 PDF 都必须执行 `polish`，打开工作区 Subagent 读取
    `polish_subagent_prompt.md`，并按 `polish_worker_handoffs/` 中各 manifest 的
    `assigned_files` 写入 `polished_markdown/`，然后运行 `polish-validate`。
    每个 Worker 写完一个 assigned file 后，必须先运行只读自检
-   `uv run pdf2epub -c <config> polish-validate --file <file> --check-only`；该命令只校验，
+   `uv run pdf2epub -c <config> polish-validate --file <file> --check-only`，该命令只校验，
    不规范化写回目标 Markdown、不写报告或 checkpoint、不创建或清理 `validated/`，因此多个 Worker 可安全并发。自检不通过时
    格式或检查记录错误由 Worker 在原地修复并重跑。脚注语义 issue 须保留目标和 sidecar，报告主 Agent 回到脚注视觉复核流程。
    Worker 全部结束后，主 Agent 仍须运行
    正式的 `polish-validate --file`（或全量 `polish-validate`）写入权威 checkpoint。
-   若启用第二套 OCR，对 OCR/混合型 PDF，前置 `ocr-correct` 通过校验后的字符、词语和符号视为权威；
-   该步骤只处理残留换行、段落边界和块级结构，不再纠正 OCR 字符、拼写或措辞。普通正文段落内部不得为了视觉排版新增换行；若仍疑似有 OCR 错误，应退回
+   若启用第二套 OCR，对 OCR/混合型 PDF，前置 `ocr-correct` 通过校验后的字符、词语和符号视为权威，
+   该步骤只处理残留换行、段落边界和块级结构，不再纠正 OCR 字符、拼写或措辞。普通正文段落内部不得为了视觉排版新增换行，若仍疑似有 OCR 错误，应退回
    `ocr-correct`，不得在 polish 中改写。若只启用一套 OCR，则没有 page-level 视觉纠错闸门，polish 仍只处理
    结构，不应静默改写 OCR 字符。对旧原生矢量文本运行，该步骤用于从视觉行重建语义段落，同时保留
    原文字符和块级结构。`polish-validate` 还会将源稿与润色稿按忽略换行、Markdown 外层标记和已确认页边装饰的
-   方式做内容保真比较；正文 token 或数字标记大量丢失时会阻断。未通过
+   方式做内容保真比较，正文 token 或数字标记大量丢失时会阻断。未通过
    `polish-validate` 不得继续实体提取或翻译。
-   PDF translate 使用 Markdown validation schema 5，polish 使用 schema 6；OCR correction 和 HTML translation 仍用 schema 3。
+   PDF translate 使用 Markdown validation schema 5，polish 使用 schema 6，OCR correction 和 HTML translation 仍用 schema 3。
    schema 6 要求当前脚注语义 sidecar 和双向上下文 freshness。恢复旧 polish 目标时先运行 `polish --resume`，
    让 worker 复核已有目标并写入当前 semantic sidecar，再运行正式 `polish-validate` 更新 receipt 与 validated 副本。
-   只把内容或语义复核实际失败的目标重新润色；旧目标可作为复核输入保留。
+   只把内容或语义复核实际失败的目标重新润色，旧目标可作为复核输入保留。
    若 translation context/receipt 旧，先运行 `translate --resume` 刷新 manifest/context，但不要按首轮
-   pending 立即派发；接着 `translate-validate` 校验现有译文，然后第二次 `translate --resume`，再按
+   pending 立即派发，接着 `translate-validate` 校验现有译文，然后第二次 `translate --resume`，再按
    当前报告只派发仍失效的 assignment，并完成全量 `translate-validate`。逐文件 ledger 若单独作为恢复
    依据，按文件重新校验。规则版本升级本身不要求重跑 OCR。
-   polish 还必须清除已确认的页眉、页脚、独立印刷页码和人工 OCR 页码标记；
+   polish 还必须清除已确认的页眉、页脚、独立印刷页码和人工 OCR 页码标记，
    诸如 `Preface XII` 的短标题加页码组合在确认属于页边装饰后应整行删除。
    正文数字、标题编号、日期、引用、脚注、参考文献和索引中的页码不得删除。
-   润色不得把普通粗体、罗马数字、编号或序数上标升级成 Markdown 标题；普通上标文字、星号和
-   匕首号须原样保留。显式 Markdown 脚注引用和生成的 HTML 脚注引用不作为普通上标迁移；裸四位年份
+   润色不得把普通粗体、罗马数字、编号或序数上标升级成 Markdown 标题，普通上标文字、星号和
+   匕首号须原样保留。显式 Markdown 脚注引用和生成的 HTML 脚注引用不作为普通上标迁移，裸四位年份
    邻接上标本身不足以判定版次，只有同一行明确的引文列表/页码线索才允许保留为版次上标。
    已确认的 `<sup>N</sup>` 注脚才可规范化为 `[^N]`。
    全量 polish 校验通过后，运行 `uv run pdf2epub -c config.yaml build-epub` 构建原语言正式书名 EPUB，
    并检查目录、段落、脚注和插图排版。翻译继续读取当前 `polished_markdown/validated/`，不重新从 EPUB
-   提取；若检查发现源稿问题，按既有 Subagent 流程修复，重新 polish-validate 并重建原稿，再准备或恢复
+   提取，若检查发现源稿问题，按既有 Subagent 流程修复，重新 polish-validate 并重建原稿，再准备或恢复
    翻译，按当前哈希和校验结果重处理失效项。
-  当前 TOC 标签会作为 polish 的保护证据；唯一出现且与 TOC 标签相同的源行被删除时，
+  当前 TOC 标签会作为 polish 的保护证据，唯一出现且与 TOC 标签相同的源行被删除时，
   必须进入 `review_required`，不能仅因该行位于页首就自动视为页眉。已登记的 TOC
   Part/Chapter **Markdown 标题行**在页边装饰检测中豁免，例如 `# PART I`、`## PART II`
-  不会因尾部罗马数字被误判为 `running_title_plus_page_label`；TOC 标题带副标题时，冒号前
+  不会因尾部罗马数字被误判为 `running_title_plus_page_label`，TOC 标题带副标题时，冒号前
   的短标签也可作为豁免前缀。纯文本 `PART I` 等重复页眉仍按页边装饰候选检测，不因匹配
   TOC 标题而豁免。`bilingual_warnings`/未翻译长英文段落门禁只在 `translate-validate`
   生效，polish 阶段输入输出同为源语言，不触发该警告。
@@ -846,12 +869,12 @@ translation:
 `uv run pdf2epub -c config.yaml special-unit-prepare --kind <bibliography|index> --file <文件名>.md`
 与 `uv run pdf2epub -c config.yaml special-unit-apply --kind <bibliography|index> --file <文件名>.md`。
 Bibliography 仅翻译标题，条目正文
-按源文精确保留；Index 仅按条目ID映射术语，页码、顺序、层级和交叉引用需保持。混合正文、模糊
+按源文精确保留，Index 仅按条目ID映射术语，页码、顺序、层级和交叉引用需保持。混合正文、模糊
 边界、无法精确确认的交叉引用必须回退普通 `translate`，不得按年份/DOI猜测边界或让实体表代替
 索引翻译。apply 后仍须执行单文件及全量 `translate-validate`。该模式不替代 PDF 的强制 polish gate。
 
-原语言 EPUB 检查通过后，按以下顺序准备实体、翻译目录和正文；实体提取前不运行
-`check-ready`。此处的结构完整门禁在 TOC 翻译校验后执行；此时不得提前开始正文翻译。
+原语言 EPUB 检查通过后，按以下顺序准备实体、翻译目录和正文，实体提取前不运行
+`check-ready`。此处的结构完整门禁在 TOC 翻译校验后执行，此时不得提前开始正文翻译。
 
 1. 执行 `extract-entities`，立即打开工作区 Subagent，读取生成的 Prompt 和 manifest，
    写入 `translation_entities.json`。
@@ -859,7 +882,7 @@ Bibliography 仅翻译标题，条目正文
 3. 执行 `translate-toc`，打开独立的工作区 Subagent，按目录 Prompt 写入
    `toc_translation_result.json`，然后运行 `translate-toc-validate`。本地校验会从不可变
    的 `toc_tree.json` 合并生成 `toc_tree_translated.json`。TOC 必须在正文翻译 worker
-   启动前完成；正文 worker 不得修改这两个 TOC 产物。
+   启动前完成，正文 worker 不得修改这两个 TOC 产物。
 4. 执行完整门禁：
 
    ```text
@@ -868,12 +891,12 @@ Bibliography 仅翻译标题，条目正文
 
 5. 执行 `translate`。该命令会生成 `translate_subagent_prompt.md`、父级 manifest 和
    `worker_handoffs/`。先检查父级 manifest 的 `pending_files`、`batching`、
-   `chapter_groups` 和 `worker_handoffs`；随后逐个打开 handoff 对应的工作区 Subagent。
+   `chapter_groups` 和 `worker_handoffs`，随后逐个打开 handoff 对应的工作区 Subagent。
    每个 Subagent 只处理自己 scoped manifest 的 `assigned_files`，同名译文写入
    `translated/`，不得读取或修改其他 worker 的文件。超过 30,000 字节的大单元仍必须
-   独立派发；相邻短章节可以在预算内共享一个 worker，但不能把大章节与其他章节合并。
+   独立派发，相邻短章节可以在预算内共享一个 worker，但不能把大章节与其他章节合并。
    Prompt 会同时提供一次按预算稀释的全书 TOC 轮廓，以及当前 assigned 文件精确的已翻译
-   TOC 标题/子标题上下文；后者对输出标题具有最高权威。拆分单元的后续 part 会在 scoped
+   TOC 标题/子标题上下文，后者对输出标题具有最高权威。拆分单元的后续 part 会在 scoped
    manifest 中收到只读 `preceding_context`（前一分片源文尾部，已剔除脚注定义），只用于
    承接代词和论证语气，不计入输出、不得翻译或复制。术语上下文按 handoff 类型读取：
    合并章节使用 `files` 映射并按文件应用，完整快照只用于审计，不能修改。标题绑定允许
@@ -884,13 +907,13 @@ Bibliography 仅翻译标题，条目正文
    uv run pdf2epub -c config.yaml translate-validate --file <文件名>.md
    ```
 
-   单文件校验会检查本文件绑定的可见 TOC 标题（`toc_heading_bindings_local`）；绑定失败时
+   单文件校验会检查本文件绑定的可见 TOC 标题（`toc_heading_bindings_local`），绑定失败时
    该文件会移出 `valid_files`、删除对应的 `translated/validated/` 副本并进入
    `retry_required`。单文件结果仍只作为 checkpoint，不能替代最终全量校验。
 7. 所有单元完成后运行 `translate-validate`。翻译未完工时，全量命令会先输出完成度和
-   pending 清单，并暂缓 TOC heading binding；只有所有目标文件存在时才运行该终审门，或显式
+   pending 清单，并暂缓 TOC heading binding，只有所有目标文件存在时才运行该终审门，或显式
    使用 `translate-validate --final` 强制检查不完整输出。`retry_required` 中的明确错误直接重新交给
-   Subagent；首次 `review_required` 也重新派发。若报告出现 `human_review_required`，必须暂停
+   Subagent，首次 `review_required` 也重新派发。若报告出现 `human_review_required`，必须暂停
    并询问人工，不能继续自动重试。只有完成复核后才可显式使用
    `translate-validate --allow-review-warnings` 放行。
 10. `translate-validate` 通过后，执行 `build-epub --only-translated` 构建使用译名的译文 EPUB。
@@ -908,23 +931,23 @@ Bibliography 仅翻译标题，条目正文
    uv run pdf2epub -c config.yaml build-epub --only-translated
    ```
 
-   第一条重建使用正式书名的原稿 EPUB；第二条只生成使用译名的译文 EPUB，不生成
+   第一条重建使用正式书名的原稿 EPUB，第二条只生成使用译名的译文 EPUB，不生成
    源语言 `<code>.epub`（如 `_en.epub`、`_de.epub`，由 `source_language` 决定）。需要额外的
    源语言 `<code>.epub` 时可改用 `build-epub --translated`，它生成
    源语言 `<code>.epub`（如 `_en.epub`、`_de.epub`，由 `source_language` 决定）和使用译名的
-   译文 EPUB，不会生成正式书名的原稿 EPUB；要交付三种产物，
+   译文 EPUB，不会生成正式书名的原稿 EPUB，要交付三种产物，
    必须已有此前构建的正式书名原稿 EPUB。
    源语言版失败时不会中止，仍会继续尝试译文版。`--only-translated`（别名
    `--target-only`）不触发源语言 `<code>.epub`（如 `_en.epub`、`_de.epub`，由
    `source_language` 决定），与 `--translated` 同时出现时以
    `--only-translated` 为准，但仍要求当前有效的 polish 和 translate checkpoint。任一
    请求的构建失败时命令最终返回非 0，已成功的产物保留。单独运行
-   `build-epub --only-translated` 只构建译文 EPUB；若原稿尚未构建或已过期，应先重建并检查原稿。
+   `build-epub --only-translated` 只构建译文 EPUB，若原稿尚未构建或已过期，应先重建并检查原稿。
    只运行不带目标参数的 `build-epub` 会缺少译文 EPUB，不得视为翻译流程完成打包。
    `pipeline: epub_conversion` 不得使用本脚本，也不得使用 `--translated` 或
    `--only-translated`，只运行一次 `build-epub`。
 
-   默认拒绝不完整译文；`--allow-partial` 仅用于明确的预览。翻译流程中若
+   默认拒绝不完整译文，`--allow-partial` 仅用于明确的预览。翻译流程中若
    `translate_validation.json` 对当前 polished source 和 `translated/validated/` 仍有效，
    但本次未带 `--translated` 或 `--only-translated`，命令会打印醒目警告说明只构建原稿
    EPUB。该警告不改变默认构建目标，也不替代显式目标选项。
@@ -932,11 +955,11 @@ Bibliography 仅翻译标题，条目正文
 若已有译文只需要修复页眉、页脚或印刷页码，不要直接用脚本改写 `translated/`，也不必
 因此重译全书。可使用一次性的 `repair-page-furniture`：本地命令会快照现有译文，生成
 Prompt、manifest 和 worker handoff。准备阶段会扫描译文和对应润色稿，只把疑似页眉页脚的
-编号、短标题加页码行及重复短行的局部窗口写入 `repair_candidates`；worker 按候选窗口
+编号、短标题加页码行及重复短行的局部窗口写入 `repair_candidates`，worker 按候选窗口
 分批，而不是按全文 token 分批。工作区 Subagent 只删除确认属于页边装饰的内容，并直接
 写回同名译文。完成后运行 `repair-page-furniture-validate`，通过后再运行
-`build-epub --translated`。该修复不得改写正文、术语、标题、脚注、参考文献或索引页码；
-不确定的候选必须保留并报告。候选窗口只是判断提示，不是本地自动删除授权；没有候选的
+`build-epub --translated`。该修复不得改写正文、术语、标题、脚注、参考文献或索引页码，
+不确定的候选必须保留并报告。候选窗口只是判断提示，不是本地自动删除授权，没有候选的
 文件应保持不变。
 
 若确实不需要书内实体表，必须显式使用 `translate --skip-entities`，并让 manifest 记录
@@ -946,20 +969,21 @@ Prompt、manifest 和 worker handoff。准备阶段会扫描译文和对应润�
 
 - 保持 Markdown 标题层级、公式 `$...$`、脚注 `[^...]`、图片链接和表格结构。
 - 正文翻译 prompt 要求人名地名首次出现附原文、古希腊语标注原文和拉丁化拼写、拉丁语标注
-  原文；这些是编辑规则，不改变结构、术语优先级或校验门禁。并行 part worker 按 assigned
+  原文，这些是编辑规则，不改变结构、术语优先级或校验门禁。并行 part worker 按 assigned
   unit 和 scoped context 判断首次出现，跨 unit 的绝对首次以实体表或上下文证据为准。
-- EPUB 公式目前使用 Unicode 优先、`latex2mathml` 复杂公式回退的 MathML 路径；不要默认引入
+- EPUB 公式目前使用 Unicode 优先、`latex2mathml` 复杂公式回退的 MathML 路径，不要默认引入
   XeLaTeX/`dvisvgm` SVG 渲染或新增系统依赖。只有用户明确要求并完成独立依赖设计时，才可另立任务评估。
-- 源文件末尾的 `REFERENCES`、`Literatur`、`Notes` 等若不是标题，译文也不得升级为标题；
+- 源文件末尾的 `REFERENCES`、`Literatur`、`Notes` 等若不是标题，译文也不得升级为标题，
   只有高置信度的单个末尾标签可用 `--fix-reference-heading` 修复。
 - `bibliography` 必须保留作者、书名、年份、版次、DOI/URL/ISBN、页码和引用标点。
 - `index` 必须保留条目层级、页码、页码范围、交叉引用和条目数量。
-- `translate-validate` 会额外比对参考文献/索引中的数字标记；发现数字丢失、改写或重排
+- 索引校验按条目行、缩进层级、续排及页码锚点诊断疑似合并/拆分，短的无页码缩进行无法确定是子条目还是续排时，按源/目标对应结构报告歧义，并给出源和目标行号及附近条目。它不自动改译文。
+- `translate-validate` 会额外比对参考文献/索引中的数字标记，发现数字丢失、改写或重排
   时必须返工。普通中文正文中的 `untranslated_source_detected` 和目标语言审计失败是
-  阻断条件；普通正文中的 `bilingual_warnings` 首次进入 `review_required` 并重新派发，
+  阻断条件，普通正文中的 `bilingual_warnings` 首次进入 `review_required` 并重新派发，
   同一文件复核后仍存在则进入 `human_review_required`，不再出现“打印 warning 后无事发生”的
   隐式继续。参考文献和索引仍按其专门规则校验。
-  `Volume II`、`Part IV` 等明确卷册语境的罗马数字按数值与阿拉伯数字比较；裸 `I`/`II`
+  `Volume II`、`Part IV` 等明确卷册语境的罗马数字按数值与阿拉伯数字比较，裸 `I`/`II`
   不作为数字标记，不得凭空添加或改写卷册语义。
 
 ### 2.4 PDF 纯转换流程
@@ -980,7 +1004,7 @@ uv run pdf2epub -c config.yaml check-ready --stage package
 uv run pdf2epub -c config.yaml build-epub
 ```
 
-`extract-entities` 和 `translate-toc-validate` 在该模式下会明确标记为不适用；
+`extract-entities` 和 `translate-toc-validate` 在该模式下会明确标记为不适用，
 `translate`、`translate-validate` 和 `build-epub --translated` 会被拒绝。该模式生成
 原语言 EPUB，不生成 `translation_entities.json` 或 `toc_tree_translated.json`。
 
@@ -989,7 +1013,7 @@ uv run pdf2epub -c config.yaml build-epub
 1. 检查 `input/` 中的 EPUB（也支持 MOBI/AZW3），在 `config_epub.yaml` 填写书名、输入文件、
    源语言和目标语言。外部术语表按第 1 节规则选择。
 2. 如需选择外部术语表，先执行 `uv run pdf2epub -c config_epub.yaml glossary-candidates`，
-   查看候选报告后再明确写入 `translation.glossaries`；跨语言参考表明确写入
+   查看候选报告后再明确写入 `translation.glossaries`，跨语言参考表明确写入
    `translation.reference_glossaries`，只能作为只读参考，并由当前源/目标语言词形投影为稀疏上下文。
 3. 执行：
 
@@ -998,45 +1022,45 @@ uv run pdf2epub -c config.yaml build-epub
    ```
 
    首次产物包括 `compressed_units/`、mapping、元数据输入/Prompt 和实体提取 Prompt。
-   mapping 以 `package_relative_path` 记录 EPUB 内解码后的完整 ZIP 成员路径；翻译单元名由该完整路径
-   稳定生成，不能按 basename/stem 推断页面身份。`html-prepare` 会记录包含路径身份的缓存；旧缓存或
+   mapping 以 `package_relative_path` 记录 EPUB 内解码后的完整 ZIP 成员路径，翻译单元名由该完整路径
+   稳定生成，不能按 basename/stem 推断页面身份。`html-prepare` 会记录包含路径身份的缓存，旧缓存或
    缺少路径身份的旧 mapping 不会直接复用。旧 mapping 只有在可唯一匹配当前 spine 页面时才迁移，
-   并保留其现有译文文件；无法唯一匹配时停止并提示处理，不删除或覆盖译文。
+   并保留其现有译文文件，无法唯一匹配时停止并提示处理，不删除或覆盖译文。
    当前输入 EPUB、压缩单元和行数预算未变化时，后续运行复用该缓存，只刷新实体/术语上下文和 worker
    handoff，不重复解包和压缩。新提取的密集单元按连续的完整非空行平衡拆为不超过
    `max_nonempty_lines`（默认 350）的
-   `.partN.md`；不得拆开 HTML 标签行或段落行，顺序和 mapping 必须保留。升级时已属当前的提取缓存
+   `.partN.md`，不得拆开 HTML 标签行或段落行，顺序和 mapping 必须保留。升级时已属当前的提取缓存
    保持原样，不因新拆分算法重新分片。
-4. 立即打开工作区 Subagent，读取实体 Prompt/manifest，写入 `translation_entities.json`；
+4. 立即打开工作区 Subagent，读取实体 Prompt/manifest，写入 `translation_entities.json`，
    完成后再次运行 `html-prepare`，让正文和元数据任务挂载当前实体表及外部术语表。
    EPUB 实体提取默认排除 `Index`、`Bibliography`、`Copyright` 和 `Cover` 等确定性附录，
    其余正文章节仍按 manifest 逐文件读取。
    确实不需要实体表时才使用 `html-prepare --skip-entities`。
-   确认实体表当前并重新运行 `html-prepare` 后，按父级 manifest 的 `dispatch_plan` 顺序派发；
+   确认实体表当前并重新运行 `html-prepare` 后，按父级 manifest 的 `dispatch_plan` 顺序派发，
    主 Agent 读取 manifest 关联的 `translate-html_dispatch_prompt.md` 派发清单。清单列出每波
    scoped prompt/manifest。先核实真实活动会话和 lease，扣除活跃 worker 与 metadata 占用的波次额度，
    再按剩余 wave cap 与 IDE 槽位同时打开首波 eligible 独立 worker，并等待结果。`active_same_assignment`/assigned/running
-   需要接回或等待，conflict 需先解决；实际 extreme worker 活跃时不启动普通波。无待处理正文时
+   需要接回或等待，conflict 需先解决，实际 extreme worker 活跃时不启动普通波。无待处理正文时
    不重派正文，只检查仍 pending 的 metadata 并完成全量校验。一波完成后再开始下一波。
-   metadata 占用同一波的并发名额。波次额度是本地静态操作提示，不会启动模型或强制 IDE 信号量；
+   metadata 占用同一波的并发名额。波次额度是本地静态操作提示，不会启动模型或强制 IDE 信号量，
    每个 worker 仍只处理其 `assigned_files`。translate-html 在每个 extreme worker 边界内将
-   ordinary worker 稳定收集并按配置 cap 装波，再将 large worker 稳定收集并按 `min(2, cap)` 装波；
+   ordinary worker 稳定收集并按配置 cap 装波，再将 large worker 稳定收集并按 `min(2, cap)` 装波，
    extreme worker 仍独占，assignment、worker id 和文件顺序不变。PDF translate/polish 继续按原顺序规划。
 5. 读取第二次生成的 `translate-html_subagent_prompt.md`、父级 manifest 和
    `translate-html_worker_handoffs/`，打开每个 handoff 对应的工作区 Subagent，将同名译文写入
-   `translated_compressed/`。单元文件名是稳定身份标识但对 worker 属于 opaque ID；必须按
+   `translated_compressed/`。单元文件名是稳定身份标识但对 worker 属于 opaque ID，必须按
    handoff 原名写译文，不重命名、不合并文件，也不得改 mapping。mapping 中的
    `package_relative_path` 是构建器恢复到原 EPUB 成员的权威路径。只处理 scoped manifest 的
    `assigned_files`。
-   正文 worker 按 TOC 顺序把相邻短分支装入同一任务；合并任务使用 `files` 映射并按文件
+   正文 worker 按 TOC 顺序把相邻短分支装入同一任务，合并任务使用 `files` 映射并按文件
    应用稀疏术语上下文，大分支拆分时使用 `shared_entries` 和 `local_entries`，不得读取
    或混用其他分支的上下文。不得把多个 HTML 单元合并成一个输出文件。
-6. EPUB 正文必须保持非空翻译单元 1:1 对齐；不得在单元内部增加换行；HTML 标签、属性、
+6. EPUB 正文必须保持非空翻译单元 1:1 对齐，不得在单元内部增加换行，HTML 标签、属性、
    实体、占位符、`<div>` 容器、`<i>` 数量/顺序/嵌套必须原样保留。
    章节分组按 mapping 中的完整 package path 与 TOC 的解析后目标路径匹配，不按文件名 stem 猜测。
 7. Subagent 按 `metadata_translation_prompt.md` 写入 `translated_metadata.json`：
-   `original_title`、作者和出版社保留原文；译名写入 `translated_title`；目录顺序、href、
-   anchor、level 不变；`translated_description` 和 `translated_rights` 保留为顶层字段。
+   `original_title`、作者和出版社保留原文，译名写入 `translated_title`，目录顺序、href、
+   anchor、level 不变，`translated_description` 和 `translated_rights` 保留为顶层字段。
 8. 正文 worker 只对自己 `assigned_files` 中的文件（包括 `.partN.md`）运行
    `html-validate --file <文件名>`，退出码为 0 才报告完成，不运行全书校验。正文分片和
    `translated_metadata.json` 全部完成后，由主代理运行全量 `html-validate`。
@@ -1046,42 +1070,42 @@ uv run pdf2epub -c config.yaml build-epub
    uv run pdf2epub -c config_epub.yaml build-html-epub
    ```
 
-   如果构建报告出现导航更新 warning，暂停并检查报告；确认可以接受后，才可显式使用
+   如果构建报告出现导航更新 warning，暂停并检查报告，确认可以接受后，才可显式使用
    `build-html-epub --allow-navigation-warnings` 放行。不要默认放行 warning。完成后运行
-   项目的最终 EPUB 渲染回归测试。EPUBCheck 是外部 Java 工具；安装官方 W3C EPUBCheck
+   项目的最终 EPUB 渲染回归测试。EPUBCheck 是外部 Java 工具，安装官方 W3C EPUBCheck
    发布版本并通过 PATH 或 `html_translation.epubcheck_path` 指定可执行文件。`warn` 模式找不到工具时
-   只记录跳过信息，不代表校验通过；`strict` 模式找不到工具会失败。
+   只记录跳过信息，不代表校验通过，`strict` 模式找不到工具会失败。
 
 ## 4. 轻小说 EPUB 流程
 
 1. 执行 `translate-novel -i <input.epub>`，生成 `novel_units/`、manifest 和 Prompt。
 2. 打开工作区 Subagent，只处理 manifest 的 `pending_files`，写入 `translated_novel/` 和
    `translated_metadata.json`。
-3. 作者、出版社、图片标记和段落边界必须保留；运行 `translate-novel-validate` 后才能
+3. 作者、出版社、图片标记和段落边界必须保留，运行 `translate-novel-validate` 后才能
    执行 `build-novel-epub`。
 
 ## 5. arXiv / LaTeX 流程
 
 1. 执行 `translate-arxiv <source>`，打开工作区 Subagent，按
    `.pdf2epub/tex_subagent_prompt.md` 和 manifest 处理 `pending_units`，写入
-   `translated_tex_units/`；不得修改 `source/`。
-2. 执行 `translate-arxiv-validate --output-dir <run_dir>`；通过后才交付编译产物。
-3. `source/` 快照只有在旁置身份记录、规范化输入身份/内容指纹和源树 SHA-256 均匹配时才可恢复；旧的无记录快照
+   `translated_tex_units/`，不得修改 `source/`。
+2. 执行 `translate-arxiv-validate --output-dir <run_dir>`，通过后才交付编译产物。
+3. `source/` 快照只有在旁置身份记录、规范化输入身份/内容指纹和源树 SHA-256 均匹配时才可恢复，旧的无记录快照
    仅在本地输入可用且文件树完全相同时兼容恢复。身份不明或输入已切换时命令会失败并
-   保留旧快照；请使用新的运行目录继续处理，不要手工覆盖 `source/`。
+   保留旧快照，请使用新的运行目录继续处理，不要手工覆盖 `source/`。
 4. TeX manifest schema 2 只复用当前校验过的单元：源指纹、布局指纹、源/目标语言、主文件和
-   `unit_chars` 必须与上次验证一致；每个单元的源哈希和已验证目标文件哈希也必须匹配。
+   `unit_chars` 必须与上次验证一致，每个单元的源哈希和已验证目标文件哈希也必须匹配。
    编译成功后会记录 `validated_units` 与 `validated_target_sha256`，连续 `--resume` 保留这些
-   检查点。旧 manifest 没有目标哈希时一律视为未验证，重新交给 Subagent 并运行校验；不能
+   检查点。旧 manifest 没有目标哈希时一律视为未验证，重新交给 Subagent 并运行校验，不能
    仅凭非空译文或旧 `validated_units` 跳过。
 
 ## 6. 断点、失败和打包禁令
 
 - 额度耗尽、模型 500、Subagent 超时或输出截断：保留已有文件，先运行对应校验，再用
-  `--resume` 重建 manifest；只重试 pending 或 invalid 项。
-- 不要凭目标文件非空判断完成；必须有同源文件 SHA-256 匹配的本地校验记录。
+  `--resume` 重建 manifest，只重试 pending 或 invalid 项。
+- 不要凭目标文件非空判断完成，必须有同源文件 SHA-256 匹配的本地校验记录。
 - 实体表、TOC、术语上下文或源稿哈希变化后，旧 checkpoint 不得复用。
-- 旧原生运行若缺少 `pages/page_*.ocr.json`，新版本无法再生成 native sidecar；保留现有
+- 旧原生运行若缺少 `pages/page_*.ocr.json`，新版本无法再生成 native sidecar，保留现有
   产物并用旧版本恢复，或把该页集视为没有原生版面证据，不能用新的视觉 OCR 静默补齐后
   继续复用旧的脚注/插图决定。
   如果 PDF、页源、TOC 或已确认插图绑定发生变化，按顺序重新检查
@@ -1090,36 +1114,36 @@ uv run pdf2epub -c config.yaml build-epub
   `footnote_decisions.json` 或 `footnote_normalization.json`。
 - 出现 `No page layout sidecars found`、`source_kind` 不一致、sidecar 哈希过期、原生
   page/block 地址无法唯一定位或缺少正文命中时，保留现有产物，先修复源阶段并用原命令的
-  `--resume` 重建；不要手工编辑决定文件来绕过校验。
-- 元数据 JSON 必须整体重写为合法 JSON；拒答/免责声明、缺失文件、结构不匹配或全量
+  `--resume` 重建，不要手工编辑决定文件来绕过校验。
+- 元数据 JSON 必须整体重写为合法 JSON，拒答/免责声明、缺失文件、结构不匹配或全量
   校验失败时禁止打包。
-- 所有写入 JSON、manifest、Prompt 索引的工作区相对路径必须使用 `/`；读取历史产物时
+- 所有写入 JSON、manifest、Prompt 索引的工作区相对路径必须使用 `/`，读取历史产物时
   可以兼容 Windows `\\`，但不得继续生成反斜杠路径。
 
 ## 7. 安全、Git 和 Windows 约定
 
 - 严禁硬编码未经授权的内部项目 ID、伪造请求头或冒用云服务凭据文件。
-- 不从 Python 调用翻译 API；所有翻译和结构判断使用 Antigravity 工作区 Subagent，
+- 不从 Python 调用翻译 API，所有翻译和结构判断使用 Antigravity 工作区 Subagent，
   消耗官方 IDE 会话配额。
-- 工作区内的编辑和测试可自动执行；仓库外路径或不可逆操作先确认。
-- 本仓库直接维护当前主分支，不创建临时分支；用户明确要求上传 GitHub 时才提交并推送 fork。
+- 工作区内的编辑和测试可自动执行，仓库外路径或不可逆操作先确认。
+- 本仓库直接维护当前主分支，不创建临时分支，用户明确要求上传 GitHub 时才提交并推送 fork。
 - GitHub 发布只上传源码、测试、配置模板和维护文档。不要使用无选择的 `git add .`：
   明确排除 `.secrets/`、`config.yaml`、`input/`、`output/` 以及根目录的一次性翻译脚本和报告。
   本地凭据读取接口位于 `pdf2epub/local_credentials.py`，密钥和本地运行时不能上传。
 - 上传前至少执行 `git status --short`、`git diff --check`、`uv run pytest -q`，并确认
   `git check-ignore -v .secrets config.yaml` 均命中忽略规则。
-- Windows 普通命令优先使用 Git Bash；复杂文本/JSON 处理优先使用 UTF-8 Python；不要把
+- Windows 普通命令优先使用 Git Bash，复杂文本/JSON 处理优先使用 UTF-8 Python，不要把
   复杂 Bash 语法传给 PowerShell，也不要为一次性翻译交接制造临时脚本。
 
 ## 8. 本地临时文件归档约定
 
 - 临时脚本、翻译实验、中间切片、比对结果、审计报告和一次性调试输出统一放在
   `.work/<task>/`，不得散落在仓库根目录。`.work/` 是本地工作台，不进入 Git。
-- PDF/EPUB 流程自身的 scratch 文件继续放在 `output/<title>/scratch/<task>/`；不得把流程
+- PDF/EPUB 流程自身的 scratch 文件继续放在 `output/<title>/scratch/<task>/`，不得把流程
   生成的中间结果复制到根目录或提交到源码目录。
-- `scripts/` 只放可复用、经过测试并准备纳入仓库的工具；一次性翻译脚本放 `.work/`。
+- `scripts/` 只放可复用、经过测试并准备纳入仓库的工具，一次性翻译脚本放 `.work/`。
   `tests/` 只放可重复运行的测试，不放临时验证脚本或数据快照。
-- 正式术语表、配置模板、源码、文档和测试不属于临时文件；尤其不能因为“看起来像数据”
+- 正式术语表、配置模板、源码、文档和测试不属于临时文件，尤其不能因为“看起来像数据”
   就把 `glossaries/`、`input/` 或 `output/` 内容移动到工作台。
-- 现有历史临时文件迁移前必须先确认用途；迁移应使用可恢复的移动并保持任务子目录，
+- 现有历史临时文件迁移前必须先确认用途，迁移应使用可恢复的移动并保持任务子目录，
   不得用清理命令批量删除未知文件。

@@ -47,99 +47,24 @@ def _candidate_decisions(
     report: Mapping[str, Any],
     validation: Mapping[str, Any],
 ) -> list[dict[str, Any]]:
-    """Combine reviewed decisions with deterministic high-confidence ones."""
+    """Consume the single compiled effective decision set."""
+    from .footnote_effective_decisions import compile_effective_decisions
 
-    decisions_by_address: dict[tuple[int, str, int], dict[str, Any]] = {}
-    high_confidence_addresses: set[tuple[int, str, int]] = set()
-    candidates_by_address: dict[tuple[int, str, int], Mapping[str, Any]] = {}
-    for page_report in report.get("pages", []) or []:
-        if not isinstance(page_report, Mapping):
-            continue
-        for candidate in page_report.get("candidates", []) or []:
-            if not isinstance(candidate, Mapping) or candidate.get("confidence") != "high":
-                continue
-            try:
-                addr = (
-                    int(candidate["page"]),
-                    str(candidate.get("source") or "primary").strip().lower(),
-                    int(candidate["block"]),
-                )
-                candidates_by_address[addr] = candidate
-                high_confidence_addresses.add(addr)
-            except (KeyError, TypeError, ValueError):
-                continue
-    for item in validation.get("decisions", []) or []:
-        if not isinstance(item, Mapping):
-            continue
-        try:
-            address = (
-                int(item["page"]),
-                str(item.get("source") or "primary").strip().lower(),
-                int(item["block"]),
-            )
-        except (KeyError, TypeError, ValueError):
-            continue
-        # High-confidence candidates are already accepted by the local,
-        # deterministic rule.  Older handoffs sometimes repeated them as
-        # ``body`` decisions; allowing that stale review output to override the
-        # local result silently dropped valid page footnotes.
-        cand = candidates_by_address.get(address, {})
-        if (
-            address not in high_confidence_addresses
-            or item.get("role") == "footnote_continuation"
-            or (item.get("role") in _MOVED_ROLES and bool(item.get("marker_context")))
-            or item.get("override") is True
-            or (item.get("role") in _NON_MOVED_ROLES and cand.get("same_page_marker") is False)
-        ):
-            decisions_by_address[address] = dict(item)
-
-    for page_report in report.get("pages", []) or []:
-        if not isinstance(page_report, Mapping):
-            continue
-        for candidate in page_report.get("candidates", []) or []:
-            if not isinstance(candidate, Mapping) or candidate.get("confidence") != "high":
-                continue
-            cand_bbox = candidate.get("bbox")
-            cand_label = str(candidate.get("label") or "").strip().lower()
-            if cand_label != "footnote" and cand_bbox and float(cand_bbox[1]) < 0.45:
-                continue
-            try:
-                address = (
-                    int(candidate["page"]),
-                    str(candidate.get("source") or "primary").strip().lower(),
-                    int(candidate["block"]),
-                )
-            except (KeyError, TypeError, ValueError):
-                continue
-            decisions_by_address.setdefault(
-                address,
-                {
-                    "page": address[0],
-                    "source": address[1],
-                    "block": address[2],
-                    "role": str(candidate.get("local_role") or "footnote_start"),
-                    "key": str(candidate.get("key") or ""),
-                    **(
-                        {"marker_label": str(candidate.get("marker_label") or "")}
-                        if candidate.get("marker_label")
-                        else {}
-                    ),
-                    **(
-                        {"requires_marker_context": True}
-                        if candidate.get("requires_marker_context") is True
-                        else {}
-                    ),
-                    "confidence": "local_high",
-                },
-            )
-
+    compiled = validation.get("effective_decisions")
+    if isinstance(compiled, list):
+        decisions = [dict(item) for item in compiled if isinstance(item, Mapping)]
+    else:
+        result = compile_effective_decisions(report, validation.get("decisions", []))
+        if result["errors"]:
+            raise ValueError("; ".join(result["errors"]))
+        decisions = result["decisions"]
     expanded: list[dict[str, Any]] = []
-    for decision in decisions_by_address.values():
+    for decision in decisions:
         segments = decision.get("segments")
         if isinstance(segments, list):
             for segment in segments:
                 if not isinstance(segment, Mapping):
-                    continue  # normalize_decisions rejects malformed segments
+                    continue
                 expanded.append({
                     **{key: value for key, value in decision.items() if key != "segments"},
                     "role": str(segment.get("role") or ""),
@@ -149,12 +74,8 @@ def _candidate_decisions(
                     "marker_context": segment.get("marker_context", decision.get("marker_context")),
                 })
         else:
-            expanded.append(dict(decision))
-
-    return sorted(
-        expanded,
-        key=lambda item: (int(item.get("page", 0)), int(item.get("block", 0))),
-    )
+            expanded.append(decision)
+    return sorted(expanded, key=lambda item: (int(item.get("page", 0)), int(item.get("block", 0))))
 
 def _records_for_page(records: list[dict[str, Any]], page: int) -> list[dict[str, Any]]:
     return [

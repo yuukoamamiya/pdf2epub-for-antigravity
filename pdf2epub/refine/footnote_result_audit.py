@@ -7,16 +7,17 @@ hash so a later source edit cannot silently reuse it.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from collections import defaultdict
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, MutableMapping, Sequence
 
 from ..footnote_markdown import collect_footnote_definition_blocks
 from .endnote_review import _inside_inline_code_or_math
 from .endnote_scopes import markdown_fence_mask
 from .footnote_structure import FOOTNOTE_STRUCTURE_EXEMPT_TYPES
 
-AUDIT_VERSION = 2
+AUDIT_VERSION = 3
 AUDIT_FILENAME = "footnote_result_audit.json"
 
 _HTML_COMMENT_RE = re.compile(r"(?s)<!--.*?-->")
@@ -101,6 +102,200 @@ def _is_in_inline_code(line: str, position: int) -> bool:
     return _inside_inline_code_or_math(line, position)
 
 
+def _marker_occurrence_identity(
+    lines: Sequence[str], line_index: int, match: re.Match[str], key: str, ordinal: int,
+    occurrence_counts: MutableMapping[str, int],
+) -> str:
+    """Identify one visible marker independently of its chapter/key peers.
+
+    The line number is intentionally absent so a finding follows an unchanged
+    occurrence when unrelated lines are inserted above it. The exact marker,
+    its line-local offset/ordinal, and local marker context identify its
+    fingerprint; a file-local rank distinguishes identical repeated lines.
+    """
+    line = lines[line_index]
+    before = line[max(0, match.start() - 48):match.start()]
+    after = line[match.end():match.end() + 48]
+    payload = {
+        "key": key,
+        "marker": match.group(0),
+        "offset": match.start(),
+        "ordinal": ordinal,
+        "before": before,
+        "after": after,
+    }
+    fingerprint = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    occurrence_rank = occurrence_counts.get(fingerprint, 0) + 1
+    occurrence_counts[fingerprint] = occurrence_rank
+    identity_payload = json.dumps(
+        {
+            **payload,
+            "occurrence_rank": occurrence_rank,
+        },
+        ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    )
+    return hashlib.sha256(identity_payload.encode("utf-8")).hexdigest()
+
+
+def _toc_heading_nodes(toc_tree: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+    """Project heading identity plus reviewed source-boundary metadata."""
+    if not isinstance(toc_tree, Mapping):
+        return []
+    result: list[dict[str, Any]] = []
+
+    def visit(nodes: Any, path: tuple[int, ...] = ()) -> None:
+        if not isinstance(nodes, list):
+            return
+        for index, node in enumerate(nodes):
+            if not isinstance(node, Mapping):
+                continue
+            node_path = (*path, index)
+            title = str(node.get("title") or "").strip()
+            if title:
+                boundary = node.get("boundary_info")
+                result.append({
+                    "title": title,
+                    "node_id": str(node.get("node_id") or ""),
+                    "unit_id": str(node.get("unit_id") or ""),
+                    "index_path": list(node.get("index_path") or node_path),
+                    "start_page": int(node.get("start_page") or 0),
+                    "boundary_info": dict(boundary) if isinstance(boundary, Mapping) else {},
+                })
+            visit(node.get("children"), node_path)
+
+    visit(toc_tree.get("chapters"))
+    return result
+
+
+def _canonical_heading_line(value: str) -> str:
+    value = re.sub(r"^\s{0,3}#{1,6}\s+", "", value.strip())
+    value = re.sub(r"\s+", " ", value)
+    return value.strip()
+
+
+def _heading_note_findings(
+    *, file: str, target: str, target_defs: Mapping[int, tuple[str, str]],
+    expected_by_target_key: Mapping[tuple[str, str], Mapping[str, Any]],
+    source_texts: Mapping[str, str], resolved_blocks: Sequence[Mapping[str, Any]],
+    toc_tree: Mapping[str, Any] | None, page_texts: Mapping[int | str, str] | None,
+) -> list[dict[str, Any]]:
+    """Find exact TOC title lines inside source spans materialized as notes.
+
+    A title is called confirmed only if the reviewed TOC boundary resolves to
+    the same physical page and the page Markdown confirms the bound heading
+    range. Without that positional confirmation, the exact title is only a
+    visual-review suspicion.
+    """
+    nodes = _toc_heading_nodes(toc_tree)
+    if not nodes:
+        return []
+    by_output: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
+    for row in resolved_blocks:
+        if isinstance(row, Mapping) and row.get("output_key"):
+            by_output[str(row["output_key"])].append(row)
+    findings: list[dict[str, Any]] = []
+    for target_index, (target_key, body) in target_defs.items():
+        expected = expected_by_target_key.get((file, str(target_key)))
+        if not isinstance(expected, Mapping):
+            continue
+        output_key = str(expected.get("output_key") or target_key)
+        chapter_id = str(expected.get("chapter_id") or "")
+        refs = {
+            (int(ref.get("page", -1)), str(ref.get("source") or "primary"), int(ref.get("block", -1)))
+            for ref in expected.get("candidate_refs", []) if isinstance(ref, Mapping)
+            and str(ref.get("page", "")).lstrip("-").isdigit()
+            and str(ref.get("block", "")).lstrip("-").isdigit()
+        }
+        target_lines = {
+            _canonical_heading_line(line) for line in _visible(body).splitlines()
+            if _canonical_heading_line(line)
+        }
+        for block in by_output.get(output_key, []):
+            if str(block.get("chapter_id") or "") != chapter_id:
+                continue
+            try:
+                address = (int(block["page"]), str(block.get("source") or "primary"), int(block["block"]))
+                span_value = block["span"]
+                start, end = int(span_value[0]), int(span_value[1])
+            except (KeyError, TypeError, ValueError, IndexError):
+                continue
+            if address not in refs:
+                continue
+            source_file = str(block.get("file") or "")
+            source = source_texts.get(source_file, "")
+            if not source_file or start < 0 or end < start or end > len(source):
+                continue
+            source_slice = source[start:end]
+            source_lines = {
+                _canonical_heading_line(line) for line in _visible(source_slice).splitlines()
+                if _canonical_heading_line(line)
+            }
+            for node in nodes:
+                title = _canonical_heading_line(str(node.get("title") or ""))
+                if not title or title not in target_lines or title not in source_lines:
+                    continue
+                if address[0] != int(node.get("start_page") or 0):
+                    continue
+                boundary = node.get("boundary_info") if isinstance(node.get("boundary_info"), Mapping) else {}
+                start_line, end_line = boundary.get("start_line"), boundary.get("heading_end_line")
+                page_text = None
+                if isinstance(page_texts, Mapping):
+                    page_text = page_texts.get(address[0], page_texts.get(str(address[0])))
+                exact_page_boundary = False
+                if (
+                    boundary.get("heading_action") == "bind"
+                    and type(start_line) is int and type(end_line) is int
+                    and isinstance(page_text, str)
+                ):
+                    from .heading_ranges import source_range_matches_title
+                    from .footnote_matching import find_exact_signature_spans
+
+                    bound_heading = source_range_matches_title(
+                        page_text.splitlines(), start_line, end_line, str(node.get("title") or ""),
+                        anchor_line=start_line,
+                    )
+                    page_lines = page_text.splitlines(keepends=True)
+                    heading_start = sum(len(line) for line in page_lines[:start_line - 1])
+                    heading_end = sum(len(line) for line in page_lines[:end_line - 1])
+                    source_matches = find_exact_signature_spans(page_text, source_slice)
+                    exact_page_boundary = (
+                        bound_heading
+                        and len(source_matches) == 1
+                        and max(source_matches[0][0], heading_start)
+                        < min(source_matches[0][1], heading_end)
+                    )
+                code = "confirmed_toc_heading_in_note" if exact_page_boundary else "suspected_heading_in_note"
+                finding = _finding(
+                    code, file, target_index + 1, f"[^{target_key}]: {body}",
+                    detail=(
+                        "The edit plan moved a source span containing a reviewed TOC heading boundary into this note. Inspect both page image and note ownership."
+                        if exact_page_boundary else
+                        "A source span materialized as a note contains an exact TOC title on the same page, but its reviewed source boundary does not intersect this span. Inspect the page image."
+                    ),
+                    key=str(target_key), origin="normalized_target",
+                    identity=(
+                        f"node={node.get('node_id') or node.get('unit_id') or node.get('index_path')};"
+                        f"page={address[0]};source={address[1]};block={address[2]};span={start}:{end}"
+                    ), page=address[0],
+                )
+                finding.update({
+                    "evidence_target_sha256": _sha(target),
+                    "source_file": source_file,
+                    "source_span": [start, end],
+                    "candidate_refs": [{"page": address[0], "source": address[1], "block": address[2]}],
+                    "pages": [address[0]],
+                    "toc_heading_identity": {
+                        "node_id": node.get("node_id"),
+                        "unit_id": node.get("unit_id"),
+                        "index_path": node.get("index_path"),
+                        "title": node.get("title"),
+                        "boundary_info": dict(boundary),
+                    },
+                })
+                findings.append(finding)
+    return findings
+
+
 def audit_footnote_result(
     source_texts: Mapping[str, str],
     *,
@@ -110,6 +305,9 @@ def audit_footnote_result(
     decisions: Sequence[Mapping[str, Any]] = (),
     expected_notes: Sequence[Mapping[str, Any]] = (),
     current_exceptions: Sequence[Mapping[str, Any]] = (),
+    resolved_blocks: Sequence[Mapping[str, Any]] = (),
+    toc_tree: Mapping[str, Any] | None = None,
+    page_texts: Mapping[int | str, str] | None = None,
 ) -> dict[str, Any]:
     """Audit source and optional normalized output; never makes semantic choices.
 
@@ -161,13 +359,6 @@ def audit_footnote_result(
         current_last = last_physical_note_ref_by_page.get(ref[0])
         if current_last is None or ref > current_last:
             last_physical_note_ref_by_page[ref[0]] = ref
-    reviewed_body_keys: dict[str, set[str]] = defaultdict(set)
-    for item in decisions:
-        if isinstance(item, Mapping) and item.get("role") == "body" and item.get("key"):
-            record = record_by_file.get(str(item.get("file") or ""), {})
-            scope = str(record.get("chapter_id") or item.get("chapter_id") or "")
-            if scope:
-                reviewed_body_keys[scope].add(str(item.get("key")))
     findings: list[dict[str, Any]] = []
     suppressed: list[dict[str, str]] = []
     resolved: list[dict[str, str]] = []
@@ -200,9 +391,11 @@ def audit_footnote_result(
     open_definitions: dict[str, list[tuple[str, str, str, int, int]]] = defaultdict(list)
     lowercase_body_starts: dict[str, list[tuple[str, int, str, int]]] = defaultdict(list)
     source_by_scope: dict[str, str] = defaultdict(str)
+    body_numeric_refs: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for file, raw in sorted(source_texts.items()):
         text = _visible(raw)
         lines = text.splitlines()
+        occurrence_counts: dict[str, int] = {}
         definitions, consumed = collect_footnote_definition_blocks(lines)
         definition_lines = {line + 1 for line in definitions}
         definition_lines.update(line + 1 for line in consumed)
@@ -253,12 +446,15 @@ def audit_footnote_result(
                 # is automatically exempt; ambiguous cases go to visual review.
                 if re.search(r"(?:=|\+|\-|\*|/|\^)\s*[A-Za-z]$", before):
                     continue
-                if key in reviewed_body_keys.get(scope, set()):
-                    resolved.append({"task_id": _task_id("unexplained_numeric_superscript", file, number, _sha(line.strip())), "evidence_sha256": _sha(line.strip()), "resolution": "image_confirmed_body_candidate"})
-                    continue
                 if re.match(r"\s*\d{4}", after) and re.search(r"\b\d{4},?\s*$", before):
                     continue
-                finding = _finding("unexplained_numeric_superscript", file, number, line.strip(), detail=f"Raw superscript {key} remains in body text.", key=key, identity=f"key={key};occurrence={occurrence}")
+                occurrence_id = _marker_occurrence_identity(lines, number - 1, match, key, occurrence, occurrence_counts)
+                body_numeric_refs[scope].append({
+                    "file": file, "line": number, "key": key,
+                    "occurrence_sha256": occurrence_id,
+                })
+                finding = _finding("unexplained_numeric_superscript", file, number, line.strip(), detail=f"Raw superscript {key} remains in body text.", key=key, identity=f"occurrence={occurrence_id}")
+                finding["occurrence_sha256"] = occurrence_id
                 record_finding(finding)
             for occurrence, match in enumerate((_UNICODE_SUP_RE.finditer(line) if scan_source_markers else ())):
                 if equation_like:
@@ -269,7 +465,9 @@ def audit_footnote_result(
                     continue
                 if re.match(r"\s*\d{4}", after):
                     continue
-                finding = _finding("unexplained_unicode_superscript", file, number, line.strip(), detail=f"Unicode superscript {key} remains in body text.", key=key, identity=f"key={key};occurrence={occurrence}")
+                occurrence_id = _marker_occurrence_identity(lines, number - 1, match, key, occurrence, occurrence_counts)
+                finding = _finding("unexplained_unicode_superscript", file, number, line.strip(), detail=f"Unicode superscript {key} remains in body text.", key=key, identity=f"occurrence={occurrence_id}")
+                finding["occurrence_sha256"] = occurrence_id
                 record_finding(finding)
             for occurrence, match in enumerate((_BRACKET_REF_RE.finditer(line) if scan_source_markers else ())):
                 if _is_in_inline_code(line, match.start()):
@@ -282,7 +480,9 @@ def audit_footnote_result(
                 if _line_is_citation(line) or re.search(r"\b(?:table|figure|fig\.|chapter|section)\s*$", line[:match.start()], re.I):
                     continue
                 key = match.group("key")
-                finding = _finding("unexplained_bracketed_numeric_reference", file, number, line.strip(), detail=f"Bracketed numeric reference [{key}] remains unclassified.", key=key, identity=f"key={key};occurrence={occurrence}")
+                occurrence_id = _marker_occurrence_identity(lines, number - 1, match, key, occurrence, occurrence_counts)
+                finding = _finding("unexplained_bracketed_numeric_reference", file, number, line.strip(), detail=f"Bracketed numeric reference [{key}] remains unclassified.", key=key, identity=f"occurrence={occurrence_id}")
+                finding["occurrence_sha256"] = occurrence_id
                 record_finding(finding)
             raw_def = _RAW_DEF_RE.match(line) if scan_source_markers else None
             if (
@@ -370,6 +570,11 @@ def audit_footnote_result(
             if current_key - previous_key <= 1:
                 continue
             missing = list(range(previous_key + 1, current_key))
+            missing_as_text = {str(value) for value in missing}
+            gap_references = [
+                dict(ref) for ref in body_numeric_refs.get(scope, [])
+                if str(ref.get("key") or "") in missing_as_text
+            ]
             evidence = (
                 f"scope={scope}; previous={previous_key}@{previous_file}:{previous_line}; "
                 f"next={current_key}@{current_file}:{current_line}; missing={missing}"
@@ -382,9 +587,18 @@ def audit_footnote_result(
                     "are uncertain, so inspect only adjacent note evidence."
                 ),
                 key=",".join(map(str, missing)),
+                identity="references=" + _sha(json.dumps(gap_references, sort_keys=True, separators=(",", ":"))),
             )
             finding["neighbor_keys"] = [previous_key, current_key]
             finding["neighbor_files"] = [previous_file, current_file]
+            finding["missing_keys"] = missing
+            finding["body_reference_occurrences"] = gap_references
+            finding["physical_definition_boundary"] = {
+                "previous_page_range": [previous_start, previous_end],
+                "current_page_range": [current_start, current_end],
+                "previous_section_id": previous_section,
+                "current_section_id": current_section,
+            }
             # Page mapping is resolved later through the exact sidecar
             # candidates for these neighboring keys. `start_page` is only a
             # unit bound and must never be invented as evidence for a gap.
@@ -403,12 +617,16 @@ def audit_footnote_result(
             # Note definitions should not be followed by unindented body text;
             # continuation paragraphs have explicit Markdown indentation.
             visible_target_lines = _visible(target).splitlines()
+            target_occurrence_counts: dict[str, int] = {}
             target_lines = visible_target_lines
             target_defs, target_consumed = collect_footnote_definition_blocks(target_lines)
+            resolved_by_output_key: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
+            for resolved_item in resolved_blocks:
+                if isinstance(resolved_item, Mapping) and resolved_item.get("output_key"):
+                    resolved_by_output_key[str(resolved_item["output_key"])].append(resolved_item)
             definition_lines = {line + 1 for line in target_defs}
             definition_lines.update(line + 1 for line in target_consumed)
             target_record = record_by_file.get(file, {})
-            target_scope = str(target_record.get("chapter_id") or file)
             target_marker_scan = (
                 mode != "endnotes_only"
                 and str(target_record.get("type") or "") not in FOOTNOTE_STRUCTURE_EXEMPT_TYPES
@@ -427,13 +645,13 @@ def audit_footnote_result(
                     if _is_in_inline_code(line, match.start()):
                         continue
                     key = match.group("key")
-                    if key in reviewed_body_keys.get(target_scope, set()):
-                        continue
+                    occurrence_id = _marker_occurrence_identity(visible_target_lines, line_number - 1, match, key, occurrence, target_occurrence_counts)
                     finding = _finding(
                         "unexplained_numeric_superscript", file, line_number, line.strip(),
                         detail=f"Raw superscript {key} remains in normalized body text.",
-                        key=key, origin="normalized_target", identity=f"key={key};occurrence={occurrence}",
+                        key=key, origin="normalized_target", identity=f"occurrence={occurrence_id}",
                     )
+                    finding["occurrence_sha256"] = occurrence_id
                     finding["evidence_target_sha256"] = _sha(target)
                     record_finding(finding)
                 for occurrence, match in enumerate(_UNICODE_SUP_RE.finditer(line) if target_marker_scan else ()):
@@ -442,11 +660,13 @@ def audit_footnote_result(
                     if _is_in_inline_code(line, match.start()):
                         continue
                     key = match.group(0).translate(_DIGIT_MAP)
+                    occurrence_id = _marker_occurrence_identity(visible_target_lines, line_number - 1, match, key, occurrence, target_occurrence_counts)
                     finding = _finding(
                         "unexplained_unicode_superscript", file, line_number, line.strip(),
                         detail=f"Unicode superscript {key} remains in normalized body text.",
-                        key=key, origin="normalized_target", identity=f"key={key};occurrence={occurrence}",
+                        key=key, origin="normalized_target", identity=f"occurrence={occurrence_id}",
                     )
+                    finding["occurrence_sha256"] = occurrence_id
                     finding["evidence_target_sha256"] = _sha(target)
                     record_finding(finding)
                 raw_def = _RAW_DEF_RE.match(line) if target_marker_scan else None
@@ -459,6 +679,13 @@ def audit_footnote_result(
                     )
                     finding["evidence_target_sha256"] = _sha(target)
                     record_finding(finding)
+            for task in _heading_note_findings(
+                file=file, target=target, target_defs=target_defs,
+                expected_by_target_key=expected_by_target_key,
+                source_texts=source_texts, resolved_blocks=resolved_blocks,
+                toc_tree=toc_tree, page_texts=page_texts,
+            ):
+                record_finding(task)
             for index, (key, body) in target_defs.items():
                 value = body.strip()
                 if (
@@ -516,20 +743,14 @@ def audit_footnote_result(
                 ):
                     finding = _finding(
                         "normalized_note_open_boundary_at_physical_page_break",
-                        file,
-                        0,
-                        f"[^{key}]: {body}",
+                        file, 0, f"[^{key}]: {body}",
                         detail=(
                             f"Normalized note {key} ends with open punctuation exactly at a mapped physical page/part boundary. "
                             "This is only a visual-review cue; confirm the neighboring page images before changing ownership."
                         ),
-                        key=str(key),
-                        origin="normalized_target",
+                        key=str(key), origin="normalized_target",
                     )
-                    finding["pages"] = [
-                        exact_ref[0],
-                        int(next_part_source.get("start_page") or 0),
-                    ]
+                    finding["pages"] = [exact_ref[0], int(next_part_source.get("start_page") or 0)]
                     finding["evidence_target_sha256"] = _sha(target)
                     record_finding(finding)
             covered = set(target_consumed)

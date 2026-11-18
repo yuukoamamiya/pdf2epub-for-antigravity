@@ -18,10 +18,16 @@ from .pdf_evidence import pdf_evidence_mode, require_current_consensus
 from .footnote_result_review import validate_result_audit_reviews
 from .footnote_result_audit import AUDIT_VERSION
 from .footnote_validation_evidence import validate_candidate_evidence
+from .footnote_effective_decisions import (
+    EFFECTIVE_DECISIONS_VERSION,
+    compile_effective_decisions,
+    project_confirmed_not_a_footnote,
+)
+from .footnote_source import load_footnote_source_snapshot
 
 
-# Version 9 binds the normalization receipt to the post-apply result audit.
-FOOTNOTE_NORMALIZATION_SCHEMA_VERSION = 9
+# Version 10 binds normalized output to the compiled effective decision set.
+FOOTNOTE_NORMALIZATION_SCHEMA_VERSION = 10
 def footnote_normalization_status(
     output_dir: Path,
     config: Optional[Mapping[str, Any]] = None,
@@ -257,6 +263,53 @@ def footnote_normalization_status(
             "decision_validation_candidate_hash_stale",
             "decision validation is bound to an older candidate report; rerun footnote-validate",
         )
+    if (
+        validation.get("effective_decisions_version") != EFFECTIVE_DECISIONS_VERSION
+        or report.get("effective_decisions_version") != EFFECTIVE_DECISIONS_VERSION
+    ):
+        fail(
+            "effective_decisions_version_mismatch",
+            "normalization or decision validation lacks the current effective decision contract; rerun footnote-validate and footnote-apply",
+        )
+    if validation.get("effective_decisions") != report.get("effective_decisions"):
+        fail(
+            "effective_decisions_stale",
+            "normalized output and validation receipt contain different effective footnote decisions",
+        )
+    try:
+        current_source_hashes = markdown_inventory(output_dir / "ocr_markdown")
+        continuation_reviews = validation.get("continuation_reviews", [])
+        confirmed_body_reviews = [
+            review for review in continuation_reviews if isinstance(review, Mapping)
+            and review.get("outcome") == "confirmed_not_a_footnote"
+        ] if isinstance(continuation_reviews, list) else []
+        records = []
+        if confirmed_body_reviews:
+            current_source = load_footnote_source_snapshot(output_dir)
+            records = list(current_source.records)
+        projected_report, projected_decisions = project_confirmed_not_a_footnote(
+            candidate_report,
+            {
+                "decisions": validation.get("decisions", []),
+                "continuation_reviews": continuation_reviews,
+            },
+            records,
+        )
+        compiled = compile_effective_decisions(
+            projected_report, projected_decisions.get("decisions", [])
+        )
+        if compiled["errors"] or compiled["decisions"] != validation.get("effective_decisions"):
+            fail(
+                "effective_decisions_stale",
+                "effective footnote decisions no longer compile from current candidates and reviews; rerun footnote-validate",
+            )
+        if dict(validation.get("source_sha256") or {}) != dict(current_source_hashes):
+            fail(
+                "decision_validation_source_stale",
+                "decision validation is bound to different source Markdown; rerun footnote-validate",
+            )
+    except (OSError, UnicodeError, ValueError, TypeError, KeyError) as exc:
+        fail("effective_decisions_unavailable", f"could not verify effective footnote decisions: {exc}")
     if report.get("decision_validation_sha256") != sha256_file(
         output_dir / "footnote_decision_validation.json"
     ):

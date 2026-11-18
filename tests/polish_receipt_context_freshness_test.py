@@ -6,6 +6,9 @@ import pytest
 
 from pdf2epub.commands.sources import _polished_stage_is_current
 from pdf2epub.markdown_handoff import prepare_markdown_subagent
+from pdf2epub.markdown_handoff_planning import plan_markdown_handoff
+from pdf2epub.markdown_handoff_resume import unit_context_is_current
+from pdf2epub.markdown_validation_persistence import capture_pdf_resume_contexts
 from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 from pdf2epub.polish_footnote_semantics import build_semantic_review_contract
 from pdf2epub.validation_receipts import validation_receipt_is_current
@@ -133,3 +136,189 @@ def test_polish_receipt_fails_closed_when_boundary_mapping_provenance_is_removed
         tmp_path / "polish_validation.json", source_dir, target_dir,
         task="polish", output_dir=tmp_path, config=config,
     )
+
+
+def test_polish_boundary_resume_tracks_halo_bytes_and_mapping_not_neighbor_full_hash(tmp_path: Path):
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    previous = source_dir / "part-a.md"
+    current = source_dir / "part-b.md"
+    previous.write_text("outside " + "halo " * 5000, encoding="utf-8")
+    current.write_text("own body", encoding="utf-8")
+    continuation = {
+        "part-a.md": {"is_continuation": True, "part_number": 1, "part_count": 2},
+        "part-b.md": {
+            "is_continuation": True, "part_number": 2, "part_count": 2,
+            "previous_file": "part-a.md",
+        },
+    }
+
+    before = plan_markdown_handoff(
+        source_dir, "polish", declared_files=["part-a.md", "part-b.md"],
+        continuation_files=continuation,
+    )
+    before_halo = before.preceding_contexts["part-b.md"]["text"]
+    before_digest = before.boundary_context_sha256["part-b.md"]
+    before_neighbor_hash = before.boundary_context_sources["part-b.md"][0]["source_sha256"]
+
+    # Change bytes outside the clipped halo. Full-source provenance changes,
+    # while the exact text and mapping the worker can read remain stable.
+    previous.write_text("changed " + "halo " * 5000, encoding="utf-8")
+    after = plan_markdown_handoff(
+        source_dir, "polish", declared_files=["part-a.md", "part-b.md"],
+        continuation_files=continuation,
+    )
+    assert after.preceding_contexts["part-b.md"]["text"] == before_halo
+    assert after.boundary_context_sources["part-b.md"][0]["source_sha256"] != before_neighbor_hash
+    assert after.boundary_context_sha256["part-b.md"] == before_digest
+
+    old_context = {
+        "boundary_context_sha256": {"part-b.md": before_digest},
+        "unit_context_sha256": {},
+    }
+    assert unit_context_is_current(
+        "part-b.md", previous_manifest=old_context, controlled_files={},
+        context_sha256={}, unit_context_sha256={}, heading_contexts={},
+        boundary_context_sha256=after.boundary_context_sha256, resume=True,
+    )
+
+    # Mapping metadata is part of the worker-visible projection identity even
+    # when the clipped text happens to stay the same.
+    changed_mapping = {
+        name: {**metadata, "part_count": 3}
+        for name, metadata in continuation.items()
+    }
+    remapped = plan_markdown_handoff(
+        source_dir, "polish", declared_files=["part-a.md", "part-b.md"],
+        continuation_files=changed_mapping,
+    )
+    assert remapped.preceding_contexts["part-b.md"]["text"] == after.preceding_contexts["part-b.md"]["text"]
+    assert remapped.boundary_context_sha256["part-b.md"] != after.boundary_context_sha256["part-b.md"]
+    assert not unit_context_is_current(
+        "part-b.md", previous_manifest=old_context, controlled_files={},
+        context_sha256={}, unit_context_sha256={}, heading_contexts={},
+        boundary_context_sha256=remapped.boundary_context_sha256, resume=True,
+    )
+
+    smaller_budget = plan_markdown_handoff(
+        source_dir, "polish",
+        {"subagent": {"batching": {"max_source_tokens": 24}}},
+        declared_files=["part-a.md", "part-b.md"],
+        continuation_files=continuation,
+    )
+    assert smaller_budget.preceding_contexts["part-b.md"]["text"] != after.preceding_contexts["part-b.md"]["text"]
+    assert smaller_budget.boundary_context_sha256["part-b.md"] != after.boundary_context_sha256["part-b.md"]
+
+
+def test_polish_prepared_boundary_still_checks_full_neighbor_source_until_reprepare(tmp_path: Path):
+    source_dir = tmp_path / "ocr_markdown"
+    target_dir = tmp_path / "polished_markdown"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    texts = {
+        "part-a.md": "outside " + "halo " * 5000,
+        "part-b.md": "Another sufficiently long source paragraph remains in its assigned file.\n",
+    }
+    for name, text in texts.items():
+        (source_dir / name).write_text(text, encoding="utf-8")
+        (target_dir / name).write_text(text, encoding="utf-8")
+    mapping_path = source_dir / "tree_progress.json"
+    mapping_path.write_text(json.dumps({"units": [{"part_files": ["part-a.md", "part-b.md"]}]}), encoding="utf-8")
+
+    from pdf2epub.refine.unit_mapping import load_pdf_continuation_files
+
+    continuations = load_pdf_continuation_files(tmp_path, source_dir)
+    paths = prepare_markdown_subagent(
+        tmp_path, "polish", source_dir, target_dir, "English", "Chinese",
+        continuation_files=continuations, footnote_semantics_enabled=True,
+    )
+    before, errors = capture_pdf_resume_contexts(tmp_path, "polish", ["part-b.md"])
+    assert errors == {}
+    assert "part-b.md" in before
+
+    # The visible tail stays byte-identical, but the just-prepared source
+    # provenance must still block validation until a fresh prepare runs.
+    (source_dir / "part-a.md").write_text("changed " + "halo " * 5000, encoding="utf-8")
+    _current, errors = capture_pdf_resume_contexts(tmp_path, "polish", ["part-b.md"])
+    assert errors == {"part-b.md": "prepared boundary context source changed after preparation"}
+
+
+def test_polish_command_resume_reuses_boundary_receipt_outside_halo_and_invalidates_inside(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    from types import SimpleNamespace
+
+    import pdf2epub.commands.markdown as markdown_commands
+
+    output_dir = tmp_path / "book"
+    source_dir = output_dir / "ocr_markdown"
+    target_dir = output_dir / "polished_markdown"
+    source_dir.mkdir(parents=True)
+    target_dir.mkdir(parents=True)
+    repeated_prefix = "outside " * 500
+    shared_tail = "shared boundary tail " * 300
+    source_texts = {
+        "part-a.md": repeated_prefix + shared_tail,
+        "part-b.md": "A sufficiently long source paragraph remains assigned to this file.\n",
+    }
+    for name, text in source_texts.items():
+        (source_dir / name).write_text(text, encoding="utf-8")
+        (target_dir / name).write_text(text, encoding="utf-8")
+    (source_dir / "tree_progress.json").write_text(json.dumps({
+        "units": [{"part_files": ["part-a.md", "part-b.md"]}],
+    }), encoding="utf-8")
+    config = {
+        "title": "Synthetic boundary book",
+        "translation": {"source_language": "English", "target_language": "Chinese"},
+        "subagent": {"batching": {"max_source_tokens": 2500}},
+        "footnotes": {"mode": "auto"},
+    }
+    context = SimpleNamespace(
+        config=config, book_title=config["title"], output_dir=output_dir,
+        config_path=None,
+    )
+    monkeypatch.setattr(markdown_commands, "load_book_context", lambda *_args, **_kwargs: context)
+    args = SimpleNamespace(config="unused.yaml", resume=False, content_type="auto")
+
+    assert markdown_commands.polish_command(args) == 0
+    first_manifest_path = output_dir / "polish_subagent_manifest.json"
+    first_manifest = json.loads(first_manifest_path.read_text(encoding="utf-8"))
+    for name in source_texts:
+        source = (source_dir / name).read_bytes().decode("utf-8")
+        target = (target_dir / name).read_bytes().decode("utf-8")
+        _write_clear_sidecar(
+            output_dir, name, source, target,
+            first_manifest["footnote_semantics"]["files"][name],
+        )
+    validate_args = SimpleNamespace(config="unused.yaml", check_only=False)
+    assert markdown_commands.polish_validate_command(validate_args) == 0
+    assert validation_receipt_is_current(
+        output_dir / "polish_validation.json", source_dir, target_dir,
+        task="polish", output_dir=output_dir, config=config,
+    )
+
+    # Change only bytes beyond the prepared preceding halo. The source file
+    # itself must be redone, while part-b's validated checkpoint remains reusable.
+    outside_prefix = "changed outside " * 500
+    (source_dir / "part-a.md").write_text(outside_prefix + shared_tail, encoding="utf-8")
+    args.resume = True
+    assert markdown_commands.polish_command(args) == 0
+    outside_manifest = json.loads(first_manifest_path.read_text(encoding="utf-8"))
+    assert "part-b.md" in outside_manifest["completed_files"]
+    assert "part-b.md" not in outside_manifest["pending_files"]
+
+    # A fresh preparation refreshes full-neighbor provenance. The ordinary
+    # single-file validation path can now reuse the old target and receipt.
+    file_validate_args = SimpleNamespace(config="unused.yaml", check_only=False, file="part-b.md")
+    assert markdown_commands.polish_validate_command(file_validate_args) == 0
+    current_contexts, errors = capture_pdf_resume_contexts(output_dir, "polish", ["part-b.md"])
+    assert errors == {}
+    assert "part-b.md" in current_contexts
+
+    # Alter the exact halo bytes; the same source/target checkpoint must no
+    # longer be considered complete on the next normal resume preparation.
+    (source_dir / "part-a.md").write_text(outside_prefix + "new boundary words " * 20, encoding="utf-8")
+    assert markdown_commands.polish_command(args) == 0
+    inside_manifest = json.loads(first_manifest_path.read_text(encoding="utf-8"))
+    assert "part-b.md" not in inside_manifest["completed_files"]
+    assert "part-b.md" in inside_manifest["pending_files"]

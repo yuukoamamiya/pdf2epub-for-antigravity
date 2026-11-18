@@ -30,7 +30,7 @@ from .footnote_source import unit_records, markdown_inventory
 from .footnote_structure import FOOTNOTE_STRUCTURE_EXEMPT_TYPES
 from .footnote_visual import ensure_visual_review_images
 from .footnote_matching import block_text_variants
-from .footnote_result_audit import AUDIT_VERSION
+from .footnote_result_audit import AUDIT_VERSION, _task_id
 
 def _endnote_ambiguity_section(ambiguity_count: int) -> str:
     """Return the focused centralized-endnote review instructions."""
@@ -132,6 +132,9 @@ def prepare_footnote_subagent(
         auto_accept=auto_accept,
         native_max_font_ratio=native_max_font_ratio,
     )
+    from ..ocr_correction import select_refinement_pages
+
+    selected_page_dir, _selected_page_kind = select_refinement_pages(output_dir, config=config)
     model = resolve_subagent_model(config, "footnote-prepare")
     # Re-run the deterministic result audit on every prepare. Existing review
     # resolutions are reusable only for the exact task and source block hash.
@@ -142,9 +145,12 @@ def prepare_footnote_subagent(
         # provide a refined unit map. The normal page decision workflow remains
         # available; source-wide result auditing starts once scope exists.
         records = []
+    from .footnote_source import project_footnote_source_text
+
     source_texts = {
-        str(record["name"]): (output_dir / "ocr_markdown" / str(record["name"]))
-        .read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
+        str(record["name"]): project_footnote_source_text(
+            (output_dir / "ocr_markdown" / str(record["name"])).read_bytes()
+        )
         for record in records
         if (output_dir / "ocr_markdown" / str(record["name"])).is_file()
     }
@@ -444,6 +450,46 @@ def prepare_footnote_subagent(
             })
             known_task_ids.add(task_id)
 
+    # A residual body marker and a short same-key numbered definition are
+    # separate evidence. Preserve the exact marker task, while creating a
+    # separately scoped definition task so the numbered candidate can be
+    # classified from its own OCR block (for example a short "17. Ebd.").
+    existing_note_tasks = {
+        (str(item.get("file") or ""), str(item.get("key") or ""))
+        for item in audit.get("findings", []) if isinstance(item, Mapping)
+        and item.get("code") == "suspected_numbered_note_definition"
+    }
+    supplemental_note_tasks: list[dict[str, Any]] = []
+    for marker_task in list(audit.get("findings", [])):
+        if not isinstance(marker_task, Mapping) or marker_task.get("code") != "unexplained_numeric_superscript":
+            continue
+        file = str(marker_task.get("file") or "")
+        key = str(marker_task.get("key") or "")
+        if not file or not key or (file, key) in existing_note_tasks:
+            continue
+        source_lines = source_texts.get(file, "").splitlines()
+        for line_number, source_line in enumerate(source_lines, 1):
+            numbered = re.match(r"^\s*(?:[-*+]\s+)?(?P<key>\d{1,3})[.)](?:\\)?\s+", source_line)
+            if not numbered or numbered.group("key") != key:
+                continue
+            excerpt = source_line.strip()
+            evidence_hash = hashlib.sha256(excerpt.encode("utf-8")).hexdigest()
+            identity = "supplemental-numbered-definition=" + evidence_hash
+            supplemental_note_tasks.append({
+                **dict(marker_task),
+                "task_id": _task_id("suspected_numbered_note_definition", file, line_number, evidence_hash, identity),
+                "code": "suspected_numbered_note_definition",
+                "line": line_number,
+                "evidence_sha256": evidence_hash,
+                "evidence_excerpt": excerpt,
+                "evidence_origin": "normalized_target",
+                "detail": f"Numbered block {key} remains a possible unnormalized note definition.",
+                "candidate_refs": [],
+                "pages": [],
+                "source_address": None,
+            })
+    audit.setdefault("findings", []).extend(supplemental_note_tasks)
+
     # A failed apply can identify a numbered note-like block that the normal
     # geometric candidate rules did not admit (for example an OCR `Text`
     # block parsed as an ordered list). Re-admit only when a long source line
@@ -468,7 +514,15 @@ def prepare_footnote_subagent(
             numbered = re.match(r"^\s*(?:[-*+]\s+)?(?P<key>\d{1,3})[.)](?:\\)?\s+", candidate_line)
             if numbered and numbered.group("key") == key:
                 numbered_lines.append(candidate_line.strip())
-        if audit_task.get("code") == "suspected_numbered_note_definition" and source_line:
+        if (
+            audit_task.get("evidence_origin") == "normalized_target"
+            and audit_task.get("code") in {
+            "suspected_numbered_note_definition",
+            "unexplained_numeric_superscript",
+            "unexplained_unicode_superscript",
+            }
+            and source_line
+        ):
             candidate_sources = [source_line]
         else:
             candidate_sources = numbered_lines
@@ -519,6 +573,11 @@ def prepare_footnote_subagent(
         page_row = next((row for row in report.get("pages", []) or [] if isinstance(row, Mapping) and int(row.get("page", 0)) == page), None)
         if not isinstance(page_row, dict):
             continue
+        # Preserve the original semantic finding identity alongside the
+        # sidecar address used for visual-review freshness. The resulting
+        # exception must match both this exact finding and this exact block.
+        audit_task["source_task_id"] = str(audit_task.get("task_id") or "")
+        audit_task["source_evidence_sha256"] = str(audit_task.get("evidence_sha256") or "")
         candidate = {
             "page": page, "source": source, "block": block_index,
             "order": block_data.get("order", block_index), "label": "Text",
@@ -545,6 +604,100 @@ def prepare_footnote_subagent(
         audit_task["candidate_refs"] = [{"page": page, "source": source, "block": block_index}]
         audit_task["pages"] = [page]
         audit_task["context_status"] = "supplemental_candidate_admitted"
+    # A TOC-title-in-note result task already carries the exact source block
+    # selected by the edit plan. Bind that task to the current page sidecar so
+    # its visual exception can use the ordinary validation/apply gate.
+    for audit_task in audit.get("findings", []):
+        if not isinstance(audit_task, dict) or audit_task.get("code") not in {
+            "confirmed_toc_heading_in_note", "suspected_heading_in_note",
+        }:
+            continue
+        refs = audit_task.get("candidate_refs")
+        if not isinstance(refs, list) or len(refs) != 1 or not isinstance(refs[0], Mapping):
+            audit_task["context_status"] = "heading_source_address_unavailable"
+            continue
+        ref = refs[0]
+        try:
+            page, source, block_index = int(ref["page"]), str(ref.get("source") or "primary"), int(ref["block"])
+        except (KeyError, TypeError, ValueError):
+            audit_task["context_status"] = "heading_source_address_invalid"
+            continue
+        sidecar_entry = exact_sidecars.get(page, {}).get(source)
+        if not isinstance(sidecar_entry, Mapping):
+            audit_task["context_status"] = "heading_sidecar_unavailable"
+            continue
+        try:
+            sidecar_data = json.loads((output_dir / str(sidecar_entry["path"])).read_text(encoding="utf-8"))
+            block_data = sidecar_data["blocks"][block_index]
+        except (OSError, UnicodeError, json.JSONDecodeError, KeyError, IndexError, TypeError):
+            audit_task["context_status"] = "heading_sidecar_block_unavailable"
+            continue
+        block_digest = hashlib.sha256(json.dumps(
+            {"sidecar_sha256": sidecar_entry["sha256"], "block": block_data},
+            ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")).hexdigest()
+        source_file = str(audit_task.get("source_file") or "")
+        source_path = output_dir / "ocr_markdown" / source_file if source_file else None
+        if not source_file or Path(source_file).name != source_file or source_path is None or not source_path.is_file():
+            audit_task["context_status"] = "heading_source_markdown_unavailable"
+            continue
+        audit_task["source_task_id"] = str(audit_task.get("task_id") or "")
+        audit_task["source_evidence_sha256"] = str(audit_task.get("evidence_sha256") or "")
+        audit_task["evidence_origin"] = "source_sidecar"
+        audit_task["evidence_sha256"] = block_digest
+        audit_task["source_address"] = {
+            "page": page, "source": source, "block": block_index,
+            "sidecar": str(sidecar_entry["path"]),
+            "sidecar_sha256": str(sidecar_entry["sha256"]),
+        }
+        audit_task["evidence_source_file"] = source_file
+        audit_task["evidence_file_sha256"] = sha256_file(source_path)
+        page_markdown = selected_page_dir / f"page_{page:03d}.md"
+        if page_markdown.is_file():
+            audit_task["evidence_page_file"] = page_markdown.resolve().relative_to(output_dir.resolve()).as_posix()
+            audit_task["evidence_page_sha256"] = sha256_file(page_markdown)
+        span = audit_task.get("source_span")
+        try:
+            start, end = int(span[0]), int(span[1])
+            source_bytes = source_path.read_bytes()
+            projected_source = project_footnote_source_text(source_bytes)
+            audit_task["evidence_source_span_sha256"] = hashlib.sha256(
+                projected_source[start:end].encode("utf-8")
+            ).hexdigest()
+        except (TypeError, ValueError, IndexError, OSError, UnicodeError):
+            audit_task["context_status"] = "heading_source_span_unverifiable"
+            audit_task.pop("evidence_source_span_sha256", None)
+            continue
+        audit_task["context_status"] = "exact_heading_source_page_resolved"
+    # A body superscript's exact sidecar address identifies the marker
+    # occurrence. A separate, same-key numbered-note task can identify the
+    # definition it refers to; keep that linked candidate available for an
+    # occurrence-level confirmed_footnote review without moving the body block.
+    note_candidates_by_scope_key: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for audit_task in audit.get("findings", []):
+        if not isinstance(audit_task, Mapping) or audit_task.get("code") != "suspected_numbered_note_definition":
+            continue
+        scope_key = (str(audit_task.get("unit_scope") or audit_task.get("file") or ""), str(audit_task.get("key") or ""))
+        note_candidates_by_scope_key.setdefault(scope_key, []).extend(
+            dict(ref) for ref in audit_task.get("candidate_refs", []) if isinstance(ref, Mapping)
+        )
+    for audit_task in audit.get("findings", []):
+        if not isinstance(audit_task, dict) or audit_task.get("code") not in {
+            "unexplained_numeric_superscript", "unexplained_unicode_superscript",
+        }:
+            continue
+        scope_key = (str(audit_task.get("unit_scope") or audit_task.get("file") or ""), str(audit_task.get("key") or ""))
+        linked = note_candidates_by_scope_key.get(scope_key, [])
+        refs = audit_task.setdefault("candidate_refs", [])
+        known = {
+            (int(ref.get("page", -1)), str(ref.get("source") or "primary"), int(ref.get("block", -1)))
+            for ref in refs if isinstance(ref, Mapping)
+        }
+        for ref in linked:
+            address = (int(ref.get("page", -1)), str(ref.get("source") or "primary"), int(ref.get("block", -1)))
+            if address not in known:
+                refs.append(ref)
+                known.add(address)
     audit["findings"].sort(key=lambda item: str(item.get("task_id")))
     prior_outcomes = {
         str(item.get("task_id")): str(item.get("outcome") or "")

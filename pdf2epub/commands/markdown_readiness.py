@@ -14,6 +14,7 @@ from pdf2epub.commands.sources import (
 )
 from pdf2epub.entity_context import entity_context_is_current
 from pdf2epub.ocr_correction import ocr_correction_is_current, select_refinement_pages
+from pdf2epub.ocr_review_selection import manual_review_selection_state
 from pdf2epub.ocr_progress import assess_progress
 from pdf2epub.pipeline_policy import PipelinePolicy
 from pdf2epub.ocr_source import is_legacy_native_source
@@ -146,6 +147,7 @@ def run_readiness_check(
     correction_ready = native_text or not correction_required or ocr_correction_is_current(
         output_dir, config, ocr_evidence=ocr_evidence
     )
+    manual_selection = manual_review_selection_state(output_dir)
     record(
         "ocr_correction",
         correction_ready,
@@ -155,9 +157,25 @@ def run_readiness_check(
             "not required because neither dual-OCR consensus nor page anomalies require visual review"
             if not correction_required
             else (
-                "validated visual OCR correction matches the current page set"
+                (
+                    "manually selected OCR pages have current visual review: "
+                    + ", ".join(manual_selection["files"])
+                )
+                if correction_ready and manual_selection["present"]
+                else "validated visual OCR correction matches the current page set"
                 if correction_ready
-                else "visual OCR correction is missing, stale, or unvalidated; run ocr-correct and ocr-correct-validate"
+                else (
+                    manual_selection["detail"]
+                    + "; run ocr-correct --resume and ocr-correct-validate"
+                    if manual_selection["present"] and manual_selection["detail"]
+                    else (
+                        "manual OCR page review is pending for: "
+                        + ", ".join(manual_selection["files"])
+                        + "; run ocr-correct --resume and ocr-correct-validate"
+                        if manual_selection["present"]
+                        else "visual OCR correction is missing, stale, or unvalidated; run ocr-correct and ocr-correct-validate"
+                    )
+                )
             )
         ),
     )

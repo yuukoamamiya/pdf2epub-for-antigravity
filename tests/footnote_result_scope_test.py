@@ -245,3 +245,56 @@ def test_markdown_definitions_keep_indented_continuation_blocks_together():
 
     assert report["valid"] is True
     assert report["findings"] == []
+
+
+def test_sequence_15_18_17_reports_one_gap_and_one_uncertain_reset_without_scanning_note_body():
+    report = _audit(
+        {
+            "chapter.md": (
+                "Body cites <sup>16</sup> and <sup>17</sup>.\n\n"
+                "[^15]: Fifteenth note.\n\n"
+                "[^18]: Eighteenth note quotes a marker <sup>17</sup>.\n\n"
+                "[^17]: Seventeenth note after an unproven decrease.\n"
+            ),
+        },
+        [{
+            "name": "chapter.md", "start_page": 4, "end_page": 4,
+            "chapter_id": "toc-unit:chapter", "part_index": 1, "part_count": 1,
+        }],
+    )
+
+    gaps = _findings(report, "scoped_numbering_gap")
+    resets = _findings(report, "scoped_numbering_reset_uncertain")
+    assert len(gaps) == 1
+    assert gaps[0]["neighbor_keys"] == [15, 18]
+    assert gaps[0]["missing_keys"] == [16, 17]
+    assert [item["key"] for item in gaps[0]["body_reference_occurrences"]] == ["16", "17"]
+    assert len(resets) == 1
+    assert resets[0]["neighbor_keys"] == [18, 17]
+    # The same-numbered superscript inside a note definition is not a body
+    # reference occurrence and cannot create another gap/reset finding.
+    assert len(gaps) + len(resets) == 2
+
+
+def test_page_bounded_numbering_reset_is_legal_after_a_gap():
+    report = _audit(
+        {
+            "part-1.md": "[^15]: Fifteenth note.\n[^18]: Eighteenth note.\n",
+            "part-2.md": "[^1]: A new page sequence begins.\n",
+        },
+        [
+            {
+                "name": "part-1.md", "start_page": 5, "end_page": 5,
+                "chapter_id": "toc-unit:chapter", "part_index": 1, "part_count": 2,
+            },
+            {
+                "name": "part-2.md", "start_page": 6, "end_page": 6,
+                "chapter_id": "toc-unit:chapter", "part_index": 2, "part_count": 2,
+            },
+        ],
+    )
+
+    gaps = _findings(report, "scoped_numbering_gap")
+    assert len(gaps) == 1
+    assert gaps[0]["neighbor_keys"] == [15, 18]
+    assert _findings(report, "scoped_numbering_reset_uncertain") == []

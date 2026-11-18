@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import re
-from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
@@ -17,6 +16,11 @@ from .footnote_edit_plan import (
 )
 from .footnote_source import FootnoteSourceSnapshot
 from .footnote_apply_resolution import FootnoteDecisionResolution
+from .footnote_effective_decisions import (
+    EFFECTIVE_DECISIONS_VERSION,
+    compile_effective_decisions,
+    project_confirmed_not_a_footnote,
+)
 
 
 @dataclass(frozen=True)
@@ -32,6 +36,8 @@ class FootnoteNormalizationPlanningInput:
     progress: Optional[Mapping[str, Any]] = None
     scope_error: Optional[str] = None
     endnote_definition_decisions: Optional[list[dict[str, Any]]] = None
+    expected_effective_decisions: Optional[list[dict[str, Any]]] = None
+    expected_source_sha256: Optional[Mapping[str, str]] = None
 
 
 @dataclass(frozen=True)
@@ -41,6 +47,9 @@ class FootnoteNormalizationPlan:
     edit_plan: Optional[FootnoteEditPlan]
     validation_decisions: tuple[dict[str, Any], ...]
     errors: tuple[str, ...] = ()
+    effective_decisions: tuple[dict[str, Any], ...] = ()
+    effective_decisions_version: int = EFFECTIVE_DECISIONS_VERSION
+    source_sha256: Mapping[str, str] = field(default_factory=dict)
 
     @property
     def valid(self) -> bool:
@@ -52,53 +61,8 @@ def _resolution_inputs(
     decisions: Mapping[str, Any],
     records: list[dict[str, Any]],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Project reviewed body exceptions into the ordinary resolver contract."""
-    projected_report = deepcopy(dict(report))
-    projected_decisions = deepcopy(dict(decisions))
-    continuation_reviews = projected_decisions.get("continuation_reviews", [])
-    body_exceptions: list[dict[str, Any]] = []
-    pages = []
-    for page_report in report.get("pages", []) or []:
-        if not isinstance(page_report, Mapping):
-            pages.append(page_report)
-            continue
-        page = dict(page_report)
-        candidates = []
-        for candidate in page_report.get("candidates", []) or []:
-            item = dict(candidate)
-            reviewed_as_body = any(
-                isinstance(review, Mapping)
-                and review.get("outcome") == "confirmed_not_a_footnote"
-                and int((review.get("source_note") or {}).get("page", -1)) == int(item.get("page", -2))
-                and int((review.get("source_note") or {}).get("block", -1)) == int(item.get("block", -2))
-                and str((review.get("source_note") or {}).get("source") or "primary") == str(item.get("source") or "primary")
-                for review in continuation_reviews if isinstance(continuation_reviews, list)
-            )
-            if reviewed_as_body:
-                item["confidence"] = "review"
-                candidate_page = int(item["page"])
-                chapter_id = next((
-                    str(record.get("chapter_id") or "") for record in records
-                    if int(record.get("start_page", 0)) <= candidate_page <= int(record.get("end_page", 0))
-                ), "")
-                body_exceptions.append({
-                    "page": candidate_page,
-                    "source": str(item.get("source") or "primary"),
-                    "block": int(item["block"]),
-                    "role": "body",
-                    "key": str(item.get("key") or ""),
-                    "chapter_id": chapter_id,
-                })
-            candidates.append(item)
-        page["candidates"] = candidates
-        pages.append(page)
-    if body_exceptions:
-        projected_report["pages"] = pages
-        projected_decisions["decisions"] = [
-            *(projected_decisions.get("decisions", []) or []), *body_exceptions
-        ]
-    return projected_report, projected_decisions
-
+    """Use the shared explicit projection for confirmed body exceptions."""
+    return project_confirmed_not_a_footnote(report, decisions, records)
 
 def _recover_continuations(
     resolution: FootnoteDecisionResolution,
@@ -163,6 +127,15 @@ def build_footnote_normalization_plan(
     records = list(inputs.source.records)
     source_texts = inputs.source.source_texts
     report, decisions = _resolution_inputs(inputs.report, inputs.decisions, records)
+    compiled = compile_effective_decisions(report, decisions.get("decisions", []))
+    if compiled["errors"]:
+        return _invalid_plan(decisions, "; ".join(compiled["errors"]))
+    effective_decisions = compiled["decisions"]
+    if inputs.expected_effective_decisions is not None and list(inputs.expected_effective_decisions) != effective_decisions:
+        return _invalid_plan(decisions, "effective footnote decisions changed since validation; rerun footnote-validate")
+    if inputs.expected_source_sha256 is not None and dict(inputs.expected_source_sha256) != dict(inputs.source.source_hashes):
+        return _invalid_plan(decisions, "footnote source Markdown changed since validation; rerun footnote-validate")
+    decisions["effective_decisions"] = effective_decisions
     try:
         resolution = resolve_page_decisions(
             inputs.output_dir,
@@ -204,6 +177,9 @@ def build_footnote_normalization_plan(
         edit_plan,
         tuple(decisions.get("decisions", []) or []),
         tuple(edit_plan.errors),
+        tuple(effective_decisions),
+        EFFECTIVE_DECISIONS_VERSION,
+        dict(inputs.source.source_hashes),
     )
 
 

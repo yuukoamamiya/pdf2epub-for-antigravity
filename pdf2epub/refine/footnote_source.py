@@ -92,6 +92,13 @@ class FootnoteSourceSnapshot:
     source_hashes: Mapping[str, str]
 
 
+def project_footnote_source_text(raw: bytes | str) -> str:
+    """Return the coordinate space used by footnote edit-plan source spans."""
+    text = raw.decode("utf-8") if isinstance(raw, bytes) else str(raw)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return split_multi_superscripts(text)
+
+
 def load_footnote_source_snapshot(output_dir: Path) -> FootnoteSourceSnapshot:
     """Read all refined Markdown units and fail if the refined map is incomplete."""
     output_dir = Path(output_dir)
@@ -127,9 +134,8 @@ def load_footnote_source_snapshot(output_dir: Path) -> FootnoteSourceSnapshot:
             raise ValueError("tree_progress contains duplicate Markdown unit filenames")
         path = source_dir / name
         data = path.read_bytes()
-        text = data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
         source_hashes[name] = hashlib.sha256(data).hexdigest()
-        source_texts[name] = split_multi_superscripts(text)
+        source_texts[name] = project_footnote_source_text(data)
 
     if len(source_texts) != len(records):
         raise ValueError("tree_progress source inventory is incomplete")
@@ -138,6 +144,7 @@ def load_footnote_source_snapshot(output_dir: Path) -> FootnoteSourceSnapshot:
 
 __all__ = [
     "FootnoteSourceSnapshot",
+    "project_footnote_source_text",
     "load_footnote_source_snapshot",
     "markdown_inventory",
     "unit_records",

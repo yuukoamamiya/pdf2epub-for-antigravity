@@ -268,6 +268,19 @@ def test_legacy_native_source_bypasses_visual_anomaly_review(tmp_path, monkeypat
     assert policy.requires_visual_ocr_review(tmp_path) is False
 
 
+def test_legacy_native_downstream_gate_rejects_stale_manual_selection(tmp_path):
+    pages_dir = tmp_path / "pages"
+    pages_dir.mkdir()
+    (pages_dir / "page_001.md").write_text("Legacy native page.", encoding="utf-8")
+    (pages_dir / "ocr_progress.json").write_text(
+        json.dumps({"mode": "native_text"}), encoding="utf-8"
+    )
+    (tmp_path / "ocr_correction_selection.json").write_text("{broken", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="manual visual OCR selection cannot apply"):
+        _require_reviewed_ocr_anomalies(tmp_path, _single_ocr_config())
+
+
 def test_dual_ocr_keeps_consensus_correction_semantics_with_snapshot(
     tmp_path, monkeypatch
 ):
