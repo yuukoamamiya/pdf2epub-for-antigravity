@@ -99,12 +99,12 @@ PDF 的页脚注抽取会复核疑似跨页断词缺口；需要时会把相邻�
 单页 `ocr-correct-validate --file PAGE.md` 只记录该页，完成整书复核后仍须运行无 `--file` 的全量 validate，
 才会生成可供后续结构整理使用的 validated OCR。请求绑定源 PDF、数字排序的完整 OCR 页清单及逐页 Markdown/sidecar 哈希。
 源变化后需更新复核。已有 handoff 记录人工页选择时，缺失或损坏请求合同也不会允许回退到未经验证的原始 OCR。
-页脚注应用后还会生成 `footnote_result_audit.json`，复核残留上标、疑似编号注释、适用范围内的编号缺口和注释边界。需要判断的发现会回到既有视觉复核、校验和应用流程，结果审计未通过时，不会生成有效脚注检查点或继续到 polish/EPUB 构建。`endnotes_only` 跳过页脚注候选扫描，但仍审计适用的尾注定义、截断和物化完整性，`disabled` 会记录为不适用。审计输出复核信号，语义决定由既有审阅流程完成。
+页脚注应用后还会生成 `footnote_result_audit.json`，复核残留上标、疑似编号注释、适用范围内的编号缺口和注释边界。需要判断的发现会回到既有视觉复核、校验和应用流程；结果审计未通过时，不会生成有效脚注检查点或继续到 polish/EPUB 构建。`endnotes_only` 跳过页脚注候选扫描，但仍审计适用的尾注定义、截断和物化完整性；`disabled` 会记录为不适用。审计输出复核信号，语义决定由既有审阅流程完成。
 结果审计现用独立 version 3，`footnote_normalization.json` 使用 schema 10，脚注决定以 effective decision version 1 统一记录候选来源和复核决定。旧 normalization schema 1–9、结果审计 version 1–2 或缺少有效决定集的 receipt，需通过 `footnote-prepare`、待复核项处理、`footnote-validate` 和 `footnote-apply` 重建，之后用 `polish --resume` 刷新润色语义复核。
 上一页脚注以断词连字符结束、下一页 OCR 将续词误标为普通 `Text` 时，行内上标通常不会让候选静默消失，与脚注列对齐且有独立脚注证据的块会带精确页/块地址进入视觉复核和 unit context。视觉复核仍决定该块是否真为续注。
-维护者可运行 `uv run pdf2epub -c config.yaml footnote-review-summary --json` 汇总既有脚注复核的页面、区域、候选块和决定覆盖，该命令纯只读，输出是成本诊断，不代表生产校验通过。
+维护者可运行 `uv run pdf2epub -c config.yaml footnote-review-summary --json` 汇总既有脚注复核的页面、区域、候选块和决定覆盖；该命令纯只读，输出是成本诊断，不代表生产校验通过。
 脚注 worker 的精简 unit context 由候选报告、精确页侧车映射和当前 refined unit mapping 重算校验。侧车哈希变化或旧 projection 版本会要求重跑 `footnote-prepare` 与 `footnote-validate`，既有语义决定文件会保留。polish 邻片边界上下文 projection version 为 2，旧 receipt 会按受影响单元重新 prepare、validate。
-PDF 润色/翻译校验规则升级可能使旧验证记录或脚注归一化 checkpoint 失效，恢复时按 [AGENTS.md](AGENTS.md)
+PDF 润色/翻译校验规则升级可能使旧验证记录或脚注归一化 checkpoint 失效；恢复时按 [AGENTS.md](AGENTS.md)
 重跑对应流程，不需要仅因规则版本变化而重新 OCR。polish schema 6 恢复要求先用 `polish --resume` 完成新的语义复核，再以正式 `polish-validate` 建立 receipt 和 validated 副本；原有润色目标会保留供复核。脚注结果审计合同升级后，旧 normalization receipt 也须重建；原始 OCR 与原稿保留，apply 阶段重建归一化派生稿。
 
 PDF 和 EPUB 的结果通常位于 `output/<书名>/`：PDF 翻译生成原语言 EPUB 和译文 EPUB，PDF 只转换时生成原语言 EPUB，

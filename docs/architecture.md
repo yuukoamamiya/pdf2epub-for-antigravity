@@ -384,7 +384,7 @@ raw fallback，即使 validation receipt 不在。恢复时保留 handoff/receip
 
 - `markdown_handoff.py`：协调规划、上下文、恢复、manifest 和 prompt 服务，写入本次 handoff 产物。
 - `markdown_handoff_planning.py`：以 `MarkdownHandoffPlan` 返回已校验的源文件 inventory、哈希、统计、有效角色及来源、续文信息、只读前后边界上下文和默认批次计划。polish 只按显式 part mapping 选择邻片，前后各最多 256 token、合计最多 512 token，并受单文件剩余 token 预算约束。优先投影完整正文块，超预算时回退到完整句或完整词片段并标记为 context-only。裁剪片段不能决定段落边界或授权合并块。脚注定义及其续行会排除。unit context hash 表示该单元实际使用的映射、邻片和 halo 投影，全书 context/source hash 保留作 provenance 与 inventory 审计，不扩大单元依赖。重新 prepare 后，halo 外邻片内容变化可复用未受影响的 sidecar/receipt，但仍核对完整 source provenance。translation 保持原 preceding context 行为。显式角色优先于共享推断，推断角色也参与普通/特殊 worker 隔离。不读写 manifest/prompt，也不导入 handoff 编排器。
-- `markdown_handoff_context.py`：将已声明的上下文文件投影为 handoff 可用路径和 hash，不读取未声明上下文。
+- `markdown_handoff_context.py`：将已声明的上下文文件投影为 handoff 可用路径和 hash；不读取未声明上下文。
 - `markdown_handoff_resume.py`：读取旧 manifest 和校验检查点，判断单元上下文、有效角色与角色来源是否仍可复用，并生成恢复决定。PDF `translate`/`polish` validation receipt 按文件记录验证时的 `unit_context_sha256`、TOC heading context、语言及角色来源；polish 还绑定 `boundary_context_sha256`。准备 manifest 更新不会刷新该 receipt。已有上下文而旧 receipt 缺少快照时，先 prepare、正式 validate，再 resume；旧 polish receipt 缺少边界投影哈希时重新进入 pending。
 - `markdown_handoff_manifest.py`：组装 manifest 数据，并检查可选视觉复核、次 OCR、review 输出目录相对 output 的边界；不负责协调器提供的 source/target/scratch 字符串，也不渲染 prompt。
 - `markdown_handoff_prompt.py`：从明确的 prompt identity、batching 和路径数据渲染提示词，不读取工作区文件。
@@ -981,7 +981,7 @@ secondary-only 的 moved decision 必须包含：
 - `refine/footnote_unit_contexts.py`：集中实现 canonical sparse projection、上下文写入/加载、投影重算、
   manifest 哈希核对和输出路径安全校验，供 validation 与 Markdown handoff 直接使用。脚注证据按 chapter scope 投影，
   缺少精确 part→page 映射时继续使用章节级证据与失效范围，不推断分片级页范围。
-- `refine/footnote_polish_review.py`：负责 polish 脚注语义问题的证据定位和 scoped review task 构造，
+- `refine/footnote_polish_review.py`：负责 polish 脚注语义问题的证据定位和 scoped review task 构造；
   handoff 只消费其结果，不承载该映射规则。
 - `refine/footnote_validation.py`：编排证据加载、纯决策审计与结果持久化；只有已验证结果才会
   更新候选报告并写入稀疏 unit context，不修改原始 Markdown。
@@ -1055,7 +1055,7 @@ apply 写入 `footnote_normalized/` 后运行 `footnote_result_audit.json`（ver
 
 apply 后的结果审计输出需视觉判读的线索，包括归一化稿中残留数字上标/疑似编号注释、可能截断或未闭合的定义、定义后的正文边界污染，以及确认候选未进入应用计划。每个非脚注例外绑定一个精确 marker occurrence identity。同一 key 或同一文本重复出现时仍逐 occurrence 核查。疑似注释内标题只有在 reviewed TOC heading span 与实际 consumed source span 于同一页唯一定位并相交时才标为 `confirmed_toc_heading_in_note`，其他情况都保持 `suspected_heading_in_note` 并交视觉复核。编号范围依据 TOC/refinement unit 与章节映射，单文件章节和多分片章节均按实际顺序检查。下降序列仅在精确页面边界分隔记录或 `section_id` 明确变化时作为编号重启，缺少边界证据时生成 `scoped_numbering_reset_uncertain` 视觉复核，不跨重启推断缺号。上游候选召回会把通用 OCR `Text` 块中行首 `<sup>…</sup>` 补入视觉任务，跨页续词若被 OCR 标为普通 `Text` 且含行内上标，在上一物理脚注开放、文本续接断词、脚注列几何对齐并有独立字号/字体或词汇证据时，也会以无 key 的低置信度精确地址进入 visual audit 和 unit context。它只创建复核任务，不自动分类或移动。后续 prepare 会把当前 apply 报告中的未决结果任务投影到同一审阅流程，仅在源稿与归一化稿哈希匹配时复用。已识别的脚注定义和缩进行续段、代码及注释排除在相应正文标记扫描外。
 
-结果审计由现有 `footnote-prepare → footnote-validate → footnote-apply` 循环处理，不增加 operator 命令或独立生产阶段。Reviewer 在 `footnote_decisions.json.result_audit_reviews` 对每个任务提交当前 task ID、证据哈希、全部指定页图和图像理由。确认脚注还要引用精确候选，并在普通决定中具有匹配角色，apply 再验证物化结果。validate 对未决任务要求重新 prepare 生成补充任务，任务仍按源地址和哈希绑定，同一任务第二轮仍不确定则为 `human_review_required`。`disabled` 下审计状态为 `not_applicable`，`endnotes_only` 跳过页脚注候选扫描，但仍审计适用的尾注定义、截断和物化完整性，单/双 OCR 和 legacy native-text 继续按当前证据模式处理。
+结果审计由现有 `footnote-prepare → footnote-validate → footnote-apply` 循环处理，不增加 operator 命令或独立生产阶段。Reviewer 在 `footnote_decisions.json.result_audit_reviews` 对每个任务提交当前 task ID、证据哈希、全部指定页图和图像理由。确认脚注还要引用精确候选，并在普通决定中具有匹配角色；apply 再验证物化结果。validate 对未决任务要求重新 prepare 生成补充任务，任务仍按源地址和哈希绑定；同一任务第二轮仍不确定则为 `human_review_required`。`disabled` 下审计状态为 `not_applicable`；`endnotes_only` 跳过页脚注候选扫描，但仍审计适用的尾注定义、截断和物化完整性；单/双 OCR 和 legacy native-text 继续按当前证据模式处理。
 
 任一计划、绑定、冲突或写前 inventory 校验失败时只写无效诊断 checkpoint，不写有效 checkpoint。`footnote_candidates.json`/决定验证使用 prepare schema 4，`footnote_result_audit.json` 使用 version 3，`footnote_normalization.json` 使用 schema 10。旧 prepare handoff 和旧 schema 1–9 normalization checkpoint 需重跑 `footnote-prepare → footnote-validate → footnote-apply`，无需重新 OCR。结果审计 version 1–2 的旧 normalization receipt 同样失效。apply 后还需 `polish --resume` 刷新 semantic sidecar，再运行正式 `polish-validate`。旧原始 Markdown、原 OCR 与已有归一化产物不由升级说明授权覆盖或清理，apply 按当前源重建正式派生稿。
 
