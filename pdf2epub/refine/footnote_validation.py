@@ -21,6 +21,7 @@ from .footnote_validation_audit import (
     validate_continuation_traceability,
 )
 from .footnote_validation_evidence import (
+    load_candidate_full_texts,
     load_visual_audit_manifest,
     validate_candidate_evidence,
 )
@@ -198,6 +199,17 @@ def validate_footnote_decisions(
         "footnote_mode_source": evidence["footnote_mode_source"],
         "warnings": list(report.get("warnings", [])),
     }
+    audit_data = report.get("result_audit") if isinstance(report.get("result_audit"), Mapping) else {}
+    polish_blockers = audit_data.get("polish_semantic_blockers", []) if isinstance(audit_data, Mapping) else []
+    for blocker in polish_blockers if isinstance(polish_blockers, list) else []:
+        if not isinstance(blocker, Mapping):
+            continue
+        errors.append(
+            "unresolved current Polish semantic review blocker "
+            f"({blocker.get('kind')}, {blocker.get('file')}, {blocker.get('issue_id')}, "
+            f"{blocker.get('mapping_stage')}): "
+            f"{blocker.get('message')}; {blocker.get('recovery')}"
+        )
     if errors:
         result = {
             **base_fields,
@@ -213,7 +225,6 @@ def validate_footnote_decisions(
     source_sha256: dict[str, str] = {}
     required = required_review_addresses(report)
     continuation_tasks = report.get("continuation_reviews", [])
-    audit_data = report.get("result_audit") if isinstance(report.get("result_audit"), Mapping) else {}
     result_audit_tasks = audit_data.get("findings", []) if isinstance(audit_data, Mapping) else []
     if isinstance(audit_data, Mapping) and isinstance(audit_data.get("reviewed_candidate_tasks"), list):
         result_audit_tasks = [
@@ -293,6 +304,38 @@ def validate_footnote_decisions(
     decisions = merge_region_and_flat_decisions(nested_decisions, decisions)
 
     candidates = candidate_index(report)
+    if any(
+        isinstance(decision, Mapping) and decision.get("segments") is not None
+        for decision in decisions
+    ):
+        segment_addresses = {
+            (int(decision["page"]), str(decision.get("source") or "primary").strip().lower(), int(decision["block"]))
+            for decision in decisions
+            if isinstance(decision, Mapping)
+            and decision.get("segments") is not None
+            and str(decision.get("page", "")).lstrip("-").isdigit()
+            and str(decision.get("block", "")).lstrip("-").isdigit()
+        }
+        hydrate_addresses = set()
+        for address in segment_addresses & candidates.keys():
+            candidate = candidates[address]
+            block_indices = candidate.get("block_indices")
+            if isinstance(block_indices, list) and len(block_indices) > 1:
+                errors.append(
+                    "segmented excerpts are not supported for an aggregated multi-block OCR candidate: "
+                    f"{address[0]}:{address[1]}:{address[2]}"
+                )
+                continue
+            hydrate_addresses.add(address)
+        full_texts, full_text_errors = load_candidate_full_texts(
+            output_dir, report, hydrate_addresses
+        )
+        errors.extend(full_text_errors)
+        for address, full_text in full_texts.items():
+            if address in candidates:
+                # Keep compact report previews intact; only this validation-time
+                # projection receives full text from the current sidecar evidence.
+                candidates[address]["text"] = full_text
     normalized, decision_errors, decision_review, seen = normalize_decisions(
         decisions, candidates
     )

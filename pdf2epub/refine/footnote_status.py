@@ -15,7 +15,10 @@ from .footnote_options import (
 from .footnote_continuation_review import validate_continuation_review_decisions
 from .footnote_contracts import FOOTNOTE_PREPARE_SCHEMA_VERSION
 from .pdf_evidence import pdf_evidence_mode, require_current_consensus
-from .footnote_result_review import validate_result_audit_reviews
+from .footnote_result_review import (
+    validate_applied_result_audit_reviews,
+    validate_result_audit_reviews,
+)
 from .footnote_result_audit import AUDIT_VERSION
 from .footnote_validation_evidence import validate_candidate_evidence
 from .footnote_effective_decisions import (
@@ -126,6 +129,18 @@ def footnote_normalization_status(
             "result_audit_review_stale",
             "supplementary footnote visual decisions are stale or incomplete: "
             + "; ".join(audit_errors[:5] or ["review records no longer match validation"]),
+        )
+    history_reviews, _, history_errors = validate_applied_result_audit_reviews(
+        output_dir,
+        prepared_audit.get("applied_result_audit_reviews"),
+        prepared_audit.get("applied_result_audit_review_tasks"),
+        current_tasks=current_audit_tasks,
+    )
+    if history_errors or history_reviews != prepared_audit.get("applied_result_audit_reviews", []):
+        fail(
+            "result_audit_history_stale",
+            "applied result audit history no longer matches its original/current visual evidence: "
+            + "; ".join(history_errors[:5] or ["historical reviews no longer match their evidence"]),
         )
     if validation.get("schema_version") != FOOTNOTE_PREPARE_SCHEMA_VERSION:
         fail(

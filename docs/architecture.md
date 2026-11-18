@@ -799,7 +799,7 @@ polish 或 translate Subagent。原始 OCR 单元不覆盖。
 存在多个定义时仍按顺序逐次配对，额外引用不猜测目标。
 当前 `footnote_candidates.json`、`footnote_decisions.json` 和
 `footnote_decision_validation.json` 使用 prepare/decision schema 4；尾注边界歧义及其决定独立使用
-schema 2。该输出合同已更新到 `footnote_normalization.json` schema 10，并绑定 version 3 的结果审计。旧 schema 1–9 checkpoint 会失效。
+schema 2。该输出合同已更新到 `footnote_normalization.json` schema 10，并绑定 version 4 的结果审计。旧 schema 1–9 checkpoint 会失效。
 须重新运行 `footnote-prepare`，按新 manifest 的 pending 状态复核并写决定，再运行
 `footnote-validate → footnote-apply`。无需重跑 OCR。本次文档/代码维护不自动处理书稿产物；
 恢复命令会更新准备合同，并由 apply 重建 `footnote_normalized/` 与成功 checkpoint，用户需按需
@@ -1050,14 +1050,16 @@ PDF 结构阶段采用“共享证据、分离语义”的边界：
 | `footnote_result_audit.py` | 纯函数生成源稿/归一化稿残留标记、scope 编号信号、疑似截断/未闭合定义及 apply 完整性任务 | 文件 IO、校验审核提交、推断脚注语义、移动块、自动补注或翻译 |
 | `footnote_result_review.py` | 读取并验证视觉结果审查的精确地址、决定、源/目标/sidecar 哈希与页图 freshness | 生成审计 findings、修改源/归一化稿、决定脚注语义 |
 
+Polish issue 回流诊断区分 `stale_contract` 与当前 `current_issue_mapping_failure`/`invalid_review`。后两者写入 result audit blocker 并由 `footnote-validate` fail closed；prepare 仍保留其他成功映射的视觉任务。恢复由原 Polish Reviewer 修正当前 sidecar 后重跑 `footnote-prepare`。
+
 脚注识别规则或评分发生变化时，应修改 `footnote_page_scan.py`、`footnote_continuation_regions.py` 或 `footnote_regions.py` 对应层，并覆盖主次 OCR 差异与跨页边界；候选到决定的物化规则应进入 `footnote_normalization_plan.py`，由统一计划承接；该 planner 可以读取当前证据以完成定位和计划校验，但不得写派生稿或 checkpoint。Context consumers 依赖 `footnote_unit_contexts.py` 的公开 API，不从 handoff coordinator 取 context。脚注 apply 按“前置门禁/证据快照 → block 定位和 unit/lane 归属 → 引用与定义绑定 → 编辑冲突校验 → 内存纯转换 → 原子写入派生稿 → 结果审计 → success checkpoint”的顺序运行。计划和所有绑定必须完整通过后才允许写入；源 unit 的哈希在读取原始字节时快照，写入前重新扫描 `ocr_markdown/*.md` 并与该快照逐项比较，同时先检查 `footnote_normalized/` 是否有不属于当前源 inventory 的 stale Markdown。
-apply 写入 `footnote_normalized/` 后运行 `footnote_result_audit.json`（version 3），并把其文件哈希/版本绑定到 `footnote_normalization.json`（schema 10）。有效决定使用 effective decision version 1，边界上下文投影使用 version 2。该报告也绑定源稿、归一化稿、候选报告和决定校验的当前哈希。只有审计通过，apply 才写有效 normalization checkpoint，未解决 findings 不会通过 `footnote_normalization_status()`，因此 polish/readiness/build 门禁也会阻断。即使派生 Markdown 已写出，它仍是未验证结果，不能据文件存在推断阶段完成。
+apply 写入 `footnote_normalized/` 后运行 `footnote_result_audit.json`（version 4），并把其文件哈希/版本绑定到 `footnote_normalization.json`（schema 10）。有效决定使用 effective decision version 1，边界上下文投影使用 version 2。该报告也绑定源稿、归一化稿、候选报告和决定校验的当前哈希。只有审计通过，apply 才写有效 normalization checkpoint，未解决 findings 不会通过 `footnote_normalization_status()`，因此 polish/readiness/build 门禁也会阻断。即使派生 Markdown 已写出，它仍是未验证结果，不能据文件存在推断阶段完成。
 
 apply 后的结果审计输出需视觉判读的线索，包括归一化稿中残留数字上标/疑似编号注释、可能截断或未闭合的定义、定义后的正文边界污染，以及确认候选未进入应用计划。每个非脚注例外绑定一个精确 marker occurrence identity。同一 key 或同一文本重复出现时仍逐 occurrence 核查。疑似注释内标题只有在 reviewed TOC heading span 与实际 consumed source span 于同一页唯一定位并相交时才标为 `confirmed_toc_heading_in_note`，其他情况都保持 `suspected_heading_in_note` 并交视觉复核。编号范围依据 TOC/refinement unit 与章节映射，单文件章节和多分片章节均按实际顺序检查。下降序列仅在精确页面边界分隔记录或 `section_id` 明确变化时作为编号重启，缺少边界证据时生成 `scoped_numbering_reset_uncertain` 视觉复核，不跨重启推断缺号。上游候选召回会把通用 OCR `Text` 块中行首 `<sup>…</sup>` 补入视觉任务，跨页续词若被 OCR 标为普通 `Text` 且含行内上标，在上一物理脚注开放、文本续接断词、脚注列几何对齐并有独立字号/字体或词汇证据时，也会以无 key 的低置信度精确地址进入 visual audit 和 unit context。它只创建复核任务，不自动分类或移动。后续 prepare 会把当前 apply 报告中的未决结果任务投影到同一审阅流程，仅在源稿与归一化稿哈希匹配时复用。已识别的脚注定义和缩进行续段、代码及注释排除在相应正文标记扫描外。
 
 结果审计由现有 `footnote-prepare → footnote-validate → footnote-apply` 循环处理，不增加 operator 命令或独立生产阶段。Reviewer 在 `footnote_decisions.json.result_audit_reviews` 对每个任务提交当前 task ID、证据哈希、全部指定页图和图像理由。确认脚注还要引用精确候选，并在普通决定中具有匹配角色；apply 再验证物化结果。validate 对未决任务要求重新 prepare 生成补充任务，任务仍按源地址和哈希绑定；同一任务第二轮仍不确定则为 `human_review_required`。`disabled` 下审计状态为 `not_applicable`；`endnotes_only` 跳过页脚注候选扫描，但仍审计适用的尾注定义、截断和物化完整性；单/双 OCR 和 legacy native-text 继续按当前证据模式处理。
 
-任一计划、绑定、冲突或写前 inventory 校验失败时只写无效诊断 checkpoint，不写有效 checkpoint。`footnote_candidates.json`/决定验证使用 prepare schema 4，`footnote_result_audit.json` 使用 version 3，`footnote_normalization.json` 使用 schema 10。旧 prepare handoff 和旧 schema 1–9 normalization checkpoint 需重跑 `footnote-prepare → footnote-validate → footnote-apply`，无需重新 OCR。结果审计 version 1–2 的旧 normalization receipt 同样失效。apply 后还需 `polish --resume` 刷新 semantic sidecar，再运行正式 `polish-validate`。旧原始 Markdown、原 OCR 与已有归一化产物不由升级说明授权覆盖或清理，apply 按当前源重建正式派生稿。
+任一计划、绑定、冲突或写前 inventory 校验失败时只写无效诊断 checkpoint，不写有效 checkpoint。`footnote_candidates.json`/决定验证使用 prepare schema 4，`footnote_result_audit.json` 使用 version 4，`footnote_normalization.json` 使用 schema 10。旧 prepare handoff 和旧 schema 1–9 normalization checkpoint 需重跑 `footnote-prepare → footnote-validate → footnote-apply`，无需重新 OCR。结果审计 version 1–3 的旧 normalization receipt 同样失效。apply 后还需 `polish --resume` 刷新 semantic sidecar，再运行正式 `polish-validate`。旧原始 Markdown、原 OCR 与已有归一化产物不由升级说明授权覆盖或清理，apply 按当前源重建正式派生稿。
 
 新增 PDF 结构信号时，先判断它是共享的几何/证据事实还是某个领域的语义规则。前者进入
 共享模块并补一组跨阶段测试，后者只进入对应的 prepare/apply 模块。命令 handler 只读取

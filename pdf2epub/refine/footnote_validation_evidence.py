@@ -9,6 +9,8 @@ from ..workflow_contracts import sha256_file
 from .footnote_options import EFFECTIVE_FOOTNOTE_MODES, resolve_effective_footnote_mode
 from .pdf_evidence import pdf_evidence_mode, require_current_consensus
 from .footnote_contracts import FOOTNOTE_PREPARE_SCHEMA_VERSION
+from .footnote_page_evidence import page_sidecar_index
+from .layout_evidence import text_from_block
 
 
 def validate_candidate_evidence(
@@ -126,3 +128,42 @@ def load_visual_audit_manifest(
         return {}, None
     except (OSError, UnicodeError, json.JSONDecodeError):
         return {}, "footnote visual audit manifest is invalid"
+
+
+def load_candidate_full_texts(
+    output_dir: Path,
+    report: Mapping[str, Any],
+    requested_addresses: set[tuple[int, str, int]],
+) -> tuple[dict[tuple[int, str, int], str], list[str]]:
+    """Read full candidate text from the current, hash-checked sidecars."""
+    result: dict[tuple[int, str, int], str] = {}
+    errors: list[str] = []
+    try:
+        sidecar_index = page_sidecar_index(Path(output_dir), report)
+    except (OSError, ValueError) as exc:
+        return {}, [f"cannot load current footnote sidecars: {exc}"]
+    sidecar_cache: dict[tuple[int, str], Mapping[str, Any]] = {}
+    for page, source, block in sorted(requested_addresses):
+        source_evidence = sidecar_index.get(page, {}).get(source)
+        if not isinstance(source_evidence, Mapping):
+            errors.append(f"{source} sidecar is missing for candidate page {page}")
+            continue
+        cache_key = (page, source)
+        sidecar = sidecar_cache.get(cache_key)
+        if sidecar is None:
+            try:
+                loaded = json.loads((Path(output_dir) / str(source_evidence["path"])).read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+                errors.append(f"cannot load {source} sidecar for page {page}: {exc}")
+                continue
+            sidecar = loaded if isinstance(loaded, Mapping) else {}
+            sidecar_cache[cache_key] = sidecar
+        blocks = sidecar.get("blocks") if isinstance(sidecar, Mapping) else None
+        if not isinstance(blocks, list):
+            errors.append(f"{source} sidecar has no blocks for page {page}")
+            continue
+        if block < 0 or block >= len(blocks) or not isinstance(blocks[block], Mapping):
+            errors.append(f"{source} sidecar has no exact block {block} for page {page}")
+            continue
+        result[(page, source, block)] = text_from_block(blocks[block])
+    return result, errors

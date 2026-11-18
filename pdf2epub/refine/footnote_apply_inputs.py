@@ -20,7 +20,10 @@ from .endnote_review import (
 )
 from .pdf_evidence import pdf_evidence_mode, require_current_consensus
 from .footnote_continuation_review import validate_continuation_review_decisions
-from .footnote_result_review import validate_result_audit_reviews
+from .footnote_result_review import (
+    validate_applied_result_audit_reviews,
+    validate_result_audit_reviews,
+)
 from .footnote_validation_evidence import validate_candidate_evidence
 
 
@@ -179,6 +182,17 @@ def load_footnote_apply_inputs(
         raise FootnoteApplyInputError(
             "footnote result audit evidence is stale or incomplete: "
             + "; ".join(audit_errors[:5] or ["review records no longer match validation"])
+        )
+    history_reviews, _, history_errors = validate_applied_result_audit_reviews(
+        output_dir,
+        audit_data.get("applied_result_audit_reviews"),
+        audit_data.get("applied_result_audit_review_tasks"),
+        current_tasks=current_audit_tasks,
+    )
+    if history_errors or history_reviews != audit_data.get("applied_result_audit_reviews", []):
+        raise FootnoteApplyInputError(
+            "applied footnote result audit history is stale: "
+            + "; ".join(history_errors[:5] or ["historical reviews no longer match their evidence"])
         )
     _, continuation_errors = validate_continuation_review_decisions(
         output_dir,

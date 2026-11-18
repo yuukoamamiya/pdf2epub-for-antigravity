@@ -190,6 +190,54 @@ def apply_footnote_normalization(
         for chapter, notes in edit_plan.notes_by_chapter.items()
         for note in notes
     ]
+    prepared_audit = report.get("result_audit") if isinstance(report.get("result_audit"), Mapping) else {}
+    candidate_audit_tasks = prepared_audit.get("findings", []) if isinstance(prepared_audit, Mapping) else []
+    prior_applied_reviews = [
+        dict(item)
+        for item in (prepared_audit.get("applied_result_audit_reviews") or [])
+        if isinstance(item, Mapping) and item.get("task_id")
+    ]
+    current_reviewed_tasks = [
+        dict(item)
+        for item in (validation.get("result_audit_reviews") or [])
+        if isinstance(item, Mapping) and item.get("task_id")
+    ]
+    merged_by_id: dict[str, dict[str, Any]] = {
+        str(item["task_id"]): item for item in prior_applied_reviews
+    }
+    for item in current_reviewed_tasks:
+        merged_by_id[str(item["task_id"])] = item
+    reviewed_audit_tasks = list(merged_by_id.values())
+    prior_review_tasks = prepared_audit.get("applied_result_audit_review_tasks", [])
+    current_review_tasks = [
+        *(prepared_audit.get("reviewed_candidate_tasks", [])
+          if isinstance(prepared_audit.get("reviewed_candidate_tasks"), list) else []),
+        *(candidate_audit_tasks if isinstance(candidate_audit_tasks, list) else []),
+    ]
+    review_task_by_id = {
+        str(item.get("task_id")): dict(item)
+        for item in (prior_review_tasks if isinstance(prior_review_tasks, list) else [])
+        if isinstance(item, Mapping) and item.get("task_id")
+    }
+    # Current prepared tasks override carried snapshots so the applied review
+    # is bound to the exact evidence revalidated in this preparation.
+    review_task_by_id.update({
+        str(item.get("task_id")): dict(item)
+        for item in current_review_tasks
+        if isinstance(item, Mapping) and item.get("task_id")
+    })
+    current_exception_reviews: list[dict[str, Any]] = []
+    for review in reviewed_audit_tasks:
+        review_task = review_task_by_id.get(str(review.get("task_id") or ""))
+        target_unchanged = (
+            review_task is None
+            or review_task.get("evidence_origin") != "normalized_target"
+            or str(review_task.get("evidence_target_sha256") or "")
+            == str(target_hashes.get(str(review_task.get("file") or "")) or "")
+        )
+        if target_unchanged:
+            current_exception_reviews.append(review)
+    reviewed_audit_tasks = current_exception_reviews
     page_texts: dict[int, str] = {}
     try:
         from ..ocr_correction import select_refinement_pages
@@ -211,7 +259,7 @@ def apply_footnote_normalization(
         mode=report_footnote_mode,
         decisions=validation_for_resolution.get("decisions", []),
         expected_notes=expected_notes,
-        current_exceptions=validation.get("result_audit_reviews", []),
+        current_exceptions=reviewed_audit_tasks,
         resolved_blocks=edit_plan.resolved_blocks,
         toc_tree=inputs.toc_tree,
         page_texts=page_texts,
@@ -220,9 +268,6 @@ def apply_footnote_normalization(
     # that status checks on disk, rather than normalized in-memory strings.
     result_audit["source_sha256"] = source_hashes
     result_audit["target_sha256"] = target_hashes
-    prepared_audit = report.get("result_audit") if isinstance(report.get("result_audit"), Mapping) else {}
-    candidate_audit_tasks = prepared_audit.get("findings", []) if isinstance(prepared_audit, Mapping) else []
-    reviewed_audit_tasks = validation.get("result_audit_reviews", [])
     resolved_addresses = {
         (int(item.get("page", -1)), str(item.get("source") or "primary"), int(item.get("block", -1)))
         for item in edit_plan.resolved_blocks if isinstance(item, Mapping)
@@ -278,6 +323,11 @@ def apply_footnote_normalization(
     ]
     result_audit["admitted_candidates"] = newly_admitted
     result_audit["applied_result_audit_reviews"] = list(reviewed_audit_tasks) if isinstance(reviewed_audit_tasks, list) else []
+    result_audit["applied_result_audit_review_tasks"] = [
+        review_task_by_id[str(item["task_id"])]
+        for item in reviewed_audit_tasks
+        if isinstance(item, Mapping) and str(item.get("task_id") or "") in review_task_by_id
+    ]
     if result_audit.get("findings"):
         result_audit["valid"] = False
         result_audit["status"] = "review_required"

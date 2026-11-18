@@ -17,7 +17,7 @@ from .endnote_review import _inside_inline_code_or_math
 from .endnote_scopes import markdown_fence_mask
 from .footnote_structure import FOOTNOTE_STRUCTURE_EXEMPT_TYPES
 
-AUDIT_VERSION = 3
+AUDIT_VERSION = 4
 AUDIT_FILENAME = "footnote_result_audit.json"
 
 _HTML_COMMENT_RE = re.compile(r"(?s)<!--.*?-->")

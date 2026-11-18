@@ -734,6 +734,13 @@ def marker_spans(
     for match in marker_matches:
         if not is_inside_definition_line(match.start()):
             append_span(match.start(), match.end(), "sup")
+    if not special_label:
+        trailing_paren_pattern = (
+            r"<sup\b[^>]*>[\s<«»\"'>]*" + escaped + r"\s*\)[\s<«»\"'>]*</sup>"
+        )
+        for match in re.finditer(trailing_paren_pattern, source, flags=re.IGNORECASE):
+            if not is_inside_definition_line(match.start()):
+                append_span(match.start(), match.end(), "sup_trailing_paren")
     for match in _MARKDOWN_REF_RE.finditer(source):
         if match.group("key") == str(key) and not is_inside_definition_line(match.start()):
             append_span(match.start(), match.end(), "markdown")

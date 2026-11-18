@@ -464,6 +464,38 @@ def inline_ordered_list_warning(
         if _leading_footnote_key(_text_from_block(previous)) is None:
             break
         run_start -= 1
+    # A prose list is a sequential run, not merely a numbered block after
+    # sentence punctuation. Require increasing numeric labels and inspect the
+    # end of the run: a run that reaches the page tail may be real notes.
+    run_keys = [
+        _leading_footnote_key(_text_from_block(blocks[index]))
+        for index in range(run_start, block_index + 1)
+    ]
+    if not run_keys or any(not key or not str(key).isdigit() for key in run_keys):
+        return None
+    if any(int(right) != int(left) + 1 for left, right in zip(run_keys, run_keys[1:])):
+        return None
+    run_end = block_index
+    expected_next = int(run_keys[-1]) + 1
+    while run_end + 1 < len(blocks):
+        following = blocks[run_end + 1]
+        if not isinstance(following, Mapping):
+            break
+        following_key = _leading_footnote_key(_text_from_block(following))
+        if following_key is None:
+            break
+        if not str(following_key).isdigit():
+            break
+        if int(following_key) != expected_next:
+            return None
+        run_end += 1
+        expected_next += 1
+    if run_end > block_index:
+        run_end_box = _normalise_bbox(blocks[run_end], sidecar)
+        if run_end_box and run_end_box[3] >= float(content_bottom) - bottom_margin:
+            return None
+    if run_end == run_start:
+        return None
     if run_start <= 0:
         return None
     context = blocks[run_start - 1]

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from pdf2epub.refine.footnote_layout import layout_scope, table_adjacent
+from pdf2epub.refine.footnote_layout import inline_ordered_list_warning, layout_scope, table_adjacent
 from pdf2epub.refine.footnote_regions import build_page_footnote_regions
 from pdf2epub.refine.footnote_prepare import prepare_footnote_candidates
 
@@ -177,6 +177,47 @@ def test_layout_scope_reports_body_lane_and_margin_note_separately():
     assert body_scope["placement"] == "column_left"
     assert margin_scope["placement"] == "margin_right"
     assert margin_scope["scope_id"] != body_scope["scope_id"]
+
+
+def test_inline_numbered_list_is_not_suppressed_when_later_run_reaches_page_tail():
+    blocks = [
+        _block("Consider the following steps:", [100, 100, 900, 150], "Text"),
+        _block("1. first", [100, 200, 900, 250], "Text"),
+        _block("2. second", [100, 300, 900, 350], "Text"),
+        _block("3. third", [100, 780, 900, 830], "Text"),
+    ]
+    sidecar = {"coordinate_system": "normalized", "blocks": blocks}
+    profile = {
+        "content_bottom": 0.83,
+        "tail_tolerance": 0.03,
+        "median_block_height": 0.05,
+    }
+
+    assert inline_ordered_list_warning(sidecar, 1, [0.1, 0.2, 0.9, 0.25], layout_profile=profile) is None
+
+
+def test_inline_numbered_list_requires_consecutive_numbering():
+    blocks = [
+        _block("Consider these:", [100, 100, 900, 150], "Text"),
+        _block("1. first", [100, 200, 900, 250], "Text"),
+        _block("3. third", [100, 300, 900, 350], "Text"),
+    ]
+    sidecar = {"coordinate_system": "normalized", "blocks": blocks}
+    profile = {"content_bottom": 0.35, "tail_tolerance": 0.02, "median_block_height": 0.05}
+
+    assert inline_ordered_list_warning(sidecar, 1, [0.1, 0.2, 0.9, 0.25], layout_profile=profile) is None
+
+
+def test_inline_numbered_list_does_not_suppress_an_isolated_numbered_paragraph():
+    blocks = [
+        _block("Consider these:", [100, 100, 900, 150], "Text"),
+        _block("1. one numbered paragraph", [100, 200, 900, 250], "Text"),
+        _block("Unnumbered prose continues.", [100, 300, 900, 350], "Text"),
+    ]
+    sidecar = {"coordinate_system": "normalized", "blocks": blocks}
+    profile = {"content_bottom": 0.35, "tail_tolerance": 0.02, "median_block_height": 0.05}
+
+    assert inline_ordered_list_warning(sidecar, 1, [0.1, 0.2, 0.9, 0.25], layout_profile=profile) is None
 
 
 def test_table_adjacent_note_scope_exposes_nearby_table_block():

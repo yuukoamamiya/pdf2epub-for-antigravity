@@ -689,8 +689,8 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    `candidate_evidence_id` 的有效决定集，apply 必须重算并逐项比对该集合。
 
    当前脚注 prepare/decision validation 使用 schema 4；尾注边界歧义及其决定使用独立 schema 2，
-   normalization 使用 schema 10，结果审计使用独立 version 3。旧 normalization schema 1–9、
-   旧 result audit version 1–2 和旧 prepare checkpoint 不能复用，
+   normalization 使用 schema 10，结果审计使用独立 version 4。旧 normalization schema 1–9、
+   旧 result audit version 1–3 和旧 prepare checkpoint 不能复用，
    endnote decision schema 1 仅兼容没有 inline 候选的旧式行边界清单，当前新决定文件使用 schema 2：
    旧 prepare schema 4 保持有效，若旧 validation 缺少有效决定集或 `source_sha256`，重跑
    `footnote-validate → footnote-apply`。旧 schema 9 normalization 也重跑 validate/apply，
@@ -828,6 +828,10 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    schema 6 要求当前脚注语义 sidecar 和双向上下文 freshness。恢复旧 polish 目标时先运行 `polish --resume`，
    让 worker 复核已有目标并写入当前 semantic sidecar，再运行正式 `polish-validate` 更新 receipt 与 validated 副本。
    只把内容或语义复核实际失败的目标重新润色；旧目标可作为复核输入保留。
+   `footnote-prepare` 回流当前 polish semantic issue 时，先区分真实 hash/contract stale 与当前 issue excerpt 无法唯一
+   映射到 raw source/primary OCR block。后者保留其他可映射任务，但写入结构化 blocker，`footnote-validate` 必须失败；
+   由原 Polish Reviewer 修正现有 semantic sidecar 的精确 excerpt 后直接重跑 `footnote-prepare`。不要用
+   `polish --resume` 绕过该 blocker，也不要手工改写语义或伪造 OCR 地址。
    若 translation context/receipt 旧，先运行 `translate --resume` 刷新 manifest/context，但不要按首轮
    pending 立即派发；接着 `translate-validate` 校验现有译文，然后第二次 `translate --resume`，再按
    当前报告只派发仍失效的 assignment，并完成全量 `translate-validate`。逐文件 ledger 若单独作为恢复

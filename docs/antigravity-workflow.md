@@ -976,7 +976,7 @@ validation 收据一致，任何一项变化都会阻断 apply，apply 不会静
 没有歧义时不要求 ambiguity/decision 哈希。
 
 脚注决定、视觉校验与 apply 后还会运行只读结果审计，报告写入
-`footnote_result_audit.json`（version 3）。审计检查正文残留数字上标或疑似编号定义、明确多分片
+`footnote_result_audit.json`（version 4）。审计检查正文残留数字上标或疑似编号定义、明确多分片
 scope 内的编号缺口、可能未闭合/截断的注释定义，以及 apply 后的边界和物化完整性。数字上标、编号样式
 或标点只构成线索，审计不会替 Subagent 决定语义、移动注释或生成译文。Markdown 代码/注释、已识别的
 脚注定义及其续行不会作为普通正文残留标记扫描。编号范围依据 TOC/refinement unit 与章节映射，单文件章节和多分片章节均按实际顺序检查。下降序列仅在精确页面边界分隔记录或 `section_id` 明确变化时作为编号重启；缺少边界证据时生成 `scoped_numbering_reset_uncertain` 视觉复核，不跨重启推断缺号。
@@ -994,6 +994,7 @@ Subagent 将结果放入既有 `footnote_decisions.json` 的 `result_audit_revie
 遗漏或未解决的发现会阻止有效 `footnote_normalization.json` checkpoint，因而不能通过 polish 和构建门禁。
 校验要求再次复核时，重跑同一 `footnote-prepare` 生成按源地址和哈希绑定的补充视觉任务，再运行
 `footnote-validate → footnote-apply`。相同任务第二次仍不确定时升级为 `human_review_required`，停止自动循环。
+已通过的跨轮次例外会连同原任务证据快照保存；每次 `footnote-prepare` 都重新核对 sidecar、页面 Markdown、归一化目标和页图哈希，任一证据变化就撤销旧例外并重新生成待复核任务。审计 version 4 起要求该快照；旧审计收据需重新准备、校验和 apply。
 不要以规则自动迁移上标、猜测注释归属或补译内容。
 
 非脚注例外绑定到具体 marker occurrence 的 task/evidence identity，同一 key 或同一文本重复出现时，每个位置仍单独核查，不能用一个例外覆盖全部匹配。疑似尾注/脚注内标题只有当已复核 TOC 标题范围、实际 consumed source span 与其 page Markdown 的定位在同页唯一相交时才报告 `confirmed_toc_heading_in_note`，否则一律作为 `suspected_heading_in_note` 视觉线索，不据此自动移出注释。
@@ -1047,14 +1048,20 @@ Polish sidecar 中的 `issues[]` 只报告疑点，不决定脚注归属。`foot
 文件的 review，再运行正式 `polish-validate`。
 
 当前回流要求 source excerpt 在 Polish 输入、raw refinement Markdown 和一个 primary OCR block 中都能唯一定位。
-摘录跨多个 OCR block/page、重复出现或无法回映时，不会合并多个 block 或猜测归属；prepare 保留 stale/recovery
-提示并跳过该 issue 的视觉决定，不阻断其他当前任务。恢复时通过 `polish --resume` 让 Worker 提交一个仍能精确说明
-疑点、且唯一落在单个 primary block 内的连续 `source_excerpt`，随后重跑 `footnote-prepare`。如果原文确实跨 block，
-先按每个确切 OCR block 分别报告可定位的 issue；没有唯一映射时保持人工复核，不得手工伪造视觉地址或 checkpoint。
+摘录跨多个 OCR block/page、重复出现或无法回映时，不会合并多个 block 或猜测归属。`footnote-prepare` 将真实哈希/合同
+过期记录为 `stale_contract`，提示先运行 `polish --resume` 刷新 review，再重跑 prepare。若合同哈希仍有效但当前 issue
+无法唯一映射，则记录带有 issue id、失败映射阶段、匹配数和恢复步骤的 `current_issue_mapping_failure`；哈希有效但
+sidecar shape/coverage 无效时记录 `invalid_review`。这两类均保留其他可映射任务继续准备，并将 result audit 置为 blocked；
+`footnote-validate` 会明确拒绝通过，因此不能 apply 或进入后续阶段。
+恢复时让原 Polish Reviewer 修正现有 semantic sidecar 中该 issue 的 `source_excerpt`：它必须是当前 Polish/raw source
+共同存在且唯一、并完整落在一个 primary OCR block 内的连续摘录。Reviewer 更新 sidecar 后直接重跑
+`footnote-prepare`，让正式哈希合同和映射重新校验；不需要先运行会被 footnote gate 挡住的 `polish --resume`，也不得
+由操作员手改语义、伪造 OCR 地址或 checkpoint。如果原文确实跨 block，Reviewer 按每个确切 OCR block 分别报告可定位
+的 issue；无法唯一映射时继续保持阻断并转人工核查。
 
 `footnote_candidates.json`、`footnote_decisions.json` 和 `footnote_decision_validation.json`
 使用 prepare/decision schema 4；`endnote_definition_ambiguities.json`、其 decisions 与 validation
-使用独立 schema 2，`footnote_result_audit.json` 使用独立 version 3，`footnote_normalization.json` 使用 schema 10，TOC 使用 schema 2。脚注 effective decision version 为 1，版本号彼此独立。旧 normalization schema 1–9、结果审计 version 1–2 的 receipt 都需重新 prepare、validate、apply，不要求重新 OCR。
+使用独立 schema 2，`footnote_result_audit.json` 使用独立 version 4，`footnote_normalization.json` 使用 schema 10，TOC 使用 schema 2。脚注 effective decision version 为 1，版本号彼此独立。旧 normalization schema 1–9、结果审计 version 1–3 的 receipt 都需重新 prepare、validate、apply，不要求重新 OCR。
 prepare manifest 另以 SHA-256 绑定 compact `footnote_review_packet.json`；Reviewer 使用 packet，完整
 candidate report 留作审计/恢复。validation 写回决定不会重建 packet。packet 缺失或哈希不符时须重跑
 `footnote-prepare`，旧 handoff 不得静默加载。
@@ -1069,7 +1076,7 @@ manifest/prompt，并由 apply 重建 `footnote_normalized/` 与成功 checkpoin
 应在恢复前备份。归一化源变化可能
 使 polish、翻译或 EPUB 构建 checkpoint 过期；先查看 `status` 与 pending/invalid 报告，按门禁
 恢复，不要直接构建。仅合同升级本身不要求重跑 OCR；只有源页或证据实际过期时才回到 OCR。
-结果审计 version 1–2 的 normalization receipt 不再 current。保留原始 OCR 与原稿，运行
+结果审计 version 1–3 的 normalization receipt 不再 current。保留原始 OCR 与原稿，运行
 `footnote-prepare`，处理新 manifest 的待复核任务，再运行 `footnote-validate` 和 `footnote-apply` 重建归一化派生稿。
 随后运行 `polish --resume` 刷新受影响单元的 semantic review，再正式 `polish-validate`；不手工改 receipt 哈希。
 

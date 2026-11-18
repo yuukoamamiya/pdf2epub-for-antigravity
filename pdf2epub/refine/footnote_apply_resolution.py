@@ -643,6 +643,8 @@ def bind_note_markers(
             continue
         marker_start, marker_end, marker_kind = marker_candidates[-1]
         replacement = f"[^{note['output_key']}]"
+        if marker_kind == "sup_trailing_paren":
+            replacement += ")"
         if marker_kind == "markdown" and source[marker_start:marker_end] == replacement:
             continue
         edits_by_file[target_file].append(

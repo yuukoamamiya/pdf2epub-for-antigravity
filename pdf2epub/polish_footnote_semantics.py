@@ -98,10 +98,11 @@ def validate_semantic_review_sidecar(
 ) -> dict[str, Any]:
     """Validate a model-authored review sidecar against prepared and current data."""
     errors: list[str] = []
+    stale_fields: list[str] = []
     try:
         data = json.loads(Path(sidecar_path).read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        return {"valid": False, "errors": [f"review sidecar is missing or unreadable: {exc}"]}
+        return {"valid": False, "errors": [f"review sidecar is missing or unreadable: {exc}"], "stale_fields": []}
     if not isinstance(data, Mapping):
         return {"valid": False, "errors": ["review sidecar must be a JSON object"]}
 
@@ -120,8 +121,10 @@ def validate_semantic_review_sidecar(
     ):
         if not _valid_hash(expected) or data.get(key) != expected:
             errors.append(f"review sidecar {key} is missing, malformed, or stale")
+            stale_fields.append(key)
     if contract.get("source_sha256") != expected_source:
         errors.append("prepared source changed after semantic review contract creation")
+        stale_fields.append("contract.source_sha256")
 
     status = data.get("status")
     if not isinstance(status, str) or status not in {"clear", "issues"}:
@@ -201,6 +204,7 @@ def validate_semantic_review_sidecar(
         "contract_valid": not errors,
         "status": status,
         "errors": errors,
+        "stale_fields": sorted(set(stale_fields)),
         "issues": normalized_issues,
         "source_sha256": expected_source,
         "target_sha256": expected_target,
@@ -237,6 +241,7 @@ def validate_prepared_file_review(
     if not isinstance(contract, Mapping):
         return {"valid": False, "contract_valid": False, "status": "missing", "errors": ["assigned file has no semantic review contract"], "issues": []}
     errors: list[str] = []
+    stale_fields: list[str] = []
     unit_hashes = manifest.get("unit_context_sha256", {})
     boundary_hashes = manifest.get("boundary_context_sha256", {})
     boundary_sources = manifest.get("boundary_context_sources", {})
@@ -252,9 +257,11 @@ def validate_prepared_file_review(
     for key in ("source_sha256", "context_sha256", "unit_context_sha256", "boundary_context_sha256", "expected_note_ids", "has_boundary_context", "sidecar", "coverage_requirements"):
         if contract.get(key) != expected.get(key):
             errors.append(f"prepared semantic review contract {key} is stale or inconsistent")
+            stale_fields.append(f"contract.{key}")
     parent_source_hashes = manifest.get("source_sha256", {})
     if not isinstance(parent_source_hashes, Mapping) or parent_source_hashes.get(filename) != expected["source_sha256"]:
         errors.append("parent prepared source hash is missing or stale")
+        stale_fields.append("manifest.source_sha256")
     sidecar_relative = contract.get("sidecar")
     if not isinstance(sidecar_relative, str):
         errors.append("prepared semantic review sidecar path is malformed")
@@ -283,6 +290,7 @@ def validate_prepared_file_review(
         result["errors"] = errors + list(result.get("errors", []))
         result["valid"] = False
         result["contract_valid"] = False
+    result["stale_fields"] = sorted(set([*result.get("stale_fields", []), *stale_fields]))
     result["sidecar"] = str(sidecar_relative or "")
     try:
         result["sidecar_sha256"] = hashlib.sha256(sidecar.read_bytes()).hexdigest()

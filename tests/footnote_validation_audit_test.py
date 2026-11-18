@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 import pytest
 
@@ -14,6 +15,47 @@ from pdf2epub.refine.footnote_validation_audit import (
     required_review_addresses,
     validate_continuation_traceability,
 )
+from pdf2epub.refine.footnote_validation_evidence import load_candidate_full_texts
+from pdf2epub.workflow_contracts import sha256_file
+
+
+def test_segment_validation_uses_full_hash_bound_sidecar_text(tmp_path: Path):
+    from pdf2epub.refine.footnote_candidates import candidate_for_block
+
+    full_text = "1 " + ("ordinary note text " * 25) + "TAIL SEGMENT"
+    sidecar = {
+        "coordinate_system": "normalized",
+        "blocks": [{"text": full_text, "label": "Footnote", "bbox": [0.1, 0.9, 0.9, 0.98]}],
+    }
+    sidecar_path = tmp_path / "pages" / "page_001.ocr.json"
+    sidecar_path.parent.mkdir()
+    sidecar_path.write_text(json.dumps(sidecar), encoding="utf-8")
+    candidate = candidate_for_block(
+        1, 0, sidecar["blocks"][0], sidecar,
+        bottom_ratio=0.5,
+    )
+    assert candidate is not None
+    assert len(candidate["text"]) == 240
+    report = {
+        "ocr_evidence_mode": "single_ocr",
+        "sidecar_sha256": {"pages/page_001.ocr.json": sha256_file(sidecar_path)},
+        "pages": [{"page": 1, "candidates": [candidate]}],
+    }
+    full_texts, errors = load_candidate_full_texts(tmp_path, report, {(1, "primary", 0)})
+    assert errors == []
+    candidates = candidate_index(report)
+    candidates[(1, "primary", 0)]["text"] = full_texts[(1, "primary", 0)]
+
+    normalized, errors, _, _ = normalize_decisions([{
+        "page": 1,
+        "block": 0,
+        "role": "body",
+        "override": True,
+        "segments": [{"text": "TAIL SEGMENT", "role": "footnote_start", "key": "1"}],
+    }], candidates)
+
+    assert errors == []
+    assert normalized[0]["segments"][0]["text"] == "TAIL SEGMENT"
 
 
 def test_required_review_addresses_preserves_fail_closed_malformed_entries():

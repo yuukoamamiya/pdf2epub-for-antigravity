@@ -17,7 +17,7 @@ def polish_semantic_issue_tasks(
     source_texts: Mapping[str, str],
     sidecar_index: Mapping[int, Mapping[str, Mapping[str, Any]]],
     page_report: Mapping[str, Any],
-) -> tuple[list[dict[str, Any]], list[str]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Route current polish semantic issues back to exact OCR evidence.
 
     Polish sidecars identify a source excerpt but do not decide ownership. An
@@ -31,7 +31,12 @@ def polish_semantic_issue_tasks(
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        return [], [f"polish_subagent_manifest.json (unreadable: {exc})"]
+        return [], [{
+            "kind": "stale_contract",
+            "file": "polish_subagent_manifest.json",
+            "message": f"unreadable: {exc}",
+            "recovery": "repair/refresh the polish manifest, rerun polish --resume, then footnote-prepare",
+        }]
     source_dir = str(manifest.get("source_dir") or "") if isinstance(manifest, Mapping) else ""
     target_dir = str(manifest.get("target_dir") or "") if isinstance(manifest, Mapping) else ""
     polish_source_root = (output_dir / source_dir).resolve()
@@ -40,9 +45,46 @@ def polish_semantic_issue_tasks(
         polish_source_root.relative_to(output_dir.resolve())
         target_root.relative_to(output_dir.resolve())
     except ValueError:
-        return [], ["polish_subagent_manifest.json (source or target directory escapes output workspace)"]
+        return [], [{
+            "kind": "stale_contract",
+            "file": "polish_subagent_manifest.json",
+            "message": "source or target directory escapes output workspace",
+            "recovery": "repair/refresh the polish manifest, rerun polish --resume, then footnote-prepare",
+        }]
     tasks: list[dict[str, Any]] = []
-    stale_files: list[str] = []
+    diagnostics: list[dict[str, Any]] = []
+
+    def diagnose(
+        kind: str,
+        filename: str,
+        message: str,
+        *,
+        issue_id: str | None = None,
+        stage: str | None = None,
+        match_count: int | None = None,
+    ) -> None:
+        row: dict[str, Any] = {
+            "kind": kind,
+            "file": filename,
+            "message": message,
+            "recovery": (
+                "rerun polish --resume, then footnote-prepare"
+                if kind == "stale_contract"
+                else (
+                    "have the original Polish Reviewer repair this current semantic sidecar; "
+                    "for mapping failures, revise source_excerpt to a unique continuous excerpt "
+                    "in one primary OCR block; if it spans blocks, report separately per block; "
+                    "then rerun footnote-prepare"
+                )
+            ),
+        }
+        if issue_id:
+            row["issue_id"] = issue_id
+        if stage:
+            row["mapping_stage"] = stage
+        if match_count is not None:
+            row["match_count"] = match_count
+        diagnostics.append(row)
     semantic = manifest.get("footnote_semantics") if isinstance(manifest, Mapping) else None
     semantic_files = semantic.get("files") if isinstance(semantic, Mapping) else None
     for record in records:
@@ -53,7 +95,7 @@ def polish_semantic_issue_tasks(
         polish_source_path = polish_source_root / filename
         target_path = target_root / filename
         if raw_source is None or not polish_source_path.is_file() or not target_path.is_file():
-            stale_files.append(filename)
+            diagnose("stale_contract", filename, "current source, polished source, or target file is missing")
             continue
         polish_source = polish_source_path.read_text(encoding="utf-8")
         target = target_path.read_text(encoding="utf-8")
@@ -63,18 +105,60 @@ def polish_semantic_issue_tasks(
         if review is None:
             continue
         if review.get("contract_valid") is not True:
-            stale_files.append(filename)
-            continue
+            stale_fields = review.get("stale_fields")
+            if isinstance(stale_fields, list) and stale_fields:
+                diagnose(
+                    "stale_contract", filename,
+                    "semantic review hashes or prepared contract snapshot are no longer current: "
+                    + ", ".join(str(field) for field in stale_fields),
+                )
+                continue
+            raw_issues = review.get("issues")
+            if not isinstance(raw_issues, list):
+                diagnose("invalid_review", filename, "current semantic sidecar is malformed and has no usable issues list")
+                continue
+            if not raw_issues and review.get("errors"):
+                diagnose("invalid_review", filename, "current semantic sidecar failed validation and provides no usable issues to map")
+                continue
+            invalid_issue_rows = [
+                item for item in raw_issues
+                if not isinstance(item, Mapping) or not item.get("issue_id") or not item.get("source_excerpt")
+            ]
+            if invalid_issue_rows:
+                diagnose(
+                    "invalid_review", filename,
+                    "current semantic sidecar contains malformed issue entries",
+                )
+                continue
+            if review.get("errors"):
+                diagnose(
+                    "invalid_review", filename,
+                    "current semantic sidecar failed shape or coverage validation: "
+                    + "; ".join(str(error) for error in review.get("errors", [])[:5]),
+                )
+            # Preserve parseable unresolved issues so mapping failures become explicit blockers.
         for issue in review.get("issues", []) or []:
             excerpt = str(issue.get("source_excerpt") or "")
             polish_first = polish_source.find(excerpt)
             if not excerpt or polish_first < 0 or polish_source.find(excerpt, polish_first + 1) >= 0:
-                stale_files.append(f"{filename} ({issue.get('issue_id')}: source excerpt is not unique)")
+                diagnose(
+                    "current_issue_mapping_failure", filename,
+                    "source_excerpt is absent or not unique in the current Polish source",
+                    issue_id=str(issue.get("issue_id") or ""),
+                    stage="polish_source",
+                    match_count=0 if polish_first < 0 else 2,
+                )
                 continue
             from .footnote_matching import find_exact_signature_spans
             raw_spans = find_exact_signature_spans(raw_source, excerpt)
             if len(raw_spans) != 1:
-                stale_files.append(f"{filename} ({issue.get('issue_id')}: source excerpt does not map uniquely to raw refined source)")
+                diagnose(
+                    "current_issue_mapping_failure", filename,
+                    "source_excerpt does not map uniquely to current raw refinement Markdown",
+                    issue_id=str(issue.get("issue_id") or ""),
+                    stage="raw_refined_source",
+                    match_count=len(raw_spans),
+                )
                 continue
             raw_start, raw_end = raw_spans[0]
             raw_excerpt = raw_source[raw_start:raw_end]
@@ -97,8 +181,12 @@ def polish_semantic_issue_tasks(
                             primary_matches.append((page, str(source_kind), block_index, entry, block))
             unique_matches = {(page, kind, block) for page, kind, block, _, _ in primary_matches}
             if len(unique_matches) != 1:
-                stale_files.append(
-                    f"{filename} ({issue.get('issue_id')}: excerpt maps to {len(unique_matches)} primary OCR blocks; edit source_excerpt to a unique single-block excerpt, then rerun footnote-prepare)"
+                diagnose(
+                    "current_issue_mapping_failure", filename,
+                    f"source_excerpt maps to {len(unique_matches)} current primary OCR blocks",
+                    issue_id=str(issue.get("issue_id") or ""),
+                    stage="primary_ocr_block",
+                    match_count=len(unique_matches),
                 )
                 continue
             page, source_kind, block_index = next(iter(unique_matches))
@@ -175,7 +263,7 @@ def polish_semantic_issue_tasks(
                 "pages": sorted(linked_pages),
                 "context_status": "exact_source_excerpt_mapped_to_current_ocr_block",
             })
-    return tasks, stale_files
+    return tasks, diagnostics
 
 
 

@@ -485,6 +485,21 @@ def test_image_confirmed_body_candidate_is_not_moved_but_same_key_marker_needs_e
     assert validation["valid"] is True, validation.get("errors")
     result = apply_footnote_normalization(tmp_path)
     assert result["valid"] is True, result.get("errors")
+    audit_after_apply = json.loads((tmp_path / "footnote_result_audit.json").read_text(encoding="utf-8"))
+    applied_reviews = audit_after_apply["applied_result_audit_reviews"]
+    assert len(applied_reviews) == 1
+    assert applied_reviews[0]["task_id"] == superscript_task["task_id"]
+    assert applied_reviews[0]["evidence_sha256"] == superscript_task["evidence_sha256"]
+    assert applied_reviews[0]["outcome"] == "legitimate_non_footnote"
+    assert len(audit_after_apply["applied_result_audit_review_tasks"]) == 1
+    third_paths = prepare_footnote_subagent(tmp_path, book_title="Synthetic Review Book")
+    third_report = json.loads(third_paths["report"].read_text(encoding="utf-8"))
+    assert third_report["result_audit"]["applied_result_audit_reviews"] == audit_after_apply["applied_result_audit_reviews"]
+    third_validation = validate_footnote_decisions(tmp_path)
+    assert third_validation["valid"] is True, third_validation.get("errors")
+    third_apply = apply_footnote_normalization(tmp_path)
+    assert third_apply["valid"] is True, third_apply.get("errors")
+    assert footnote_normalization_status(tmp_path)["current"] is True
     normalized = (tmp_path / "footnote_normalized" / "chapter_1.md").read_text(encoding="utf-8")
     assert "In text <sup>36</sup>" in normalized
     assert "[^36]:" not in normalized

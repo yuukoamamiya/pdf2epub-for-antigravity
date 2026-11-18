@@ -170,25 +170,23 @@ def validate_result_audit_reviews(
             if _sha(exact_block) != task.get("evidence_sha256"):
                 errors.append(f"result audit review {task_id} no longer identifies its exact Markdown block")
                 continue
-        elif task.get("evidence_origin") == "normalized_target":
+        if task.get("evidence_origin") == "normalized_target":
             name = str(task.get("file") or "")
             target_path = root / "footnote_normalized" / name
             if not name or Path(name).name != name or not target_path.is_file() or sha256_file(target_path) != task.get("evidence_target_sha256"):
                 errors.append(f"result audit review {task_id} normalized target changed")
                 continue
-            target_text = target_path.read_text(encoding="utf-8")
-            if str(task.get("code") or "").startswith("applied_note_"):
-                exact_block = "plan-bound materialization evidence"
-            else:
+            if not isinstance(source_address, Mapping) and not str(task.get("code") or "").startswith("applied_note_"):
+                target_text = target_path.read_text(encoding="utf-8")
                 exact_block = next((line.strip() for line in target_text.splitlines() if _sha(line.strip()) == task.get("evidence_sha256")), "")
-            if not exact_block:
-                definitions, _ = collect_footnote_definition_blocks(_visible(target_text).splitlines())
-                key = str(task.get("key") or "")
-                body = next((body for definition_key, body in definitions.values() if str(definition_key) == key), None)
-                exact_block = f"[^{key}]: {body}" if body is not None else ""
-            if _sha(exact_block) != task.get("evidence_sha256"):
-                errors.append(f"result audit review {task_id} no longer identifies its exact normalized block")
-                continue
+                if not exact_block:
+                    definitions, _ = collect_footnote_definition_blocks(_visible(target_text).splitlines())
+                    key = str(task.get("key") or "")
+                    body = next((body for definition_key, body in definitions.values() if str(definition_key) == key), None)
+                    exact_block = f"[^{key}]: {body}" if body is not None else ""
+                if _sha(exact_block) != task.get("evidence_sha256"):
+                    errors.append(f"result audit review {task_id} no longer identifies its exact normalized block")
+                    continue
         reason = str(review.get("reason") or "").strip()
         if not reason:
             errors.append(f"result audit review {task_id} needs an image-based reason")
@@ -282,4 +280,63 @@ def validate_result_audit_reviews(
     return normalized, errors
 
 
-__all__ = ["validate_result_audit_reviews"]
+def validate_applied_result_audit_reviews(
+    output_dir: Any,
+    raw_reviews: Any,
+    raw_tasks: Any,
+    *,
+    current_tasks: Sequence[Mapping[str, Any]] = (),
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
+    """Revalidate carried exceptions against their original and current evidence."""
+    if raw_reviews in (None, []) and raw_tasks in (None, []):
+        return [], [], []
+    if not isinstance(raw_reviews, list) or not isinstance(raw_tasks, list):
+        return [], [], ["applied result audit history is missing its review or task snapshot array"]
+    task_index: dict[str, dict[str, Any]] = {}
+    for task in raw_tasks:
+        if not isinstance(task, Mapping) or not task.get("task_id"):
+            return [], [], ["applied result audit task snapshots must have unique task IDs"]
+        task_id = str(task["task_id"])
+        if task_id in task_index:
+            return [], [], ["applied result audit task snapshots must have unique task IDs"]
+        task_index[task_id] = dict(task)
+    current_index = {
+        str(task.get("task_id")): dict(task)
+        for task in current_tasks if isinstance(task, Mapping) and task.get("task_id")
+    }
+    reviews: list[dict[str, Any]] = []
+    tasks: list[dict[str, Any]] = []
+    errors: list[str] = []
+    seen: set[str] = set()
+    for review in raw_reviews:
+        if not isinstance(review, Mapping):
+            errors.append("each applied result audit review must be an object")
+            continue
+        task_id = str(review.get("task_id") or "")
+        original = task_index.get(task_id)
+        if not task_id or task_id in seen or original is None:
+            errors.append(f"applied result audit review {task_id or '<missing>'} has no unique task snapshot")
+            continue
+        seen.add(task_id)
+        if review.get("outcome") not in {"legitimate_non_footnote", "truncated_source_exception"}:
+            continue
+        original_result, original_errors = validate_result_audit_reviews(
+            output_dir, [original], [review]
+        )
+        if original_errors or not original_result:
+            errors.extend(original_errors or [f"applied result audit review {task_id} is stale"])
+            continue
+        current = current_index.get(task_id)
+        snapshot = {**original, **current} if current is not None else original
+        current_result, current_errors = validate_result_audit_reviews(
+            output_dir, [snapshot], [review]
+        )
+        if current_errors or not current_result:
+            errors.extend(current_errors or [f"applied result audit review {task_id} is stale"])
+            continue
+        reviews.extend(current_result)
+        tasks.append(snapshot)
+    return reviews, tasks, errors
+
+
+__all__ = ["validate_applied_result_audit_reviews", "validate_result_audit_reviews"]

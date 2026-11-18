@@ -192,14 +192,19 @@ def prepare_footnote_subagent(
         known = {str(item.get("task_id")) for item in audit.get("findings", []) if isinstance(item, Mapping)}
         for prior in prior_result_audit["findings"]:
             if isinstance(prior, Mapping) and prior.get("task_id") and str(prior["task_id"]) not in known:
+                origin = str(prior.get("evidence_origin") or "")
+                if origin not in {"source_markdown", "normalized_target"}:
+                    # Sidecar-addressed findings are rebuilt from the current
+                    # page inventory below; carrying the old task would retain
+                    # stale addresses and visual evidence.
+                    continue
                 if (
-                    str(prior.get("evidence_origin") or "") == "normalized_target"
+                    origin == "normalized_target"
                     and prior_result_audit.get("target_sha256") != current_target_inventory
                 ):
                     continue
                 carried = dict(prior)
-                origin = str(carried.get("evidence_origin") or "")
-                if origin == "source_markdown" or (not origin and str(carried.get("line") or "0").isdigit() and int(carried.get("line") or 0) > 0):
+                if origin == "source_markdown":
                     evidence_file = output_dir / "ocr_markdown" / str(carried.get("file") or "")
                     carried["evidence_origin"] = "source_markdown"
                     carried["evidence_file_sha256"] = sha256_file(evidence_file) if evidence_file.is_file() else None
@@ -208,6 +213,10 @@ def prepare_footnote_subagent(
                     carried["evidence_target_sha256"] = (prior_result_audit.get("target_sha256") or {}).get(str(carried.get("file") or ""))
                 audit.setdefault("findings", []).append(carried)
                 known.add(str(prior["task_id"]))
+        prior_applied = prior_result_audit.get("applied_result_audit_reviews")
+        prior_applied_tasks = prior_result_audit.get("applied_result_audit_review_tasks")
+        audit["_prior_applied_reviews"] = prior_applied
+        audit["_prior_applied_review_tasks"] = prior_applied_tasks
     # Pull in direct recall candidates found in generic OCR ``Text`` blocks.
     # These are already exact sidecar-addressable blocks and are always sent
     # for visual classification, never accepted from layout/text evidence.
@@ -229,17 +238,34 @@ def prepare_footnote_subagent(
         ):
             raise ValueError(f"cannot resolve exact result-audit sidecar inventory: {exc}") from exc
         exact_sidecars = {}
-    if records and exact_sidecars:
-        polish_tasks, stale_semantic_files = polish_semantic_issue_tasks(
+    if records:
+        polish_tasks, polish_diagnostics = polish_semantic_issue_tasks(
             output_dir, records, source_texts, exact_sidecars, report,
         )
         audit["findings"].extend(polish_tasks)
-        audit["polish_semantic_stale_files"] = sorted(set(stale_semantic_files))
+        audit["polish_semantic_diagnostics"] = polish_diagnostics
+        stale_semantic_files = sorted({
+            str(item.get("file")) for item in polish_diagnostics
+            if isinstance(item, Mapping) and item.get("kind") == "stale_contract"
+        })
+        mapping_blockers = [
+            item for item in polish_diagnostics
+            if isinstance(item, Mapping) and item.get("kind") in {
+                "current_issue_mapping_failure", "invalid_review",
+            }
+        ]
+        audit["polish_semantic_stale_files"] = stale_semantic_files
+        audit["polish_semantic_blockers"] = mapping_blockers
         if stale_semantic_files:
             audit.setdefault("warnings", []).append(
-                "Ignored stale polish semantic sidecars for "
-                + ", ".join(sorted(set(stale_semantic_files)))
-                + "; rerun polish --resume, then footnote-prepare to refresh visual tasks."
+                "Polish semantic contracts are stale for " + ", ".join(stale_semantic_files)
+                + "; rerun polish --resume, then footnote-prepare."
+            )
+        if mapping_blockers:
+            audit.setdefault("warnings", []).append(
+                "Current unresolved Polish semantic issues could not be mapped to exact primary OCR blocks; "
+                "the result audit is blocked. Have the original Polish Reviewer revise the listed source_excerpt "
+                "in its existing semantic sidecar, then rerun footnote-prepare."
             )
         for task in polish_tasks:
             address = task.get("source_address", {})
@@ -705,8 +731,11 @@ def prepare_footnote_subagent(
     } if isinstance(prior_audit_reviews, list) else {}
     for task in audit["findings"]:
         task["review_attempt"] = 2 if prior_outcomes.get(str(task.get("task_id"))) == "review_required" else 1
-    audit["valid"] = not audit["findings"]
-    audit["status"] = "review_required" if audit["findings"] else "validated"
+    audit["valid"] = not audit["findings"] and not audit.get("polish_semantic_blockers")
+    audit["status"] = (
+        "blocked" if audit.get("polish_semantic_blockers")
+        else "review_required" if audit["findings"] else "validated"
+    )
     if audit.get("findings"):
         first_by_file = {str(record["name"]): record for record in records}
         for audit_task in audit["findings"]:
@@ -775,6 +804,23 @@ def prepare_footnote_subagent(
                         if isinstance(candidate, Mapping) and str(candidate.get("key") or "") == str(task.get("key") or ""):
                             refs.append({"page": page, "source": str(candidate.get("source") or default_source), "block": int(candidate.get("block", -1))})
                 task["candidate_refs"] = [ref for ref in refs if ref["block"] >= 0]
+    prior_reviews = audit.pop("_prior_applied_reviews", None)
+    prior_review_tasks = audit.pop("_prior_applied_review_tasks", None)
+    if prior_reviews is not None or prior_review_tasks is not None:
+        from .footnote_result_review import validate_applied_result_audit_reviews
+
+        valid_reviews, valid_tasks, _history_errors = validate_applied_result_audit_reviews(
+            output_dir,
+            prior_reviews,
+            prior_review_tasks,
+            current_tasks=[
+                *(audit.get("findings", []) if isinstance(audit.get("findings"), list) else []),
+                *(audit.get("reviewed_candidate_tasks", []) if isinstance(audit.get("reviewed_candidate_tasks"), list) else []),
+            ],
+        )
+        if valid_reviews:
+            audit["applied_result_audit_reviews"] = valid_reviews
+            audit["applied_result_audit_review_tasks"] = valid_tasks
     report["result_audit"] = audit
     packet_path, packet_sha256, preparation_evidence_sha256 = write_review_packet(output_dir, report)
     from .footnote_unit_contexts import write_footnote_unit_contexts
@@ -802,6 +848,8 @@ def prepare_footnote_subagent(
         (bool(report["review_required"]) or bool(report.get("continuation_reviews")) or bool(audit.get("findings")))
         and report["footnote_mode"] != "disabled"
     )
+    polish_semantic_blockers = audit.get("polish_semantic_blockers", [])
+    recovery_required = bool(polish_semantic_blockers)
     manifest = {
         "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
         "task": "footnote-prepare",
@@ -840,6 +888,9 @@ def prepare_footnote_subagent(
         "cross_page_window_count": len(report["cross_page_windows"]),
         "continuation_reviews": report.get("continuation_reviews", []),
         "result_audit_tasks": audit.get("findings", []),
+        "polish_semantic_diagnostics": audit.get("polish_semantic_diagnostics", []),
+        "polish_semantic_blockers": polish_semantic_blockers,
+        "recovery_required": recovery_required,
         "result_audit_version": audit.get("schema_version"),
         "result_audit_status": audit.get("status"),
         "consensus_visual_review_pages": report["consensus_visual_review_pages"],
@@ -861,7 +912,8 @@ def prepare_footnote_subagent(
         "endnote_decision_file": DECISIONS_FILENAME,
         "endnote_definition_file": AMBIGUITIES_FILENAME,
         "status": (
-            "pending_review"
+            "recovery_required" if recovery_required
+            else "pending_review"
             if page_review_required or ambiguity_count
             else "no_subagent_review_required"
         ),
@@ -1039,6 +1091,25 @@ def prepare_footnote_subagent(
                 "List segments in physical reading order. The apply stage moves only exact footnote segments and leaves body text at its source position; it rejects duplicate, overlapping, stale, or non-unique excerpts. "
                 "Do not use the polished target excerpt to infer source ownership.\n"
             )
+    if recovery_required:
+        recovery_rows = []
+        for blocker in polish_semantic_blockers:
+            if not isinstance(blocker, Mapping):
+                continue
+            recovery_rows.append(
+                f"- file `{blocker.get('file')}`, issue `{blocker.get('issue_id') or 'unknown'}`, "
+                f"kind `{blocker.get('kind')}`, stage `{blocker.get('mapping_stage') or 'review validation'}`: "
+                f"{blocker.get('message')}. Recovery: {blocker.get('recovery')}"
+            )
+        prompt += (
+            "\n\n## Polish semantic recovery required\n\n"
+            "This handoff contains unresolved Polish semantic review blockers. Do not invent a page/block address, "
+            "do not add a footnote decision for a blocker, and do not treat it as a normal visual candidate. "
+            "Have the original Polish Reviewer update the existing semantic sidecar, preserving the unresolved issue "
+            "until its exact excerpt maps; then rerun `footnote-prepare`. Other listed exact visual tasks remain independently actionable.\n\n"
+            + "\n".join(recovery_rows)
+            + "\n"
+        )
     prompt += f"\nRecommended model: `{model}`.\n"
     prompt_path = output_dir / "footnote_subagent_prompt.md"
     atomic_write_text(prompt_path, prompt)

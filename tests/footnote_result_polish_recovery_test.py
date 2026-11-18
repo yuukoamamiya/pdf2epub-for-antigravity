@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import runpy
+
+import pytest
 from pathlib import Path
 
 from pdf2epub.polish_footnote_semantics import build_semantic_review_contract, sha256_text
@@ -11,7 +13,8 @@ from pdf2epub.refine.footnote_handoff import prepare_footnote_subagent
 from pdf2epub.refine.footnote_validation import validate_footnote_decisions
 
 
-def test_polish_issue_recovery_uses_normalized_source_but_maps_to_raw_primary_block(tmp_path, monkeypatch):
+@pytest.mark.parametrize("scenario", ["mapped", "mapping_blocker", "blocker_only", "invalid_review", "stale_hash"])
+def test_polish_issue_recovery_distinguishes_current_mapping_and_contract_failures(tmp_path, monkeypatch, scenario):
     helper = runpy.run_path(str(Path(__file__).with_name("footnote_review_gates_test.py")))
     helper["_prepare_continuation_book"](tmp_path, monkeypatch)
     assert (tmp_path / "page_001.png").is_file()
@@ -20,7 +23,7 @@ def test_polish_issue_recovery_uses_normalized_source_but_maps_to_raw_primary_bl
         "available": True, "files": {"1": "page_001.png"},
     })
 
-    raw = "In text <sup>36</sup>.\n\nBody sentence. 36 Note body.\n"
+    raw = "In text <sup>36</sup>.\n\nBody sentence. 36 Note body.\nDistinct sentence.\n"
     raw_path = tmp_path / "ocr_markdown" / "chapter_1.md"
     raw_path.write_text(raw, encoding="utf-8")
     sidecar_path = tmp_path / "pages" / "page_001.ocr.json"
@@ -29,13 +32,15 @@ def test_polish_issue_recovery_uses_normalized_source_but_maps_to_raw_primary_bl
         "label": "Footnote",
         "html": "Body sentence. 36 Note body.",
     })
+    if scenario in {"mapping_blocker", "blocker_only"}:
+        sidecar["blocks"][0]["html"] = "Body sentence. 36 Note body. 36 Note body."
     sidecar_path.write_text(json.dumps(sidecar), encoding="utf-8")
 
-    normalized = "In text [^36].\n\n[^36]: 36 Note body.\n"
+    normalized = "In text [^36].\n\n[^36]: 36 Note body.\nBody sentence.\n"
     normalized_dir = tmp_path / "footnote_normalized"
     normalized_dir.mkdir()
     (normalized_dir / "chapter_1.md").write_text(normalized, encoding="utf-8")
-    target = "In text [^36].\n\n[^36]: 36 Note body.\n"
+    target = "In text [^36].\n\n[^36]: 36 Note body.\nBody sentence.\n"
     target_dir = tmp_path / "polished_markdown" / "validated"
     target_dir.mkdir(parents=True)
     (target_dir / "chapter_1.md").write_text(target, encoding="utf-8")
@@ -52,7 +57,7 @@ def test_polish_issue_recovery_uses_normalized_source_but_maps_to_raw_primary_bl
     }
     (tmp_path / "polish_subagent_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     (tmp_path / contract["sidecar"]).parent.mkdir(parents=True, exist_ok=True)
-    (tmp_path / contract["sidecar"]).write_text(json.dumps({
+    sidecar_data = {
         "schema_version": 1,
         "file": "chapter_1.md",
         "source_sha256": sha256_text(normalized),
@@ -77,11 +82,63 @@ def test_polish_issue_recovery_uses_normalized_source_but_maps_to_raw_primary_bl
             "source_sha256": sha256_text(normalized),
             "target_sha256": sha256_text(target),
             "context_sha256": contract["context_sha256"],
-        }],
-    }), encoding="utf-8")
+        }]
+        + ([{
+            "issue_id": "issue-2",
+            "code": "body_note_mixed_block",
+                "source_excerpt": "Body sentence.",
+                "target_excerpt": "Body sentence.",
+            "reason": "The source sentence must remain ordinary body text.",
+            "unit_id": "chapter_1",
+            "file": "chapter_1.md",
+            "source_sha256": sha256_text(normalized),
+            "target_sha256": sha256_text(target),
+            "context_sha256": contract["context_sha256"],
+        }] if scenario == "mapping_blocker" else []),
+    }
+    if scenario == "invalid_review":
+        sidecar_data["coverage"]["body_reviewed"]["status"] = "missing"
+    if scenario == "stale_hash":
+        sidecar_data["target_sha256"] = "0" * 64
+    (tmp_path / contract["sidecar"]).write_text(json.dumps(sidecar_data), encoding="utf-8")
 
     paths = prepare_footnote_subagent(tmp_path, book_title="Synthetic Review Book")
     report = json.loads(paths["report"].read_text(encoding="utf-8"))
+    if scenario == "stale_hash":
+        audit = report["result_audit"]
+        assert audit["polish_semantic_diagnostics"][0]["kind"] == "stale_contract"
+        assert audit["polish_semantic_blockers"] == []
+        assert audit["polish_semantic_stale_files"] == ["chapter_1.md"]
+        return
+
+    if scenario in {"mapping_blocker", "blocker_only", "invalid_review"}:
+        audit = report["result_audit"]
+        assert audit["polish_semantic_blockers"], audit.get("polish_semantic_diagnostics")
+        blocker = audit["polish_semantic_blockers"][0]
+        expected_kind = "current_issue_mapping_failure" if scenario in {"mapping_blocker", "blocker_only"} else "invalid_review"
+        assert blocker["kind"] == expected_kind
+        if scenario in {"mapping_blocker", "blocker_only"}:
+            assert blocker["issue_id"] == "issue-1"
+            assert blocker["mapping_stage"] == "primary_ocr_block"
+            assert blocker["match_count"] == 0
+        assert audit["valid"] is False
+        assert audit["status"] == "blocked"
+        expected_mapped = ["issue-2"] if scenario == "mapping_blocker" else [] if scenario == "blocker_only" else ["issue-1"]
+        assert [item["polish_issue"]["issue_id"] for item in audit["findings"] if item["code"] == "polish_semantic_issue"] == expected_mapped
+        assert "original Polish Reviewer" in " ".join(audit["warnings"])
+        assert "rerun footnote-prepare" in blocker["recovery"]
+        if scenario == "blocker_only":
+            manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+            prompt = paths["prompt"].read_text(encoding="utf-8")
+            assert manifest["recovery_required"] is True
+            assert manifest["status"] == "recovery_required"
+            assert "Polish semantic recovery required" in prompt
+            assert "do not add a footnote decision for a blocker" in prompt
+        validation = validate_footnote_decisions(tmp_path)
+        assert validation["valid"] is False
+        assert any("unresolved current Polish semantic review blocker" in item for item in validation["errors"])
+        return
+
     task = next(item for item in report["result_audit"]["findings"] if item["code"] == "polish_semantic_issue")
     assert task["source_address"]["source"] == "primary"
     assert task["pages"] == [1]

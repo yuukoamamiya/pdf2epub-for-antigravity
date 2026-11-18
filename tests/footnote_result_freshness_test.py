@@ -10,7 +10,9 @@ from pdf2epub.refine.footnote_apply import apply_footnote_normalization
 from pdf2epub.refine.footnote_handoff import prepare_footnote_subagent
 from pdf2epub.refine.footnote_status import footnote_normalization_status
 from pdf2epub.refine.footnote_validation import validate_footnote_decisions
+from pdf2epub.refine.footnote_result_review import validate_applied_result_audit_reviews
 from pdf2epub.workflow_contracts import sha256_file
+from pdf2epub.refine.footnote_source import markdown_inventory
 
 
 def _prepare_review_case(tmp_path: Path) -> tuple[dict, dict, list[dict]]:
@@ -143,6 +145,168 @@ def _validate_ready_case(tmp_path: Path) -> tuple[dict, dict, list[dict]]:
     validation = validate_footnote_decisions(tmp_path)
     assert validation["valid"] is True, validation["errors"]
     return paths, report, tasks
+
+
+@pytest.mark.parametrize("changed_evidence", ["sidecar", "page_markdown", "image"])
+def test_applied_result_exception_is_revalidated_against_exact_evidence_on_third_prepare(
+    tmp_path, changed_evidence
+):
+    _, report, tasks = _prepare_review_case(tmp_path)
+    task = next(
+        item for item in tasks
+        if isinstance(item.get("source_address"), dict)
+        and item.get("pages") and item.get("visual_files")
+    )
+    task = dict(task)
+    task["evidence_page_file"] = "pages/page_001.md"
+    task["evidence_page_sha256"] = sha256_file(tmp_path / "pages/page_001.md")
+    review = {
+        "task_id": task["task_id"],
+        "evidence_sha256": task["evidence_sha256"],
+        "outcome": "legitimate_non_footnote",
+        "reason": "The page image confirms this is a body citation marker.",
+        "evidence_pages": list(task["pages"]),
+    }
+    audit_path = tmp_path / "footnote_result_audit.json"
+    source_inventory = markdown_inventory(tmp_path / "ocr_markdown")
+    audit_path.write_text(json.dumps({
+        "schema_version": 4,
+        "source_sha256": source_inventory,
+        "target_sha256": markdown_inventory(tmp_path / "footnote_normalized"),
+        "findings": [task],
+        "applied_result_audit_reviews": [review],
+        "applied_result_audit_review_tasks": [task],
+    }), encoding="utf-8")
+
+    # Second prepare keeps the exception while all of its exact evidence is current.
+    paths = prepare_footnote_subagent(tmp_path, book_title="Freshness Review")
+    second = json.loads(paths["report"].read_text(encoding="utf-8"))["result_audit"]
+    assert second["applied_result_audit_reviews"] == [review]
+    saved_task = second["applied_result_audit_review_tasks"][0]
+    assert saved_task["evidence_page_file"] == task["evidence_page_file"]
+    assert saved_task["evidence_page_sha256"] == task["evidence_page_sha256"]
+    assert saved_task["source_address"] == task["source_address"]
+
+    # Third prepare sees changed exact evidence even though the complete source
+    # Markdown inventory is byte-for-byte unchanged, so it must drop the old exception.
+    if changed_evidence == "sidecar":
+        sidecar_path = tmp_path / task["source_address"]["sidecar"]
+        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+        changed_block = sidecar["blocks"][int(task["source_address"]["block"])]
+        changed_block["text"] = "<sup>17</sup> Changed exact block"
+        changed_block["html"] = "<sup>17</sup> Changed exact block"
+        sidecar_path.write_text(json.dumps(sidecar), encoding="utf-8")
+    elif changed_evidence == "page_markdown":
+        page_path = tmp_path / task["evidence_page_file"]
+        page_path.write_text("Changed exact page Markdown evidence\n", encoding="utf-8")
+    else:
+        image_path = tmp_path / task["visual_files"][str(task["pages"][0])]["path"]
+        image_path.write_bytes(image_path.read_bytes() + b" changed image pixels")
+    paths = prepare_footnote_subagent(tmp_path, book_title="Freshness Review")
+    third = json.loads(paths["report"].read_text(encoding="utf-8"))["result_audit"]
+    assert third.get("applied_result_audit_reviews", []) == []
+    assert any(
+        isinstance(item.get("source_address"), dict)
+        and (item["source_address"].get("page"), item["source_address"].get("source"), item["source_address"].get("block"))
+        == (task["source_address"].get("page"), task["source_address"].get("source"), task["source_address"].get("block"))
+        for item in third["findings"]
+    )
+    assert markdown_inventory(tmp_path / "ocr_markdown") == source_inventory
+
+
+def test_applied_result_exception_without_matching_task_snapshot_is_not_reused(tmp_path):
+    _, _, tasks = _prepare_review_case(tmp_path)
+    task = next(item for item in tasks if isinstance(item.get("source_address"), dict))
+    review = {
+        "task_id": task["task_id"],
+        "evidence_sha256": task["evidence_sha256"],
+        "outcome": "legitimate_non_footnote",
+        "reason": "The page image confirms this is not a footnote.",
+        "evidence_pages": list(task.get("pages") or []),
+    }
+    (tmp_path / "footnote_result_audit.json").write_text(json.dumps({
+        "schema_version": 4,
+        "source_sha256": markdown_inventory(tmp_path / "ocr_markdown"),
+        "target_sha256": markdown_inventory(tmp_path / "footnote_normalized"),
+        "findings": [task],
+        "applied_result_audit_reviews": [review],
+        "applied_result_audit_review_tasks": [],
+    }), encoding="utf-8")
+
+    paths = prepare_footnote_subagent(tmp_path, book_title="Freshness Review")
+    audit = json.loads(paths["report"].read_text(encoding="utf-8"))["result_audit"]
+    assert audit.get("applied_result_audit_reviews", []) == []
+    assert any(item.get("task_id") == task["task_id"] for item in audit["findings"])
+
+
+def test_applied_result_history_rejects_duplicate_task_snapshots(tmp_path):
+    review = {"task_id": "duplicate", "outcome": "legitimate_non_footnote"}
+    task = {"task_id": "duplicate"}
+    reviews, tasks, errors = validate_applied_result_audit_reviews(
+        tmp_path, [review], [task, task]
+    )
+    assert reviews == []
+    assert tasks == []
+    assert errors == ["applied result audit task snapshots must have unique task IDs"]
+
+
+def test_prepare_does_not_fold_duplicate_historical_task_snapshots(tmp_path):
+    _, _, tasks = _prepare_review_case(tmp_path)
+    task = next(item for item in tasks if isinstance(item.get("source_address"), dict))
+    review = {
+        "task_id": task["task_id"],
+        "evidence_sha256": task["evidence_sha256"],
+        "outcome": "legitimate_non_footnote",
+        "reason": "The page image confirms this is not a footnote.",
+        "evidence_pages": list(task.get("pages") or []),
+    }
+    (tmp_path / "footnote_result_audit.json").write_text(json.dumps({
+        "schema_version": 4,
+        "source_sha256": markdown_inventory(tmp_path / "ocr_markdown"),
+        "target_sha256": markdown_inventory(tmp_path / "footnote_normalized"),
+        "findings": [task],
+        "applied_result_audit_reviews": [review],
+        "applied_result_audit_review_tasks": [task, task],
+    }), encoding="utf-8")
+
+    paths = prepare_footnote_subagent(tmp_path, book_title="Freshness Review")
+    audit = json.loads(paths["report"].read_text(encoding="utf-8"))["result_audit"]
+    assert audit.get("applied_result_audit_reviews", []) == []
+    assert any(item.get("task_id") == task["task_id"] for item in audit["findings"])
+
+
+def test_applied_result_exception_is_revalidated_when_normalized_target_changes(tmp_path):
+    _, _, tasks = _prepare_review_case(tmp_path)
+    task = dict(next(item for item in tasks if isinstance(item.get("source_address"), dict)))
+    task["evidence_origin"] = "normalized_target"
+    task["code"] = "normalized_note_truncated"
+    task["file"] = "chapter_1.md"
+    target_path = tmp_path / "footnote_normalized" / "chapter_1.md"
+    target_path.parent.mkdir()
+    target_path.write_text("[^17]: A source note remains open (\n", encoding="utf-8")
+    task["evidence_target_sha256"] = sha256_file(target_path)
+    review = {
+        "task_id": task["task_id"], "evidence_sha256": task["evidence_sha256"],
+        "outcome": "truncated_source_exception",
+        "reason": "The page image confirms the printed note ends here.",
+        "evidence_pages": list(task["pages"]),
+    }
+    source_inventory = markdown_inventory(tmp_path / "ocr_markdown")
+    (tmp_path / "footnote_result_audit.json").write_text(json.dumps({
+        "schema_version": 4, "source_sha256": source_inventory,
+        "target_sha256": markdown_inventory(tmp_path / "footnote_normalized"),
+        "findings": [task], "applied_result_audit_reviews": [review],
+        "applied_result_audit_review_tasks": [task],
+    }), encoding="utf-8")
+
+    paths = prepare_footnote_subagent(tmp_path, book_title="Freshness Review")
+    second = json.loads(paths["report"].read_text(encoding="utf-8"))["result_audit"]
+    assert second["applied_result_audit_reviews"] == [review]
+    target_path.write_text("[^17]: This note is now complete.\n", encoding="utf-8")
+    paths = prepare_footnote_subagent(tmp_path, book_title="Freshness Review")
+    third = json.loads(paths["report"].read_text(encoding="utf-8"))["result_audit"]
+    assert third.get("applied_result_audit_reviews", []) == []
+    assert markdown_inventory(tmp_path / "ocr_markdown") == source_inventory
 
 
 def test_result_audit_rejects_pdf_change_with_saved_real_images(tmp_path):
