@@ -17,6 +17,71 @@ SCHEMA_VERSION = 1
 SIDECAR_DIRECTORY = "polish_footnote_reviews"
 _FOOTNOTE_TOKEN = re.compile(r"\[\^([^\]\r\n]+)\]")
 _HEX = re.compile(r"^[0-9a-f]{64}$")
+_UPSTREAM_CLOSING_OUTCOMES = frozenset({
+    "confirmed_not_a_footnote",
+    "legitimate_non_footnote",
+    "truncated_source_exception",
+    "deferred_to_polish",
+})
+
+
+def polish_issue_task_id(filename: str, issue: Mapping[str, Any]) -> str:
+    """Compute the canonical upstream footnote audit task_id for one polish issue."""
+    identity = "\0".join((
+        str(filename),
+        str(issue.get("issue_id") or ""),
+        str(issue.get("source_sha256") or ""),
+        str(issue.get("target_sha256") or ""),
+        str(issue.get("context_sha256") or ""),
+    ))
+    return "fra-" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:20]
+
+
+def _upstream_resolved_issue_task_ids(
+    output_dir: Path,
+    filename: str,
+    issues: list[Mapping[str, Any]],
+) -> list[str]:
+    """Return upstream-closed task IDs when a valid footnote_normalization closed every issue."""
+    if not issues:
+        return []
+    root = Path(output_dir)
+    norm_path = root / "footnote_normalization.json"
+    try:
+        norm = json.loads(norm_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return []
+    if not isinstance(norm, Mapping) or norm.get("valid") is not True:
+        return []
+
+    closed_task_ids: set[str] = set()
+    for candidate_path, keys in (
+        (root / "footnote_result_audit.json", ("applied_result_audit_reviews", "reviewed_tasks", "result_audit_reviews")),
+        (root / "footnote_decision_validation.json", ("result_audit_reviews",)),
+        (norm_path, ("applied_result_audit_reviews", "result_audit_reviews")),
+    ):
+        try:
+            payload = json.loads(candidate_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, Mapping):
+            continue
+        for key in keys:
+            rows = payload.get(key)
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if not isinstance(row, Mapping):
+                    continue
+                task_id = str(row.get("task_id") or "").strip()
+                outcome = str(row.get("outcome") or "").strip()
+                if task_id and outcome in _UPSTREAM_CLOSING_OUTCOMES:
+                    closed_task_ids.add(task_id)
+
+    expected_task_ids = [polish_issue_task_id(filename, issue) for issue in issues]
+    if expected_task_ids and all(tid in closed_task_ids for tid in expected_task_ids):
+        return sorted(set(expected_task_ids))
+    return []
 
 
 def sha256_text(text: str) -> str:
@@ -290,6 +355,14 @@ def validate_prepared_file_review(
         result["errors"] = errors + list(result.get("errors", []))
         result["valid"] = False
         result["contract_valid"] = False
+    elif result.get("contract_valid") is True and result.get("status") == "issues":
+        resolved_ids = _upstream_resolved_issue_task_ids(
+            root, filename, result.get("issues", [])
+        )
+        if resolved_ids:
+            result["valid"] = True
+            result["resolved_by_upstream_audit"] = True
+            result["resolved_issue_task_ids"] = resolved_ids
     result["stale_fields"] = sorted(set([*result.get("stale_fields", []), *stale_fields]))
     result["sidecar"] = str(sidecar_relative or "")
     try:

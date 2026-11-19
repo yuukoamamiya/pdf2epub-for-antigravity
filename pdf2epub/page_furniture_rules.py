@@ -63,10 +63,13 @@ _DIAGRAM_MARKS_RE = re.compile(r"^[I|/\\_\-–—·•.\s]+$", re.IGNORECASE)
 _SECTION_HEADING_RE = re.compile(
     r"^(?:§{1,3}\s*(?:\d{1,4}|[ivxlcdm]{1,8})"
     r"|(?:Lehrsatz|Aufgabe|Satz|Theorem|Proposition|Korollar|Korollarium|Lemma|"
-    r"Hilfssatz|Definition|Anmerkung|Bemerkung|Zusatz|Folgesatz|Beweis)"
-    r"\s+(?:\d{1,4}|[ivxlcdm]{1,8}))$",
+    r"Hilfssatz|Definition|Anmerkung|Bemerkung|Zusatz|Folgesatz|Beweis|"
+    r"Table|Tables|Figure|Figures|Fig\.?|Chart|Diagram|Plate|Box|Map|"
+    r"Appendix|Abb\.?|Abbildung|Tabelle|Tafel|Schema)"
+    r"\s+(?:\d{1,4}(?:[.-]\d{1,4})?|[ivxlcdm]{1,8}|[A-Z]))$",
     re.IGNORECASE,
 )
+_ALIGNMENT_LEADER_RE = re.compile(r"(?:--+|–{2,}|—{2,})")
 _MAX_COMBINED_LINE_LENGTH = 96
 
 
@@ -113,6 +116,8 @@ def candidate_for_line(line: str) -> Optional[dict[str, Any]]:
         _DIAGRAM_MARKS_RE.fullmatch(title_line)
         and any(mark in title_line for mark in ("/", "\\", "_", "-", "–", "—"))
     ):
+        return None
+    if _ALIGNMENT_LEADER_RE.search(title_line):
         return None
     if _NUMBERED_RUNNING_HEADER_RE.fullmatch(title_line) and not re.search(
         r"[。！？；.!?;]", title_line

@@ -59,6 +59,7 @@ def validation_snapshot_changes(
     from .polish_footnote_semantics import validate_prepared_file_review
 
     for name, expected in semantic_hashes.items():
+        original_review = semantic_reviews.get(name)
         try:
             source_text = (Path(source_dir) / name).read_bytes().decode("utf-8")
             target_text = target_texts.get(name)
@@ -71,15 +72,19 @@ def validation_snapshot_changes(
             output_dir, name, source_text=source_text,
             target_text=target_text, required=True,
         )
+        original_contract_valid = (
+            isinstance(original_review, Mapping)
+            and original_review.get("contract_valid") is True
+        )
+        original_valid = (
+            isinstance(original_review, Mapping)
+            and original_review.get("valid") is True
+        )
         if (
             not isinstance(current, Mapping)
             or current.get("sidecar_sha256") != expected
-            or current.get("contract_valid") is not True
-            or (
-                isinstance(review, Mapping)
-                and review.get("valid") is True
-                and current.get("valid") is not True
-            )
+            or (original_contract_valid and current.get("contract_valid") is not True)
+            or (original_valid and current.get("valid") is not True)
         ):
             changes.setdefault(name, ("semantic_sidecar", "semantic review sidecar changed during validation"))
     return changes

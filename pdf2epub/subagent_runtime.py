@@ -401,15 +401,21 @@ def write_worker_handoffs(
         {"subagent": {"batching": dict(batching)}}
     )
     max_workers = normalized_batching["max_concurrency"]
+    file_stats = manifest.get("file_stats", {})
+    if not isinstance(file_stats, Mapping):
+        file_stats = {}
     chapter_mode = isinstance(manifest.get("chapter_groups"), Mapping)
     groups = (
         _chapter_worker_groups(manifest)
         if chapter_mode
-        else _worker_groups(queue, max_workers)
+        else _worker_groups(
+            queue,
+            max_workers,
+            file_stats=file_stats,
+            batching=normalized_batching,
+            task=task,
+        )
     )
-    file_stats = manifest.get("file_stats", {})
-    if not isinstance(file_stats, Mapping):
-        file_stats = {}
     groups, dispatch_plan, configured_cap = _plan_dispatch_waves(
         groups,
         file_stats,

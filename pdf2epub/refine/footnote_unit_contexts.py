@@ -61,109 +61,133 @@ def _project_unit_contexts(
             or end_page - start_page + 1 > len(page_index)
         ):
             raise ValueError(f"invalid refined page range for footnote context {names}: {page_range}")
-        windows = [
-            _compact_window_context(item) for item in cross_windows
-            if any(start_page <= int(page) <= end_page for page in item.get("pages", []))
-        ]
-        continuation_reviews = [
-            _compact_window_context(item) for item in report.get("continuation_reviews", [])
-            if any(start_page <= int(page) <= end_page for page in item.get("pages", []))
-        ]
-        continuation_chains = [
-            _compact_window_context(item) for item in report.get("continuation_chains", [])
-            if any(start_page <= int(page) <= end_page for page in item.get("pages", []))
-        ]
-        evidence_pages = set(range(start_page, end_page + 1))
-        for window in [*windows, *continuation_reviews, *continuation_chains]:
-            evidence_pages.update(
-                int(page) for page in window.get("pages", [])
-                if str(page).lstrip("-").isdigit()
-            )
-        pages = [
-            _compact_page_context(item) for item in page_reports
-            if int(item.get("page", -1)) in evidence_pages
-        ]
-        by_evidence_page = {int(item["page"]): item for item in pages if str(item.get("page", "")).isdigit()}
-        visual_inventory = report.get("visual_evidence", {}).get("files", {}) if isinstance(report.get("visual_evidence"), Mapping) else {}
-        for page_number in sorted(evidence_pages):
-            page_context = by_evidence_page.setdefault(page_number, {
-                "page": page_number,
-                "sidecar": f"pages/page_{page_number:03d}.ocr.json",
-            })
-            image = visual_inventory.get(str(page_number), visual_inventory.get(page_number)) if isinstance(visual_inventory, Mapping) else None
-            if isinstance(image, str) and not page_context.get("visual_file"):
-                page_context["visual_file"] = image
-        pages = [by_evidence_page[number] for number in sorted(by_evidence_page)]
-        for page_context in pages:
-            evidence = page_index.get(int(page_context["page"]), {})
-            primary = evidence.get("primary")
-            secondary = evidence.get("secondary")
-            if not primary:
-                raise ValueError(f"footnote primary sidecar missing for page {page_context['page']}")
-            page_context["sidecar"] = primary["path"]
-            page_context["sidecar_sha256"] = primary["sha256"]
-            if secondary:
-                page_context["secondary_sidecar"] = secondary["path"]
-                page_context["secondary_sidecar_sha256"] = secondary["sha256"]
-            else:
-                page_context.pop("secondary_sidecar", None)
-                page_context.pop("secondary_sidecar_sha256", None)
-        # Each part is a distinct Markdown permission boundary. Page evidence
-        # is retained as one shared read-only projection, but never lists its
-        # sibling parts as authorized source units.
-        refs: set[str] = set()
-        for page_context in pages:
-            refs.update(str(ref) for ref in page_context.get("candidate_refs", []))
-            for region in page_context.get("footnote_regions", []):
-                refs.update(str(ref) for ref in region.get("candidate_refs", []))
-        for window in [*windows, *continuation_reviews]:
-            for key in ("left_candidate_refs", "right_candidate_refs"):
-                refs.update(str(ref) for ref in window.get(key, []))
-            if window.get("source_note_ref"):
-                refs.add(str(window["source_note_ref"]))
-            refs.update(str(ref) for ref in window.get("candidate_refs", []))
-        packet_candidates = packet_data.get("candidates", {})
-        page_by_number = {int(page["page"]): page for page in pages if str(page.get("page", "")).isdigit()}
-        local_facts = {}
-        if isinstance(packet_candidates, Mapping):
-            for ref in sorted(refs):
-                fact = packet_candidates.get(ref)
-                if not isinstance(fact, Mapping):
+
+        def _build_range_context(range_start: int, range_end: int) -> dict[str, Any]:
+            windows = [
+                _compact_window_context(item) for item in cross_windows
+                if any(range_start <= int(page) <= range_end for page in item.get("pages", []))
+            ]
+            continuation_reviews = [
+                _compact_window_context(item) for item in report.get("continuation_reviews", [])
+                if any(range_start <= int(page) <= range_end for page in item.get("pages", []))
+            ]
+            continuation_chains = [
+                _compact_window_context(item) for item in report.get("continuation_chains", [])
+                if any(range_start <= int(page) <= range_end for page in item.get("pages", []))
+            ]
+            evidence_pages = set(range(range_start, range_end + 1))
+            for window in [*windows, *continuation_reviews, *continuation_chains]:
+                evidence_pages.update(
+                    int(page) for page in window.get("pages", [])
+                    if str(page).lstrip("-").isdigit()
+                )
+            pages = [
+                _compact_page_context(item) for item in page_reports
+                if int(item.get("page", -1)) in evidence_pages
+            ]
+            by_evidence_page = {int(item["page"]): item for item in pages if str(item.get("page", "")).isdigit()}
+            visual_inventory = report.get("visual_evidence", {}).get("files", {}) if isinstance(report.get("visual_evidence"), Mapping) else {}
+            for page_number in sorted(evidence_pages):
+                page_context = by_evidence_page.setdefault(page_number, {
+                    "page": page_number,
+                    "sidecar": f"pages/page_{page_number:03d}.ocr.json",
+                })
+                image = visual_inventory.get(str(page_number), visual_inventory.get(page_number)) if isinstance(visual_inventory, Mapping) else None
+                if isinstance(image, str) and not page_context.get("visual_file"):
+                    page_context["visual_file"] = image
+            pages = [by_evidence_page[number] for number in sorted(by_evidence_page)]
+            for page_context in pages:
+                evidence = page_index.get(int(page_context["page"]), {})
+                primary = evidence.get("primary")
+                secondary = evidence.get("secondary")
+                if not primary:
+                    raise ValueError(f"footnote primary sidecar missing for page {page_context['page']}")
+                page_context["sidecar"] = primary["path"]
+                page_context["sidecar_sha256"] = primary["sha256"]
+                if secondary:
+                    page_context["secondary_sidecar"] = secondary["path"]
+                    page_context["secondary_sidecar_sha256"] = secondary["sha256"]
+                else:
+                    page_context.pop("secondary_sidecar", None)
+                    page_context.pop("secondary_sidecar_sha256", None)
+            refs: set[str] = set()
+            for page_context in pages:
+                refs.update(str(ref) for ref in page_context.get("candidate_refs", []))
+                for region in page_context.get("footnote_regions", []):
+                    refs.update(str(ref) for ref in region.get("candidate_refs", []))
+            for window in [*windows, *continuation_reviews]:
+                for key in ("left_candidate_refs", "right_candidate_refs"):
+                    refs.update(str(ref) for ref in window.get(key, []))
+                if window.get("source_note_ref"):
+                    refs.add(str(window["source_note_ref"]))
+                refs.update(str(ref) for ref in window.get("candidate_refs", []))
+            packet_candidates = packet_data.get("candidates", {})
+            page_by_number = {int(page["page"]): page for page in pages if str(page.get("page", "")).isdigit()}
+            local_facts = {}
+            if isinstance(packet_candidates, Mapping):
+                for ref in sorted(refs):
+                    fact = packet_candidates.get(ref)
+                    if not isinstance(fact, Mapping):
+                        continue
+                    page_context = page_by_number.get(int(fact.get("page", 0)), {})
+                    local_facts[ref] = _unit_fact_projection(fact, page_context)
+            if refs - set(local_facts):
+                raise ValueError(
+                    "footnote unit context contains candidate refs missing from its packet: "
+                    + ", ".join(sorted(refs - set(local_facts))[:10])
+                )
+            return {
+                "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
+                "projection_version": FOOTNOTE_UNIT_CONTEXT_PROJECTION_VERSION,
+                "task": "footnote-prepare",
+                "source_kind": report.get("source_kind"),
+                "ocr_evidence_mode": report.get("ocr_evidence_mode"),
+                "footnote_mode": report.get("footnote_mode"),
+                "source_packet": {
+                    "path": review_packet,
+                    "usage": "provenance_only_do_not_open_for_unit_work",
+                },
+                "source_units": [],
+                "page_range": [range_start, range_end],
+                "pages": pages,
+                "cross_page_windows": windows,
+                "continuation_reviews": continuation_reviews,
+                "continuation_chains": continuation_chains,
+                "decisions": [
+                    item
+                    for item in report.get("decisions", [])
+                    if isinstance(item, Mapping)
+                    and range_start <= int(item.get("page", -1)) <= range_end
+                ],
+                "candidates": local_facts,
+            }
+
+        raw_part_ranges = unit.get("part_page_ranges")
+        part_ranges: dict[str, tuple[int, int]] = {}
+        if isinstance(raw_part_ranges, Mapping):
+            for part_name, raw_range in raw_part_ranges.items():
+                if not isinstance(raw_range, list) or len(raw_range) != 2:
                     continue
-                page_context = page_by_number.get(int(fact.get("page", 0)), {})
-                local_facts[ref] = _unit_fact_projection(fact, page_context)
-        if refs - set(local_facts):
-            raise ValueError(
-                "footnote unit context contains candidate refs missing from its packet: "
-                + ", ".join(sorted(refs - set(local_facts))[:10])
-            )
-        context = {
-            "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
-            "projection_version": FOOTNOTE_UNIT_CONTEXT_PROJECTION_VERSION,
-            "task": "footnote-prepare",
-            "source_kind": report.get("source_kind"),
-            "ocr_evidence_mode": report.get("ocr_evidence_mode"),
-            "footnote_mode": report.get("footnote_mode"),
-            "source_packet": {
-                "path": review_packet,
-                "usage": "provenance_only_do_not_open_for_unit_work",
-            },
-            "source_units": [],
-            "page_range": [start_page, end_page],
-            "pages": pages,
-            "cross_page_windows": windows,
-            "continuation_reviews": continuation_reviews,
-            "continuation_chains": continuation_chains,
-            "decisions": [
-                item
-                for item in report.get("decisions", [])
-                if isinstance(item, Mapping)
-                and start_page <= int(item.get("page", -1)) <= end_page
-            ],
-            "candidates": local_facts,
-        }
+                try:
+                    p_start, p_end = int(raw_range[0]), int(raw_range[1])
+                except (TypeError, ValueError):
+                    continue
+                if start_page <= p_start <= p_end <= end_page:
+                    part_ranges[str(part_name)] = (p_start, p_end)
+
+        # Each part is a distinct Markdown permission boundary. When explicit
+        # part_page_ranges are recorded, project only that part's exact page
+        # range so edits in another part of the same chapter do not cascade
+        # invalidations; otherwise fall back conservatively to chapter scope.
+        chapter_context: dict[str, Any] | None = None
         for name in names:
-            unit_context = deepcopy(context)
+            if name in part_ranges:
+                p_start, p_end = part_ranges[name]
+                unit_context = _build_range_context(p_start, p_end)
+            else:
+                if chapter_context is None:
+                    chapter_context = _build_range_context(start_page, end_page)
+                unit_context = deepcopy(chapter_context)
             unit_context["source_units"] = [name]
             unit_contexts[name] = unit_context
     return unit_contexts

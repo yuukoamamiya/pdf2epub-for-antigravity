@@ -162,39 +162,150 @@ def _balanced_worker_groups(
     return groups
 
 
+def _pack_ordinary_batches_within_budget(
+    batches: List[Dict[str, Any]],
+    max_workers: int,
+    *,
+    max_files: int,
+    max_tokens: int,
+) -> List[Dict[str, Any]]:
+    """Pack ordinary batches into workers without exceeding per-worker budgets."""
+    total_files = sum(len(batch.get("files", [])) for batch in batches)
+    total_tokens = sum(int(batch.get("estimated_tokens", 0)) for batch in batches)
+    if (
+        len(batches) <= max_workers
+        or (total_files <= max_workers * max_files and total_tokens <= max_workers * max_tokens)
+    ):
+        # Try LPT balancing first; keep it only if every resulting worker stays
+        # within both file and token caps.
+        balanced = _balanced_worker_groups(batches, max_workers)
+        if all(
+            sum(len(b.get("files", [])) for b in g["batches"]) <= max_files
+            and int(g["estimated_tokens"]) <= max_tokens
+            for g in balanced
+        ):
+            return balanced
+
+    groups: List[Dict[str, Any]] = []
+    current_batches: List[Dict[str, Any]] = []
+    current_files = 0
+    current_tokens = 0
+    for batch in batches:
+        batch_files = len(batch.get("files", []))
+        batch_tokens = int(batch.get("estimated_tokens", 0))
+        if current_batches and (
+            current_files + batch_files > max_files
+            or current_tokens + batch_tokens > max_tokens
+        ):
+            groups.append(
+                {
+                    "batches": current_batches,
+                    "estimated_tokens": current_tokens,
+                }
+            )
+            current_batches = []
+            current_files = 0
+            current_tokens = 0
+        current_batches.append(batch)
+        current_files += batch_files
+        current_tokens += batch_tokens
+    if current_batches:
+        groups.append(
+            {
+                "batches": current_batches,
+                "estimated_tokens": current_tokens,
+            }
+        )
+    return groups
+
+
 def _worker_groups(
     queue: List[Dict[str, Any]],
     max_workers: int,
+    *,
+    file_stats: Optional[Mapping[str, Mapping[str, Any]]] = None,
+    batching: Optional[Mapping[str, Any]] = None,
+    task: str = "",
 ) -> List[Dict[str, Any]]:
-    """Pack batches into workers while forcing special units to stay alone.
+    """Pack batches into workers while isolating special and oversized units.
 
-    Ordinary batches remain eligible for LPT packing up to the configured
-    concurrency.  A batch marked ``isolated`` gets its own worker so an index,
-    bibliography, notes, or front-matter unit never shares a Subagent with
-    ordinary chapters.  Worker ids remain stable ``worker_NNN`` values.
+    Ordinary batches remain eligible for packing up to the configured per-worker
+    budget.  A batch marked ``isolated``—or containing an extreme/large/oversized
+    file when ``file_stats`` and ``batching`` are supplied—gets its own worker
+    so an index, bibliography, notes, front-matter, or giant endnote unit never
+    shares a Subagent with ordinary chapters.  Worker ids remain stable
+    ``worker_NNN`` values.
     """
     if not queue:
         return []
-    isolated_batches = [
-        batch for batch in queue if bool(batch.get("isolated"))
+    large_threshold = (
+        positive_int(
+            batching.get("large_file_token_threshold"),
+            DEFAULT_LARGE_FILE_TOKEN_THRESHOLD,
+        )
+        if isinstance(batching, Mapping)
+        else None
+    )
+    single_file_max_bytes = (
+        positive_int(
+            batching.get("single_file_max_bytes"),
+            DEFAULT_SINGLE_FILE_MAX_BYTES,
+        )
+        if isinstance(batching, Mapping)
+        else None
+    )
+
+    def _is_isolated_batch(batch: Mapping[str, Any]) -> bool:
+        if bool(batch.get("isolated")):
+            return True
+        if task != "polish" or not isinstance(file_stats, Mapping) or large_threshold is None:
+            return False
+        for name in batch.get("files", []) or []:
+            stats = file_stats.get(name, {}) or {}
+            if int(stats.get("estimated_tokens", 0)) >= large_threshold:
+                return True
+            if (
+                single_file_max_bytes is not None
+                and int(stats.get("size_bytes", 0)) > single_file_max_bytes
+            ):
+                return True
+        return False
+
+    isolated_batches = [batch for batch in queue if _is_isolated_batch(batch)]
+    ordinary_batches = [batch for batch in queue if not _is_isolated_batch(batch)]
+    groups: List[Dict[str, Any]] = [
+        {
+            "batches": [batch],
+            "estimated_tokens": int(batch.get("estimated_tokens", 0)),
+        }
+        for batch in isolated_batches
     ]
-    if not isolated_batches:
-        groups = _balanced_worker_groups(queue, max_workers)
-    else:
-        ordinary_batches = [
-            batch for batch in queue if not bool(batch.get("isolated"))
-        ]
-        groups = [
-            {
-                "batches": [batch],
-                "estimated_tokens": int(batch.get("estimated_tokens", 0)),
-            }
-            for batch in isolated_batches
-        ]
-        if ordinary_batches:
-            groups.extend(
-                _balanced_worker_groups(ordinary_batches, max_workers)
+    if ordinary_batches:
+        if task == "polish" and isinstance(batching, Mapping) and file_stats is not None:
+            max_files = min(
+                MAX_BATCH_FILES,
+                positive_int(batching.get("polish_max_files"), DEFAULT_BATCH_MAX_FILES),
             )
+            max_source_tokens = positive_int(
+                batching.get("max_source_tokens"), DEFAULT_BATCH_MAX_SOURCE_TOKENS
+            )
+            max_packed_tokens = max(
+                max_source_tokens,
+                positive_int(
+                    batching.get("max_packed_source_tokens"),
+                    max_source_tokens * DEFAULT_PACKED_SOURCE_TOKEN_MULTIPLIER,
+                ),
+            )
+            groups.extend(
+                _pack_ordinary_batches_within_budget(
+                    ordinary_batches,
+                    max_workers,
+                    max_files=max_files,
+                    max_tokens=max_packed_tokens,
+                )
+            )
+        else:
+            groups.extend(_balanced_worker_groups(ordinary_batches, max_workers))
     for index, group in enumerate(groups, 1):
         group["worker_id"] = f"worker_{index:03d}"
         group["batches"].sort(key=lambda item: str(item.get("batch_id", "")))

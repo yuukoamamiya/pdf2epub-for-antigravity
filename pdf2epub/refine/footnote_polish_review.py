@@ -39,7 +39,11 @@ def polish_semantic_issue_tasks(
         }]
     source_dir = str(manifest.get("source_dir") or "") if isinstance(manifest, Mapping) else ""
     target_dir = str(manifest.get("target_dir") or "") if isinstance(manifest, Mapping) else ""
-    polish_source_root = (output_dir / source_dir).resolve()
+    normalized_dir = output_dir / "footnote_normalized"
+    if normalized_dir.is_dir() and any(normalized_dir.glob("*.md")):
+        polish_source_root = normalized_dir.resolve()
+    else:
+        polish_source_root = (output_dir / source_dir).resolve()
     target_root = (output_dir / target_dir).resolve()
     try:
         polish_source_root.relative_to(output_dir.resolve())
@@ -117,9 +121,12 @@ def polish_semantic_issue_tasks(
             if not isinstance(raw_issues, list):
                 diagnose("invalid_review", filename, "current semantic sidecar is malformed and has no usable issues list")
                 continue
-            if not raw_issues and review.get("errors"):
-                diagnose("invalid_review", filename, "current semantic sidecar failed validation and provides no usable issues to map")
-                continue
+            if not raw_issues:
+                if review.get("status") == "clear":
+                    continue
+                if review.get("errors"):
+                    diagnose("invalid_review", filename, "current semantic sidecar failed validation and provides no usable issues to map")
+                    continue
             invalid_issue_rows = [
                 item for item in raw_issues
                 if not isinstance(item, Mapping) or not item.get("issue_id") or not item.get("source_excerpt")
@@ -139,18 +146,43 @@ def polish_semantic_issue_tasks(
             # Preserve parseable unresolved issues so mapping failures become explicit blockers.
         for issue in review.get("issues", []) or []:
             excerpt = str(issue.get("source_excerpt") or "")
-            polish_first = polish_source.find(excerpt)
-            if not excerpt or polish_first < 0 or polish_source.find(excerpt, polish_first + 1) >= 0:
+            from .footnote_matching import find_exact_signature_spans
+            polish_first = polish_source.find(excerpt) if excerpt else -1
+            if not excerpt:
+                polish_match_count = 0
+            elif polish_first >= 0 and polish_source.find(excerpt, polish_first + 1) < 0:
+                polish_match_count = 1
+            else:
+                polish_match_count = len(find_exact_signature_spans(polish_source, excerpt))
+            if polish_match_count != 1:
                 diagnose(
                     "current_issue_mapping_failure", filename,
                     "source_excerpt is absent or not unique in the current Polish source",
                     issue_id=str(issue.get("issue_id") or ""),
                     stage="polish_source",
-                    match_count=0 if polish_first < 0 else 2,
+                    match_count=polish_match_count,
                 )
                 continue
-            from .footnote_matching import find_exact_signature_spans
-            raw_spans = find_exact_signature_spans(raw_source, excerpt)
+            raw_record = record
+            raw_text = raw_source
+            raw_spans = find_exact_signature_spans(raw_text, excerpt)
+            if len(raw_spans) != 1 and record.get("chapter_id"):
+                chapter_id = str(record.get("chapter_id"))
+                chapter_matches: list[tuple[Mapping[str, Any], str, list[tuple[int, int]]]] = []
+                total_chapter_spans = 0
+                for sibling in records:
+                    sib_name = str(sibling.get("name") or "")
+                    if not sib_name or sib_name == filename or str(sibling.get("chapter_id") or "") != chapter_id:
+                        continue
+                    sib_text = source_texts.get(sib_name)
+                    if sib_text is None:
+                        continue
+                    sib_spans = find_exact_signature_spans(sib_text, excerpt)
+                    if sib_spans:
+                        total_chapter_spans += len(sib_spans)
+                        chapter_matches.append((sibling, sib_text, sib_spans))
+                if len(chapter_matches) == 1 and total_chapter_spans == 1:
+                    raw_record, raw_text, raw_spans = chapter_matches[0]
             if len(raw_spans) != 1:
                 diagnose(
                     "current_issue_mapping_failure", filename,
@@ -161,9 +193,11 @@ def polish_semantic_issue_tasks(
                 )
                 continue
             raw_start, raw_end = raw_spans[0]
-            raw_excerpt = raw_source[raw_start:raw_end]
+            raw_excerpt = raw_text[raw_start:raw_end]
             primary_matches: list[tuple[int, str, int, Mapping[str, Any], Mapping[str, Any]]] = []
-            for page in range(int(record.get("start_page") or 0), int(record.get("end_page") or 0) + 1):
+            sig_matches: list[tuple[int, str, int, Mapping[str, Any], Mapping[str, Any]]] = []
+            adjacent_pair_matches: list[tuple[int, str, int, int, Mapping[str, Any], Mapping[str, Any]]] = []
+            for page in range(int(raw_record.get("start_page") or 0), int(raw_record.get("end_page") or 0) + 1):
                 for source_kind, entry in sidecar_index.get(page, {}).items():
                     if str(source_kind) != "primary":
                         continue
@@ -173,13 +207,35 @@ def polish_semantic_issue_tasks(
                         data = json.loads((output_dir / str(entry["path"])).read_text(encoding="utf-8"))
                     except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError):
                         continue
-                    for block_index, block in enumerate(data.get("blocks", [])):
+                    blocks = data.get("blocks", [])
+                    block_variants_cache: list[tuple[int, Mapping[str, Any], list[str]]] = []
+                    for block_index, block in enumerate(blocks):
                         if not isinstance(block, Mapping):
                             continue
                         variants = block_text_variants(output_dir, page, block)
+                        block_variants_cache.append((block_index, block, variants))
                         if any(variant.count(excerpt) == 1 for variant in variants):
                             primary_matches.append((page, str(source_kind), block_index, entry, block))
+                        elif any(len(find_exact_signature_spans(variant, excerpt)) == 1 for variant in variants):
+                            sig_matches.append((page, str(source_kind), block_index, entry, block))
+                    for pos in range(len(block_variants_cache) - 1):
+                        idx_a, blk_a, vars_a = block_variants_cache[pos]
+                        idx_b, _blk_b, vars_b = block_variants_cache[pos + 1]
+                        if idx_b != idx_a + 1 or not vars_a or not vars_b:
+                            continue
+                        joined = f"{vars_a[0]}\n\n{vars_b[0]}"
+                        if len(find_exact_signature_spans(joined, excerpt)) == 1:
+                            adjacent_pair_matches.append((page, str(source_kind), idx_a, idx_b, entry, blk_a))
+            extra_linked_refs: set[tuple[int, str, int]] = set()
             unique_matches = {(page, kind, block) for page, kind, block, _, _ in primary_matches}
+            if not unique_matches and sig_matches:
+                primary_matches = sig_matches
+                unique_matches = {(page, kind, block) for page, kind, block, _, _ in primary_matches}
+            if not unique_matches and len(adjacent_pair_matches) == 1:
+                adj_page, adj_kind, idx_a, idx_b, adj_entry, adj_blk = adjacent_pair_matches[0]
+                primary_matches = [(adj_page, adj_kind, idx_a, adj_entry, adj_blk)]
+                unique_matches = {(adj_page, adj_kind, idx_a)}
+                extra_linked_refs.add((adj_page, adj_kind, idx_b))
             if len(unique_matches) != 1:
                 diagnose(
                     "current_issue_mapping_failure", filename,
@@ -195,11 +251,11 @@ def polish_semantic_issue_tasks(
                 {"sidecar_sha256": entry["sha256"], "block": block_data},
                 ensure_ascii=False, sort_keys=True, separators=(",", ":"),
             ).encode("utf-8")).hexdigest()
-            line = raw_source.count("\n", 0, raw_start) + 1
+            line = raw_text.count("\n", 0, raw_start) + 1
             issue_identity = "\0".join((filename, str(issue.get("issue_id") or ""), str(issue.get("source_sha256") or ""), str(issue.get("target_sha256") or ""), str(issue.get("context_sha256") or "")))
             task_id = "fra-" + hashlib.sha256(issue_identity.encode("utf-8")).hexdigest()[:20]
             linked_pages = {page}
-            linked_refs = {(page, source_kind, block_index)}
+            linked_refs = {(page, source_kind, block_index), *extra_linked_refs}
             for collection in ("continuation_chains", "cross_page_windows"):
                 for window in page_report.get(collection, []) or []:
                     if not isinstance(window, Mapping):
@@ -240,6 +296,7 @@ def polish_semantic_issue_tasks(
                 "evidence_sha256": evidence_hash,
                 "evidence_excerpt": raw_excerpt,
                 "evidence_file_sha256": sha256_file(output_dir / "ocr_markdown" / filename),
+                **({"polish_raw_source_file": str(raw_record.get("name"))} if str(raw_record.get("name") or "") != filename else {}),
                 "evidence_target_sha256": review.get("target_sha256"),
                 "polish_issue": {
                     key: issue.get(key) for key in (

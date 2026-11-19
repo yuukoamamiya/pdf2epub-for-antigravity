@@ -263,6 +263,11 @@ def decide_resume(
                     validated_files = set()
                 source_hashes = dict(validation.get("source_sha256", {})) if isinstance(validation.get("source_sha256", {}), dict) else {}
                 target_hashes = dict(validation.get("target_sha256", {})) if isinstance(validation.get("target_sha256", {}), dict) else {}
+                review_hashes = (
+                    dict(validation.get("polish_footnote_semantic_review_sha256", {}))
+                    if isinstance(validation.get("polish_footnote_semantic_review_sha256", {}), dict)
+                    else {}
+                )
                 for name, record in records.items():
                     if not isinstance(record, dict):
                         continue
@@ -277,6 +282,7 @@ def decide_resume(
                         source_hashes.pop(name, None)
                         target_hashes.pop(name, None)
                         html_resume_contexts.pop(name, None)
+                        review_hashes.pop(name, None)
                         continue
                     source_digest = record.get("source_sha256")
                     target_digest = record.get("target_sha256")
@@ -297,10 +303,16 @@ def decide_resume(
                         source_hashes.pop(name, None)
                         target_hashes.pop(name, None)
                         html_resume_contexts.pop(name, None)
+                        review_hashes.pop(name, None)
                         continue
                     validated_files.add(str(name))
                     source_hashes[str(name)] = source_digest
                     target_hashes[str(name)] = target_digest
+                    review_digest = record.get("polish_footnote_semantic_review_sha256")
+                    if isinstance(review_digest, str) and review_digest.strip():
+                        review_hashes[str(name)] = review_digest
+                    else:
+                        review_hashes.pop(str(name), None)
                     if isinstance(record.get("resume_context"), Mapping):
                         html_resume_contexts[str(name)] = dict(record["resume_context"])
                         snapshot = record["resume_context"]
@@ -312,6 +324,8 @@ def decide_resume(
                 validation["source_sha256"] = source_hashes
                 validation["target_sha256"] = target_hashes
                 validation["resume_contexts"] = html_resume_contexts
+                if review_hashes or "polish_footnote_semantic_review_sha256" in validation:
+                    validation["polish_footnote_semantic_review_sha256"] = review_hashes
         except (OSError, json.JSONDecodeError, AttributeError, TypeError):
             pass
 
