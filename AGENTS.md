@@ -83,7 +83,7 @@ uv run pdf2epub -c config.yaml doctor
 选中的 OCR 依赖和配置兼容性。页面 OCR 只能使用注册表中当前存在的后端；未知、退役或遗留
 的后端配置会在 `doctor` 阶段阻断，不能靠关闭开关绕过。
 维护者可用 `uv run pdf2epub -c config.yaml footnote-review-summary --json` 只读汇总脚注复核成本；它是独立诊断，不能替代 `footnote-validate`，也不建议删除相邻页上下文窗口。
-脚注 unit context 使用独立 projection version。加载时必须依据当前候选报告、精确页侧车哈希索引和 refined unit mapping 重算完整投影。Polish boundary context projection version 2 首次恢复时用 `polish --resume` 刷新 sidecar/context 并运行正式 `polish-validate`。之后 halo 外邻片变化不使已完成 sidecar/receipt 失效，但完整 source provenance 与 inventory 检查仍须通过。脚注证据始终按 chapter scope 投影，缺少精确 part→page 映射时继续使用章节级证据与失效范围，不推断分片级页范围。旧脚注 unit context 版本或脚注证据变化时，先重跑 `footnote-prepare`、`footnote-validate`，保留原 decision 文件，不把刷新上下文当作语义决定通过。
+脚注 unit context 使用独立 projection version。加载时必须依据当前候选报告、精确页侧车哈希索引和 refined unit mapping 重算完整投影。Polish boundary context projection version 2 首次恢复时用 `polish --resume` 刷新 sidecar/context 并运行正式 `polish-validate`。之后 halo 外邻片变化不使已完成 sidecar/receipt 失效，但完整 source provenance 与 inventory 检查仍须通过。脚注证据在 `tree_progress.json` 提供显式、合法的 `part_page_ranges` 时按该分片页范围投影以缩小失效半径；缺少精确 part→page 映射时继续使用章节级证据与失效范围，不推断分片级页范围。旧脚注 unit context 版本或脚注证据变化时，先重跑 `footnote-prepare`、`footnote-validate`，保留原 decision 文件，不把刷新上下文当作语义决定通过。
 
 ## 0.2 依赖和 OCR 后端快速配置
 
@@ -412,8 +412,8 @@ polish handoff 按显式 part mapping 为每个单元提供前后各最多 256 t
 列出的投影，不打开邻片全文，也不把上下文写入目标。源文或相关 refined mapping 变化会使 polish 验收和
 resume 失效。脚注模式启用时，每个文件还必须生成 schema 1 的 `polish_footnote_reviews/<stem>.json`，
 覆盖正文、脚注定义及跨分片关联；无脚注定义的文件也要完成正文扫描。sidecar 报告 issue 时，按报告回到
-`footnote-prepare` 的视觉复核、`footnote-validate` 和 `footnote-apply`。正式 `polish-validate` 会更新
-当前 receipt 和 validated 副本；不得手工重算哈希恢复旧检查点。
+`footnote-prepare` 的视觉复核、`footnote-validate` 和 `footnote-apply`；若所有上报 issue 对应的精确 `task_id` 均已在当前有效的 `footnote_normalization.json` 及已应用结果审计裁决（`confirmed_not_a_footnote`、`legitimate_non_footnote`、`truncated_source_exception`、`deferred_to_polish`）中正式关闭，`polish` 语义校验收敛通过，不再循环退回脚注阶段。正式 `polish-validate`（含 `--file` 单文件校验写入的 `polish_file_validation.json` 语义审查哈希）会更新
+当前 receipt 和 validated 副本并由 `polish --resume` 合并复用；不得手工重算哈希恢复旧检查点。
 `refine-local` 的页面合并器会保守地拼接跨页未完的普通正文；完整句子、标题、列表、脚注、
 图片和表格仍保持块边界。Markdown→XHTML 默认遵循标准 Markdown 语义：单换行是软换行，
 空行才创建新段落；只有显式 `<br />` 才生成硬换行。

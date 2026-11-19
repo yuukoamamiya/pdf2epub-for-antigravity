@@ -592,8 +592,8 @@ translate/polish。`translate-html_dispatch_prompt.md` 是主 Agent 专用静态
 `min(max_files, 4)`，硬上限 8）。准备阶段从 `file_roles` 识别 `index`、
 `bibliography`、`notes`、`author_notes`、`toc`、`catalog`、`ad`、`copyright`、
 `frontmatter`、`metadata` 和 `cover` 等特殊角色，把它们标记为 `isolated` batch。
-`_worker_groups()` 先为每个 isolated batch 建立只含该批次的独立 worker，再把其余普通
-batch 交给 LPT 分组；普通 batch 不会进入隔离 worker。PDF chapter 模式的
+`_worker_groups()` 先为每个 isolated batch（在 `polish` 下还包含含 large/extreme/超字节文件的 batch）建立只含该批次的独立 worker，再把其余普通
+batch 在 `polish` 下按 `polish_max_files` 与 `max_packed_source_tokens` 预算封顶装箱（其他非 chapter 模式继续 LPT 分组）；普通 batch 不会进入隔离 worker。PDF chapter 模式的
 `_chapter_worker_groups()` 使用同一角色集合隔离；`pack_tiny_special_units` 只允许特殊
 单元之间合包。`max_concurrency` 仍是同时运行
 上限，不限制 handoff 总数，因此特殊角色可能产生更多 handoff。`write_worker_handoffs()`
@@ -979,7 +979,7 @@ secondary-only 的 moved decision 必须包含：
 - `refine/footnote_handoff.py`：生成脚注 Subagent 的 manifest 和 Prompt，并调度候选报告、review
   packet 与 context API；不持有 projection 或 freshness 实现。
 - `refine/footnote_unit_contexts.py`：集中实现 canonical sparse projection、上下文写入/加载、投影重算、
-  manifest 哈希核对和输出路径安全校验，供 validation 与 Markdown handoff 直接使用。脚注证据按 chapter scope 投影，
+  manifest 哈希核对和输出路径安全校验，供 validation 与 Markdown handoff 直接使用。当单元提供显式、合法的 `part_page_ranges` 时按分片页范围投影以缩小失效半径；
   缺少精确 part→page 映射时继续使用章节级证据与失效范围，不推断分片级页范围。
 - `refine/footnote_polish_review.py`：负责 polish 脚注语义问题的证据定位和 scoped review task 构造；
   handoff 只消费其结果，不承载该映射规则。
@@ -1050,7 +1050,7 @@ PDF 结构阶段采用“共享证据、分离语义”的边界：
 | `footnote_result_audit.py` | 纯函数生成源稿/归一化稿残留标记、scope 编号信号、疑似截断/未闭合定义及 apply 完整性任务 | 文件 IO、校验审核提交、推断脚注语义、移动块、自动补注或翻译 |
 | `footnote_result_review.py` | 读取并验证视觉结果审查的精确地址、决定、源/目标/sidecar 哈希与页图 freshness | 生成审计 findings、修改源/归一化稿、决定脚注语义 |
 
-Polish issue 回流诊断区分 `stale_contract` 与当前 `current_issue_mapping_failure`/`invalid_review`。后两者写入 result audit blocker 并由 `footnote-validate` fail closed；prepare 仍保留其他成功映射的视觉任务。恢复由原 Polish Reviewer 修正当前 sidecar 后重跑 `footnote-prepare`。
+Polish issue 回流诊断区分 `stale_contract` 与当前 `current_issue_mapping_failure`/`invalid_review`。映射在严格唯一性（`match_count == 1`）前提下支持空白/软换行归一化与同页相邻双块唯一匹配；无法唯一映射或 sidecar 无效时写入 result audit blocker 并由 `footnote-validate` fail closed，prepare 仍保留其他成功映射的视觉任务。恢复由原 Polish Reviewer 修正当前 sidecar 后重跑 `footnote-prepare`。当当前有效的 `footnote_normalization.json` 及已应用结果审计裁决（`confirmed_not_a_footnote`、`legitimate_non_footnote`、`truncated_source_exception`、`deferred_to_polish`）已精确关闭 sidecar 上报的全部 issue `task_id` 时，`polish_footnote_semantics.py` 允许校验收敛通过（`resolved_by_upstream_audit: true`），避免死循环退回脚注流程。
 
 脚注识别规则或评分发生变化时，应修改 `footnote_page_scan.py`、`footnote_continuation_regions.py` 或 `footnote_regions.py` 对应层，并覆盖主次 OCR 差异与跨页边界；候选到决定的物化规则应进入 `footnote_normalization_plan.py`，由统一计划承接；该 planner 可以读取当前证据以完成定位和计划校验，但不得写派生稿或 checkpoint。Context consumers 依赖 `footnote_unit_contexts.py` 的公开 API，不从 handoff coordinator 取 context。脚注 apply 按“前置门禁/证据快照 → block 定位和 unit/lane 归属 → 引用与定义绑定 → 编辑冲突校验 → 内存纯转换 → 原子写入派生稿 → 结果审计 → success checkpoint”的顺序运行。计划和所有绑定必须完整通过后才允许写入；源 unit 的哈希在读取原始字节时快照，写入前重新扫描 `ocr_markdown/*.md` 并与该快照逐项比较，同时先检查 `footnote_normalized/` 是否有不属于当前源 inventory 的 stale Markdown。
 apply 写入 `footnote_normalized/` 后运行 `footnote_result_audit.json`（version 4），并把其文件哈希/版本绑定到 `footnote_normalization.json`（schema 10）。有效决定使用 effective decision version 1，边界上下文投影使用 version 2。该报告也绑定源稿、归一化稿、候选报告和决定校验的当前哈希。只有审计通过，apply 才写有效 normalization checkpoint，未解决 findings 不会通过 `footnote_normalization_status()`，因此 polish/readiness/build 门禁也会阻断。即使派生 Markdown 已写出，它仍是未验证结果，不能据文件存在推断阶段完成。

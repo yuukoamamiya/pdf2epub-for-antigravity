@@ -86,13 +86,13 @@ subagent:
 
 PDF `translate`/`polish` 的全量报告和逐文件 ledger 会保存 validation-time `unit_context_sha256` 与 TOC heading context。上下文改变或移除后，重复 prepare 不能刷新旧 receipt；先 prepare 更新 manifest，再正式 validate 现有目标，之后 resume 才能复用。旧 receipt 缺少上下文快照时，若当前单元没有上下文仍兼容复用；若已有 unit/heading 或全书 context，则要求一次正式校验。校验发现 `prepared_context` 文件实际哈希与 manifest 不符时，只清除该单元的 validated 副本并提示刷新 context、重新校验；合法 target 保留不移动。若同单元另有内容错误，内容错误仍会隔离 target。Full validation 替代旧 partial ledger 前会保留原始 ledger bytes 到 `scratch/<task>/superseded_checkpoints/`，并在最新报告记录相对路径和 SHA-256；check-only 不创建此归档。
 
-脚注 handoff 的 unit context 使用独立的 `projection_version`，并保持 chapter-scoped。缺少精确 part→page 映射时继续使用章节级证据与失效范围，不推断分片级页范围。加载时以候选报告和 review packet 的页来源重新核对侧车路径，context 自身的页/fact/hash 不能作为来源证明。旧 context 缺少当前 projection version 时，重新运行 `footnote-prepare` 与 `footnote-validate`，原有 decision 文件保留，只有当前证据身份仍一致且校验通过时才可复用。此刷新不会调用 OCR，也不会放宽语义决定门禁。
+脚注 handoff 的 unit context 使用独立的 `projection_version`：当单元在 `tree_progress.json` 中提供显式、合法的 `part_page_ranges` 时按该分片页范围投影以缩小失效半径；缺少精确 part→page 映射时继续使用章节级证据与失效范围，不推断分片级页范围。加载时以候选报告和 review packet 的页来源重新核对侧车路径，context 自身的页/fact/hash 不能作为来源证明。旧 context 缺少当前 projection version 时，重新运行 `footnote-prepare` 与 `footnote-validate`，原有 decision 文件保留，只有当前证据身份仍一致且校验通过时才可复用。此刷新不会调用 OCR，也不会放宽语义决定门禁。
 
 PDF/EPUB 的 `translate` manifest 会在 `worker_handoffs/` 按 TOC 顺序为相邻短章节装箱，生成隔离的最小 manifest 和提示词；拆分单元的后续 part 会收到只读的 `preceding_context`（前一分片的源文尾部，已剔除脚注定义），仅用于承接代词和论证语气，不计入输出、不得翻译或复制；父级 manifest 保留完整审计索引，worker 只接收自己的文件、批次、上下文哈希和必要的章节元数据，不重复携带全书文件统计、章节映射或审计快照路径；
 `polish` 使用独立的 `polish_worker_handoffs/`，避免不同阶段的任务被误认。每个 Subagent
-只读取自己 handoff 的 `assigned_files`；超过 30,000 字节的单元自动独立成批，但不能与
-其他章节合并。polish 的普通章节仍可适度打包，文件预算使用独立的
-`subagent.batching.polish_max_files`（默认 `min(max_files, 4)`）；`index`、
+只读取自己 handoff 的 `assigned_files`；包含 large/extreme 或超过 30,000 字节单元的 batch 自动独立占用单独 worker，不能与
+其他普通分片混装。polish 的普通章节仍可适度打包，文件与 token 预算受
+`subagent.batching.polish_max_files`（默认 `min(max_files, 4)`）和 `max_packed_source_tokens` 双重封顶；`index`、
 `bibliography`、`notes`、`author_notes`、`toc`、`catalog`、`ad`、`copyright`、
 `frontmatter`、`metadata` 和 `cover` 会标记为 isolated batch，并各自占用独立 worker，
 不与普通章节或其他特殊角色混排。隔离 worker 的 prompt 只针对其 assigned files 高亮
@@ -1047,12 +1047,13 @@ Polish sidecar 中的 `issues[]` 只报告疑点，不决定脚注归属。`foot
 重建 `footnote_normalized/` 后，旧 Polish semantic sidecar 会因源哈希过期，先运行 `polish --resume` 刷新受影响
 文件的 review，再运行正式 `polish-validate`。
 
-当前回流要求 source excerpt 在 Polish 输入、raw refinement Markdown 和一个 primary OCR block 中都能唯一定位。
-摘录跨多个 OCR block/page、重复出现或无法回映时，不会合并多个 block 或猜测归属。`footnote-prepare` 将真实哈希/合同
+当前回流要求 source excerpt 在 Polish 输入、raw refinement Markdown 和 primary OCR block 中都能唯一定位（在严格 `match_count == 1` 前提下支持空白/软换行归一化与同页相邻双块唯一匹配）。
+摘录跨非相邻 block/跨页、重复出现或无法唯一回映时，不会猜测归属。`footnote-prepare` 将真实哈希/合同
 过期记录为 `stale_contract`，提示先运行 `polish --resume` 刷新 review，再重跑 prepare。若合同哈希仍有效但当前 issue
 无法唯一映射，则记录带有 issue id、失败映射阶段、匹配数和恢复步骤的 `current_issue_mapping_failure`；哈希有效但
 sidecar shape/coverage 无效时记录 `invalid_review`。这两类均保留其他可映射任务继续准备，并将 result audit 置为 blocked；
 `footnote-validate` 会明确拒绝通过，因此不能 apply 或进入后续阶段。
+当上报的所有 issue 均已由当前有效的 `footnote_normalization.json` 及已应用结果审计裁决（`confirmed_not_a_footnote`、`legitimate_non_footnote`、`truncated_source_exception`、`deferred_to_polish`）按精确 `task_id` 正式关闭时，回到 `polish-validate` 将收敛通过（`resolved_by_upstream_audit: true`），不再无限退回脚注阶段；此外 `polish-validate --file` 写入 `polish_file_validation.json` 的语义审查哈希也会被 `polish --resume` 合并复用。
 恢复时让原 Polish Reviewer 修正现有 semantic sidecar 中该 issue 的 `source_excerpt`：它必须是当前 Polish/raw source
 共同存在且唯一、并完整落在一个 primary OCR block 内的连续摘录。Reviewer 更新 sidecar 后直接重跑
 `footnote-prepare`，让正式哈希合同和映射重新校验；不需要先运行会被 footnote gate 挡住的 `polish --resume`，也不得
