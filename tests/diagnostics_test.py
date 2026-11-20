@@ -246,3 +246,71 @@ def test_status_reports_current_and_reachable_flags(tmp_path: Path, monkeypatch)
     assert stages["refine-prepare"]["current"] is False
     assert stages["refine-prepare"]["reachable"] is True
     assert report["next_command"].endswith("refine-prepare")
+
+
+def _write_manifest(path: Path, payload: dict) -> None:
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_status_surfaces_pending_subagent_review_gates(tmp_path: Path, monkeypatch):
+    config_path = _config(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    output_dir = tmp_path / "output" / "Diagnostics Book"
+    output_dir.mkdir(parents=True)
+    _write_manifest(
+        output_dir / "footnote_subagent_manifest.json",
+        {
+            "status": "pending_review",
+            "review_candidate_count": 7,
+            "visual_audit_task_count": 3,
+        },
+    )
+    _write_manifest(
+        output_dir / "translate_subagent_manifest.json",
+        {
+            "pending_files": ["chapter_1.md", "chapter_2.md"],
+            "worker_handoffs": [
+                {"worker_id": "w1", "dispatch_status": "available"},
+                {"worker_id": "w2", "dispatch_status": "running"},
+            ],
+            "dispatch_plan": [{"wave": 1}],
+        },
+    )
+
+    report = build_status(config_path)
+    gates = {gate["name"]: gate for gate in report["review_gates"]}
+
+    assert gates["footnote"]["status"] == "pending_review"
+    assert gates["footnote"]["needs_subagent"] is True
+    assert "7 review candidate(s)" in gates["footnote"]["detail"]
+    assert "3 visual audit task(s)" in gates["footnote"]["detail"]
+
+    assert gates["translate"]["needs_subagent"] is True
+    assert gates["translate"]["pending_files"] == 2
+    assert gates["translate"]["pending_file_names"] == ["chapter_1.md", "chapter_2.md"]
+    assert gates["translate"]["workers"] == 2
+    assert gates["translate"]["worker_status"] == {"available": 1, "running": 1}
+    assert gates["translate"]["waves"] == 1
+
+
+def test_status_flags_unreadable_review_manifest(tmp_path: Path, monkeypatch):
+    config_path = _config(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    output_dir = tmp_path / "output" / "Diagnostics Book"
+    output_dir.mkdir(parents=True)
+    (output_dir / "footnote_subagent_manifest.json").write_text("{broken", encoding="utf-8")
+
+    report = build_status(config_path)
+    gates = {gate["name"]: gate for gate in report["review_gates"]}
+
+    assert gates["footnote"]["status"] == "unreadable"
+    assert gates["footnote"]["needs_subagent"] is True
+
+
+def test_status_has_no_review_gates_without_manifests(tmp_path: Path, monkeypatch):
+    config_path = _config(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    report = build_status(config_path)
+
+    assert report["review_gates"] == []

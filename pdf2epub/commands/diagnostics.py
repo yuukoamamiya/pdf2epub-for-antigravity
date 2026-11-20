@@ -453,6 +453,98 @@ def _html_stages(output_dir: Path) -> list[dict[str, Any]]:
     return _apply_stage_blockers(stages)
 
 
+_REVIEW_MANIFESTS: tuple[tuple[str, str], ...] = (
+    ("refine", "refine_subagent_manifest.json"),
+    ("ocr-correct", "ocr-correct_subagent_manifest.json"),
+    ("illustration", "illustration_subagent_manifest.json"),
+    ("footnote", "footnote_subagent_manifest.json"),
+    ("polish", "polish_subagent_manifest.json"),
+    ("entities", "entity_subagent_manifest.json"),
+    ("translate", "translate_subagent_manifest.json"),
+    ("translate-html", "translate-html_subagent_manifest.json"),
+)
+
+
+def _review_gates(output_dir: Path) -> list[dict[str, Any]]:
+    """Summarize which Subagent hand-offs still need an operator decision.
+
+    ``status`` previously answered only "is the checkpoint there".  Whether a
+    human has to open a Subagent at all is the question operators ask most
+    often, and answering it required opening manifests by hand.
+    """
+    gates: list[dict[str, Any]] = []
+    for name, filename in _REVIEW_MANIFESTS:
+        path = output_dir / filename
+        if not path.is_file():
+            continue
+        manifest = _read_json(path)
+        if not manifest:
+            gates.append(
+                {
+                    "name": name,
+                    "manifest": filename,
+                    "status": "unreadable",
+                    "needs_subagent": True,
+                    "detail": "manifest exists but could not be parsed; rerun the prepare step",
+                }
+            )
+            continue
+        pending_files = manifest.get("pending_files")
+        pending = sorted(pending_files) if isinstance(pending_files, list) else []
+        handoffs = manifest.get("worker_handoffs")
+        workers = [item for item in handoffs if isinstance(item, dict)] if isinstance(handoffs, list) else []
+        worker_status: dict[str, int] = {}
+        for worker in workers:
+            key = str(worker.get("dispatch_status") or "unknown")
+            worker_status[key] = worker_status.get(key, 0) + 1
+        waves = manifest.get("dispatch_plan")
+        declared_status = str(manifest.get("status") or "").strip()
+        if declared_status:
+            status = declared_status
+        elif pending:
+            status = "pending_review"
+        elif workers:
+            status = "assigned"
+        else:
+            status = "clear"
+        needs_subagent = status in {"pending_review", "unreadable"} or status.startswith(
+            "human_review"
+        )
+        detail_parts: list[str] = []
+        if pending:
+            detail_parts.append(f"{len(pending)} pending file(s)")
+        for label, key in (
+            ("review candidate(s)", "review_candidate_count"),
+            ("visual audit task(s)", "visual_audit_task_count"),
+        ):
+            value = manifest.get(key)
+            if isinstance(value, int) and value > 0:
+                detail_parts.append(f"{value} {label}")
+        if workers:
+            detail_parts.append(f"{len(workers)} worker hand-off(s)")
+        if isinstance(waves, list) and waves:
+            detail_parts.append(f"{len(waves)} dispatch wave(s)")
+        if worker_status:
+            detail_parts.append(
+                ", ".join(f"{key}={value}" for key, value in sorted(worker_status.items()))
+            )
+        gates.append(
+            {
+                "name": name,
+                "manifest": filename,
+                "status": status,
+                "needs_subagent": needs_subagent,
+                "pending_files": len(pending),
+                "pending_file_names": pending[:10],
+                "workers": len(workers),
+                "worker_status": worker_status,
+                "waves": len(waves) if isinstance(waves, list) else 0,
+                "detail": "; ".join(detail_parts) or "nothing outstanding",
+            }
+        )
+    return gates
+
+
 def _apply_stage_blockers(stages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Propagate currency and reachability through the stage ladder.
 
@@ -508,6 +600,7 @@ def build_status(config_path: str | Path = "config.yaml") -> dict[str, Any]:
         "next_command": None,
         "blocked_stage": None,
         "blocked_reason": None,
+        "review_gates": [],
     }
     if errors:
         return report
@@ -540,6 +633,7 @@ def build_status(config_path: str | Path = "config.yaml") -> dict[str, Any]:
     else:
         stages = _pdf_stages(output_dir, path, config, input_path)
     report["stages"] = stages
+    report["review_gates"] = _review_gates(output_dir) if output_dir.is_dir() else []
     pending = []
     for stage in stages:
         pending.extend(stage.get("pending_files", []))
@@ -713,6 +807,12 @@ def status_command(args: Any) -> int:
                 print(f"阻断: {error}")
         for stage in report.get("stages", []):
             print(f"[{stage['status']}] {stage['name']}: {stage['detail']}")
+        gates = report.get("review_gates") or []
+        if gates:
+            print("Subagent 复核门:")
+            for gate in gates:
+                flag = "需要复核" if gate["needs_subagent"] else "无需复核"
+                print(f"  [{gate['status']}] {gate['name']} ({flag}): {gate['detail']}")
         if report.get("next_command"):
             print(f"下一步: {report['next_command']}")
         elif report.get("blocked_stage"):
