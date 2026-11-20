@@ -270,14 +270,22 @@ def test_legacy_native_source_requires_consistent_page_progress(tmp_path: Path):
     assert is_legacy_native_source(tmp_path) is False
 
 
-def test_legacy_native_source_ignores_unusable_json_and_requires_progress(tmp_path: Path):
+def test_legacy_native_source_rejects_corrupt_progress(tmp_path: Path):
+    import pytest
     from pdf2epub.ocr_source import is_legacy_native_source
 
     (tmp_path / "pages").mkdir()
-    (tmp_path / "pages" / "ocr_progress.json").write_text("[]", encoding="utf-8")
+    progress = tmp_path / "pages" / "ocr_progress.json"
     (tmp_path / "pdf_text_probe.json").write_text(json.dumps({"schema_version": 3, "recommendation": "ocr_required"}), encoding="utf-8")
-    assert is_legacy_native_source(tmp_path) is False
-    (tmp_path / "pages" / "ocr_progress.json").write_text("{broken", encoding="utf-8")
+    # The page progress record is authoritative: an unreadable or non-object
+    # record blocks instead of silently degrading to a missing record.
+    progress.write_text("[]", encoding="utf-8")
+    with pytest.raises(ValueError, match="could not read pages/ocr_progress.json"):
+        is_legacy_native_source(tmp_path)
+    progress.write_text("{broken", encoding="utf-8")
+    with pytest.raises(ValueError, match="could not read pages/ocr_progress.json"):
+        is_legacy_native_source(tmp_path)
+    progress.unlink()
     assert is_legacy_native_source(tmp_path) is False
 
 
@@ -2328,3 +2336,36 @@ def test_global_toc_token_budget_is_configurable():
     )
 
     assert batching["global_toc_tokens"] == 321
+
+
+def test_readiness_reports_corrupt_progress_instead_of_raising(tmp_path: Path, monkeypatch):
+    """The fail-closed source check must surface as a gate error, not a traceback."""
+
+    from pdf2epub.commands.markdown_readiness import run_readiness_check
+
+    (tmp_path / "input").mkdir()
+    (tmp_path / "input" / "book.pdf").write_bytes(b"%PDF-1.7 placeholder")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                'title: "Corrupt Progress Book"',
+                "input_pdf: input/book.pdf",
+                "ocr:",
+                "  backend: chandra",
+                "  secondary:",
+                "    enabled: false",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    pages = tmp_path / "output" / "Corrupt Progress Book" / "pages"
+    pages.mkdir(parents=True)
+    (pages / "ocr_progress.json").write_text("{broken", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    report = run_readiness_check(str(config_path), "translate")
+
+    assert report["ready"] is False
+    assert any("could not read pages/ocr_progress.json" in error for error in report["errors"])

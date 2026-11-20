@@ -136,7 +136,11 @@ def _prepare_pdf_markdown_task(args, task: str):
             logger.error(f"Could not load external glossary: {exc}")
             return 1
     if task == "polish":
-        source_dir, _ = _resolve_pdf_polish_source(output_dir, config)
+        try:
+            source_dir, _ = _resolve_pdf_polish_source(output_dir, config)
+        except ValueError as exc:
+            logger.error(str(exc))
+            return 1
         target_dir = output_dir / "polished_markdown"
         rules = [
             "Repair source layout and line wrapping while preserving meaning and document structure.",
@@ -570,7 +574,11 @@ def _validate_pdf_markdown_task_impl(args, task: str, *, context=None):
             logger.error(f"Invalid footnotes configuration: {exc}")
             return 1
     if task == "polish":
-        source_dir, _ = _resolve_pdf_polish_source(output_dir, config)
+        try:
+            source_dir, _ = _resolve_pdf_polish_source(output_dir, config)
+        except ValueError as exc:
+            logger.error(str(exc))
+            return 1
         target_dir = output_dir / "polished_markdown"
     else:
         try:

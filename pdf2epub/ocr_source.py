@@ -7,24 +7,45 @@ from pathlib import Path
 from typing import Mapping
 
 
+def _read_progress_record(path: Path) -> Mapping | None:
+    """Read the authoritative page progress record; unusable data blocks.
+
+    A missing record simply means no page progress was written yet. A record
+    that exists but cannot be parsed is contradictory evidence, so it must not
+    be downgraded to "absent" and silently fall back to visual OCR.
+    """
+    try:
+        if not path.is_file():
+            return None
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"could not read pages/ocr_progress.json: {exc}") from exc
+    if not isinstance(value, Mapping):
+        raise ValueError(
+            "could not read pages/ocr_progress.json: expected a JSON object, "
+            f"got {type(value).__name__}"
+        )
+    return value
+
+
+def _read_probe_record(path: Path) -> Mapping | None:
+    """Read the audit-only probe leniently; it cannot gate OCR on its own."""
+    try:
+        if path.is_file():
+            value = json.loads(path.read_text(encoding="utf-8"))
+            return value if isinstance(value, Mapping) else None
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    return None
+
+
 def is_legacy_native_source(output_dir: Path) -> bool:
     """Resolve legacy native source metadata; contradictory evidence blocks."""
     root = Path(output_dir)
     progress_path = root / "pages" / "ocr_progress.json"
     probe_path = root / "pdf_text_probe.json"
-    progress = probe = None
-    try:
-        if progress_path.is_file():
-            value = json.loads(progress_path.read_text(encoding="utf-8"))
-            progress = value if isinstance(value, Mapping) else None
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        pass
-    try:
-        if probe_path.is_file():
-            value = json.loads(probe_path.read_text(encoding="utf-8"))
-            probe = value if isinstance(value, Mapping) else None
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        pass
+    progress = _read_progress_record(progress_path)
+    probe = _read_probe_record(probe_path)
 
     progress_mode = progress.get("mode") if progress is not None else None
     if progress_mode is not None and not isinstance(progress_mode, str):
