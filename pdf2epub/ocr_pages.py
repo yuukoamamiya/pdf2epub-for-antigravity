@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 """
 Page-wise OCR processing for PDF files.
 
@@ -617,216 +618,58 @@ def run_secondary_ocr_consensus(
     }
 
 
-def ocr_full_book_pagewise(
-    pdf_path: Path,
-    output_dir: Path,
-    session: Any = None,
-    project_id: str = None,
-    location: str = None,
-    start_page: int = 1,
-    end_page: int = None,
-    backend: str = DEFAULT_PRIMARY_OCR_BACKEND,
-    api_key: str = None,
-    base_url: str = None,
-    resume: bool = False,
-    config: Dict = None,
-    max_workers: int = 5,
-    allow_empty_pages: bool = False,
-    retry_pages: Optional[List[int]] = None,
-    allow_slow_secondary: bool = False,
-) -> Dict[str, Any]:
-    """OCR全书，并行处理多页。
+@dataclass(frozen=True)
+class _PageRunInputs:
+    """State for one page-OCR worker batch."""
 
-    Args:
-        pdf_path: Path to PDF file
-        output_dir: Base output directory (will create pages/ subdirectory)
-        session: Authorized session for API calls
-        project_id: GCP project ID
-        location: GCP location
-        start_page: First page to process (default: 1)
-        end_page: Last page to process (default: all pages)
-        backend: OCR backend to use
-        api_key: Retained for compatibility with legacy callers.
-        base_url: Retained for compatibility with legacy callers.
-        resume: Resume from previous progress
-        config: Configuration dict (for retry settings)
-        max_workers: Number of parallel OCR requests (default: 5)
-        allow_empty_pages: Explicitly acknowledge pages with no OCR payload
-            after manual inspection.
-        retry_pages: Specific physical pages to re-OCR even when their
-            checkpoint currently says they are complete.
-        allow_slow_secondary: Explicitly accept a secondary OCR estimate above
-            the configured preflight limit.
-    """
-    backend = str(backend or "").strip().lower()
+    pages_to_process: list[int]
+    ocr_pdf: Path
+    session: Any
+    project_id: Any
+    location: Any
+    images_dir: Optional[Path]
+    pages_dir: Path
+    output_dir: Path
+    backend: str
+    api_key: Optional[str]
+    base_url: Optional[str]
+    config: Dict[str, Any]
+    max_workers: int
+    max_retries: int
+    initial_backoff: float
+    allow_empty_pages: bool
+    progress: Dict[str, Any]
+    page_stats: Dict[str, Any]
+    progress_file: Path
+    page_stats_file: Path
+    total_pages: int
+
+
+def _run_page_workers(inputs: _PageRunInputs) -> None:
+    """OCR the pending pages in parallel and persist progress per page."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
-    # Get retry settings from config
-    if config is None:
-        config = {}
 
-    ocr_config = config.get('ocr', {})
-    max_retries = ocr_config.get('max_retries', 5)
-    initial_backoff = ocr_config.get('initial_backoff', 4.0)
-
-    # Optional: backend-specific override
-    backend_config = ocr_config.get('backends', {}).get(backend, {})
-    if backend_config:
-        max_retries = backend_config.get('max_retries', max_retries)
-        initial_backoff = backend_config.get('initial_backoff', initial_backoff)
-    # Create pages directory
-    pages_dir = output_dir / "pages"
-    pages_dir.mkdir(parents=True, exist_ok=True)
-
-    # Create images directory
-    images_dir = output_dir / "images"
-    images_dir.mkdir(parents=True, exist_ok=True)
-
-    # Prefer original PDF for OCR (preprocessed version is binarized, ruins images)
-    original_pdf = output_dir / "input_original.pdf"
-    ocr_pdf = original_pdf if original_pdf.exists() else pdf_path
-    if ocr_pdf != pdf_path:
-        logger.info(f"Using original PDF for OCR: {ocr_pdf}")
-
-    # Determine page range
-    with fitz.open(ocr_pdf) as pdf:
-        total_pages = len(pdf)
-
-    secondary_preflight = preflight_secondary_ocr(
-        output_dir,
-        total_pages,
-        config,
-        allow_slow=allow_slow_secondary,
-    )
-
-    source_sha256 = _file_sha256(ocr_pdf)
-    progress_file = pages_dir / "ocr_progress.json"
-    page_stats_file = pages_dir / "page_stats.json"
-
-    progress = None
-    page_stats: Dict[str, Any] = {}
-    if resume and progress_file.exists():
-        progress = load_progress(progress_file)
-        if progress is None:
-            logger.warning(
-                "OCR progress is invalid; rebuilding the checkpoint and rechecking all pages"
-            )
-        else:
-            try:
-                recorded_total_pages = int(progress.get("total_pages", 0) or 0)
-            except (TypeError, ValueError):
-                recorded_total_pages = 0
-            if (
-                progress.get("schema_version") != OCR_PROGRESS_SCHEMA_VERSION
-                or progress.get("source_sha256") != source_sha256
-                or recorded_total_pages != total_pages
-                or str(progress.get("backend", "")).strip().lower() != backend
-            ):
-                logger.warning(
-                    "OCR checkpoint provenance changed; existing page files will be reprocessed"
-                )
-                progress = None
-            else:
-                progress = normalize_progress(progress, total_pages)
-                logger.info(
-                    f"Resuming from progress: {len(progress['pages_processed'])} pages already processed"
-                )
-
-    if progress is None:
-        progress = new_progress(
-            source_sha256=source_sha256,
-            total_pages=total_pages,
-            backend=backend,
-        )
-
-    if page_stats_file.exists() and progress.get("pages_processed"):
-        try:
-            loaded_stats = json.loads(page_stats_file.read_text(encoding="utf-8"))
-            if isinstance(loaded_stats, dict):
-                page_stats = loaded_stats
-        except (OSError, UnicodeError, json.JSONDecodeError):
-            logger.warning("page_stats.json is invalid; rebuilding page statistics")
-
-    if end_page is None:
-        end_page = total_pages
-
-    end_page = min(end_page, total_pages)
-
-    forced_pages = {
-        int(page)
-        for page in (retry_pages or [])
-        if isinstance(page, int) and not isinstance(page, bool)
-    }
-    invalid_forced_pages = sorted(
-        page for page in forced_pages if page < 1 or page > total_pages
-    )
-    if invalid_forced_pages:
-        raise ValueError(
-            f"retry_pages contains page(s) outside the PDF range: {invalid_forced_pages}"
-        )
-    outside_requested_range = sorted(
-        page for page in forced_pages if page < start_page or page > end_page
-    )
-    if outside_requested_range:
-        raise ValueError(
-            "retry_pages must fall within the requested OCR range: "
-            f"{outside_requested_range}"
-        )
-    if forced_pages:
-        progress["pages_processed"] = [
-            page for page in progress["pages_processed"] if page not in forced_pages
-        ]
-        progress["failed_pages"] = [
-            page for page in progress["failed_pages"] if page not in forced_pages
-        ]
-        progress["empty_pages"] = [
-            page for page in progress["empty_pages"] if page not in forced_pages
-        ]
-        progress["allowed_empty_pages"] = [
-            page
-            for page in progress["allowed_empty_pages"]
-            if page not in forced_pages
-        ]
-        for page in forced_pages:
-            page_stats.pop(str(page), None)
-
-    progress["requested_start_page"] = start_page
-    progress["requested_end_page"] = end_page
-    progress["source_sha256"] = source_sha256
-    progress["total_pages"] = total_pages
-    progress["backend"] = backend
-    progress["schema_version"] = OCR_PROGRESS_SCHEMA_VERSION
-    progress["retry_pages"] = sorted(forced_pages)
-
-    logger.info(f"Processing pages {start_page}-{end_page} (total: {end_page - start_page + 1} pages, {max_workers} workers)")
-
-    # Determine pages to process
-    pages_to_process = []
-    for page_num in range(start_page, end_page + 1):
-        page_file = pages_dir / f"page_{page_num:03d}.md"
-
-        # Check if already processed
-        if resume and page_num in progress['pages_processed']:
-            if _page_artifacts_are_complete(pages_dir, page_num):
-                # Update stats if not already recorded
-                if str(page_num) not in page_stats:
-                    with open(page_file, 'r', encoding='utf-8') as f:
-                        existing_content = f.read()
-                    token_count = count_tokens(existing_content)
-                    page_stats[str(page_num)] = {
-                        'tokens': token_count,
-                        'file': (page_file.relative_to(output_dir)).as_posix(),
-                        'char_count': len(existing_content)
-                    }
-                logger.debug(f"Skipping page {page_num} (already processed)")
-                continue
-            else:
-                logger.warning(
-                    f"Page {page_num} is marked processed but its artifacts are incomplete; reprocessing"
-                )
-                progress['pages_processed'].remove(page_num)
-
-        pages_to_process.append(page_num)
-
+    pages_to_process = inputs.pages_to_process
+    ocr_pdf = inputs.ocr_pdf
+    session = inputs.session
+    project_id = inputs.project_id
+    location = inputs.location
+    images_dir = inputs.images_dir
+    pages_dir = inputs.pages_dir
+    output_dir = inputs.output_dir
+    backend = inputs.backend
+    api_key = inputs.api_key
+    base_url = inputs.base_url
+    config = inputs.config
+    max_workers = inputs.max_workers
+    max_retries = inputs.max_retries
+    initial_backoff = inputs.initial_backoff
+    allow_empty_pages = inputs.allow_empty_pages
+    progress = inputs.progress
+    page_stats = inputs.page_stats
+    progress_file = inputs.progress_file
+    page_stats_file = inputs.page_stats_file
+    total_pages = inputs.total_pages
     if not pages_to_process:
         logger.info("All pages already processed")
     else:
@@ -965,6 +808,198 @@ def ocr_full_book_pagewise(
                 _atomic_write_json(progress_file, progress)
                 _atomic_write_json(page_stats_file, page_stats)
 
+
+
+def _resume_page_progress(
+    pages_dir: Path,
+    *,
+    ocr_pdf: Path,
+    backend: str,
+    resume: bool,
+    start_page: int,
+    end_page: Optional[int],
+    total_pages: int,
+    retry_pages: Optional[list[int]],
+) -> tuple[Dict[str, Any], Dict[str, Any], int]:
+    """Load the page checkpoint, apply retry pages, and clamp the range."""
+    source_sha256 = _file_sha256(ocr_pdf)
+    progress_file = pages_dir / "ocr_progress.json"
+    page_stats_file = pages_dir / "page_stats.json"
+
+    progress = None
+    page_stats: Dict[str, Any] = {}
+    if resume and progress_file.exists():
+        progress = load_progress(progress_file)
+        if progress is None:
+            logger.warning(
+                "OCR progress is invalid; rebuilding the checkpoint and rechecking all pages"
+            )
+        else:
+            try:
+                recorded_total_pages = int(progress.get("total_pages", 0) or 0)
+            except (TypeError, ValueError):
+                recorded_total_pages = 0
+            if (
+                progress.get("schema_version") != OCR_PROGRESS_SCHEMA_VERSION
+                or progress.get("source_sha256") != source_sha256
+                or recorded_total_pages != total_pages
+                or str(progress.get("backend", "")).strip().lower() != backend
+            ):
+                logger.warning(
+                    "OCR checkpoint provenance changed; existing page files will be reprocessed"
+                )
+                progress = None
+            else:
+                progress = normalize_progress(progress, total_pages)
+                logger.info(
+                    f"Resuming from progress: {len(progress['pages_processed'])} pages already processed"
+                )
+
+    if progress is None:
+        progress = new_progress(
+            source_sha256=source_sha256,
+            total_pages=total_pages,
+            backend=backend,
+        )
+
+    if page_stats_file.exists() and progress.get("pages_processed"):
+        try:
+            loaded_stats = json.loads(page_stats_file.read_text(encoding="utf-8"))
+            if isinstance(loaded_stats, dict):
+                page_stats = loaded_stats
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            logger.warning("page_stats.json is invalid; rebuilding page statistics")
+
+    if end_page is None:
+        end_page = total_pages
+
+    end_page = min(end_page, total_pages)
+
+    forced_pages = {
+        int(page)
+        for page in (retry_pages or [])
+        if isinstance(page, int) and not isinstance(page, bool)
+    }
+    invalid_forced_pages = sorted(
+        page for page in forced_pages if page < 1 or page > total_pages
+    )
+    if invalid_forced_pages:
+        raise ValueError(
+            f"retry_pages contains page(s) outside the PDF range: {invalid_forced_pages}"
+        )
+    outside_requested_range = sorted(
+        page for page in forced_pages if page < start_page or page > end_page
+    )
+    if outside_requested_range:
+        raise ValueError(
+            "retry_pages must fall within the requested OCR range: "
+            f"{outside_requested_range}"
+        )
+    if forced_pages:
+        progress["pages_processed"] = [
+            page for page in progress["pages_processed"] if page not in forced_pages
+        ]
+        progress["failed_pages"] = [
+            page for page in progress["failed_pages"] if page not in forced_pages
+        ]
+        progress["empty_pages"] = [
+            page for page in progress["empty_pages"] if page not in forced_pages
+        ]
+        progress["allowed_empty_pages"] = [
+            page
+            for page in progress["allowed_empty_pages"]
+            if page not in forced_pages
+        ]
+        for page in forced_pages:
+            page_stats.pop(str(page), None)
+
+    progress["requested_start_page"] = start_page
+    progress["requested_end_page"] = end_page
+    progress["source_sha256"] = source_sha256
+    progress["total_pages"] = total_pages
+    progress["backend"] = backend
+    progress["schema_version"] = OCR_PROGRESS_SCHEMA_VERSION
+    progress["retry_pages"] = sorted(forced_pages)
+
+    return progress, page_stats, end_page
+
+
+def _collect_pages_to_process(
+    pages_dir: Path,
+    output_dir: Path,
+    *,
+    start_page: int,
+    end_page: int,
+    resume: bool,
+    progress: Dict[str, Any],
+    page_stats: Dict[str, Any],
+) -> list[int]:
+    """Collect pending pages and backfill missing token statistics."""
+    # Determine pages to process
+    pages_to_process = []
+    for page_num in range(start_page, end_page + 1):
+        page_file = pages_dir / f"page_{page_num:03d}.md"
+
+        # Check if already processed
+        if resume and page_num in progress['pages_processed']:
+            if _page_artifacts_are_complete(pages_dir, page_num):
+                # Update stats if not already recorded
+                if str(page_num) not in page_stats:
+                    with open(page_file, 'r', encoding='utf-8') as f:
+                        existing_content = f.read()
+                    token_count = count_tokens(existing_content)
+                    page_stats[str(page_num)] = {
+                        'tokens': token_count,
+                        'file': (page_file.relative_to(output_dir)).as_posix(),
+                        'char_count': len(existing_content)
+                    }
+                logger.debug(f"Skipping page {page_num} (already processed)")
+                continue
+            else:
+                logger.warning(
+                    f"Page {page_num} is marked processed but its artifacts are incomplete; reprocessing"
+                )
+                progress['pages_processed'].remove(page_num)
+
+        pages_to_process.append(page_num)
+
+    return pages_to_process
+
+
+@dataclass(frozen=True)
+class _PagewiseSummaryInputs:
+    """State for the final page-wise OCR summary."""
+
+    progress: Dict[str, Any]
+    page_stats: Dict[str, Any]
+    total_pages: int
+    progress_file: Path
+    page_stats_file: Path
+    ocr_pdf: Path
+    output_dir: Path
+    pages_dir: Path
+    backend: str
+    config: Dict[str, Any]
+    max_workers: int
+    resume: bool
+    secondary_preflight: Optional[Dict[str, Any]]
+
+
+def _finish_pagewise(inputs: _PagewiseSummaryInputs) -> Dict[str, Any]:
+    """Write the final checkpoint and report the page-wise result."""
+    progress = inputs.progress
+    page_stats = inputs.page_stats
+    total_pages = inputs.total_pages
+    progress_file = inputs.progress_file
+    page_stats_file = inputs.page_stats_file
+    ocr_pdf = inputs.ocr_pdf
+    output_dir = inputs.output_dir
+    pages_dir = inputs.pages_dir
+    backend = inputs.backend
+    config = inputs.config
+    max_workers = inputs.max_workers
+    resume = inputs.resume
+    secondary_preflight = inputs.secondary_preflight
     # Summary
     total_tokens = sum(stats['tokens'] for stats in page_stats.values())
     avg_tokens = total_tokens / len(page_stats) if page_stats else 0
@@ -1049,3 +1084,145 @@ def ocr_full_book_pagewise(
         "secondary_preflight": secondary_preflight,
         "progress_file": progress_file,
     }
+
+
+def ocr_full_book_pagewise(
+    pdf_path: Path,
+    output_dir: Path,
+    session: Any = None,
+    project_id: str = None,
+    location: str = None,
+    start_page: int = 1,
+    end_page: int = None,
+    backend: str = DEFAULT_PRIMARY_OCR_BACKEND,
+    api_key: str = None,
+    base_url: str = None,
+    resume: bool = False,
+    config: Dict = None,
+    max_workers: int = 5,
+    allow_empty_pages: bool = False,
+    retry_pages: Optional[List[int]] = None,
+    allow_slow_secondary: bool = False,
+) -> Dict[str, Any]:
+    """OCR全书，并行处理多页。
+
+    Args:
+        pdf_path: Path to PDF file
+        output_dir: Base output directory (will create pages/ subdirectory)
+        session: Authorized session for API calls
+        project_id: GCP project ID
+        location: GCP location
+        start_page: First page to process (default: 1)
+        end_page: Last page to process (default: all pages)
+        backend: OCR backend to use
+        api_key: Retained for compatibility with legacy callers.
+        base_url: Retained for compatibility with legacy callers.
+        resume: Resume from previous progress
+        config: Configuration dict (for retry settings)
+        max_workers: Number of parallel OCR requests (default: 5)
+        allow_empty_pages: Explicitly acknowledge pages with no OCR payload
+            after manual inspection.
+        retry_pages: Specific physical pages to re-OCR even when their
+            checkpoint currently says they are complete.
+        allow_slow_secondary: Explicitly accept a secondary OCR estimate above
+            the configured preflight limit.
+    """
+    backend = str(backend or "").strip().lower()
+    # Get retry settings from config
+    if config is None:
+        config = {}
+
+    ocr_config = config.get('ocr', {})
+    max_retries = ocr_config.get('max_retries', 5)
+    initial_backoff = ocr_config.get('initial_backoff', 4.0)
+
+    # Optional: backend-specific override
+    backend_config = ocr_config.get('backends', {}).get(backend, {})
+    if backend_config:
+        max_retries = backend_config.get('max_retries', max_retries)
+        initial_backoff = backend_config.get('initial_backoff', initial_backoff)
+    # Create pages directory
+    pages_dir = output_dir / "pages"
+    pages_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create images directory
+    images_dir = output_dir / "images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+
+    # Prefer original PDF for OCR (preprocessed version is binarized, ruins images)
+    original_pdf = output_dir / "input_original.pdf"
+    ocr_pdf = original_pdf if original_pdf.exists() else pdf_path
+    if ocr_pdf != pdf_path:
+        logger.info(f"Using original PDF for OCR: {ocr_pdf}")
+
+    # Determine page range
+    with fitz.open(ocr_pdf) as pdf:
+        total_pages = len(pdf)
+
+    secondary_preflight = preflight_secondary_ocr(
+        output_dir,
+        total_pages,
+        config,
+        allow_slow=allow_slow_secondary,
+    )
+
+    progress_file = pages_dir / "ocr_progress.json"
+    page_stats_file = pages_dir / "page_stats.json"
+    progress, page_stats, end_page = _resume_page_progress(
+        pages_dir,
+        ocr_pdf=ocr_pdf,
+        backend=backend,
+        resume=resume,
+        start_page=start_page,
+        end_page=end_page,
+        total_pages=total_pages,
+        retry_pages=retry_pages,
+    )
+    logger.info(f"Processing pages {start_page}-{end_page} (total: {end_page - start_page + 1} pages, {max_workers} workers)")
+
+    pages_to_process = _collect_pages_to_process(
+        pages_dir, output_dir,
+        start_page=start_page,
+        end_page=end_page,
+        resume=resume,
+        progress=progress,
+        page_stats=page_stats,
+    )
+    _run_page_workers(_PageRunInputs(
+        pages_to_process=pages_to_process,
+        ocr_pdf=ocr_pdf,
+        session=session,
+        project_id=project_id,
+        location=location,
+        images_dir=images_dir,
+        pages_dir=pages_dir,
+        output_dir=output_dir,
+        backend=backend,
+        api_key=api_key,
+        base_url=base_url,
+        config=config,
+        max_workers=max_workers,
+        max_retries=max_retries,
+        initial_backoff=initial_backoff,
+        allow_empty_pages=allow_empty_pages,
+        progress=progress,
+        page_stats=page_stats,
+        progress_file=progress_file,
+        page_stats_file=page_stats_file,
+        total_pages=total_pages,
+    ))
+    return _finish_pagewise(_PagewiseSummaryInputs(
+        progress=progress,
+        page_stats=page_stats,
+        total_pages=total_pages,
+        progress_file=progress_file,
+        page_stats_file=page_stats_file,
+        ocr_pdf=ocr_pdf,
+        output_dir=output_dir,
+        pages_dir=pages_dir,
+        backend=backend,
+        config=config,
+        max_workers=max_workers,
+        resume=resume,
+        secondary_preflight=secondary_preflight,
+    ))
