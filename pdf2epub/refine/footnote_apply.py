@@ -9,6 +9,7 @@ and ordinary body blocks stay in their original unit.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
@@ -78,87 +79,11 @@ def _write_normalized_units(
 
 
 
-def apply_footnote_normalization(
-    output_dir: Path,
-    *,
-    config: Optional[Mapping[str, Any]] = None,
-) -> dict[str, Any]:
-    """Create ``footnote_normalized/`` from validated decisions.
-
-    The operation is preflighted before writing the derived stage.  A missing
-    body marker, ambiguous source match, cross-chapter continuation, or a
-    footnote decision inside bibliography/index content blocks the stage and
-    leaves the original OCR Markdown untouched.
-    """
-
-    output_dir = Path(output_dir)
-    try:
-        inputs = load_footnote_apply_inputs(output_dir, config)
-    except FootnoteApplyInputError as exc:
-        return _write_failure(output_dir, [str(exc)])
-
-    report = inputs.report
-    validation = inputs.validation
-    candidate_report_hash_at_start = sha256_file(output_dir / "footnote_candidates.json")
-    decision_validation_hash_at_start = sha256_file(output_dir / "footnote_decision_validation.json")
-    tree_progress_path = output_dir / "ocr_markdown" / "tree_progress.json"
-    toc_tree_path = output_dir / "toc_tree.json"
-    tree_progress_hash_at_start = sha256_file(tree_progress_path) if tree_progress_path.is_file() else None
-    toc_tree_hash_at_start = sha256_file(toc_tree_path) if toc_tree_path.is_file() else None
-    report_mode = inputs.report_mode
-    report_footnote_mode = inputs.footnote_mode
-    endnote_definition_decisions = inputs.endnote_definition_decisions
-    endnote_ambiguities_sha256 = inputs.endnote_ambiguities_sha256
-    endnote_decisions_sha256 = inputs.endnote_decisions_sha256
-    source = inputs.source_snapshot
-    source_dir = source.source_dir
-    target_dir = inputs.target_dir
-    records = list(source.records)
-    source_texts = source.source_texts
-    continuation_results = validation.get("continuation_reviews", [])
-
-    if (
-        validation.get("effective_decisions_version") != EFFECTIVE_DECISIONS_VERSION
-        or not isinstance(validation.get("effective_decisions"), list)
-    ):
-        return _write_failure(output_dir, ["footnote validation lacks the current effective decision set; rerun footnote-validate"])
-
-    planning = build_footnote_normalization_plan(FootnoteNormalizationPlanningInput(
-        output_dir=output_dir,
-        report=report,
-        decisions=validation,
-        source=inputs.source_snapshot,
-        footnote_mode=report_footnote_mode,
-        toc_tree=inputs.toc_tree,
-        progress=inputs.progress,
-        scope_error=inputs.scope_error,
-        endnote_definition_decisions=endnote_definition_decisions,
-        expected_effective_decisions=validation["effective_decisions"],
-        expected_source_sha256=validation.get("source_sha256"),
-    ))
-    if not planning.valid or planning.edit_plan is None:
-        return _write_failure(output_dir, list(planning.errors) or ["footnote normalization plan is invalid"])
-    edit_plan = planning.edit_plan
-    validation_for_resolution = {"decisions": list(planning.validation_decisions)}
-
-    try:
-        source_hashes, target_hashes = _write_normalized_units(
-            source_dir, target_dir, edit_plan.transformed_texts, edit_plan.source_hashes
-        )
-    except (OSError, UnicodeError, ValueError) as exc:
-        return _write_failure(output_dir, [f"could not write normalized source: {exc}"])
-
-    # Audit only after every unit has been freshly transformed from the
-    # original OCR source. The audit report is written before the success
-    # receipt; unresolved findings leave no valid normalization checkpoint.
-    materialized_targets = {}
-    for name in source_texts:
-        target_path = target_dir / name
-        if target_path.is_file():
-            try:
-                materialized_targets[name] = target_path.read_text(encoding="utf-8")
-            except (OSError, UnicodeError):
-                continue
+def _expected_notes(
+    edit_plan: Any,
+    records: list[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Project the applied notes back to their chapter target files."""
     final_file_by_chapter = {}
     for record in records:
         chapter = str(record.get("chapter_id") or "")
@@ -197,8 +122,15 @@ def apply_footnote_normalization(
         for chapter, notes in edit_plan.notes_by_chapter.items()
         for note in notes
     ]
-    prepared_audit = report.get("result_audit") if isinstance(report.get("result_audit"), Mapping) else {}
-    candidate_audit_tasks = prepared_audit.get("findings", []) if isinstance(prepared_audit, Mapping) else []
+    return expected_notes
+
+def _merge_reviewed_audit_tasks(
+    prepared_audit: Mapping[str, Any],
+    validation: Mapping[str, Any],
+    target_hashes: Mapping[str, Any],
+    candidate_audit_tasks: Any,
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+    """Merge carried and current audit reviews, dropping stale target evidence."""
     prior_applied_reviews = [
         dict(item)
         for item in (prepared_audit.get("applied_result_audit_reviews") or [])
@@ -245,36 +177,20 @@ def apply_footnote_normalization(
         if target_unchanged:
             current_exception_reviews.append(review)
     reviewed_audit_tasks = current_exception_reviews
-    page_texts: dict[int, str] = {}
-    try:
-        from ..ocr_correction import select_refinement_pages
+    return reviewed_audit_tasks, review_task_by_id
 
-        page_dir, _page_source_kind = select_refinement_pages(output_dir, config=config)
-    except (OSError, ValueError, TypeError) as exc:
-        return _write_failure(output_dir, [f"could not load current page evidence for result audit: {exc}"])
-    if page_dir.is_dir():
-        for page_path in page_dir.glob("page_*.md"):
-            try:
-                page_number = int(page_path.stem.removeprefix("page_"))
-                page_texts[page_number] = page_path.read_text(encoding="utf-8")
-            except (ValueError, OSError, UnicodeError):
-                continue
-    result_audit = audit_footnote_result(
-        source_texts,
-        records=records,
-        target_texts=materialized_targets,
-        mode=report_footnote_mode,
-        decisions=validation_for_resolution.get("decisions", []),
-        expected_notes=expected_notes,
-        current_exceptions=reviewed_audit_tasks,
-        resolved_blocks=edit_plan.resolved_blocks,
-        toc_tree=inputs.toc_tree,
-        page_texts=page_texts,
-    )
-    # Bind to byte-level inventories (including original newline convention)
-    # that status checks on disk, rather than normalized in-memory strings.
-    result_audit["source_sha256"] = source_hashes
-    result_audit["target_sha256"] = target_hashes
+def _bind_admitted_candidates(
+    result_audit: dict[str, Any],
+    *,
+    candidate_audit_tasks: Any,
+    reviewed_audit_tasks: list[dict[str, Any]],
+    review_task_by_id: Mapping[str, dict[str, Any]],
+    prepared_audit: Mapping[str, Any],
+    edit_plan: Any,
+    report: Mapping[str, Any],
+    output_dir: Path,
+) -> None:
+    """Bind reviewed and supplemental candidates to the applied plan."""
     resolved_addresses = {
         (int(item.get("page", -1)), str(item.get("source") or "primary"), int(item.get("block", -1)))
         for item in edit_plan.resolved_blocks if isinstance(item, Mapping)
@@ -380,33 +296,39 @@ def apply_footnote_normalization(
         for item in reviewed_audit_tasks
         if isinstance(item, Mapping) and str(item.get("task_id") or "") in review_task_by_id
     ]
-    if result_audit.get("findings"):
-        result_audit["valid"] = False
-        result_audit["status"] = "review_required"
-    result_audit["candidate_report_sha256"] = sha256_file(output_dir / "footnote_candidates.json")
-    result_audit["decision_validation_sha256"] = sha256_file(output_dir / "footnote_decision_validation.json")
-    audit_path = output_dir / AUDIT_FILENAME
-    atomic_write_json(audit_path, result_audit)
-    if result_audit.get("valid") is not True:
-        findings = result_audit.get("findings", [])
-        repeated_review = any(
-            isinstance(item, Mapping) and int(item.get("review_attempt") or 1) >= 2
-            for item in findings
-        )
-        technical_retry = any(
-            isinstance(item, Mapping) and str(item.get("code") or "").startswith("applied_note_")
-            for item in findings
-        )
-        failure_status = "human_review_required" if repeated_review else "retry_required" if technical_retry else "review_required"
-        return _write_failure(
-            output_dir,
-            [
-                f"{item.get('task_id')}: {item.get('detail')} (rerun footnote-prepare for scoped visual review)"
-                for item in result_audit.get("findings", [])
-            ] or ["footnote result audit requires review"],
-            status=failure_status,
-        )
 
+@dataclass(frozen=True)
+class _SuccessReceiptInputs:
+    """Inputs for the validated normalization receipt."""
+
+    output_dir: Path
+    report: Mapping[str, Any]
+    planning: Any
+    edit_plan: Any
+    validation: Mapping[str, Any]
+    target_hashes: Mapping[str, str]
+    audit_path: Path
+    report_mode: str
+    report_footnote_mode: str
+    endnote_ambiguities_sha256: str
+    endnote_decisions_sha256: str
+    continuation_results: Any
+
+
+def _build_success_result(inputs: _SuccessReceiptInputs) -> dict[str, Any]:
+    """Build the validated normalization receipt from the applied plan."""
+    output_dir = inputs.output_dir
+    report = inputs.report
+    planning = inputs.planning
+    edit_plan = inputs.edit_plan
+    validation = inputs.validation
+    target_hashes = inputs.target_hashes
+    audit_path = inputs.audit_path
+    report_mode = inputs.report_mode
+    report_footnote_mode = inputs.report_footnote_mode
+    endnote_ambiguities_sha256 = inputs.endnote_ambiguities_sha256
+    endnote_decisions_sha256 = inputs.endnote_decisions_sha256
+    continuation_results = inputs.continuation_results
     result = {
         "schema_version": FOOTNOTE_NORMALIZATION_SCHEMA_VERSION,
         "source_kind": report.get("source_kind", "ocr"),
@@ -471,6 +393,177 @@ def apply_footnote_normalization(
             else None
         ),
     }
+    return result
+
+
+def apply_footnote_normalization(
+    output_dir: Path,
+    *,
+    config: Optional[Mapping[str, Any]] = None,
+) -> dict[str, Any]:
+    """Create ``footnote_normalized/`` from validated decisions.
+
+    The operation is preflighted before writing the derived stage.  A missing
+    body marker, ambiguous source match, cross-chapter continuation, or a
+    footnote decision inside bibliography/index content blocks the stage and
+    leaves the original OCR Markdown untouched.
+    """
+
+    output_dir = Path(output_dir)
+    try:
+        inputs = load_footnote_apply_inputs(output_dir, config)
+    except FootnoteApplyInputError as exc:
+        return _write_failure(output_dir, [str(exc)])
+
+    report = inputs.report
+    validation = inputs.validation
+    candidate_report_hash_at_start = sha256_file(output_dir / "footnote_candidates.json")
+    decision_validation_hash_at_start = sha256_file(output_dir / "footnote_decision_validation.json")
+    tree_progress_path = output_dir / "ocr_markdown" / "tree_progress.json"
+    toc_tree_path = output_dir / "toc_tree.json"
+    tree_progress_hash_at_start = sha256_file(tree_progress_path) if tree_progress_path.is_file() else None
+    toc_tree_hash_at_start = sha256_file(toc_tree_path) if toc_tree_path.is_file() else None
+    report_mode = inputs.report_mode
+    report_footnote_mode = inputs.footnote_mode
+    endnote_definition_decisions = inputs.endnote_definition_decisions
+    endnote_ambiguities_sha256 = inputs.endnote_ambiguities_sha256
+    endnote_decisions_sha256 = inputs.endnote_decisions_sha256
+    source = inputs.source_snapshot
+    source_dir = source.source_dir
+    target_dir = inputs.target_dir
+    records = list(source.records)
+    source_texts = source.source_texts
+    continuation_results = validation.get("continuation_reviews", [])
+
+    if (
+        validation.get("effective_decisions_version") != EFFECTIVE_DECISIONS_VERSION
+        or not isinstance(validation.get("effective_decisions"), list)
+    ):
+        return _write_failure(output_dir, ["footnote validation lacks the current effective decision set; rerun footnote-validate"])
+
+    planning = build_footnote_normalization_plan(FootnoteNormalizationPlanningInput(
+        output_dir=output_dir,
+        report=report,
+        decisions=validation,
+        source=inputs.source_snapshot,
+        footnote_mode=report_footnote_mode,
+        toc_tree=inputs.toc_tree,
+        progress=inputs.progress,
+        scope_error=inputs.scope_error,
+        endnote_definition_decisions=endnote_definition_decisions,
+        expected_effective_decisions=validation["effective_decisions"],
+        expected_source_sha256=validation.get("source_sha256"),
+    ))
+    if not planning.valid or planning.edit_plan is None:
+        return _write_failure(output_dir, list(planning.errors) or ["footnote normalization plan is invalid"])
+    edit_plan = planning.edit_plan
+    validation_for_resolution = {"decisions": list(planning.validation_decisions)}
+
+    try:
+        source_hashes, target_hashes = _write_normalized_units(
+            source_dir, target_dir, edit_plan.transformed_texts, edit_plan.source_hashes
+        )
+    except (OSError, UnicodeError, ValueError) as exc:
+        return _write_failure(output_dir, [f"could not write normalized source: {exc}"])
+
+    # Audit only after every unit has been freshly transformed from the
+    # original OCR source. The audit report is written before the success
+    # receipt; unresolved findings leave no valid normalization checkpoint.
+    materialized_targets = {}
+    for name in source_texts:
+        target_path = target_dir / name
+        if target_path.is_file():
+            try:
+                materialized_targets[name] = target_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeError):
+                continue
+    expected_notes = _expected_notes(edit_plan, records)
+    prepared_audit = report.get("result_audit") if isinstance(report.get("result_audit"), Mapping) else {}
+    candidate_audit_tasks = prepared_audit.get("findings", []) if isinstance(prepared_audit, Mapping) else []
+    reviewed_audit_tasks, review_task_by_id = _merge_reviewed_audit_tasks(
+        prepared_audit, validation, target_hashes, candidate_audit_tasks
+    )
+    page_texts: dict[int, str] = {}
+    try:
+        from ..ocr_correction import select_refinement_pages
+
+        page_dir, _page_source_kind = select_refinement_pages(output_dir, config=config)
+    except (OSError, ValueError, TypeError) as exc:
+        return _write_failure(output_dir, [f"could not load current page evidence for result audit: {exc}"])
+    if page_dir.is_dir():
+        for page_path in page_dir.glob("page_*.md"):
+            try:
+                page_number = int(page_path.stem.removeprefix("page_"))
+                page_texts[page_number] = page_path.read_text(encoding="utf-8")
+            except (ValueError, OSError, UnicodeError):
+                continue
+    result_audit = audit_footnote_result(
+        source_texts,
+        records=records,
+        target_texts=materialized_targets,
+        mode=report_footnote_mode,
+        decisions=validation_for_resolution.get("decisions", []),
+        expected_notes=expected_notes,
+        current_exceptions=reviewed_audit_tasks,
+        resolved_blocks=edit_plan.resolved_blocks,
+        toc_tree=inputs.toc_tree,
+        page_texts=page_texts,
+    )
+    # Bind to byte-level inventories (including original newline convention)
+    # that status checks on disk, rather than normalized in-memory strings.
+    result_audit["source_sha256"] = source_hashes
+    result_audit["target_sha256"] = target_hashes
+    _bind_admitted_candidates(
+        result_audit,
+        candidate_audit_tasks=candidate_audit_tasks,
+        reviewed_audit_tasks=reviewed_audit_tasks,
+        review_task_by_id=review_task_by_id,
+        prepared_audit=prepared_audit,
+        edit_plan=edit_plan,
+        report=report,
+        output_dir=output_dir,
+    )
+    if result_audit.get("findings"):
+        result_audit["valid"] = False
+        result_audit["status"] = "review_required"
+    result_audit["candidate_report_sha256"] = sha256_file(output_dir / "footnote_candidates.json")
+    result_audit["decision_validation_sha256"] = sha256_file(output_dir / "footnote_decision_validation.json")
+    audit_path = output_dir / AUDIT_FILENAME
+    atomic_write_json(audit_path, result_audit)
+    if result_audit.get("valid") is not True:
+        findings = result_audit.get("findings", [])
+        repeated_review = any(
+            isinstance(item, Mapping) and int(item.get("review_attempt") or 1) >= 2
+            for item in findings
+        )
+        technical_retry = any(
+            isinstance(item, Mapping) and str(item.get("code") or "").startswith("applied_note_")
+            for item in findings
+        )
+        failure_status = "human_review_required" if repeated_review else "retry_required" if technical_retry else "review_required"
+        return _write_failure(
+            output_dir,
+            [
+                f"{item.get('task_id')}: {item.get('detail')} (rerun footnote-prepare for scoped visual review)"
+                for item in result_audit.get("findings", [])
+            ] or ["footnote result audit requires review"],
+            status=failure_status,
+        )
+
+    result = _build_success_result(_SuccessReceiptInputs(
+        output_dir=output_dir,
+        report=report,
+        planning=planning,
+        edit_plan=edit_plan,
+        validation=validation,
+        target_hashes=target_hashes,
+        audit_path=audit_path,
+        report_mode=report_mode,
+        report_footnote_mode=report_footnote_mode,
+        endnote_ambiguities_sha256=endnote_ambiguities_sha256,
+        endnote_decisions_sha256=endnote_decisions_sha256,
+        continuation_results=continuation_results,
+    ))
     # Revalidate the complete evidence snapshot immediately before committing
     # the final success receipt. Hashes captured only at this point would let a
     # mid-run edit certify a plan made against older evidence.
