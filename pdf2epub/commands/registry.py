@@ -22,6 +22,23 @@ def _lazy_handler(module_name: str, attribute: str) -> Callable[[Any], Any]:
 def register_command_parsers(subparsers) -> None:
     """Register every workflow command on an argparse subparser collection."""
 
+    _register_dispatch_commands(subparsers)
+    _register_diagnostics_commands(subparsers)
+    _register_ocr_commands(subparsers)
+    _register_refine_commands(subparsers)
+    _register_footnote_commands(subparsers)
+    _register_markdown_commands(subparsers)
+    _register_special_unit_commands(subparsers)
+    _register_tex_commands(subparsers)
+    _register_entity_commands(subparsers)
+    _register_build_commands(subparsers)
+    _register_html_commands(subparsers)
+    _register_novel_commands(subparsers)
+
+
+def _register_dispatch_commands(subparsers) -> None:
+    """Register operator dispatch recovery commands."""
+
     dispatch_status = subparsers.add_parser("dispatch-status", help="Read operator dispatch recovery state")
     dispatch_status.add_argument("--task", required=True)
     dispatch_status.add_argument("--json", action="store_true")
@@ -49,6 +66,10 @@ def register_command_parsers(subparsers) -> None:
     dispatch_resume.add_argument("--confirm-sessions-reconciled", action="store_true")
     dispatch_resume.add_argument("--confirm-quota-available", action="store_true")
     dispatch_resume.set_defaults(func=_lazy_handler("pdf2epub.commands.dispatch_recovery", "dispatch_resume_command"))
+
+
+def _register_diagnostics_commands(subparsers) -> None:
+    """Register read-only status, doctor, and readiness commands."""
 
     status_parser = subparsers.add_parser(
         "status",
@@ -119,6 +140,10 @@ def register_command_parsers(subparsers) -> None:
     glossary_candidates_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.glossary", "glossary_candidates_command"))
 
     # Breakdown subcommand (DEPRECATED)
+
+
+def _register_ocr_commands(subparsers) -> None:
+    """Register page-level OCR and OCR correction commands."""
 
     # OCR Pages subcommand (new workflow)
     ocr_pages_parser = subparsers.add_parser(
@@ -235,6 +260,10 @@ def register_command_parsers(subparsers) -> None:
     )
     ocr_correct_validate_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.ocr", "ocr_correct_validate_command"))
 
+
+def _register_refine_commands(subparsers) -> None:
+    """Register PDF structure refinement and illustration commands."""
+
     # Refine subcommand (refined breakdown with boundary verification)
     refine_parser = subparsers.add_parser(
         "refine",
@@ -334,6 +363,10 @@ def register_command_parsers(subparsers) -> None:
     )
     illustration_apply_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.refine", "illustration_apply_command"))
 
+
+def _register_footnote_commands(subparsers) -> None:
+    """Register footnote review commands."""
+
     footnote_prepare_parser = subparsers.add_parser(
         "footnote-prepare",
         help="Prepare a compact layout-aware footnote review hand-off",
@@ -401,6 +434,10 @@ def register_command_parsers(subparsers) -> None:
         ),
     )
     footnote_apply_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.refine", "footnote_apply_command"))
+
+
+def _register_markdown_commands(subparsers) -> None:
+    """Register polish, translate, and their validation commands."""
 
     # Polish subcommand
     polish_parser = subparsers.add_parser(
@@ -574,6 +611,10 @@ def register_command_parsers(subparsers) -> None:
     )
     translate_validate_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.markdown", "translate_validate_command"))
 
+
+def _register_special_unit_commands(subparsers) -> None:
+    """Register controlled bibliography/index translation commands."""
+
     special_prepare_parser = subparsers.add_parser(
         "special-unit-prepare",
         help="Prepare an opt-in controlled bibliography or index translation",
@@ -591,6 +632,10 @@ def register_command_parsers(subparsers) -> None:
     special_apply_parser.add_argument("--kind", required=True, choices=["bibliography", "index"])
     special_apply_parser.add_argument("--file", required=True)
     special_apply_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.markdown", "special_unit_apply_command"))
+
+
+def _register_tex_commands(subparsers) -> None:
+    """Register arXiv/TeX translation commands."""
 
     # arXiv / TeX whole-mode translation
     translate_arxiv_parser = subparsers.add_parser(
@@ -650,6 +695,10 @@ def register_command_parsers(subparsers) -> None:
     )
     translate_arxiv_validate_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.tex", "translate_arxiv_validate_command"))
 
+
+def _register_entity_commands(subparsers) -> None:
+    """Register entity extraction commands."""
+
     # Entity extraction subcommand
     entity_parser = subparsers.add_parser(
         "extract-entities",
@@ -683,6 +732,10 @@ def register_command_parsers(subparsers) -> None:
     )
     entity_validate_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.entities", "extract_entities_validate_command"))
 
+
+def _register_build_commands(subparsers) -> None:
+    """Register the PDF-to-EPUB build command."""
+
     # Build EPUB subcommand (toc_tree.json driven - new approach)
     build_epub_parser = subparsers.add_parser(
         "build-epub",
@@ -709,6 +762,10 @@ def register_command_parsers(subparsers) -> None:
         help="Path to cover image file"
     )
     build_epub_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.pdf", "build_epub_command"))
+
+
+def _register_html_commands(subparsers) -> None:
+    """Register EPUB/HTML translation, terminology memory, and build commands."""
 
     # HTML Prepare subcommand (pure local extraction and compression)
     html_prepare_parser = subparsers.add_parser(
@@ -827,6 +884,10 @@ def register_command_parsers(subparsers) -> None:
     )
     build_html_epub_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.html", "build_html_epub_command"))
 
+
+def _register_novel_commands(subparsers) -> None:
+    """Register light-novel translation commands."""
+
     # Novel Translation subcommand (text-mode for light novels)
     translate_novel_parser = subparsers.add_parser(
         "translate-novel",
@@ -865,5 +926,6 @@ def register_command_parsers(subparsers) -> None:
         description="Rebuild EPUB only after translate-novel-validate succeeds."
     )
     build_novel_epub_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.novel", "build_novel_epub_command"))
+
 
 __all__ = ["register_command_parsers"]
