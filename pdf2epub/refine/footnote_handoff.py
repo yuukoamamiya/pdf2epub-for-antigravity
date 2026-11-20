@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import hashlib
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
@@ -206,6 +207,316 @@ def _dry_run_preflight_audit_findings(
         return surfaced
     except Exception:
         return []
+
+
+def _render_review_prompt(
+    book_title: str,
+    report: Mapping[str, Any],
+    *,
+    ambiguity_count: int,
+    page_review_required: bool,
+    audit: Mapping[str, Any],
+    recovery_required: bool,
+    polish_semantic_blockers: list[Any],
+    model: str,
+) -> str:
+    """Render the footnote review prompt for the current prepared state."""
+    review_pages = report["review_pages"]
+    page_reports = {
+        int(item["page"]): item
+        for item in report.get("pages", [])
+        if isinstance(item, Mapping) and str(item.get("page", "")).isdigit()
+    }
+    page_lines = []
+    for page in review_pages:
+        page_report = page_reports.get(int(page), {})
+        primary = f"`{page_report.get('sidecar', f'pages/page_{int(page):03d}.ocr.json')}`"
+        secondary = page_report.get("secondary_sidecar")
+        line = f"- primary: {primary}"
+        if secondary:
+            line += f"; secondary: `{secondary}`"
+        if page_report.get("consensus_visual_review"):
+            line += " (OCR consensus marked this page for visual review)"
+        if page_report.get("consensus_status") == "disagree":
+            line += " (primary/secondary footnote candidate evidence differs)"
+        if page_report.get("visual_file"):
+            line += f"; visual: `{page_report['visual_file']}`"
+        region_lines = []
+        for region in page_report.get("footnote_regions", []) or []:
+            if not isinstance(region, Mapping) or region.get("disposition") != "visual_audit_required":
+                continue
+            region_line = str(region.get("region_id"))
+            if region.get("region_visual_file"):
+                region_line += f" crop=`{region['region_visual_file']}`"
+            reasons = ", ".join(str(item) for item in region.get("reasons", []) or [])
+            if reasons:
+                region_line += f" ({reasons})"
+            region_lines.append(region_line)
+        if region_lines:
+            line += "; audit regions: " + ", ".join(region_lines)
+        page_lines.append(line)
+    page_text = "\n".join(page_lines) or "- 无需 Subagent 复核；仅保留本地高置信度候选。"
+    source_guidance = (
+        (
+            "For native-text pages, use the recorded coordinates and font metadata as layout evidence. "
+            "Candidates marked confidence=high have already passed the conservative local rule: an earlier "
+            "same-page superscript reference matches the key and the note text is materially smaller than "
+            "the body font. Do not create a second decision for those blocks. Review only confidence=review "
+            "blocks, and distinguish them from citations, page furniture, and ordinary numbered prose."
+            if report["source_kind"] == "native_text"
+            else "If a page is marked as an OCR-consensus visual review, treat the local label as untrusted even when it says `Footnote`; compare the primary and secondary sidecars and the page image before deciding."
+        )
+        if report["footnote_mode"] == "footnotes"
+        else (
+            "Page-footnote extraction is not part of this footnotes.mode. "
+            "Review only page items explicitly listed here and do not classify "
+            "ordinary Notes content as a page footnote."
+        )
+    )
+    if ambiguity_count:
+        source_guidance += (
+            " Page-footnote review follows the page instructions; centralized "
+            "endnote ambiguities use the final section and write "
+            f"`{DECISIONS_FILENAME}`."
+        )
+    prompt = f"""# Footnote review\n\nBook: {book_title}\n\nRead `footnote_subagent_manifest.json`, `footnote_review_packet.json`, and `footnote_visual_audit_manifest.json`. The compact packet is hash-bound by the manifest. `footnote_candidates.json` remains the audit and recovery source; do not load it for routine review. Review exact page/source/block references and region IDs in the packet. Retain and inspect every listed adjacent-page window, primary/secondary sidecar, full-page image, and gap-review image even when no continuation candidate was emitted. Do not reread or rewrite the whole book. {source_guidance}\n\nCandidate page sidecars and visual evidence:\n{page_text}\n\nFor every listed review page, open the full-page `visual` PNG first. It is authoritative for the overall body/footnote boundary, page furniture, reading order, and cross-page context. When a `crop` PNG is present, open it as a zoomed supplement for small text and block-level details; never use the crop alone to decide whether a region belongs to the page footer or body. If the full-page image is unavailable, use the crop and sidecar coordinates.\n\nA region audit is one visual decision for the area, but the output must still contain one block decision for every listed review/audit block so the deterministic apply stage can address exact sidecar coordinates. Treat the page image as authoritative for region boundaries, continuations, headers, footers, and OCR omissions.\n\nUse these meanings strictly:\n- `footnote_start`: the beginning of a real page footnote; it will be moved to the end of its logical chapter.\n- `footnote_continuation`: text continuing a real footnote from an earlier page; it will be joined to that footnote.\n- `footnote_definition`: a complete footnote definition already presented as a note block.\n- `citation`: an in-text citation, quoted source, parenthetical/numeric reference, or other scholarly reference; it must stay in the body and must never be moved.\n- `bibliography`: a reference-list/bibliography entry; it must stay in place and must never be moved.\n- `body`: ordinary prose or an uncertain block that is not a footnote.\n\nWrite one `region_audits` entry for every audit region, with its exact `region_id`, a `disposition` of `footnote_region`, `body_region`, or `review_required`, and nested block decisions. A `review_required` region or block is unresolved and will block the workflow. Also keep a flat `decisions` array for compatibility; it may repeat the nested decisions, but do not emit duplicates. For each review/audit block assign exactly one role and keep its page, source, and block number. `source` defaults to `primary`; use `source: "secondary"` only for a candidate listed under `secondary_only_candidates`. For `footnote_start` and `footnote_definition`, copy the visible numeric key when present. For `footnote_continuation`, provide the key of the footnote it continues. A numeric marker alone is not enough to call something a footnote: if it is a citation or reference, use `citation` or `bibliography`.\n\nWrite only valid JSON to `footnote_decisions.json` with this shape:\n\n```json\n{{\n  "schema_version": {FOOTNOTE_PREPARE_SCHEMA_VERSION},\n  "region_audits": [\n    {{\n      "region_id": "page-125-region-01",\n      "disposition": "footnote_region",\n      "decisions": [\n        {{\n          "page": 125,\n          "source": "primary",\n          "block": 8,\n          "role": "footnote_continuation",\n          "key": "36",\n          "confidence": "high"\n        }}\n      ]\n    }}\n  ],\n  "decisions": []\n}}\n```\n\nIf a block or region is genuinely ambiguous, use `role` or `disposition: "review_required"` and explain it in `reason`; do not guess.\n"""
+    prompt = prompt.replace(
+        "Candidate page sidecars and visual evidence:",
+        "When a `visual:` or `crop=` path is present, open that matching PNG and use it as the visual authority. "
+        "Do not infer a footnote from the label alone. The report's "
+        "`bottom_detection.suspected_missed_count` is a recall warning: inspect those pages' lower region "
+        "even when no candidate was emitted.\n\nCandidate page sidecars and visual evidence:",
+    )
+    prompt += (
+        "\n\nMarker identity contract: for moved definitions, copy the candidate's exact safe `key` and exact visible `marker_label`. "
+        "`marker_label` preserves printed spelling and case (`*`, `**`, `†`, `‡`, `a`, `A`); `key` is internal ASCII identity. "
+        "Never substitute one for the other. A bare `a)` may be a list item, and bare `*` may be multiplication or Markdown emphasis; "
+        "classify only with explicit note syntax/label and page-image evidence. If multiple body markers could match, provide an exact short `marker_context`; apply refuses to guess. "
+        "If the same chapter contains multiple identical non-numeric markers (for example several `*`, `**`, or `†`), every `footnote_start`/`footnote_definition` decision must include a precise `marker_context` with the surrounding text that locates its marker uniquely; otherwise `footnote-validate` fails immediately. "
+        "Continuations use the start's internal `key`.\n\n"
+    )
+    prompt += (
+        "\n\nFor every secondary-only moved decision, also include "
+        "`primary_disposition`: `absent` when the Chandra/refinement text truly "
+        "does not contain this note, or `remove` when it contains a duplicate "
+        "primary block. For `remove`, include `primary_blocks` (or one integer "
+        "`primary_block`) so the local stage can delete only the reviewed block. "
+        "If the body contains more than one possible marker with this key, include "
+        "`marker_context` with a short exact surrounding phrase; the local stage "
+        "will refuse to guess between repeated markers.\n\n"
+        "Do not reread or rewrite the whole book.\n"
+    )
+    if report.get("continuation_reviews"):
+        continuation_task_lines = []
+        for task in report.get("continuation_reviews", []) or []:
+            if not isinstance(task, Mapping):
+                continue
+            source_note = task.get("source_note", {})
+            image_paths = ", ".join(
+                f"page {page}: `{image.get('path')}`"
+                for page, image in (task.get("visual_files", {}) or {}).items()
+                if isinstance(image, Mapping) and image.get("path")
+            )
+            continuation_task_lines.append(
+                f"- `{task.get('task_id')}` source page {source_note.get('page')}, "
+                f"key `{source_note.get('key')}`, ending `{source_note.get('text_ending')}`; "
+                f"review pages {task.get('pages')}: {image_paths or 'required image unavailable'}"
+            )
+        prompt += (
+            "\n\n## Missing continuation review tasks\n\n"
+            "For each `continuation_reviews` task, open every listed full-page image. "
+            "Review only the exact source note and every listed page. Add exactly one object "
+            "per task to `continuation_reviews` in `footnote_decisions.json`, keyed by the exact "
+            "`task_id`. Use `outcome: truncated_source_exception` only when the page image shows "
+            "the source itself ends there or the hyphen is intentional, or `confirmed_not_a_footnote` "
+            "when the image shows the candidate is ordinary body text. Explain the image evidence "
+            "in `reason`. Use `outcome: recovered_continuation` only when the next page "
+            "image visibly contains the missing continuation; include the exact visible text and "
+            "the existing note `key`. Never infer text from context or OCR alone. Each record must "
+            "include `evidence_pages` listing every task page. A task on the final physical PDF page "
+            "can only be `truncated_source_exception` or `confirmed_not_a_footnote`. No ordinary block decision clears "
+            "this task.\n\nTasks and exact image paths:\n"
+            + "\n".join(continuation_task_lines)
+            + "\n"
+        )
+    if report["footnote_mode"] == "disabled":
+        prompt = _no_review_prompt(book_title, report)
+        if report.get("warnings"):
+            prompt += "\nConfigured mode warning: " + " ".join(
+                str(item.get("message")) for item in report["warnings"]
+                if isinstance(item, Mapping) and item.get("message")
+            ) + "\n"
+    elif page_review_required:
+        if ambiguity_count:
+            prompt += _endnote_ambiguity_section(ambiguity_count)
+    elif ambiguity_count:
+        prompt = _focused_endnote_prompt(book_title, ambiguity_count)
+    else:
+        prompt = _no_review_prompt(book_title, report)
+    if audit.get("findings") and report["footnote_mode"] != "disabled":
+        task_lines = []
+        for task in audit["findings"]:
+            refs = task.get("candidate_refs", [])
+            ref_text = ", ".join(
+                f"{ref['page']}:{ref['source']}:{ref['block']}" for ref in refs
+            ) or "no existing page/block candidate; do not mark confirmed_footnote"
+            images = ", ".join(
+                f"page {page}: {item.get('path')}" for page, item in (task.get("visual_files") or {}).items()
+            ) or "required page image unavailable"
+            task_lines.append(
+                f"- task_id={task['task_id']} evidence_sha256={task['evidence_sha256']} "
+                f"file={task['file']} line={task['line']} scope={task.get('unit_scope')} "
+                f"excerpt={task['evidence_excerpt']!r}; candidates=[{ref_text}]; images=[{images}]"
+            )
+        prompt += (
+            "\n\n## Post-result audit findings\n\n"
+            "For each exact source block below, compare its cited full-page image and sidecar context. "
+            "Do not use words or numbering alone to decide footnote semantics. Return exactly one "
+            "`result_audit_reviews` object per task with task_id, exact evidence_sha256, outcome, "
+            "reason, and every evidence page. Allowed outcomes: `legitimate_non_footnote` for a "
+            "citation/formula/ordinary body block; `truncated_source_exception` only when the image "
+            "shows the source itself is intentionally incomplete; `confirmed_footnote` only when an "
+            "exact listed candidate_ref is selected and the same page/block is also assigned a "
+            "matching footnote role in the ordinary `decisions` array. Never invent a missing note or "
+            "accept a confirmed note without that exact candidate decision. Preserve any existing "
+            "nested Markdown footnote references in the source paragraph.\n\n"
+            + "\n".join(task_lines)
+            + "\n\nUse these objects in the existing `footnote_decisions.json`; keep its normal schema_version.\n"
+        )
+        if any(task.get("code") == "polish_semantic_issue" for task in audit.get("findings", [])):
+            prompt += (
+                "\n\nFor a `polish_semantic_issue`, compare the exact source excerpt, OCR sidecar, and cited page image. "
+                "If one OCR block mixes body and footnote text, replace that block's whole-block decision with `role: \"body\", override: true` and a `segments` array. "
+                "Each segment must contain its exact OCR `text` and a `role`; moved segments also need their exact `key` and visible `marker_label` when applicable. "
+                "List segments in physical reading order. The apply stage moves only exact footnote segments and leaves body text at its source position; it rejects duplicate, overlapping, stale, or non-unique excerpts. "
+                "Do not use the polished target excerpt to infer source ownership.\n"
+            )
+    if recovery_required:
+        recovery_rows = []
+        for blocker in polish_semantic_blockers:
+            if not isinstance(blocker, Mapping):
+                continue
+            recovery_rows.append(
+                f"- file `{blocker.get('file')}`, issue `{blocker.get('issue_id') or 'unknown'}`, "
+                f"kind `{blocker.get('kind')}`, stage `{blocker.get('mapping_stage') or 'review validation'}`: "
+                f"{blocker.get('message')}. Recovery: {blocker.get('recovery')}"
+            )
+        prompt += (
+            "\n\n## Polish semantic recovery required\n\n"
+            "This handoff contains unresolved Polish semantic review blockers. Do not invent a page/block address, "
+            "do not add a footnote decision for a blocker, and do not treat it as a normal visual candidate. "
+            "Have the original Polish Reviewer update the existing semantic sidecar, preserving the unresolved issue "
+            "until its exact excerpt maps; then rerun `footnote-prepare`. Other listed exact visual tasks remain independently actionable.\n\n"
+            + "\n".join(recovery_rows)
+            + "\n"
+        )
+    prompt += f"\nRecommended model: `{model}`.\n"
+    return prompt
+
+
+@dataclass(frozen=True)
+class _ManifestInputs:
+    """Inputs for the prepared footnote manifest."""
+
+    output_dir: Path
+    report: Mapping[str, Any]
+    audit: Mapping[str, Any]
+    model: str
+    book_title: str
+    packet_path: str
+    packet_sha256: str
+    preparation_evidence_sha256: str
+    unit_context_files: Mapping[str, str]
+    ambiguity_count: int
+    page_review_required: bool
+    polish_semantic_blockers: list[Any]
+    recovery_required: bool
+
+
+def _build_prepare_manifest(inputs: _ManifestInputs) -> dict[str, Any]:
+    """Build the prepared footnote manifest without file I/O."""
+    output_dir = inputs.output_dir
+    report = inputs.report
+    audit = inputs.audit
+    model = inputs.model
+    book_title = inputs.book_title
+    packet_path = inputs.packet_path
+    packet_sha256 = inputs.packet_sha256
+    preparation_evidence_sha256 = inputs.preparation_evidence_sha256
+    unit_context_files = inputs.unit_context_files
+    ambiguity_count = inputs.ambiguity_count
+    page_review_required = inputs.page_review_required
+    polish_semantic_blockers = inputs.polish_semantic_blockers
+    recovery_required = inputs.recovery_required
+    manifest = {
+        "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
+        "task": "footnote-prepare",
+        "model": model,
+        "book_title": book_title,
+        "source_kind": report["source_kind"],
+        "ocr_evidence_mode": report["ocr_evidence_mode"],
+        "footnote_mode": report["footnote_mode"],
+        "configured_footnote_mode": report.get("configured_footnote_mode"),
+        "footnote_mode_source": report.get("footnote_mode_source"),
+        "warnings": report.get("warnings", []),
+        "candidate_report": "footnote_candidates.json",
+        "review_packet": packet_path,
+        "review_packet_sha256": packet_sha256,
+        "preparation_evidence_sha256": preparation_evidence_sha256,
+        "review_pages": report["review_pages"],
+        "high_confidence_candidate_count": report["high_confidence_candidate_count"],
+        "review_candidate_count": report["review_candidate_count"],
+        "soft_continuation_context_count": report[
+            "soft_continuation_context_count"
+        ],
+        "soft_continuation_context_pages": report[
+            "soft_continuation_context_pages"
+        ],
+        "bottom_detection": report["bottom_detection"],
+        "suspected_missed_count": report["suspected_missed_count"],
+        "suspected_missed_pages": report["suspected_missed_pages"],
+        "structure_excluded_pages": report["structure_excluded_pages"],
+        "visual_evidence": report["visual_evidence"],
+        "visual_audit_manifest": report["visual_audit_manifest"],
+        "visual_audit_task_count": report["visual_audit_task_count"],
+        "auto_accept": report["auto_accept"],
+        "bottom_intersection_ratio": report["bottom_intersection_ratio"],
+        "native_max_font_ratio": report["native_max_font_ratio"],
+        "native_font_profile": report.get("native_font_profile", {}),
+        "cross_page_window_count": len(report["cross_page_windows"]),
+        "continuation_reviews": report.get("continuation_reviews", []),
+        "result_audit_tasks": audit.get("findings", []),
+        "polish_semantic_diagnostics": audit.get("polish_semantic_diagnostics", []),
+        "polish_semantic_blockers": polish_semantic_blockers,
+        "recovery_required": recovery_required,
+        "result_audit_version": audit.get("schema_version"),
+        "result_audit_status": audit.get("status"),
+        "consensus_visual_review_pages": report["consensus_visual_review_pages"],
+        "unit_context_files": unit_context_files,
+        "unit_context_sha256": {
+            name: sha256_file(output_dir / relative)
+            for name, relative in unit_context_files.items()
+        },
+        "unit_context_sha256": {
+            name: sha256_file(output_dir / relative)
+            for name, relative in unit_context_files.items()
+        },
+        "decision_file": (
+            "footnote_decisions.json" if page_review_required else None
+        ),
+        "page_review_required": page_review_required,
+        "endnote_ambiguity_count": ambiguity_count,
+        "endnote_ambiguities": AMBIGUITIES_FILENAME,
+        "endnote_decision_file": DECISIONS_FILENAME,
+        "endnote_definition_file": AMBIGUITIES_FILENAME,
+        "status": (
+            "recovery_required" if recovery_required
+            else "pending_review"
+            if page_review_required or ambiguity_count
+            else "no_subagent_review_required"
+        ),
+    }
+    return manifest
 
 
 def prepare_footnote_subagent(
@@ -1065,267 +1376,34 @@ def prepare_footnote_subagent(
     )
     polish_semantic_blockers = audit.get("polish_semantic_blockers", [])
     recovery_required = bool(polish_semantic_blockers)
-    manifest = {
-        "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
-        "task": "footnote-prepare",
-        "model": model,
-        "book_title": book_title,
-        "source_kind": report["source_kind"],
-        "ocr_evidence_mode": report["ocr_evidence_mode"],
-        "footnote_mode": report["footnote_mode"],
-        "configured_footnote_mode": report.get("configured_footnote_mode"),
-        "footnote_mode_source": report.get("footnote_mode_source"),
-        "warnings": report.get("warnings", []),
-        "candidate_report": "footnote_candidates.json",
-        "review_packet": packet_path,
-        "review_packet_sha256": packet_sha256,
-        "preparation_evidence_sha256": preparation_evidence_sha256,
-        "review_pages": report["review_pages"],
-        "high_confidence_candidate_count": report["high_confidence_candidate_count"],
-        "review_candidate_count": report["review_candidate_count"],
-        "soft_continuation_context_count": report[
-            "soft_continuation_context_count"
-        ],
-        "soft_continuation_context_pages": report[
-            "soft_continuation_context_pages"
-        ],
-        "bottom_detection": report["bottom_detection"],
-        "suspected_missed_count": report["suspected_missed_count"],
-        "suspected_missed_pages": report["suspected_missed_pages"],
-        "structure_excluded_pages": report["structure_excluded_pages"],
-        "visual_evidence": report["visual_evidence"],
-        "visual_audit_manifest": report["visual_audit_manifest"],
-        "visual_audit_task_count": report["visual_audit_task_count"],
-        "auto_accept": report["auto_accept"],
-        "bottom_intersection_ratio": report["bottom_intersection_ratio"],
-        "native_max_font_ratio": report["native_max_font_ratio"],
-        "native_font_profile": report.get("native_font_profile", {}),
-        "cross_page_window_count": len(report["cross_page_windows"]),
-        "continuation_reviews": report.get("continuation_reviews", []),
-        "result_audit_tasks": audit.get("findings", []),
-        "polish_semantic_diagnostics": audit.get("polish_semantic_diagnostics", []),
-        "polish_semantic_blockers": polish_semantic_blockers,
-        "recovery_required": recovery_required,
-        "result_audit_version": audit.get("schema_version"),
-        "result_audit_status": audit.get("status"),
-        "consensus_visual_review_pages": report["consensus_visual_review_pages"],
-        "unit_context_files": unit_context_files,
-        "unit_context_sha256": {
-            name: sha256_file(output_dir / relative)
-            for name, relative in unit_context_files.items()
-        },
-        "unit_context_sha256": {
-            name: sha256_file(output_dir / relative)
-            for name, relative in unit_context_files.items()
-        },
-        "decision_file": (
-            "footnote_decisions.json" if page_review_required else None
-        ),
-        "page_review_required": page_review_required,
-        "endnote_ambiguity_count": ambiguity_count,
-        "endnote_ambiguities": AMBIGUITIES_FILENAME,
-        "endnote_decision_file": DECISIONS_FILENAME,
-        "endnote_definition_file": AMBIGUITIES_FILENAME,
-        "status": (
-            "recovery_required" if recovery_required
-            else "pending_review"
-            if page_review_required or ambiguity_count
-            else "no_subagent_review_required"
-        ),
-    }
+    manifest = _build_prepare_manifest(_ManifestInputs(
+        output_dir=output_dir,
+        report=report,
+        audit=audit,
+        model=model,
+        book_title=book_title,
+        packet_path=packet_path,
+        packet_sha256=packet_sha256,
+        preparation_evidence_sha256=preparation_evidence_sha256,
+        unit_context_files=unit_context_files,
+        ambiguity_count=ambiguity_count,
+        page_review_required=page_review_required,
+        polish_semantic_blockers=polish_semantic_blockers,
+        recovery_required=recovery_required,
+    ))
     manifest_path = output_dir / "footnote_subagent_manifest.json"
     atomic_write_json(manifest_path, manifest)
 
-    review_pages = report["review_pages"]
-    page_reports = {
-        int(item["page"]): item
-        for item in report.get("pages", [])
-        if isinstance(item, Mapping) and str(item.get("page", "")).isdigit()
-    }
-    page_lines = []
-    for page in review_pages:
-        page_report = page_reports.get(int(page), {})
-        primary = f"`{page_report.get('sidecar', f'pages/page_{int(page):03d}.ocr.json')}`"
-        secondary = page_report.get("secondary_sidecar")
-        line = f"- primary: {primary}"
-        if secondary:
-            line += f"; secondary: `{secondary}`"
-        if page_report.get("consensus_visual_review"):
-            line += " (OCR consensus marked this page for visual review)"
-        if page_report.get("consensus_status") == "disagree":
-            line += " (primary/secondary footnote candidate evidence differs)"
-        if page_report.get("visual_file"):
-            line += f"; visual: `{page_report['visual_file']}`"
-        region_lines = []
-        for region in page_report.get("footnote_regions", []) or []:
-            if not isinstance(region, Mapping) or region.get("disposition") != "visual_audit_required":
-                continue
-            region_line = str(region.get("region_id"))
-            if region.get("region_visual_file"):
-                region_line += f" crop=`{region['region_visual_file']}`"
-            reasons = ", ".join(str(item) for item in region.get("reasons", []) or [])
-            if reasons:
-                region_line += f" ({reasons})"
-            region_lines.append(region_line)
-        if region_lines:
-            line += "; audit regions: " + ", ".join(region_lines)
-        page_lines.append(line)
-    page_text = "\n".join(page_lines) or "- 无需 Subagent 复核；仅保留本地高置信度候选。"
-    source_guidance = (
-        (
-            "For native-text pages, use the recorded coordinates and font metadata as layout evidence. "
-            "Candidates marked confidence=high have already passed the conservative local rule: an earlier "
-            "same-page superscript reference matches the key and the note text is materially smaller than "
-            "the body font. Do not create a second decision for those blocks. Review only confidence=review "
-            "blocks, and distinguish them from citations, page furniture, and ordinary numbered prose."
-            if report["source_kind"] == "native_text"
-            else "If a page is marked as an OCR-consensus visual review, treat the local label as untrusted even when it says `Footnote`; compare the primary and secondary sidecars and the page image before deciding."
-        )
-        if report["footnote_mode"] == "footnotes"
-        else (
-            "Page-footnote extraction is not part of this footnotes.mode. "
-            "Review only page items explicitly listed here and do not classify "
-            "ordinary Notes content as a page footnote."
-        )
+    prompt = _render_review_prompt(
+        book_title,
+        report,
+        ambiguity_count=ambiguity_count,
+        page_review_required=page_review_required,
+        audit=audit,
+        recovery_required=recovery_required,
+        polish_semantic_blockers=polish_semantic_blockers,
+        model=model,
     )
-    if ambiguity_count:
-        source_guidance += (
-            " Page-footnote review follows the page instructions; centralized "
-            "endnote ambiguities use the final section and write "
-            f"`{DECISIONS_FILENAME}`."
-        )
-    prompt = f"""# Footnote review\n\nBook: {book_title}\n\nRead `footnote_subagent_manifest.json`, `footnote_review_packet.json`, and `footnote_visual_audit_manifest.json`. The compact packet is hash-bound by the manifest. `footnote_candidates.json` remains the audit and recovery source; do not load it for routine review. Review exact page/source/block references and region IDs in the packet. Retain and inspect every listed adjacent-page window, primary/secondary sidecar, full-page image, and gap-review image even when no continuation candidate was emitted. Do not reread or rewrite the whole book. {source_guidance}\n\nCandidate page sidecars and visual evidence:\n{page_text}\n\nFor every listed review page, open the full-page `visual` PNG first. It is authoritative for the overall body/footnote boundary, page furniture, reading order, and cross-page context. When a `crop` PNG is present, open it as a zoomed supplement for small text and block-level details; never use the crop alone to decide whether a region belongs to the page footer or body. If the full-page image is unavailable, use the crop and sidecar coordinates.\n\nA region audit is one visual decision for the area, but the output must still contain one block decision for every listed review/audit block so the deterministic apply stage can address exact sidecar coordinates. Treat the page image as authoritative for region boundaries, continuations, headers, footers, and OCR omissions.\n\nUse these meanings strictly:\n- `footnote_start`: the beginning of a real page footnote; it will be moved to the end of its logical chapter.\n- `footnote_continuation`: text continuing a real footnote from an earlier page; it will be joined to that footnote.\n- `footnote_definition`: a complete footnote definition already presented as a note block.\n- `citation`: an in-text citation, quoted source, parenthetical/numeric reference, or other scholarly reference; it must stay in the body and must never be moved.\n- `bibliography`: a reference-list/bibliography entry; it must stay in place and must never be moved.\n- `body`: ordinary prose or an uncertain block that is not a footnote.\n\nWrite one `region_audits` entry for every audit region, with its exact `region_id`, a `disposition` of `footnote_region`, `body_region`, or `review_required`, and nested block decisions. A `review_required` region or block is unresolved and will block the workflow. Also keep a flat `decisions` array for compatibility; it may repeat the nested decisions, but do not emit duplicates. For each review/audit block assign exactly one role and keep its page, source, and block number. `source` defaults to `primary`; use `source: "secondary"` only for a candidate listed under `secondary_only_candidates`. For `footnote_start` and `footnote_definition`, copy the visible numeric key when present. For `footnote_continuation`, provide the key of the footnote it continues. A numeric marker alone is not enough to call something a footnote: if it is a citation or reference, use `citation` or `bibliography`.\n\nWrite only valid JSON to `footnote_decisions.json` with this shape:\n\n```json\n{{\n  "schema_version": {FOOTNOTE_PREPARE_SCHEMA_VERSION},\n  "region_audits": [\n    {{\n      "region_id": "page-125-region-01",\n      "disposition": "footnote_region",\n      "decisions": [\n        {{\n          "page": 125,\n          "source": "primary",\n          "block": 8,\n          "role": "footnote_continuation",\n          "key": "36",\n          "confidence": "high"\n        }}\n      ]\n    }}\n  ],\n  "decisions": []\n}}\n```\n\nIf a block or region is genuinely ambiguous, use `role` or `disposition: "review_required"` and explain it in `reason`; do not guess.\n"""
-    prompt = prompt.replace(
-        "Candidate page sidecars and visual evidence:",
-        "When a `visual:` or `crop=` path is present, open that matching PNG and use it as the visual authority. "
-        "Do not infer a footnote from the label alone. The report's "
-        "`bottom_detection.suspected_missed_count` is a recall warning: inspect those pages' lower region "
-        "even when no candidate was emitted.\n\nCandidate page sidecars and visual evidence:",
-    )
-    prompt += (
-        "\n\nMarker identity contract: for moved definitions, copy the candidate's exact safe `key` and exact visible `marker_label`. "
-        "`marker_label` preserves printed spelling and case (`*`, `**`, `†`, `‡`, `a`, `A`); `key` is internal ASCII identity. "
-        "Never substitute one for the other. A bare `a)` may be a list item, and bare `*` may be multiplication or Markdown emphasis; "
-        "classify only with explicit note syntax/label and page-image evidence. If multiple body markers could match, provide an exact short `marker_context`; apply refuses to guess. "
-        "If the same chapter contains multiple identical non-numeric markers (for example several `*`, `**`, or `†`), every `footnote_start`/`footnote_definition` decision must include a precise `marker_context` with the surrounding text that locates its marker uniquely; otherwise `footnote-validate` fails immediately. "
-        "Continuations use the start's internal `key`.\n\n"
-    )
-    prompt += (
-        "\n\nFor every secondary-only moved decision, also include "
-        "`primary_disposition`: `absent` when the Chandra/refinement text truly "
-        "does not contain this note, or `remove` when it contains a duplicate "
-        "primary block. For `remove`, include `primary_blocks` (or one integer "
-        "`primary_block`) so the local stage can delete only the reviewed block. "
-        "If the body contains more than one possible marker with this key, include "
-        "`marker_context` with a short exact surrounding phrase; the local stage "
-        "will refuse to guess between repeated markers.\n\n"
-        "Do not reread or rewrite the whole book.\n"
-    )
-    if report.get("continuation_reviews"):
-        continuation_task_lines = []
-        for task in report.get("continuation_reviews", []) or []:
-            if not isinstance(task, Mapping):
-                continue
-            source_note = task.get("source_note", {})
-            image_paths = ", ".join(
-                f"page {page}: `{image.get('path')}`"
-                for page, image in (task.get("visual_files", {}) or {}).items()
-                if isinstance(image, Mapping) and image.get("path")
-            )
-            continuation_task_lines.append(
-                f"- `{task.get('task_id')}` source page {source_note.get('page')}, "
-                f"key `{source_note.get('key')}`, ending `{source_note.get('text_ending')}`; "
-                f"review pages {task.get('pages')}: {image_paths or 'required image unavailable'}"
-            )
-        prompt += (
-            "\n\n## Missing continuation review tasks\n\n"
-            "For each `continuation_reviews` task, open every listed full-page image. "
-            "Review only the exact source note and every listed page. Add exactly one object "
-            "per task to `continuation_reviews` in `footnote_decisions.json`, keyed by the exact "
-            "`task_id`. Use `outcome: truncated_source_exception` only when the page image shows "
-            "the source itself ends there or the hyphen is intentional, or `confirmed_not_a_footnote` "
-            "when the image shows the candidate is ordinary body text. Explain the image evidence "
-            "in `reason`. Use `outcome: recovered_continuation` only when the next page "
-            "image visibly contains the missing continuation; include the exact visible text and "
-            "the existing note `key`. Never infer text from context or OCR alone. Each record must "
-            "include `evidence_pages` listing every task page. A task on the final physical PDF page "
-            "can only be `truncated_source_exception` or `confirmed_not_a_footnote`. No ordinary block decision clears "
-            "this task.\n\nTasks and exact image paths:\n"
-            + "\n".join(continuation_task_lines)
-            + "\n"
-        )
-    if report["footnote_mode"] == "disabled":
-        prompt = _no_review_prompt(book_title, report)
-        if report.get("warnings"):
-            prompt += "\nConfigured mode warning: " + " ".join(
-                str(item.get("message")) for item in report["warnings"]
-                if isinstance(item, Mapping) and item.get("message")
-            ) + "\n"
-    elif page_review_required:
-        if ambiguity_count:
-            prompt += _endnote_ambiguity_section(ambiguity_count)
-    elif ambiguity_count:
-        prompt = _focused_endnote_prompt(book_title, ambiguity_count)
-    else:
-        prompt = _no_review_prompt(book_title, report)
-    if audit.get("findings") and report["footnote_mode"] != "disabled":
-        task_lines = []
-        for task in audit["findings"]:
-            refs = task.get("candidate_refs", [])
-            ref_text = ", ".join(
-                f"{ref['page']}:{ref['source']}:{ref['block']}" for ref in refs
-            ) or "no existing page/block candidate; do not mark confirmed_footnote"
-            images = ", ".join(
-                f"page {page}: {item.get('path')}" for page, item in (task.get("visual_files") or {}).items()
-            ) or "required page image unavailable"
-            task_lines.append(
-                f"- task_id={task['task_id']} evidence_sha256={task['evidence_sha256']} "
-                f"file={task['file']} line={task['line']} scope={task.get('unit_scope')} "
-                f"excerpt={task['evidence_excerpt']!r}; candidates=[{ref_text}]; images=[{images}]"
-            )
-        prompt += (
-            "\n\n## Post-result audit findings\n\n"
-            "For each exact source block below, compare its cited full-page image and sidecar context. "
-            "Do not use words or numbering alone to decide footnote semantics. Return exactly one "
-            "`result_audit_reviews` object per task with task_id, exact evidence_sha256, outcome, "
-            "reason, and every evidence page. Allowed outcomes: `legitimate_non_footnote` for a "
-            "citation/formula/ordinary body block; `truncated_source_exception` only when the image "
-            "shows the source itself is intentionally incomplete; `confirmed_footnote` only when an "
-            "exact listed candidate_ref is selected and the same page/block is also assigned a "
-            "matching footnote role in the ordinary `decisions` array. Never invent a missing note or "
-            "accept a confirmed note without that exact candidate decision. Preserve any existing "
-            "nested Markdown footnote references in the source paragraph.\n\n"
-            + "\n".join(task_lines)
-            + "\n\nUse these objects in the existing `footnote_decisions.json`; keep its normal schema_version.\n"
-        )
-        if any(task.get("code") == "polish_semantic_issue" for task in audit.get("findings", [])):
-            prompt += (
-                "\n\nFor a `polish_semantic_issue`, compare the exact source excerpt, OCR sidecar, and cited page image. "
-                "If one OCR block mixes body and footnote text, replace that block's whole-block decision with `role: \"body\", override: true` and a `segments` array. "
-                "Each segment must contain its exact OCR `text` and a `role`; moved segments also need their exact `key` and visible `marker_label` when applicable. "
-                "List segments in physical reading order. The apply stage moves only exact footnote segments and leaves body text at its source position; it rejects duplicate, overlapping, stale, or non-unique excerpts. "
-                "Do not use the polished target excerpt to infer source ownership.\n"
-            )
-    if recovery_required:
-        recovery_rows = []
-        for blocker in polish_semantic_blockers:
-            if not isinstance(blocker, Mapping):
-                continue
-            recovery_rows.append(
-                f"- file `{blocker.get('file')}`, issue `{blocker.get('issue_id') or 'unknown'}`, "
-                f"kind `{blocker.get('kind')}`, stage `{blocker.get('mapping_stage') or 'review validation'}`: "
-                f"{blocker.get('message')}. Recovery: {blocker.get('recovery')}"
-            )
-        prompt += (
-            "\n\n## Polish semantic recovery required\n\n"
-            "This handoff contains unresolved Polish semantic review blockers. Do not invent a page/block address, "
-            "do not add a footnote decision for a blocker, and do not treat it as a normal visual candidate. "
-            "Have the original Polish Reviewer update the existing semantic sidecar, preserving the unresolved issue "
-            "until its exact excerpt maps; then rerun `footnote-prepare`. Other listed exact visual tasks remain independently actionable.\n\n"
-            + "\n".join(recovery_rows)
-            + "\n"
-        )
-    prompt += f"\nRecommended model: `{model}`.\n"
     prompt_path = output_dir / "footnote_subagent_prompt.md"
     atomic_write_text(prompt_path, prompt)
     return {
