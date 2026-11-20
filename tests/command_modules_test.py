@@ -53,6 +53,7 @@ def test_command_registry_registers_every_workflow_command():
         "dispatch-status",
         "dispatch-record-failure",
         "dispatch-resume",
+        "dispatch-plan",
         "extract-entities",
         "extract-entities-validate",
         "footnote-apply",

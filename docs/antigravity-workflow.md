@@ -131,7 +131,9 @@ worker 会话。整波完成且主 Agent 验收后才开始下一波。完成后
 不强制绑定 IDE session 生命周期。
 
 provider 429 的操作员恢复状态与译文验证 receipt 分开，使用 `dispatch-record-failure`、
-`dispatch-status`、`dispatch-resume`。`rate_limit` 用 Retry-After 或有界指数退避；
+`dispatch-status`、`dispatch-resume`。`dispatch-plan --task <task>` 只读复用 manifest 的
+`dispatch_plan`，列出本波 worker、scoped prompt 与 assigned_files；它不写文件、不占额度，
+也不能替代真实会话与容量核对。`rate_limit` 用 Retry-After 或有界指数退避；
 `quota_exhausted` 需提供 timezone-aware `--reset-at`，缺失时进入 operator block；
 `unknown_429` 有界重试后也需人工确认。例：
 `uv run pdf2epub -c config.yaml dispatch-record-failure --task translate --worker-id worker_001 --assignment-sha256 <current-digest> --kind rate_limit --retry-after 120 --actual-peak-concurrency 2 --temporary-cap 2`。

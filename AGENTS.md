@@ -325,6 +325,8 @@ Subagent 直接写文件 → 单文件校验 → 收集完成结果 → 下一�
 ```
 
 Provider 429 恢复使用 `dispatch-record-failure` / `dispatch-status` / `dispatch-resume` 操作员命令。每波前读取最新状态；短时 `rate_limit` 与 `unknown_429` 使用有界退避，`quota_exhausted` 必须记录 reset 时间，缺失时保持人工阻断。恢复前核对真实 IDE 会话、lease 和验证报告，只重新处理 pending/invalid 项；确认会话结束后再按原规则释放 lease。操作员确认只记审计，不自动释放 lease、重试网络请求或验证译文。小时额度下调并发可能仍无法避免额度耗尽。
+`dispatch-plan --task <task>` 只读打印 manifest 的分波计划、每个 worker 的 scoped prompt 与
+assigned_files，不写文件、不占额度；它不能替代真实 IDE 会话与 `dispatch-status` 的容量核对。
 
 ### 1.1 主 Agent 的快速执行表
 

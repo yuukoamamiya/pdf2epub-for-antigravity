@@ -45,6 +45,65 @@ def test_real_cli_record_status_resume_and_bad_retry_after(tmp_path, monkeypatch
     assert "Retry-After" in capsys.readouterr().err
 
 
+def test_plan_prints_waves_and_stays_read_only(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(
+        command,
+        "_context",
+        lambda args: SimpleNamespace(output_dir=tmp_path, config={}),
+    )
+    (tmp_path / "translate_subagent_manifest.json").write_text(
+        json.dumps(
+            {
+                "task": "translate",
+                "pending_files": ["b.md", "c.md"],
+                "worker_handoffs": [
+                    {"worker_id": "worker_001", "prompt": "p1.md", "assigned_files": ["b.md"]},
+                    {"worker_id": "worker_002", "prompt": "p2.md", "assigned_files": ["c.md"]},
+                ],
+                "dispatch_plan": [
+                    {
+                        "wave": 1,
+                        "max_concurrency": 2,
+                        "reason": "ordinary",
+                        "worker_ids": ["worker_001", "worker_002"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert command.dispatch_plan_command(
+        SimpleNamespace(task="translate", wave=None, json=True)
+    ) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["dispatch_plan"][0]["workers"][0]["assigned_files"] == ["b.md"]
+    assert payload["dispatch_plan"][0]["workers"][1]["prompt"] == "p2.md"
+
+    assert command.dispatch_plan_command(
+        SimpleNamespace(task="translate", wave=None, json=False)
+    ) == 0
+    text = capsys.readouterr().out
+    assert "wave 1 (cap 2, ordinary): 2 worker(s)" in text
+    assert "assigned: c.md" in text
+    assert sorted(item.name for item in tmp_path.iterdir()) == [
+        "translate_subagent_manifest.json"
+    ]
+
+
+def test_plan_without_a_manifest_is_a_clean_error(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(
+        command,
+        "_context",
+        lambda args: SimpleNamespace(output_dir=tmp_path, config={}),
+    )
+
+    assert command.dispatch_plan_command(
+        SimpleNamespace(task="translate", wave=None, json=False)
+    ) == 2
+    assert "is missing" in capsys.readouterr().err
+
+
 def test_guide_shell_quotes_config_path_with_spaces():
     guide = render_dispatch_operator_prompt(task="translate-html", manifest_path="manifest.json", handoffs=[], dispatch_plan=[], config_path="configs/my book.yaml")
     assert "-c 'configs/my book.yaml'" in guide

@@ -607,7 +607,8 @@ claim/renew/release，但不强制 IDE session 生命周期，也不启动模型
 `fcntl.flock(LOCK_EX|LOCK_NB)`，进程内互斥锁也按同一 `timeout` 获取，超时抛 `TimeoutError`。
 任务级 `subagent_dispatch_recovery.py` 以 schema 1 JSON
 记录 provider 限流、操作员确认和实际峰值，并与 validation receipt 分离。CLI 提供
-`dispatch-status`（只读）、`dispatch-record-failure` 与 `dispatch-resume`；运行时不会自动重试
+`dispatch-status`（只读）、`dispatch-record-failure` 与 `dispatch-resume`；`dispatch-plan`
+只读打印当前 manifest 的分波计划与 scoped prompt，不占额度也不改变派发状态。运行时不会自动重试
 网络请求、换模型、释放 lease 或假定 IDE session 已结束。短时 rate limit 尊重 Retry-After，
 quota block 需明确 reset/操作员确认；temporary cap 只约束后续分组，降低并发也不保证绕过小时额度。
 

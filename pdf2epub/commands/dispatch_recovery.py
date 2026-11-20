@@ -2,7 +2,7 @@
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 from pdf2epub.batching_service import batching_config
 
 from pdf2epub.commands.runtime import load_book_context
@@ -51,6 +51,101 @@ def _dispatch_status(args: Any) -> int:
         print(json.dumps(value, ensure_ascii=False, indent=2))
     else:
         print(f"task={args.task} next_retry_at={value.get('next_retry_at')} cooldown_active={value.get('cooldown_active')} operator_blocked={bool((value.get('task_block') or {}).get('operator_blocked'))} concurrency_cap={value.get('concurrency_cap')} new_worker_slots={value.get('new_worker_slots')} effective_cap={value.get('effective_cap')} (report actual running workers and free slots)")
+    return 0
+
+
+def dispatch_plan_command(args: Any) -> int:
+    return _run(lambda: _dispatch_plan(args))
+
+
+def _dispatch_plan(args: Any) -> int:
+    """Print the prepared worker plan without writing or reserving anything."""
+    context = _context(args)
+    if context is None:
+        return 2
+    manifest_path = _inside_output(
+        context.output_dir, context.output_dir / f"{args.task}_subagent_manifest.json"
+    )
+    if not manifest_path.is_file():
+        raise ValueError(
+            f"{manifest_path.name} is missing; prepare {args.task} before asking for a dispatch plan"
+        )
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"could not read {manifest_path.name}: {exc}") from exc
+    if not isinstance(manifest, Mapping):
+        raise ValueError(f"{manifest_path.name} is not a JSON object")
+    raw_handoffs = manifest.get("worker_handoffs")
+    handoffs = {
+        str(item.get("worker_id")): item
+        for item in (raw_handoffs if isinstance(raw_handoffs, list) else [])
+        if isinstance(item, Mapping) and item.get("worker_id")
+    }
+    raw_plan = manifest.get("dispatch_plan")
+    waves = [wave for wave in (raw_plan if isinstance(raw_plan, list) else []) if isinstance(wave, Mapping)]
+    if args.wave is not None:
+        waves = [wave for wave in waves if wave.get("wave") == args.wave]
+    selected_ids = {
+        str(worker_id)
+        for wave in waves
+        for worker_id in (wave.get("worker_ids") or [])
+    }
+    handoffs = {
+        worker_id: item
+        for worker_id, item in handoffs.items()
+        if not selected_ids or worker_id in selected_ids
+    }
+    if args.json:
+        payload = {
+            "task": args.task,
+            "manifest": manifest_path.name,
+            "pending_files": manifest.get("pending_files") or [],
+            "dispatch_plan": [
+                {
+                    "wave": wave.get("wave"),
+                    "max_concurrency": wave.get("max_concurrency"),
+                    "reason": wave.get("reason"),
+                    "workers": [
+                        {
+                            "worker_id": worker_id,
+                            "prompt": (handoffs.get(worker_id) or {}).get("prompt"),
+                            "assigned_files": list(
+                                (handoffs.get(worker_id) or {}).get("assigned_files") or []
+                            ),
+                        }
+                        for worker_id in (wave.get("worker_ids") or [])
+                    ],
+                }
+                for wave in waves
+            ],
+        }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+    if not waves:
+        print(f"task={args.task}: no dispatch plan (nothing pending)")
+        return 0
+    print(
+        f"task={args.task} manifest={manifest_path.name} "
+        f"workers={len(handoffs)} waves={len(waves)}"
+    )
+    for wave in waves:
+        worker_ids = [str(item) for item in (wave.get("worker_ids") or [])]
+        print(
+            f"wave {wave.get('wave')} "
+            f"(cap {wave.get('max_concurrency')}, {wave.get('reason')}): "
+            f"{len(worker_ids)} worker(s)"
+        )
+        for worker_id in worker_ids:
+            handoff = handoffs.get(worker_id) or {}
+            print(f"  {worker_id}")
+            print(f"    prompt: {handoff.get('prompt') or '(missing)'}")
+            files = [str(item) for item in (handoff.get("assigned_files") or [])]
+            print("    assigned: " + (", ".join(files) if files else "(none)"))
+    print(
+        "This plan is advisory: read dispatch-status before each wave and report the "
+        "actual running workers and free slots."
+    )
     return 0
 
 

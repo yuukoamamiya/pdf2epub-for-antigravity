@@ -67,6 +67,15 @@ def _register_dispatch_commands(subparsers) -> None:
     dispatch_resume.add_argument("--confirm-quota-available", action="store_true")
     dispatch_resume.set_defaults(func=_lazy_handler("pdf2epub.commands.dispatch_recovery", "dispatch_resume_command"))
 
+    dispatch_plan = subparsers.add_parser(
+        "dispatch-plan",
+        help="Print the prepared worker waves and scoped prompts (read-only)",
+    )
+    dispatch_plan.add_argument("--task", required=True)
+    dispatch_plan.add_argument("--wave", type=int, help="Only print this wave number")
+    dispatch_plan.add_argument("--json", action="store_true")
+    dispatch_plan.set_defaults(func=_lazy_handler("pdf2epub.commands.dispatch_recovery", "dispatch_plan_command"))
+
 
 def _register_diagnostics_commands(subparsers) -> None:
     """Register read-only status, doctor, and readiness commands."""
