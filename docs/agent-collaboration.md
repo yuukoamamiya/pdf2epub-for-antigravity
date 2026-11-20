@@ -14,7 +14,7 @@
 ```text
 git status --short          # 先看有没有别人的改动；不要清理、不要纳入本次提交
 git branch --show-current   # 必须是 main；不要建临时分支
-uv run pytest -q            # 基线：1633 个测试（4 skipped），约 40 秒
+uv run pytest -q            # 基线：1635 个测试（4 skipped），约 40 秒
 uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲染
 ```
 
@@ -55,7 +55,7 @@ uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲
 | 脚注 / 尾注合同 | `refine/footnote_*.py`, `refine/endnote_*.py` | `tests/endnote_normalization_test.py`, `tests/footnote_*_test.py` |
 | 翻译/润色校验 | `markdown_validation*.py` | `tests/markdown_*_test.py` |
 | EPUB 构建与渲染 | `build_epub.py`, `epub/`, `html_translation/` | `tests/epub_visual_regression_test.py`, `tests/html_epub_builder_test.py` |
-| CI | `.github/workflows/tests.yml` | GitHub Actions（Windows + Linux，Python 3.12） |
+| CI | `.github/workflows/tests.yml` | GitHub Actions（Windows + Linux 跑 pytest；Ubuntu 跑 ruff 关键规则，Python 3.12） |
 
 ## 4. 2026-11-20 审计批次已完成项
 
@@ -81,6 +81,8 @@ uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲
 | `3d97c7a` | `prepare_markdown_subagent()` 改为只接收 `MarkdownHandoffRequest`，删除 29 参适配段；125 个调用点（4 生产 / 121 测试）同步改为构造 dataclass，行为与默认值不变 |
 | `f39520c` | `status` 增加 `ocr_evidence`（`two_ocr` / `single_ocr` / `legacy_native` / `indeterminate`）并升到 schema 3，单 OCR 不再读成已复核；handler 捕获的失败复用同一个 `--debug` 判定，保留异常类型与可选 traceback |
 | `65fcc9c` | `translate` / `polish` 增加只读 `--dry-run`：复用同一 planning/resume 决定，打印 `pending_reasons`、worker 批次与并发度，不写 manifest/prompt/handoff |
+| `007b27a` | 新增只读 `dispatch-plan --task <task>`：打印 manifest 的分波计划、每个 worker 的 scoped prompt 与 assigned_files，不写文件、不占额度 |
+| `1b97905` | 新增最小 ruff 门禁（语法/未定义名/无效异常）与 CI job；顺手修复 `preview_markdown_handoff` 丢失的 `Any` 导入和一处 3.12-only f-string |
 
 ## 5. 已知遗留 backlog
 
@@ -108,9 +110,10 @@ uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲
    `_MARKDOWN_DEF_RE` / `_RAW_NOTE_DEF_RE` / `_RAW_SUP_NOTE_DEF_RE` 仍是两份且语义有细微差异；
    合并前必须逐条比对（apply 侧要求行尾有内容，校验侧只匹配前缀）。不要为了去重改变行为。
 5. **`.gitattributes` 与工作区换行**（P2）
-   仓库索引是 LF、工作区是 CRLF，`git status` 会列出约 200 个 stat-only 改动。
-   建议在**工作区干净时**单独做一次 `git add --renormalize .` 并作为独立提交；不要在
-   有未提交改动的批次里做。
+   仓库索引是 LF、工作区是 CRLF，`git status` 会列出大量 stat-only 改动。
+   2026-11-20 已用逐文件 `git add` 刷新 143 个仅 stat 变化的条目，剩余 11 个是真实改动，
+   必须由作者先提交；不要在有真实改动的批次里做 `git add --renormalize .`。
+   工具再次改写换行后重复同一刷新即可。
 6. **`status` 的 `package` 阶段**（P2）
    目前只要存在 `*.epub` 就视为有产物；结合 `current/reachable` 已不会误报，但更严格的
    做法是校验 EPUB 的构建 receipt 是否对应当前 polish/translate 检查点。
