@@ -286,6 +286,45 @@ def test_status_reports_ocr_evidence_level(tmp_path: Path, monkeypatch):
     assert build_status(config_path)["ocr_evidence"]["mode"] == "legacy_native"
 
 
+def test_package_stage_uses_the_build_receipt(tmp_path: Path):
+    from pdf2epub.build_receipt import PDF_SOURCE, write_build_receipt
+    from pdf2epub.commands.diagnostics import _package_stage
+
+    (tmp_path / "toc_tree.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "polish_validation.json").write_text("{}", encoding="utf-8")
+    epub = tmp_path / "book.epub"
+    epub.write_bytes(b"PK\x03\x04")
+    write_build_receipt(tmp_path, epub, kind=PDF_SOURCE)
+
+    stage = _package_stage(
+        tmp_path, [epub], command="build-epub", kinds=("pdf-source",)
+    )
+    assert stage["status"] == "passed"
+    assert "matches current checkpoints" in stage["detail"]
+
+    (tmp_path / "polish_validation.json").write_text(
+        '{"revalidated": true}', encoding="utf-8"
+    )
+    stage = _package_stage(
+        tmp_path, [epub], command="build-epub", kinds=("pdf-source",)
+    )
+    assert stage["status"] == "stale"
+    assert "does not match current checkpoints" in stage["detail"]
+
+
+def test_package_stage_keeps_legacy_artifacts_readable(tmp_path: Path):
+    from pdf2epub.commands.diagnostics import _package_stage
+
+    epub = tmp_path / "book.epub"
+    epub.write_bytes(b"PK\x03\x04")
+
+    stage = _package_stage(
+        tmp_path, [epub], command="build-epub", kinds=("pdf-source",)
+    )
+    assert stage["status"] == "passed"
+    assert "no build receipt" in stage["detail"]
+
+
 def test_status_surfaces_pending_subagent_review_gates(tmp_path: Path, monkeypatch):
     config_path = _config(tmp_path)
     monkeypatch.chdir(tmp_path)

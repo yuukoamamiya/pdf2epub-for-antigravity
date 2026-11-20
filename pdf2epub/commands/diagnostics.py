@@ -400,14 +400,52 @@ def _pdf_stages(
 
     epub_files = [path for path in output_dir.glob("*.epub") if path.is_file()]
     stages.append(
-        _status_record(
-            "package",
-            "build-epub" if input_path.suffix.lower() == ".pdf" else "build-html-epub",
-            "passed" if epub_files else "pending",
-            f"{len(epub_files)} EPUB artifact(s) found" if epub_files else "no generated EPUB found",
+        _package_stage(
+            output_dir,
+            epub_files,
+            command="build-epub" if input_path.suffix.lower() == ".pdf" else "build-html-epub",
+            kinds=("pdf-source", "pdf-translated"),
         )
     )
     return _apply_stage_blockers(stages)
+
+
+def _package_stage(
+    output_dir: Path,
+    epub_files: list[Path],
+    *,
+    command: str,
+    kinds: tuple[str, ...],
+) -> dict[str, Any]:
+    """Report a packaged EPUB together with its build receipt.
+
+    Legacy artifacts built before receipts existed keep the old ``passed``
+    reading; an artifact whose receipt no longer matches the current
+    checkpoints becomes ``stale`` instead of masquerading as finished.
+    """
+    if not epub_files:
+        return _status_record("package", command, "pending", "no generated EPUB found")
+    from pdf2epub.build_receipt import receipt_status
+
+    states = [receipt_status(output_dir, kind) for kind in kinds]
+    current = [detail for state, detail in states if state == "current"]
+    stale = [detail for state, detail in states if state == "stale"]
+    count = len(epub_files)
+    if current:
+        return _status_record(
+            "package",
+            command,
+            "passed",
+            f"{current[0]} ({count} EPUB artifact(s))",
+        )
+    if stale:
+        return _status_record("package", command, "stale", "; ".join(stale))
+    return _status_record(
+        "package",
+        command,
+        "passed",
+        f"{count} EPUB artifact(s) found (no build receipt)",
+    )
 
 
 def _html_stages(output_dir: Path) -> list[dict[str, Any]]:
@@ -447,11 +485,11 @@ def _html_stages(output_dir: Path) -> list[dict[str, Any]]:
     )
     epub_files = [path for path in output_dir.glob("*.epub") if path.is_file()]
     stages.append(
-        _status_record(
-            "package",
-            "build-html-epub",
-            "passed" if epub_files else "pending",
-            f"{len(epub_files)} EPUB artifact(s) found" if epub_files else "no generated EPUB found",
+        _package_stage(
+            output_dir,
+            epub_files,
+            command="build-html-epub",
+            kinds=("html-translated",),
         )
     )
     return _apply_stage_blockers(stages)

@@ -1682,7 +1682,15 @@ def build_epub(config: BuildEpubConfig) -> Path:
         builder,
     )
 
-    return _package_epub(config, epub_dir, builder, all_html_files)
+    epub_path = _package_epub(config, epub_dir, builder, all_html_files)
+    from .build_receipt import PDF_SOURCE, PDF_TRANSLATED, write_build_receipt
+
+    write_build_receipt(
+        config.output_dir,
+        epub_path,
+        kind=PDF_TRANSLATED if config.translated else PDF_SOURCE,
+    )
+    return epub_path
 
 def markdown_to_html(
     markdown_content: str,

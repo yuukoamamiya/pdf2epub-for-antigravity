@@ -316,7 +316,11 @@ def build_html_epub(
     )
 
     builder = HTMLEpubBuilder(config)
-    return builder.build()
+    epub_path = builder.build()
+    from ..build_receipt import HTML_TRANSLATED, write_build_receipt
+
+    write_build_receipt(Path(translated_dir).parent, epub_path, kind=HTML_TRANSLATED)
+    return epub_path
 
 
 class HTMLEpubPipeline:
