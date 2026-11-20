@@ -74,6 +74,9 @@ uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲
 | `485de4b` | `web/` 演示代理改为白名单主机 + 来源白名单 + 10 MB 上限，不再是无认证中继 |
 | `056a043` | `status` 增加 `review_gates`：各阶段待复核文件数、候选数、worker 派发状态与波次数 |
 | `fab9f15` | `commands/registry.py` 的 837 行 `register_command_parsers()` 拆成 12 个 `_register_*` 分组函数（命令顺序、help 文案、handler 路径逐字未变） |
+| `8db3489` | CLI 统一错误边界：未预期异常打印一行并返回 1，`--debug` / `PDF2EPUB_DEBUG=1` 才展开 traceback；`Ctrl-C` 返回 130 |
+| `cc7724c` | dynamic terminology 的 manifest 盖章抽成 `manifest_dynamic_terminology_stamp()`，PDF 与 EPUB 共用 |
+| `df1f0e0` | 新增本文件并同步 AGENTS/architecture/maintenance/opencode |
 
 ## 5. 已知遗留 backlog
 
@@ -94,16 +97,20 @@ uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲
    `markdown_handoff.py:28 prepare_markdown_subagent()` 有 29 个参数，函数体首行就在组装
    `MarkdownHandoffRequest`。建议把参数上移到该 dataclass，保留一个薄兼容包装，同步改
    `commands/markdown.py`、`commands/html.py` 的调用点。
-4. **Notes 解析的重复实现**（P2）
+4. **Azure / Vision 后端的重复实现**（P2）
+   `ocr/backends/azure.py` 与 `vision.py` 有 219 行逐字相同（约占较小文件的 34%）：
+   图片落盘、坐标转换、插图提取、纵向栏处理各写了一遍。两者都是可选 legacy 后端，
+   合并前先确认还要不要保留这两个后端；若要保留，抽 `_image_page_backend_common.py`。
+5. **Notes 解析的重复实现**（P2）
    `footnote_normalization.py`（polish 校验）与 `refine/endnote_normalization.py`（apply）
    各自维护一套定义正则。`endnote_definition_keys()` 已经共享，但
    `_MARKDOWN_DEF_RE` / `_RAW_NOTE_DEF_RE` / `_RAW_SUP_NOTE_DEF_RE` 仍是两份且语义有细微差异；
    合并前必须逐条比对（apply 侧要求行尾有内容，校验侧只匹配前缀）。不要为了去重改变行为。
-5. **`.gitattributes` 与工作区换行**（P2）
+6. **`.gitattributes` 与工作区换行**（P2）
    仓库索引是 LF、工作区是 CRLF，`git status` 会列出约 200 个 stat-only 改动。
    建议在**工作区干净时**单独做一次 `git add --renormalize .` 并作为独立提交；不要在
    有未提交改动的批次里做。
-6. **`status` 的 `package` 阶段**（P2）
+7. **`status` 的 `package` 阶段**（P2）
    目前只要存在 `*.epub` 就视为有产物；结合 `current/reachable` 已不会误报，但更严格的
    做法是校验 EPUB 的构建 receipt 是否对应当前 polish/translate 检查点。
 
@@ -121,7 +128,9 @@ uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲
 - **提交粒度**：一个可独立验证的功能/修复一个提交；提交信息写"为什么"而不只是"改了什么"。
   不把无关的既有改动夹带进来，不 `git add .`。
 - **验收**：改动后至少跑受影响的测试，收尾跑一次 `uv run pytest -q`；始终跑
-  `git diff --check`。代码改动按 DeepSec skill 扫描改动范围。
+  `git diff --check`。代码改动按 DeepSec skill 扫描改动范围
+  （`deepsec shield scan <改动文件>`；注意该 CLI 一次只接受一个路径）。
+  2026-11-20 批次改动的 13 个文件扫描结果为 0 findings。
 - **禁止**：`push`（需人类明确授权）、force push、改写已推送历史、提交
   `config*.yaml` / `input/` / `output/` / `.secrets/` / `.work/` / 日志。
 - **不要伪造 checkpoint**：校验不过就修内容或修代码，不要手改 JSON 或加
