@@ -12,6 +12,8 @@
 - `docs/architecture.md`：本文，记录模块边界、数据契约、依赖方向和可扩展点。
 - `docs/antigravity-workflow.md`：记录各阶段的详细交接合同、恢复语义和维护示例。
 - `docs/html-translation-improvements.md`：EPUB HTML 路径的专门维护说明。
+- `docs/agent-collaboration.md`：跨 Agent 交接指南——当前状态、契约→测试映射、
+  已完成批次与遗留 backlog。
 
 修改命令、配置或产物格式时，先改实现和测试，再按上述层次同步文档；不要把维护细节全部
 塞进 README，也不要把执行规范只写在维护文档里。
@@ -35,8 +37,9 @@ cli.py
 └── commands/registry.py             argparse 接线
     └── commands/*.py                命令编排与用户可见返回值
         ├── commands/runtime.py      配置、书名、输出目录、日志上下文
-        ├── commands/sources.py      PDF 源稿阶段选择
+        ├── commands/sources.py      PDF 源稿阶段选择与输入身份校验
         ├── pipeline_policy.py       PDF pipeline 能力和门禁策略
+        ├── workflow_stages.py       PDF 阶段顺序的唯一来源（--help 由它渲染）
         └── 领域工作流模块
             ├── refine/              PDF 结构、分页、插图/脚注闸门和单元生成
             ├── html_translation/    EPUB HTML 解析、压缩、校验和重建
@@ -98,6 +101,10 @@ Subagent 合同层
 
 - `runtime.py`：提供 `BookCommandContext`、配置加载和输出目录解析。
 - `sources.py`：选择原始 `ocr_markdown` 或已验证的 `polished_markdown`；所有 PDF 的翻译、实体提取和打包都必须使用后者。
+  它还提供 `validate_pdf_source()`：`ocr-pages` 的输出目录来自配置书名，而 `-i` 只替换
+  源路径，因此写命令会先校验后缀与 `%PDF-` 魔数，再把源哈希与本目录已记录的
+  `pages/ocr_progress.json`、`pdf_text_probe.json`、`input_original.pdf` 比对；不一致时
+  拒绝写入，只有显式 `--allow-source-change` 才放行。
 - `ocr.py`：执行唯一允许调用 OCR 服务的入口；启用次 OCR 时只把差异页交给工作区 Subagent
   做视觉纠错。
 - `ocr_pages.py`：逐页调度主 OCR 和可选次 OCR，持久化页面 Markdown、HTML、原始 HTML、
@@ -332,6 +339,11 @@ polish。`commands/markdown.py`、`entities.py`、`toc.py` 和 `pdf.py` 均应�
 新命令应优先使用 `runtime.py` 的公共上下文；不要从 `cli.py` 导入业务函数，也不要把
 配置解析和输出目录推断复制到每个 handler 中。
 
+PDF 阶段顺序由 `workflow_stages.py` 的 `PDF_WORKFLOW_STAGES` 声明，`cli.py` 的 `--help`
+epilog 直接由它渲染；`status` 的阶段名与命令必须与表中 `key`/`command` 一致。
+`tests/workflow_stages_test.py` 会同时校验阶段表、已注册子命令、epilog 和 `status` 输出，
+因此新增或改名阶段时必须改这一处并同步测试，不要再去手写 epilog。
+
 `cli.py` 仅保留命令注册和启动逻辑。为兼容历史上从入口模块导入工作流 helper 的调用方，
 少量旧名称通过模块级懒加载映射按需解析；新代码必须直接从所属领域模块导入。这样普通 CLI
 启动不会预先导入全部 OCR、PDF、HTML、TeX 和翻译工作流，也不会把入口文件变成共享服务层。
@@ -369,7 +381,13 @@ raw fallback，即使 validation receipt 不在。恢复时保留 handoff/receip
 
 `local_credentials.py` 负责读取被 Git 忽略的本地凭据；各 OCR 后端不共享运行时状态。
 
-`commands/diagnostics.py` 提供只读的 `status` 和 `doctor`。`commands/footnote_diagnostics.py`
+`commands/diagnostics.py` 提供只读的 `status` 和 `doctor`（`STATUS_SCHEMA_VERSION` 2）。
+每个阶段同时给出 `current`（检查点仍对应当前输入）和 `reachable`（更早阶段都已当前）；
+产物存在但上游未通过时报告 `stale`，没有可执行阶段时输出 `blocked_stage`/`blocked_reason`
+而不是给出必然失败的命令。`review_gates` 汇总 `refine`/`ocr-correct`/`illustration`/
+`footnote`/`polish`/`entities`/`translate`/`translate-html` manifest 的待复核文件数、候选数、
+worker `dispatch_status` 计数与波次数，用于判断是否需要开 Subagent；它只是只读摘要，
+不替代 manifest 与正式校验。`commands/footnote_diagnostics.py`
 通过纯读取 JSON 的 `refine/footnote_review_diagnostics.py` 汇总既有脚注复核页面、区域、候选地址、决定和证据图成本；它不写入报告，也不代表生产校验通过。`status` 根据当前输入哈希、阶段
 检查点和验证报告给出恢复顺序；`doctor` 在载入完整工作流前拒绝未知或退役的 OCR backend
 以及缺失的选配 SDK。诊断命令不写入 readiness 或其他恢复产物。
@@ -472,7 +490,9 @@ raw fallback，即使 validation receipt 不在。恢复时保留 handoff/receip
   parts 及行数预算，并写入/检查压缩提取 receipt；不导入 HTML pipeline/builder。builder 保留薄包装
   以兼容既有调用。
 - `utils/paths.py`、`ocr_options.py`、`ocr_source.py`：分别提供书名路径处理、次 OCR 开关读取、
-  OCR progress/probe 页面来源读取。`ocr_source.py` 以旧 progress 识别已知 legacy 来源；命令和
+  OCR progress/probe 页面来源读取。`ocr_source.py` 以旧 progress 识别已知 legacy 来源；progress
+  记录损坏或不是 JSON object 时抛 `ValueError`（缺失才视为没有记录），probe 只作审计、
+  读取失败按缺失处理；命令和
   refine 编排依赖这些窄服务，不复制各自的底层解析。
 - `subagent_safety.py`：集中处理拒答、免责声明和翻译占位套话检测，避免各工作流使用不同规则。
 - `toc_translation_workflow.py`：维护 TOC 的原始结构、节点数量、非标题字段和翻译结果校验。
@@ -574,6 +594,8 @@ metadata 也占同一波额度，且不与极大单元波重叠。父级 `dispat
 终止再释放 lease；恢复时检查真实活动会话，避免重复派发或误释放活跃 lease。lease API 继续负责原子
 claim/renew/release，但不强制 IDE session 生命周期，也不启动模型或实现 IDE 实际并发信号量。
 `state_lock.py` 是 lease 与恢复状态 JSON 共用的独立跨平台文件锁实现，避免两个状态模块相互导入。
+两个平台共用同一套有界退避：Windows 用 `msvcrt.LK_NBLCK`，POSIX 用
+`fcntl.flock(LOCK_EX|LOCK_NB)`，进程内互斥锁也按同一 `timeout` 获取，超时抛 `TimeoutError`。
 任务级 `subagent_dispatch_recovery.py` 以 schema 1 JSON
 记录 provider 限流、操作员确认和实际峰值，并与 validation receipt 分离。CLI 提供
 `dispatch-status`（只读）、`dispatch-record-failure` 与 `dispatch-resume`；运行时不会自动重试
@@ -1345,7 +1367,9 @@ polish 校验对续片的 TOC 保护是上下文感知的：只有文件开头�
    handoff、manifest、sidecar、validation report 或恢复语义，同时更新
    `docs/antigravity-workflow.md` 或对应专项维护文档。
 
-测试入口为 `uv run pytest -q`。代码重构不应读取、改写或重新生成用户的书稿和译文输出；
+测试入口为 `uv run pytest -q`（本地约 40 秒，1600+ 用例）。CI 在
+`.github/workflows/tests.yml` 中于 `windows-latest` 和 `ubuntu-latest`、Python 3.12 上运行
+同一命令；跨平台代码（文件锁、路径处理）必须在两个平台都通过。代码重构不应读取、改写或重新生成用户的书稿和译文输出；
 涉及实际翻译时必须重新遵守 [`AGENTS.md`](../AGENTS.md) 的 Subagent 总闸和开工检查。
 
 ### 本地工作文件归档

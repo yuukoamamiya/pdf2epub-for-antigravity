@@ -11,6 +11,9 @@
 `pyproject.toml` 和 CI 配置，不需要打开 Antigravity 工作区 Subagent。Codex 的实现委派遵循
 [`codex.md`](../codex.md)；其他编码 Agent 可直接实施。
 
+接手别人做了一半的维护工作时，先读 [`agent-collaboration.md`](agent-collaboration.md)：
+它记录当前已完成批次、契约→测试映射和遗留 backlog，避免重复修或回退已有合同。
+
 ---
 
 ## 1. 先判断任务类型

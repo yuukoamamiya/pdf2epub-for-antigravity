@@ -1,6 +1,8 @@
 # 维护任务入口（OpenCode / Codex）
 
 本文件是给编码 Agent 的短入口。完整规则见 [`docs/maintenance.md`](docs/maintenance.md)。
+跨 Agent 交接现状（已完成批次、契约→测试映射、遗留 backlog）见
+[`docs/agent-collaboration.md`](docs/agent-collaboration.md)。
 
 ## 任务分类
 

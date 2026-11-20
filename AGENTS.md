@@ -82,6 +82,13 @@ uv run pdf2epub -c config.yaml doctor
 `status` 只读取当前阶段、哈希和验证报告，不创建恢复产物；`doctor` 检查配置、输入文件、
 选中的 OCR 依赖和配置兼容性。页面 OCR 只能使用注册表中当前存在的后端；未知、退役或遗留
 的后端配置会在 `doctor` 阶段阻断，不能靠关闭开关绕过。
+
+`status` 的每个阶段同时给出 `current`（检查点是否仍对应当前输入）和 `reachable`
+（更早阶段是否都已当前）。产物存在但上游未通过时显示 `stale` 而不是 `passed`；没有任何
+可执行阶段时输出 `blocked_stage`/`blocked_reason` 而不是给出必然失败的命令。
+`review_gates` 段汇总各阶段待复核文件数、候选数、worker 派发状态与波次数，用于判断
+"下一步要不要开 Subagent"，但它是只读摘要，不能替代 manifest 本身和正式校验。
+跨 Agent 交接与当前遗留项见 [`docs/agent-collaboration.md`](docs/agent-collaboration.md)。
 维护者可用 `uv run pdf2epub -c config.yaml footnote-review-summary --json` 只读汇总脚注复核成本；它是独立诊断，不能替代 `footnote-validate`，也不建议删除相邻页上下文窗口。
 脚注 unit context 使用独立 projection version。加载时必须依据当前候选报告、精确页侧车哈希索引和 refined unit mapping 重算完整投影。Polish boundary context projection version 2 首次恢复时用 `polish --resume` 刷新 sidecar/context 并运行正式 `polish-validate`。之后 halo 外邻片变化不使已完成 sidecar/receipt 失效，但完整 source provenance 与 inventory 检查仍须通过。脚注证据在 `tree_progress.json` 提供显式、合法的 `part_page_ranges` 时按该分片页范围投影以缩小失效半径；缺少精确 part→page 映射时继续使用章节级证据与失效范围，不推断分片级页范围。旧脚注 unit context 版本或脚注证据变化时，先重跑 `footnote-prepare`、`footnote-validate`，保留原 decision 文件，不把刷新上下文当作语义决定通过。
 
@@ -505,6 +512,13 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    ```text
    uv run pdf2epub -c config.yaml ocr-pages --resume
    ```
+
+   `ocr-pages` 的输出目录由配置的 `title` 决定，`-i/--input` 只替换源文件路径。因此该命令
+   会先校验输入确实是 PDF（后缀与 `%PDF-` 魔数），并把它与本目录已记录的源哈希
+   （`pages/ocr_progress.json`、`pdf_text_probe.json`、`input_original.pdf`）比对；
+   不一致时拒绝写入并提示改用独立书目目录，或显式加 `--allow-source-change`
+   （会使现有 OCR、脚注、润色和翻译检查点失效）。不要用 `-i` 把另一本书或 EPUB
+   指进现有书目目录。
 
    程序会先生成 `pdf_text_probe.json`。所有新运行都使用视觉 OCR；扫描 PDF、可搜索 OCR
    PDF 和混合稿都生成视觉 OCR 的 `pages/page_XXX.md`。probe schema 为 3，
