@@ -7,7 +7,7 @@ import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 
 
 _THREAD_LOCKS: dict[str, threading.Lock] = {}
@@ -23,22 +23,23 @@ def _thread_lock_for(path: Path) -> threading.Lock:
         return _THREAD_LOCKS.setdefault(key, threading.Lock())
 
 
-def _acquire_windows_lock(handle, timeout: float) -> None:
-    """Acquire a Windows byte-range lock with bounded backoff instead of LK_LOCK's 10s EDEADLK."""
-    import msvcrt
+def _is_retryable_lock_error(exc: OSError) -> bool:
+    """Return True for contention errors that may clear on a later attempt."""
+    return exc.errno in (errno.EACCES, errno.EDEADLK, errno.EAGAIN) or isinstance(
+        exc, PermissionError
+    )
 
+
+def _retry_until_deadline(timeout: float, attempt: Callable[[], None]) -> None:
+    """Run ``attempt`` with bounded backoff until ``timeout`` expires."""
     deadline = time.monotonic() + max(0.0, float(timeout))
     delay = _LOCK_RETRY_INITIAL_SECONDS
     while True:
         try:
-            handle.seek(0)
-            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            attempt()
             return
         except OSError as exc:
-            retryable = exc.errno in (errno.EACCES, errno.EDEADLK, errno.EAGAIN) or isinstance(
-                exc, PermissionError
-            )
-            if not retryable:
+            if not _is_retryable_lock_error(exc):
                 raise
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -47,6 +48,27 @@ def _acquire_windows_lock(handle, timeout: float) -> None:
                 ) from exc
             time.sleep(min(delay, remaining))
             delay = min(delay * 1.5, _LOCK_RETRY_MAX_SECONDS)
+
+
+def _acquire_windows_lock(handle, timeout: float) -> None:
+    """Acquire a Windows byte-range lock with bounded backoff instead of LK_LOCK's 10s EDEADLK."""
+    import msvcrt
+
+    def attempt() -> None:
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+
+    _retry_until_deadline(timeout, attempt)
+
+
+def _acquire_posix_lock(handle, timeout: float) -> None:
+    """Acquire a POSIX advisory lock with the same bounded backoff as Windows."""
+    import fcntl
+
+    def attempt() -> None:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    _retry_until_deadline(timeout, attempt)
 
 
 @contextmanager
@@ -60,8 +82,12 @@ def state_lock(
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     # Windows byte-range locks do not serialize threads in the same process
     # consistently, so pair them with a per-path in-process mutex. The file
-    # lock still coordinates independent processes.
-    with _thread_lock_for(lock_path):
+    # lock still coordinates independent processes. The timeout bounds the
+    # whole wait, including contention on this in-process mutex.
+    thread_lock = _thread_lock_for(lock_path)
+    if not thread_lock.acquire(timeout=max(0.0, float(timeout))):
+        raise TimeoutError(f"Timed out after {timeout:.1f}s waiting for state lock")
+    try:
         try:
             # Exclusive creation ensures only one contender initializes the
             # lock byte; existing lock files are never written without a lock.
@@ -72,8 +98,7 @@ def state_lock(
             if os.name == "nt":
                 _acquire_windows_lock(handle, timeout)
             else:
-                import fcntl
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+                _acquire_posix_lock(handle, timeout)
             try:
                 if os.fstat(handle.fileno()).st_size == 0:
                     handle.seek(0)
@@ -88,3 +113,5 @@ def state_lock(
                 else:
                     import fcntl
                     fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    finally:
+        thread_lock.release()
