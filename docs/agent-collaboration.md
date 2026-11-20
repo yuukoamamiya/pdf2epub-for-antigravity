@@ -14,7 +14,7 @@
 ```text
 git status --short          # 先看有没有别人的改动；不要清理、不要纳入本次提交
 git branch --show-current   # 必须是 main；不要建临时分支
-uv run pytest -q            # 基线：1627 个测试（4 skipped），约 40 秒
+uv run pytest -q            # 基线：1630 个测试（4 skipped），约 40 秒
 uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲染
 ```
 
@@ -79,6 +79,7 @@ uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲
 | `f4aa8ac` | resume 现在按文件说明 pending 原因（`source_changed` / `context_version_bumped` / `context_changed` / `receipt_missing` / `target_missing` / `review_reopened` / `checkpoint_invalid` / `fresh_run`），父 manifest 写 `pending_reasons` + `pending_reason_counts`，`status.review_gates` 同步显示；`unit_context_mismatch_reason()` 是判定分量的唯一来源 |
 | `df1f0e0` | 新增本文件并同步 AGENTS/architecture/maintenance/opencode |
 | `3d97c7a` | `prepare_markdown_subagent()` 改为只接收 `MarkdownHandoffRequest`，删除 29 参适配段；125 个调用点（4 生产 / 121 测试）同步改为构造 dataclass，行为与默认值不变 |
+| `f39520c` | `status` 增加 `ocr_evidence`（`two_ocr` / `single_ocr` / `legacy_native` / `indeterminate`）并升到 schema 3，单 OCR 不再读成已复核；handler 捕获的失败复用同一个 `--debug` 判定，保留异常类型与可选 traceback |
 
 ## 5. 已知遗留 backlog
 
