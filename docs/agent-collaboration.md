@@ -14,7 +14,7 @@
 ```text
 git status --short          # 先看有没有别人的改动；不要清理、不要纳入本次提交
 git branch --show-current   # 必须是 main；不要建临时分支
-uv run pytest -q            # 基线：1635 个测试（4 skipped），约 40 秒
+uv run pytest -q            # 基线：1637 个测试（4 skipped），约 40 秒
 uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲染
 ```
 
@@ -86,6 +86,11 @@ uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲
 | `ee78c60` | `audit_footnote_result()` 从 534 行拆成 243 行编排 + 4 个阶段函数（finding 身份、task_id、evidence 哈希不变） |
 | `c3aedaf` | `run_readiness_check()` 从 449 行拆到 257 行：OCR/异常/纠错页选择与 TOC/refine/footnote/source 两段成为具名 helper，检查顺序与消息不变 |
 | `3969711` | 抽出 `endnote_patterns.py`：两边逐字相同的 Unicode 上标正则、数字表和 Markdown 引用正则只保留一份；定义正则因语义不同继续分开 |
+| `eafd9ae` | `build_page_footnote_regions()` 从 509 行拆成 76 行编排 + 7 个阶段函数（宽注折叠、lane 推断、lane 分配、key scope、分组、区域构建、复核原因） |
+| `1c711d6` | 修复结果审计拆分遗留的 `findings.append` → `record_finding`，并补缺失归一化单元的测试 |
+| `a2ec66c` | `apply_footnote_normalization()` 从 413 行拆到 188 行：期望注释、review 合并、候选绑定、成功 receipt 各成 helper |
+| `307d254` | `prepare_footnote_subagent()` 先拆出 manifest 与 prompt 两段，1126 → 893 行；候选增强中段仍待按共享状态分阶段 |
+| `7793568` | 移除 Azure Document Intelligence 与 Google Cloud Vision 两个页面后端、对应可选依赖与 doctor 探测；旧配置按退役 backend 阻断 |
 
 ## 5. 已知遗留 backlog
 
@@ -98,31 +103,32 @@ uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲
    `prepare → validate → prepare` 三步走。实现前必须先证明旧快照与当前快照除版本戳外完全
    相同，否则宁可不刷新；relax 到"源哈希一致即可"会接受在旧投影下验证过的译文。
 2. **巨型函数拆分**（P1）
-   `commands/registry.py`（见 `fab9f15`）与 `commands/markdown_readiness.py`（见 `c3aedaf`）
-   已完成。剩余：
-   `refine/footnote_handoff.py:211 prepare_footnote_subagent()`（1126 行）、
-   `refine/footnote_regions.py:33`（509 行）、`refine/footnote_apply.py:81`（413 行）。
-   `refine/footnote_result_audit.py` 已拆（见 §4）：`audit_footnote_result()` 从 534 行降到
-   243 行，源稿侧三个检查与归一化稿侧 `_audit_normalized_targets()` 独立成函数。
+   已完成：`registry.py`（`fab9f15`）、`markdown_readiness.py`（`c3aedaf`）、
+   `footnote_regions.py`（`eafd9ae`）、`footnote_apply.py`（`a2ec66c`）、
+   `footnote_result_audit.py`（`ee78c60`），以及 `prepare_footnote_subagent()` 的
+   manifest/prompt 两段（`307d254`）。剩余：
+   `prepare_footnote_subagent()` 的候选增强中段（893 行，需先把共享状态收进一个
+   上下文对象，再按 source-audit / target-audit / preflight 三个相位拆分）、
+   `ocr_pages.py:716 ocr_full_book_pagewise()`（432 行）、
+   `commands/markdown.py:78 _prepare_pdf_markdown_task()`（387 行）。
    拆分必须保持 manifest/report schema 与哈希合同不变，并跑全量测试。
-3. **Azure / Vision 后端的重复实现**（P2）
-   `ocr/backends/azure.py` 与 `vision.py` 的 furigana 重建逻辑（`_classify_lines_by_width`、
-   `_group_furigana_words`、`_match_furigana_to_main_text`、`_assemble_reconstructed_text`、
-   `_format_clean_output`）仍各有一份；两者都是可选 legacy 后端且没有独立测试。
-   **前置决定**：确认是否继续保留这两个后端；若要保留，再抽 `_image_page_backend_common.py`，
-   合并前必须先用真实页图对比两条路径的输出。盲目合并属于行为变更，不是去重。
-4. **Notes 定义正则的剩余差异**（P2）
+3. **Notes 定义正则的剩余差异**（P2）
    逐字相同的 Unicode 上标正则、数字表和 Markdown 引用正则已抽到 `endnote_patterns.py`
    （见 `3969711`）。定义正则仍分开：校验侧只匹配前缀，apply 侧要求行尾有内容；
    合并会改变行为，因此保留并加注释，不做"看起来更整齐"的统一。
-5. **`.gitattributes` 与工作区换行**（P2）
+4. **`.gitattributes` 与工作区换行**（P2）
    仓库索引是 LF、工作区是 CRLF，`git status` 会列出大量 stat-only 改动。
    2026-11-20 已用逐文件 `git add` 刷新 143 个仅 stat 变化的条目，剩余 11 个是真实改动，
    必须由作者先提交；不要在有真实改动的批次里做 `git add --renormalize .`。
    工具再次改写换行后重复同一刷新即可。
-6. **`status` 的 `package` 阶段**（P2）
+
+5. **`status` 的 `package` 阶段**（P2）
    目前只要存在 `*.epub` 就视为有产物；结合 `current/reachable` 已不会误报，但更严格的
    做法是校验 EPUB 的构建 receipt 是否对应当前 polish/translate 检查点。
+
+2026-11-20 另将根目录 17 个一次性脚本/JSON（`inspect_*.py`、`suture_*.py`、
+`scratch_*.json`、`output_survey.json`、`scripts/apply_glossary_supplement.py`）归档到
+`.work/archive/root-scratch-2026-11-20/`；`.work/` 不进入 Git。
 
 ### 已评估但决定不做
 
