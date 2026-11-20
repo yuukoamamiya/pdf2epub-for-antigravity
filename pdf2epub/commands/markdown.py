@@ -9,7 +9,7 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Mapping
+from typing import Any, Dict, Mapping, Optional
 
 from loguru import logger
 
@@ -75,60 +75,22 @@ def _print_handoff_preview(preview: Mapping[str, Any]) -> None:
     logger.warning("[dry-run] no manifest, prompt, or worker hand-off was written")
 
 
-def _prepare_pdf_markdown_task(args, task: str):
-    from pdf2epub.markdown_handoff import prepare_markdown_subagent
-    from pdf2epub.markdown_handoff_context import MarkdownHandoffRequest
-    from pdf2epub.subagent_runtime import resolve_subagent_model
-
-    dynamic_attestation = None
-    if task == "translate":
-        try:
-            early_config = load_config(args.config)
-            early_policy = PipelinePolicy.from_config(early_config)
-            if early_policy.dynamic_terminology_enabled:
-                from pdf2epub.dynamic_terminology import session_attestation, verify_session_attestation
-                from pdf2epub.utils.paths import book_output_dir
-
-                title = str(early_config.get("title") or "").strip()
-                if not title:
-                    raise ValueError("title is required before dynamic terminology can prepare translation")
-                early_output = book_output_dir(title)
-                dynamic_attestation = session_attestation(
-                    early_output, "translate",
-                    confirmed=bool(getattr(args, "confirm_no_active_sessions", False)),
-                )
-                verify_session_attestation(early_output, dynamic_attestation)
-        except Exception as exc:
-            log_command_error(f"Dynamic terminology pre-write gate blocked {task}", exc, args=args)
-            return 1
-
-    context = load_book_context(args, f"{task}-prepare")
-    if context is None:
-        return 1
-    config = context.config
-    policy = PipelinePolicy.from_config(config)
-    conversion_pipeline = policy.is_conversion
-    if task == "translate" and conversion_pipeline:
-        logger.error(
-            "pipeline: epub_conversion is language-neutral; remove that setting "
-            "before running translate."
-        )
-        return 1
-    book_title = context.book_title
-    output_dir = context.output_dir
-    translation = config.get("translation", {})
-    source_language = getattr(args, "source_language", None) or policy.source_language or (
-        "Original" if conversion_pipeline else "English"
-    )
-    target_language = getattr(args, "target_language", None) or policy.target_language or (
-        "Original" if conversion_pipeline else "Chinese"
-    )
-    dynamic_snapshot_sha256 = None
-    dynamic_entries = []
-    if task == "translate" and policy.dynamic_terminology_enabled:
-        from pdf2epub.dynamic_terminology import verify_session_attestation
-        verify_session_attestation(output_dir, dynamic_attestation)
-    glossary_bundle = None
+def _prepare_task_source(
+    args,
+    task: str,
+    *,
+    config: Mapping[str, Any],
+    policy: PipelinePolicy,
+    output_dir: Path,
+    book_title: str,
+    source_language: str,
+    target_language: str,
+    footnote_mode: Optional[str],
+    glossary_bundle: Any,
+    dynamic_attestation: Any,
+    config_path: Path,
+) -> Optional[dict[str, Any]]:
+    """Resolve source, rules and per-unit contexts for polish or translate."""
     context_files = {}
     skipped_context_files = []
     unit_context_files = {}
@@ -137,35 +99,15 @@ def _prepare_pdf_markdown_task(args, task: str):
     base_unit_context_files = {}
     preexisting_dynamic_targets = {}
     prompt_context_files = None
-    footnote_mode = None
-    if task == "polish":
-        from pdf2epub.refine.footnote_options import resolve_footnote_options
-
-        try:
-            footnote_mode = resolve_footnote_options(config).mode
-        except ValueError as exc:
-            logger.error(f"Invalid footnotes configuration: {exc}")
-            return 1
-    if task == "translate":
-        from pdf2epub.glossary import load_selected_glossaries
-
-        try:
-            glossary_bundle = load_selected_glossaries(
-                config,
-                output_dir,
-                source_language,
-                target_language,
-                context.config_path,
-            )
-        except Exception as exc:
-            log_command_error("Could not load external glossary", exc, args=args)
-            return 1
+    chapter_groups = {}
+    dynamic_snapshot_sha256 = None
+    dynamic_entries = []
     if task == "polish":
         try:
             source_dir, _ = _resolve_pdf_polish_source(output_dir, config)
         except ValueError as exc:
             logger.error(str(exc))
-            return 1
+            return None
         target_dir = output_dir / "polished_markdown"
         rules = [
             "Repair source layout and line wrapping while preserving meaning and document structure.",
@@ -205,14 +147,14 @@ def _prepare_pdf_markdown_task(args, task: str):
             source_dir, source_stage = _resolve_pdf_markdown_source(output_dir, config)
         except ValueError as exc:
             logger.error(str(exc))
-            return 1
+            return None
         if source_stage != "polished":
             logger.error(
                 "PDF translation requires a current validated polished source for "
                 "both OCR-derived and native-text PDFs. Run polish and "
                 "polish-validate before translate."
             )
-            return 1
+            return None
         from pdf2epub.toc_translation_workflow import (
             build_global_toc_outline,
             build_toc_heading_contexts,
@@ -226,7 +168,7 @@ def _prepare_pdf_markdown_task(args, task: str):
                 "TOC translation must be completed and validated before PDF "
                 "translation: " + "; ".join(toc_report["errors"][:5])
             )
-            return 1
+            return None
         heading_contexts = build_toc_heading_contexts(
             output_dir,
             source_dir=source_dir,
@@ -247,7 +189,7 @@ def _prepare_pdf_markdown_task(args, task: str):
                     "run extract-entities-validate; use --skip-entities only "
                     "when a glossary is genuinely unnecessary."
                 )
-                return 1
+                return None
             try:
                 from pdf2epub.entity_extractor import validate_entities
 
@@ -260,7 +202,7 @@ def _prepare_pdf_markdown_task(args, task: str):
             if entity_errors:
                 for error in entity_errors:
                     logger.error(f"Entity glossary: {error}")
-                return 1
+                return None
         rules = [
             "Translate prose to the target language; do not summarize, censor, or add commentary.",
             "Preserve Markdown heading levels, image links, footnote references, formulas, and link destinations exactly.",
@@ -332,6 +274,131 @@ def _prepare_pdf_markdown_task(args, task: str):
         # Native glossary snapshots are audit inputs; workers receive only
         # per-unit projections through unit_context_files.
         prompt_context_files = {}
+    return {
+        "source_dir": source_dir,
+        "target_dir": target_dir,
+        "rules": rules,
+        "unit_context_files": unit_context_files,
+        "heading_contexts": heading_contexts,
+        "global_toc_outline": global_toc_outline,
+        "context_files": context_files,
+        "skipped_context_files": skipped_context_files,
+        "prompt_context_files": prompt_context_files,
+        "base_unit_context_files": base_unit_context_files,
+        "preexisting_dynamic_targets": preexisting_dynamic_targets,
+        "dynamic_snapshot_sha256": dynamic_snapshot_sha256,
+        "dynamic_entries": dynamic_entries,
+        "chapter_groups": chapter_groups,
+    }
+
+
+def _prepare_pdf_markdown_task(args, task: str):
+    from pdf2epub.markdown_handoff import prepare_markdown_subagent
+    from pdf2epub.markdown_handoff_context import MarkdownHandoffRequest
+    from pdf2epub.subagent_runtime import resolve_subagent_model
+
+    dynamic_attestation = None
+    if task == "translate":
+        try:
+            early_config = load_config(args.config)
+            early_policy = PipelinePolicy.from_config(early_config)
+            if early_policy.dynamic_terminology_enabled:
+                from pdf2epub.dynamic_terminology import session_attestation, verify_session_attestation
+                from pdf2epub.utils.paths import book_output_dir
+
+                title = str(early_config.get("title") or "").strip()
+                if not title:
+                    raise ValueError("title is required before dynamic terminology can prepare translation")
+                early_output = book_output_dir(title)
+                dynamic_attestation = session_attestation(
+                    early_output, "translate",
+                    confirmed=bool(getattr(args, "confirm_no_active_sessions", False)),
+                )
+                verify_session_attestation(early_output, dynamic_attestation)
+        except Exception as exc:
+            log_command_error(f"Dynamic terminology pre-write gate blocked {task}", exc, args=args)
+            return 1
+
+    context = load_book_context(args, f"{task}-prepare")
+    if context is None:
+        return 1
+    config = context.config
+    policy = PipelinePolicy.from_config(config)
+    conversion_pipeline = policy.is_conversion
+    if task == "translate" and conversion_pipeline:
+        logger.error(
+            "pipeline: epub_conversion is language-neutral; remove that setting "
+            "before running translate."
+        )
+        return 1
+    book_title = context.book_title
+    output_dir = context.output_dir
+    translation = config.get("translation", {})
+    source_language = getattr(args, "source_language", None) or policy.source_language or (
+        "Original" if conversion_pipeline else "English"
+    )
+    target_language = getattr(args, "target_language", None) or policy.target_language or (
+        "Original" if conversion_pipeline else "Chinese"
+    )
+    dynamic_snapshot_sha256 = None
+    dynamic_entries = []
+    if task == "translate" and policy.dynamic_terminology_enabled:
+        from pdf2epub.dynamic_terminology import verify_session_attestation
+        verify_session_attestation(output_dir, dynamic_attestation)
+    glossary_bundle = None
+    # Source-preparation state is initialized in _prepare_task_source().
+    footnote_mode = None
+    if task == "polish":
+        from pdf2epub.refine.footnote_options import resolve_footnote_options
+
+        try:
+            footnote_mode = resolve_footnote_options(config).mode
+        except ValueError as exc:
+            logger.error(f"Invalid footnotes configuration: {exc}")
+            return 1
+    if task == "translate":
+        from pdf2epub.glossary import load_selected_glossaries
+
+        try:
+            glossary_bundle = load_selected_glossaries(
+                config,
+                output_dir,
+                source_language,
+                target_language,
+                context.config_path,
+            )
+        except Exception as exc:
+            log_command_error("Could not load external glossary", exc, args=args)
+            return 1
+    prepared = _prepare_task_source(
+        args, task,
+        config=config,
+        policy=policy,
+        output_dir=output_dir,
+        book_title=book_title,
+        source_language=source_language,
+        target_language=target_language,
+        footnote_mode=footnote_mode,
+        glossary_bundle=glossary_bundle,
+        dynamic_attestation=dynamic_attestation,
+        config_path=context.config_path,
+    )
+    if prepared is None:
+        return 1
+    source_dir = prepared["source_dir"]
+    target_dir = prepared["target_dir"]
+    rules = prepared["rules"]
+    unit_context_files = prepared["unit_context_files"]
+    heading_contexts = prepared["heading_contexts"]
+    global_toc_outline = prepared["global_toc_outline"]
+    context_files = prepared["context_files"]
+    skipped_context_files = prepared["skipped_context_files"]
+    prompt_context_files = prepared["prompt_context_files"]
+    base_unit_context_files = prepared["base_unit_context_files"]
+    preexisting_dynamic_targets = prepared["preexisting_dynamic_targets"]
+    dynamic_snapshot_sha256 = prepared["dynamic_snapshot_sha256"]
+    dynamic_entries = prepared["dynamic_entries"]
+    chapter_groups = prepared["chapter_groups"]
     try:
         controlled_files = {}
         if task == "translate":
