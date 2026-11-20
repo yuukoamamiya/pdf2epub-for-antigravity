@@ -208,7 +208,7 @@ def test_status_marks_downstream_artifacts_stale_and_withholds_command(
     report = build_status(config_path)
     stages = {item["name"]: item for item in report["stages"]}
 
-    assert report["schema_version"] == 3
+    assert report["schema_version"] == 4
     assert stages["ocr-pages"]["status"] == "blocked"
     assert stages["ocr-pages"]["reachable"] is False
     assert stages["package"]["status"] == "stale"
@@ -260,7 +260,7 @@ def test_status_reports_ocr_evidence_level(tmp_path: Path, monkeypatch):
     output_dir.mkdir(parents=True)
 
     report = build_status(config_path)
-    assert report["schema_version"] == 3
+    assert report["schema_version"] == 4
     assert report["ocr_evidence"] == {
         "mode": "single_ocr",
         "cross_verified": False,
@@ -323,6 +323,30 @@ def test_package_stage_keeps_legacy_artifacts_readable(tmp_path: Path):
     )
     assert stage["status"] == "passed"
     assert "no build receipt" in stage["detail"]
+
+
+def test_status_reports_the_cross_page_boundary_preview(tmp_path: Path, monkeypatch):
+    config_path = _config(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    output_dir = tmp_path / "output" / "Diagnostics Book"
+    output_dir.mkdir(parents=True)
+    (output_dir / "refine_boundary_preview.json").write_text(
+        json.dumps(
+            {
+                "suspect_count": 2,
+                "suspects": [{"unit": "a.md"}, {"unit": "b.md"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = build_status(config_path)
+
+    assert report["boundary_preview"] == {
+        "report": "refine_boundary_preview.json",
+        "suspect_count": 2,
+        "units": ["a.md", "b.md"],
+    }
 
 
 def test_status_surfaces_pending_subagent_review_gates(tmp_path: Path, monkeypatch):

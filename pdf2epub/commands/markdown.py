@@ -139,6 +139,18 @@ def _prepare_task_source(
                     "When a footnote continues across pages, join only the footnote text; keep intervening body text in the body. Do not use page order alone to attach a block to a footnote.",
                 ]
             )
+        from pdf2epub.refine.boundary_preview import load_boundary_preview
+
+        boundary_preview = load_boundary_preview(output_dir)
+        suspect_count = int(boundary_preview.get("suspect_count") or 0)
+        if suspect_count:
+            rules.append(
+                f"refine_boundary_preview.json lists {suspect_count} cross-page join(s) "
+                "where a footnote-style line may have been merged with body text. While "
+                "polishing an assigned file, keep footnote and body text in separate "
+                "blocks when the boundary evidence supports it; never join or split by "
+                "page order alone."
+            )
         content_type = getattr(args, "content_type", "auto")
         if content_type and content_type != "auto":
             rules.append(f"Treat this as {content_type} content and preserve its domain-specific conventions.")

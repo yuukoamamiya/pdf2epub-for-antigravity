@@ -131,6 +131,21 @@ def refine_local_command(args):
         return 1
 
     logger.success(f"Local refine complete: {len(units)} units generated")
+    from pdf2epub.refine.boundary_preview import write_boundary_preview
+
+    try:
+        preview = write_boundary_preview(output_dir, pages_dir)
+    except (OSError, UnicodeError, ValueError) as exc:
+        logger.warning(f"Boundary preview could not be built: {exc}")
+    else:
+        count = int(preview.get("suspect_count") or 0)
+        if count:
+            logger.warning(
+                f"Boundary preview: {count} suspect cross-page join(s); "
+                "polish should verify them (see refine_boundary_preview.json)"
+            )
+        else:
+            logger.info("Boundary preview: no suspect cross-page joins")
     return 0
 
 

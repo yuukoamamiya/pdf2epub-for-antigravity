@@ -28,7 +28,7 @@ from pdf2epub.utils.paths import book_output_dir
 from pdf2epub.utils.input_paths import resolve_book_input_path
 
 
-STATUS_SCHEMA_VERSION = 3
+STATUS_SCHEMA_VERSION = 4
 DOCTOR_SCHEMA_VERSION = 1
 
 
@@ -410,6 +410,23 @@ def _pdf_stages(
     return _apply_stage_blockers(stages)
 
 
+def _boundary_preview_summary(output_dir: Path) -> dict[str, Any] | None:
+    """Summarize the read-only cross-page boundary preview written by refine-local."""
+    report = _read_json(output_dir / "refine_boundary_preview.json")
+    if not report:
+        return None
+    suspects = report.get("suspects")
+    suspects = suspects if isinstance(suspects, list) else []
+    return {
+        "report": "refine_boundary_preview.json",
+        "suspect_count": int(report.get("suspect_count") or len(suspects)),
+        "units": sorted({
+            str(item.get("unit")) for item in suspects
+            if isinstance(item, Mapping) and item.get("unit")
+        }),
+    }
+
+
 def _package_stage(
     output_dir: Path,
     epub_files: list[Path],
@@ -690,6 +707,7 @@ def build_status(config_path: str | Path = "config.yaml") -> dict[str, Any]:
         "blocked_reason": None,
         "review_gates": [],
         "ocr_evidence": None,
+        "boundary_preview": None,
     }
     if errors:
         return report
@@ -724,6 +742,9 @@ def build_status(config_path: str | Path = "config.yaml") -> dict[str, Any]:
     report["stages"] = stages
     report["ocr_evidence"] = _ocr_evidence(output_dir, config, input_type)
     report["review_gates"] = _review_gates(output_dir) if output_dir.is_dir() else []
+    report["boundary_preview"] = (
+        _boundary_preview_summary(output_dir) if output_dir.is_dir() else None
+    )
     pending = []
     for stage in stages:
         pending.extend(stage.get("pending_files", []))
@@ -894,6 +915,13 @@ def status_command(args: Any) -> int:
         if evidence:
             verified = "已交叉验证" if evidence["cross_verified"] else "未交叉验证"
             print(f"OCR 证据: {evidence['mode']} ({verified}) — {evidence['detail']}")
+        boundary = report.get("boundary_preview")
+        if boundary and boundary.get("suspect_count"):
+            print(
+                f"边界预检: {boundary['suspect_count']} 处可疑跨页合并（"
+                + ", ".join(boundary.get("units", [])[:5])
+                + "）"
+            )
         if report.get("errors"):
             for error in report["errors"]:
                 print(f"阻断: {error}")
