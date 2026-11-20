@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from pathlib import Path
-from typing import Dict
+from typing import Any, Dict, Mapping
 
 from pdf2epub.commands.sources import (
     _polished_stage_is_current,
@@ -27,51 +28,14 @@ from pdf2epub.refine.subagent_workflow import validate_toc_tree_data
 from pdf2epub.refine.footnote_options import footnote_mode_warnings
 
 
-def run_readiness_check(
-    config_path: str,
-    stage: str = "translate",
-    skip_entities: bool = False,
+def _record_ocr_readiness(
+    record: Callable[..., None],
+    *,
+    output_dir: Path,
+    config: Mapping[str, Any],
+    policy: PipelinePolicy,
 ) -> dict:
-    """Run deterministic gates before translation or packaging."""
-    config = load_config(config_path)
-    policy = PipelinePolicy.from_config(config)
-    conversion_pipeline = policy.is_conversion
-    book_title = config.get("title")
-    output_dir = book_output_dir(book_title) if book_title else Path("output")
-    checks: Dict[str, dict] = {}
-    errors: list[str] = []
-
-    def record(
-        name: str,
-        ready: bool,
-        detail: str,
-        *,
-        code: str | None = None,
-        blocked_by: list[str] | None = None,
-        emit_error: bool = True,
-    ) -> None:
-        checks[name] = {"ready": bool(ready), "detail": detail}
-        if code:
-            checks[name]["code"] = code
-        if blocked_by:
-            checks[name]["blocked_by"] = list(blocked_by)
-        if not ready and emit_error:
-            errors.append(f"{name}: {detail}")
-
-    if not book_title:
-        record("config", False, "title is missing")
-        report = {
-            "schema_version": 1,
-            "stage": stage,
-            "ready": False,
-            "checks": checks,
-            "errors": errors,
-            "warnings": [],
-        }
-        output_dir.mkdir(parents=True, exist_ok=True)
-        atomic_write_json(output_dir / "readiness.json", report)
-        return report
-
+    """Record the OCR, anomaly, correction and page-selection gates."""
     raw_pages_dir = output_dir / "pages"
     probe_path = output_dir / "pdf_text_probe.json"
     expected_total_pages = None
@@ -187,7 +151,27 @@ def run_readiness_check(
         pages_dir = raw_pages_dir
         if source_error is None:
             record("ocr_page_source", False, str(exc))
+    return {
+        "available": available,
+        "pages_dir": pages_dir,
+        "ocr_evidence": ocr_evidence,
+    }
 
+
+def _record_structure_readiness(
+    record: Callable[..., None],
+    *,
+    output_dir: Path,
+    config: Mapping[str, Any],
+    policy: PipelinePolicy,
+    stage: str,
+    available: list[int],
+    pages_dir: Path,
+    ocr_evidence: Any,
+    checks: Dict[str, dict],
+    conversion_pipeline: bool,
+) -> dict:
+    """Record TOC, refinement, footnote and source-stage gates."""
     toc_path = output_dir / "toc_tree.json"
     toc_errors: list[str] = []
     if toc_path.is_file() and available:
@@ -287,6 +271,82 @@ def run_readiness_check(
             ),
             emit_error=bool(footnote_status.get("current")),
         )
+    return {
+        "source_dir": source_dir,
+        "source_stage": source_stage,
+        "source_ready": source_ready,
+        "footnote_status": footnote_status,
+    }
+
+
+def run_readiness_check(
+    config_path: str,
+    stage: str = "translate",
+    skip_entities: bool = False,
+) -> dict:
+    """Run deterministic gates before translation or packaging."""
+    config = load_config(config_path)
+    policy = PipelinePolicy.from_config(config)
+    conversion_pipeline = policy.is_conversion
+    book_title = config.get("title")
+    output_dir = book_output_dir(book_title) if book_title else Path("output")
+    checks: Dict[str, dict] = {}
+    errors: list[str] = []
+
+    def record(
+        name: str,
+        ready: bool,
+        detail: str,
+        *,
+        code: str | None = None,
+        blocked_by: list[str] | None = None,
+        emit_error: bool = True,
+    ) -> None:
+        checks[name] = {"ready": bool(ready), "detail": detail}
+        if code:
+            checks[name]["code"] = code
+        if blocked_by:
+            checks[name]["blocked_by"] = list(blocked_by)
+        if not ready and emit_error:
+            errors.append(f"{name}: {detail}")
+
+    if not book_title:
+        record("config", False, "title is missing")
+        report = {
+            "schema_version": 1,
+            "stage": stage,
+            "ready": False,
+            "checks": checks,
+            "errors": errors,
+            "warnings": [],
+        }
+        output_dir.mkdir(parents=True, exist_ok=True)
+        atomic_write_json(output_dir / "readiness.json", report)
+        return report
+
+    ocr_state = _record_ocr_readiness(
+        record, output_dir=output_dir, config=config, policy=policy
+    )
+    available = ocr_state["available"]
+    pages_dir = ocr_state["pages_dir"]
+    ocr_evidence = ocr_state["ocr_evidence"]
+
+    structure_state = _record_structure_readiness(
+        record,
+        output_dir=output_dir,
+        config=config,
+        policy=policy,
+        stage=stage,
+        available=available,
+        pages_dir=pages_dir,
+        ocr_evidence=ocr_evidence,
+        checks=checks,
+        conversion_pipeline=conversion_pipeline,
+    )
+    source_dir = structure_state["source_dir"]
+    source_stage = structure_state["source_stage"]
+    source_ready = structure_state["source_ready"]
+    footnote_status = structure_state["footnote_status"]
 
     if stage == "package" and policy.requires_translation and policy.dynamic_terminology_enabled:
         memory_ready = False
