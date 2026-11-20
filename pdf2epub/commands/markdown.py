@@ -456,6 +456,7 @@ def _prepare_pdf_markdown_task(args, task: str):
             config_path=context.config_path,
             controlled_files=controlled_files or None,
             footnote_semantics_enabled=task == "polish" and footnote_mode != "disabled",
+            refresh_checkpoints=bool(getattr(args, "refresh_checkpoints", False)),
         )
         if getattr(args, "dry_run", False):
             from pdf2epub.markdown_handoff import preview_markdown_handoff

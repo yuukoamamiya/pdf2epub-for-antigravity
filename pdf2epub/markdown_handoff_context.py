@@ -40,6 +40,10 @@ class MarkdownHandoffRequest:
     config_path: Optional[str | Path] = None
     controlled_files: Optional[Mapping[str, str]] = None
     footnote_semantics_enabled: bool = False
+    # Re-stamp receipts whose only context difference is the projection
+    # version.  This is narrower than a general "source hash matches" refresh:
+    # a changed projection payload still requires the validate step.
+    refresh_checkpoints: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "output_dir", Path(self.output_dir))

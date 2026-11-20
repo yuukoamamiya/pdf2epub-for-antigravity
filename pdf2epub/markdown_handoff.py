@@ -61,28 +61,14 @@ def preview_markdown_handoff(request: MarkdownHandoffRequest) -> Dict[str, Any]:
     }
 
 
-def prepare_markdown_subagent(request: MarkdownHandoffRequest) -> Dict[str, Path]:
-    """Write the manifest and prompt for one Markdown hand-off request."""
-    plan = plan_markdown_handoff(
-        request.source_dir,
-        request.task,
-        request.config,
-        declared_files=request.declared_files,
-        file_roles=request.file_roles,
-        file_role_sources=request.file_role_sources,
-        controlled_files=request.controlled_files,
-        continuation_files=request.continuation_files,
-    )
-    context = normalize_handoff_context(request, (source.name for source in plan.sources))
-    resume_decision = decide_resume(request, plan, context)
-    model = resolve_subagent_model(request.config, request.task)
-    visual_dir, secondary_dir, review_dir = validate_manifest_directories(request)
+def _build_manifest(request, plan, context, decision, model, visual_dir, secondary_dir, review_dir):
+    """Build the manifest for one decision, including the polish semantics contract."""
     manifest = build_markdown_manifest(
         ManifestBuild(
             request=request,
             plan=plan,
             context=context,
-            resume=resume_decision,
+            resume=decision,
             model=model,
             visual_review_dir=visual_dir,
             secondary_source_dir=secondary_dir,
@@ -121,7 +107,50 @@ def prepare_markdown_subagent(request: MarkdownHandoffRequest) -> Dict[str, Path
             "files": semantic_contracts,
             "recovery": "footnote-prepare, footnote-validate, footnote-apply",
         }
+    return manifest
+
+
+def prepare_markdown_subagent(request: MarkdownHandoffRequest) -> Dict[str, Path]:
+    """Write the manifest and prompt for one Markdown hand-off request."""
+    plan = plan_markdown_handoff(
+        request.source_dir,
+        request.task,
+        request.config,
+        declared_files=request.declared_files,
+        file_roles=request.file_roles,
+        file_role_sources=request.file_role_sources,
+        controlled_files=request.controlled_files,
+        continuation_files=request.continuation_files,
+    )
+    context = normalize_handoff_context(request, (source.name for source in plan.sources))
+    resume_decision = decide_resume(request, plan, context)
+    model = resolve_subagent_model(request.config, request.task)
+    visual_dir, secondary_dir, review_dir = validate_manifest_directories(request)
+    manifest = _build_manifest(
+        request, plan, context, resume_decision, model,
+        visual_dir, secondary_dir, review_dir,
+    )
     manifest_path = request.output_dir / f"{request.task}_subagent_manifest.json"
+    if request.refresh_checkpoints and resume_decision.pending_files:
+        # Capture the current projection through the provisional manifest so
+        # the refresh compares against exactly the snapshot validation uses.
+        atomic_write_json(manifest_path, manifest)
+        from .markdown_handoff_resume import refresh_version_only_receipts
+
+        refreshed = refresh_version_only_receipts(
+            request.output_dir,
+            request.task,
+            request=request,
+            plan=plan,
+            decision=resume_decision,
+        )
+        if refreshed:
+            resume_decision = decide_resume(request, plan, context)
+            manifest = _build_manifest(
+                request, plan, context, resume_decision, model,
+                visual_dir, secondary_dir, review_dir,
+            )
+            manifest["refreshed_receipts"] = refreshed
     atomic_write_json(manifest_path, manifest)
     prompt_path = request.output_dir / f"{request.task}_subagent_prompt.md"
     prompt = render_markdown_prompt(

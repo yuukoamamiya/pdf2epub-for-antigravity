@@ -11,7 +11,12 @@ from typing import Any, Mapping, Optional
 from .batching_service import effective_max_concurrency, recommended_batches
 from .markdown_handoff_context import ContextProjection, MarkdownHandoffRequest
 from .markdown_handoff_planning import MarkdownHandoffPlan
-from .workflow_contracts import markdown_validation_schema_version, is_reusable_checkpoint
+from .workflow_contracts import (
+    atomic_write_json,
+    is_reusable_checkpoint,
+    markdown_validation_schema_version,
+    sha256_file,
+)
 
 
 def _html_resume_context_is_current(
@@ -313,6 +318,114 @@ def _pending_reason(
     if validated_files is None or name not in validated_files:
         return "receipt_missing"
     return "checkpoint_invalid"
+
+
+def _without_projection_versions(value: Any) -> Any:
+    """Return a copy of a receipt snapshot with version stamps removed."""
+    if isinstance(value, Mapping):
+        return {
+            str(key): _without_projection_versions(item)
+            for key, item in value.items()
+            if str(key) != "projection_version"
+        }
+    if isinstance(value, (list, tuple)):
+        return [_without_projection_versions(item) for item in value]
+    return value
+
+
+def _read_receipt(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def refresh_version_only_receipts(
+    output_dir: Path,
+    task: str,
+    *,
+    request: MarkdownHandoffRequest,
+    plan: MarkdownHandoffPlan,
+    decision: ResumeDecision,
+) -> list[str]:
+    """Re-stamp receipts whose only context difference is a projection version.
+
+    A version bump (for example ``projection_version`` 5 → 6) can leave the
+    projected payload byte-identical.  In that case the old receipt still
+    describes exactly the current translation, so forcing ``prepare → validate
+    → prepare`` only adds an operator step.  Anything beyond the version stamp
+    (new or changed payload fields) is refused on purpose: accepting it would
+    certify a translation that was validated under a weaker projection.
+    """
+    if task not in {"translate", "polish"}:
+        return []
+    names = [
+        name
+        for name in decision.pending_files
+        if name not in decision.special_pending_files
+    ]
+    if not names:
+        return []
+    from .markdown_validation_persistence import capture_pdf_resume_contexts
+
+    snapshots, capture_errors = capture_pdf_resume_contexts(
+        Path(output_dir), task, list(names)
+    )
+    current_schema = markdown_validation_schema_version(task)
+    receipt_contexts = decision.validation.get("resume_contexts", {})
+    if not isinstance(receipt_contexts, Mapping):
+        receipt_contexts = {}
+    source_hashes = decision.validation.get("source_sha256", {})
+    target_hashes = decision.validation.get("target_sha256", {})
+    if not isinstance(source_hashes, Mapping):
+        source_hashes = {}
+    if not isinstance(target_hashes, Mapping):
+        target_hashes = {}
+    report_path = Path(output_dir) / f"{task}_validation.json"
+    ledger_path = Path(output_dir) / f"{task}_file_validation.json"
+    report = _read_receipt(report_path)
+    ledger = _read_receipt(ledger_path)
+    ledger_current = ledger.get("schema_version") == current_schema
+    refreshed: list[str] = []
+    for name in names:
+        if name in capture_errors or name not in snapshots:
+            continue
+        previous = receipt_contexts.get(name)
+        if not isinstance(previous, Mapping):
+            continue
+        if _without_projection_versions(previous) != _without_projection_versions(
+            snapshots[name]
+        ):
+            continue
+        current_source = plan.source_sha256.get(name)
+        if not isinstance(current_source, str) or source_hashes.get(name) != current_source:
+            continue
+        target = Path(request.target_dir) / name
+        if not target.is_file():
+            continue
+        if target_hashes.get(name) != sha256_file(target):
+            continue
+        if decision.validated_files is None or name not in decision.validated_files:
+            continue
+        if isinstance(report.get("resume_contexts"), dict):
+            report["resume_contexts"][name] = snapshots[name]
+            report.setdefault("source_sha256", {})[name] = current_source
+            report.setdefault("target_sha256", {})[name] = target_hashes.get(name)
+        if ledger_current and isinstance(ledger.get("files"), dict):
+            record = ledger["files"].get(name)
+            if isinstance(record, dict):
+                record["resume_context"] = snapshots[name]
+                record["source_sha256"] = current_source
+                record["target_sha256"] = target_hashes.get(name)
+        refreshed.append(name)
+    if not refreshed:
+        return []
+    if report.get("resume_contexts"):
+        atomic_write_json(report_path, report)
+    if ledger_current and ledger.get("files"):
+        atomic_write_json(ledger_path, ledger)
+    return refreshed
 
 
 def decide_resume(

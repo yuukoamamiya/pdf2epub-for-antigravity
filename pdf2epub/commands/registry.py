@@ -474,6 +474,14 @@ def _register_markdown_commands(subparsers) -> None:
         ),
     )
     polish_parser.add_argument(
+        "--refresh-checkpoints",
+        action="store_true",
+        help=(
+            "Re-stamp receipts whose only context difference is a projection "
+            "version; payload changes still require validate"
+        ),
+    )
+    polish_parser.add_argument(
         "--retry-after-human-review",
         action="store_true",
         help=(
@@ -557,6 +565,14 @@ def _register_markdown_commands(subparsers) -> None:
         help=(
             "With --resume, print pending reasons and worker batches without "
             "writing a manifest, prompt or hand-off"
+        ),
+    )
+    translate_parser.add_argument(
+        "--refresh-checkpoints",
+        action="store_true",
+        help=(
+            "Re-stamp receipts whose only context difference is a projection "
+            "version; payload changes still require validate"
         ),
     )
     translate_parser.add_argument(
