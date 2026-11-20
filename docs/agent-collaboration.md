@@ -14,7 +14,7 @@
 ```text
 git status --short          # 先看有没有别人的改动；不要清理、不要纳入本次提交
 git branch --show-current   # 必须是 main；不要建临时分支
-uv run pytest -q            # 基线：1630 个测试（4 skipped），约 40 秒
+uv run pytest -q            # 基线：1632 个测试（4 skipped），约 40 秒
 uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲染
 ```
 
@@ -80,6 +80,7 @@ uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲
 | `df1f0e0` | 新增本文件并同步 AGENTS/architecture/maintenance/opencode |
 | `3d97c7a` | `prepare_markdown_subagent()` 改为只接收 `MarkdownHandoffRequest`，删除 29 参适配段；125 个调用点（4 生产 / 121 测试）同步改为构造 dataclass，行为与默认值不变 |
 | `f39520c` | `status` 增加 `ocr_evidence`（`two_ocr` / `single_ocr` / `legacy_native` / `indeterminate`）并升到 schema 3，单 OCR 不再读成已复核；handler 捕获的失败复用同一个 `--debug` 判定，保留异常类型与可选 traceback |
+| `65fcc9c` | `translate` / `polish` 增加只读 `--dry-run`：复用同一 planning/resume 决定，打印 `pending_reasons`、worker 批次与并发度，不写 manifest/prompt/handoff |
 
 ## 5. 已知遗留 backlog
 
@@ -87,7 +88,7 @@ uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲
 
 1. **receipt 迁移命令**（P1，`markdown_handoff_resume.py`、`markdown_validation*.py`）
    pending 原因分类已完成（见 `f4aa8ac`），`translate/polish --resume --dry-run` 现在可只读
-   预览原因与 worker 批次（见 `feat(handoff)` 提交）。仍缺一次性的
+   预览原因与 worker 批次（见 `65fcc9c`）。仍缺一次性的
    `refresh-checkpoints`：只在源哈希一致时重盖章旧 receipt，免去
    `prepare → validate → prepare` 三步走。实现前必须先证明旧快照与当前快照除版本戳外完全
    相同，否则宁可不刷新；relax 到"源哈希一致即可"会接受在旧投影下验证过的译文。
