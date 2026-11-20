@@ -1,2 +1,4 @@
-# Set default behavior to automatically normalize line endings
-* text=auto
+# Normalize line endings in the index and check out LF on every platform.
+# `eol=lf` overrides core.autocrlf, so the working tree no longer flips to
+# CRLF on Windows and `git status` keeps showing only real changes.
+* text=auto eol=lf
