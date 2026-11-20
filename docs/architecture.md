@@ -750,6 +750,11 @@ build-epub --only-translated → 最终译文 EPUB
 check-ready --stage package → build-epub → 原语言 EPUB
 ```
 
+`build-epub` 与 `build-html-epub` 在产物旁写入 `epub_build_receipt.json`，记录 EPUB 的
+sha256 和构建时的输入检查点（polish/translate/HTML validation、toc_tree 等）。`status`
+的 `package` 阶段据此判断产物是否对应当前检查点；没有 receipt 的历史 EPUB 仍可通过，
+但会在 detail 中标注 `no build receipt`。
+
 ### Controlled bibliography and index units
 
 `translation.special_units` is an opt-in policy map with `bibliography: controlled` and/or

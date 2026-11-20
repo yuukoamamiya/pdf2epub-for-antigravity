@@ -14,7 +14,7 @@
 ```text
 git status --short          # 先看有没有别人的改动；不要清理、不要纳入本次提交
 git branch --show-current   # 必须是 main；不要建临时分支
-uv run pytest -q            # 基线：1639 个测试（4 skipped），约 40 秒
+uv run pytest -q            # 基线：1641 个测试（4 skipped），约 40 秒
 uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲染
 ```
 
@@ -95,16 +95,11 @@ uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲
 | `7c8d747` | `_prepare_pdf_markdown_task()` 抽出 `_prepare_task_source()`，387 → 236 行；控制流与错误返回不变 |
 | `2f41543` | `ocr_full_book_pagewise()` 拆出进度恢复、待处理页扫描、worker 池与 summary，432 → 140 行 |
 | `9e908dc` | resume 增加 `--refresh-checkpoints`：只在旧快照与当前投影除 `projection_version` 外完全一致且源/目标哈希匹配时重盖章 receipt；载荷变化仍走 validate |
+| `d9abb32` | `build-epub` / `build-html-epub` 写入 `epub_build_receipt.json`；`status` 的 `package` 阶段据此报告 `stale`，无 receipt 的历史产物保持通过并标注 |
 
 ## 5. 已知遗留 backlog
 
-按价值排序。动手前先读对应模块和测试，并按第 3 节跑守护测试。
-
-1. **`status` 的 `package` 阶段**（P2）
-   目前只要存在 `*.epub` 就视为有产物；结合 `current/reachable` 已不会误报，但更严格的
-   做法是让 `build-epub`/`build-html-epub` 写构建 receipt，并让 `package` 校验该 receipt
-   对应当前 polish/translate 检查点。旧产物没有 receipt 时需要兼容回退，不能直接判失败。
-2. **`.gitattributes` 与工作区换行**（P2，已缓解）
+1. **`.gitattributes` 与工作区换行**（P2，已缓解）
    仓库索引是 LF、工作区是 CRLF，`git status` 会列出大量 stat-only 改动。
    2026-11-20 已用逐文件 `git add` 刷新 143 个仅 stat 变化的条目，剩余 11 个是真实改动，
    必须由作者先提交；不要在有真实改动的批次里做 `git add --renormalize .`。
