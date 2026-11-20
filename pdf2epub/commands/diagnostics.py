@@ -24,7 +24,7 @@ from pdf2epub.utils.paths import book_output_dir
 from pdf2epub.utils.input_paths import resolve_book_input_path
 
 
-STATUS_SCHEMA_VERSION = 1
+STATUS_SCHEMA_VERSION = 2
 DOCTOR_SCHEMA_VERSION = 1
 
 
@@ -454,16 +454,38 @@ def _html_stages(output_dir: Path) -> list[dict[str, Any]]:
 
 
 def _apply_stage_blockers(stages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Mark downstream work as blocked when an earlier actionable stage is pending."""
-    blocked_by: list[str] = []
+    """Propagate currency and reachability through the stage ladder.
+
+    ``status`` answers two different questions per stage: whether the stage's
+    own artifact is *current* (its checkpoint still matches its inputs) and
+    whether the stage is *reachable* (every earlier stage is current, so the
+    command can actually do something).  A ``passed`` stage downstream of a
+    stale or blocked stage is reported as ``stale`` instead of leaking an
+    "everything is fine" signal, and downstream pending stages are no longer
+    offered as the next command when an earlier stage cannot run.
+    """
+    upstream_current = True
+    blocking_stages: list[str] = []
     for stage in stages:
         if stage["status"] == "skipped":
+            stage["current"] = True
+            stage["reachable"] = upstream_current
             continue
-        if blocked_by and stage["status"] not in {"passed", "skipped"}:
-            stage["status"] = "blocked"
-            stage["blocked_by"] = list(blocked_by)
-        elif stage["status"] in {"pending", "blocked"}:
-            blocked_by.append(stage["name"])
+        stage["current"] = upstream_current and stage["status"] == "passed"
+        stage["reachable"] = upstream_current and stage["status"] != "blocked"
+        if stage["status"] == "passed" and not stage["current"]:
+            stage["status"] = "stale"
+            stage["detail"] = (
+                "artifact exists but is stale because an earlier stage is not "
+                "current; rebuild it after resolving that stage"
+            )
+        if stage["status"] == "stale" and blocking_stages:
+            stage["blocked_by"] = list(blocking_stages)
+        if stage["status"] == "blocked" and blocking_stages:
+            stage["blocked_by"] = list(blocking_stages)
+        if not stage["current"]:
+            upstream_current = False
+            blocking_stages.append(stage["name"])
     return stages
 
 
@@ -484,6 +506,8 @@ def build_status(config_path: str | Path = "config.yaml") -> dict[str, Any]:
         "stages": [],
         "pending_files": [],
         "next_command": None,
+        "blocked_stage": None,
+        "blocked_reason": None,
     }
     if errors:
         return report
@@ -520,10 +544,27 @@ def build_status(config_path: str | Path = "config.yaml") -> dict[str, Any]:
     for stage in stages:
         pending.extend(stage.get("pending_files", []))
     report["pending_files"] = sorted(set(pending))
-    for stage in stages:
-        if stage["status"] in {"pending", "blocked"}:
-            report["next_command"] = f"uv run pdf2epub -c {path} {stage['command']}"
-            break
+    actionable = next(
+        (
+            stage
+            for stage in stages
+            if stage["status"] in {"pending", "stale"} and stage.get("reachable")
+        ),
+        None,
+    )
+    if actionable is not None:
+        report["next_command"] = (
+            f"uv run pdf2epub -c {path} {actionable['command']}"
+        )
+    else:
+        # Nothing downstream can run: surface the earliest stage that blocks
+        # the ladder (usually a missing or replaced input file).
+        blocker = next(
+            (stage for stage in stages if stage["status"] == "blocked"), None
+        )
+        if blocker is not None:
+            report["blocked_stage"] = blocker["name"]
+            report["blocked_reason"] = blocker["detail"]
     return report
 
 
@@ -674,6 +715,11 @@ def status_command(args: Any) -> int:
             print(f"[{stage['status']}] {stage['name']}: {stage['detail']}")
         if report.get("next_command"):
             print(f"下一步: {report['next_command']}")
+        elif report.get("blocked_stage"):
+            print(
+                f"阻塞: {report['blocked_stage']} — {report.get('blocked_reason') or 'unavailable'}"
+            )
+            print("下一步: 先解决上述阻塞；无法执行的阶段不会给出可运行命令")
     return 1 if report.get("errors") else 0
 
 

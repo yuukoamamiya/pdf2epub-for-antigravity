@@ -191,3 +191,58 @@ def test_status_detects_stale_ocr_source_hash(tmp_path: Path, monkeypatch):
 
     assert report["stages"][0]["status"] == "pending"
     assert "match" in report["stages"][0]["detail"]
+
+
+def test_status_marks_downstream_artifacts_stale_and_withholds_command(
+    tmp_path: Path, monkeypatch
+):
+    """A missing source must not let a finished EPUB look like a clean run."""
+
+    config_path = _config(tmp_path)
+    (tmp_path / "input" / "book.pdf").unlink()
+    monkeypatch.chdir(tmp_path)
+    output_dir = tmp_path / "output" / "Diagnostics Book"
+    output_dir.mkdir(parents=True)
+    (output_dir / "Diagnostics Book.epub").write_bytes(b"PK\x03\x04")
+
+    report = build_status(config_path)
+    stages = {item["name"]: item for item in report["stages"]}
+
+    assert report["schema_version"] == 2
+    assert stages["ocr-pages"]["status"] == "blocked"
+    assert stages["ocr-pages"]["reachable"] is False
+    assert stages["package"]["status"] == "stale"
+    assert stages["package"]["current"] is False
+    assert stages["package"]["reachable"] is False
+    assert "artifact exists but is stale" in stages["package"]["detail"]
+    assert stages["refine-prepare"]["reachable"] is False
+    # No runnable command may be advertised while the ladder is blocked.
+    assert report["next_command"] is None
+    assert report["blocked_stage"] == "ocr-pages"
+    assert "input PDF is missing" in report["blocked_reason"]
+
+
+def test_status_reports_current_and_reachable_flags(tmp_path: Path, monkeypatch):
+    config_path = _config(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    output_dir = tmp_path / "output" / "Diagnostics Book"
+    pages_dir = output_dir / "pages"
+    pages_dir.mkdir(parents=True)
+    source_hash = hashlib.sha256((tmp_path / "input" / "book.pdf").read_bytes()).hexdigest()
+    (output_dir / "pdf_text_probe.json").write_text(
+        json.dumps({"page_count": 1, "source_sha256": source_hash}), encoding="utf-8"
+    )
+    progress = new_progress(source_sha256=source_hash, total_pages=1, backend="chandra")
+    progress["pages_processed"] = [1]
+    progress["missing_pages"] = []
+    (pages_dir / "ocr_progress.json").write_text(json.dumps(progress), encoding="utf-8")
+    (pages_dir / "page_001.md").write_text("page", encoding="utf-8")
+
+    report = build_status(config_path)
+    stages = {item["name"]: item for item in report["stages"]}
+
+    assert stages["ocr-pages"]["current"] is True
+    assert stages["ocr-pages"]["reachable"] is True
+    assert stages["refine-prepare"]["current"] is False
+    assert stages["refine-prepare"]["reachable"] is True
+    assert report["next_command"].endswith("refine-prepare")
