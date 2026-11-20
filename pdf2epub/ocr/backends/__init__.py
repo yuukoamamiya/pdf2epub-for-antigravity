@@ -6,7 +6,7 @@ not become import-time requirements for the default Chandra workflow.
 
 from dataclasses import dataclass
 from importlib import import_module
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional
 
 
 @dataclass(frozen=True)
@@ -27,31 +27,6 @@ class OCRBackendSpec:
 
 
 _BACKEND_NAMES = ("vllm", "azure", "vision", "chandra")
-
-
-def get_backend(backend_name: str) -> Tuple[Callable, Callable]:
-    """
-    Get the init_client and process_page functions for a backend.
-    
-    Args:
-        backend_name: Name of the backend ('azure', 'vision', or 'vllm')
-        
-    Returns:
-        Tuple of (init_client, process_page) functions
-        
-    Raises:
-        ValueError: If backend_name is not recognized
-    """
-    if backend_name == 'azure':
-        from .azure import init_client, process_page
-    elif backend_name == 'vision':
-        from .vision import init_client, process_page
-    elif backend_name == 'vllm':
-        from .vllm import init_client, process_page
-    else:
-        raise ValueError(f"Unknown backend: {backend_name}")
-    
-    return init_client, process_page
 
 
 def get_backend_spec(backend_name: str) -> OCRBackendSpec:
@@ -108,4 +83,4 @@ def supported_backends() -> tuple[str, ...]:
     return _BACKEND_NAMES
 
 
-__all__ = ["OCRBackendSpec", "get_backend", "get_backend_spec", "supported_backends"]
+__all__ = ["OCRBackendSpec", "get_backend_spec", "supported_backends"]
