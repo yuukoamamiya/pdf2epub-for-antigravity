@@ -519,82 +519,17 @@ def _build_prepare_manifest(inputs: _ManifestInputs) -> dict[str, Any]:
     return manifest
 
 
-def prepare_footnote_subagent(
-    output_dir: Path,
+def _carry_prior_audit_findings(
+    prior_result_audit: Mapping[str, Any],
+    audit: dict[str, Any],
     *,
-    book_title: str,
-    config: Optional[Mapping[str, Any]] = None,
-    mode: Optional[str] = None,
-    bottom_ratio: Optional[float] = None,
-    bottom_intersection_ratio: Optional[float] = None,
-    context_blocks: Optional[int] = None,
-    auto_accept: Optional[bool] = None,
-    native_max_font_ratio: Optional[float] = None,
-) -> dict[str, Path]:
-    """Write the compact Subagent hand-off for ambiguous layout windows."""
-    output_dir = Path(output_dir)
-    report = prepare_footnote_candidates(
-        output_dir,
-        config=config,
-        mode=mode,
-        bottom_ratio=bottom_ratio,
-        bottom_intersection_ratio=bottom_intersection_ratio,
-        context_blocks=context_blocks,
-        auto_accept=auto_accept,
-        native_max_font_ratio=native_max_font_ratio,
-    )
-    from ..ocr_correction import select_refinement_pages
-
-    selected_page_dir, _selected_page_kind = select_refinement_pages(output_dir, config=config)
-    model = resolve_subagent_model(config, "footnote-prepare")
-    # Re-run the deterministic result audit on every prepare. Existing review
-    # resolutions are reusable only for the exact task and source block hash.
-    try:
-        records = unit_records(output_dir)
-    except (OSError, ValueError):
-        # Older library-only tests and narrow preparation callers may not
-        # provide a refined unit map. The normal page decision workflow remains
-        # available; source-wide result auditing starts once scope exists.
-        records = []
-    from .footnote_source import project_footnote_source_text
-
-    source_texts = {
-        str(record["name"]): project_footnote_source_text(
-            (output_dir / "ocr_markdown" / str(record["name"])).read_bytes()
-        )
-        for record in records
-        if (output_dir / "ocr_markdown" / str(record["name"])).is_file()
-    }
-    prior_review_data = {}
-    try:
-        prior_review_data = json.loads((output_dir / "footnote_decisions.json").read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        pass
-    prior_audit_reviews = prior_review_data.get("result_audit_reviews", []) if isinstance(prior_review_data, Mapping) else []
-    audit = {
-        "schema_version": AUDIT_VERSION,
-        "status": "validated",
-        "valid": True,
-        "mode": str(report.get("footnote_mode") or "footnotes"),
-        "source_sha256": markdown_inventory(output_dir / "ocr_markdown") if records else {},
-        "target_sha256": None,
-        "candidate_report_sha256": None,
-        "decision_validation_sha256": None,
-        "findings": [],
-        "reviewed_candidate_tasks": [],
-        "resolved": [],
-        "suppressed": [],
-    }
-    # A failed apply may discover a target-only seam (for example body text
-    # absorbed by a note). Carry that exact finding into the next prepare only
-    # while its original source inventory is unchanged, so the existing visual
-    # review path can resolve it instead of rediscovering forever.
-    prior_result_audit_path = output_dir / "footnote_result_audit.json"
-    try:
-        prior_result_audit = json.loads(prior_result_audit_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        prior_result_audit = {}
-    current_target_inventory = markdown_inventory(output_dir / "footnote_normalized")
+    output_dir: Path,
+    current_target_inventory: Mapping[str, Any],
+    records: list[Mapping[str, Any]],
+    report: Mapping[str, Any],
+    config: Optional[Mapping[str, Any]],
+) -> None:
+    """Carry exact findings from the previous audit while their evidence is unchanged."""
     if (
         isinstance(prior_result_audit, Mapping)
         and prior_result_audit.get("source_sha256") == markdown_inventory(output_dir / "ocr_markdown")
@@ -643,27 +578,18 @@ def prepare_footnote_subagent(
                 if tid and tid not in known:
                     audit.setdefault("findings", []).append(finding)
                     known.add(tid)
-    # Pull in direct recall candidates found in generic OCR ``Text`` blocks.
-    # These are already exact sidecar-addressable blocks and are always sent
-    # for visual classification, never accepted from layout/text evidence.
-    unit_by_page = {}
-    for unit in records:
-        for page in range(int(unit.get("start_page", 0)), int(unit.get("end_page", 0)) + 1):
-            unit_by_page.setdefault(page, unit)
-    try:
-        exact_sidecars = page_sidecar_index(output_dir, report)
-    except (OSError, ValueError) as exc:
-        if (
-            any(isinstance(item, Mapping) and item.get("code") == "suspected_numbered_note_definition" for item in audit.get("findings", []))
-            or any(
-                isinstance(candidate, Mapping) and candidate.get("leading_superscript_review") is True
-                for page_row in report.get("pages", []) or []
-                if isinstance(page_row, Mapping)
-                for candidate in page_row.get("candidates", []) or []
-            )
-        ):
-            raise ValueError(f"cannot resolve exact result-audit sidecar inventory: {exc}") from exc
-        exact_sidecars = {}
+
+
+def _attach_polish_semantic_tasks(
+    audit: dict[str, Any],
+    report: dict[str, Any],
+    *,
+    output_dir: Path,
+    records: list[Mapping[str, Any]],
+    source_texts: Mapping[str, str],
+    exact_sidecars: Mapping[Any, Any],
+) -> None:
+    """Attach polish semantic review tasks and their exact page blocks."""
     if records:
         polish_tasks, polish_diagnostics = polish_semantic_issue_tasks(
             output_dir, records, source_texts, exact_sidecars, report,
@@ -722,6 +648,18 @@ def prepare_footnote_subagent(
             rows = page_row.setdefault(field, [])
             if not any(isinstance(row, Mapping) and int(row.get("block", -1)) == candidate["block"] and str(row.get("source") or "primary") == candidate["source"] for row in rows):
                 rows.append(candidate)
+
+
+def _restore_admitted_candidates(
+    audit: dict[str, Any],
+    report: dict[str, Any],
+    *,
+    output_dir: Path,
+    prior_result_audit: Mapping[str, Any],
+    exact_sidecars: Mapping[Any, Any],
+    prior_review_data: Mapping[str, Any],
+) -> None:
+    """Re-admit candidates that a previous run approved and whose sidecar is unchanged."""
     if (
         isinstance(prior_result_audit, Mapping)
         and prior_result_audit.get("source_sha256") == markdown_inventory(output_dir / "ocr_markdown")
@@ -810,9 +748,17 @@ def prepare_footnote_subagent(
                         if not any(isinstance(item, Mapping) and int(item.get("block", -1)) == p_block and str(item.get("source") or "primary") == p_source for item in target_list):
                             target_list.append(dict(prior_cand))
 
-    # Truncated source/target definitions need exact owning-page evidence and
-    # the following physical page when available. Reassociate by the complete
-    # source definition signature, never by a chapter-wide page range.
+
+
+def _resolve_truncated_definitions(
+    audit: dict[str, Any],
+    *,
+    output_dir: Path,
+    records: list[Mapping[str, Any]],
+    source_texts: Mapping[str, str],
+    exact_sidecars: Mapping[Any, Any],
+) -> None:
+    """Bind truncated-definition tasks to their exact sidecar block."""
     for audit_task in audit.get("findings", []):
         if not isinstance(audit_task, dict) or audit_task.get("code") not in {
             "normalized_note_truncated",
@@ -879,7 +825,19 @@ def prepare_footnote_subagent(
         audit_task["candidate_refs"] = [{"page": page, "source": source, "block": block_index}]
         audit_task["pages"] = sorted({page, *(int(value) for value in audit_task.get("pages", []) if str(value).isdigit())})
         audit_task["context_status"] = "exact_truncated_definition_page_resolved"
-    known_task_ids = {str(item.get("task_id")) for item in audit.get("findings", [])}
+
+
+def _admit_leading_superscripts(
+    audit: dict[str, Any],
+    report: Mapping[str, Any],
+    *,
+    output_dir: Path,
+    exact_sidecars: Mapping[Any, Any],
+    unit_by_page: Mapping[int, Mapping[str, Any]],
+    source_texts: Mapping[str, str],
+    known_task_ids: set[str],
+) -> None:
+    """Admit generic Text blocks that begin with an explicit numeric superscript."""
     for page_row in report.get("pages", []) or []:
         if not isinstance(page_row, Mapping):
             continue
@@ -940,6 +898,14 @@ def prepare_footnote_subagent(
             })
             known_task_ids.add(task_id)
 
+
+
+def _add_supplemental_note_tasks(
+    audit: dict[str, Any],
+    *,
+    source_texts: Mapping[str, str],
+) -> None:
+    """Add separately scoped definition tasks for same-key numbered source lines."""
     # A residual body marker and a short same-key numbered definition are
     # separate evidence. Preserve the exact marker task, while creating a
     # separately scoped definition task so the numbered candidate can be
@@ -980,6 +946,18 @@ def prepare_footnote_subagent(
             })
     audit.setdefault("findings", []).extend(supplemental_note_tasks)
 
+
+
+def _bind_supplemental_candidates(
+    audit: dict[str, Any],
+    report: dict[str, Any],
+    *,
+    output_dir: Path,
+    records: list[Mapping[str, Any]],
+    source_texts: Mapping[str, str],
+    exact_sidecars: Mapping[Any, Any],
+) -> None:
+    """Re-admit numbered notes only when a long source line matches one exact block."""
     # A failed apply can identify a numbered note-like block that the normal
     # geometric candidate rules did not admit (for example an OCR `Text`
     # block parsed as an ordered list). Re-admit only when a long source line
@@ -1094,6 +1072,18 @@ def prepare_footnote_subagent(
         audit_task["candidate_refs"] = [{"page": page, "source": source, "block": block_index}]
         audit_task["pages"] = [page]
         audit_task["context_status"] = "supplemental_candidate_admitted"
+
+
+def _bind_heading_tasks(
+    audit: dict[str, Any],
+    *,
+    output_dir: Path,
+    exact_sidecars: Mapping[Any, Any],
+    selected_page_dir: Path,
+) -> None:
+    """Bind heading-in-note tasks to their exact sidecar and page evidence."""
+    from .footnote_source import project_footnote_source_text
+
     # A TOC-title-in-note result task already carries the exact source block
     # selected by the edit plan. Bind that task to the current page sidecar so
     # its visual exception can use the ordinary validation/apply gate.
@@ -1159,10 +1149,12 @@ def prepare_footnote_subagent(
             audit_task.pop("evidence_source_span_sha256", None)
             continue
         audit_task["context_status"] = "exact_heading_source_page_resolved"
-    # A body superscript's exact sidecar address identifies the marker
-    # occurrence. A separate, same-key numbered-note task can identify the
-    # definition it refers to; keep that linked candidate available for an
-    # occurrence-level confirmed_footnote review without moving the body block.
+
+
+def _link_marker_candidates(
+    audit: dict[str, Any],
+) -> None:
+    """Link same-scope marker and definition tasks without moving the body block."""
     note_candidates_by_scope_key: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for audit_task in audit.get("findings", []):
         if not isinstance(audit_task, Mapping) or audit_task.get("code") != "suspected_numbered_note_definition":
@@ -1188,6 +1180,13 @@ def prepare_footnote_subagent(
             if address not in known:
                 refs.append(ref)
                 known.add(address)
+
+
+def _annotate_review_attempts(
+    audit: dict[str, Any],
+    prior_audit_reviews: Any,
+) -> None:
+    """Apply the review-attempt counter and recompute the audit status."""
     audit["findings"].sort(key=lambda item: str(item.get("task_id")))
     prior_outcomes = {
         str(item.get("task_id")): str(item.get("outcome") or "")
@@ -1200,6 +1199,18 @@ def prepare_footnote_subagent(
         "blocked" if audit.get("polish_semantic_blockers")
         else "review_required" if audit["findings"] else "validated"
     )
+
+
+def _populate_visual_context(
+    audit: dict[str, Any],
+    report: dict[str, Any],
+    *,
+    output_dir: Path,
+    records: list[Mapping[str, Any]],
+    exact_sidecars: Mapping[Any, Any],
+    config: Optional[Mapping[str, Any]],
+) -> None:
+    """Resolve candidate refs, page sets and visual evidence for every audit task."""
     if audit.get("findings"):
         first_by_file = {str(record["name"]): record for record in records}
         for audit_task in audit["findings"]:
@@ -1330,6 +1341,173 @@ def prepare_footnote_subagent(
                         if isinstance(candidate, Mapping) and str(candidate.get("key") or "") == str(task.get("key") or ""):
                             refs.append({"page": page, "source": str(candidate.get("source") or default_source), "block": int(candidate.get("block", -1))})
                 task["candidate_refs"] = [ref for ref in refs if ref["block"] >= 0]
+
+
+def prepare_footnote_subagent(
+    output_dir: Path,
+    *,
+    book_title: str,
+    config: Optional[Mapping[str, Any]] = None,
+    mode: Optional[str] = None,
+    bottom_ratio: Optional[float] = None,
+    bottom_intersection_ratio: Optional[float] = None,
+    context_blocks: Optional[int] = None,
+    auto_accept: Optional[bool] = None,
+    native_max_font_ratio: Optional[float] = None,
+) -> dict[str, Path]:
+    """Write the compact Subagent hand-off for ambiguous layout windows."""
+    output_dir = Path(output_dir)
+    report = prepare_footnote_candidates(
+        output_dir,
+        config=config,
+        mode=mode,
+        bottom_ratio=bottom_ratio,
+        bottom_intersection_ratio=bottom_intersection_ratio,
+        context_blocks=context_blocks,
+        auto_accept=auto_accept,
+        native_max_font_ratio=native_max_font_ratio,
+    )
+    from ..ocr_correction import select_refinement_pages
+
+    selected_page_dir, _selected_page_kind = select_refinement_pages(output_dir, config=config)
+    model = resolve_subagent_model(config, "footnote-prepare")
+    # Re-run the deterministic result audit on every prepare. Existing review
+    # resolutions are reusable only for the exact task and source block hash.
+    try:
+        records = unit_records(output_dir)
+    except (OSError, ValueError):
+        # Older library-only tests and narrow preparation callers may not
+        # provide a refined unit map. The normal page decision workflow remains
+        # available; source-wide result auditing starts once scope exists.
+        records = []
+    from .footnote_source import project_footnote_source_text
+
+    source_texts = {
+        str(record["name"]): project_footnote_source_text(
+            (output_dir / "ocr_markdown" / str(record["name"])).read_bytes()
+        )
+        for record in records
+        if (output_dir / "ocr_markdown" / str(record["name"])).is_file()
+    }
+    prior_review_data = {}
+    try:
+        prior_review_data = json.loads((output_dir / "footnote_decisions.json").read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        pass
+    prior_audit_reviews = prior_review_data.get("result_audit_reviews", []) if isinstance(prior_review_data, Mapping) else []
+    audit = {
+        "schema_version": AUDIT_VERSION,
+        "status": "validated",
+        "valid": True,
+        "mode": str(report.get("footnote_mode") or "footnotes"),
+        "source_sha256": markdown_inventory(output_dir / "ocr_markdown") if records else {},
+        "target_sha256": None,
+        "candidate_report_sha256": None,
+        "decision_validation_sha256": None,
+        "findings": [],
+        "reviewed_candidate_tasks": [],
+        "resolved": [],
+        "suppressed": [],
+    }
+    # A failed apply may discover a target-only seam (for example body text
+    # absorbed by a note). Carry that exact finding into the next prepare only
+    # while its original source inventory is unchanged, so the existing visual
+    # review path can resolve it instead of rediscovering forever.
+    prior_result_audit_path = output_dir / "footnote_result_audit.json"
+    try:
+        prior_result_audit = json.loads(prior_result_audit_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        prior_result_audit = {}
+    current_target_inventory = markdown_inventory(output_dir / "footnote_normalized")
+    _carry_prior_audit_findings(
+        prior_result_audit, audit,
+        output_dir=output_dir,
+        current_target_inventory=current_target_inventory,
+        records=records,
+        report=report,
+        config=config,
+    )
+    # Pull in direct recall candidates found in generic OCR ``Text`` blocks.
+    # These are already exact sidecar-addressable blocks and are always sent
+    # for visual classification, never accepted from layout/text evidence.
+    unit_by_page = {}
+    for unit in records:
+        for page in range(int(unit.get("start_page", 0)), int(unit.get("end_page", 0)) + 1):
+            unit_by_page.setdefault(page, unit)
+    try:
+        exact_sidecars = page_sidecar_index(output_dir, report)
+    except (OSError, ValueError) as exc:
+        if (
+            any(isinstance(item, Mapping) and item.get("code") == "suspected_numbered_note_definition" for item in audit.get("findings", []))
+            or any(
+                isinstance(candidate, Mapping) and candidate.get("leading_superscript_review") is True
+                for page_row in report.get("pages", []) or []
+                if isinstance(page_row, Mapping)
+                for candidate in page_row.get("candidates", []) or []
+            )
+        ):
+            raise ValueError(f"cannot resolve exact result-audit sidecar inventory: {exc}") from exc
+        exact_sidecars = {}
+    _attach_polish_semantic_tasks(
+        audit, report,
+        output_dir=output_dir,
+        records=records,
+        source_texts=source_texts,
+        exact_sidecars=exact_sidecars,
+    )
+    _restore_admitted_candidates(
+        audit, report,
+        output_dir=output_dir,
+        prior_result_audit=prior_result_audit,
+        exact_sidecars=exact_sidecars,
+        prior_review_data=prior_review_data,
+    )
+    # Truncated source/target definitions need exact owning-page evidence and
+    # the following physical page when available. Reassociate by the complete
+    # source definition signature, never by a chapter-wide page range.
+    _resolve_truncated_definitions(
+        audit,
+        output_dir=output_dir,
+        records=records,
+        source_texts=source_texts,
+        exact_sidecars=exact_sidecars,
+    )
+    known_task_ids = {str(item.get("task_id")) for item in audit.get("findings", [])}
+    _admit_leading_superscripts(
+        audit, report,
+        output_dir=output_dir,
+        exact_sidecars=exact_sidecars,
+        unit_by_page=unit_by_page,
+        source_texts=source_texts,
+        known_task_ids=known_task_ids,
+    )
+    _add_supplemental_note_tasks(audit, source_texts=source_texts)
+    _bind_supplemental_candidates(
+        audit, report,
+        output_dir=output_dir,
+        records=records,
+        source_texts=source_texts,
+        exact_sidecars=exact_sidecars,
+    )
+    _bind_heading_tasks(
+        audit,
+        output_dir=output_dir,
+        exact_sidecars=exact_sidecars,
+        selected_page_dir=selected_page_dir,
+    )
+    # A body superscript's exact sidecar address identifies the marker
+    # occurrence. A separate, same-key numbered-note task can identify the
+    # definition it refers to; keep that linked candidate available for an
+    # occurrence-level confirmed_footnote review without moving the body block.
+    _link_marker_candidates(audit)
+    _annotate_review_attempts(audit, prior_audit_reviews)
+    _populate_visual_context(
+        audit, report,
+        output_dir=output_dir,
+        records=records,
+        exact_sidecars=exact_sidecars,
+        config=config,
+    )
     prior_reviews = audit.pop("_prior_applied_reviews", None)
     prior_review_tasks = audit.pop("_prior_applied_review_tasks", None)
     if prior_reviews is not None or prior_review_tasks is not None:
