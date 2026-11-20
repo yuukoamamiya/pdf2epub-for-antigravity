@@ -196,6 +196,21 @@ def ocr_pages_command(args):
         logger.info("Specify --input with the path to your PDF file")
         return 1
 
+    # A wrong --input would otherwise write a probe and a preprocessed copy
+    # into this book's output directory while its checkpoints still attest to
+    # a different source. Validate type and identity before any write.
+    from pdf2epub.commands.sources import validate_pdf_source
+
+    try:
+        validate_pdf_source(
+            pdf_path,
+            output_dir=output_dir,
+            allow_source_change=bool(getattr(args, "allow_source_change", False)),
+        )
+    except ValueError as exc:
+        logger.error(str(exc))
+        return 1
+
     # A searchable PDF is not automatically trustworthy: scanned books often
     # carry a hidden OCR text layer.  The probe is audit-only; every new run
     # uses visual OCR.

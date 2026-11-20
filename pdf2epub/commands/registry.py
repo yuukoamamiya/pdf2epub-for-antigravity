@@ -136,6 +136,15 @@ def register_command_parsers(subparsers) -> None:
         help="Resume from previous progress"
     )
     ocr_pages_parser.add_argument(
+        "--allow-source-change",
+        action="store_true",
+        help=(
+            "Explicitly accept a different PDF than the one recorded for this "
+            "book; existing OCR/footnote/polish/translation checkpoints will "
+            "become stale"
+        ),
+    )
+    ocr_pages_parser.add_argument(
         "--start-page",
         type=int,
         help="First page to process (default: 1)"

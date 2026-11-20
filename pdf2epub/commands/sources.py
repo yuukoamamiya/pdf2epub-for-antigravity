@@ -1,9 +1,96 @@
 """Shared source-stage selection for PDF command workflows."""
 
+from __future__ import annotations
+
+import json
 from pathlib import Path
+from typing import Any, Optional
 
 from pdf2epub.refine.footnote_status import footnote_normalization_is_current
 from pdf2epub.validation_receipts import validation_receipt_is_current
+from pdf2epub.workflow_contracts import sha256_file
+
+
+PDF_SOURCE_SIGNATURE = b"%PDF-"
+_SOURCE_DIGEST_SCAN_BYTES = 1024
+
+
+def validate_pdf_source(
+    path: Path,
+    *,
+    output_dir: Optional[Path] = None,
+    allow_source_change: bool = False,
+) -> str:
+    """Validate a PDF source before a write workflow binds it to a book.
+
+    ``ocr-pages`` resolves its output directory from the configured book title,
+    not from ``-i``.  Without this gate, pointing ``-i`` at another file (or at
+    an EPUB/MOBI that PyMuPDF happily opens page-by-page) silently writes a
+    probe and preprocessed copy into an unrelated book's workspace, replacing
+    the source evidence every downstream checkpoint is bound to.
+
+    Returns the SHA-256 of the accepted source.  Raises ``ValueError`` with an
+    operator-facing message when the file is not a PDF or when it conflicts
+    with the source already recorded for ``output_dir``.
+    """
+    candidate = Path(path)
+    if not candidate.is_file():
+        raise ValueError(f"input PDF does not exist: {candidate}")
+    if candidate.suffix.lower() != ".pdf":
+        raise ValueError(
+            "ocr-pages requires a PDF input; "
+            f"got {candidate.name!r} ({candidate.suffix or 'no suffix'}). "
+            "PDF-only commands cannot consume EPUB/MOBI/AZW3 input."
+        )
+    with candidate.open("rb") as handle:
+        head = handle.read(_SOURCE_DIGEST_SCAN_BYTES)
+    if PDF_SOURCE_SIGNATURE not in head:
+        raise ValueError(
+            f"input is not a PDF: {candidate} does not start with a %PDF- header"
+        )
+
+    digest = sha256_file(candidate)
+    if output_dir is None or allow_source_change:
+        return digest
+
+    recorded = _recorded_source_digests(Path(output_dir), candidate)
+    conflicts = {
+        label: value for label, value in recorded.items() if value and value != digest
+    }
+    if conflicts:
+        details = ", ".join(f"{label}={value[:12]}…" for label, value in conflicts.items())
+        raise ValueError(
+            "input PDF does not match the source recorded for this book "
+            f"({details}). Refusing to mix a different PDF into "
+            f"{Path(output_dir)}. Use a separate title/output directory, or pass "
+            "--allow-source-change if you intentionally replaced the source of "
+            "this book (this invalidates existing OCR, footnote, polish, and "
+            "translation checkpoints)."
+        )
+    return digest
+
+
+def _recorded_source_digests(output_dir: Path, candidate: Path) -> dict[str, str]:
+    """Return the source hashes already attested inside ``output_dir``."""
+    recorded: dict[str, str] = {}
+    progress = _load_json_mapping(output_dir / "pages" / "ocr_progress.json")
+    probe = _load_json_mapping(output_dir / "pdf_text_probe.json")
+    for label, payload in (("ocr_progress", progress), ("pdf_text_probe", probe)):
+        value = payload.get("source_sha256") if payload else None
+        if isinstance(value, str) and len(value) == 64:
+            recorded[label] = value
+    original = output_dir / "input_original.pdf"
+    if original.is_file() and original.resolve() != candidate.resolve():
+        recorded["input_original.pdf"] = sha256_file(original)
+    return recorded
+
+
+def _load_json_mapping(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
 
 
 def _resolve_pdf_polish_source(
