@@ -29,6 +29,11 @@ from .endnote_review import NUMBERED_PUNCT_DEF_RE as _NUMBERED_PUNCT_DEF_RE
 from .endnote_review import is_ambiguous_definition_line
 from .endnote_review import inline_endnote_candidates
 from .endnote_scopes import markdown_fence_mask, scope_for_line, scope_report
+from ..endnote_patterns import (
+    MARKDOWN_REF_RE as _MARKDOWN_REF_RE,
+    UNICODE_DIGITS as _UNICODE_DIGITS,
+    UNICODE_SUP_RE as _UNICODE_SUP_RE,
+)
 
 
 _KEY = r"[A-Za-z0-9_-]+"
@@ -51,9 +56,6 @@ _HTML_SUP_RE = re.compile(
     r"<sup\b[^>]*>[ \t]*(?P<key>[^<>]+?)[ \t]*</sup>",
     re.IGNORECASE,
 )
-_UNICODE_SUP_RE = re.compile(r"(?P<value>[⁰¹²³⁴⁵⁶⁷⁸⁹]+)")
-_UNICODE_DIGITS = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789")
-_MARKDOWN_REF_RE = re.compile(rf"\[\^(?P<key>{_KEY})\](?!:)")
 _RAW_NOTE_DEF_RE = re.compile(
     rf"^[ \t]{0,3}(?:"
     rf"<sup\b[^>]*>[ \t]*(?P<html_key>\d+)[ \t]*</sup>"

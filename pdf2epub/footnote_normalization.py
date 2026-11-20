@@ -7,6 +7,11 @@ import html
 from collections import Counter
 from typing import List
 
+from .endnote_patterns import (
+    MARKDOWN_REF_RE as _MARKDOWN_REF_RE,
+    UNICODE_DIGITS as _UNICODE_DIGITS,
+    UNICODE_SUP_RE as _UNICODE_SUP_RE,
+)
 from .footnote_keys import key_from_printed_marker
 
 
@@ -17,9 +22,6 @@ _NOTE_HEADING_RE = re.compile(
 _HTML_SUP_RE = re.compile(
     r"<sup\b[^>]*>\s*(?P<key>[A-Za-z0-9_-]+)\s*</sup>", re.IGNORECASE
 )
-_UNICODE_SUP_RE = re.compile(r"(?P<value>[⁰¹²³⁴⁵⁶⁷⁸⁹]+)")
-_UNICODE_DIGITS = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789")
-_MARKDOWN_REF_RE = re.compile(r"\[\^(?P<key>[A-Za-z0-9_-]+)\](?!:)")
 _MARKDOWN_DEF_RE = re.compile(r"^\s*\[\^(?P<key>[A-Za-z0-9_-]+)\]:\s*", re.MULTILINE)
 _LEGACY_DEF_RE = re.compile(
     r"^\s*(?:[-*+][ \t]+)?(?P<key>\d+)\.\s+", re.MULTILINE
@@ -126,6 +128,10 @@ def _is_math_or_formula_superscript(
     # A citation cue must accompany the year. A bare year plus superscript is
     # ambiguous and remains eligible for normal footnote validation/conversion.
     if _is_explicit_citation_list(text[line_start:line_end]):
+        return True
+    # A prior edition year followed by comma and a new edition (e.g. "1991, <sup>2</sup>1994")
+    # is standard German edition notation ("2. Auflage 1994").
+    if precedes_year and re.search(r"\b\d{4},\s*$", before):
         return True
     # A year immediately followed by its page locator is strong local evidence
     # even when this citation is embedded in a longer bibliographic sentence.
