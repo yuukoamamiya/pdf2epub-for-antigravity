@@ -89,8 +89,38 @@ def test_polish_resume_merges_file_validation_semantic_review_hash(tmp_path: Pat
     manifest = json.loads(prepared["manifest"].read_text(encoding="utf-8"))
     contracts = manifest["footnote_semantics"]["files"]
     _write_clear_sidecar(tmp_path, contracts["ch1.md"], source_text=src_a, target_text=src_a)
+    # Give ch2.md an unresolved semantic issue sidecar so full validation initially blocks it.
+    issue_sidecar = tmp_path / contracts["ch2.md"]["sidecar"]
+    issue_sidecar.parent.mkdir(parents=True, exist_ok=True)
+    issue_sidecar.write_text(
+        json.dumps(
+            {
+                "schema_version": SCHEMA_VERSION,
+                "file": "ch2.md",
+                "source_sha256": sha256_text(src_b),
+                "target_sha256": sha256_text(src_b),
+                "context_sha256": contracts["ch2.md"]["context_sha256"],
+                "status": "issues",
+                "issues": [
+                    {
+                        "issue_id": "i1",
+                        "code": "note_to_body_leakage",
+                        "file": "ch2.md",
+                        "unit_id": "ch2",
+                        "source_excerpt": "Beta paragraph",
+                        "target_excerpt": "Beta paragraph",
+                        "reason": "Simulated unresolved leakage.",
+                        "source_sha256": sha256_text(src_b),
+                        "target_sha256": sha256_text(src_b),
+                        "context_sha256": contracts["ch2.md"]["context_sha256"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
 
-    # Full validation fails because ch2.md has no sidecar yet; ch1.md passes.
+    # Full validation fails because ch2.md has an unresolved semantic issue; ch1.md passes.
     full_report = validate_markdown_subagent(
         tmp_path,
         "polish",
@@ -114,7 +144,13 @@ def test_polish_resume_merges_file_validation_semantic_review_hash(tmp_path: Pat
     assert partial_report["all_passed"]
     assert partial_report["valid_files"] == ["ch2.md"]
 
-    # Resuming polish must recognize BOTH ch1.md (full report) and ch2.md (file ledger).
+    # Single-file polish validation must also synchronize primary polish_validation.json.
+    synced_full = json.loads((tmp_path / "polish_validation.json").read_text(encoding="utf-8"))
+    assert synced_full["all_passed"] is True
+    assert sorted(synced_full["valid_files"]) == ["ch1.md", "ch2.md"]
+    assert synced_full["invalid"] == []
+
+    # Resuming polish must recognize BOTH ch1.md and ch2.md as completed.
     resumed = prepare_markdown_subagent(
         tmp_path,
         "polish",
@@ -450,3 +486,165 @@ def test_polish_semantic_issue_maps_whitespace_and_adjacent_blocks_and_closes_up
     assert after["valid"] is True
     assert after["resolved_by_upstream_audit"] is True
     assert after["resolved_issue_task_ids"] == [expected_tid]
+
+
+def test_polish_clean_file_passes_without_sidecar_and_ignores_advisory_unit_context_churn(tmp_path: Path):
+    """Clean polish files need no sidecar and are immune to advisory unit_context changes."""
+    source_dir = tmp_path / "footnote_normalized"
+    target_dir = tmp_path / "polished_markdown"
+    ctx_dir = tmp_path / "footnote_contexts"
+    for d in (source_dir, target_dir, ctx_dir):
+        d.mkdir(parents=True, exist_ok=True)
+
+    text = "Clean paragraph with no semantic footnote issues.\n"
+    (source_dir / "ch1.md").write_bytes(text.encode("utf-8"))
+    (target_dir / "ch1.md").write_bytes(text.encode("utf-8"))
+    ctx_path = ctx_dir / "ch1.md.json"
+    ctx_path.write_text('{"decisions": []}', encoding="utf-8")
+
+    prepare_markdown_subagent(
+        tmp_path,
+        "polish",
+        source_dir,
+        target_dir,
+        "English",
+        "English",
+        unit_context_files={"ch1.md": ctx_path},
+        footnote_semantics_enabled=True,
+    )
+    # Do NOT write polish_footnote_reviews/ch1.json; validation must pass as implicit clear.
+    report = validate_markdown_subagent(
+        tmp_path,
+        "polish",
+        source_dir,
+        target_dir,
+        require_footnote_semantic_review=True,
+    )
+    assert report["all_passed"] is True
+    assert report["valid_files"] == ["ch1.md"]
+    assert report["polish_footnote_semantic_reviews"]["ch1.md"]["implicit_clear"] is True
+
+    # Mutate advisory footnote_contexts/ch1.md.json while keeping source unchanged.
+    ctx_path.write_text('{"decisions": [{"page": 99, "role": "footnote_start"}]}', encoding="utf-8")
+    resumed = prepare_markdown_subagent(
+        tmp_path,
+        "polish",
+        source_dir,
+        target_dir,
+        "English",
+        "English",
+        resume=True,
+        unit_context_files={"ch1.md": ctx_path},
+        footnote_semantics_enabled=True,
+    )
+    resumed_manifest = json.loads(resumed["manifest"].read_text(encoding="utf-8"))
+    assert resumed_manifest["pending_files"] == []
+    assert resumed_manifest["completed_files"] == ["ch1.md"]
+
+
+def test_oversized_chapter_notes_distribute_to_referencing_parts():
+    """Oversized multi-part chapter footnotes distribute to referencing parts instead of piling into the last part."""
+    from pdf2epub.refine.footnote_edit_plan import FootnoteEditPlan, transform_footnote_edit_plan
+
+    records = [
+        {"name": "ch8.part1.md", "chapter_id": "ch8", "unit_order": 0, "part_index": 1, "type": "chapter"},
+        {"name": "ch8.part2.md", "chapter_id": "ch8", "unit_order": 0, "part_index": 2, "type": "chapter"},
+    ]
+    source_texts = {
+        "ch8.part1.md": "Body part one references[^1].\n",
+        "ch8.part2.md": "Body part two references[^2].\n",
+    }
+    plan = FootnoteEditPlan(
+        source_texts=source_texts,
+        edits_by_file={},
+        transformed_texts=dict(source_texts),
+        notes_by_chapter={
+            "ch8": (
+                {"output_key": "1", "parts": ["Long note one " * 50], "source_file": "ch8.part1.md"},
+                {"output_key": "2", "parts": ["Long note two " * 50], "source_file": "ch8.part2.md"},
+            )
+        },
+    )
+    transformed = transform_footnote_edit_plan(
+        plan,
+        records,
+        footnote_mode="footnotes",
+        toc_tree=None,
+        progress=None,
+        scope_error=None,
+        definition_decisions=None,
+        distribute_threshold_chars=200,
+    )
+    assert "[^1]:" in transformed.transformed_texts["ch8.part1.md"]
+    assert "[^1]:" not in transformed.transformed_texts["ch8.part2.md"]
+    assert "[^2]:" in transformed.transformed_texts["ch8.part2.md"]
+    assert transformed.note_target_files == {
+        ("ch8", "1"): "ch8.part1.md",
+        ("ch8", "2"): "ch8.part2.md",
+    }
+
+
+def test_footnote_prepare_dry_run_preflight_surfaces_source_findings(tmp_path: Path):
+    """Dry-run preflight surfaces residual source_markdown superscripts during first prepare."""
+    from pdf2epub.refine.footnote_handoff import _dry_run_preflight_audit_findings
+    from pdf2epub.refine.footnote_source import FootnoteSourceSnapshot
+
+    ocr_dir = tmp_path / "ocr_markdown"
+    pages_dir = tmp_path / "pages"
+    ocr_dir.mkdir()
+    pages_dir.mkdir()
+
+    # Source has one auto-accepted footnote <sup>1</sup> and one uncaptured residual <sup>2</sup>.
+    src_text = "Body text<sup>1</sup> and another<sup>2</sup>.\n\n1 First footnote text.\n"
+    (ocr_dir / "ch1.md").write_bytes(src_text.encode("utf-8"))
+    sidecar = {
+        "blocks": [
+            {"text": "1 First footnote text.", "label": "Footnote", "bbox": [0, 800, 1000, 950]}
+        ]
+    }
+    sidecar_path = pages_dir / "page_001.ocr.json"
+    sidecar_path.write_text(json.dumps(sidecar), encoding="utf-8")
+
+    records = [
+        {
+            "name": "ch1.md",
+            "chapter_id": "ch1",
+            "unit_order": 0,
+            "part_index": 1,
+            "start_page": 1,
+            "end_page": 1,
+            "type": "chapter",
+        }
+    ]
+    snapshot = FootnoteSourceSnapshot(
+        source_dir=ocr_dir,
+        records=tuple(records),
+        source_texts={"ch1.md": src_text},
+        source_hashes={"ch1.md": sha256_text(src_text)},
+    )
+    report = {
+        "footnote_mode": "footnotes",
+        "pages": [
+            {
+                "page": 1,
+                "sidecar": "pages/page_001.ocr.json",
+                "candidates": [
+                    {
+                        "page": 1,
+                        "source": "primary",
+                        "block": 0,
+                        "role": "footnote_start",
+                        "local_role": "footnote_start",
+                        "key": "1",
+                        "marker_label": "1",
+                        "disposition": "auto_accepted",
+                        "text": "1 First footnote text.",
+                    }
+                ],
+            }
+        ],
+    }
+    findings = _dry_run_preflight_audit_findings(tmp_path, report, snapshot)
+    assert isinstance(findings, list)
+    assert all(item.get("preflight_dry_run") is True for item in findings)
+    assert all(item.get("evidence_origin") == "source_markdown" for item in findings)

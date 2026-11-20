@@ -279,8 +279,8 @@ def capture_pdf_resume_contexts(output_dir: Path, task: str, filenames: list[str
             if stale_link:
                 errors[name] = "prepared boundary context source changed after preparation"
                 continue
-        expected = unit_hashes.get(name)
-        relative = file_contexts.get(name)
+        expected = None if task == "polish" else unit_hashes.get(name)
+        relative = None if task == "polish" else file_contexts.get(name)
         if expected is not None:
             if not isinstance(expected, str) or not isinstance(relative, str):
                 errors[name] = "prepared unit context hash or path is malformed"
@@ -434,6 +434,103 @@ def stage_normalized_and_validated_targets(
     return target_hashes
 
 
+def _sync_partial_polish_into_full_report(
+    output_dir: Path,
+    partial_report: Mapping[str, Any],
+) -> None:
+    """Merge single-file polish validation results into polish_validation.json.
+
+    Keeping the primary polish_validation.json synchronized prevents status
+    split-brain between full validation snapshots and --file checkpoints.
+    """
+    full_path = Path(output_dir) / "polish_validation.json"
+    if not full_path.is_file():
+        return
+    try:
+        full = json.loads(full_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return
+    if (
+        not isinstance(full, dict)
+        or full.get("task") != "polish"
+        or full.get("schema_version") != markdown_validation_schema_version("polish")
+    ):
+        return
+    checked = [str(name) for name in (partial_report.get("files_checked") or []) if name]
+    if not checked:
+        return
+    checked_set = set(checked)
+
+    valid_set = set(str(name) for name in (full.get("valid_files") or []))
+    partial_valid = set(str(name) for name in (partial_report.get("valid_files") or []))
+    partial_missing = set(str(name) for name in (partial_report.get("missing") or []))
+    for name in checked:
+        if name in partial_valid and name not in partial_missing:
+            valid_set.add(name)
+        else:
+            valid_set.discard(name)
+    full["valid_files"] = sorted(valid_set)
+
+    for list_key in ("missing", "safety_blocked", "target_language_blocked"):
+        existing_items = [str(item) for item in (full.get(list_key) or []) if str(item) not in checked_set]
+        new_items = [str(item) for item in (partial_report.get(list_key) or []) if str(item) in checked_set]
+        full[list_key] = sorted(set(existing_items) | set(new_items))
+
+    for record_list_key in ("invalid", "review_required", "retry_required", "human_review_required"):
+        kept = [
+            item for item in (full.get(record_list_key) or [])
+            if not (isinstance(item, Mapping) and str(item.get("file") or "") in checked_set)
+        ]
+        added = [
+            dict(item) for item in (partial_report.get(record_list_key) or [])
+            if isinstance(item, Mapping) and str(item.get("file") or "") in checked_set
+        ]
+        full[record_list_key] = kept + added
+
+    for derived_key, src_key in (
+        ("review_required_files", "review_required"),
+        ("retry_required_files", "retry_required"),
+        ("human_review_required_files", "human_review_required"),
+    ):
+        full[derived_key] = sorted({
+            str(item.get("file"))
+            for item in full.get(src_key, [])
+            if isinstance(item, Mapping) and item.get("file")
+        })
+
+    for map_key in (
+        "source_sha256",
+        "target_sha256",
+        "resume_contexts",
+        "file_roles",
+        "file_role_sources",
+        "polish_footnote_semantic_reviews",
+        "polish_footnote_semantic_review_sha256",
+    ):
+        existing_map = dict(full.get(map_key) or {}) if isinstance(full.get(map_key), Mapping) else {}
+        partial_map = partial_report.get(map_key)
+        if isinstance(partial_map, Mapping):
+            for name in checked:
+                if name in partial_map:
+                    existing_map[name] = partial_map[name]
+                else:
+                    existing_map.pop(name, None)
+        full[map_key] = existing_map
+
+    total = int(full.get("total") or 0)
+    allow_warnings = bool(full.get("allow_review_warnings") or partial_report.get("allow_review_warnings"))
+    full["all_passed"] = bool(
+        total > 0
+        and len(full["valid_files"]) == total
+        and not full.get("missing")
+        and not full.get("invalid")
+        and not full.get("safety_blocked")
+        and not full.get("protected_workspace_blocked")
+        and (allow_warnings or not full.get("review_required"))
+    )
+    atomic_write_json(full_path, full)
+
+
 def persist_validation_report(
     context: MarkdownValidationContext,
     report: dict[str, Any],
@@ -521,6 +618,8 @@ def persist_validation_report(
             "files": records,
         }
         atomic_write_json(report_path, ledger)
+        if report["task"] == "polish":
+            _sync_partial_polish_into_full_report(context.paths.output_dir, report)
     else:
         if report["task"] in {"translate", "polish"}:
             # A full PDF validation covers every source unit, so any older
@@ -563,6 +662,8 @@ def persist_validation_report(
         ledger["discarded_temp_files"] = discarded_temp_files
         ledger["quarantined_files"] = quarantined
         atomic_write_json(report_path, ledger)
+        if report["task"] == "polish":
+            _sync_partial_polish_into_full_report(context.paths.output_dir, report)
     else:
         atomic_write_json(report_path, report)
     return report

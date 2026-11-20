@@ -430,12 +430,14 @@ def render_worker_prompt(
         semantic_files = {}
     if task == "polish" and semantic_files:
         footnote_semantics_notice = (
-            "\n\n## Footnote semantic review sidecars (required)\n\n"
-            "For each assigned file listed below, write its required JSON review sidecar "
-            "to the exact `sidecar` path. Bind it to the provided source/context hashes, "
-            "review every listed note identity and required coverage category, and record "
-            "status, `reviewed_all`, `coverage`, and any issues. The sidecar is review "
-            "metadata, not translated output. Do not alter its expected hashes.\n\n"
+            "\n\n## Footnote semantic review sidecars (on-demand for issues only)\n\n"
+            "Scan each assigned file for leaked footnote continuations or body/note "
+            "misplacement. For clean files with no semantic footnote issues, do NOT "
+            "write a sidecar file (a missing sidecar is treated as an implicit `clear`). "
+            "Only if you detect a genuine semantic footnote issue, write a JSON sidecar "
+            "with `status: \"issues\"` to the exact `sidecar` path below, bound to the "
+            "provided `source_sha256`, `context_sha256`, and polished `target_sha256`. "
+            "Do not alter the expected hashes.\n\n"
             + json.dumps(semantic_files, ensure_ascii=False, indent=2)
         )
     scoped_prompt = _scope_worker_prompt(

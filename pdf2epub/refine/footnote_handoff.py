@@ -108,6 +108,106 @@ def _no_review_prompt(book_title: str, report: Mapping[str, Any]) -> str:
     return f"# Footnote review\n\nBook: {book_title}\n\n{detail}\n"
 
 
+def _dry_run_preflight_audit_findings(
+    output_dir: Path,
+    report: Mapping[str, Any],
+    source_snapshot: Any,
+    *,
+    config: Optional[Mapping[str, Any]] = None,
+) -> list[dict[str, Any]]:
+    """Run an in-memory dry-run normalization + result audit on auto-accepted candidates.
+
+    Only findings anchored to ``source_markdown`` (stable ``ocr_markdown/*.md``
+    hashes) are surfaced so the first visual review wave can resolve residual
+    source markers in one pass without waiting for a failed ``footnote-apply``.
+    """
+    if str(report.get("footnote_mode") or "") != "footnotes":
+        return []
+    auto_decisions: list[dict[str, Any]] = []
+    for page_row in report.get("pages", []) or []:
+        if not isinstance(page_row, Mapping):
+            continue
+        page_num = page_row.get("page")
+        for cand in page_row.get("candidates", []) or []:
+            if not isinstance(cand, Mapping) or cand.get("disposition") != "auto_accepted":
+                continue
+            role = str(cand.get("role") or cand.get("local_role") or "").strip()
+            if not role:
+                continue
+            auto_decisions.append({
+                "page": int(cand.get("page", page_num or 0)),
+                "source": str(cand.get("source") or "primary"),
+                "block": int(cand.get("block", -1)),
+                "role": role,
+                "key": cand.get("key"),
+                "marker_label": cand.get("marker_label"),
+            })
+    if not auto_decisions:
+        return []
+    try:
+        from .footnote_normalization_plan import (
+            FootnoteNormalizationPlanningInput,
+            build_footnote_normalization_plan,
+        )
+        from .footnote_result_audit import audit_footnote_result
+
+        planning = build_footnote_normalization_plan(FootnoteNormalizationPlanningInput(
+            output_dir=output_dir,
+            report=report,
+            decisions={"decisions": auto_decisions, "continuation_reviews": []},
+            source=source_snapshot,
+            footnote_mode="footnotes",
+        ))
+        if not planning.valid or planning.edit_plan is None:
+            return []
+        edit_plan = planning.edit_plan
+        records = list(source_snapshot.records)
+        final_file_by_chapter: dict[str, dict[str, Any]] = {}
+        for rec in records:
+            ch = str(rec.get("chapter_id") or "")
+            cur = final_file_by_chapter.get(ch)
+            if cur is None or (rec.get("unit_order", 0), rec.get("part_index", 0)) >= (
+                cur.get("unit_order", 0), cur.get("part_index", 0)
+            ):
+                final_file_by_chapter[ch] = rec
+        expected_notes = [
+            {
+                "chapter_id": ch,
+                "target_file": str(
+                    edit_plan.note_target_files.get((ch, str(note.get("output_key") or note.get("key") or "")))
+                    or final_file_by_chapter.get(ch, {}).get("name")
+                    or ""
+                ),
+                "output_key": str(note.get("output_key") or note.get("key") or ""),
+                "parts": list(note.get("parts") or []),
+            }
+            for ch, notes in edit_plan.notes_by_chapter.items()
+            for note in notes
+        ]
+        dry_audit = audit_footnote_result(
+            source_snapshot.source_texts,
+            edit_plan.transformed_texts,
+            records,
+            expected_notes=expected_notes,
+            resolved_blocks=list(edit_plan.resolved_blocks),
+            footnote_mode="footnotes",
+        )
+        surfaced: list[dict[str, Any]] = []
+        for finding in dry_audit.get("findings", []) or []:
+            if not isinstance(finding, Mapping) or not finding.get("task_id"):
+                continue
+            if str(finding.get("evidence_origin") or "") != "source_markdown":
+                continue
+            item = dict(finding)
+            evidence_file = output_dir / "ocr_markdown" / str(item.get("file") or "")
+            item["evidence_file_sha256"] = sha256_file(evidence_file) if evidence_file.is_file() else None
+            item["preflight_dry_run"] = True
+            surfaced.append(item)
+        return surfaced
+    except Exception:
+        return []
+
+
 def prepare_footnote_subagent(
     output_dir: Path,
     *,
@@ -217,6 +317,21 @@ def prepare_footnote_subagent(
         prior_applied_tasks = prior_result_audit.get("applied_result_audit_review_tasks")
         audit["_prior_applied_reviews"] = prior_applied
         audit["_prior_applied_review_tasks"] = prior_applied_tasks
+    elif not current_target_inventory and records and str(report.get("footnote_mode") or "") == "footnotes":
+        known = {str(item.get("task_id")) for item in audit.get("findings", []) if isinstance(item, Mapping)}
+        try:
+            from .footnote_source import load_footnote_source_snapshot
+            preflight_snapshot = load_footnote_source_snapshot(output_dir)
+        except Exception:
+            preflight_snapshot = None
+        if preflight_snapshot is not None:
+            for finding in _dry_run_preflight_audit_findings(
+                output_dir, report, preflight_snapshot, config=config,
+            ):
+                tid = str(finding.get("task_id") or "")
+                if tid and tid not in known:
+                    audit.setdefault("findings", []).append(finding)
+                    known.add(tid)
     # Pull in direct recall candidates found in generic OCR ``Text`` blocks.
     # These are already exact sidecar-addressable blocks and are always sent
     # for visual classification, never accepted from layout/text evidence.
@@ -303,7 +418,7 @@ def prepare_footnote_subagent(
     ):
         audit["reviewed_candidate_tasks"] = [
             dict(item) for item in prior_result_audit.get("admitted_candidates", [])
-            if isinstance(item, Mapping)
+            if isinstance(item, Mapping) and not item.get("preserved_candidate_only")
         ]
         for saved in prior_result_audit.get("admitted_candidates", []) or []:
             if not isinstance(saved, Mapping) or not isinstance(saved.get("source_address"), Mapping):
@@ -329,7 +444,8 @@ def prepare_footnote_subagent(
                 continue
             page_row = next((row for row in report.get("pages", []) or [] if isinstance(row, dict) and int(row.get("page", 0)) == page), None)
             if not isinstance(page_row, dict):
-                continue
+                page_row = {"page": page, "candidates": [], "secondary_only_candidates": []}
+                report.setdefault("pages", []).append(page_row)
             key = str(saved.get("key") or "")
             block_text = str(block_data.get("text") or block_data.get("html") or "") if isinstance(block_data, Mapping) else ""
             candidate = {
@@ -345,6 +461,43 @@ def prepare_footnote_subagent(
             candidates = page_row.setdefault(field, [])
             if not any(isinstance(item, Mapping) and int(item.get("block", -1)) == block_index and str(item.get("source") or "primary") == source for item in candidates):
                 candidates.append(candidate)
+        decided_addresses = {
+            (int(d["page"]), str(d.get("source") or "primary"), int(d["block"]))
+            for d in (prior_review_data.get("decisions") or [])
+            if isinstance(d, Mapping)
+            and str(d.get("page", "")).lstrip("-").isdigit()
+            and str(d.get("block", "")).lstrip("-").isdigit()
+        } if isinstance(prior_review_data, Mapping) else set()
+        if decided_addresses:
+            try:
+                prior_candidate_report = json.loads((output_dir / "footnote_candidates.json").read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                prior_candidate_report = {}
+            for prior_page in prior_candidate_report.get("pages", []) or [] if isinstance(prior_candidate_report, Mapping) else []:
+                if not isinstance(prior_page, Mapping):
+                    continue
+                for prior_field in ("candidates", "secondary_only_candidates"):
+                    for prior_cand in prior_page.get(prior_field, []) or []:
+                        if not isinstance(prior_cand, Mapping) or not prior_cand.get("result_audit_admitted"):
+                            continue
+                        try:
+                            p_page = int(prior_cand["page"])
+                            p_source = str(prior_cand.get("source") or "primary")
+                            p_block = int(prior_cand["block"])
+                        except (KeyError, TypeError, ValueError):
+                            continue
+                        if (p_page, p_source, p_block) not in decided_addresses:
+                            continue
+                        if not isinstance(exact_sidecars.get(p_page, {}).get(p_source), Mapping):
+                            continue
+                        p_row = next((row for row in report.get("pages", []) or [] if isinstance(row, dict) and int(row.get("page", 0)) == p_page), None)
+                        if not isinstance(p_row, dict):
+                            p_row = {"page": p_page, "candidates": [], "secondary_only_candidates": []}
+                            report.setdefault("pages", []).append(p_row)
+                        target_field = "secondary_only_candidates" if p_source == "secondary" else "candidates"
+                        target_list = p_row.setdefault(target_field, [])
+                        if not any(isinstance(item, Mapping) and int(item.get("block", -1)) == p_block and str(item.get("source") or "primary") == p_source for item in target_list):
+                            target_list.append(dict(prior_cand))
 
     # Truncated source/target definitions need exact owning-page evidence and
     # the following physical page when available. Reassociate by the complete
@@ -744,7 +897,12 @@ def prepare_footnote_subagent(
             if not isinstance(refs, list) or not refs:
                 neighbor_keys = audit_task.get("neighbor_keys")
                 keys = {str(key) for key in neighbor_keys} if isinstance(neighbor_keys, list) else set()
-                keys.update(str(audit_task.get("key") or "").split(","))
+                raw_keys = str(audit_task.get("key") or "").split(",")
+                keys.update(raw_keys)
+                for k in raw_keys:
+                    m = re.match(r"^fnm-number-(\d+)", k)
+                    if m:
+                        keys.add(m.group(1))
                 keys.discard("")
                 start, end = int(record.get("start_page") or 0), int(record.get("end_page") or 0)
                 refs = []
@@ -760,7 +918,7 @@ def prepare_footnote_subagent(
                             refs.append({"page": page_number, "source": str(candidate.get("source") or "primary"), "block": int(candidate.get("block", -1))})
                 audit_task["candidate_refs"] = refs
             pages_for_task = sorted({int(ref["page"]) for ref in refs if isinstance(ref, Mapping) and ref.get("page")})
-            if not pages_for_task and audit_task.get("source_address", {}).get("page"):
+            if not pages_for_task and (audit_task.get("source_address") or {}).get("page"):
                 pages_for_task = [int(audit_task["source_address"]["page"])]
             if audit_task.get("code") == "normalized_note_truncated" and pages_for_task:
                 owner_pages = list(pages_for_task)
@@ -774,6 +932,63 @@ def prepare_footnote_subagent(
                 audit_task["context_error"] = "No exact sidecar candidate page was found for this result-audit task; review cannot proceed until the source-to-page linkage is restored."
             elif audit_task.get("context_status") != "supplemental_candidate_admitted":
                 audit_task["context_status"] = "exact_adjacent_note_pages_resolved"
+            task_refs = audit_task.get("candidate_refs")
+            if audit_task.get("code") == "polish_semantic_issue" and isinstance(task_refs, list):
+                pages_by_number = {
+                    int(p.get("page", 0)): p
+                    for p in report.get("pages", []) or []
+                    if isinstance(p, dict) and str(p.get("page", "")).isdigit()
+                }
+                for ref in task_refs:
+                    if not isinstance(ref, Mapping):
+                        continue
+                    try:
+                        ref_page = int(ref["page"])
+                        ref_block = int(ref["block"])
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    ref_source = str(ref.get("source") or "primary").strip().lower()
+                    page_row = pages_by_number.get(ref_page)
+                    if not isinstance(page_row, dict):
+                        page_row = {"page": ref_page, "candidates": [], "secondary_only_candidates": []}
+                        report.setdefault("pages", []).append(page_row)
+                        pages_by_number[ref_page] = page_row
+                    candidate_field = "secondary_only_candidates" if ref_source == "secondary" else "candidates"
+                    candidates_list = page_row.setdefault(candidate_field, [])
+                    if any(
+                        isinstance(item, Mapping)
+                        and (int(item.get("block", -1)), str(item.get("source") or "primary").strip().lower()) == (ref_block, ref_source)
+                        for item in candidates_list
+                    ):
+                        continue
+                    sidecar_entry = (exact_sidecars.get(ref_page) or {}).get(ref_source)
+                    if not isinstance(sidecar_entry, Mapping):
+                        continue
+                    try:
+                        sidecar_data = json.loads((output_dir / str(sidecar_entry["path"])).read_text(encoding="utf-8"))
+                    except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError):
+                        continue
+                    blocks = sidecar_data.get("blocks", [])
+                    if not isinstance(blocks, list) or not 0 <= ref_block < len(blocks):
+                        continue
+                    block_data = blocks[ref_block]
+                    if not isinstance(block_data, Mapping):
+                        continue
+                    block_text = (block_text_variants(output_dir, ref_page, block_data) or [str(audit_task.get("evidence_excerpt") or "")])[0]
+                    candidates_list.append({
+                        "page": ref_page,
+                        "source": ref_source,
+                        "block": ref_block,
+                        "order": block_data.get("order", ref_block),
+                        "label": str(block_data.get("label") or "Text"),
+                        "bbox": block_data.get("bbox"),
+                        "key": str(audit_task.get("key") or ""),
+                        "confidence": "review",
+                        "disposition": "review_required",
+                        "text": block_text[:240],
+                        "result_audit_admitted": True,
+                        "review_reason": "polish_semantic_issue_source_block",
+                    })
             audit_task["pages"] = pages_for_task
         pages = sorted({int(page) for task in audit["findings"] for page in task.get("pages", [])})
         image_evidence = ensure_visual_review_images(output_dir, set(pages), config) if pages else {"files": {}}

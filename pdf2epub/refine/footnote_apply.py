@@ -22,6 +22,7 @@ from .footnote_status import FOOTNOTE_NORMALIZATION_SCHEMA_VERSION
 from .footnote_source import markdown_inventory
 from .footnote_result_audit import AUDIT_FILENAME, AUDIT_VERSION, audit_footnote_result
 from .footnote_effective_decisions import EFFECTIVE_DECISIONS_VERSION
+from .footnote_page_evidence import page_sidecar_index
 
 
 def _write_failure(output_dir: Path, errors: list[str], *, status: str = "human_review_required") -> dict[str, Any]:
@@ -169,7 +170,13 @@ def apply_footnote_normalization(
     expected_notes = [
         {
             "chapter_id": chapter,
-            "target_file": str(final_file_by_chapter.get(chapter, {}).get("name") or ""),
+            "target_file": str(
+                edit_plan.note_target_files.get(
+                    (chapter, str(note.get("output_key") or note.get("key") or ""))
+                )
+                or final_file_by_chapter.get(chapter, {}).get("name")
+                or ""
+            ),
             "output_key": str(note.get("output_key") or note.get("key") or ""),
             "parts": list(note.get("parts") or []),
             "candidate_refs": [
@@ -317,6 +324,51 @@ def apply_footnote_normalization(
         and task.get("context_status") == "supplemental_candidate_admitted"
         and isinstance(task.get("source_address"), Mapping)
     ] if isinstance(candidate_audit_tasks, list) else []
+    admitted_addrs = {
+        (
+            int(item["source_address"]["page"]),
+            str(item["source_address"].get("source") or "primary"),
+            int(item["source_address"]["block"]),
+        )
+        for item in newly_admitted
+        if isinstance(item.get("source_address"), Mapping)
+        and str(item["source_address"].get("page", "")).lstrip("-").isdigit()
+        and str(item["source_address"].get("block", "")).lstrip("-").isdigit()
+    }
+    try:
+        sidecar_index = page_sidecar_index(output_dir, report)
+    except Exception:
+        sidecar_index = {}
+    for page_row in report.get("pages", []) or []:
+        if not isinstance(page_row, Mapping):
+            continue
+        for field in ("candidates", "secondary_only_candidates"):
+            for cand in page_row.get(field, []) or []:
+                if not isinstance(cand, Mapping) or not cand.get("result_audit_admitted"):
+                    continue
+                try:
+                    c_page = int(cand["page"])
+                    c_source = str(cand.get("source") or "primary")
+                    c_block = int(cand["block"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if (c_page, c_source, c_block) in admitted_addrs:
+                    continue
+                sidecar_entry = sidecar_index.get(c_page, {}).get(c_source)
+                if not isinstance(sidecar_entry, Mapping):
+                    continue
+                admitted_addrs.add((c_page, c_source, c_block))
+                newly_admitted.append({
+                    "preserved_candidate_only": True,
+                    "key": str(cand.get("key") or ""),
+                    "source_address": {
+                        "page": c_page,
+                        "source": c_source,
+                        "block": c_block,
+                        "sidecar": sidecar_entry.get("path"),
+                        "sidecar_sha256": sidecar_entry.get("sha256"),
+                    },
+                })
     result_audit["reviewed_candidate_tasks"] = [
         *(prior_reviewed_tasks if isinstance(prior_reviewed_tasks, list) else []),
         *newly_admitted,

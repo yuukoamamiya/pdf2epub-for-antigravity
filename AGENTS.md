@@ -410,10 +410,9 @@ ocr-pages
 合并软换行并保留真实段落、标题和块级结构。
 polish handoff 按显式 part mapping 为每个单元提供前后各最多 256 token、合计最多 512 token 且不超过单文件剩余预算的只读正文上下文。优先使用完整块，超预算时使用带明确裁剪标记的句子或完整词片段；裁剪片段不能用来判断段落边界或要求合并块。只读取 scoped manifest
 列出的投影，不打开邻片全文，也不把上下文写入目标。源文或相关 refined mapping 变化会使 polish 验收和
-resume 失效。脚注模式启用时，每个文件还必须生成 schema 1 的 `polish_footnote_reviews/<stem>.json`，
-覆盖正文、脚注定义及跨分片关联；无脚注定义的文件也要完成正文扫描。sidecar 报告 issue 时，按报告回到
-`footnote-prepare` 的视觉复核、`footnote-validate` 和 `footnote-apply`；若所有上报 issue 对应的精确 `task_id` 均已在当前有效的 `footnote_normalization.json` 及已应用结果审计裁决（`confirmed_not_a_footnote`、`legitimate_non_footnote`、`truncated_source_exception`、`deferred_to_polish`）中正式关闭，`polish` 语义校验收敛通过，不再循环退回脚注阶段。正式 `polish-validate`（含 `--file` 单文件校验写入的 `polish_file_validation.json` 语义审查哈希）会更新
-当前 receipt 和 validated 副本并由 `polish --resume` 合并复用；不得手工重算哈希恢复旧检查点。
+resume 失效。脚注模式启用时，`polish_footnote_reviews/<stem>.json` 采用按需上报模式：干净分片免写 sidecar（缺失即隐式 `clear`），且只读 `footnote_contexts` 变更不再使 `source_sha256` 与边界上下文未变的 `polish` 产物失效。仅当发现漏网的脚注粘连或跨页续注污染时，才写出 `status: issues` 的 sidecar 并按报告回到
+`footnote-prepare` 的单页视觉复核、`footnote-validate` 和 `footnote-apply`；若所有上报 issue 对应的精确 `task_id` 均已在当前有效的 `footnote_normalization.json` 及已应用结果审计裁决（`confirmed_not_a_footnote`、`legitimate_non_footnote`、`truncated_source_exception`、`deferred_to_polish`）中正式关闭，`polish` 语义校验收敛通过，不再循环退回脚注阶段。正式 `polish-validate`（含 `--file` 单文件校验同步合并更新主 `polish_validation.json`）会更新
+当前 receipt 和 validated 副本并由 `polish --resume` 复用；不得手工重算哈希恢复旧检查点。
 `refine-local` 的页面合并器会保守地拼接跨页未完的普通正文；完整句子、标题、列表、脚注、
 图片和表格仍保持块边界。Markdown→XHTML 默认遵循标准 Markdown 语义：单换行是软换行，
 空行才创建新段落；只有显式 `<br />` 才生成硬换行。

@@ -100,9 +100,13 @@ def semantic_context_sha256(
     *, unit_context_sha256: str | None = None,
     boundary_context_sha256: str | None = None,
 ) -> str:
-    """Bind the review to exact prepared layout and cross-file context inputs."""
+    """Bind the review to exact cross-file boundary context inputs.
+
+    Advisory footnote unit_context files are intentionally excluded so edits in
+    one chapter part do not cascade-invalidate unchanged sibling parts.
+    """
+    _ = unit_context_sha256
     payload = {
-        "unit_context_sha256": unit_context_sha256 or "",
         "boundary_context_sha256": boundary_context_sha256 or "",
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -161,24 +165,48 @@ def validate_semantic_review_sidecar(
     source_text: str,
     target_text: str,
 ) -> dict[str, Any]:
-    """Validate a model-authored review sidecar against prepared and current data."""
+    """Validate an optional model-authored review sidecar against current data.
+
+    Clean polish files do not need to write an empty sidecar; a missing sidecar
+    file resolves as an implicit ``clear`` review. When a sidecar file is
+    present, its hashes and any reported issues are validated strictly.
+    """
     errors: list[str] = []
     stale_fields: list[str] = []
+    expected_source = sha256_text(source_text)
+    expected_target = sha256_text(target_text)
+    expected_context = contract.get("context_sha256")
+    if contract.get("source_sha256") != expected_source:
+        errors.append("prepared source changed after semantic review contract creation")
+        stale_fields.append("contract.source_sha256")
+
+    path = Path(sidecar_path)
+    if not path.exists():
+        return {
+            "valid": not errors,
+            "contract_valid": not errors,
+            "status": "clear",
+            "implicit_clear": True,
+            "errors": errors,
+            "stale_fields": sorted(set(stale_fields)),
+            "issues": [],
+            "source_sha256": expected_source,
+            "target_sha256": expected_target,
+            "context_sha256": expected_context,
+        }
+
     try:
-        data = json.loads(Path(sidecar_path).read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        return {"valid": False, "errors": [f"review sidecar is missing or unreadable: {exc}"], "stale_fields": []}
+        return {"valid": False, "contract_valid": False, "errors": [f"review sidecar is missing or unreadable: {exc}"], "stale_fields": []}
     if not isinstance(data, Mapping):
-        return {"valid": False, "errors": ["review sidecar must be a JSON object"]}
+        return {"valid": False, "contract_valid": False, "errors": ["review sidecar must be a JSON object"], "stale_fields": []}
 
     if contract.get("schema_version") != SCHEMA_VERSION or data.get("schema_version") != SCHEMA_VERSION:
         errors.append("review contract or sidecar schema version is unsupported")
     filename = str(contract.get("file") or "")
     if data.get("file") != filename:
         errors.append("review sidecar file identity does not match the assigned file")
-    expected_source = sha256_text(source_text)
-    expected_target = sha256_text(target_text)
-    expected_context = contract.get("context_sha256")
     for key, expected in (
         ("source_sha256", expected_source),
         ("target_sha256", expected_target),
@@ -187,43 +215,42 @@ def validate_semantic_review_sidecar(
         if not _valid_hash(expected) or data.get(key) != expected:
             errors.append(f"review sidecar {key} is missing, malformed, or stale")
             stale_fields.append(key)
-    if contract.get("source_sha256") != expected_source:
-        errors.append("prepared source changed after semantic review contract creation")
-        stale_fields.append("contract.source_sha256")
 
     status = data.get("status")
     if not isinstance(status, str) or status not in {"clear", "issues"}:
         errors.append("review sidecar status must be clear or issues")
-    if data.get("reviewed_all") is not True:
+    if "reviewed_all" in data and data.get("reviewed_all") is not True:
         errors.append("review sidecar must explicitly attest that the assigned file was fully reviewed")
 
-    coverage = data.get("coverage")
-    if not isinstance(coverage, Mapping):
-        errors.append("review sidecar coverage must be an object")
-        coverage = {}
-    for key in ("body_reviewed", "definitions_reviewed", "cross_boundary_reviewed"):
-        item = coverage.get(key)
-        if not isinstance(item, Mapping):
-            errors.append(f"review coverage {key} is missing")
-            continue
-        state = item.get("status")
-        if key == "cross_boundary_reviewed" and state == "not_applicable" and contract.get("has_boundary_context") is not True:
-            if not _nonempty_string(item.get("reason")):
-                errors.append("cross-boundary not_applicable requires a reason")
-        elif state != "reviewed":
-            errors.append(f"review coverage {key} must be reviewed")
-    expected_ids = contract.get("expected_note_ids")
-    reviewed_ids = data.get("reviewed_note_ids")
-    if not isinstance(expected_ids, list) or not all(isinstance(item, str) for item in expected_ids):
-        errors.append("prepared expected_note_ids contract is malformed")
-    elif (
-        not isinstance(reviewed_ids, list)
-        or not all(isinstance(item, str) for item in reviewed_ids)
-        or sorted(set(reviewed_ids)) != sorted(set(expected_ids))
-    ):
-        errors.append("review sidecar does not cover every expected note identity")
+    if "coverage" in data:
+        coverage = data.get("coverage")
+        if not isinstance(coverage, Mapping):
+            errors.append("review sidecar coverage must be an object")
+            coverage = {}
+        for key in ("body_reviewed", "definitions_reviewed", "cross_boundary_reviewed"):
+            item = coverage.get(key)
+            if not isinstance(item, Mapping):
+                errors.append(f"review coverage {key} is missing")
+                continue
+            state = item.get("status")
+            if key == "cross_boundary_reviewed" and state == "not_applicable" and contract.get("has_boundary_context") is not True:
+                if not _nonempty_string(item.get("reason")):
+                    errors.append("cross-boundary not_applicable requires a reason")
+            elif state != "reviewed":
+                errors.append(f"review coverage {key} must be reviewed")
+    if "reviewed_note_ids" in data:
+        expected_ids = contract.get("expected_note_ids")
+        reviewed_ids = data.get("reviewed_note_ids")
+        if not isinstance(expected_ids, list) or not all(isinstance(item, str) for item in expected_ids):
+            errors.append("prepared expected_note_ids contract is malformed")
+        elif (
+            not isinstance(reviewed_ids, list)
+            or not all(isinstance(item, str) for item in reviewed_ids)
+            or sorted(set(reviewed_ids)) != sorted(set(expected_ids))
+        ):
+            errors.append("review sidecar does not cover every expected note identity")
 
-    issues = data.get("issues")
+    issues = data.get("issues", [])
     if not isinstance(issues, list):
         errors.append("review sidecar issues must be a list")
         issues = []
@@ -268,6 +295,7 @@ def validate_semantic_review_sidecar(
         "valid": not errors and status == "clear",
         "contract_valid": not errors,
         "status": status,
+        "implicit_clear": False,
         "errors": errors,
         "stale_fields": sorted(set(stale_fields)),
         "issues": normalized_issues,
@@ -319,7 +347,7 @@ def validate_prepared_file_review(
         boundary_context_sha256=boundary_hash,
         has_boundary_context=has_boundary,
     )
-    for key in ("source_sha256", "context_sha256", "unit_context_sha256", "boundary_context_sha256", "expected_note_ids", "has_boundary_context", "sidecar", "coverage_requirements"):
+    for key in ("source_sha256", "context_sha256", "boundary_context_sha256", "expected_note_ids", "has_boundary_context", "sidecar", "coverage_requirements"):
         if contract.get(key) != expected.get(key):
             errors.append(f"prepared semantic review contract {key} is stale or inconsistent")
             stale_fields.append(f"contract.{key}")

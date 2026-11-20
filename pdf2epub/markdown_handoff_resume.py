@@ -86,6 +86,7 @@ def unit_context_is_current(
     file_roles: Mapping[str, str] | None = None,
     file_role_sources: Mapping[str, Mapping[str, Any]] | None = None,
     boundary_context_sha256: Mapping[str, str] | None = None,
+    ignore_unit_context: bool = False,
 ) -> bool:
     """Decide whether the context projection for one source unit is unchanged."""
     previous_special_modes = previous_manifest.get("special_unit_modes", {})
@@ -103,23 +104,24 @@ def unit_context_is_current(
         return False
     if previous_sources.get(name) != (file_role_sources or {}).get(name):
         return False
-    previous_unit_hashes = previous_manifest.get("unit_context_sha256", {})
-    if not isinstance(previous_unit_hashes, Mapping):
-        previous_unit_hashes = {}
-    # Old manifests lack unit projections, so a changed book-wide context
-    # cannot be localized and must invalidate their checkpoints conservatively.
-    if (
-        resume
-        and context_sha256
-        and previous_manifest.get("context_sha256", {}) != context_sha256
-        and not previous_unit_hashes
-    ):
-        return False
-    if name in unit_context_sha256:
-        if previous_unit_hashes.get(name) != unit_context_sha256[name]:
+    if not ignore_unit_context:
+        previous_unit_hashes = previous_manifest.get("unit_context_sha256", {})
+        if not isinstance(previous_unit_hashes, Mapping):
+            previous_unit_hashes = {}
+        # Old manifests lack unit projections, so a changed book-wide context
+        # cannot be localized and must invalidate their checkpoints conservatively.
+        if (
+            resume
+            and context_sha256
+            and previous_manifest.get("context_sha256", {}) != context_sha256
+            and not previous_unit_hashes
+        ):
             return False
-    elif name in previous_unit_hashes:
-        return False
+        if name in unit_context_sha256:
+            if previous_unit_hashes.get(name) != unit_context_sha256[name]:
+                return False
+        elif name in previous_unit_hashes:
+            return False
     previous_boundary = previous_manifest.get("boundary_context_sha256", {})
     if not isinstance(previous_boundary, Mapping):
         previous_boundary = {}
@@ -348,17 +350,20 @@ def decide_resume(
         name = source.name
         target = request.target_dir / name
         source_hash = plan.source_sha256[name]
+        effective_unit_hashes = {} if task == "polish" else context.unit_context_sha256
+        ignore_unit_ctx = task == "polish"
         context_current = unit_context_is_current(
             name,
             previous_manifest=previous_manifest,
             controlled_files=controlled,
             context_sha256=context.context_sha256,
-            unit_context_sha256=context.unit_context_sha256,
+            unit_context_sha256=effective_unit_hashes,
             heading_contexts=context.heading_contexts,
             file_roles=context.file_roles,
             file_role_sources=context.file_role_sources,
             boundary_context_sha256=plan.boundary_context_sha256,
             resume=request.resume,
+            ignore_unit_context=ignore_unit_ctx,
         )
         html_fingerprint = None
         if task in {"translate", "polish"}:
@@ -373,16 +378,17 @@ def decide_resume(
                         previous_manifest=receipt_context,
                         controlled_files=controlled,
                         context_sha256=context.context_sha256,
-                        unit_context_sha256=context.unit_context_sha256,
+                        unit_context_sha256=effective_unit_hashes,
                         heading_contexts=context.heading_contexts,
                         file_roles=context.file_roles,
                         file_role_sources=context.file_role_sources,
                         boundary_context_sha256=plan.boundary_context_sha256,
                         resume=True,
+                        ignore_unit_context=ignore_unit_ctx,
                     )
                 )
             elif (
-                name in context.unit_context_sha256
+                name in effective_unit_hashes
                 or name in context.heading_contexts
                 or bool(context.context_sha256)
             ):
@@ -434,8 +440,10 @@ def decide_resume(
                 checkpoint_current = bool(
                     isinstance(semantic_review, Mapping)
                     and semantic_review.get("valid") is True
-                    and recorded_review
-                    and recorded_review == semantic_review.get("sidecar_sha256")
+                    and (
+                        (semantic_review.get("implicit_clear") is True and not recorded_review)
+                        or (recorded_review and recorded_review == semantic_review.get("sidecar_sha256"))
+                    )
                 )
             except (OSError, UnicodeError, ValueError):
                 checkpoint_current = False

@@ -109,9 +109,19 @@ def test_polish_receipt_and_downstream_stage_recheck_prepared_context_without_re
         tmp_path, context_kind=context_kind,
     )
     if context_kind == "unit_context":
+        # Advisory footnote unit_context files are decoupled from polish
+        # invalidation so unchanged parts do not cascade-invalidate.
         changed_path.write_text('{"entries": [{"source": "new", "target": "新"}]}', encoding="utf-8")
-    else:
-        changed_path.write_text(json.dumps({"units": [{"part_files": ["part-b.md", "part-a.md"]}]}), encoding="utf-8")
+        assert validation_receipt_is_current(
+            tmp_path / "polish_validation.json", source_dir, target_dir,
+            task="polish", output_dir=tmp_path, config=config,
+        )
+        assert _polished_stage_is_current(
+            tmp_path, target_dir / "validated", source_dir, config=config,
+        )
+        return
+
+    changed_path.write_text(json.dumps({"units": [{"part_files": ["part-b.md", "part-a.md"]}]}), encoding="utf-8")
 
     assert not validation_receipt_is_current(
         tmp_path / "polish_validation.json", source_dir, target_dir,

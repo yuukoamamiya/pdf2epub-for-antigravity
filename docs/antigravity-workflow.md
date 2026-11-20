@@ -1053,7 +1053,7 @@ Polish sidecar 中的 `issues[]` 只报告疑点，不决定脚注归属。`foot
 无法唯一映射，则记录带有 issue id、失败映射阶段、匹配数和恢复步骤的 `current_issue_mapping_failure`；哈希有效但
 sidecar shape/coverage 无效时记录 `invalid_review`。这两类均保留其他可映射任务继续准备，并将 result audit 置为 blocked；
 `footnote-validate` 会明确拒绝通过，因此不能 apply 或进入后续阶段。
-当上报的所有 issue 均已由当前有效的 `footnote_normalization.json` 及已应用结果审计裁决（`confirmed_not_a_footnote`、`legitimate_non_footnote`、`truncated_source_exception`、`deferred_to_polish`）按精确 `task_id` 正式关闭时，回到 `polish-validate` 将收敛通过（`resolved_by_upstream_audit: true`），不再无限退回脚注阶段；此外 `polish-validate --file` 写入 `polish_file_validation.json` 的语义审查哈希也会被 `polish --resume` 合并复用。
+当上报的所有 issue 均已由当前有效的 `footnote_normalization.json` 及已应用结果审计裁决（`confirmed_not_a_footnote`、`legitimate_non_footnote`、`truncated_source_exception`、`deferred_to_polish`）按精确 `task_id` 正式关闭时，回到 `polish-validate` 将收敛通过（`resolved_by_upstream_audit: true`），不再无限退回脚注阶段。干净分片无需编写 `polish_footnote_reviews/<stem>.json`（缺失即隐式 `clear`），且只读 `footnote_contexts` 变更不再令 `source_sha256` 未变的 `polish` 产物级联失效；`polish-validate --file` 同步合并更新主 `polish_validation.json` 供 `polish --resume` 直接复用。此外，首轮 `footnote-prepare` 对自动接受候选执行纯内存 dry-run `result_audit`，提前合并暴露残余源标记；多片长章脚注总量超阈值（>40k 字符）时，`footnote-apply` 按引用分片就近放置定义以避免制造巨型尾片。
 恢复时让原 Polish Reviewer 修正现有 semantic sidecar 中该 issue 的 `source_excerpt`：它必须是当前 Polish/raw source
 共同存在且唯一、并完整落在一个 primary OCR block 内的连续摘录。Reviewer 更新 sidecar 后直接重跑
 `footnote-prepare`，让正式哈希合同和映射重新校验；不需要先运行会被 footnote gate 挡住的 `polish --resume`，也不得

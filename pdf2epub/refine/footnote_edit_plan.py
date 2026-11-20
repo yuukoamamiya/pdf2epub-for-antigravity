@@ -55,6 +55,7 @@ class FootnoteEditPlan:
     resolved_blocks: tuple[Mapping[str, Any], ...] = ()
     preserved_roles: Mapping[str, int] = field(default_factory=dict)
     endnotes_report: Mapping[str, Any] = field(default_factory=dict)
+    note_target_files: Mapping[tuple[str, str], str] = field(default_factory=dict)
 
     @property
     def valid(self) -> bool:
@@ -212,6 +213,13 @@ def _join_parts(parts: list[str]) -> str:
     return result.strip()
 
 
+# When a multi-part chapter accumulates more than ~10k tokens of page-footnote
+# definitions (~40k chars), appending all definitions to the final part creates
+# an extreme_unit bottleneck (60k-76k tokens) for polish/translate. Distribute
+# definitions to the chapter part that references each note instead.
+DISTRIBUTED_CHAPTER_NOTES_CHAR_THRESHOLD = 40_000
+
+
 def transform_footnote_edit_plan(
     plan: FootnoteEditPlan,
     records: list[dict[str, Any]],
@@ -221,29 +229,70 @@ def transform_footnote_edit_plan(
     progress: Optional[Mapping[str, Any]],
     scope_error: Optional[str],
     definition_decisions: Optional[list[dict[str, Any]]],
+    distribute_threshold_chars: int = DISTRIBUTED_CHAPTER_NOTES_CHAR_THRESHOLD,
 ) -> FootnoteEditPlan:
     """Append page notes and normalize centralized endnotes in memory."""
     if not plan.valid:
         return plan
     transformed = dict(plan.transformed_texts)
     final_file_by_chapter: dict[str, dict[str, Any]] = {}
+    records_by_chapter: dict[str, list[dict[str, Any]]] = {}
     for record in records:
-        current = final_file_by_chapter.get(record["chapter_id"])
+        chapter_key = record["chapter_id"]
+        records_by_chapter.setdefault(chapter_key, []).append(record)
+        current = final_file_by_chapter.get(chapter_key)
         if current is None or (record["unit_order"], record["part_index"]) >= (
             current["unit_order"], current["part_index"]
         ):
-            final_file_by_chapter[record["chapter_id"]] = record
+            final_file_by_chapter[chapter_key] = record
+    for chapter_records in records_by_chapter.values():
+        chapter_records.sort(key=lambda item: (item["unit_order"], item["part_index"]))
+
+    note_target_files: dict[tuple[str, str], str] = {}
     for chapter_id, notes in plan.notes_by_chapter.items():
         target = final_file_by_chapter.get(chapter_id)
         if target is None:
             raise FootnotePlanTransformError(f"no chapter-end unit found for {chapter_id}")
-        definitions = [
-            _format_definition(str(note["output_key"]), _join_parts(list(note["parts"])))
+        formatted_notes = [
+            (
+                str(note["output_key"]),
+                _format_definition(str(note["output_key"]), _join_parts(list(note["parts"]))),
+                note,
+            )
             for note in notes
         ]
-        if definitions:
-            current = transformed[target["name"]].rstrip()
-            transformed[target["name"]] = current + "\n\n" + "\n\n".join(definitions) + "\n"
+        if not formatted_notes:
+            continue
+        total_def_chars = sum(len(defn) for _, defn, _ in formatted_notes)
+        chapter_parts = [rec["name"] for rec in records_by_chapter.get(chapter_id, [])]
+        distribute = len(chapter_parts) > 1 and total_def_chars > distribute_threshold_chars
+        if not distribute:
+            target_name = target["name"]
+            definitions = [defn for _, defn, _ in formatted_notes]
+            for output_key, _, _ in formatted_notes:
+                note_target_files[(chapter_id, output_key)] = target_name
+            current = transformed[target_name].rstrip()
+            transformed[target_name] = current + "\n\n" + "\n\n".join(definitions) + "\n"
+        else:
+            definitions_by_file: dict[str, list[str]] = {}
+            for output_key, defn, note in formatted_notes:
+                ref_token = f"[^{output_key}]"
+                chosen = None
+                for part_name in chapter_parts:
+                    if ref_token in transformed.get(part_name, ""):
+                        chosen = part_name
+                        break
+                if chosen is None:
+                    src_file = str(note.get("source_file") or "")
+                    if src_file in chapter_parts:
+                        chosen = src_file
+                if chosen is None:
+                    chosen = target["name"]
+                note_target_files[(chapter_id, output_key)] = chosen
+                definitions_by_file.setdefault(chosen, []).append(defn)
+            for part_name, definitions in definitions_by_file.items():
+                current = transformed[part_name].rstrip()
+                transformed[part_name] = current + "\n\n" + "\n\n".join(definitions) + "\n"
 
     endnote_report: Mapping[str, Any] = {
         "status": "disabled" if footnote_mode == "disabled" else "not_started",
@@ -289,10 +338,12 @@ def transform_footnote_edit_plan(
         plan,
         transformed_texts=transformed,
         endnotes_report=endnote_report,
+        note_target_files=note_target_files,
     )
 
 
 __all__ = [
+    "DISTRIBUTED_CHAPTER_NOTES_CHAR_THRESHOLD",
     "FootnoteEdit",
     "FootnoteEditPlan",
     "FootnotePlanTransformError",

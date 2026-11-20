@@ -22,16 +22,17 @@ def _sidecar(source: str, target: str, contract: dict) -> dict:
         "coverage": {
             "body_reviewed": {"status": "reviewed"},
             "definitions_reviewed": {"status": "reviewed"},
-            "cross_boundary_reviewed": {
-                "status": "not_applicable",
-                "reason": "This file has no split boundary.",
-            },
+            "cross_boundary_reviewed": (
+                {"status": "reviewed"}
+                if contract.get("has_boundary_context")
+                else {"status": "not_applicable", "reason": "This file has no split boundary."}
+            ),
         },
         "issues": [],
     }
 
 
-@pytest.mark.parametrize("mutated_input", ["source", "target", "sidecar", "context"])
+@pytest.mark.parametrize("mutated_input", ["source", "target", "sidecar", "boundary"])
 def test_formal_validation_rejects_inputs_changed_after_staging(
     tmp_path: Path, monkeypatch, mutated_input: str,
 ):
@@ -43,18 +44,26 @@ def test_formal_validation_rejects_inputs_changed_after_staging(
         "This is a sufficiently long prose paragraph used to exercise the formal "
         "validation snapshot race without triggering a short-line structure warning.\n"
     )
+    neighbor = "Neighboring continuation part paragraph for boundary halo checks.\n"
     target = source
     source_path = source_dir / "chapter.md"
+    neighbor_path = source_dir / "chapter.part2.md"
     target_path = target_dir / "chapter.md"
     source_path.write_bytes(source.encode("utf-8"))
+    neighbor_path.write_bytes(neighbor.encode("utf-8"))
     target_path.write_bytes(target.encode("utf-8"))
-    context_path = tmp_path / "unit-context.json"
-    context_path.write_text('{"entries": []}', encoding="utf-8")
+    (target_dir / "chapter.part2.md").write_bytes(neighbor.encode("utf-8"))
+    (source_dir / "tree_progress.json").write_text(
+        json.dumps({"units": [{"part_files": ["chapter.md", "chapter.part2.md"]}]}),
+        encoding="utf-8",
+    )
+
+    from pdf2epub.refine.unit_mapping import load_pdf_continuation_files
 
     paths = prepare_markdown_subagent(
         tmp_path, "polish", source_dir, target_dir, "English", "Chinese",
         footnote_semantics_enabled=True,
-        unit_context_files={"chapter.md": context_path},
+        continuation_files=load_pdf_continuation_files(tmp_path, source_dir),
     )
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
     contract = manifest["footnote_semantics"]["files"]["chapter.md"]
@@ -75,11 +84,12 @@ def test_formal_validation_rejects_inputs_changed_after_staging(
         elif mutated_input == "sidecar":
             sidecar_path.write_text(json.dumps(_sidecar(source, target, contract), indent=2), encoding="utf-8")
         else:
-            context_path.write_text('{"entries": [{"source": "new", "target": "新"}]}', encoding="utf-8")
+            neighbor_path.write_text("Mutated neighbor boundary during validation.\n", encoding="utf-8")
 
     monkeypatch.setattr(persistence, "_atomic_copy", mutate_after_copy)
     report = validate_markdown_subagent(
         tmp_path, "polish", source_dir, target_dir,
+        selected_files=["chapter.md"],
         require_footnote_semantic_review=True,
     )
 
