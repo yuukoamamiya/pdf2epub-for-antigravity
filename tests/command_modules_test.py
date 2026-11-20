@@ -135,6 +135,15 @@ def test_polish_validate_parser_accepts_single_file_checkpoint():
     assert args.file == "chapter_8.5.md"
 
 
+def test_translate_and_polish_accept_dry_run():
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers(dest="command")
+    register_command_parsers(subparsers)
+
+    assert parser.parse_args(["translate", "--resume", "--dry-run"]).dry_run is True
+    assert parser.parse_args(["polish", "--resume", "--dry-run"]).dry_run is True
+
+
 def test_html_prepare_logs_generated_handoff_directory_and_scopes_validation_prompt(tmp_path, monkeypatch):
     from types import SimpleNamespace
     import pdf2epub.glossary as glossary
