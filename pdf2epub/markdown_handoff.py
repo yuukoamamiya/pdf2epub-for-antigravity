@@ -25,6 +25,42 @@ from .subagent_safety import protected_workspace_snapshot
 from .workflow_contracts import atomic_write_json, atomic_write_text, relative_posix_path
 
 
+def preview_markdown_handoff(request: MarkdownHandoffRequest) -> Dict[str, Any]:
+    """Describe what a prepare run would do, without writing any file.
+
+    The first ``--resume`` after a projection or schema upgrade lists every
+    unit as pending, and operators are told not to dispatch from it.  A
+    read-only preview makes the pending reasons and worker batches visible
+    before any manifest, prompt or hand-off is replaced.
+    """
+    plan = plan_markdown_handoff(
+        request.source_dir,
+        request.task,
+        request.config,
+        declared_files=request.declared_files,
+        file_roles=request.file_roles,
+        file_role_sources=request.file_role_sources,
+        controlled_files=request.controlled_files,
+        continuation_files=request.continuation_files,
+    )
+    context = normalize_handoff_context(request, (source.name for source in plan.sources))
+    decision = decide_resume(request, plan, context)
+    reason_counts: Dict[str, int] = {}
+    for reason in decision.pending_reasons.values():
+        reason_counts[reason] = reason_counts.get(reason, 0) + 1
+    return {
+        "task": request.task,
+        "completed_files": list(decision.completed_files),
+        "pending_files": list(decision.pending_files),
+        "special_pending_files": list(decision.special_pending_files),
+        "pending_reasons": dict(decision.pending_reasons),
+        "pending_reason_counts": dict(sorted(reason_counts.items())),
+        "worker_batches": [list(batch) for batch in decision.pending_batches],
+        "effective_concurrency": decision.effective_concurrency,
+        "concurrency_reason": decision.concurrency_reason,
+    }
+
+
 def prepare_markdown_subagent(request: MarkdownHandoffRequest) -> Dict[str, Path]:
     """Write the manifest and prompt for one Markdown hand-off request."""
     plan = plan_markdown_handoff(

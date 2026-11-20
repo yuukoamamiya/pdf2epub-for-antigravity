@@ -562,6 +562,8 @@ Subagent 实际读写哪些文件。两者不能互相替代。
   （字段定义集中在 `markdown_handoff_context.py`，路径与元组在 `__post_init__` 归一化），
   只把声明过的源文件写入映射，并把不在映射中的源文件补成单文件组。它同时计算源哈希、
   单元上下文哈希和 `pending_files`，所以装箱器不需要重新猜测哪些文件可用。
+  `markdown_handoff.preview_markdown_handoff()` 复用同一 planning/resume 决定，只返回
+  `pending_reasons`、worker 批次与并发度，不写 manifest、prompt 或 handoff。
 
 `worker_grouping._chapter_worker_groups()` 的处理顺序是固定的：先按 TOC 顺序读取待处理
 章节，对每个章节单独运行 `_recommended_batches()`；若章节需要多个批次，或任一文件超过

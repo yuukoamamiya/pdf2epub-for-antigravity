@@ -457,6 +457,14 @@ def _register_markdown_commands(subparsers) -> None:
         help="Keep existing non-empty Subagent outputs and prepare only pending files",
     )
     polish_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "With --resume, print pending reasons and worker batches without "
+            "writing a manifest, prompt or hand-off"
+        ),
+    )
+    polish_parser.add_argument(
         "--retry-after-human-review",
         action="store_true",
         help=(
@@ -533,6 +541,14 @@ def _register_markdown_commands(subparsers) -> None:
         "--resume",
         action="store_true",
         help="Keep existing non-empty Subagent outputs and prepare only pending files",
+    )
+    translate_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "With --resume, print pending reasons and worker batches without "
+            "writing a manifest, prompt or hand-off"
+        ),
     )
     translate_parser.add_argument(
         "--retry-after-human-review",

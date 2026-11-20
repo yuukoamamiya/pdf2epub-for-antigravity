@@ -485,6 +485,9 @@ validation receipt 可能失效并暂时把所有现有目标列为 pending。�
 它：若只有 `context_version_bumped`/`receipt_missing`，说明是合同升级或 receipt 缺失，
 不是正文变化，不得据此重译；`source_changed` 或 `review_reopened` 才表示需要 Subagent 重新处理。
 `status` 的 `review_gates` 会同步显示这些计数。该字段只用于诊断，不改变复用判定。
+准备前可用 `translate --resume --dry-run` 或 `polish --resume --dry-run` 只读预览
+`pending_reasons` 与 worker 批次；preview 不写 manifest、prompt 或 worker handoff。
+剩余的 receipt 自动重盖章仍未提供，版本升级仍按 `prepare → validate → prepare` 流程处理。
 EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编号格式差异；编号只在一侧缺失时，
 仅当去编号后的标题正文精确且全书分片中唯一、没有不同编号冲突时才回退。模糊相似标题不绑定，
 原有 HTML `id` 保留。

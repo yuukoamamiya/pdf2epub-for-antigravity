@@ -52,6 +52,29 @@ def polish_command(args):
     return _prepare_pdf_markdown_task(args, "polish")
 
 
+def _print_handoff_preview(preview: Mapping[str, Any]) -> None:
+    """Print a read-only prepare preview for an operator."""
+    logger.info(
+        f"[dry-run] {preview['task']}: "
+        f"{len(preview['completed_files'])} completed, "
+        f"{len(preview['pending_files'])} pending, "
+        f"{len(preview['special_pending_files'])} controlled pending"
+    )
+    counts = preview.get("pending_reason_counts") or {}
+    if counts:
+        logger.info(
+            "pending reasons: "
+            + ", ".join(f"{key}={value}" for key, value in counts.items())
+        )
+    for index, batch in enumerate(preview.get("worker_batches") or [], 1):
+        logger.info(f"worker batch {index}: " + ", ".join(batch))
+    logger.info(
+        f"concurrency: {preview['effective_concurrency']} "
+        f"({preview['concurrency_reason']})"
+    )
+    logger.warning("[dry-run] no manifest, prompt, or worker hand-off was written")
+
+
 def _prepare_pdf_markdown_task(args, task: str):
     from pdf2epub.markdown_handoff import prepare_markdown_subagent
     from pdf2epub.markdown_handoff_context import MarkdownHandoffRequest
@@ -338,37 +361,41 @@ def _prepare_pdf_markdown_task(args, task: str):
                         source_language=source_language,
                     ):
                         controlled_files[filename] = kind
-        paths = prepare_markdown_subagent(
-            MarkdownHandoffRequest(
-                output_dir=output_dir,
-                task=task,
-                source_dir=source_dir,
-                target_dir=target_dir,
-                source_language=source_language,
-                target_language=target_language,
-                extra_rules=rules,
-                config=config,
-                resume=getattr(args, "resume", False),
-                allow_human_review_retry=bool(
-                    getattr(args, "retry_after_human_review", False)
-                ),
-                file_roles=load_pdf_file_roles(output_dir) if task in {"translate", "polish"} else None,
-                file_role_sources=_pdf_file_role_sources(output_dir) if task in {"translate", "polish"} else None,
-                context_files=context_files or None,
-                skipped_context_files=skipped_context_files,
-                prompt_context_files=prompt_context_files,
-                file_contexts=_load_pdf_file_contexts(output_dir) if task == "translate" else None,
-                heading_contexts=heading_contexts or None,
-                global_toc_outline=global_toc_outline or None,
-                unit_context_files=unit_context_files or None,
-                chapter_groups=chapter_groups if task == "translate" else None,
-                continuation_files=_load_pdf_continuation_files(output_dir, source_dir),
-                protected_toc_titles=_load_pdf_toc_titles(output_dir) if task == "polish" else None,
-                config_path=context.config_path,
-                controlled_files=controlled_files or None,
-                footnote_semantics_enabled=task == "polish" and footnote_mode != "disabled",
-            )
+        handoff_request = MarkdownHandoffRequest(
+            output_dir=output_dir,
+            task=task,
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language=source_language,
+            target_language=target_language,
+            extra_rules=rules,
+            config=config,
+            resume=getattr(args, "resume", False),
+            allow_human_review_retry=bool(
+                getattr(args, "retry_after_human_review", False)
+            ),
+            file_roles=load_pdf_file_roles(output_dir) if task in {"translate", "polish"} else None,
+            file_role_sources=_pdf_file_role_sources(output_dir) if task in {"translate", "polish"} else None,
+            context_files=context_files or None,
+            skipped_context_files=skipped_context_files,
+            prompt_context_files=prompt_context_files,
+            file_contexts=_load_pdf_file_contexts(output_dir) if task == "translate" else None,
+            heading_contexts=heading_contexts or None,
+            global_toc_outline=global_toc_outline or None,
+            unit_context_files=unit_context_files or None,
+            chapter_groups=chapter_groups if task == "translate" else None,
+            continuation_files=_load_pdf_continuation_files(output_dir, source_dir),
+            protected_toc_titles=_load_pdf_toc_titles(output_dir) if task == "polish" else None,
+            config_path=context.config_path,
+            controlled_files=controlled_files or None,
+            footnote_semantics_enabled=task == "polish" and footnote_mode != "disabled",
         )
+        if getattr(args, "dry_run", False):
+            from pdf2epub.markdown_handoff import preview_markdown_handoff
+
+            _print_handoff_preview(preview_markdown_handoff(handoff_request))
+            return 0
+        paths = prepare_markdown_subagent(handoff_request)
         from pdf2epub.subagent_runtime import write_worker_handoffs
 
         if task == "translate" and policy.dynamic_terminology_enabled:

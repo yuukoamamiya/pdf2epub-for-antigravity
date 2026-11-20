@@ -86,10 +86,11 @@ uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲
 按价值排序。动手前先读对应模块和测试，并按第 3 节跑守护测试。
 
 1. **receipt 迁移命令**（P1，`markdown_handoff_resume.py`、`markdown_validation*.py`）
-   pending 原因分类已完成（见 `f4aa8ac`）：版本迁移与内容失效现在能区分，首轮 pending
-   不会再被误当成正文变化。仍缺一次性的只读 `translate --dry-run` 或显式
+   pending 原因分类已完成（见 `f4aa8ac`），`translate/polish --resume --dry-run` 现在可只读
+   预览原因与 worker 批次（见 `feat(handoff)` 提交）。仍缺一次性的
    `refresh-checkpoints`：只在源哈希一致时重盖章旧 receipt，免去
-   `prepare → validate → prepare` 三步走。
+   `prepare → validate → prepare` 三步走。实现前必须先证明旧快照与当前快照除版本戳外完全
+   相同，否则宁可不刷新；relax 到"源哈希一致即可"会接受在旧投影下验证过的译文。
 2. **巨型函数拆分**（P1）
    `commands/registry.py` 已完成（见 `fab9f15`）。剩余：
    `refine/footnote_handoff.py:211 prepare_footnote_subagent()`（1126 行）、
