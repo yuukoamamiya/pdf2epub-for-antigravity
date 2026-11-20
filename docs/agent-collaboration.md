@@ -83,6 +83,8 @@ uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲
 | `65fcc9c` | `translate` / `polish` 增加只读 `--dry-run`：复用同一 planning/resume 决定，打印 `pending_reasons`、worker 批次与并发度，不写 manifest/prompt/handoff |
 | `007b27a` | 新增只读 `dispatch-plan --task <task>`：打印 manifest 的分波计划、每个 worker 的 scoped prompt 与 assigned_files，不写文件、不占额度 |
 | `1b97905` | 新增最小 ruff 门禁（语法/未定义名/无效异常）与 CI job；顺手修复 `preview_markdown_handoff` 丢失的 `Any` 导入和一处 3.12-only f-string |
+| `c3aedaf` | `run_readiness_check()` 从 449 行拆到 257 行：OCR/异常/纠错页选择与 TOC/refine/footnote/source 两段成为具名 helper，检查顺序与消息不变 |
+| `3969711` | 抽出 `endnote_patterns.py`：两边逐字相同的 Unicode 上标正则、数字表和 Markdown 引用正则只保留一份；定义正则因语义不同继续分开 |
 
 ## 5. 已知遗留 backlog
 
@@ -95,20 +97,22 @@ uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲
    `prepare → validate → prepare` 三步走。实现前必须先证明旧快照与当前快照除版本戳外完全
    相同，否则宁可不刷新；relax 到"源哈希一致即可"会接受在旧投影下验证过的译文。
 2. **巨型函数拆分**（P1）
-   `commands/registry.py` 已完成（见 `fab9f15`）。剩余：
+   `commands/registry.py`（见 `fab9f15`）与 `commands/markdown_readiness.py`（见 `c3aedaf`）
+   已完成。剩余：
    `refine/footnote_handoff.py:211 prepare_footnote_subagent()`（1126 行）、
    `refine/footnote_result_audit.py:299`（534 行）、`refine/footnote_regions.py:33`（509 行）、
-   `commands/markdown_readiness.py:30`（449 行）、`refine/footnote_apply.py:81`（413 行）。
+   `refine/footnote_apply.py:81`（413 行）。
    拆分必须保持 manifest/report schema 与哈希合同不变，并跑全量测试。
 3. **Azure / Vision 后端的重复实现**（P2）
-   `ocr/backends/azure.py` 与 `vision.py` 有 219 行逐字相同（约占较小文件的 34%）：
-   图片落盘、坐标转换、插图提取、纵向栏处理各写了一遍。两者都是可选 legacy 后端，
-   合并前先确认还要不要保留这两个后端；若要保留，抽 `_image_page_backend_common.py`。
-4. **Notes 解析的重复实现**（P2）
-   `footnote_normalization.py`（polish 校验）与 `refine/endnote_normalization.py`（apply）
-   各自维护一套定义正则。`endnote_definition_keys()` 已经共享，但
-   `_MARKDOWN_DEF_RE` / `_RAW_NOTE_DEF_RE` / `_RAW_SUP_NOTE_DEF_RE` 仍是两份且语义有细微差异；
-   合并前必须逐条比对（apply 侧要求行尾有内容，校验侧只匹配前缀）。不要为了去重改变行为。
+   `ocr/backends/azure.py` 与 `vision.py` 的 furigana 重建逻辑（`_classify_lines_by_width`、
+   `_group_furigana_words`、`_match_furigana_to_main_text`、`_assemble_reconstructed_text`、
+   `_format_clean_output`）仍各有一份；两者都是可选 legacy 后端且没有独立测试。
+   **前置决定**：确认是否继续保留这两个后端；若要保留，再抽 `_image_page_backend_common.py`，
+   合并前必须先用真实页图对比两条路径的输出。盲目合并属于行为变更，不是去重。
+4. **Notes 定义正则的剩余差异**（P2）
+   逐字相同的 Unicode 上标正则、数字表和 Markdown 引用正则已抽到 `endnote_patterns.py`
+   （见 `3969711`）。定义正则仍分开：校验侧只匹配前缀，apply 侧要求行尾有内容；
+   合并会改变行为，因此保留并加注释，不做"看起来更整齐"的统一。
 5. **`.gitattributes` 与工作区换行**（P2）
    仓库索引是 LF、工作区是 CRLF，`git status` 会列出大量 stat-only 改动。
    2026-11-20 已用逐文件 `git add` 刷新 143 个仅 stat 变化的条目，剩余 11 个是真实改动，
