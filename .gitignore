@@ -59,6 +59,9 @@ scripts/realign_*.py
 # are being migrated.
 /.work/
 /scratch/
+# Local archive of retired configs and old run outputs (hundreds of MB).
+# Kept on disk for reference only; it must never be committed.
+/archive/
 /tmp_chunks/
 /.pytest-local-temp/
 /deepsec-*.json
