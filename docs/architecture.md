@@ -87,7 +87,9 @@ Subagent 合同层
 - 初始化 UTF-8 标准输入输出和基础日志；
 - 创建全局参数和 argparse 子命令容器；
 - 调用 `register_command_parsers`；
-- 将解析后的参数交给对应的 `args.func`。
+- 将解析后的参数交给 `run_command()`，由它提供唯一的错误边界：预期门禁失败仍由 handler
+  返回非零码，未预期异常打印一行 `类型: 消息` 并返回 1，只有 `--debug` 或
+  `PDF2EPUB_DEBUG=1` 才展开 traceback；`KeyboardInterrupt` 返回 130，`SystemExit` 不吞掉。
 
 命令注册集中在 [`commands/registry.py`](../pdf2epub/commands/registry.py)。注册模块只
 定义命令名称、参数和 handler，不实现业务逻辑。这样新增命令时不会再次扩大 CLI 入口。

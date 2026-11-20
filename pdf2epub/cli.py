@@ -7,6 +7,7 @@ including polishing OCR output and translating content.
 """
 
 import argparse
+import os
 import sys
 
 from pdf2epub.utils.encoding import configure_utf8_stdio
@@ -34,6 +35,14 @@ def main():
     # Global arguments
     parser.add_argument("-c", "--config", default="config.yaml", 
                         help="Path to config file")
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help=(
+            "Print the full traceback for unexpected errors instead of a "
+            "one-line message (PDF2EPUB_DEBUG=1 has the same effect)"
+        ),
+    )
     
     # Create subcommands
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
@@ -43,7 +52,32 @@ def main():
     args = parser.parse_args()
     
     # Execute the appropriate command
-    return args.func(args)
+    return run_command(args)
+
+
+def run_command(args) -> int:
+    """Run one command handler with a single operator-facing error boundary.
+
+    Handlers already return non-zero exit codes for expected gate failures.
+    An unexpected exception used to escape as a raw traceback; now it is
+    reported as one line and only expanded with ``--debug``.
+    """
+    try:
+        return args.func(args)
+    except KeyboardInterrupt:
+        logger.error("Interrupted")
+        return 130
+    except SystemExit:
+        raise
+    except Exception as exc:  # noqa: BLE001 - top-level CLI boundary
+        if getattr(args, "debug", False) or os.environ.get("PDF2EPUB_DEBUG"):
+            logger.opt(exception=exc).error("Unhandled error")
+        else:
+            logger.error(f"{type(exc).__name__}: {exc}")
+            logger.info(
+                "Re-run with --debug (or PDF2EPUB_DEBUG=1) for a traceback."
+            )
+        return 1
 
 
 if __name__ == "__main__":
