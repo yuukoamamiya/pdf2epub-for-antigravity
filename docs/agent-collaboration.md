@@ -14,7 +14,7 @@
 ```text
 git status --short          # 先看有没有别人的改动；不要清理、不要纳入本次提交
 git branch --show-current   # 必须是 main；不要建临时分支
-uv run pytest -q            # 基线：1637 个测试（4 skipped），约 40 秒
+uv run pytest -q            # 基线：1639 个测试（4 skipped），约 40 秒
 uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲染
 ```
 
@@ -94,38 +94,21 @@ uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲
 | `6f2602b` | `prepare_footnote_subagent()` 的候选增强链拆成 11 个具名阶段，1126 → 247 行；顺序、任务身份与证据哈希不变 |
 | `7c8d747` | `_prepare_pdf_markdown_task()` 抽出 `_prepare_task_source()`，387 → 236 行；控制流与错误返回不变 |
 | `2f41543` | `ocr_full_book_pagewise()` 拆出进度恢复、待处理页扫描、worker 池与 summary，432 → 140 行 |
+| `9e908dc` | resume 增加 `--refresh-checkpoints`：只在旧快照与当前投影除 `projection_version` 外完全一致且源/目标哈希匹配时重盖章 receipt；载荷变化仍走 validate |
 
 ## 5. 已知遗留 backlog
 
 按价值排序。动手前先读对应模块和测试，并按第 3 节跑守护测试。
 
-1. **receipt 迁移命令**（P1，`markdown_handoff_resume.py`、`markdown_validation*.py`）
-   pending 原因分类已完成（见 `f4aa8ac`），`translate/polish --resume --dry-run` 现在可只读
-   预览原因与 worker 批次（见 `65fcc9c`）。仍缺一次性的
-   `refresh-checkpoints`：只在源哈希一致时重盖章旧 receipt，免去
-   `prepare → validate → prepare` 三步走。实现前必须先证明旧快照与当前快照除版本戳外完全
-   相同，否则宁可不刷新；relax 到"源哈希一致即可"会接受在旧投影下验证过的译文。
-2. **巨型函数拆分**（P1，本轮已完成）
-   `registry.py`、`markdown_readiness.py`、`footnote_regions.py`、`footnote_apply.py`、
-   `footnote_result_audit.py`、`prepare_footnote_subagent()`、`_prepare_pdf_markdown_task()`、
-   `ocr_full_book_pagewise()` 均已拆分到 ≤247 行，详见 §4。
-   仅剩两个公开签名偏长：`validate_markdown_subagent()`（17 参）与
-   `ocr_full_book_pagewise()`（16 参）；改签名会牵动大量调用点，收益低于本轮已完成的
-   函数体拆分，暂列为可选维护项。
-   `run_secondary_ocr_consensus()`（175 行）也可作为一个独立的小批次，但不在原审计清单内。
-3. **Notes 定义正则的剩余差异**（P2）
-   逐字相同的 Unicode 上标正则、数字表和 Markdown 引用正则已抽到 `endnote_patterns.py`
-   （见 `3969711`）。定义正则仍分开：校验侧只匹配前缀，apply 侧要求行尾有内容；
-   合并会改变行为，因此保留并加注释，不做"看起来更整齐"的统一。
-4. **`.gitattributes` 与工作区换行**（P2）
+1. **`status` 的 `package` 阶段**（P2）
+   目前只要存在 `*.epub` 就视为有产物；结合 `current/reachable` 已不会误报，但更严格的
+   做法是让 `build-epub`/`build-html-epub` 写构建 receipt，并让 `package` 校验该 receipt
+   对应当前 polish/translate 检查点。旧产物没有 receipt 时需要兼容回退，不能直接判失败。
+2. **`.gitattributes` 与工作区换行**（P2，已缓解）
    仓库索引是 LF、工作区是 CRLF，`git status` 会列出大量 stat-only 改动。
    2026-11-20 已用逐文件 `git add` 刷新 143 个仅 stat 变化的条目，剩余 11 个是真实改动，
    必须由作者先提交；不要在有真实改动的批次里做 `git add --renormalize .`。
    工具再次改写换行后重复同一刷新即可。
-
-5. **`status` 的 `package` 阶段**（P2）
-   目前只要存在 `*.epub` 就视为有产物；结合 `current/reachable` 已不会误报，但更严格的
-   做法是校验 EPUB 的构建 receipt 是否对应当前 polish/translate 检查点。
 
 2026-11-20 另将根目录 17 个一次性脚本/JSON（`inspect_*.py`、`suture_*.py`、
 `scratch_*.json`、`output_survey.json`、`scripts/apply_glossary_supplement.py`）归档到
@@ -133,6 +116,9 @@ uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲
 
 ### 已评估但决定不做
 
+- **Notes 定义正则的剩余差异**：逐字相同的 Unicode 上标正则、数字表和 Markdown 引用正则
+  已抽到 `endnote_patterns.py`（见 `3969711`）。定义正则仍分开：校验侧只匹配前缀，apply 侧
+  要求行尾有内容；合并会改变行为，因此保留并加注释。
 - **worker prompt 瘦身**：每个 scoped prompt 约 20 KB，含整书装箱与派发规则。经核查这是
   **有意共享的操作员合同**（`docs/architecture.md` §2.4、`tests/workflow_optimizations_test.py`
   与 `tests/worker_dispatch_plan_test.py` 都断言它存在）。删减属于合同变更，不是 bug 修复；

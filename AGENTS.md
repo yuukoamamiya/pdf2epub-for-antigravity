@@ -489,7 +489,9 @@ validation receipt 可能失效并暂时把所有现有目标列为 pending。�
 `status` 的 `review_gates` 会同步显示这些计数。该字段只用于诊断，不改变复用判定。
 准备前可用 `translate --resume --dry-run` 或 `polish --resume --dry-run` 只读预览
 `pending_reasons` 与 worker 批次；preview 不写 manifest、prompt 或 worker handoff。
-剩余的 receipt 自动重盖章仍未提供，版本升级仍按 `prepare → validate → prepare` 流程处理。
+若旧 receipt 的上下文快照与当前投影除 `projection_version` 外完全一致，可用
+`--refresh-checkpoints` 直接重盖章；任何投影载荷变化（新增或改动的 heading 字段）仍必须
+按 `prepare → validate → prepare` 处理，refresh 会拒绝。
 EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编号格式差异；编号只在一侧缺失时，
 仅当去编号后的标题正文精确且全书分片中唯一、没有不同编号冲突时才回退。模糊相似标题不绑定，
 原有 HTML `id` 保留。
