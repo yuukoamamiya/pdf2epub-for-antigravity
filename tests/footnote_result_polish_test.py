@@ -1,4 +1,5 @@
 from pdf2epub.markdown_handoff import prepare_markdown_subagent
+from pdf2epub.markdown_handoff_context import MarkdownHandoffRequest
 from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
 
@@ -10,7 +11,14 @@ def _validate_polish(tmp_path, source_text, target_text):
     (source_dir / "unit.md").write_text(source_text, encoding="utf-8")
     (target_dir / "unit.md").write_text(target_text, encoding="utf-8")
     prepare_markdown_subagent(
-        tmp_path, "polish", source_dir, target_dir, "English", "English"
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="polish",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="English",
+        )
     )
     return validate_markdown_subagent(tmp_path, "polish", source_dir, target_dir)
 

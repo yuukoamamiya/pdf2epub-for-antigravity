@@ -3,6 +3,7 @@ import json
 import pytest
 from types import SimpleNamespace
 
+from pdf2epub.markdown_handoff_context import MarkdownHandoffRequest
 from pdf2epub.special_unit_translation import apply, parse_unit, prepare
 
 
@@ -128,8 +129,16 @@ def test_translate_handoff_keeps_full_inventory_and_separates_controlled_pending
     (source / "refs.md").write_text("# References\n\n- A 2020\n", encoding="utf-8")
     (source / "chapter.md").write_text("# Chapter\n\nText.\n", encoding="utf-8")
     paths = prepare_markdown_subagent(
-        tmp_path, "translate", source, tmp_path / "translated", "English", "Chinese",
-        file_roles={"refs.md": "bibliography"}, controlled_files={"refs.md": "bibliography"},
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source,
+            target_dir=tmp_path / "translated",
+            source_language="English",
+            target_language="Chinese",
+            file_roles={"refs.md": "bibliography"},
+            controlled_files={"refs.md": "bibliography"},
+        )
     )
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
     assert set(manifest["files"]) == {"refs.md", "chapter.md"}

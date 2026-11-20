@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from pdf2epub.markdown_handoff import prepare_markdown_subagent
+from pdf2epub.markdown_handoff_context import MarkdownHandoffRequest
 from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
 
@@ -21,10 +22,17 @@ def _setup(tmp_path: Path, *, contexts: bool = True):
             context_path.write_text(json.dumps({"entries": [{"source": name, "target": "条目"}]}), encoding="utf-8")
             unit_context_files[name] = context_path
     paths = prepare_markdown_subagent(
-        tmp_path, "translate", source, target, "English", "Chinese",
-        unit_context_files=unit_context_files,
-        heading_contexts={"a.md": {"node_id": "a", "title": "A"}, "b.md": {"node_id": "b", "title": "B"}} if contexts else {},
-        config={"subagent": {"batching": {"max_files": 1}}},
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source,
+            target_dir=target,
+            source_language="English",
+            target_language="Chinese",
+            unit_context_files=unit_context_files,
+            heading_contexts={"a.md": {"node_id": "a", "title": "A"}, "b.md": {"node_id": "b", "title": "B"}} if contexts else {},
+            config={"subagent": {"batching": {"max_files": 1}}},
+        )
     )
     return source, target, context_dir, unit_context_files, paths
 
@@ -45,17 +53,33 @@ def test_full_validation_receipt_keeps_resume_context_across_repeated_prepare(tm
         json.dumps({"entries": [{"source": "changed", "target": "新条目"}]}), encoding="utf-8"
     )
     first = prepare_markdown_subagent(
-        tmp_path, "translate", source, target, "English", "Chinese", resume=True,
-        unit_context_files={name: context_dir / f"{name}.json" for name in ("a.md", "b.md")},
-        heading_contexts={"a.md": {"node_id": "a", "title": "A"}, "b.md": {"node_id": "b", "title": "B"}},
-        config={"subagent": {"batching": {"max_files": 1}}},
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source,
+            target_dir=target,
+            source_language="English",
+            target_language="Chinese",
+            resume=True,
+            unit_context_files={name: context_dir / f"{name}.json" for name in ("a.md", "b.md")},
+            heading_contexts={"a.md": {"node_id": "a", "title": "A"}, "b.md": {"node_id": "b", "title": "B"}},
+            config={"subagent": {"batching": {"max_files": 1}}},
+        )
     )
     assert _read_manifest(first["manifest"])["pending_files"] == ["a.md"]
     second = prepare_markdown_subagent(
-        tmp_path, "translate", source, target, "English", "Chinese", resume=True,
-        unit_context_files={name: context_dir / f"{name}.json" for name in ("a.md", "b.md")},
-        heading_contexts={"a.md": {"node_id": "a", "title": "A"}, "b.md": {"node_id": "b", "title": "B"}},
-        config={"subagent": {"batching": {"max_files": 1}}},
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source,
+            target_dir=target,
+            source_language="English",
+            target_language="Chinese",
+            resume=True,
+            unit_context_files={name: context_dir / f"{name}.json" for name in ("a.md", "b.md")},
+            heading_contexts={"a.md": {"node_id": "a", "title": "A"}, "b.md": {"node_id": "b", "title": "B"}},
+            config={"subagent": {"batching": {"max_files": 1}}},
+        )
     )
     second_manifest = _read_manifest(second["manifest"])
     assert second_manifest["pending_files"] == ["a.md"]
@@ -66,10 +90,18 @@ def test_full_validation_receipt_keeps_resume_context_across_repeated_prepare(tm
     )
     assert refreshed["all_passed"]
     final = prepare_markdown_subagent(
-        tmp_path, "translate", source, target, "English", "Chinese", resume=True,
-        unit_context_files={name: context_dir / f"{name}.json" for name in ("a.md", "b.md")},
-        heading_contexts={"a.md": {"node_id": "a", "title": "A"}, "b.md": {"node_id": "b", "title": "B"}},
-        config={"subagent": {"batching": {"max_files": 1}}},
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source,
+            target_dir=target,
+            source_language="English",
+            target_language="Chinese",
+            resume=True,
+            unit_context_files={name: context_dir / f"{name}.json" for name in ("a.md", "b.md")},
+            heading_contexts={"a.md": {"node_id": "a", "title": "A"}, "b.md": {"node_id": "b", "title": "B"}},
+            config={"subagent": {"batching": {"max_files": 1}}},
+        )
     )
     final_manifest = _read_manifest(final["manifest"])
     assert final_manifest["pending_files"] == []
@@ -79,9 +111,16 @@ def test_full_validation_receipt_keeps_resume_context_across_repeated_prepare(tm
 def test_partial_receipt_persists_snapshot_and_rejects_unprepared_context_change(tmp_path: Path):
     source, target, context_dir, unit_context_files, _ = _setup(tmp_path)
     prepared = prepare_markdown_subagent(
-        tmp_path, "translate", source, target, "English", "Chinese",
-        unit_context_files=unit_context_files,
-        heading_contexts={"a.md": {"node_id": "a", "title": "A"}, "b.md": {"node_id": "b", "title": "B"}},
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source,
+            target_dir=target,
+            source_language="English",
+            target_language="Chinese",
+            unit_context_files=unit_context_files,
+            heading_contexts={"a.md": {"node_id": "a", "title": "A"}, "b.md": {"node_id": "b", "title": "B"}},
+        )
     )
     assert validate_markdown_subagent(tmp_path, "translate", source, target)["all_passed"]
     (context_dir / "a.md.json").write_text(json.dumps({"entries": [{"source": "late"}]}), encoding="utf-8")
@@ -107,10 +146,18 @@ def test_partial_receipt_persists_snapshot_and_rejects_unprepared_context_change
         assert any(item.get("action") == "refresh_context_and_revalidate" for item in report["retry_required"])
     ledger_bytes = (tmp_path / "translate_file_validation.json").read_bytes()
     resumed = prepare_markdown_subagent(
-        tmp_path, "translate", source, target, "English", "Chinese", resume=True,
-        unit_context_files={name: context_dir / f"{name}.json" for name in ("a.md", "b.md")},
-        heading_contexts={"a.md": {"node_id": "a", "title": "A"}, "b.md": {"node_id": "b", "title": "B"}},
-        config={"subagent": {"batching": {"max_files": 1}}},
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source,
+            target_dir=target,
+            source_language="English",
+            target_language="Chinese",
+            resume=True,
+            unit_context_files={name: context_dir / f"{name}.json" for name in ("a.md", "b.md")},
+            heading_contexts={"a.md": {"node_id": "a", "title": "A"}, "b.md": {"node_id": "b", "title": "B"}},
+            config={"subagent": {"batching": {"max_files": 1}}},
+        )
     )
     resumed_manifest = _read_manifest(resumed["manifest"])
     assert resumed_manifest["pending_files"] == ["a.md"]
@@ -123,10 +170,18 @@ def test_partial_receipt_persists_snapshot_and_rejects_unprepared_context_change
     assert archived_path.read_bytes() == ledger_bytes
     assert __import__("hashlib").sha256(archived_path.read_bytes()).hexdigest() == archive["sha256"]
     completed = prepare_markdown_subagent(
-        tmp_path, "translate", source, target, "English", "Chinese", resume=True,
-        unit_context_files={name: context_dir / f"{name}.json" for name in ("a.md", "b.md")},
-        heading_contexts={"a.md": {"node_id": "a", "title": "A"}, "b.md": {"node_id": "b", "title": "B"}},
-        config={"subagent": {"batching": {"max_files": 1}}},
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source,
+            target_dir=target,
+            source_language="English",
+            target_language="Chinese",
+            resume=True,
+            unit_context_files={name: context_dir / f"{name}.json" for name in ("a.md", "b.md")},
+            heading_contexts={"a.md": {"node_id": "a", "title": "A"}, "b.md": {"node_id": "b", "title": "B"}},
+            config={"subagent": {"batching": {"max_files": 1}}},
+        )
     )
     assert _read_manifest(completed["manifest"])["completed_files"] == ["a.md", "b.md"]
 
@@ -134,8 +189,15 @@ def test_partial_receipt_persists_snapshot_and_rejects_unprepared_context_change
 def test_check_only_full_validation_does_not_archive_partial_ledger(tmp_path: Path):
     source, target, _, unit_context_files, _ = _setup(tmp_path)
     prepare_markdown_subagent(
-        tmp_path, "translate", source, target, "English", "Chinese",
-        unit_context_files=unit_context_files,
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source,
+            target_dir=target,
+            source_language="English",
+            target_language="Chinese",
+            unit_context_files=unit_context_files,
+        )
     )
     validate_markdown_subagent(tmp_path, "translate", source, target, selected_files=["a.md"])
     ledger_path = tmp_path / "translate_file_validation.json"
@@ -168,20 +230,44 @@ def test_removed_unit_and_heading_context_require_formal_validation(tmp_path: Pa
     source, target, _, unit_context_files, _ = _setup(tmp_path)
     headings = {"a.md": {"node_id": "a"}, "b.md": {"node_id": "b"}}
     prepare_markdown_subagent(
-        tmp_path, "translate", source, target, "English", "Chinese",
-        unit_context_files=unit_context_files, heading_contexts=headings,
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source,
+            target_dir=target,
+            source_language="English",
+            target_language="Chinese",
+            unit_context_files=unit_context_files,
+            heading_contexts=headings,
+        )
     )
     assert validate_markdown_subagent(tmp_path, "translate", source, target)["all_passed"]
 
     for _ in range(2):
         prepared = prepare_markdown_subagent(
-            tmp_path, "translate", source, target, "English", "Chinese", resume=True,
+            MarkdownHandoffRequest(
+                output_dir=tmp_path,
+                task="translate",
+                source_dir=source,
+                target_dir=target,
+                source_language="English",
+                target_language="Chinese",
+                resume=True,
+            )
         )
         manifest = _read_manifest(prepared["manifest"])
         assert manifest["pending_files"] == ["a.md", "b.md"]
     assert validate_markdown_subagent(tmp_path, "translate", source, target)["all_passed"]
     completed = prepare_markdown_subagent(
-        tmp_path, "translate", source, target, "English", "Chinese", resume=True,
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source,
+            target_dir=target,
+            source_language="English",
+            target_language="Chinese",
+            resume=True,
+        )
     )
     assert _read_manifest(completed["manifest"])["completed_files"] == ["a.md", "b.md"]
 
@@ -189,8 +275,15 @@ def test_removed_unit_and_heading_context_require_formal_validation(tmp_path: Pa
 def test_content_failure_with_stale_context_still_quarantines_target(tmp_path: Path):
     source, target, context_dir, unit_context_files, _ = _setup(tmp_path)
     prepare_markdown_subagent(
-        tmp_path, "translate", source, target, "English", "Chinese",
-        unit_context_files=unit_context_files,
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source,
+            target_dir=target,
+            source_language="English",
+            target_language="Chinese",
+            unit_context_files=unit_context_files,
+        )
     )
     (target / "a.md").write_text("", encoding="utf-8")
     (context_dir / "a.md.json").write_text(json.dumps({"entries": [{"source": "late"}]}), encoding="utf-8")
@@ -214,7 +307,17 @@ def test_legacy_context_free_receipt_remains_reusable(tmp_path: Path):
     receipt = _read_manifest(receipt_path)
     receipt.pop("resume_contexts", None)
     receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
-    prepared = prepare_markdown_subagent(tmp_path, "translate", source, target, "English", "Chinese", resume=True)
+    prepared = prepare_markdown_subagent(
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source,
+            target_dir=target,
+            source_language="English",
+            target_language="Chinese",
+            resume=True,
+        )
+    )
     assert _read_manifest(prepared["manifest"])["completed_files"] == ["a.md", "b.md"]
 
 
@@ -228,8 +331,15 @@ def test_legacy_global_context_receipt_stays_pending_until_formal_validation(tmp
     glossary.write_text(json.dumps({"entries": [{"source": "old"}]}), encoding="utf-8")
 
     initial = prepare_markdown_subagent(
-        tmp_path, "translate", source, target, "English", "Chinese",
-        context_files={"book": glossary},
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source,
+            target_dir=target,
+            source_language="English",
+            target_language="Chinese",
+            context_files={"book": glossary},
+        )
     )
     assert validate_markdown_subagent(tmp_path, "translate", source, target)["all_passed"]
     receipt_path = tmp_path / "translate_validation.json"
@@ -240,19 +350,43 @@ def test_legacy_global_context_receipt_stays_pending_until_formal_validation(tmp
     glossary.write_text(json.dumps({"entries": [{"source": "new"}]}), encoding="utf-8")
     prepare_kwargs = {"context_files": {"book": glossary}}
     first = prepare_markdown_subagent(
-        tmp_path, "translate", source, target, "English", "Chinese", resume=True,
-        **prepare_kwargs,
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source,
+            target_dir=target,
+            source_language="English",
+            target_language="Chinese",
+            resume=True,
+            **prepare_kwargs,
+        )
     )
     assert _read_manifest(first["manifest"])["pending_files"] == ["unit.md"]
     second = prepare_markdown_subagent(
-        tmp_path, "translate", source, target, "English", "Chinese", resume=True,
-        **prepare_kwargs,
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source,
+            target_dir=target,
+            source_language="English",
+            target_language="Chinese",
+            resume=True,
+            **prepare_kwargs,
+        )
     )
     assert _read_manifest(second["manifest"])["pending_files"] == ["unit.md"]
 
     assert validate_markdown_subagent(tmp_path, "translate", source, target)["all_passed"]
     completed = prepare_markdown_subagent(
-        tmp_path, "translate", source, target, "English", "Chinese", resume=True,
-        **prepare_kwargs,
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source,
+            target_dir=target,
+            source_language="English",
+            target_language="Chinese",
+            resume=True,
+            **prepare_kwargs,
+        )
     )
     assert _read_manifest(completed["manifest"])["completed_files"] == ["unit.md"]

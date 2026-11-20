@@ -10,6 +10,7 @@ from pdf2epub.validation_receipts import (
 from pdf2epub.commands.markdown import _sync_subagent_manifest_progress
 from pdf2epub.commands.markdown_context import _load_pdf_continuation_files
 from pdf2epub.markdown_handoff import prepare_markdown_subagent
+from pdf2epub.markdown_handoff_context import MarkdownHandoffRequest
 from pdf2epub.workflow_contracts import (
     MARKDOWN_VALIDATION_SCHEMA_VERSION,
     markdown_validation_schema_version,
@@ -341,13 +342,15 @@ def test_continuation_metadata_uses_refinement_part_order(tmp_path: Path):
     assert metadata["chapter.part3.md"]["previous_file"] == "chapter.part2.md"
 
     paths = prepare_markdown_subagent(
-        tmp_path,
-        "translate",
-        source_dir,
-        target_dir,
-        "German",
-        "Chinese",
-        continuation_files=metadata,
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="German",
+            target_language="Chinese",
+            continuation_files=metadata,
+        )
     )
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
     assert manifest["continuation_files"] == metadata

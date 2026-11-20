@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from pdf2epub.markdown_handoff_context import MarkdownHandoffRequest
 from pdf2epub.special_unit_context import (
     SpecialUnitContextError,
     build_special_unit_context,
@@ -237,17 +238,19 @@ def test_empty_glossary_projection_survives_translate_prepare_and_special_prepar
     sparse = build_unit_glossary_contexts(output, source_dir, {}, None, source_language="English")
     assert sparse == {}
     handoff = prepare_markdown_subagent(
-        output,
-        "translate",
-        source_dir,
-        output / "translated",
-        "English",
-        "Chinese",
-        config={},
-        file_roles={"index.md": "index"},
-        heading_contexts=current_headings,
-        unit_context_files=sparse,
-        controlled_files={"index.md": "index"},
+        MarkdownHandoffRequest(
+            output_dir=output,
+            task="translate",
+            source_dir=source_dir,
+            target_dir=output / "translated",
+            source_language="English",
+            target_language="Chinese",
+            config={},
+            file_roles={"index.md": "index"},
+            heading_contexts=current_headings,
+            unit_context_files=sparse,
+            controlled_files={"index.md": "index"},
+        )
     )
     context = build_special_unit_context(
         output, "index.md", "index", source_language="English", target_language="Chinese"

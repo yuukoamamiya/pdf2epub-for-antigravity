@@ -215,7 +215,14 @@ def test_role_change_stays_pending_across_prepare_until_new_validation_receipt(t
     role = {"unit.md": "bibliography"}
     role_source = {"unit.md": {"source": "toc_tree.type", "node_id": "refs", "index_path": [1]}}
     prepare_markdown_subagent(
-        tmp_path, "translate", source_dir, target_dir, "English", "Chinese"
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="Chinese",
+        )
     )
     assert validate_markdown_subagent(
         tmp_path, "translate", source_dir, target_dir
@@ -228,14 +235,32 @@ def test_role_change_stays_pending_across_prepare_until_new_validation_receipt(t
     plan = plan_markdown_handoff(source_dir, "translate", file_roles=role)
     context = normalize_handoff_context(request, ["unit.md"])
     first_prepare = prepare_markdown_subagent(
-        tmp_path, "translate", source_dir, target_dir, "English", "Chinese",
-        resume=True, file_roles=role, file_role_sources=role_source,
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="Chinese",
+            resume=True,
+            file_roles=role,
+            file_role_sources=role_source,
+        )
     )
     import json
     assert json.loads(first_prepare["manifest"].read_text(encoding="utf-8"))["pending_files"] == ["unit.md"]
     second_prepare = prepare_markdown_subagent(
-        tmp_path, "translate", source_dir, target_dir, "English", "Chinese",
-        resume=True, file_roles=role, file_role_sources=role_source,
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="Chinese",
+            resume=True,
+            file_roles=role,
+            file_role_sources=role_source,
+        )
     )
     assert json.loads(second_prepare["manifest"].read_text(encoding="utf-8"))["pending_files"] == ["unit.md"]
     assert decide_resume(request, plan, context).pending_files == ("unit.md",)
@@ -265,8 +290,16 @@ def test_role_receipt_e2e_reuses_after_prepare_and_validation(tmp_path, source_n
     target_heading = "# 3. 参考文献" if source_text.startswith("# 3.") else "# 参考文献"
     (target_dir / source_name).write_text(f"{target_heading}\n\n作者。书名，1999。", encoding="utf-8")
     prepare_markdown_subagent(
-        tmp_path, "translate", source_dir, target_dir, "English", "Chinese",
-        file_roles=roles, file_role_sources=sources,
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="Chinese",
+            file_roles=roles,
+            file_role_sources=sources,
+        )
     )
     report = validate_markdown_subagent(
         tmp_path, "translate", source_dir, target_dir,
@@ -279,8 +312,17 @@ def test_role_receipt_e2e_reuses_after_prepare_and_validation(tmp_path, source_n
     if not roles:
         assert manifest["file_role_sources"][source_name]["source"] == "text_inference"
     paths = prepare_markdown_subagent(
-        tmp_path, "translate", source_dir, target_dir, "English", "Chinese",
-        resume=True, file_roles=roles, file_role_sources=sources,
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="Chinese",
+            resume=True,
+            file_roles=roles,
+            file_role_sources=sources,
+        )
     )
     resumed = json.loads(paths["manifest"].read_text(encoding="utf-8"))
     assert resumed["completed_files"] == [source_name]
@@ -313,8 +355,16 @@ def test_partial_role_receipt_change_to_ordinary_clears_old_full_role(tmp_path):
     old_roles = {"unit.md": "bibliography"}
     old_sources = {"unit.md": {"source": "toc_tree.type", "node_id": "refs", "index_path": [1]}}
     prepare_markdown_subagent(
-        tmp_path, "translate", source_dir, target_dir, "English", "Chinese",
-        file_roles=old_roles, file_role_sources=old_sources,
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="Chinese",
+            file_roles=old_roles,
+            file_role_sources=old_sources,
+        )
     )
     assert validate_markdown_subagent(
         tmp_path, "translate", source_dir, target_dir,
@@ -322,8 +372,17 @@ def test_partial_role_receipt_change_to_ordinary_clears_old_full_role(tmp_path):
     )["all_passed"]
 
     changed = prepare_markdown_subagent(
-        tmp_path, "translate", source_dir, target_dir, "English", "Chinese",
-        resume=True, file_roles={}, file_role_sources={},
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="Chinese",
+            resume=True,
+            file_roles={},
+            file_role_sources={},
+        )
     )
     assert json.loads(changed["manifest"].read_text(encoding="utf-8"))["pending_files"] == ["unit.md"]
     partial = validate_markdown_subagent(
@@ -334,8 +393,17 @@ def test_partial_role_receipt_change_to_ordinary_clears_old_full_role(tmp_path):
     ledger = json.loads((tmp_path / "translate_file_validation.json").read_text(encoding="utf-8"))
     assert ledger["files"]["unit.md"]["file_role"] is None
     resumed = prepare_markdown_subagent(
-        tmp_path, "translate", source_dir, target_dir, "English", "Chinese",
-        resume=True, file_roles={}, file_role_sources={},
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="Chinese",
+            resume=True,
+            file_roles={},
+            file_role_sources={},
+        )
     )
     manifest = json.loads(resumed["manifest"].read_text(encoding="utf-8"))
     assert manifest["completed_files"] == ["unit.md"]
@@ -358,8 +426,15 @@ def test_validate_existing_outputs_before_second_resume_avoids_full_redelegation
     from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
     prepare_markdown_subagent(
-        tmp_path, "translate", source_dir, target_dir, "English", "Chinese",
-        heading_contexts={"unit.md": old_context},
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="Chinese",
+            heading_contexts={"unit.md": old_context},
+        )
     )
     assert validate_markdown_subagent(
         tmp_path, "translate", source_dir, target_dir,
@@ -380,8 +455,16 @@ def test_validate_existing_outputs_before_second_resume_avoids_full_redelegation
     # Refreshing preparation context alone cannot replace the old validation
     # receipt. A second resume remains pending until formal validation runs.
     refreshed = prepare_markdown_subagent(
-        tmp_path, "translate", source_dir, target_dir, "English", "Chinese",
-        resume=True, heading_contexts={"unit.md": refreshed_context},
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="Chinese",
+            resume=True,
+            heading_contexts={"unit.md": refreshed_context},
+        )
     )
     assert __import__("json").loads(refreshed["manifest"].read_text(encoding="utf-8"))["pending_files"] == ["unit.md"]
 
@@ -390,8 +473,16 @@ def test_validate_existing_outputs_before_second_resume_avoids_full_redelegation
     assert second_resume.pending_files == ("unit.md",)
     assert validate_markdown_subagent(tmp_path, "translate", source_dir, target_dir)["all_passed"]
     final = prepare_markdown_subagent(
-        tmp_path, "translate", source_dir, target_dir, "English", "Chinese",
-        resume=True, heading_contexts={"unit.md": refreshed_context},
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="Chinese",
+            resume=True,
+            heading_contexts={"unit.md": refreshed_context},
+        )
     )
     assert __import__("json").loads(final["manifest"].read_text(encoding="utf-8"))["completed_files"] == ["unit.md"]
     legacy = {"context_sha256": {"snapshot": "old"}}

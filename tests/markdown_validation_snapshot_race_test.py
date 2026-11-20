@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from pdf2epub.markdown_handoff import prepare_markdown_subagent
+from pdf2epub.markdown_handoff_context import MarkdownHandoffRequest
 from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 from pdf2epub.polish_footnote_semantics import build_semantic_review_contract
 
@@ -61,9 +62,16 @@ def test_formal_validation_rejects_inputs_changed_after_staging(
     from pdf2epub.refine.unit_mapping import load_pdf_continuation_files
 
     paths = prepare_markdown_subagent(
-        tmp_path, "polish", source_dir, target_dir, "English", "Chinese",
-        footnote_semantics_enabled=True,
-        continuation_files=load_pdf_continuation_files(tmp_path, source_dir),
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="polish",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="Chinese",
+            footnote_semantics_enabled=True,
+            continuation_files=load_pdf_continuation_files(tmp_path, source_dir),
+        )
     )
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
     contract = manifest["footnote_semantics"]["files"]["chapter.md"]

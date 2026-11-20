@@ -257,14 +257,29 @@ def test_parent_manifest_exposes_pending_reasons_and_counts(tmp_path: Path):
     (source_dir / "unit.md").write_text("Source paragraph.", encoding="utf-8")
 
     first = prepare_markdown_subagent(
-        tmp_path, "translate", source_dir, target_dir, "English", "Chinese"
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="Chinese",
+        )
     )
     first_manifest = json.loads(first["manifest"].read_text(encoding="utf-8"))
     assert first_manifest["pending_reasons"] == {"unit.md": "fresh_run"}
     assert first_manifest["pending_reason_counts"] == {"fresh_run": 1}
 
     second = prepare_markdown_subagent(
-        tmp_path, "translate", source_dir, target_dir, "English", "Chinese", resume=True
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="Chinese",
+            resume=True,
+        )
     )
     second_manifest = json.loads(second["manifest"].read_text(encoding="utf-8"))
     assert second_manifest["pending_files"] == ["unit.md"]

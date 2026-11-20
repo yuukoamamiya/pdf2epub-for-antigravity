@@ -7,6 +7,7 @@ import pytest
 from pdf2epub.build_epub import BuildEpubConfig, build_epub
 from pdf2epub.refine.main import RefinedBreakdown
 from pdf2epub.markdown_handoff import prepare_markdown_subagent
+from pdf2epub.markdown_handoff_context import MarkdownHandoffRequest
 from pdf2epub.toc_translation_workflow import (
     build_toc_heading_contexts,
     prepare_toc_translation_subagent,
@@ -73,8 +74,15 @@ def test_review_to_refine_to_translation_handoff_and_epub_roundtrip(tmp_path, gr
     assert contexts
     markdown_dir = output / "translated"
     prepare_markdown_subagent(
-        output, "translate", source_dir, markdown_dir, "English", "Chinese",
-        heading_contexts=contexts,
+        MarkdownHandoffRequest(
+            output_dir=output,
+            task="translate",
+            source_dir=source_dir,
+            target_dir=markdown_dir,
+            source_language="English",
+            target_language="Chinese",
+            heading_contexts=contexts,
+        )
     )
     validated_dir = markdown_dir / "validated"
     validated_dir.mkdir(parents=True)

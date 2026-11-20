@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from pdf2epub.markdown_handoff import prepare_markdown_subagent
+from pdf2epub.markdown_handoff_context import MarkdownHandoffRequest
 from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 from pdf2epub.markdown_validation_persistence import validation_snapshot_changes
 from pdf2epub.page_furniture_rules import candidate_for_line
@@ -78,13 +79,15 @@ def test_polish_resume_merges_file_validation_semantic_review_hash(tmp_path: Pat
     (target_dir / "ch2.md").write_text(src_b, encoding="utf-8")
 
     prepared = prepare_markdown_subagent(
-        tmp_path,
-        "polish",
-        source_dir,
-        target_dir,
-        "English",
-        "English",
-        footnote_semantics_enabled=True,
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="polish",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="English",
+            footnote_semantics_enabled=True,
+        )
     )
     manifest = json.loads(prepared["manifest"].read_text(encoding="utf-8"))
     contracts = manifest["footnote_semantics"]["files"]
@@ -152,14 +155,16 @@ def test_polish_resume_merges_file_validation_semantic_review_hash(tmp_path: Pat
 
     # Resuming polish must recognize BOTH ch1.md and ch2.md as completed.
     resumed = prepare_markdown_subagent(
-        tmp_path,
-        "polish",
-        source_dir,
-        target_dir,
-        "English",
-        "English",
-        resume=True,
-        footnote_semantics_enabled=True,
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="polish",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="English",
+            resume=True,
+            footnote_semantics_enabled=True,
+        )
     )
     resumed_manifest = json.loads(resumed["manifest"].read_text(encoding="utf-8"))
     assert resumed_manifest["pending_files"] == []
@@ -180,13 +185,15 @@ def test_validation_snapshot_changes_does_not_flag_preexisting_stale_or_issues(t
     (target_dir / "b.md").write_text(src_b, encoding="utf-8")
 
     prepared = prepare_markdown_subagent(
-        tmp_path,
-        "polish",
-        source_dir,
-        target_dir,
-        "English",
-        "English",
-        footnote_semantics_enabled=True,
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="polish",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="English",
+            footnote_semantics_enabled=True,
+        )
     )
     manifest = json.loads(prepared["manifest"].read_text(encoding="utf-8"))
     contracts = manifest["footnote_semantics"]["files"]
@@ -293,23 +300,25 @@ def test_polish_worker_groups_isolate_extreme_units_and_respect_budget(tmp_path:
         )
 
     prepared = prepare_markdown_subagent(
-        tmp_path,
-        "polish",
-        source_dir,
-        target_dir,
-        "English",
-        "English",
-        config={
-            "subagent": {
-                "batching": {
-                    "polish_max_files": 4,
-                    "max_source_tokens": 12_000,
-                    "max_concurrency": 4,
-                    "large_file_token_threshold": 12_000,
-                    "extreme_file_token_threshold": 24_000,
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="polish",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="English",
+            config={
+                "subagent": {
+                    "batching": {
+                        "polish_max_files": 4,
+                        "max_source_tokens": 12_000,
+                        "max_concurrency": 4,
+                        "large_file_token_threshold": 12_000,
+                        "extreme_file_token_threshold": 24_000,
+                    }
                 }
-            }
-        },
+            },
+        )
     )
     handoffs = write_worker_handoffs(tmp_path, prepared["manifest"], prepared["prompt"])
     extreme_workers = [h for h in handoffs if "chapter_8.part14.md" in h["files"]]
@@ -392,13 +401,15 @@ def test_polish_semantic_issue_maps_whitespace_and_adjacent_blocks_and_closes_up
     (polish_dir / "ch12.md").write_bytes(raw_text.encode("utf-8"))
 
     prepared = prepare_markdown_subagent(
-        tmp_path,
-        "polish",
-        norm_dir,
-        polish_dir,
-        "English",
-        "English",
-        footnote_semantics_enabled=True,
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="polish",
+            source_dir=norm_dir,
+            target_dir=polish_dir,
+            source_language="English",
+            target_language="English",
+            footnote_semantics_enabled=True,
+        )
     )
     manifest = json.loads(prepared["manifest"].read_text(encoding="utf-8"))
     contract = manifest["footnote_semantics"]["files"]["ch12.md"]
@@ -503,14 +514,16 @@ def test_polish_clean_file_passes_without_sidecar_and_ignores_advisory_unit_cont
     ctx_path.write_text('{"decisions": []}', encoding="utf-8")
 
     prepare_markdown_subagent(
-        tmp_path,
-        "polish",
-        source_dir,
-        target_dir,
-        "English",
-        "English",
-        unit_context_files={"ch1.md": ctx_path},
-        footnote_semantics_enabled=True,
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="polish",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="English",
+            unit_context_files={"ch1.md": ctx_path},
+            footnote_semantics_enabled=True,
+        )
     )
     # Do NOT write polish_footnote_reviews/ch1.json; validation must pass as implicit clear.
     report = validate_markdown_subagent(
@@ -527,15 +540,17 @@ def test_polish_clean_file_passes_without_sidecar_and_ignores_advisory_unit_cont
     # Mutate advisory footnote_contexts/ch1.md.json while keeping source unchanged.
     ctx_path.write_text('{"decisions": [{"page": 99, "role": "footnote_start"}]}', encoding="utf-8")
     resumed = prepare_markdown_subagent(
-        tmp_path,
-        "polish",
-        source_dir,
-        target_dir,
-        "English",
-        "English",
-        resume=True,
-        unit_context_files={"ch1.md": ctx_path},
-        footnote_semantics_enabled=True,
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="polish",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="English",
+            resume=True,
+            unit_context_files={"ch1.md": ctx_path},
+            footnote_semantics_enabled=True,
+        )
     )
     resumed_manifest = json.loads(resumed["manifest"].read_text(encoding="utf-8"))
     assert resumed_manifest["pending_files"] == []

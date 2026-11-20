@@ -17,6 +17,7 @@ from pdf2epub.dynamic_terminology import (
     session_attestation,
 )
 from pdf2epub.markdown_handoff import prepare_markdown_subagent
+from pdf2epub.markdown_handoff_context import MarkdownHandoffRequest
 from pdf2epub.subagent_runtime import write_worker_handoffs
 from pdf2epub.workflow_contracts import atomic_write_json
 
@@ -423,8 +424,17 @@ def test_new_unit_survives_unrelated_ancestor_publish_without_review(tmp_path):
         target_language="Chinese", chapter_groups=chapters,
     )
     paths = prepare_markdown_subagent(
-        output, "translate", source, target, "English", "Chinese", config={},
-        unit_context_files=contexts, chapter_groups=chapters,
+        MarkdownHandoffRequest(
+            output_dir=output,
+            task="translate",
+            source_dir=source,
+            target_dir=target,
+            source_language="English",
+            target_language="Chinese",
+            config={},
+            unit_context_files=contexts,
+            chapter_groups=chapters,
+        )
     )
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
     manifest["book_title"] = "book"
@@ -457,8 +467,17 @@ def _build_real_publish_fixture(tmp_path, *, retranslate_file=None):
     )
     empty_contexts = {name: output / path for name, path in empty_contexts.items()}
     paths = prepare_markdown_subagent(
-        output, "translate", source, target, "English", "Chinese", config={},
-        unit_context_files=empty_contexts, chapter_groups=chapters,
+        MarkdownHandoffRequest(
+            output_dir=output,
+            task="translate",
+            source_dir=source,
+            target_dir=target,
+            source_language="English",
+            target_language="Chinese",
+            config={},
+            unit_context_files=empty_contexts,
+            chapter_groups=chapters,
+        )
     )
     handoffs = write_worker_handoffs(output, paths["manifest"], paths["prompt"])
     attach_candidate_sidecars(
@@ -567,8 +586,18 @@ def _build_real_publish_fixture(tmp_path, *, retranslate_file=None):
         chapter_groups=chapters,
     )
     current_paths = prepare_markdown_subagent(
-        output, "translate", source, target, "English", "Chinese", config={}, resume=True,
-        unit_context_files=current_contexts, chapter_groups=chapters,
+        MarkdownHandoffRequest(
+            output_dir=output,
+            task="translate",
+            source_dir=source,
+            target_dir=target,
+            source_language="English",
+            target_language="Chinese",
+            config={},
+            resume=True,
+            unit_context_files=current_contexts,
+            chapter_groups=chapters,
+        )
     )
     current_manifest = json.loads(current_paths["manifest"].read_text(encoding="utf-8"))
     current_manifest["book_title"] = "book"
@@ -596,8 +625,18 @@ def _build_real_publish_fixture(tmp_path, *, retranslate_file=None):
         chapter_groups=expanded_chapters,
     )
     new_paths = prepare_markdown_subagent(
-        output, "translate", source, target, "English", "Chinese", config={}, resume=True,
-        unit_context_files=new_contexts, chapter_groups=expanded_chapters,
+        MarkdownHandoffRequest(
+            output_dir=output,
+            task="translate",
+            source_dir=source,
+            target_dir=target,
+            source_language="English",
+            target_language="Chinese",
+            config={},
+            resume=True,
+            unit_context_files=new_contexts,
+            chapter_groups=expanded_chapters,
+        )
     )
     new_manifest = json.loads(new_paths["manifest"].read_text(encoding="utf-8"))
     new_manifest["book_title"] = "book"

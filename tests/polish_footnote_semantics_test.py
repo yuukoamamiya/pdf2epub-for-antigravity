@@ -3,6 +3,7 @@ import json
 
 import pytest
 
+from pdf2epub.markdown_handoff_context import MarkdownHandoffRequest
 from pdf2epub.polish_footnote_semantics import (
     SIDECAR_DIRECTORY,
     build_semantic_review_contract,
@@ -67,8 +68,16 @@ def test_prepare_emits_per_file_semantic_contract_only_when_enabled(tmp_path):
     target_dir.mkdir()
     (source_dir / "chapter.md").write_text("Body[^1].\n\n[^1]: Note.\n", encoding="utf-8")
     paths = prepare_markdown_subagent(
-        tmp_path, "polish", source_dir, target_dir, "English", "Chinese",
-        config={}, footnote_semantics_enabled=True,
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="polish",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="Chinese",
+            config={},
+            footnote_semantics_enabled=True,
+        )
     )
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
     assert manifest["footnote_semantics"]["enabled"] is True
@@ -97,8 +106,16 @@ def test_prepare_emits_per_file_semantic_contract_only_when_enabled(tmp_path):
     assert contract["sidecar"] in worker_prompt
 
     disabled = prepare_markdown_subagent(
-        tmp_path, "polish", source_dir, target_dir, "English", "Chinese",
-        config={}, footnote_semantics_enabled=False,
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="polish",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="Chinese",
+            config={},
+            footnote_semantics_enabled=False,
+        )
     )
     disabled_manifest = json.loads(disabled["manifest"].read_text(encoding="utf-8"))
     assert "footnote_semantics" not in disabled_manifest

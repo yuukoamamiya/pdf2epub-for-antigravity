@@ -16,6 +16,7 @@ from pdf2epub.dynamic_terminology import (
     verify_session_attestation,
 )
 from pdf2epub.markdown_handoff import prepare_markdown_subagent
+from pdf2epub.markdown_handoff_context import MarkdownHandoffRequest
 from pdf2epub.subagent_dispatch import dispatch_lease_path
 from pdf2epub.subagent_runtime import write_worker_handoffs
 from pdf2epub.workflow_contracts import atomic_write_json
@@ -286,8 +287,17 @@ def test_actual_handoff_candidate_review_publish_and_resume(tmp_path, monkeypatc
         output, source, {}, [], source_language="English", target_language="Chinese", chapter_groups=chapters,
     )
     paths = prepare_markdown_subagent(
-        output, task, source, target, "English", "Chinese", config={},
-        unit_context_files=unit_contexts, chapter_groups=chapters,
+        MarkdownHandoffRequest(
+            output_dir=output,
+            task=task,
+            source_dir=source,
+            target_dir=target,
+            source_language="English",
+            target_language="Chinese",
+            config={},
+            unit_context_files=unit_contexts,
+            chapter_groups=chapters,
+        )
     )
     initial_manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
     preexisting = {path.name: sha(path.read_bytes()) for path in target.glob("*.md")}
@@ -477,8 +487,18 @@ def test_actual_handoff_candidate_review_publish_and_resume(tmp_path, monkeypatc
     assert "social form" in json.loads(resumed_contexts["a.md"].read_text(encoding="utf-8"))["entries"][0]["source"]
     assert bool(json.loads(resumed_contexts["c.md"].read_text(encoding="utf-8"))["entries"]) == (scope_kind == "book")
     resume_paths = prepare_markdown_subagent(
-        output, task, source, target, "English", "Chinese", config={}, resume=True,
-        unit_context_files=resumed_contexts, chapter_groups=chapters,
+        MarkdownHandoffRequest(
+            output_dir=output,
+            task=task,
+            source_dir=source,
+            target_dir=target,
+            source_language="English",
+            target_language="Chinese",
+            config={},
+            resume=True,
+            unit_context_files=resumed_contexts,
+            chapter_groups=chapters,
+        )
     )
     if review_decision == "retranslate_required":
         # A replacement target is structurally valid but its dynamic memory
@@ -486,8 +506,18 @@ def test_actual_handoff_candidate_review_publish_and_resume(tmp_path, monkeypatc
         (target / "a.md").write_text("重新译：社会形式在此出现", encoding="utf-8")
         # Recreate the resume manifest with the frozen post-publication context.
         resume_paths = prepare_markdown_subagent(
-            output, task, source, target, "English", "Chinese", config={}, resume=True,
-            unit_context_files=resumed_contexts, chapter_groups=chapters,
+            MarkdownHandoffRequest(
+                output_dir=output,
+                task=task,
+                source_dir=source,
+                target_dir=target,
+                source_language="English",
+                target_language="Chinese",
+                config={},
+                resume=True,
+                unit_context_files=resumed_contexts,
+                chapter_groups=chapters,
+            )
         )
         current_targets = {name: sha((target / name).read_bytes()) for name in texts}
         resumed_manifest = json.loads(resume_paths["manifest"].read_text(encoding="utf-8"))
@@ -654,8 +684,17 @@ def test_dynamic_prepare_review_publish_accepts_cwd_relative_output_root(tmp_pat
         chapter_groups={"chapter-1": ["chapter.md"]},
     )
     paths = prepare_markdown_subagent(
-        output, "translate", source, target, "English", "Chinese", config={},
-        unit_context_files=contexts, chapter_groups={"chapter-1": ["chapter.md"]},
+        MarkdownHandoffRequest(
+            output_dir=output,
+            task="translate",
+            source_dir=source,
+            target_dir=target,
+            source_language="English",
+            target_language="Chinese",
+            config={},
+            unit_context_files=contexts,
+            chapter_groups={"chapter-1": ["chapter.md"]},
+        )
     )
     manifest_path = output / "translate_subagent_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))

@@ -15,6 +15,7 @@ from pdf2epub.html_translation.translation_validation import (
     HTMLValidationWorkspace,
 )
 from pdf2epub.markdown_handoff import prepare_markdown_subagent
+from pdf2epub.markdown_handoff_context import MarkdownHandoffRequest
 from pdf2epub.subagent_runtime import write_worker_handoffs
 from pdf2epub.workflow_contracts import atomic_write_json
 from tests.terminology_memory_validation_test import (
@@ -101,8 +102,17 @@ def test_html_single_file_gate_catches_target_term_hidden_in_attribute_comment_a
         target_language="Chinese", chapter_groups=chapter_groups,
     )
     paths = prepare_markdown_subagent(
-        output, "translate-html", source, target, "English", "Chinese",
-        config={}, unit_context_files=contexts, chapter_groups=chapter_groups,
+        MarkdownHandoffRequest(
+            output_dir=output,
+            task="translate-html",
+            source_dir=source,
+            target_dir=target,
+            source_language="English",
+            target_language="Chinese",
+            config={},
+            unit_context_files=contexts,
+            chapter_groups=chapter_groups,
+        )
     )
     import hashlib
     import json
@@ -154,8 +164,18 @@ def test_retranslate_required_repair_consistency_only_review_and_publish_closes_
     )
     contexts = {name: output / path for name, path in contexts.items()}
     paths = prepare_markdown_subagent(
-        output, "translate", source, target, "English", "Chinese", config={}, resume=True,
-        unit_context_files=contexts, chapter_groups=chapters,
+        MarkdownHandoffRequest(
+            output_dir=output,
+            task="translate",
+            source_dir=source,
+            target_dir=target,
+            source_language="English",
+            target_language="Chinese",
+            config={},
+            resume=True,
+            unit_context_files=contexts,
+            chapter_groups=chapters,
+        )
     )
     handoffs = write_worker_handoffs(output, paths["manifest"], paths["prompt"])
     attach_candidate_sidecars(
@@ -229,8 +249,18 @@ def test_source_hash_refresh_does_not_reuse_old_memory_consistency_review(tmp_pa
     )
     contexts = {name: output / path for name, path in contexts.items()}
     paths = prepare_markdown_subagent(
-        output, "translate", source, target, "English", "Chinese", config={}, resume=True,
-        unit_context_files=contexts, chapter_groups=chapters,
+        MarkdownHandoffRequest(
+            output_dir=output,
+            task="translate",
+            source_dir=source,
+            target_dir=target,
+            source_language="English",
+            target_language="Chinese",
+            config={},
+            resume=True,
+            unit_context_files=contexts,
+            chapter_groups=chapters,
+        )
     )
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
     manifest["book_title"] = "book"

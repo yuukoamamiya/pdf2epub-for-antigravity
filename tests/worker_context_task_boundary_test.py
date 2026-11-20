@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from pdf2epub.markdown_handoff import prepare_markdown_subagent
+from pdf2epub.markdown_handoff_context import MarkdownHandoffRequest
 from pdf2epub.subagent_runtime import write_worker_handoffs
 
 
@@ -23,14 +24,16 @@ def _prepare(tmp_path: Path, task: str, files: dict[str, dict]):
         unit_context_files[filename] = context_path
 
     paths = prepare_markdown_subagent(
-        output,
-        task,
-        source,
-        target,
-        "English",
-        "Chinese",
-        unit_context_files=unit_context_files,
-        config={"subagent": {"batching": {"max_files": 1, "max_concurrency": 4}}},
+        MarkdownHandoffRequest(
+            output_dir=output,
+            task=task,
+            source_dir=source,
+            target_dir=target,
+            source_language="English",
+            target_language="Chinese",
+            unit_context_files=unit_context_files,
+            config={"subagent": {"batching": {"max_files": 1, "max_concurrency": 4}}},
+        )
     )
     return output, paths
 

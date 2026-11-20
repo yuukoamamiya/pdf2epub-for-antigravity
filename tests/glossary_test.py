@@ -18,6 +18,7 @@ from pdf2epub.glossary import (
 )
 from pdf2epub.entity_extractor import validate_entities
 from pdf2epub.markdown_handoff import prepare_markdown_subagent
+from pdf2epub.markdown_handoff_context import MarkdownHandoffRequest
 
 
 def test_v2_concepts_project_by_language_pair_and_target_policy():
@@ -693,14 +694,16 @@ def test_context_change_invalidates_resume_checkpoint(tmp_path: Path):
     old_context.write_text('{"version": 2}', encoding="utf-8")
 
     paths = prepare_markdown_subagent(
-        tmp_path,
-        "translate",
-        source_dir,
-        target_dir,
-        "German",
-        "Chinese",
-        resume=True,
-        context_files={"domain_glossary_001": old_context},
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="German",
+            target_language="Chinese",
+            resume=True,
+            context_files={"domain_glossary_001": old_context},
+        )
     )
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
 

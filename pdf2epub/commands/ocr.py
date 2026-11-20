@@ -369,6 +369,7 @@ def ocr_consensus_rebuild_command(args):
 def ocr_correct_command(args):
     """Prepare visual OCR correction for a workspace Subagent."""
     from pdf2epub.markdown_handoff import prepare_markdown_subagent
+    from pdf2epub.markdown_handoff_context import MarkdownHandoffRequest
     from pdf2epub.ocr_correction import (
         DEFAULT_REVIEW_IMAGE_DPI,
         render_review_images,
@@ -530,21 +531,21 @@ def ocr_correct_command(args):
             or "Original"
         )
         paths = prepare_markdown_subagent(
-            output_dir,
-            "ocr-correct",
-            output_dir / "pages",
-            output_dir / "ocr_corrected_pages",
-            str(source_language),
-            "Original",
-            rules,
-            config=context.config,
-            resume=bool(getattr(args, "resume", False) or had_manual_selection),
-            declared_files=review_files,
-            secondary_source_dir=(
-                output_dir / "ocr_secondary" if consensus_enabled else None
-            ),
-            visual_review_dir=review_image_dir(output_dir),
-            review_output_dir=review_record_dir(output_dir),
+            MarkdownHandoffRequest(
+                output_dir=output_dir,
+                task="ocr-correct",
+                source_dir=output_dir / "pages",
+                target_dir=output_dir / "ocr_corrected_pages",
+                source_language=str(source_language),
+                target_language="Original",
+                extra_rules=rules,
+                config=context.config,
+                resume=bool(getattr(args, "resume", False) or had_manual_selection),
+                declared_files=review_files,
+                secondary_source_dir=output_dir / "ocr_secondary" if consensus_enabled else None,
+                visual_review_dir=review_image_dir(output_dir),
+                review_output_dir=review_record_dir(output_dir),
+            )
         )
         manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
         manifest["manual_review_files"] = manual_files

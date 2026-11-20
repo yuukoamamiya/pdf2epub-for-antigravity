@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from pdf2epub.markdown_handoff import prepare_markdown_subagent
+from pdf2epub.markdown_handoff_context import MarkdownHandoffRequest
 from pdf2epub.ocr_correction import (
     OCR_REVIEW_IMAGE_SCHEMA_VERSION,
     corrected_page_dir,
@@ -266,15 +267,17 @@ def test_ocr_correction_handoff_scopes_visual_assets(tmp_path: Path):
     review_images.mkdir()
 
     paths = prepare_markdown_subagent(
-        tmp_path,
-        "ocr-correct",
-        pages,
-        tmp_path / "ocr_corrected_pages",
-        "English",
-        "Original",
-        ["Compare each page with its matching visual review image."],
-        visual_review_dir=review_images,
-        review_output_dir=tmp_path / "ocr_correction_reviews",
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="ocr-correct",
+            source_dir=pages,
+            target_dir=tmp_path / "ocr_corrected_pages",
+            source_language="English",
+            target_language="Original",
+            extra_rules=["Compare each page with its matching visual review image."],
+            visual_review_dir=review_images,
+            review_output_dir=tmp_path / "ocr_correction_reviews",
+        )
     )
     handoffs = write_worker_handoffs(
         tmp_path,
@@ -303,12 +306,14 @@ def test_polish_handoff_defers_ocr_corrections_to_page_gate(tmp_path: Path):
     (source_dir / "chapter_001.md").write_text("OCR-derived text\n", encoding="utf-8")
 
     paths = prepare_markdown_subagent(
-        tmp_path,
-        "polish",
-        source_dir,
-        tmp_path / "polished_markdown",
-        "English",
-        "Original",
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="polish",
+            source_dir=source_dir,
+            target_dir=tmp_path / "polished_markdown",
+            source_language="English",
+            target_language="Original",
+        )
     )
 
     prompt = paths["prompt"].read_text(encoding="utf-8")

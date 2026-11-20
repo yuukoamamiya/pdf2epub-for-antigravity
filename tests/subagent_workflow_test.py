@@ -18,6 +18,7 @@ from pdf2epub.refine.unit_splitter import split_markdown_unit
 from pdf2epub.entity_extractor import validate_entities
 from pdf2epub.entity_context import prepare_entity_subagent_task
 from pdf2epub.markdown_handoff import prepare_markdown_subagent
+from pdf2epub.markdown_handoff_context import MarkdownHandoffRequest
 from pdf2epub.workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION, markdown_validation_schema_version
 from pdf2epub.markdown_validation import (
     detect_bilingual_output,
@@ -533,13 +534,15 @@ def test_markdown_validation_requires_review_for_bilingual_warning(tmp_path: Pat
     from pdf2epub.markdown_handoff import prepare_markdown_subagent
 
     retry_paths = prepare_markdown_subagent(
-        tmp_path,
-        "translate",
-        source_dir,
-        target_dir,
-        "English",
-        "German",
-        resume=True,
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="German",
+            resume=True,
+        )
     )
     retry_manifest = json.loads(
         retry_paths["manifest"].read_text(encoding="utf-8")
@@ -563,23 +566,27 @@ def test_markdown_validation_requires_review_for_bilingual_warning(tmp_path: Pat
 
     with pytest.raises(ValueError, match="Human review is required"):
         prepare_markdown_subagent(
-            tmp_path,
-            "translate",
-            source_dir,
-            target_dir,
-            "English",
-            "German",
-            resume=True,
+            MarkdownHandoffRequest(
+                output_dir=tmp_path,
+                task="translate",
+                source_dir=source_dir,
+                target_dir=target_dir,
+                source_language="English",
+                target_language="German",
+                resume=True,
+            )
         )
     prepare_markdown_subagent(
-        tmp_path,
-        "translate",
-        source_dir,
-        target_dir,
-        "English",
-        "German",
-        resume=True,
-        allow_human_review_retry=True,
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="German",
+            resume=True,
+            allow_human_review_retry=True,
+        )
     )
 
     acknowledged = validate_markdown_subagent(
@@ -1838,12 +1845,14 @@ def test_polish_prompt_explains_line_structure_audit_and_exceptions(tmp_path: Pa
     (source_dir / "unit.md").write_text("A line\nAnother line\n", encoding="utf-8")
 
     paths = prepare_markdown_subagent(
-        tmp_path,
-        "polish",
-        source_dir,
-        tmp_path / "target",
-        "English",
-        "English",
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="polish",
+            source_dir=source_dir,
+            target_dir=tmp_path / "target",
+            source_language="English",
+            target_language="English",
+        )
     )
     prompt = paths["prompt"].read_text(encoding="utf-8")
     handoffs = write_worker_handoffs(tmp_path, paths["manifest"], paths["prompt"])
@@ -2029,15 +2038,17 @@ def test_html_single_file_checkpoint_is_written_and_used_for_resume(tmp_path: Pa
     from pdf2epub.markdown_handoff import prepare_markdown_subagent
 
     paths = prepare_markdown_subagent(
-        tmp_path,
-        "translate-html",
-        pipeline.compressed_units_dir,
-        pipeline.translated_dir,
-        "English",
-        "Chinese",
-        config={"subagent": {"batching": {"max_concurrency": 1}}},
-        resume=True,
-        declared_files=["chapter.md"],
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate-html",
+            source_dir=pipeline.compressed_units_dir,
+            target_dir=pipeline.translated_dir,
+            source_language="English",
+            target_language="Chinese",
+            config={"subagent": {"batching": {"max_concurrency": 1}}},
+            resume=True,
+            declared_files=["chapter.md"],
+        )
     )
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
     assert manifest["pending_files"] == ["chapter.md"]
@@ -2050,13 +2061,15 @@ def test_prepare_markdown_subagent_records_model(tmp_path: Path):
     (source_dir / "unit.md").write_text("source", encoding="utf-8")
 
     paths = prepare_markdown_subagent(
-        tmp_path,
-        "translate-html",
-        source_dir,
-        target_dir,
-        "English",
-        "Chinese",
-        config={"subagent": {"models": {"translation": "configured-pro"}}},
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate-html",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="Chinese",
+            config={"subagent": {"models": {"translation": "configured-pro"}}},
+        )
     )
 
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
@@ -2071,12 +2084,14 @@ def test_prepare_markdown_translation_prompt_has_immutable_heading_guard(tmp_pat
     (source_dir / "unit.md").write_text("# Heading\nBody\n", encoding="utf-8")
 
     paths = prepare_markdown_subagent(
-        tmp_path,
-        "translate",
-        source_dir,
-        tmp_path / "target",
-        "German",
-        "Chinese",
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source_dir,
+            target_dir=tmp_path / "target",
+            source_language="German",
+            target_language="Chinese",
+        )
     )
     prompt = paths["prompt"].read_text(encoding="utf-8")
 
@@ -2096,12 +2111,14 @@ def test_polish_prompt_does_not_include_translation_language_rules(tmp_path: Pat
     (source_dir / "unit.md").write_text("# Heading\nBody\n", encoding="utf-8")
 
     paths = prepare_markdown_subagent(
-        tmp_path,
-        "polish",
-        source_dir,
-        tmp_path / "target",
-        "German",
-        "Chinese",
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="polish",
+            source_dir=source_dir,
+            target_dir=tmp_path / "target",
+            source_language="German",
+            target_language="Chinese",
+        )
     )
     prompt = paths["prompt"].read_text(encoding="utf-8")
 
@@ -2116,21 +2133,23 @@ def test_prepare_markdown_subagent_records_file_sizes_and_batches(tmp_path: Path
     (source_dir / "b.md").write_text("three", encoding="utf-8")
 
     paths = prepare_markdown_subagent(
-        tmp_path,
-        "translate",
-        source_dir,
-        tmp_path / "target",
-        "English",
-        "Chinese",
-        config={
-            "subagent": {
-                "batching": {
-                    "max_files": 1,
-                    "max_source_tokens": 100,
-                    "max_concurrency": 2,
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source_dir,
+            target_dir=tmp_path / "target",
+            source_language="English",
+            target_language="Chinese",
+            config={
+                "subagent": {
+                    "batching": {
+                        "max_files": 1,
+                        "max_source_tokens": 100,
+                        "max_concurrency": 2,
+                    }
                 }
-            }
-        },
+            },
+        )
     )
 
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
@@ -2155,8 +2174,15 @@ def test_prepare_markdown_subagent_records_special_file_roles(tmp_path: Path):
     source_dir.mkdir()
     (source_dir / "refs.md").write_text("References\n", encoding="utf-8")
     paths = prepare_markdown_subagent(
-        tmp_path, "translate", source_dir, tmp_path / "target", "English", "Chinese",
-        file_roles={"refs.md": "bibliography"},
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source_dir,
+            target_dir=tmp_path / "target",
+            source_language="English",
+            target_language="Chinese",
+            file_roles={"refs.md": "bibliography"},
+        )
     )
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
     prompt = paths["prompt"].read_text(encoding="utf-8")
@@ -2173,9 +2199,17 @@ def test_worker_assignment_hashes_role_and_source_and_scopes_role_maps(tmp_path:
         "refs.md": {"source": "toc_tree.type", "node_id": "refs", "index_path": [2]},
     }
     paths = prepare_markdown_subagent(
-        tmp_path, "translate", source_dir, tmp_path / "target", "English", "Chinese",
-        config={"subagent": {"batching": {"max_files": 1}}},
-        file_roles={"refs.md": "bibliography"}, file_role_sources=role_sources,
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source_dir,
+            target_dir=tmp_path / "target",
+            source_language="English",
+            target_language="Chinese",
+            config={"subagent": {"batching": {"max_files": 1}}},
+            file_roles={"refs.md": "bibliography"},
+            file_role_sources=role_sources,
+        )
     )
     first_handoffs = write_worker_handoffs(tmp_path, paths["manifest"], paths["prompt"])
     first_by_file = {}
@@ -2212,13 +2246,15 @@ def test_polish_isolates_copyright_units_and_scopes_cip_rules(tmp_path: Path):
     )
 
     paths = prepare_markdown_subagent(
-        tmp_path,
-        "polish",
-        source_dir,
-        target_dir,
-        "English",
-        "Chinese",
-        file_roles={"copyright.md": "copyright"},
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="polish",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="Chinese",
+            file_roles={"copyright.md": "copyright"},
+        )
     )
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
     copyright_batches = [
@@ -2288,8 +2324,17 @@ def test_worker_handoff_paths_are_cwd_relative_for_relative_output_root(
             chapter_groups={"chapter-1": ["chapter.md"]},
         )
     paths = prepare_markdown_subagent(
-        output_dir, "translate", source_dir, target_dir, "English", "Chinese", config={},
-        unit_context_files=contexts, chapter_groups={"chapter-1": ["chapter.md"]},
+        MarkdownHandoffRequest(
+            output_dir=output_dir,
+            task="translate",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="Chinese",
+            config={},
+            unit_context_files=contexts,
+            chapter_groups={"chapter-1": ["chapter.md"]},
+        )
     )
     kwargs = {}
     if dynamic_enabled:
@@ -2317,14 +2362,16 @@ def test_prepare_markdown_subagent_isolates_large_units_and_writes_scoped_handof
     (source_dir / "small.md").write_text("small", encoding="utf-8")
     (source_dir / "large.md").write_text("x" * 30_001, encoding="utf-8")
     paths = prepare_markdown_subagent(
-        tmp_path,
-        "translate",
-        source_dir,
-        tmp_path / "target",
-        "German",
-        "Chinese",
-        config={"subagent": {"batching": {"max_source_tokens": 100_000}}},
-        file_contexts={"large.md": "Kapitel 1 → 1.1 → Große Einheit"},
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source_dir,
+            target_dir=tmp_path / "target",
+            source_language="German",
+            target_language="Chinese",
+            config={"subagent": {"batching": {"max_source_tokens": 100_000}}},
+            file_contexts={"large.md": "Kapitel 1 → 1.1 → Große Einheit"},
+        )
     )
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
     assert manifest["oversized_files"] == ["large.md"]
@@ -2365,17 +2412,19 @@ def test_worker_handoff_deduplicates_unit_terminology_contexts(tmp_path: Path):
         )
 
     paths = prepare_markdown_subagent(
-        tmp_path,
-        "translate",
-        source_dir,
-        tmp_path / "target",
-        "English",
-        "Chinese",
-        config={"subagent": {"batching": {"max_concurrency": 1}}},
-        unit_context_files={
-            "a.md": glossary_dir / "a.json",
-            "b.md": glossary_dir / "b.json",
-        },
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source_dir,
+            target_dir=tmp_path / "target",
+            source_language="English",
+            target_language="Chinese",
+            config={"subagent": {"batching": {"max_concurrency": 1}}},
+            unit_context_files={
+                "a.md": glossary_dir / "a.json",
+                "b.md": glossary_dir / "b.json",
+            },
+        )
     )
 
     handoffs = write_worker_handoffs(tmp_path, paths["manifest"], paths["prompt"])
@@ -2465,13 +2514,15 @@ def test_prepare_markdown_subagent_records_read_only_context_hash(tmp_path: Path
     glossary.write_text('{"metadata": {"book_title": "Book"}}', encoding="utf-8")
 
     paths = prepare_markdown_subagent(
-        tmp_path,
-        "translate",
-        source_dir,
-        tmp_path / "target",
-        "English",
-        "Chinese",
-        context_files={"translation_entities": glossary},
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source_dir,
+            target_dir=tmp_path / "target",
+            source_language="English",
+            target_language="Chinese",
+            context_files={"translation_entities": glossary},
+        )
     )
 
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
@@ -2488,13 +2539,15 @@ def test_prepare_markdown_subagent_records_explicitly_skipped_context(tmp_path: 
     (source_dir / "unit.md").write_text("source", encoding="utf-8")
 
     paths = prepare_markdown_subagent(
-        tmp_path,
-        "translate",
-        source_dir,
-        tmp_path / "target",
-        "English",
-        "Chinese",
-        skipped_context_files=("translation_entities",),
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source_dir,
+            target_dir=tmp_path / "target",
+            source_language="English",
+            target_language="Chinese",
+            skipped_context_files=("translation_entities",),
+        )
     )
 
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
@@ -2628,12 +2681,14 @@ def test_translate_task_integrates_toc_contract_into_main_manifest_and_prompt(tm
     source_dir.mkdir()
     (source_dir / "chapter.md").write_text("Source", encoding="utf-8")
     paths = prepare_markdown_subagent(
-        output_dir,
-        "translate",
-        source_dir,
-        output_dir / "translated",
-        "English",
-        "Chinese",
+        MarkdownHandoffRequest(
+            output_dir=output_dir,
+            task="translate",
+            source_dir=source_dir,
+            target_dir=output_dir / "translated",
+            source_language="English",
+            target_language="Chinese",
+        )
     )
     toc_paths = prepare_toc_translation_subagent(output_dir, "English", "Chinese")
 
@@ -2732,13 +2787,15 @@ def test_prepare_markdown_subagent_does_not_trust_unvalidated_partial_file(
     (target_dir / "unit.md").write_text("partial", encoding="utf-8")
 
     paths = prepare_markdown_subagent(
-        tmp_path,
-        "translate",
-        source_dir,
-        target_dir,
-        "English",
-        "Chinese",
-        resume=True,
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="Chinese",
+            resume=True,
+        )
     )
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
 
@@ -2770,13 +2827,15 @@ def test_prepare_markdown_subagent_accepts_only_matching_validated_checkpoint(
     )
 
     paths = prepare_markdown_subagent(
-        tmp_path,
-        "translate",
-        source_dir,
-        target_dir,
-        "English",
-        "Chinese",
-        resume=True,
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="Chinese",
+            resume=True,
+        )
     )
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
 
@@ -2807,13 +2866,15 @@ def test_prepare_markdown_subagent_does_not_reuse_invalid_utf8_checkpoint(
     )
 
     paths = prepare_markdown_subagent(
-        tmp_path,
-        "translate",
-        source_dir,
-        target_dir,
-        "English",
-        "Chinese",
-        resume=True,
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="Chinese",
+            resume=True,
+        )
     )
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
 
@@ -2831,13 +2892,15 @@ def test_prepare_markdown_subagent_emits_explicit_resume_lists(tmp_path: Path):
     (target_dir / "done.md").write_text("已完成", encoding="utf-8")
 
     paths = prepare_markdown_subagent(
-        tmp_path,
-        "translate",
-        source_dir,
-        target_dir,
-        "English",
-        "Chinese",
-        resume=True,
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="Chinese",
+            resume=True,
+        )
     )
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
     prompt = paths["prompt"].read_text(encoding="utf-8")

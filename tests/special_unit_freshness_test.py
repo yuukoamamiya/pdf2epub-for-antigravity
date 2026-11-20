@@ -11,6 +11,7 @@ import pytest
 
 from pdf2epub.commands.runtime import BookCommandContext
 from pdf2epub.markdown_handoff import prepare_markdown_subagent
+from pdf2epub.markdown_handoff_context import MarkdownHandoffRequest
 from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 from pdf2epub.special_unit_context import build_special_unit_context
 from pdf2epub.special_unit_translation import apply, prepare
@@ -91,37 +92,41 @@ def _setup(tmp_path: Path):
 
 def _prepare_translate(fx, *, source_language="English", target_language="Chinese", controlled=True):
     return prepare_markdown_subagent(
-        fx["output"],
-        "translate",
-        fx["source_dir"],
-        fx["target_dir"],
-        source_language,
-        target_language,
-        config={},
-        file_roles={SOURCE_NAME: "index"},
-        context_files={"translation_entities": fx["parent_context_path"]},
-        heading_contexts={SOURCE_NAME: HEADING_CONTEXT},
-        unit_context_files={SOURCE_NAME: fx["unit_context_path"]},
-        controlled_files={SOURCE_NAME: "index"} if controlled else None,
-        resume=False,
+        MarkdownHandoffRequest(
+            output_dir=fx["output"],
+            task="translate",
+            source_dir=fx["source_dir"],
+            target_dir=fx["target_dir"],
+            source_language=source_language,
+            target_language=target_language,
+            config={},
+            file_roles={SOURCE_NAME: "index"},
+            context_files={"translation_entities": fx["parent_context_path"]},
+            heading_contexts={SOURCE_NAME: HEADING_CONTEXT},
+            unit_context_files={SOURCE_NAME: fx["unit_context_path"]},
+            controlled_files={SOURCE_NAME: "index"} if controlled else None,
+            resume=False,
+        )
     )
 
 
 def _resume(fx, *, source_language="English", target_language="Chinese", controlled=True):
     paths = prepare_markdown_subagent(
-        fx["output"],
-        "translate",
-        fx["source_dir"],
-        fx["target_dir"],
-        source_language,
-        target_language,
-        config={},
-        file_roles={SOURCE_NAME: "index"},
-        context_files={"translation_entities": fx["parent_context_path"]},
-        heading_contexts={SOURCE_NAME: HEADING_CONTEXT},
-        unit_context_files={SOURCE_NAME: fx["unit_context_path"]},
-        controlled_files={SOURCE_NAME: "index"} if controlled else None,
-        resume=True,
+        MarkdownHandoffRequest(
+            output_dir=fx["output"],
+            task="translate",
+            source_dir=fx["source_dir"],
+            target_dir=fx["target_dir"],
+            source_language=source_language,
+            target_language=target_language,
+            config={},
+            file_roles={SOURCE_NAME: "index"},
+            context_files={"translation_entities": fx["parent_context_path"]},
+            heading_contexts={SOURCE_NAME: HEADING_CONTEXT},
+            unit_context_files={SOURCE_NAME: fx["unit_context_path"]},
+            controlled_files={SOURCE_NAME: "index"} if controlled else None,
+            resume=True,
+        )
     )
     return json.loads(paths["manifest"].read_text(encoding="utf-8"))
 

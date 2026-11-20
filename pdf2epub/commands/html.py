@@ -334,6 +334,7 @@ def _prepare_html_command(args):
         # Create the body translation contract alongside the metadata contract.
         # Both are workspace Subagent tasks; this command never translates.
         from pdf2epub.markdown_handoff import prepare_markdown_subagent
+        from pdf2epub.markdown_handoff_context import MarkdownHandoffRequest
         if dynamic_enabled:
             from pdf2epub.dynamic_terminology import verify_session_attestation
             verify_session_attestation(output_dir, dynamic_attestation)
@@ -362,39 +363,39 @@ def _prepare_html_command(args):
                 target_language=target_language, chapter_groups=chapter_groups,
             )
         body_paths = prepare_markdown_subagent(
-            output_dir,
-            "translate-html",
-            pipeline.compressed_units_dir,
-            pipeline.translated_dir,
-            source_language,
-            target_language,
-            extra_rules=(
-                "【1:1 Line Count Consistency】: Keep exactly one non-empty output line for every non-empty source translation unit. Never insert internal newlines or line breaks inside a paragraph.",
-                "【Exact Tag Sequence】: Preserve every HTML tag, attribute, and entity (<span ...>, <a ...>, <em>, <i>, <b>, <ruby>, etc.) in the exact same sequence. NEVER delete or merge adjacent tags (e.g. `<span>A</span> (<span>B</span>)` MUST remain two separate tags `<span>甲</span> (<span>乙</span>)`, not merged into one).",
-                "【No Invented Containers】: Copy the source line's outer shape exactly. If a source line does not begin and end with `<div>...</div>`, NEVER add a `<div>` wrapper yourself. The compressor mapping restores structural containers; wrappers are not translation content.",
-                "【Italic Tag 1:1 Preservation】: Preserve the exact count, order, and nesting of `<i>...</i>` tags. Example: `<i>Gidra</i>` may become `<i>《基多拉》（Gidra）</i>`, and `<i>A, B</i>` may become `<i>《甲》、《乙》</i>`; in both cases it remains one `<i>` pair, never two pairs or none.",
-                "【Entity Preservation】: Copy protected entities and anchors literally, including `&amp;`, `&lt;`, `&gt;`, `<a/>`, and other self-closing or placeholder tokens. Translate surrounding text only; never replace an entity with its prose meaning.",
-                "【Direct File Writing】: Write output directly to the designated target file without markdown code fences.",
-                HTML_BODY_SELF_VALIDATION_RULE,
-                *(["Dynamic terminology memory is frozen for this handoff. Read only the sparse assigned-unit context; do not inspect the global snapshot, another unit, or independent metadata/TOC contracts. Write optional candidates only to the sidecar specified in your scoped manifest."] if dynamic_enabled else []),
-                *glossary_bundle.rules,
-            ),
-            config=config,
-            resume=getattr(args, "resume", False),
-            context_files=context_files or None,
-            skipped_context_files=skipped_context_files,
-            file_roles=pipeline.translation_file_roles(declared_files),
-            file_role_sources=(
-                pipeline.translation_file_role_sources(declared_files)
-                if callable(getattr(pipeline, "translation_file_role_sources", None))
-                else {}
-            ),
-            # Native glossary snapshots remain audit-only; workers receive
-            # per-unit projected terms through unit_context_files.
-            prompt_context_files={},
-            unit_context_files=unit_context_files,
-            declared_files=declared_files,
-            chapter_groups=chapter_groups,
+            MarkdownHandoffRequest(
+                output_dir=output_dir,
+                task="translate-html",
+                source_dir=pipeline.compressed_units_dir,
+                target_dir=pipeline.translated_dir,
+                source_language=source_language,
+                target_language=target_language,
+                extra_rules=(
+                    "【1:1 Line Count Consistency】: Keep exactly one non-empty output line for every non-empty source translation unit. Never insert internal newlines or line breaks inside a paragraph.",
+                    "【Exact Tag Sequence】: Preserve every HTML tag, attribute, and entity (<span ...>, <a ...>, <em>, <i>, <b>, <ruby>, etc.) in the exact same sequence. NEVER delete or merge adjacent tags (e.g. `<span>A</span> (<span>B</span>)` MUST remain two separate tags `<span>甲</span> (<span>乙</span>)`, not merged into one).",
+                    "【No Invented Containers】: Copy the source line's outer shape exactly. If a source line does not begin and end with `<div>...</div>`, NEVER add a `<div>` wrapper yourself. The compressor mapping restores structural containers; wrappers are not translation content.",
+                    "【Italic Tag 1:1 Preservation】: Preserve the exact count, order, and nesting of `<i>...</i>` tags. Example: `<i>Gidra</i>` may become `<i>《基多拉》（Gidra）</i>`, and `<i>A, B</i>` may become `<i>《甲》、《乙》</i>`; in both cases it remains one `<i>` pair, never two pairs or none.",
+                    "【Entity Preservation】: Copy protected entities and anchors literally, including `&amp;`, `&lt;`, `&gt;`, `<a/>`, and other self-closing or placeholder tokens. Translate surrounding text only; never replace an entity with its prose meaning.",
+                    "【Direct File Writing】: Write output directly to the designated target file without markdown code fences.",
+                    HTML_BODY_SELF_VALIDATION_RULE,
+                    *(["Dynamic terminology memory is frozen for this handoff. Read only the sparse assigned-unit context; do not inspect the global snapshot, another unit, or independent metadata/TOC contracts. Write optional candidates only to the sidecar specified in your scoped manifest."] if dynamic_enabled else []),
+                    *glossary_bundle.rules,
+                ),
+                config=config,
+                resume=getattr(args, "resume", False),
+                context_files=context_files or None,
+                skipped_context_files=skipped_context_files,
+                file_roles=pipeline.translation_file_roles(declared_files),
+                file_role_sources=pipeline.translation_file_role_sources(declared_files)
+                    if callable(getattr(pipeline, "translation_file_role_sources", None))
+                    else {},
+                # Native glossary snapshots remain audit-only; workers receive
+                # per-unit projected terms through unit_context_files.
+                prompt_context_files={},
+                unit_context_files=unit_context_files,
+                declared_files=declared_files,
+                chapter_groups=chapter_groups,
+            )
         )
         from pdf2epub.workflow_contracts import atomic_write_json, atomic_write_text, sha256_file
 
@@ -624,6 +625,7 @@ def html_skeleton_retry_command(args):
     """Prepare one complex HTML unit for protected-token retry translation."""
     from pdf2epub.html_translation.skeleton import write_masked_unit
     from pdf2epub.markdown_handoff import prepare_markdown_subagent
+    from pdf2epub.markdown_handoff_context import MarkdownHandoffRequest
     file_name = str(args.file)
     candidate = Path(file_name)
     if candidate.name != file_name or candidate.suffix.lower() != ".md":
@@ -650,21 +652,23 @@ def html_skeleton_retry_command(args):
         contract_dir / f"{Path(file_name).stem}.json",
     )
     paths = prepare_markdown_subagent(
-        output_dir,
-        "translate-html-skeleton",
-        skeleton_dir,
-        target_dir,
-        config.get("translation", {}).get("source_language", "English"),
-        config.get("translation", {}).get("target_language", "Chinese"),
-        extra_rules=(
-            "Translate the complete line with its surrounding sentence context.",
-            "Preserve every placeholder such as ⟦HTML_0001⟧ exactly, including count and order.",
-            "Never translate, remove, duplicate, or reorder placeholders.",
-            "Write only the translated masked lines to the assigned target file.",
-        ),
-        config=config,
-        resume=getattr(args, "resume", False),
-        declared_files=[file_name],
+        MarkdownHandoffRequest(
+            output_dir=output_dir,
+            task="translate-html-skeleton",
+            source_dir=skeleton_dir,
+            target_dir=target_dir,
+            source_language=config.get("translation", {}).get("source_language", "English"),
+            target_language=config.get("translation", {}).get("target_language", "Chinese"),
+            extra_rules=(
+                "Translate the complete line with its surrounding sentence context.",
+                "Preserve every placeholder such as ⟦HTML_0001⟧ exactly, including count and order.",
+                "Never translate, remove, duplicate, or reorder placeholders.",
+                "Write only the translated masked lines to the assigned target file.",
+            ),
+            config=config,
+            resume=getattr(args, "resume", False),
+            declared_files=[file_name],
+        )
     )
     logger.success(f"Skeleton retry prompt: {paths['prompt']}")
     logger.info(

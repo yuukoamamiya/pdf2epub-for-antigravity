@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from pdf2epub.markdown_handoff import prepare_markdown_subagent
+from pdf2epub.markdown_handoff_context import MarkdownHandoffRequest
 from pdf2epub.subagent_runtime import write_worker_handoffs
 from pdf2epub.worker_grouping import _plan_dispatch_waves
 
@@ -26,25 +27,27 @@ def _prepared(
         else None
     )
     paths = prepare_markdown_subagent(
-        tmp_path,
-        task,
-        source,
-        target,
-        "English",
-        "Chinese",
-        chapter_groups=chapter_groups,
-        config={
-            "subagent": {
-                "batching": {
-                    "max_concurrency": 4,
-                    "max_chapters_per_worker": 1,
-                    "max_tiny_chapters_per_worker": 1,
-                    "max_source_tokens": max_source_tokens,
-                    "large_file_token_threshold": 100,
-                    "extreme_file_token_threshold": 400,
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task=task,
+            source_dir=source,
+            target_dir=target,
+            source_language="English",
+            target_language="Chinese",
+            chapter_groups=chapter_groups,
+            config={
+                "subagent": {
+                    "batching": {
+                        "max_concurrency": 4,
+                        "max_chapters_per_worker": 1,
+                        "max_tiny_chapters_per_worker": 1,
+                        "max_source_tokens": max_source_tokens,
+                        "large_file_token_threshold": 100,
+                        "extreme_file_token_threshold": 400,
+                    }
                 }
-            }
-        },
+            },
+        )
     )
     return paths
 
@@ -570,21 +573,23 @@ def test_continuation_worker_receives_read_only_preceding_source_context(tmp_pat
         "Continued paragraph.\n", encoding="utf-8"
     )
     paths = prepare_markdown_subagent(
-        tmp_path,
-        "translate",
-        source,
-        target,
-        "English",
-        "Chinese",
-        continuation_files={
-            "chapter_1.part2.md": {
-                "is_continuation": True,
-                "part_number": 2,
-                "part_count": 2,
-                "previous_file": "chapter_1.part1.md",
-            }
-        },
-        config={"subagent": {"batching": {"max_concurrency": 1}}},
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source,
+            target_dir=target,
+            source_language="English",
+            target_language="Chinese",
+            continuation_files={
+                "chapter_1.part2.md": {
+                    "is_continuation": True,
+                    "part_number": 2,
+                    "part_count": 2,
+                    "previous_file": "chapter_1.part1.md",
+                }
+            },
+            config={"subagent": {"batching": {"max_concurrency": 1}}},
+        )
     )
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
     context = manifest["preceding_context"]["chapter_1.part2.md"]

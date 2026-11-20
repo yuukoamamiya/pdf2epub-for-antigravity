@@ -6,6 +6,7 @@ import pytest
 
 from pdf2epub.commands.sources import _polished_stage_is_current
 from pdf2epub.markdown_handoff import prepare_markdown_subagent
+from pdf2epub.markdown_handoff_context import MarkdownHandoffRequest
 from pdf2epub.markdown_handoff_planning import plan_markdown_handoff
 from pdf2epub.markdown_handoff_resume import unit_context_is_current
 from pdf2epub.markdown_validation_persistence import capture_pdf_resume_contexts
@@ -74,10 +75,17 @@ def _prepare_valid_polish(tmp_path: Path, *, context_kind: str):
         raise AssertionError(context_kind)
 
     paths = prepare_markdown_subagent(
-        tmp_path, "polish", source_dir, target_dir, "English", "Chinese",
-        unit_context_files=unit_context_files,
-        continuation_files=continuation_files,
-        footnote_semantics_enabled=True,
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="polish",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="Chinese",
+            unit_context_files=unit_context_files,
+            continuation_files=continuation_files,
+            footnote_semantics_enabled=True,
+        )
     )
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
     for name in source_texts:
@@ -239,8 +247,16 @@ def test_polish_prepared_boundary_still_checks_full_neighbor_source_until_reprep
 
     continuations = load_pdf_continuation_files(tmp_path, source_dir)
     paths = prepare_markdown_subagent(
-        tmp_path, "polish", source_dir, target_dir, "English", "Chinese",
-        continuation_files=continuations, footnote_semantics_enabled=True,
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="polish",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="Chinese",
+            continuation_files=continuations,
+            footnote_semantics_enabled=True,
+        )
     )
     before, errors = capture_pdf_resume_contexts(tmp_path, "polish", ["part-b.md"])
     assert errors == {}

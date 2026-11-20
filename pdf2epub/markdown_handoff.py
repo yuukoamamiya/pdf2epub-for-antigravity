@@ -1,8 +1,8 @@
-"""Markdown Subagent hand-off preparation and public compatibility entry point."""
+"""Markdown Subagent hand-off preparation entry point."""
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Iterable, Mapping, Optional
+from typing import Dict, Mapping
 
 from .markdown_handoff_context import MarkdownHandoffRequest, normalize_handoff_context
 from .markdown_handoff_manifest import (
@@ -25,69 +25,8 @@ from .subagent_safety import protected_workspace_snapshot
 from .workflow_contracts import atomic_write_json, atomic_write_text, relative_posix_path
 
 
-def prepare_markdown_subagent(
-    output_dir: Path,
-    task: str,
-    source_dir: Path,
-    target_dir: Path,
-    source_language: str,
-    target_language: str,
-    extra_rules: Iterable[str] = (),
-    config: Optional[Mapping[str, Any]] = None,
-    resume: bool = False,
-    file_roles: Optional[Mapping[str, str]] = None,
-    file_role_sources: Optional[Mapping[str, Mapping[str, Any]]] = None,
-    context_files: Optional[Mapping[str, Path]] = None,
-    skipped_context_files: Iterable[str] = (),
-    file_contexts: Optional[Mapping[str, str]] = None,
-    heading_contexts: Optional[Mapping[str, Mapping[str, Any]]] = None,
-    global_toc_outline: Optional[str] = None,
-    unit_context_files: Optional[Mapping[str, Path]] = None,
-    chapter_groups: Optional[Mapping[str, Iterable[str]]] = None,
-    prompt_context_files: Optional[Mapping[str, Path]] = None,
-    declared_files: Optional[Iterable[str]] = None,
-    allow_human_review_retry: bool = False,
-    secondary_source_dir: Optional[Path] = None,
-    visual_review_dir: Optional[Path] = None,
-    review_output_dir: Optional[Path] = None,
-    continuation_files: Optional[Mapping[str, Mapping[str, Any]]] = None,
-    protected_toc_titles: Optional[Iterable[str]] = None,
-    config_path: Optional[str | Path] = None,
-    controlled_files: Optional[Mapping[str, str]] = None,
-    footnote_semantics_enabled: bool = False,
-) -> Dict[str, Path]:
-    """Adapt the stable public signature to the focused hand-off services."""
-    request = MarkdownHandoffRequest(
-        output_dir=Path(output_dir),
-        task=task,
-        source_dir=Path(source_dir),
-        target_dir=Path(target_dir),
-        source_language=source_language,
-        target_language=target_language,
-        extra_rules=tuple(extra_rules or ()),
-        config=config,
-        resume=resume,
-        file_roles=file_roles,
-        file_role_sources=file_role_sources,
-        context_files=context_files,
-        skipped_context_files=tuple(skipped_context_files or ()),
-        file_contexts=file_contexts,
-        heading_contexts=heading_contexts,
-        global_toc_outline=global_toc_outline,
-        unit_context_files=unit_context_files,
-        chapter_groups=chapter_groups,
-        prompt_context_files=prompt_context_files,
-        declared_files=declared_files,
-        allow_human_review_retry=allow_human_review_retry,
-        secondary_source_dir=secondary_source_dir,
-        visual_review_dir=visual_review_dir,
-        review_output_dir=review_output_dir,
-        continuation_files=continuation_files,
-        protected_toc_titles=protected_toc_titles,
-        config_path=config_path,
-        controlled_files=controlled_files,
-        footnote_semantics_enabled=footnote_semantics_enabled,
-    )
+def prepare_markdown_subagent(request: MarkdownHandoffRequest) -> Dict[str, Path]:
+    """Write the manifest and prompt for one Markdown hand-off request."""
     plan = plan_markdown_handoff(
         request.source_dir,
         request.task,

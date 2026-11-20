@@ -16,6 +16,7 @@ from pdf2epub.html_translation.translation_validation import (
     HTMLValidationWorkspace,
 )
 from pdf2epub.markdown_handoff import prepare_markdown_subagent
+from pdf2epub.markdown_handoff_context import MarkdownHandoffRequest
 
 
 def _workspace(tmp_path: Path) -> tuple[Path, Path, Path]:
@@ -37,16 +38,18 @@ def _prepare(
     **kwargs,
 ):
     return prepare_markdown_subagent(
-        output,
-        "translate-html",
-        source,
-        target,
-        source_language,
-        target_language,
-        config={"subagent": {"batching": {"max_concurrency": 1}}},
-        declared_files=["chapter.md"],
-        resume=True,
-        **kwargs,
+        MarkdownHandoffRequest(
+            output_dir=output,
+            task="translate-html",
+            source_dir=source,
+            target_dir=target,
+            source_language=source_language,
+            target_language=target_language,
+            config={"subagent": {"batching": {"max_concurrency": 1}}},
+            declared_files=["chapter.md"],
+            resume=True,
+            **kwargs,
+        )
     )
 
 
@@ -153,10 +156,18 @@ def test_html_special_role_receipt_is_persisted_and_reused_after_validation(tmp_
     roles = {source_name: "bibliography"}
     role_sources = {source_name: {"source": "filename_inference", "reason": "bibliography filename"}}
     paths = prepare_markdown_subagent(
-        output, "translate-html", source_dir, target_dir, "English", "Chinese",
-        config={"subagent": {"batching": {"max_concurrency": 1}}},
-        declared_files=[source_name], file_roles=roles,
-        file_role_sources=role_sources,
+        MarkdownHandoffRequest(
+            output_dir=output,
+            task="translate-html",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="Chinese",
+            config={"subagent": {"batching": {"max_concurrency": 1}}},
+            declared_files=[source_name],
+            file_roles=roles,
+            file_role_sources=role_sources,
+        )
     )
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
     manifest["input_epub"] = "input.epub"
@@ -172,10 +183,19 @@ def test_html_special_role_receipt_is_persisted_and_reused_after_validation(tmp_
     validator.persist_checkpoint(report)
 
     resumed_paths = prepare_markdown_subagent(
-        output, "translate-html", source_dir, target_dir, "English", "Chinese",
-        config={"subagent": {"batching": {"max_concurrency": 1}}},
-        declared_files=[source_name], resume=True, file_roles=roles,
-        file_role_sources=role_sources,
+        MarkdownHandoffRequest(
+            output_dir=output,
+            task="translate-html",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            source_language="English",
+            target_language="Chinese",
+            config={"subagent": {"batching": {"max_concurrency": 1}}},
+            declared_files=[source_name],
+            resume=True,
+            file_roles=roles,
+            file_role_sources=role_sources,
+        )
     )
     resumed = json.loads(resumed_paths["manifest"].read_text(encoding="utf-8"))
     assert resumed["completed_files"] == [source_name]
