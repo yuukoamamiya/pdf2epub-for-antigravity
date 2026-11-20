@@ -4,7 +4,6 @@ Extraction, validation, and packaging remain local operations; translation is
 delegated to the workspace Subagent through the generated hand-off.
 """
 
-import hashlib
 import json
 import re
 from pathlib import Path, PurePosixPath
