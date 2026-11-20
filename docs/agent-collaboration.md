@@ -14,7 +14,7 @@
 ```text
 git status --short          # 先看有没有别人的改动；不要清理、不要纳入本次提交
 git branch --show-current   # 必须是 main；不要建临时分支
-uv run pytest -q            # 基线：1620 个测试（4 skipped），约 40 秒
+uv run pytest -q            # 基线：1627 个测试（4 skipped），约 40 秒
 uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲染
 ```
 
@@ -76,42 +76,39 @@ uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲
 | `fab9f15` | `commands/registry.py` 的 837 行 `register_command_parsers()` 拆成 12 个 `_register_*` 分组函数（命令顺序、help 文案、handler 路径逐字未变） |
 | `8db3489` | CLI 统一错误边界：未预期异常打印一行并返回 1，`--debug` / `PDF2EPUB_DEBUG=1` 才展开 traceback；`Ctrl-C` 返回 130 |
 | `cc7724c` | dynamic terminology 的 manifest 盖章抽成 `manifest_dynamic_terminology_stamp()`，PDF 与 EPUB 共用 |
-| `0b47b0a` | resume 现在按文件说明 pending 原因（`source_changed` / `context_version_bumped` / `context_changed` / `receipt_missing` / `target_missing` / `review_reopened` / `checkpoint_invalid` / `fresh_run`），父 manifest 写 `pending_reasons` + `pending_reason_counts`，`status.review_gates` 同步显示；`unit_context_mismatch_reason()` 是判定分量的唯一来源 |
+| `f4aa8ac` | resume 现在按文件说明 pending 原因（`source_changed` / `context_version_bumped` / `context_changed` / `receipt_missing` / `target_missing` / `review_reopened` / `checkpoint_invalid` / `fresh_run`），父 manifest 写 `pending_reasons` + `pending_reason_counts`，`status.review_gates` 同步显示；`unit_context_mismatch_reason()` 是判定分量的唯一来源 |
 | `df1f0e0` | 新增本文件并同步 AGENTS/architecture/maintenance/opencode |
+| `3d97c7a` | `prepare_markdown_subagent()` 改为只接收 `MarkdownHandoffRequest`，删除 29 参适配段；125 个调用点（4 生产 / 121 测试）同步改为构造 dataclass，行为与默认值不变 |
 
 ## 5. 已知遗留 backlog
 
-按价值排序，均未实施。动手前先读对应模块和测试，并按第 3 节跑守护测试。
+按价值排序。动手前先读对应模块和测试，并按第 3 节跑守护测试。
 
 1. **receipt 迁移命令**（P1，`markdown_handoff_resume.py`、`markdown_validation*.py`）
-   projection/schema 升级时，操作员必须 `prepare → validate → prepare` 三步走，且首轮
-   pending 全满不可派发。建议给 pending 加 `pending_reason`
-   （`source_changed` / `context_version_bumped` / `receipt_missing`），并提供只读
-   `translate --dry-run` 或显式 `refresh-checkpoints`，把"版本迁移"与"内容失效"分开。
+   pending 原因分类已完成（见 `f4aa8ac`）：版本迁移与内容失效现在能区分，首轮 pending
+   不会再被误当成正文变化。仍缺一次性的只读 `translate --dry-run` 或显式
+   `refresh-checkpoints`：只在源哈希一致时重盖章旧 receipt，免去
+   `prepare → validate → prepare` 三步走。
 2. **巨型函数拆分**（P1）
    `commands/registry.py` 已完成（见 `fab9f15`）。剩余：
    `refine/footnote_handoff.py:211 prepare_footnote_subagent()`（1126 行）、
    `refine/footnote_result_audit.py:299`（534 行）、`refine/footnote_regions.py:33`（509 行）、
    `commands/markdown_readiness.py:30`（449 行）、`refine/footnote_apply.py:81`（413 行）。
    拆分必须保持 manifest/report schema 与哈希合同不变，并跑全量测试。
-3. **超长签名**（P1）
-   `markdown_handoff.py:28 prepare_markdown_subagent()` 有 29 个参数，函数体首行就在组装
-   `MarkdownHandoffRequest`。建议把参数上移到该 dataclass，保留一个薄兼容包装，同步改
-   `commands/markdown.py`、`commands/html.py` 的调用点。
-4. **Azure / Vision 后端的重复实现**（P2）
+3. **Azure / Vision 后端的重复实现**（P2）
    `ocr/backends/azure.py` 与 `vision.py` 有 219 行逐字相同（约占较小文件的 34%）：
    图片落盘、坐标转换、插图提取、纵向栏处理各写了一遍。两者都是可选 legacy 后端，
    合并前先确认还要不要保留这两个后端；若要保留，抽 `_image_page_backend_common.py`。
-5. **Notes 解析的重复实现**（P2）
+4. **Notes 解析的重复实现**（P2）
    `footnote_normalization.py`（polish 校验）与 `refine/endnote_normalization.py`（apply）
    各自维护一套定义正则。`endnote_definition_keys()` 已经共享，但
    `_MARKDOWN_DEF_RE` / `_RAW_NOTE_DEF_RE` / `_RAW_SUP_NOTE_DEF_RE` 仍是两份且语义有细微差异；
    合并前必须逐条比对（apply 侧要求行尾有内容，校验侧只匹配前缀）。不要为了去重改变行为。
-6. **`.gitattributes` 与工作区换行**（P2）
+5. **`.gitattributes` 与工作区换行**（P2）
    仓库索引是 LF、工作区是 CRLF，`git status` 会列出约 200 个 stat-only 改动。
    建议在**工作区干净时**单独做一次 `git add --renormalize .` 并作为独立提交；不要在
    有未提交改动的批次里做。
-7. **`status` 的 `package` 阶段**（P2）
+6. **`status` 的 `package` 阶段**（P2）
    目前只要存在 `*.epub` 就视为有产物；结合 `current/reachable` 已不会误报，但更严格的
    做法是校验 EPUB 的构建 receipt 是否对应当前 polish/translate 检查点。
 
