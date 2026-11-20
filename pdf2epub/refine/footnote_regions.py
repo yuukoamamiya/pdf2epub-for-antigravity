@@ -9,6 +9,7 @@ Subagent decisions.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
 from .footnote_candidates import DEFAULT_NATIVE_MAX_FONT_RATIO
@@ -30,44 +31,224 @@ from .layout_evidence import normalized_bbox as _normalise_bbox
 DEFAULT_REGION_BOUNDARY_MARGIN = 0.12
 
 
-def build_page_footnote_regions(
-    page_number: int,
-    sidecar: Mapping[str, Any],
-    candidates: list[dict[str, Any]],
-    audit_candidates: list[dict[str, Any]],
-    *,
-    bottom_ratio: float,
-    auto_accept: bool,
-    continuous_regions: list[dict[str, Any]],
-    context_candidates: Iterable[Mapping[str, Any]] = (),
-    ocr_conflict: bool = False,
-) -> list[dict[str, Any]]:
-    """Infer page-level note areas and mark only uncertain areas for vision."""
-    all_candidates = [*candidates, *audit_candidates]
-    context_indexes = {
-        int(item["block"])
-        for item in context_candidates
-        if isinstance(item, Mapping)
-        and str(item.get("block", "")).lstrip("-").isdigit()
-    }
-    by_index = {
-        int(item["block"]): item
-        for item in all_candidates
+@dataclass
+class _RegionInputs:
+    """Shared page facts used while building every region."""
+
+    page_number: int
+    sidecar: Mapping[str, Any]
+    blocks: Any
+    all_candidates: list[dict[str, Any]]
+    by_index: dict[int, dict[str, Any]]
+    scopes: dict[int, dict[str, Any]]
+    key_scopes: dict[str, set[str]]
+    ambiguous_lane_blocks: set[int]
+    context_indexes: set[int]
+    continuous_indexes: set[int]
+    bottom_ratio: float
+    auto_accept: bool
+    ocr_conflict: bool
+
+
+def _region_review_reasons(
+    item_candidates: list[dict[str, Any]],
+    indexes: list[int],
+    layout_evidence: Mapping[str, Any],
+    inputs: "_RegionInputs",
+) -> list[str]:
+    """Collect page-region reasons that require a visual review."""
+    by_index = inputs.by_index
+    scopes = inputs.scopes
+    key_scopes = inputs.key_scopes
+    ambiguous_lane_blocks = inputs.ambiguous_lane_blocks
+    context_indexes = inputs.context_indexes
+    blocks = inputs.blocks
+    sidecar = inputs.sidecar
+    bottom_ratio = inputs.bottom_ratio
+    ocr_conflict = inputs.ocr_conflict
+    reasons: list[str] = []
+    if any(
+        len(key_scopes.get(str(item.get("key") or ""), set())) > 1
+        for item in item_candidates
+        if item.get("key")
+    ):
+        reasons.append("duplicate_key_across_layout_scopes")
+    if any(int(item["block"]) in ambiguous_lane_blocks for item in item_candidates):
+        reasons.append("layout_lane_bridge_ambiguity")
+    if any(
+        scopes.get(int(item["block"]), {}).get("placement")
+        in {"margin_left", "margin_right"}
+        for item in item_candidates
         if str(item.get("block", "")).lstrip("-").isdigit()
-    }
-    if not by_index:
-        return []
-    blocks = sidecar.get("blocks", [])
-    ordered = sorted(by_index)
-    scopes = {
-        index: _layout_scope(sidecar, index)
-        for index in ordered
-        if 0 <= index < len(blocks) and isinstance(blocks[index], Mapping)
-    }
-    # A wide first note line and a narrower following line can be one footer
-    # lane when their left edges align and they touch vertically. Only fold a
-    # wide block when there is exactly one compatible note lane; this leaves
-    # cross-column bridges ambiguous.
+    ):
+        reasons.append("margin_note_requires_visual_review")
+    if (
+        not layout_evidence.get("tail_aligned")
+        and any(
+            _FOOTNOTE_LABEL_RE.search(str(item.get("label") or ""))
+            and item.get("key")
+            and item.get("local_role") != "footnote_continuation"
+            and scopes.get(int(item["block"]), {}).get("available")
+            for item in item_candidates
+            if str(item.get("block", "")).lstrip("-").isdigit()
+        )
+    ):
+        reasons.append("explicit_footnote_label_outside_page_tail")
+    if any(item.get("audit_only") for item in item_candidates):
+        reasons.append("suspected_missed_bottom_numeric_block")
+    if any(
+        not item.get("key") and not _auto_continuation_key(item)
+        for item in item_candidates
+    ):
+        reasons.append("unclassified_continuation_block")
+    if any(
+        item.get("continuous_region_evidence")
+        and _FURNITURE_LABEL_RE.search(str(item.get("label") or ""))
+        for item in item_candidates
+    ):
+        reasons.append("page_furniture_inside_continuous_region")
+    if ocr_conflict:
+        reasons.append("ocr_candidate_evidence_conflict")
+    if any(item.get("body_flow_warning") for item in item_candidates):
+        reasons.append("ordinary_text_below_numeric_block")
+
+    first_index = indexes[0]
+    if (
+        first_index > 0
+        and first_index - 1 not in by_index
+        and first_index - 1 not in context_indexes
+    ):
+        previous_block = (
+            blocks[first_index - 1]
+            if first_index - 1 < len(blocks)
+            else None
+        )
+        previous_box = (
+            _normalise_bbox(previous_block, sidecar)
+            if isinstance(previous_block, Mapping)
+            else None
+        )
+        first_box = (
+            _normalise_bbox(blocks[first_index], sidecar)
+            if first_index < len(blocks)
+            else None
+        )
+        previous_label = (
+            str(previous_block.get("label") or "")
+            if isinstance(previous_block, Mapping)
+            else ""
+        )
+        first_label = (
+            str(blocks[first_index].get("label") or "")
+            if first_index < len(blocks)
+            and isinstance(blocks[first_index], Mapping)
+            else ""
+        )
+        if (
+            previous_box
+            and first_box
+            and previous_box[3]
+            >= float(bottom_ratio) - DEFAULT_REGION_BOUNDARY_MARGIN
+            and _horizontal_overlap(previous_box, first_box) >= 0.35
+            and not _FURNITURE_LABEL_RE.search(previous_label)
+            and not _FOOTNOTE_LABEL_RE.search(first_label)
+        ):
+            reasons.append("footnote_region_boundary_uncertain")
+    return reasons
+
+
+def _local_acceptance(
+    item_candidates: list[dict[str, Any]],
+    layout_evidence: Mapping[str, Any],
+    has_sequence: bool,
+    auto_accept: bool,
+    reasons: list[str],
+) -> tuple[bool, list[str]]:
+    """Decide whether independent evidence allows local acceptance."""
+    # A numeric run is not semantic proof. Local acceptance requires an
+    # independent signal plus page-relative tail evidence.
+    all_numbered = bool(item_candidates) and all(
+        item.get("key") for item in item_candidates
+    )
+    has_auto_continuation = any(
+        item.get("auto_continuation") for item in item_candidates
+    )
+    explicit_labels = all(
+        _FOOTNOTE_LABEL_RE.search(str(item.get("label") or ""))
+        for item in item_candidates
+    )
+    native_candidates = any(
+        str(item.get("source_kind") or "").strip().lower() == "native_text"
+        for item in item_candidates
+    )
+    keyed_candidates = [item for item in item_candidates if item.get("key")]
+    marker_support = bool(keyed_candidates) and all(
+        bool(item.get("same_page_marker")) for item in keyed_candidates
+    )
+    native_structural_support = native_candidates and all(
+        bool(item.get("same_page_superscript"))
+        and isinstance(item.get("font_size_ratio"), (int, float))
+        and float(item["font_size_ratio"])
+        <= float(item.get("native_max_font_ratio", DEFAULT_NATIVE_MAX_FONT_RATIO))
+        for item in keyed_candidates
+    )
+    explicit_layout_support = bool(
+        explicit_labels and layout_evidence.get("tail_aligned")
+    )
+    marker_layout_support = bool(
+        has_sequence
+        and marker_support
+        and layout_evidence.get("tail_aligned")
+        and layout_evidence.get("detached_from_body")
+    )
+    continuation_layout_support = bool(
+        has_auto_continuation
+        and keyed_candidates
+        and any(not item.get("auto_continuation") for item in keyed_candidates)
+        and layout_evidence.get("tail_aligned")
+        and all(
+            _FOOTNOTE_LABEL_RE.search(str(item.get("label") or ""))
+            for item in keyed_candidates
+            if not item.get("auto_continuation")
+        )
+    )
+    native_layout_support = bool(
+        native_structural_support and layout_evidence.get("tail_aligned")
+    )
+    local_acceptance_evidence: list[str] = []
+    if explicit_layout_support:
+        local_acceptance_evidence.append("consistent_footnote_labels")
+    if marker_layout_support:
+        local_acceptance_evidence.append("same_page_markers_and_detached_tail")
+    if continuation_layout_support:
+        local_acceptance_evidence.append(
+            "cross_page_continuation_and_labeled_tail"
+        )
+    if native_layout_support:
+        local_acceptance_evidence.append("native_marker_font_and_detached_tail")
+    if all_numbered and not local_acceptance_evidence:
+        reasons.append("insufficient_independent_footnote_evidence")
+    forced_visual_review = any(
+        item.get("leading_superscript_review") is True for item in item_candidates
+    )
+    if forced_visual_review:
+        reasons.append("leading_superscript_recall_requires_visual_review")
+    locally_clear = bool(
+        auto_accept
+        and not reasons
+        and not forced_visual_review
+        and all_numbered
+        and bool(local_acceptance_evidence)
+    )
+    return locally_clear, local_acceptance_evidence
+
+
+def _fold_wide_notes(
+    ordered: list[int],
+    scopes: Mapping[int, Mapping[str, Any]],
+    by_index: Mapping[int, Mapping[str, Any]],
+) -> dict[int, int]:
+    """Fold a wide note line into exactly one compatible narrow lane."""
     folded_wide_notes: dict[int, int] = {}
     wide_notes = [
         index for index in ordered
@@ -106,8 +287,13 @@ def build_page_footnote_regions(
                 compatible.append(other_index)
         if len(compatible) == 1:
             folded_wide_notes[wide_index] = compatible[0]
-    # Infer candidate lanes from actual horizontal overlap, not the page
-    # midpoint. That keeps centered or narrow single-column text together.
+    return folded_wide_notes
+
+def _infer_lane_components(
+    ordered: list[int],
+    scopes: Mapping[int, Mapping[str, Any]],
+) -> tuple[list[list[int]], set[int]]:
+    """Infer candidate lanes from horizontal overlap, not the page midpoint."""
     lane_components: list[list[int]] = []
     ambiguous_lane_blocks: set[int] = set()
     for index in ordered:
@@ -190,6 +376,17 @@ def build_page_footnote_regions(
         else:
             first = matches[0]
             lane_components[first].append(index)
+    return lane_components, ambiguous_lane_blocks
+
+def _assign_lane_scopes(
+    lane_components: list[list[int]],
+    folded_wide_notes: Mapping[int, int],
+    scopes: dict[int, dict[str, Any]],
+    by_index: Mapping[int, Mapping[str, Any]],
+    ambiguous_lane_blocks: set[int],
+    ocr_conflict: bool,
+) -> None:
+    """Write lane scope ids and fold compatible wide note lines."""
     for lane_number, component in enumerate(lane_components, 1):
         lane_id = f"candidate_lane_{lane_number:02d}"
         for index in component:
@@ -234,12 +431,27 @@ def build_page_footnote_regions(
             and not ocr_conflict
         ):
             scopes[wide_index]["scope_id"] = scopes[narrow_index]["scope_id"]
+
+def _key_scopes(
+    by_index: Mapping[int, Mapping[str, Any]],
+    scopes: Mapping[int, Mapping[str, Any]],
+) -> dict[str, set[str]]:
+    """Map each visible key to the layout scopes it appears in."""
     key_scopes: dict[str, set[str]] = {}
     for index, item in by_index.items():
         key = str(item.get("key") or "").strip()
         scope_id = str(scopes.get(index, {}).get("scope_id") or "")
         if key and scope_id:
             key_scopes.setdefault(key, set()).add(scope_id)
+    return key_scopes
+
+def _group_candidates(
+    ordered: list[int],
+    blocks: Any,
+    sidecar: Mapping[str, Any],
+    scopes: Mapping[int, Mapping[str, Any]],
+) -> list[list[int]]:
+    """Group adjacent candidates that share scope, overlap and gap."""
     groups: list[list[int]] = []
     for index in ordered:
         if not groups:
@@ -277,267 +489,203 @@ def build_page_footnote_regions(
         else:
             groups.append([index])
 
+    return groups
+
+def _build_region(
+    region_number: int,
+    indexes: list[int],
+    inputs: "_RegionInputs",
+) -> dict[str, Any]:
+    """Build one region and annotate its member candidates."""
+    by_index = inputs.by_index
+    scopes = inputs.scopes
+    sidecar = inputs.sidecar
+    blocks = inputs.blocks
+    all_candidates = inputs.all_candidates
+    context_indexes = inputs.context_indexes
+    ambiguous_lane_blocks = inputs.ambiguous_lane_blocks
+    key_scopes = inputs.key_scopes
+    continuous_indexes = inputs.continuous_indexes
+    ocr_conflict = inputs.ocr_conflict
+    auto_accept = inputs.auto_accept
+    page_number = inputs.page_number
+    bottom_ratio = inputs.bottom_ratio
+    item_candidates = [by_index[index] for index in indexes if index in by_index]
+    for item in item_candidates:
+        continuation_key = _auto_continuation_key(item)
+        if continuation_key and not item.get("key"):
+            item["key"] = continuation_key
+            item["auto_continuation"] = True
+            item["local_role"] = "footnote_continuation"
+    keys = [str(item.get("key")) for item in item_candidates if item.get("key")]
+    numeric_keys: list[int] = []
+    for key in keys:
+        try:
+            numeric_keys.append(int(key))
+        except ValueError:
+            continue
+    has_sequence = any(
+        right == left + 1
+        for left, right in zip(numeric_keys, numeric_keys[1:])
+    )
+    layout_evidence = _region_layout_evidence(
+        sidecar,
+        indexes,
+        context_indexes=context_indexes,
+    )
+    reasons = _region_review_reasons(item_candidates, indexes, layout_evidence, inputs)
+
+    locally_clear, local_acceptance_evidence = _local_acceptance(
+        item_candidates,
+        layout_evidence,
+        has_sequence,
+        auto_accept,
+        reasons,
+    )
+    region_id = f"page-{int(page_number):03d}-region-{region_number:02d}"
+    role = "local_footnote_region" if locally_clear else "visual_audit_required"
+    bbox = _region_union_bbox(
+        _normalise_bbox(blocks[index], sidecar)
+        for index in indexes
+        if 0 <= index < len(blocks)
+        and isinstance(blocks[index], Mapping)
+    )
+    region = {
+        "region_id": region_id,
+        "page": int(page_number),
+        "block_indices": indexes,
+        "bbox": bbox,
+        "keys": keys,
+        "numeric_sequence": has_sequence,
+        "continuous_numeric_evidence": any(
+            index in continuous_indexes for index in indexes
+        ),
+        "confidence": "high" if locally_clear else "review",
+        "disposition": role,
+        "reasons": sorted(set(reasons)),
+        "layout_evidence": layout_evidence,
+        "layout_scopes": [
+            {"block": index, **scopes.get(index, {})} for index in indexes
+        ],
+        "local_acceptance_evidence": local_acceptance_evidence,
+        "blocks": _region_compact_blocks(sidecar, all_candidates, indexes),
+    }
+    for item in item_candidates:
+        item["region_id"] = region_id
+        item["region_confidence"] = region["confidence"]
+        item["layout_evidence"] = layout_evidence
+        item["layout_scope"] = scopes.get(int(item["block"]), {})
+        if (
+            item.get("key")
+            and len(key_scopes.get(str(item.get("key") or ""), set())) > 1
+        ):
+            item["requires_marker_context"] = True
+        if "ordinary_text_below_numeric_block" in reasons:
+            item["confidence"] = "review"
+            item["disposition"] = "review_required"
+            item["review_reason"] = "ordinary_text_below_numeric_block"
+        elif locally_clear:
+            item["confidence"] = "high"
+            item["disposition"] = "local_candidate"
+            item.setdefault("local_role", "footnote_start")
+            item["review_reason"] = "page_region_local_accept"
+        else:
+            mixed_region_only = set(reasons) <= {
+                "unclassified_continuation_block"
+            }
+            if (
+                mixed_region_only
+                and item.get("confidence") == "high"
+                and item.get("key")
+                and _FOOTNOTE_LABEL_RE.search(str(item.get("label") or ""))
+                and not item.get("audit_only")
+            ):
+                continue
+            existing_reason = str(item.get("review_reason") or "").strip()
+            item["confidence"] = "review"
+            item["disposition"] = "review_required"
+            item["review_reason"] = existing_reason or (
+                reasons[0] if reasons else "region_requires_visual_review"
+            )
+    region["blocks"] = _region_compact_blocks(sidecar, all_candidates, indexes)
+    return region
+
+
+def build_page_footnote_regions(
+    page_number: int,
+    sidecar: Mapping[str, Any],
+    candidates: list[dict[str, Any]],
+    audit_candidates: list[dict[str, Any]],
+    *,
+    bottom_ratio: float,
+    auto_accept: bool,
+    continuous_regions: list[dict[str, Any]],
+    context_candidates: Iterable[Mapping[str, Any]] = (),
+    ocr_conflict: bool = False,
+) -> list[dict[str, Any]]:
+    """Infer page-level note areas and mark only uncertain areas for vision."""
+    all_candidates = [*candidates, *audit_candidates]
+    context_indexes = {
+        int(item["block"])
+        for item in context_candidates
+        if isinstance(item, Mapping)
+        and str(item.get("block", "")).lstrip("-").isdigit()
+    }
+    by_index = {
+        int(item["block"]): item
+        for item in all_candidates
+        if str(item.get("block", "")).lstrip("-").isdigit()
+    }
+    if not by_index:
+        return []
+    blocks = sidecar.get("blocks", [])
+    ordered = sorted(by_index)
+    scopes = {
+        index: _layout_scope(sidecar, index)
+        for index in ordered
+        if 0 <= index < len(blocks) and isinstance(blocks[index], Mapping)
+    }
+    # A wide first note line and a narrower following line can be one footer
+    # lane when their left edges align and they touch vertically. Only fold a
+    # wide block when there is exactly one compatible note lane; this leaves
+    # cross-column bridges ambiguous.
+    folded_wide_notes = _fold_wide_notes(ordered, scopes, by_index)
+    # Infer candidate lanes from actual horizontal overlap, not the page
+    # midpoint. That keeps centered or narrow single-column text together.
+    lane_components, ambiguous_lane_blocks = _infer_lane_components(ordered, scopes)
+    _assign_lane_scopes(
+        lane_components,
+        folded_wide_notes,
+        scopes,
+        by_index,
+        ambiguous_lane_blocks,
+        ocr_conflict,
+    )
+    key_scopes = _key_scopes(by_index, scopes)
+    groups = _group_candidates(ordered, blocks, sidecar, scopes)
     continuous_indexes = {
         int(index)
         for region in continuous_regions
         for index in region.get("review_block_indices", [])
     }
     regions: list[dict[str, Any]] = []
+    region_inputs = _RegionInputs(
+        page_number=page_number,
+        sidecar=sidecar,
+        blocks=blocks,
+        all_candidates=all_candidates,
+        by_index=by_index,
+        scopes=scopes,
+        key_scopes=key_scopes,
+        ambiguous_lane_blocks=ambiguous_lane_blocks,
+        context_indexes=context_indexes,
+        continuous_indexes=continuous_indexes,
+        bottom_ratio=bottom_ratio,
+        auto_accept=auto_accept,
+        ocr_conflict=ocr_conflict,
+    )
     for region_number, indexes in enumerate(groups, 1):
-        item_candidates = [by_index[index] for index in indexes if index in by_index]
-        for item in item_candidates:
-            continuation_key = _auto_continuation_key(item)
-            if continuation_key and not item.get("key"):
-                item["key"] = continuation_key
-                item["auto_continuation"] = True
-                item["local_role"] = "footnote_continuation"
-        keys = [str(item.get("key")) for item in item_candidates if item.get("key")]
-        numeric_keys: list[int] = []
-        for key in keys:
-            try:
-                numeric_keys.append(int(key))
-            except ValueError:
-                continue
-        has_sequence = any(
-            right == left + 1
-            for left, right in zip(numeric_keys, numeric_keys[1:])
-        )
-        layout_evidence = _region_layout_evidence(
-            sidecar,
-            indexes,
-            context_indexes=context_indexes,
-        )
-        reasons: list[str] = []
-        if any(
-            len(key_scopes.get(str(item.get("key") or ""), set())) > 1
-            for item in item_candidates
-            if item.get("key")
-        ):
-            reasons.append("duplicate_key_across_layout_scopes")
-        if any(int(item["block"]) in ambiguous_lane_blocks for item in item_candidates):
-            reasons.append("layout_lane_bridge_ambiguity")
-        if any(
-            scopes.get(int(item["block"]), {}).get("placement")
-            in {"margin_left", "margin_right"}
-            for item in item_candidates
-            if str(item.get("block", "")).lstrip("-").isdigit()
-        ):
-            reasons.append("margin_note_requires_visual_review")
-        if (
-            not layout_evidence.get("tail_aligned")
-            and any(
-                _FOOTNOTE_LABEL_RE.search(str(item.get("label") or ""))
-                and item.get("key")
-                and item.get("local_role") != "footnote_continuation"
-                and scopes.get(int(item["block"]), {}).get("available")
-                for item in item_candidates
-                if str(item.get("block", "")).lstrip("-").isdigit()
-            )
-        ):
-            reasons.append("explicit_footnote_label_outside_page_tail")
-        if any(item.get("audit_only") for item in item_candidates):
-            reasons.append("suspected_missed_bottom_numeric_block")
-        if any(
-            not item.get("key") and not _auto_continuation_key(item)
-            for item in item_candidates
-        ):
-            reasons.append("unclassified_continuation_block")
-        if any(
-            item.get("continuous_region_evidence")
-            and _FURNITURE_LABEL_RE.search(str(item.get("label") or ""))
-            for item in item_candidates
-        ):
-            reasons.append("page_furniture_inside_continuous_region")
-        if ocr_conflict:
-            reasons.append("ocr_candidate_evidence_conflict")
-        if any(item.get("body_flow_warning") for item in item_candidates):
-            reasons.append("ordinary_text_below_numeric_block")
-
-        first_index = indexes[0]
-        if (
-            first_index > 0
-            and first_index - 1 not in by_index
-            and first_index - 1 not in context_indexes
-        ):
-            previous_block = (
-                blocks[first_index - 1]
-                if first_index - 1 < len(blocks)
-                else None
-            )
-            previous_box = (
-                _normalise_bbox(previous_block, sidecar)
-                if isinstance(previous_block, Mapping)
-                else None
-            )
-            first_box = (
-                _normalise_bbox(blocks[first_index], sidecar)
-                if first_index < len(blocks)
-                else None
-            )
-            previous_label = (
-                str(previous_block.get("label") or "")
-                if isinstance(previous_block, Mapping)
-                else ""
-            )
-            first_label = (
-                str(blocks[first_index].get("label") or "")
-                if first_index < len(blocks)
-                and isinstance(blocks[first_index], Mapping)
-                else ""
-            )
-            if (
-                previous_box
-                and first_box
-                and previous_box[3]
-                >= float(bottom_ratio) - DEFAULT_REGION_BOUNDARY_MARGIN
-                and _horizontal_overlap(previous_box, first_box) >= 0.35
-                and not _FURNITURE_LABEL_RE.search(previous_label)
-                and not _FOOTNOTE_LABEL_RE.search(first_label)
-            ):
-                reasons.append("footnote_region_boundary_uncertain")
-
-        # A numeric run is not semantic proof. Local acceptance requires an
-        # independent signal plus page-relative tail evidence.
-        all_numbered = bool(item_candidates) and all(
-            item.get("key") for item in item_candidates
-        )
-        has_auto_continuation = any(
-            item.get("auto_continuation") for item in item_candidates
-        )
-        explicit_labels = all(
-            _FOOTNOTE_LABEL_RE.search(str(item.get("label") or ""))
-            for item in item_candidates
-        )
-        native_candidates = any(
-            str(item.get("source_kind") or "").strip().lower() == "native_text"
-            for item in item_candidates
-        )
-        keyed_candidates = [item for item in item_candidates if item.get("key")]
-        marker_support = bool(keyed_candidates) and all(
-            bool(item.get("same_page_marker")) for item in keyed_candidates
-        )
-        native_structural_support = native_candidates and all(
-            bool(item.get("same_page_superscript"))
-            and isinstance(item.get("font_size_ratio"), (int, float))
-            and float(item["font_size_ratio"])
-            <= float(item.get("native_max_font_ratio", DEFAULT_NATIVE_MAX_FONT_RATIO))
-            for item in keyed_candidates
-        )
-        explicit_layout_support = bool(
-            explicit_labels and layout_evidence.get("tail_aligned")
-        )
-        marker_layout_support = bool(
-            has_sequence
-            and marker_support
-            and layout_evidence.get("tail_aligned")
-            and layout_evidence.get("detached_from_body")
-        )
-        continuation_layout_support = bool(
-            has_auto_continuation
-            and keyed_candidates
-            and any(not item.get("auto_continuation") for item in keyed_candidates)
-            and layout_evidence.get("tail_aligned")
-            and all(
-                _FOOTNOTE_LABEL_RE.search(str(item.get("label") or ""))
-                for item in keyed_candidates
-                if not item.get("auto_continuation")
-            )
-        )
-        native_layout_support = bool(
-            native_structural_support and layout_evidence.get("tail_aligned")
-        )
-        local_acceptance_evidence: list[str] = []
-        if explicit_layout_support:
-            local_acceptance_evidence.append("consistent_footnote_labels")
-        if marker_layout_support:
-            local_acceptance_evidence.append("same_page_markers_and_detached_tail")
-        if continuation_layout_support:
-            local_acceptance_evidence.append(
-                "cross_page_continuation_and_labeled_tail"
-            )
-        if native_layout_support:
-            local_acceptance_evidence.append("native_marker_font_and_detached_tail")
-        if all_numbered and not local_acceptance_evidence:
-            reasons.append("insufficient_independent_footnote_evidence")
-        forced_visual_review = any(
-            item.get("leading_superscript_review") is True for item in item_candidates
-        )
-        if forced_visual_review:
-            reasons.append("leading_superscript_recall_requires_visual_review")
-        locally_clear = bool(
-            auto_accept
-            and not reasons
-            and not forced_visual_review
-            and all_numbered
-            and bool(local_acceptance_evidence)
-        )
-        region_id = f"page-{int(page_number):03d}-region-{region_number:02d}"
-        role = "local_footnote_region" if locally_clear else "visual_audit_required"
-        bbox = _region_union_bbox(
-            _normalise_bbox(blocks[index], sidecar)
-            for index in indexes
-            if 0 <= index < len(blocks)
-            and isinstance(blocks[index], Mapping)
-        )
-        region = {
-            "region_id": region_id,
-            "page": int(page_number),
-            "block_indices": indexes,
-            "bbox": bbox,
-            "keys": keys,
-            "numeric_sequence": has_sequence,
-            "continuous_numeric_evidence": any(
-                index in continuous_indexes for index in indexes
-            ),
-            "confidence": "high" if locally_clear else "review",
-            "disposition": role,
-            "reasons": sorted(set(reasons)),
-            "layout_evidence": layout_evidence,
-            "layout_scopes": [
-                {"block": index, **scopes.get(index, {})} for index in indexes
-            ],
-            "local_acceptance_evidence": local_acceptance_evidence,
-            "blocks": _region_compact_blocks(sidecar, all_candidates, indexes),
-        }
-        regions.append(region)
-        for item in item_candidates:
-            item["region_id"] = region_id
-            item["region_confidence"] = region["confidence"]
-            item["layout_evidence"] = layout_evidence
-            item["layout_scope"] = scopes.get(int(item["block"]), {})
-            if (
-                item.get("key")
-                and len(key_scopes.get(str(item.get("key") or ""), set())) > 1
-            ):
-                item["requires_marker_context"] = True
-            if "ordinary_text_below_numeric_block" in reasons:
-                item["confidence"] = "review"
-                item["disposition"] = "review_required"
-                item["review_reason"] = "ordinary_text_below_numeric_block"
-            elif locally_clear:
-                item["confidence"] = "high"
-                item["disposition"] = "local_candidate"
-                item.setdefault("local_role", "footnote_start")
-                item["review_reason"] = "page_region_local_accept"
-            else:
-                mixed_region_only = set(reasons) <= {
-                    "unclassified_continuation_block"
-                }
-                if (
-                    mixed_region_only
-                    and item.get("confidence") == "high"
-                    and item.get("key")
-                    and _FOOTNOTE_LABEL_RE.search(str(item.get("label") or ""))
-                    and not item.get("audit_only")
-                ):
-                    continue
-                existing_reason = str(item.get("review_reason") or "").strip()
-                item["confidence"] = "review"
-                item["disposition"] = "review_required"
-                item["review_reason"] = existing_reason or (
-                    reasons[0] if reasons else "region_requires_visual_review"
-                )
-        region["blocks"] = _region_compact_blocks(sidecar, all_candidates, indexes)
+        regions.append(_build_region(region_number, indexes, region_inputs))
     return regions
 
 
