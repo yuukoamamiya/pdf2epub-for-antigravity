@@ -50,6 +50,13 @@ def validate_manifest_directories(request: MarkdownHandoffRequest) -> tuple[str 
     return visual, secondary, review
 
 
+def _count_pending_reasons(reasons: Mapping[str, str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for reason in reasons.values():
+        counts[reason] = counts.get(reason, 0) + 1
+    return dict(sorted(counts.items()))
+
+
 def build_markdown_manifest(data: ManifestBuild) -> dict[str, Any]:
     """Construct the manifest value without performing file I/O."""
     request, plan, context, resume = data.request, data.plan, data.context, data.resume
@@ -80,6 +87,11 @@ def build_markdown_manifest(data: ManifestBuild) -> dict[str, Any]:
         "completed_files": list(resume.completed_files),
         "pending_files": list(resume.pending_files),
         "special_pending_files": list(resume.special_pending_files),
+        # Why each pending unit is not reusable. A projection/schema upgrade
+        # and a real content change otherwise look identical on the first
+        # --resume, when every unit is listed as pending.
+        "pending_reasons": dict(resume.pending_reasons),
+        "pending_reason_counts": _count_pending_reasons(resume.pending_reasons),
         "special_unit_modes": dict(plan.controlled_files),
         "atomic_output_contract": {
             "temporary_pattern": ".<assigned_filename>.tmp",

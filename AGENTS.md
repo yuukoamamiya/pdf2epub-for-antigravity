@@ -476,6 +476,13 @@ validation receipt 可能失效并暂时把所有现有目标列为 pending。�
 `translate-validate` 校验现有译文并建立当前 receipt，再运行第二次 `translate --resume`；
 只派发仍列为 pending/invalid 的 assignment，完成后运行全量 `translate-validate`。
 只重派上下文/源哈希失效的 assignment，不因 projection 升级盲目重译全书，也不迁移旧树或旧翻译结果。
+
+父 manifest 的 `pending_reasons`（以及汇总的 `pending_reason_counts`）按文件说明 pending 原因：
+`source_changed`、`context_version_bumped`、`context_changed`、`receipt_missing`、
+`target_missing`、`review_reopened`、`checkpoint_invalid`、`fresh_run`。第一次 resume 前先读
+它：若只有 `context_version_bumped`/`receipt_missing`，说明是合同升级或 receipt 缺失，
+不是正文变化，不得据此重译；`source_changed` 或 `review_reopened` 才表示需要 Subagent 重新处理。
+`status` 的 `review_gates` 会同步显示这些计数。该字段只用于诊断，不改变复用判定。
 EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编号格式差异；编号只在一侧缺失时，
 仅当去编号后的标题正文精确且全书分片中唯一、没有不同编号冲突时才回退。模糊相似标题不绑定，
 原有 HTML `id` 保留。

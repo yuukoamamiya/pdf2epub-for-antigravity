@@ -74,6 +74,76 @@ def load_previous_manifest(path: Path, *, enabled: bool) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def unit_context_mismatch_reason(
+    name: str,
+    *,
+    previous_manifest: Mapping[str, Any],
+    controlled_files: Mapping[str, str],
+    context_sha256: Mapping[str, str],
+    unit_context_sha256: Mapping[str, str],
+    heading_contexts: Mapping[str, Mapping[str, Any]],
+    resume: bool,
+    file_roles: Mapping[str, str] | None = None,
+    file_role_sources: Mapping[str, Mapping[str, Any]] | None = None,
+    boundary_context_sha256: Mapping[str, str] | None = None,
+    ignore_unit_context: bool = False,
+) -> str | None:
+    """Return which projection component changed, or ``None`` when current.
+
+    The component name feeds the operator-facing ``pending_reasons`` report so
+    a first ``--resume`` can distinguish "the source changed" from "the
+    projection was upgraded" without reading hashes by hand.  Decision logic is
+    unchanged: ``unit_context_is_current()`` is exactly ``reason is None``.
+    """
+    previous_special_modes = previous_manifest.get("special_unit_modes", {})
+    if not isinstance(previous_special_modes, Mapping):
+        previous_special_modes = {}
+    if previous_special_modes.get(name) != controlled_files.get(name):
+        return "special_unit_mode"
+    previous_roles = previous_manifest.get("file_roles", {})
+    previous_sources = previous_manifest.get("file_role_sources", {})
+    if not isinstance(previous_roles, Mapping):
+        previous_roles = {}
+    if not isinstance(previous_sources, Mapping):
+        previous_sources = {}
+    if previous_roles.get(name) != (file_roles or {}).get(name):
+        return "file_role"
+    if previous_sources.get(name) != (file_role_sources or {}).get(name):
+        return "file_role_source"
+    if not ignore_unit_context:
+        previous_unit_hashes = previous_manifest.get("unit_context_sha256", {})
+        if not isinstance(previous_unit_hashes, Mapping):
+            previous_unit_hashes = {}
+        # Old manifests lack unit projections, so a changed book-wide context
+        # cannot be localized and must invalidate their checkpoints conservatively.
+        if (
+            resume
+            and context_sha256
+            and previous_manifest.get("context_sha256", {}) != context_sha256
+            and not previous_unit_hashes
+        ):
+            return "book_context"
+        if name in unit_context_sha256:
+            if previous_unit_hashes.get(name) != unit_context_sha256[name]:
+                return "unit_context"
+        elif name in previous_unit_hashes:
+            return "unit_context"
+    previous_boundary = previous_manifest.get("boundary_context_sha256", {})
+    if not isinstance(previous_boundary, Mapping):
+        previous_boundary = {}
+    if name in (boundary_context_sha256 or {}):
+        if previous_boundary.get(name) != (boundary_context_sha256 or {}).get(name):
+            return "boundary_context"
+    elif name in previous_boundary:
+        return "boundary_context"
+    previous_heading_contexts = previous_manifest.get("toc_heading_contexts", {})
+    if not isinstance(previous_heading_contexts, Mapping):
+        previous_heading_contexts = {}
+    if heading_contexts.get(name) != previous_heading_contexts.get(name):
+        return "heading_context"
+    return None
+
+
 def unit_context_is_current(
     name: str,
     *,
@@ -89,51 +159,22 @@ def unit_context_is_current(
     ignore_unit_context: bool = False,
 ) -> bool:
     """Decide whether the context projection for one source unit is unchanged."""
-    previous_special_modes = previous_manifest.get("special_unit_modes", {})
-    if not isinstance(previous_special_modes, Mapping):
-        previous_special_modes = {}
-    if previous_special_modes.get(name) != controlled_files.get(name):
-        return False
-    previous_roles = previous_manifest.get("file_roles", {})
-    previous_sources = previous_manifest.get("file_role_sources", {})
-    if not isinstance(previous_roles, Mapping):
-        previous_roles = {}
-    if not isinstance(previous_sources, Mapping):
-        previous_sources = {}
-    if previous_roles.get(name) != (file_roles or {}).get(name):
-        return False
-    if previous_sources.get(name) != (file_role_sources or {}).get(name):
-        return False
-    if not ignore_unit_context:
-        previous_unit_hashes = previous_manifest.get("unit_context_sha256", {})
-        if not isinstance(previous_unit_hashes, Mapping):
-            previous_unit_hashes = {}
-        # Old manifests lack unit projections, so a changed book-wide context
-        # cannot be localized and must invalidate their checkpoints conservatively.
-        if (
-            resume
-            and context_sha256
-            and previous_manifest.get("context_sha256", {}) != context_sha256
-            and not previous_unit_hashes
-        ):
-            return False
-        if name in unit_context_sha256:
-            if previous_unit_hashes.get(name) != unit_context_sha256[name]:
-                return False
-        elif name in previous_unit_hashes:
-            return False
-    previous_boundary = previous_manifest.get("boundary_context_sha256", {})
-    if not isinstance(previous_boundary, Mapping):
-        previous_boundary = {}
-    if name in (boundary_context_sha256 or {}):
-        if previous_boundary.get(name) != (boundary_context_sha256 or {}).get(name):
-            return False
-    elif name in previous_boundary:
-        return False
-    previous_heading_contexts = previous_manifest.get("toc_heading_contexts", {})
-    if not isinstance(previous_heading_contexts, Mapping):
-        previous_heading_contexts = {}
-    return heading_contexts.get(name) == previous_heading_contexts.get(name)
+    return (
+        unit_context_mismatch_reason(
+            name,
+            previous_manifest=previous_manifest,
+            controlled_files=controlled_files,
+            context_sha256=context_sha256,
+            unit_context_sha256=unit_context_sha256,
+            heading_contexts=heading_contexts,
+            resume=resume,
+            file_roles=file_roles,
+            file_role_sources=file_role_sources,
+            boundary_context_sha256=boundary_context_sha256,
+            ignore_unit_context=ignore_unit_context,
+        )
+        is None
+    )
 
 
 def controlled_special_checkpoint_is_current(
@@ -183,9 +224,95 @@ class ResumeDecision:
     special_pending_files: tuple[str, ...] = ()
     pending_batches: tuple[tuple[str, ...], ...] = ()
     pending_stats: Mapping[str, Mapping[str, int]] = field(default_factory=dict)
+    # Why each non-reusable unit is pending: source_changed,
+    # context_version_bumped, context_changed, receipt_missing,
+    # target_missing, review_reopened, checkpoint_invalid or fresh_run.
+    pending_reasons: Mapping[str, str] = field(default_factory=dict)
     html_invalidated_checkpoints: Mapping[str, str] = field(default_factory=dict)
     effective_concurrency: int = 1
     concurrency_reason: str = "no pending files"
+
+
+def _projection_version_changed(
+    name: str,
+    previous_manifest: Mapping[str, Any],
+    heading_contexts: Mapping[str, Mapping[str, Any]],
+) -> bool:
+    """Return True when only the TOC heading projection version moved."""
+    previous = previous_manifest.get("toc_heading_contexts", {})
+    if not isinstance(previous, Mapping):
+        return False
+    current_entry = heading_contexts.get(name)
+    previous_entry = previous.get(name)
+    if not isinstance(current_entry, Mapping) or not isinstance(previous_entry, Mapping):
+        return False
+    current_version = current_entry.get("projection_version")
+    previous_version = previous_entry.get("projection_version")
+    return (
+        isinstance(current_version, int)
+        and isinstance(previous_version, int)
+        and current_version != previous_version
+    )
+
+
+def _target_is_empty(target: Path) -> bool:
+    try:
+        return not target.is_file() or target.stat().st_size == 0
+    except OSError:
+        return True
+
+
+def _pending_reason(
+    name: str,
+    *,
+    request: MarkdownHandoffRequest,
+    previous_manifest: Mapping[str, Any],
+    validation_hashes: Mapping[str, Any],
+    target: Path,
+    source_hash: str,
+    validated_files: Optional[frozenset[str]],
+    mismatch: Optional[str],
+    heading_contexts: Mapping[str, Mapping[str, Any]],
+    review_reopened: bool,
+) -> str:
+    """Explain why one unit is not reusable, without changing the decision.
+
+    The classification exists so an operator can tell a real content change
+    from a contract/projection upgrade on the first ``--resume``, which
+    otherwise lists every unit as pending.
+    """
+    if review_reopened:
+        return "review_reopened"
+    if not request.resume:
+        return "fresh_run"
+    receipt_hash = (
+        validation_hashes.get(name) if isinstance(validation_hashes, Mapping) else None
+    )
+    if isinstance(receipt_hash, str) and receipt_hash != source_hash:
+        return "source_changed"
+    previous_sources = previous_manifest.get("source_sha256", {})
+    previous_hash = (
+        previous_sources.get(name) if isinstance(previous_sources, Mapping) else None
+    )
+    if (
+        isinstance(previous_hash, str)
+        and previous_hash != source_hash
+        and not isinstance(receipt_hash, str)
+    ):
+        return "source_changed"
+    if mismatch == "heading_context" and _projection_version_changed(
+        name, previous_manifest, heading_contexts
+    ):
+        return "context_version_bumped"
+    if mismatch == "receipt_context":
+        return "receipt_missing"
+    if mismatch is not None:
+        return "context_changed"
+    if _target_is_empty(target):
+        return "target_missing"
+    if validated_files is None or name not in validated_files:
+        return "receipt_missing"
+    return "checkpoint_invalid"
 
 
 def decide_resume(
@@ -341,6 +468,7 @@ def decide_resume(
         target_hashes = {}
     completed: list[str] = []
     pending: list[str] = []
+    pending_reasons: dict[str, str] = {}
     invalidated_html_checkpoints: dict[str, str] = {}
     previous_html_invalidations = previous_manifest.get("html_invalidated_checkpoints", {})
     if not isinstance(previous_html_invalidations, Mapping):
@@ -352,7 +480,7 @@ def decide_resume(
         source_hash = plan.source_sha256[name]
         effective_unit_hashes = {} if task == "polish" else context.unit_context_sha256
         ignore_unit_ctx = task == "polish"
-        context_current = unit_context_is_current(
+        context_mismatch = unit_context_mismatch_reason(
             name,
             previous_manifest=previous_manifest,
             controlled_files=controlled,
@@ -365,6 +493,7 @@ def decide_resume(
             resume=request.resume,
             ignore_unit_context=ignore_unit_ctx,
         )
+        context_current = context_mismatch is None
         html_fingerprint = None
         if task in {"translate", "polish"}:
             receipt_contexts = validation.get("resume_contexts", {})
@@ -418,6 +547,10 @@ def decide_resume(
                     context_current = False
                 elif not context_current and html_fingerprint:
                     invalidated_html_checkpoints[name] = html_fingerprint
+        if not context_current and context_mismatch is None:
+            # The projection matches, but the receipt cannot prove which
+            # context it was validated against (legacy receipt).
+            context_mismatch = "receipt_context"
         checkpoint_current = request.resume and context_current and is_reusable_checkpoint(
             target, name, source_hash, validated_files or (), validation_hashes, target_hashes
         )
@@ -460,7 +593,24 @@ def decide_resume(
                 request.output_dir, target, name, controlled[name], source_hash,
                 request.source_language, request.target_language,
             )
-        (completed if checkpoint_current else pending).append(name)
+        if checkpoint_current:
+            completed.append(name)
+        else:
+            pending.append(name)
+            pending_reasons[name] = _pending_reason(
+                name,
+                request=request,
+                previous_manifest=previous_manifest,
+                validation_hashes=validation_hashes,
+                target=target,
+                source_hash=source_hash,
+                validated_files=validated_files,
+                mismatch=context_mismatch,
+                heading_contexts=context.heading_contexts,
+                review_reopened=(
+                    name in human_review_files or bool(previous_reviews.get(name))
+                ),
+            )
         if task == "translate-html" and html_fingerprint:
             if previous_html_invalidations.get(name) == html_fingerprint:
                 invalidated_html_checkpoints[name] = html_fingerprint
@@ -497,6 +647,7 @@ def decide_resume(
         special_pending_files=tuple(special_pending),
         pending_batches=tuple(tuple(batch) for batch in batches),
         pending_stats=pending_stats,
+        pending_reasons=pending_reasons,
         html_invalidated_checkpoints=invalidated_html_checkpoints,
         effective_concurrency=effective,
         concurrency_reason=reason,

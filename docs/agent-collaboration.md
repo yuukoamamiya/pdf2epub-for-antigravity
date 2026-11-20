@@ -76,6 +76,7 @@ uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲
 | `fab9f15` | `commands/registry.py` 的 837 行 `register_command_parsers()` 拆成 12 个 `_register_*` 分组函数（命令顺序、help 文案、handler 路径逐字未变） |
 | `8db3489` | CLI 统一错误边界：未预期异常打印一行并返回 1，`--debug` / `PDF2EPUB_DEBUG=1` 才展开 traceback；`Ctrl-C` 返回 130 |
 | `cc7724c` | dynamic terminology 的 manifest 盖章抽成 `manifest_dynamic_terminology_stamp()`，PDF 与 EPUB 共用 |
+| `0b47b0a` | resume 现在按文件说明 pending 原因（`source_changed` / `context_version_bumped` / `context_changed` / `receipt_missing` / `target_missing` / `review_reopened` / `checkpoint_invalid` / `fresh_run`），父 manifest 写 `pending_reasons` + `pending_reason_counts`，`status.review_gates` 同步显示；`unit_context_mismatch_reason()` 是判定分量的唯一来源 |
 | `df1f0e0` | 新增本文件并同步 AGENTS/architecture/maintenance/opencode |
 
 ## 5. 已知遗留 backlog

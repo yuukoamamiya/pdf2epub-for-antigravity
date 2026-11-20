@@ -520,6 +520,12 @@ def _review_gates(output_dir: Path) -> list[dict[str, Any]]:
             value = manifest.get(key)
             if isinstance(value, int) and value > 0:
                 detail_parts.append(f"{value} {label}")
+        reason_counts = manifest.get("pending_reason_counts")
+        if isinstance(reason_counts, Mapping) and reason_counts:
+            detail_parts.append(
+                "pending reasons: "
+                + ", ".join(f"{key}={value}" for key, value in sorted(reason_counts.items()))
+            )
         if workers:
             detail_parts.append(f"{len(workers)} worker hand-off(s)")
         if isinstance(waves, list) and waves:

@@ -269,6 +269,7 @@ def test_status_surfaces_pending_subagent_review_gates(tmp_path: Path, monkeypat
         output_dir / "translate_subagent_manifest.json",
         {
             "pending_files": ["chapter_1.md", "chapter_2.md"],
+            "pending_reason_counts": {"context_version_bumped": 2},
             "worker_handoffs": [
                 {"worker_id": "w1", "dispatch_status": "available"},
                 {"worker_id": "w2", "dispatch_status": "running"},
@@ -288,6 +289,7 @@ def test_status_surfaces_pending_subagent_review_gates(tmp_path: Path, monkeypat
     assert gates["translate"]["needs_subagent"] is True
     assert gates["translate"]["pending_files"] == 2
     assert gates["translate"]["pending_file_names"] == ["chapter_1.md", "chapter_2.md"]
+    assert "pending reasons: context_version_bumped=2" in gates["translate"]["detail"]
     assert gates["translate"]["workers"] == 2
     assert gates["translate"]["worker_status"] == {"available": 1, "running": 1}
     assert gates["translate"]["waves"] == 1
