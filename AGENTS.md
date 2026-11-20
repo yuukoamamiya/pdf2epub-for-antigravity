@@ -88,6 +88,8 @@ uv run pdf2epub -c config.yaml doctor
 可执行阶段时输出 `blocked_stage`/`blocked_reason` 而不是给出必然失败的命令。
 `review_gates` 段汇总各阶段待复核文件数、候选数、worker 派发状态与波次数，用于判断
 "下一步要不要开 Subagent"，但它是只读摘要，不能替代 manifest 本身和正式校验。
+`ocr_evidence` 段标明页面证据等级：`two_ocr`（已交叉验证）、`single_ocr`（正常页未经
+第二套 OCR 验证，只有异常页进入视觉复核）或 `legacy_native`（旧原生版面证据）。
 跨 Agent 交接与当前遗留项见 [`docs/agent-collaboration.md`](docs/agent-collaboration.md)。
 维护者可用 `uv run pdf2epub -c config.yaml footnote-review-summary --json` 只读汇总脚注复核成本；它是独立诊断，不能替代 `footnote-validate`，也不建议删除相邻页上下文窗口。
 脚注 unit context 使用独立 projection version。加载时必须依据当前候选报告、精确页侧车哈希索引和 refined unit mapping 重算完整投影。Polish boundary context projection version 2 首次恢复时用 `polish --resume` 刷新 sidecar/context 并运行正式 `polish-validate`。之后 halo 外邻片变化不使已完成 sidecar/receipt 失效，但完整 source provenance 与 inventory 检查仍须通过。脚注证据在 `tree_progress.json` 提供显式、合法的 `part_page_ranges` 时按该分片页范围投影以缩小失效半径；缺少精确 part→page 映射时继续使用章节级证据与失效范围，不推断分片级页范围。旧脚注 unit context 版本或脚注证据变化时，先重跑 `footnote-prepare`、`footnote-validate`，保留原 decision 文件，不把刷新上下文当作语义决定通过。

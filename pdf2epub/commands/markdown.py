@@ -13,6 +13,7 @@ from typing import Any, Dict, Mapping
 
 from loguru import logger
 
+from pdf2epub.command_errors import log_command_error
 from pdf2epub.commands.runtime import load_book_context
 from pdf2epub.commands.markdown_readiness import run_readiness_check
 from pdf2epub.commands.sources import (
@@ -75,7 +76,7 @@ def _prepare_pdf_markdown_task(args, task: str):
                 )
                 verify_session_attestation(early_output, dynamic_attestation)
         except Exception as exc:
-            logger.error(f"Dynamic terminology pre-write gate blocked {task}: {exc}")
+            log_command_error(f"Dynamic terminology pre-write gate blocked {task}", exc, args=args)
             return 1
 
     context = load_book_context(args, f"{task}-prepare")
@@ -134,7 +135,7 @@ def _prepare_pdf_markdown_task(args, task: str):
                 context.config_path,
             )
         except Exception as exc:
-            logger.error(f"Could not load external glossary: {exc}")
+            log_command_error("Could not load external glossary", exc, args=args)
             return 1
     if task == "polish":
         try:
@@ -409,7 +410,7 @@ def _prepare_pdf_markdown_task(args, task: str):
         if handoffs:
             paths["worker_handoffs"] = output_dir / Path(handoffs[0]["manifest"]).parent
     except Exception as exc:
-        logger.error(f"Could not prepare {task} task: {exc}")
+        log_command_error(f"Could not prepare {task} task", exc, args=args)
         return 1
     logger.success(f"Wrote Subagent prompt: {paths['prompt']}")
     logger.info(f"Recommended Antigravity model: {resolve_subagent_model(config, task)}")
@@ -1131,7 +1132,7 @@ def special_unit_prepare_command(args):
         logger.warning("After Subagent completes its scoped JSON, run special-unit-apply, then translate-validate --file and full translate-validate.")
         return 0
     except Exception as exc:
-        logger.error(str(exc))
+        log_command_error(f"Could not prepare controlled {args.kind} unit {args.file}", exc, args=args)
         return 1
 
 
@@ -1163,5 +1164,5 @@ def special_unit_apply_command(args):
         logger.warning("Run translate-validate --file for this unit and the full translate-validate gate.")
         return 0
     except Exception as exc:
-        logger.error(str(exc))
+        log_command_error(f"Could not apply controlled {args.kind} unit {args.file}", exc, args=args)
         return 1

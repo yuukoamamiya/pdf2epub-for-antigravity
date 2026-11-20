@@ -8,6 +8,7 @@ import pytest
 from loguru import logger
 
 from pdf2epub.cli import run_command
+from pdf2epub.command_errors import log_command_error
 
 
 @pytest.fixture
@@ -52,6 +53,31 @@ def test_debug_environment_variable_expands_the_traceback(records, monkeypatch):
     monkeypatch.setenv("PDF2EPUB_DEBUG", "1")
 
     assert run_command(_raiser(ValueError("boom"))) == 1
+
+    assert any(record["exception"] is not None for record in records)
+
+
+def test_handler_error_helper_keeps_one_line_and_names_the_type(records, monkeypatch):
+    monkeypatch.delenv("PDF2EPUB_DEBUG", raising=False)
+
+    log_command_error(
+        "Could not prepare translate task",
+        ValueError("boom"),
+        args=SimpleNamespace(debug=False),
+    )
+
+    messages = [record["message"] for record in records]
+    assert any("Could not prepare translate task: ValueError: boom" in message for message in messages)
+    assert any("--debug" in message for message in messages)
+    assert all(record["exception"] is None for record in records)
+
+
+def test_handler_error_helper_expands_with_debug(records):
+    log_command_error(
+        "Could not prepare translate task",
+        ValueError("boom"),
+        args=SimpleNamespace(debug=True),
+    )
 
     assert any(record["exception"] is not None for record in records)
 

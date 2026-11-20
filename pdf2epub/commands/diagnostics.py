@@ -16,7 +16,11 @@ from typing import Any, Mapping
 import yaml
 
 from pdf2epub.ocr.backends import supported_backends
-from pdf2epub.ocr_consensus import secondary_ocr_enabled, secondary_backend_name
+from pdf2epub.ocr_consensus import (
+    ocr_evidence_mode,
+    secondary_ocr_enabled,
+    secondary_backend_name,
+)
 from pdf2epub.ocr_progress import assess_progress
 from pdf2epub.pipeline_policy import PipelinePolicy
 from pdf2epub.ocr_source import is_legacy_native_source
@@ -24,7 +28,7 @@ from pdf2epub.utils.paths import book_output_dir
 from pdf2epub.utils.input_paths import resolve_book_input_path
 
 
-STATUS_SCHEMA_VERSION = 2
+STATUS_SCHEMA_VERSION = 3
 DOCTOR_SCHEMA_VERSION = 1
 
 
@@ -587,6 +591,46 @@ def _apply_stage_blockers(stages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return stages
 
 
+def _ocr_evidence(
+    output_dir: Path,
+    config: Mapping[str, Any],
+    input_type: str | None,
+) -> dict[str, Any] | None:
+    """Describe the page-transcription evidence level behind the pipeline.
+
+    Single OCR is a legitimate cost trade-off, but it must not read as
+    ``cross-checked``.  Making the evidence level explicit in ``status`` keeps
+    the gate strength visible instead of hiding it in the configuration.
+    """
+    if input_type != "pdf":
+        return None
+    try:
+        legacy = is_legacy_native_source(output_dir)
+    except ValueError as exc:
+        return {
+            "mode": "indeterminate",
+            "cross_verified": False,
+            "detail": f"源页面证据互相矛盾: {exc}",
+        }
+    if legacy:
+        return {
+            "mode": "legacy_native",
+            "cross_verified": False,
+            "detail": "旧原生版面证据；没有视觉 OCR 交叉验证",
+        }
+    if ocr_evidence_mode(config) == "two_ocr":
+        return {
+            "mode": "two_ocr",
+            "cross_verified": True,
+            "detail": "布局门禁要求当前双 OCR 共识检查点",
+        }
+    return {
+        "mode": "single_ocr",
+        "cross_verified": False,
+        "detail": "单 OCR 视觉转录；正常页未经第二套 OCR 交叉验证，只有异常页进入视觉复核",
+    }
+
+
 def build_status(config_path: str | Path = "config.yaml") -> dict[str, Any]:
     """Build a read-only status snapshot for the configured book."""
     path = Path(config_path).expanduser()
@@ -607,6 +651,7 @@ def build_status(config_path: str | Path = "config.yaml") -> dict[str, Any]:
         "blocked_stage": None,
         "blocked_reason": None,
         "review_gates": [],
+        "ocr_evidence": None,
     }
     if errors:
         return report
@@ -639,6 +684,7 @@ def build_status(config_path: str | Path = "config.yaml") -> dict[str, Any]:
     else:
         stages = _pdf_stages(output_dir, path, config, input_path)
     report["stages"] = stages
+    report["ocr_evidence"] = _ocr_evidence(output_dir, config, input_type)
     report["review_gates"] = _review_gates(output_dir) if output_dir.is_dir() else []
     pending = []
     for stage in stages:
@@ -808,6 +854,10 @@ def status_command(args: Any) -> int:
             print(f"流程: {report['pipeline']} ({report.get('input_type') or 'unknown'})")
         if report.get("output_dir"):
             print(f"输出: {report['output_dir']}")
+        evidence = report.get("ocr_evidence")
+        if evidence:
+            verified = "已交叉验证" if evidence["cross_verified"] else "未交叉验证"
+            print(f"OCR 证据: {evidence['mode']} ({verified}) — {evidence['detail']}")
         if report.get("errors"):
             for error in report["errors"]:
                 print(f"阻断: {error}")

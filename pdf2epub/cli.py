@@ -7,9 +7,9 @@ including polishing OCR output and translating content.
 """
 
 import argparse
-import os
 import sys
 
+from pdf2epub.command_errors import log_command_error
 from pdf2epub.utils.encoding import configure_utf8_stdio
 from pdf2epub.commands.registry import register_command_parsers
 from pdf2epub.workflow_stages import render_cli_epilog
@@ -70,13 +70,7 @@ def run_command(args) -> int:
     except SystemExit:
         raise
     except Exception as exc:  # noqa: BLE001 - top-level CLI boundary
-        if getattr(args, "debug", False) or os.environ.get("PDF2EPUB_DEBUG"):
-            logger.opt(exception=exc).error("Unhandled error")
-        else:
-            logger.error(f"{type(exc).__name__}: {exc}")
-            logger.info(
-                "Re-run with --debug (or PDF2EPUB_DEBUG=1) for a traceback."
-            )
+        log_command_error("Unhandled error", exc, args=args)
         return 1
 
 

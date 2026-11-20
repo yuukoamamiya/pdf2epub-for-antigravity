@@ -90,6 +90,8 @@ Subagent 合同层
 - 将解析后的参数交给 `run_command()`，由它提供唯一的错误边界：预期门禁失败仍由 handler
   返回非零码，未预期异常打印一行 `类型: 消息` 并返回 1，只有 `--debug` 或
   `PDF2EPUB_DEBUG=1` 才展开 traceback；`KeyboardInterrupt` 返回 130，`SystemExit` 不吞掉。
+  handler 自己捕获的失败也通过 `pdf2epub/command_errors.py` 复用同一判定，不再只打印
+  `str(exc)` 而丢掉异常类型。
 
 命令注册集中在 [`commands/registry.py`](../pdf2epub/commands/registry.py)。注册模块只
 定义命令名称、参数和 handler，不实现业务逻辑。这样新增命令时不会再次扩大 CLI 入口。
@@ -383,10 +385,12 @@ raw fallback，即使 validation receipt 不在。恢复时保留 handoff/receip
 
 `local_credentials.py` 负责读取被 Git 忽略的本地凭据；各 OCR 后端不共享运行时状态。
 
-`commands/diagnostics.py` 提供只读的 `status` 和 `doctor`（`STATUS_SCHEMA_VERSION` 2）。
+`commands/diagnostics.py` 提供只读的 `status` 和 `doctor`（`STATUS_SCHEMA_VERSION` 3）。
 每个阶段同时给出 `current`（检查点仍对应当前输入）和 `reachable`（更早阶段都已当前）；
 产物存在但上游未通过时报告 `stale`，没有可执行阶段时输出 `blocked_stage`/`blocked_reason`
-而不是给出必然失败的命令。`review_gates` 汇总 `refine`/`ocr-correct`/`illustration`/
+而不是给出必然失败的命令。`ocr_evidence` 记录页面证据等级与是否交叉验证
+（`two_ocr` / `single_ocr` / `legacy_native` / `indeterminate`），避免单 OCR 被读成已复核。
+`review_gates` 汇总 `refine`/`ocr-correct`/`illustration`/
 `footnote`/`polish`/`entities`/`translate`/`translate-html` manifest 的待复核文件数、候选数、
 worker `dispatch_status` 计数与波次数，用于判断是否需要开 Subagent；它只是只读摘要，
 不替代 manifest 与正式校验。`commands/footnote_diagnostics.py`

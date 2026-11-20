@@ -208,7 +208,7 @@ def test_status_marks_downstream_artifacts_stale_and_withholds_command(
     report = build_status(config_path)
     stages = {item["name"]: item for item in report["stages"]}
 
-    assert report["schema_version"] == 2
+    assert report["schema_version"] == 3
     assert stages["ocr-pages"]["status"] == "blocked"
     assert stages["ocr-pages"]["reachable"] is False
     assert stages["package"]["status"] == "stale"
@@ -250,6 +250,40 @@ def test_status_reports_current_and_reachable_flags(tmp_path: Path, monkeypatch)
 
 def _write_manifest(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_status_reports_ocr_evidence_level(tmp_path: Path, monkeypatch):
+    """Single OCR must not look cross-verified in the operator summary."""
+    config_path = _config(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    output_dir = tmp_path / "output" / "Diagnostics Book"
+    output_dir.mkdir(parents=True)
+
+    report = build_status(config_path)
+    assert report["schema_version"] == 3
+    assert report["ocr_evidence"] == {
+        "mode": "single_ocr",
+        "cross_verified": False,
+        "detail": "单 OCR 视觉转录；正常页未经第二套 OCR 交叉验证，只有异常页进入视觉复核",
+    }
+
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace(
+            "    enabled: false", "    enabled: true\n    backend: vision"
+        ),
+        encoding="utf-8",
+    )
+    assert build_status(config_path)["ocr_evidence"]["mode"] == "two_ocr"
+    assert build_status(config_path)["ocr_evidence"]["cross_verified"] is True
+
+    (output_dir / "pages").mkdir(exist_ok=True)
+    (output_dir / "pages" / "ocr_progress.json").write_text(
+        json.dumps({"mode": "native_text"}), encoding="utf-8"
+    )
+    (output_dir / "pdf_text_probe.json").write_text(
+        json.dumps({"recommendation": "use_text_layer"}), encoding="utf-8"
+    )
+    assert build_status(config_path)["ocr_evidence"]["mode"] == "legacy_native"
 
 
 def test_status_surfaces_pending_subagent_review_gates(tmp_path: Path, monkeypatch):
