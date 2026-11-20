@@ -328,7 +328,15 @@ def _audit_normalized_targets(
     for file, source in sorted(ctx.source_texts.items()):
         target = ctx.target_texts.get(file)
         if target is None:
-            findings.append(_finding("normalized_unit_missing", file, 1, source[:280], detail="Normalized unit is missing."))
+            record_finding(
+                _finding(
+                    "normalized_unit_missing",
+                    file,
+                    1,
+                    source[:280],
+                    detail="Normalized unit is missing.",
+                )
+            )
             continue
         # Note definitions should not be followed by unindented body text;
         # continuation paragraphs have explicit Markdown indentation.

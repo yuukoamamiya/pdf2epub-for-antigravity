@@ -17,6 +17,16 @@ def test_apply_audit_checks_materialized_target_not_consumed_source_marker():
     assert not any(item["code"] == "unexplained_numeric_superscript" for item in result["findings"])
 
 
+def test_apply_audit_reports_missing_normalized_unit():
+    result = audit_footnote_result(
+        {"chapter.md": "Body text<sup>37</sup>\n"},
+        records=[{"name": "chapter.md", "chapter_id": "chapter-1"}],
+        target_texts={},
+    )
+
+    assert any(item["code"] == "normalized_unit_missing" for item in result["findings"])
+
+
 def test_apply_audit_reports_raw_superscript_left_in_materialized_target():
     source = {"chapter.md": "Body text<sup>37</sup>\n"}
     target = {"chapter.md": "Body text<sup>37</sup>\n"}
