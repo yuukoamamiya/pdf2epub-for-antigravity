@@ -386,11 +386,12 @@ raw fallback，即使 validation receipt 不在。恢复时保留 handoff/receip
 
 `local_credentials.py` 负责读取被 Git 忽略的本地凭据；各 OCR 后端不共享运行时状态。
 
-`commands/diagnostics.py` 提供只读的 `status` 和 `doctor`（`STATUS_SCHEMA_VERSION` 3）。
+`commands/diagnostics.py` 提供只读的 `status` 和 `doctor`（`STATUS_SCHEMA_VERSION` 4）。
 每个阶段同时给出 `current`（检查点仍对应当前输入）和 `reachable`（更早阶段都已当前）；
 产物存在但上游未通过时报告 `stale`，没有可执行阶段时输出 `blocked_stage`/`blocked_reason`
 而不是给出必然失败的命令。`ocr_evidence` 记录页面证据等级与是否交叉验证
 （`two_ocr` / `single_ocr` / `legacy_native` / `indeterminate`），避免单 OCR 被读成已复核。
+`boundary_preview` 汇总 `refine_boundary_preview.json` 的可疑跨页交界数与涉及单元。
 `review_gates` 汇总 `refine`/`ocr-correct`/`illustration`/
 `footnote`/`polish`/`entities`/`translate`/`translate-html` manifest 的待复核文件数、候选数、
 worker `dispatch_status` 计数与波次数，用于判断是否需要开 Subagent；它只是只读摘要，
@@ -680,6 +681,7 @@ illustration-prepare + 工作区 Subagent（只复核疑似整页插图页）
   → illustration_bindings.json
 refine-local
   → pagination_map.json + toc_title_normalization.json
+  → refine_boundary_preview.json（只读跨页交界预检，供 polish 使用）
   → 当前 review 行投影（heading source ranges + page-number dispositions）
   → ocr_markdown/ + tree_progress.json
 footnote-prepare +（必要时）工作区 Subagent

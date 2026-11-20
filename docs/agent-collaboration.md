@@ -14,7 +14,7 @@
 ```text
 git status --short          # 先看有没有别人的改动；不要清理、不要纳入本次提交
 git branch --show-current   # 必须是 main；不要建临时分支
-uv run pytest -q            # 基线：1641 个测试（4 skipped），约 40 秒
+uv run pytest -q            # 基线：1645 个测试（4 skipped），约 40 秒
 uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲染
 ```
 
@@ -96,6 +96,7 @@ uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲
 | `2f41543` | `ocr_full_book_pagewise()` 拆出进度恢复、待处理页扫描、worker 池与 summary，432 → 140 行 |
 | `9e908dc` | resume 增加 `--refresh-checkpoints`：只在旧快照与当前投影除 `projection_version` 外完全一致且源/目标哈希匹配时重盖章 receipt；载荷变化仍走 validate |
 | `d9abb32` | `build-epub` / `build-html-epub` 写入 `epub_build_receipt.json`；`status` 的 `package` 阶段据此报告 `stale`，无 receipt 的历史产物保持通过并标注 |
+| `996d0aa` | `refine-local` 写只读 `refine_boundary_preview.json`（跨页脚注/正文合并、开句跨页）；polish 规则与 `status.boundary_preview` 使用它，减少 footnote→polish 返工 |
 
 ## 5. 已知遗留 backlog
 

@@ -92,6 +92,7 @@ uv run pdf2epub -c config.yaml doctor
 第二套 OCR 验证，只有异常页进入视觉复核）或 `legacy_native`（旧原生版面证据）。
 `package` 阶段会核对 EPUB 的构建 receipt 与当前 polish/translate 检查点；receipt 过期时显示
 `stale`，旧版本生成、没有 receipt 的 EPUB 仍按历史产物通过并标注 `no build receipt`。
+`boundary_preview` 汇总 `refine-local` 写出的跨页交界可疑数与其单元，供 polish 前判断。
 跨 Agent 交接与当前遗留项见 [`docs/agent-collaboration.md`](docs/agent-collaboration.md)。
 维护者可用 `uv run pdf2epub -c config.yaml footnote-review-summary --json` 只读汇总脚注复核成本；它是独立诊断，不能替代 `footnote-validate`，也不建议删除相邻页上下文窗口。
 脚注 unit context 使用独立 projection version。加载时必须依据当前候选报告、精确页侧车哈希索引和 refined unit mapping 重算完整投影。Polish boundary context projection version 2 首次恢复时用 `polish --resume` 刷新 sidecar/context 并运行正式 `polish-validate`。之后 halo 外邻片变化不使已完成 sidecar/receipt 失效，但完整 source provenance 与 inventory 检查仍须通过。脚注证据在 `tree_progress.json` 提供显式、合法的 `part_page_ranges` 时按该分片页范围投影以缩小失效半径；缺少精确 part→page 映射时继续使用章节级证据与失效范围，不推断分片级页范围。旧脚注 unit context 版本或脚注证据变化时，先重跑 `footnote-prepare`、`footnote-validate`，保留原 decision 文件，不把刷新上下文当作语义决定通过。
@@ -842,6 +843,10 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
 9. 所有 PDF 都必须执行 `polish`，打开工作区 Subagent 读取
    `polish_subagent_prompt.md`，并按 `polish_worker_handoffs/` 中各 manifest 的
    `assigned_files` 写入 `polished_markdown/`，然后运行 `polish-validate`。
+   `refine-local` 会同时写入只读的 `refine_boundary_preview.json`：它列出跨页合并后
+   脚注行与正文落在同一段、或开句跨页的情况。polish 规则会带上可疑边界数量；Worker
+   应据此检查自己 assigned 文件的交界，但 preview 只是布局证据，不得据此移动正文、改写
+   脚注或新增 Markdown 结构。
    每个 Worker 写完一个 assigned file 后，必须先运行只读自检
    `uv run pdf2epub -c <config> polish-validate --file <file> --check-only`；该命令只校验，
    不规范化写回目标 Markdown、不写报告或 checkpoint、不创建或清理 `validated/`，因此多个 Worker 可安全并发。自检不通过时
