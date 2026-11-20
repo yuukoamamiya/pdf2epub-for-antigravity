@@ -730,3 +730,42 @@ def test_dynamic_prepare_review_publish_accepts_cwd_relative_output_root(tmp_pat
     assert "chapter.md" in publication_target_inventory(
         output, book_id="Book", source_language="English", target_language="Chinese",
     )
+
+
+def test_manifest_stamp_uses_relative_posix_paths_and_stable_digest(tmp_path):
+    """Both pipelines must stamp the same manifest block for the same inputs."""
+
+    from pdf2epub.dynamic_terminology import manifest_dynamic_terminology_stamp
+
+    output_dir = tmp_path / "output" / "Book"
+    context = output_dir / "dynamic_terminology" / "unit_contexts" / "chapter_1.json"
+    context.parent.mkdir(parents=True)
+    context.write_text("{}", encoding="utf-8")
+
+    stamp = manifest_dynamic_terminology_stamp(
+        snapshot_sha256="a" * 64,
+        operator_attestation_sha256="b" * 64,
+        base_unit_context_files={"chapter_1.md": context},
+        output_dir=output_dir,
+        preexisting_target_inventory={"chapter_1.md": {"target_sha256": "c" * 64}},
+    )
+
+    assert stamp["schema_version"] == 1
+    assert stamp["enabled"] is True
+    assert stamp["current_snapshot_sha256"] == "a" * 64
+    assert stamp["operator_attestation_sha256"] == "b" * 64
+    assert stamp["base_unit_context_files"] == {
+        "chapter_1.md": "dynamic_terminology/unit_contexts/chapter_1.json"
+    }
+    assert stamp["preexisting_target_inventory"] == {
+        "chapter_1.md": {"target_sha256": "c" * 64}
+    }
+    digest = stamp["preexisting_target_inventory_sha256"]
+    assert len(digest) == 64
+    assert digest == manifest_dynamic_terminology_stamp(
+        snapshot_sha256="a" * 64,
+        operator_attestation_sha256="b" * 64,
+        base_unit_context_files={"chapter_1.md": context},
+        output_dir=output_dir,
+        preexisting_target_inventory={"chapter_1.md": {"target_sha256": "c" * 64}},
+    )["preexisting_target_inventory_sha256"]

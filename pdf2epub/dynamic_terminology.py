@@ -1165,10 +1165,44 @@ def publish_review_packet(
     )
 
 
+def manifest_dynamic_terminology_stamp(
+    *,
+    snapshot_sha256: str,
+    operator_attestation_sha256: str,
+    base_unit_context_files: Mapping[str, Path],
+    output_dir: Path,
+    preexisting_target_inventory: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Build the manifest block that binds a hand-off to the memory snapshot.
+
+    PDF ``translate`` and EPUB ``translate-html`` used to assemble this block
+    (including the inventory digest) independently.  Keeping it here means the
+    two pipelines cannot drift on field names, relative-path form or digest
+    separators.
+    """
+    inventory = dict(preexisting_target_inventory)
+    root = Path(output_dir).resolve()
+    return {
+        "schema_version": 1,
+        "enabled": True,
+        "current_snapshot_sha256": snapshot_sha256,
+        "operator_attestation_sha256": operator_attestation_sha256,
+        "base_unit_context_files": {
+            name: Path(path).resolve().relative_to(root).as_posix()
+            for name, path in base_unit_context_files.items()
+        },
+        "preexisting_target_inventory": inventory,
+        "preexisting_target_inventory_sha256": hashlib.sha256(
+            json.dumps(inventory, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest(),
+    }
+
+
 __all__ = [
     "attach_candidate_sidecars", "build_authority_from_manifest", "build_dynamic_unit_contexts",
     "affected_target_consistency_state", "current_authority_for_task",
     "current_effective_projection", "dynamic_terminology_enabled", "load_current_snapshot",
+    "manifest_dynamic_terminology_stamp",
     "prepare_review_packet", "publication_target_inventory", "publication_target_inventory_complete",
     "publish_review_packet", "session_attestation",
 ]

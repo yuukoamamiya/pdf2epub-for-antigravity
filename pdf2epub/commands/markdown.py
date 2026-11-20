@@ -396,21 +396,16 @@ def _prepare_pdf_markdown_task(args, task: str):
                 chapter_by_file={name: chapter for chapter, files in chapter_groups.items() for name in files},
                 source_language=source_language, target_language=target_language, book_id=book_title,
             )
+            from pdf2epub.dynamic_terminology import manifest_dynamic_terminology_stamp
+
             manifest_data = json.loads(Path(paths["manifest"]).read_text(encoding="utf-8"))
-            manifest_data["dynamic_terminology"] = {
-                "schema_version": 1,
-                "enabled": True,
-                "current_snapshot_sha256": dynamic_snapshot_sha256,
-                "operator_attestation_sha256": dynamic_attestation["evidence_sha256"],
-                "base_unit_context_files": {
-                    name: path.resolve().relative_to(output_dir.resolve()).as_posix()
-                    for name, path in base_unit_context_files.items()
-                },
-                "preexisting_target_inventory": preexisting_dynamic_targets,
-                "preexisting_target_inventory_sha256": hashlib.sha256(
-                    json.dumps(preexisting_dynamic_targets, sort_keys=True, separators=(",", ":")).encode()
-                ).hexdigest(),
-            }
+            manifest_data["dynamic_terminology"] = manifest_dynamic_terminology_stamp(
+                snapshot_sha256=dynamic_snapshot_sha256,
+                operator_attestation_sha256=dynamic_attestation["evidence_sha256"],
+                base_unit_context_files=base_unit_context_files,
+                output_dir=output_dir,
+                preexisting_target_inventory=preexisting_dynamic_targets,
+            )
             atomic_write_json(Path(paths["manifest"]), manifest_data)
         if handoffs:
             paths["worker_handoffs"] = output_dir / Path(handoffs[0]["manifest"]).parent
