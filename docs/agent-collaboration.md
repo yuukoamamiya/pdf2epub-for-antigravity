@@ -91,6 +91,9 @@ uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲
 | `a2ec66c` | `apply_footnote_normalization()` 从 413 行拆到 188 行：期望注释、review 合并、候选绑定、成功 receipt 各成 helper |
 | `307d254` | `prepare_footnote_subagent()` 先拆出 manifest 与 prompt 两段，1126 → 893 行；候选增强中段仍待按共享状态分阶段 |
 | `7793568` | 移除 Azure Document Intelligence 与 Google Cloud Vision 两个页面后端、对应可选依赖与 doctor 探测；旧配置按退役 backend 阻断 |
+| `6f2602b` | `prepare_footnote_subagent()` 的候选增强链拆成 11 个具名阶段，1126 → 247 行；顺序、任务身份与证据哈希不变 |
+| `7c8d747` | `_prepare_pdf_markdown_task()` 抽出 `_prepare_task_source()`，387 → 236 行；控制流与错误返回不变 |
+| `2f41543` | `ocr_full_book_pagewise()` 拆出进度恢复、待处理页扫描、worker 池与 summary，432 → 140 行 |
 
 ## 5. 已知遗留 backlog
 
@@ -102,16 +105,14 @@ uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲
    `refresh-checkpoints`：只在源哈希一致时重盖章旧 receipt，免去
    `prepare → validate → prepare` 三步走。实现前必须先证明旧快照与当前快照除版本戳外完全
    相同，否则宁可不刷新；relax 到"源哈希一致即可"会接受在旧投影下验证过的译文。
-2. **巨型函数拆分**（P1）
-   已完成：`registry.py`（`fab9f15`）、`markdown_readiness.py`（`c3aedaf`）、
-   `footnote_regions.py`（`eafd9ae`）、`footnote_apply.py`（`a2ec66c`）、
-   `footnote_result_audit.py`（`ee78c60`），以及 `prepare_footnote_subagent()` 的
-   manifest/prompt 两段（`307d254`）。剩余：
-   `prepare_footnote_subagent()` 的候选增强中段（893 行，需先把共享状态收进一个
-   上下文对象，再按 source-audit / target-audit / preflight 三个相位拆分）、
-   `ocr_pages.py:716 ocr_full_book_pagewise()`（432 行）、
-   `commands/markdown.py:78 _prepare_pdf_markdown_task()`（387 行）。
-   拆分必须保持 manifest/report schema 与哈希合同不变，并跑全量测试。
+2. **巨型函数拆分**（P1，本轮已完成）
+   `registry.py`、`markdown_readiness.py`、`footnote_regions.py`、`footnote_apply.py`、
+   `footnote_result_audit.py`、`prepare_footnote_subagent()`、`_prepare_pdf_markdown_task()`、
+   `ocr_full_book_pagewise()` 均已拆分到 ≤247 行，详见 §4。
+   仅剩两个公开签名偏长：`validate_markdown_subagent()`（17 参）与
+   `ocr_full_book_pagewise()`（16 参）；改签名会牵动大量调用点，收益低于本轮已完成的
+   函数体拆分，暂列为可选维护项。
+   `run_secondary_ocr_consensus()`（175 行）也可作为一个独立的小批次，但不在原审计清单内。
 3. **Notes 定义正则的剩余差异**（P2）
    逐字相同的 Unicode 上标正则、数字表和 Markdown 引用正则已抽到 `endnote_patterns.py`
    （见 `3969711`）。定义正则仍分开：校验侧只匹配前缀，apply 侧要求行尾有内容；
