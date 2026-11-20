@@ -83,6 +83,7 @@ uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲
 | `65fcc9c` | `translate` / `polish` 增加只读 `--dry-run`：复用同一 planning/resume 决定，打印 `pending_reasons`、worker 批次与并发度，不写 manifest/prompt/handoff |
 | `007b27a` | 新增只读 `dispatch-plan --task <task>`：打印 manifest 的分波计划、每个 worker 的 scoped prompt 与 assigned_files，不写文件、不占额度 |
 | `1b97905` | 新增最小 ruff 门禁（语法/未定义名/无效异常）与 CI job；顺手修复 `preview_markdown_handoff` 丢失的 `Any` 导入和一处 3.12-only f-string |
+| `ee78c60` | `audit_footnote_result()` 从 534 行拆成 243 行编排 + 4 个阶段函数（finding 身份、task_id、evidence 哈希不变） |
 | `c3aedaf` | `run_readiness_check()` 从 449 行拆到 257 行：OCR/异常/纠错页选择与 TOC/refine/footnote/source 两段成为具名 helper，检查顺序与消息不变 |
 | `3969711` | 抽出 `endnote_patterns.py`：两边逐字相同的 Unicode 上标正则、数字表和 Markdown 引用正则只保留一份；定义正则因语义不同继续分开 |
 
@@ -100,8 +101,9 @@ uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲
    `commands/registry.py`（见 `fab9f15`）与 `commands/markdown_readiness.py`（见 `c3aedaf`）
    已完成。剩余：
    `refine/footnote_handoff.py:211 prepare_footnote_subagent()`（1126 行）、
-   `refine/footnote_result_audit.py:299`（534 行）、`refine/footnote_regions.py:33`（509 行）、
-   `refine/footnote_apply.py:81`（413 行）。
+   `refine/footnote_regions.py:33`（509 行）、`refine/footnote_apply.py:81`（413 行）。
+   `refine/footnote_result_audit.py` 已拆（见 §4）：`audit_footnote_result()` 从 534 行降到
+   243 行，源稿侧三个检查与归一化稿侧 `_audit_normalized_targets()` 独立成函数。
    拆分必须保持 manifest/report schema 与哈希合同不变，并跑全量测试。
 3. **Azure / Vision 后端的重复实现**（P2）
    `ocr/backends/azure.py` 与 `vision.py` 的 furigana 重建逻辑（`_classify_lines_by_width`、

@@ -10,7 +10,8 @@ import hashlib
 import json
 import re
 from collections import defaultdict
-from typing import Any, Mapping, MutableMapping, Sequence
+from dataclasses import dataclass
+from typing import Any, Callable, Mapping, MutableMapping, Sequence
 
 from ..footnote_markdown import collect_footnote_definition_blocks
 from .endnote_review import _inside_inline_code_or_math
@@ -296,6 +297,369 @@ def _heading_note_findings(
     return findings
 
 
+@dataclass(frozen=True)
+class _TargetAuditContext:
+    """Read-only inputs for the normalized-target half of the audit."""
+
+    source_texts: Mapping[str, str]
+    target_texts: Mapping[str, str]
+    mode: str
+    records: Sequence[Mapping[str, Any]]
+    record_by_file: Mapping[str, Mapping[str, Any]]
+    resolved_blocks: Sequence[Mapping[str, Any]]
+    expected_notes: Sequence[Mapping[str, Any]]
+    expected_by_target_key: Mapping[tuple[str, str], Mapping[str, Any]]
+    next_part_by_file: Mapping[str, Mapping[str, Any]]
+    last_physical_note_ref_by_page: Mapping[int, tuple[int, int, str, str, str]]
+    target_definition_rows: Mapping[str, list[tuple[str, str]]]
+    toc_tree: Mapping[str, Any] | None
+    page_texts: Mapping[int | str, str] | None
+
+
+def _audit_normalized_targets(
+    ctx: _TargetAuditContext,
+    record_finding: Callable[[dict[str, Any]], None],
+) -> None:
+    """Check materialized markers, definitions, and note integrity.
+
+    Split out of ``audit_footnote_result`` so the source-side and target-side
+    audits stay readable; the logic and finding identities are unchanged.
+    """
+    for file, source in sorted(ctx.source_texts.items()):
+        target = ctx.target_texts.get(file)
+        if target is None:
+            findings.append(_finding("normalized_unit_missing", file, 1, source[:280], detail="Normalized unit is missing."))
+            continue
+        # Note definitions should not be followed by unindented body text;
+        # continuation paragraphs have explicit Markdown indentation.
+        visible_target_lines = _visible(target).splitlines()
+        target_occurrence_counts: dict[str, int] = {}
+        target_lines = visible_target_lines
+        target_defs, target_consumed = collect_footnote_definition_blocks(target_lines)
+        resolved_by_output_key: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
+        for resolved_item in ctx.resolved_blocks:
+            if isinstance(resolved_item, Mapping) and resolved_item.get("output_key"):
+                resolved_by_output_key[str(resolved_item["output_key"])].append(resolved_item)
+        definition_lines = {line + 1 for line in target_defs}
+        definition_lines.update(line + 1 for line in target_consumed)
+        target_record = ctx.record_by_file.get(file, {})
+        target_marker_scan = (
+            ctx.mode != "endnotes_only"
+            and str(target_record.get("type") or "") not in FOOTNOTE_STRUCTURE_EXEMPT_TYPES
+        )
+        for line_number, line in enumerate(visible_target_lines, 1):
+            if line_number in definition_lines:
+                continue
+            equation_text = re.sub(r"<[^>]+>", " ", line)
+            equation_like = (
+                len(list(_RAW_SUP_RE.finditer(line))) + len(list(_UNICODE_SUP_RE.finditer(line))) >= 2
+                and bool(re.search(r"(?:=|[+*/])", equation_text))
+            )
+            for occurrence, match in enumerate(_RAW_SUP_RE.finditer(line) if target_marker_scan else ()):
+                if equation_like:
+                    continue
+                if _is_in_inline_code(line, match.start()):
+                    continue
+                key = match.group("key")
+                occurrence_id = _marker_occurrence_identity(visible_target_lines, line_number - 1, match, key, occurrence, target_occurrence_counts)
+                finding = _finding(
+                    "unexplained_numeric_superscript", file, line_number, line.strip(),
+                    detail=f"Raw superscript {key} remains in normalized body text.",
+                    key=key, origin="normalized_target", identity=f"occurrence={occurrence_id}",
+                )
+                finding["occurrence_sha256"] = occurrence_id
+                finding["evidence_target_sha256"] = _sha(target)
+                record_finding(finding)
+            for occurrence, match in enumerate(_UNICODE_SUP_RE.finditer(line) if target_marker_scan else ()):
+                if equation_like:
+                    continue
+                if _is_in_inline_code(line, match.start()):
+                    continue
+                key = match.group(0).translate(_DIGIT_MAP)
+                occurrence_id = _marker_occurrence_identity(visible_target_lines, line_number - 1, match, key, occurrence, target_occurrence_counts)
+                finding = _finding(
+                    "unexplained_unicode_superscript", file, line_number, line.strip(),
+                    detail=f"Unicode superscript {key} remains in normalized body text.",
+                    key=key, origin="normalized_target", identity=f"occurrence={occurrence_id}",
+                )
+                finding["occurrence_sha256"] = occurrence_id
+                finding["evidence_target_sha256"] = _sha(target)
+                record_finding(finding)
+            raw_def = _RAW_DEF_RE.match(line) if target_marker_scan else None
+            if raw_def and re.search(r"\b(?:note|notes|see note|cf\.|ibid\.|trans\.|ed\.)\b", raw_def.group("body"), re.I):
+                key = raw_def.group("bracket") or raw_def.group("num")
+                finding = _finding(
+                    "suspected_numbered_note_definition", file, line_number, line.strip(),
+                    detail=f"Numbered block {key} remains a possible unnormalized note definition.",
+                    key=key, origin="normalized_target",
+                )
+                finding["evidence_target_sha256"] = _sha(target)
+                record_finding(finding)
+        for task in _heading_note_findings(
+            file=file, target=target, target_defs=target_defs,
+            expected_by_target_key=ctx.expected_by_target_key,
+            source_texts=ctx.source_texts, resolved_blocks=ctx.resolved_blocks,
+            toc_tree=ctx.toc_tree, page_texts=ctx.page_texts,
+        ):
+            record_finding(task)
+        for index, (key, body) in target_defs.items():
+            value = body.strip()
+            if (
+                value.endswith(("-", "‐", "‑", "—", "…"))
+                or value.count("(") > value.count(")")
+                or value.count("[") > value.count("]")
+            ):
+                record_finding(_finding(
+                    "normalized_note_truncated", file, 0,
+                    f"[^{key}]: {body}",
+                    detail=f"Normalized note definition {key} remains truncated or unclosed.",
+                    key=key,
+                    origin="normalized_target",
+                ))
+            expected = ctx.expected_by_target_key.get((file, str(key)))
+            candidate_refs = expected.get("candidate_refs", []) if isinstance(expected, Mapping) else []
+            exact_ref = max(
+                (
+                    (int(ref.get("page", 0)), int(ref.get("block", -1)), str(ref.get("source_file") or ""), str(expected.get("target_file") or ""), str(expected.get("output_key") or ""))
+                    for ref in candidate_refs if isinstance(ref, Mapping)
+                    and str(ref.get("page", "")).isdigit()
+                    and str(ref.get("block", "")).isdigit()
+                ),
+                default=None,
+            ) if isinstance(expected, Mapping) else None
+            source_record = next_part_source = None
+            if exact_ref is not None:
+                physical_page = exact_ref[0]
+                source_filename = exact_ref[2]
+                if source_filename:
+                    source_record = ctx.record_by_file.get(source_filename)
+                    if source_record is not None and not (
+                        int(source_record.get("start_page") or 0)
+                        <= physical_page
+                        <= int(source_record.get("end_page") or 0)
+                    ):
+                        source_record = None
+                else:
+                    source_record = next((
+                        row for row in ctx.records
+                        if int(row.get("start_page") or 0) <= physical_page <= int(row.get("end_page") or 0)
+                        and str(row.get("chapter_id") or "") == str(expected.get("chapter_id") or "")
+                    ), None)
+                if source_record is not None:
+                    next_part_source = ctx.next_part_by_file.get(str(source_record.get("name") or ""))
+            open_punctuation = value.endswith((",", ":", ";"))
+            if (
+                ctx.mode != "endnotes_only"
+                and source_record is not None
+                and str(source_record.get("type") or "") not in FOOTNOTE_STRUCTURE_EXEMPT_TYPES
+                and open_punctuation
+                and next_part_source is not None
+                and exact_ref == ctx.last_physical_note_ref_by_page.get(exact_ref[0])
+                and int(source_record.get("end_page") or 0) == exact_ref[0]
+            ):
+                finding = _finding(
+                    "normalized_note_open_boundary_at_physical_page_break",
+                    file, 0, f"[^{key}]: {body}",
+                    detail=(
+                        f"Normalized note {key} ends with open punctuation exactly at a mapped physical page/part boundary. "
+                        "This is only a visual-review cue; confirm the neighboring page images before changing ownership."
+                    ),
+                    key=str(key), origin="normalized_target",
+                )
+                finding["pages"] = [exact_ref[0], int(next_part_source.get("start_page") or 0)]
+                finding["evidence_target_sha256"] = _sha(target)
+                record_finding(finding)
+        covered = set(target_consumed)
+        covered.update(target_defs)
+        for index in target_defs:
+            cursor = index + 1
+            while cursor < len(target_lines) and not target_lines[cursor].strip():
+                cursor += 1
+            if cursor < len(target_lines) and cursor not in covered and not target_lines[cursor].lstrip().startswith("#"):
+                record_finding(_finding("possible_body_note_boundary_contamination", file, 0, target_lines[cursor].strip(), detail="Unindented body text follows a note definition; verify the page/body boundary and paragraph ownership."))
+
+    # Verify the complete expected note parts against the actual
+    # materialized definitions, including ordering within the chapter-end
+    # file. A resolved sidecar address alone does not prove its text made
+    # it into the EPUB source.
+    expected_by_file: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
+    for expected in ctx.expected_notes:
+        if isinstance(expected, Mapping) and expected.get("target_file") and expected.get("output_key"):
+            expected_by_file[str(expected["target_file"])].append(expected)
+    for target_file, expected_rows in expected_by_file.items():
+        actual_rows = ctx.target_definition_rows.get(target_file, [])
+        actual_keys = [key for key, _ in actual_rows]
+        key_positions = {key: index for index, key in enumerate(actual_keys)}
+        expected_keys = [str(row["output_key"]) for row in expected_rows]
+        for expected in expected_rows:
+            key = str(expected["output_key"])
+            bodies = [body for actual_key, body in actual_rows if actual_key == key]
+            parts = expected.get("parts") if isinstance(expected.get("parts"), list) else []
+            signature = _alnum(" ".join(str(part) for part in parts))
+            body_signature = _alnum(bodies[0]) if len(bodies) == 1 else ""
+            if len(bodies) != 1 or not signature or signature not in body_signature:
+                evidence = f"key={key}; expected={signature}; actual_count={len(bodies)}"
+                finding = _finding(
+                    "applied_note_content_integrity", target_file, 0, evidence,
+                    detail=f"Expected complete note {key} is missing, duplicated, truncated, or has its parts out of order in the materialized chapter-end definition.",
+                    key=key, origin="normalized_target",
+                )
+                finding["evidence_target_sha256"] = _sha(ctx.target_texts.get(target_file, ""))
+                refs = expected.get("candidate_refs") if isinstance(expected.get("candidate_refs"), list) else []
+                finding["candidate_refs"] = refs
+                if refs:
+                    finding["page"] = refs[0].get("page")
+                record_finding(finding)
+        if all(key in key_positions for key in expected_keys):
+            positions = [key_positions[key] for key in expected_keys]
+            if positions != sorted(positions) or len(set(positions)) != len(positions):
+                evidence = f"expected_order={expected_keys}; actual_order={actual_keys}"
+                finding = _finding(
+                    "applied_note_order_integrity", target_file, 0, evidence,
+                    detail="Materialized chapter-end note definitions do not preserve accepted source order.",
+                    origin="normalized_target",
+                )
+                finding["evidence_target_sha256"] = _sha(ctx.target_texts.get(target_file, ""))
+                refs = [
+                    ref for expected in expected_rows
+                    for ref in (expected.get("candidate_refs") if isinstance(expected.get("candidate_refs"), list) else [])
+                ]
+                finding["candidate_refs"] = refs
+                if refs:
+                    finding["page"] = refs[0].get("page")
+                record_finding(finding)
+
+
+
+def _audit_truncated_definitions(
+    file: str,
+    definitions: Mapping[int, tuple[str, str]],
+    record_finding: Callable[[dict[str, Any]], None],
+) -> None:
+    """Report note definitions that look truncated or unclosed."""
+    # Exact broken word suffixes and likely truncated note definitions need
+    # visual review; punctuation/wording alone never auto-repairs them.
+    for line_index, (key, body) in definitions.items():
+        stripped = body.strip()
+        open_paren = stripped.count("(") - stripped.count(")")
+        open_bracket = stripped.count("[") - stripped.count("]")
+        if stripped.endswith(("-", "‐", "‑", "—", "…")) or open_paren > 0 or open_bracket > 0:
+            finding = _finding("normalized_note_truncated", file, 0, f"[^{key}]: {body}", detail=f"Footnote definition {key} may be truncated, unclosed, or require a continuation.", key=key, origin="source_markdown")
+            record_finding(finding)
+
+
+
+def _audit_cross_page_note_boundaries(
+    open_definitions: Mapping[str, list[tuple[str, str, str, int, int]]],
+    lowercase_body_starts: Mapping[str, list[tuple[str, int, str, int]]],
+    source_by_scope: Mapping[str, str],
+    record_finding: Callable[[dict[str, Any]], None],
+) -> None:
+    """Report a split note word plus a lowercase body start in the same scope."""
+    # A note definition ending with a split word plus a lower-case body start
+    # elsewhere in the same established chapter-part scope is a possible
+    # cross-page body/note seam. Require the rejoined token to occur in source
+    # text; this is structural corroboration, not a language dictionary.
+    for scope, definitions in open_definitions.items():
+        scope_text = _alnum(source_by_scope.get(scope, ""))
+        for key, _definition_file, prefix, definition_part, _definition_line in definitions:
+            for body_file, body_line, body_text, body_part in lowercase_body_starts.get(scope, []):
+                first = re.match(r"([a-zà-öø-ÿ]{3,})\b", body_text)
+                if not first or abs(body_part - definition_part) > 1:
+                    continue
+                joined = _alnum(prefix + first.group(1))
+                if len(joined) < 6 or joined not in scope_text:
+                    continue
+                record_finding(_finding(
+                    "cross_page_body_note_boundary", body_file, body_line,
+                    body_text,
+                    detail=f"Lowercase fragment may continue note {key} ending with {prefix}- across adjacent parts; inspect both page images.",
+                    key=key,
+                ))
+
+
+
+def _audit_note_numbering(
+    ordered_definitions: Mapping[str, list[tuple[int, str, int, int, int, int, int, str]]],
+    body_numeric_refs: Mapping[str, list[dict[str, Any]]],
+    mode: str,
+    record_finding: Callable[[dict[str, Any]], None],
+) -> None:
+    """Report interior numbering gaps and unexplained sequence resets."""
+    # Detect only interior gaps in a forward-running numeric sequence. A
+    # decrease is a numbering reset (common at section boundaries), so start
+    # a new segment and never infer missing notes across it. This applies to
+    # single-file and multipart chapters alike.
+    for scope, sequence in (ordered_definitions.items() if mode != "endnotes_only" else ()):
+        sequence.sort(key=lambda item: (int(item[3]), item[6], item[2]))
+        for previous, current in zip(sequence, sequence[1:]):
+            previous_key, previous_file, previous_line, previous_part, previous_start, previous_end, previous_order, previous_section = previous
+            current_key, current_file, current_line, current_part, current_start, current_end, current_order, current_section = current
+            if current_key == previous_key:  # duplicate key is not a sequence gap
+                continue
+            if current_key < previous_key:
+                page_bounded_reset = (
+                    previous_order != current_order
+                    and previous_end > 0 and current_start > 0
+                    and current_start > previous_end
+                )
+                section_bounded_reset = bool(previous_section and current_section and previous_section != current_section)
+                if page_bounded_reset or section_bounded_reset:
+                    continue
+                finding = _finding(
+                    "scoped_numbering_reset_uncertain", current_file, current_line,
+                    f"scope={scope}; previous={previous_key}@{previous_file}:{previous_line}; next={current_key}@{current_file}:{current_line}",
+                    detail=(
+                        f"Numeric note sequence decreases from {previous_key} to {current_key}, "
+                        "but no exact page or section boundary confirms a numbering reset. "
+                        "Review the adjacent note images; no missing key is inferred."
+                    ),
+                    origin="source_markdown",
+                    identity=f"previous={previous_key};current={current_key};reset",
+                )
+                finding["neighbor_keys"] = [previous_key, current_key]
+                finding["neighbor_files"] = [previous_file, current_file]
+                record_finding(finding)
+                continue
+            if current_key - previous_key <= 1:
+                continue
+            missing = list(range(previous_key + 1, current_key))
+            missing_as_text = {str(value) for value in missing}
+            gap_references = [
+                dict(ref) for ref in body_numeric_refs.get(scope, [])
+                if str(ref.get("key") or "") in missing_as_text
+            ]
+            evidence = (
+                f"scope={scope}; previous={previous_key}@{previous_file}:{previous_line}; "
+                f"next={current_key}@{current_file}:{current_line}; missing={missing}"
+            )
+            finding = _finding(
+                "scoped_numbering_gap", current_file, current_line, evidence,
+                detail=(
+                    f"Possible note-number gap {missing} between definitions "
+                    f"{previous_key} and {current_key}; numbering resets and OCR omissions "
+                    "are uncertain, so inspect only adjacent note evidence."
+                ),
+                key=",".join(map(str, missing)),
+                identity="references=" + _sha(json.dumps(gap_references, sort_keys=True, separators=(",", ":"))),
+            )
+            finding["neighbor_keys"] = [previous_key, current_key]
+            finding["neighbor_files"] = [previous_file, current_file]
+            finding["missing_keys"] = missing
+            finding["body_reference_occurrences"] = gap_references
+            finding["physical_definition_boundary"] = {
+                "previous_page_range": [previous_start, previous_end],
+                "current_page_range": [current_start, current_end],
+                "previous_section_id": previous_section,
+                "current_section_id": current_section,
+            }
+            # Page mapping is resolved later through the exact sidecar
+            # candidates for these neighboring keys. `start_page` is only a
+            # unit bound and must never be invented as evidence for a gap.
+            record_finding(finding)
+
+
+
 def audit_footnote_result(
     source_texts: Mapping[str, str],
     *,
@@ -498,320 +862,29 @@ def audit_footnote_result(
             if stripped_line and stripped_line[0].islower() and re.match(r"[a-zà-öø-ÿ]{3,}\b", stripped_line):
                 lowercase_body_starts[scope].append((file, number, stripped_line, part_index))
 
-        # Exact broken word suffixes and likely truncated note definitions need
-        # visual review; punctuation/wording alone never auto-repairs them.
-        for line_index, (key, body) in definitions.items():
-            stripped = body.strip()
-            open_paren = stripped.count("(") - stripped.count(")")
-            open_bracket = stripped.count("[") - stripped.count("]")
-            if stripped.endswith(("-", "‐", "‑", "—", "…")) or open_paren > 0 or open_bracket > 0:
-                finding = _finding("normalized_note_truncated", file, 0, f"[^{key}]: {body}", detail=f"Footnote definition {key} may be truncated, unclosed, or require a continuation.", key=key, origin="source_markdown")
-                record_finding(finding)
+        _audit_truncated_definitions(file, definitions, record_finding)
 
-    # A note definition ending with a split word plus a lower-case body start
-    # elsewhere in the same established chapter-part scope is a possible
-    # cross-page body/note seam. Require the rejoined token to occur in source
-    # text; this is structural corroboration, not a language dictionary.
-    for scope, definitions in open_definitions.items():
-        scope_text = _alnum(source_by_scope.get(scope, ""))
-        for key, _definition_file, prefix, definition_part, _definition_line in definitions:
-            for body_file, body_line, body_text, body_part in lowercase_body_starts.get(scope, []):
-                first = re.match(r"([a-zà-öø-ÿ]{3,})\b", body_text)
-                if not first or abs(body_part - definition_part) > 1:
-                    continue
-                joined = _alnum(prefix + first.group(1))
-                if len(joined) < 6 or joined not in scope_text:
-                    continue
-                record_finding(_finding(
-                    "cross_page_body_note_boundary", body_file, body_line,
-                    body_text,
-                    detail=f"Lowercase fragment may continue note {key} ending with {prefix}- across adjacent parts; inspect both page images.",
-                    key=key,
-                ))
+    _audit_cross_page_note_boundaries(open_definitions, lowercase_body_starts, source_by_scope, record_finding)
 
-    # Detect only interior gaps in a forward-running numeric sequence. A
-    # decrease is a numbering reset (common at section boundaries), so start
-    # a new segment and never infer missing notes across it. This applies to
-    # single-file and multipart chapters alike.
-    for scope, sequence in (ordered_definitions.items() if mode != "endnotes_only" else ()):
-        sequence.sort(key=lambda item: (int(item[3]), item[6], item[2]))
-        for previous, current in zip(sequence, sequence[1:]):
-            previous_key, previous_file, previous_line, previous_part, previous_start, previous_end, previous_order, previous_section = previous
-            current_key, current_file, current_line, current_part, current_start, current_end, current_order, current_section = current
-            if current_key == previous_key:  # duplicate key is not a sequence gap
-                continue
-            if current_key < previous_key:
-                page_bounded_reset = (
-                    previous_order != current_order
-                    and previous_end > 0 and current_start > 0
-                    and current_start > previous_end
-                )
-                section_bounded_reset = bool(previous_section and current_section and previous_section != current_section)
-                if page_bounded_reset or section_bounded_reset:
-                    continue
-                finding = _finding(
-                    "scoped_numbering_reset_uncertain", current_file, current_line,
-                    f"scope={scope}; previous={previous_key}@{previous_file}:{previous_line}; next={current_key}@{current_file}:{current_line}",
-                    detail=(
-                        f"Numeric note sequence decreases from {previous_key} to {current_key}, "
-                        "but no exact page or section boundary confirms a numbering reset. "
-                        "Review the adjacent note images; no missing key is inferred."
-                    ),
-                    origin="source_markdown",
-                    identity=f"previous={previous_key};current={current_key};reset",
-                )
-                finding["neighbor_keys"] = [previous_key, current_key]
-                finding["neighbor_files"] = [previous_file, current_file]
-                if (finding["task_id"], finding["evidence_sha256"]) not in exceptions:
-                    findings.append(finding)
-                else:
-                    suppressed.append({"task_id": finding["task_id"], "evidence_sha256": finding["evidence_sha256"]})
-                continue
-            if current_key - previous_key <= 1:
-                continue
-            missing = list(range(previous_key + 1, current_key))
-            missing_as_text = {str(value) for value in missing}
-            gap_references = [
-                dict(ref) for ref in body_numeric_refs.get(scope, [])
-                if str(ref.get("key") or "") in missing_as_text
-            ]
-            evidence = (
-                f"scope={scope}; previous={previous_key}@{previous_file}:{previous_line}; "
-                f"next={current_key}@{current_file}:{current_line}; missing={missing}"
-            )
-            finding = _finding(
-                "scoped_numbering_gap", current_file, current_line, evidence,
-                detail=(
-                    f"Possible note-number gap {missing} between definitions "
-                    f"{previous_key} and {current_key}; numbering resets and OCR omissions "
-                    "are uncertain, so inspect only adjacent note evidence."
-                ),
-                key=",".join(map(str, missing)),
-                identity="references=" + _sha(json.dumps(gap_references, sort_keys=True, separators=(",", ":"))),
-            )
-            finding["neighbor_keys"] = [previous_key, current_key]
-            finding["neighbor_files"] = [previous_file, current_file]
-            finding["missing_keys"] = missing
-            finding["body_reference_occurrences"] = gap_references
-            finding["physical_definition_boundary"] = {
-                "previous_page_range": [previous_start, previous_end],
-                "current_page_range": [current_start, current_end],
-                "previous_section_id": previous_section,
-                "current_section_id": current_section,
-            }
-            # Page mapping is resolved later through the exact sidecar
-            # candidates for these neighboring keys. `start_page` is only a
-            # unit bound and must never be invented as evidence for a gap.
-            if (finding["task_id"], finding["evidence_sha256"]) not in exceptions:
-                findings.append(finding)
-            else:
-                suppressed.append({"task_id": finding["task_id"], "evidence_sha256": finding["evidence_sha256"]})
+    _audit_note_numbering(ordered_definitions, body_numeric_refs, mode, record_finding)
 
-    # Validate materialized marker/definition counts and continuation seams.
+    target_audit_ctx = _TargetAuditContext(
+        source_texts=source_texts,
+        target_texts=target_texts,
+        mode=mode,
+        records=records,
+        record_by_file=record_by_file,
+        resolved_blocks=resolved_blocks,
+        expected_notes=expected_notes,
+        expected_by_target_key=expected_by_target_key,
+        next_part_by_file=next_part_by_file,
+        last_physical_note_ref_by_page=last_physical_note_ref_by_page,
+        target_definition_rows=target_definition_rows,
+        toc_tree=toc_tree,
+        page_texts=page_texts,
+    )
     if target_texts is not None:
-        for file, source in sorted(source_texts.items()):
-            target = target_texts.get(file)
-            if target is None:
-                findings.append(_finding("normalized_unit_missing", file, 1, source[:280], detail="Normalized unit is missing."))
-                continue
-            # Note definitions should not be followed by unindented body text;
-            # continuation paragraphs have explicit Markdown indentation.
-            visible_target_lines = _visible(target).splitlines()
-            target_occurrence_counts: dict[str, int] = {}
-            target_lines = visible_target_lines
-            target_defs, target_consumed = collect_footnote_definition_blocks(target_lines)
-            resolved_by_output_key: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
-            for resolved_item in resolved_blocks:
-                if isinstance(resolved_item, Mapping) and resolved_item.get("output_key"):
-                    resolved_by_output_key[str(resolved_item["output_key"])].append(resolved_item)
-            definition_lines = {line + 1 for line in target_defs}
-            definition_lines.update(line + 1 for line in target_consumed)
-            target_record = record_by_file.get(file, {})
-            target_marker_scan = (
-                mode != "endnotes_only"
-                and str(target_record.get("type") or "") not in FOOTNOTE_STRUCTURE_EXEMPT_TYPES
-            )
-            for line_number, line in enumerate(visible_target_lines, 1):
-                if line_number in definition_lines:
-                    continue
-                equation_text = re.sub(r"<[^>]+>", " ", line)
-                equation_like = (
-                    len(list(_RAW_SUP_RE.finditer(line))) + len(list(_UNICODE_SUP_RE.finditer(line))) >= 2
-                    and bool(re.search(r"(?:=|[+*/])", equation_text))
-                )
-                for occurrence, match in enumerate(_RAW_SUP_RE.finditer(line) if target_marker_scan else ()):
-                    if equation_like:
-                        continue
-                    if _is_in_inline_code(line, match.start()):
-                        continue
-                    key = match.group("key")
-                    occurrence_id = _marker_occurrence_identity(visible_target_lines, line_number - 1, match, key, occurrence, target_occurrence_counts)
-                    finding = _finding(
-                        "unexplained_numeric_superscript", file, line_number, line.strip(),
-                        detail=f"Raw superscript {key} remains in normalized body text.",
-                        key=key, origin="normalized_target", identity=f"occurrence={occurrence_id}",
-                    )
-                    finding["occurrence_sha256"] = occurrence_id
-                    finding["evidence_target_sha256"] = _sha(target)
-                    record_finding(finding)
-                for occurrence, match in enumerate(_UNICODE_SUP_RE.finditer(line) if target_marker_scan else ()):
-                    if equation_like:
-                        continue
-                    if _is_in_inline_code(line, match.start()):
-                        continue
-                    key = match.group(0).translate(_DIGIT_MAP)
-                    occurrence_id = _marker_occurrence_identity(visible_target_lines, line_number - 1, match, key, occurrence, target_occurrence_counts)
-                    finding = _finding(
-                        "unexplained_unicode_superscript", file, line_number, line.strip(),
-                        detail=f"Unicode superscript {key} remains in normalized body text.",
-                        key=key, origin="normalized_target", identity=f"occurrence={occurrence_id}",
-                    )
-                    finding["occurrence_sha256"] = occurrence_id
-                    finding["evidence_target_sha256"] = _sha(target)
-                    record_finding(finding)
-                raw_def = _RAW_DEF_RE.match(line) if target_marker_scan else None
-                if raw_def and re.search(r"\b(?:note|notes|see note|cf\.|ibid\.|trans\.|ed\.)\b", raw_def.group("body"), re.I):
-                    key = raw_def.group("bracket") or raw_def.group("num")
-                    finding = _finding(
-                        "suspected_numbered_note_definition", file, line_number, line.strip(),
-                        detail=f"Numbered block {key} remains a possible unnormalized note definition.",
-                        key=key, origin="normalized_target",
-                    )
-                    finding["evidence_target_sha256"] = _sha(target)
-                    record_finding(finding)
-            for task in _heading_note_findings(
-                file=file, target=target, target_defs=target_defs,
-                expected_by_target_key=expected_by_target_key,
-                source_texts=source_texts, resolved_blocks=resolved_blocks,
-                toc_tree=toc_tree, page_texts=page_texts,
-            ):
-                record_finding(task)
-            for index, (key, body) in target_defs.items():
-                value = body.strip()
-                if (
-                    value.endswith(("-", "‐", "‑", "—", "…"))
-                    or value.count("(") > value.count(")")
-                    or value.count("[") > value.count("]")
-                ):
-                    record_finding(_finding(
-                        "normalized_note_truncated", file, 0,
-                        f"[^{key}]: {body}",
-                        detail=f"Normalized note definition {key} remains truncated or unclosed.",
-                        key=key,
-                        origin="normalized_target",
-                    ))
-                expected = expected_by_target_key.get((file, str(key)))
-                candidate_refs = expected.get("candidate_refs", []) if isinstance(expected, Mapping) else []
-                exact_ref = max(
-                    (
-                        (int(ref.get("page", 0)), int(ref.get("block", -1)), str(ref.get("source_file") or ""), str(expected.get("target_file") or ""), str(expected.get("output_key") or ""))
-                        for ref in candidate_refs if isinstance(ref, Mapping)
-                        and str(ref.get("page", "")).isdigit()
-                        and str(ref.get("block", "")).isdigit()
-                    ),
-                    default=None,
-                ) if isinstance(expected, Mapping) else None
-                source_record = next_part_source = None
-                if exact_ref is not None:
-                    physical_page = exact_ref[0]
-                    source_filename = exact_ref[2]
-                    if source_filename:
-                        source_record = record_by_file.get(source_filename)
-                        if source_record is not None and not (
-                            int(source_record.get("start_page") or 0)
-                            <= physical_page
-                            <= int(source_record.get("end_page") or 0)
-                        ):
-                            source_record = None
-                    else:
-                        source_record = next((
-                            row for row in records
-                            if int(row.get("start_page") or 0) <= physical_page <= int(row.get("end_page") or 0)
-                            and str(row.get("chapter_id") or "") == str(expected.get("chapter_id") or "")
-                        ), None)
-                    if source_record is not None:
-                        next_part_source = next_part_by_file.get(str(source_record.get("name") or ""))
-                open_punctuation = value.endswith((",", ":", ";"))
-                if (
-                    mode != "endnotes_only"
-                    and source_record is not None
-                    and str(source_record.get("type") or "") not in FOOTNOTE_STRUCTURE_EXEMPT_TYPES
-                    and open_punctuation
-                    and next_part_source is not None
-                    and exact_ref == last_physical_note_ref_by_page.get(exact_ref[0])
-                    and int(source_record.get("end_page") or 0) == exact_ref[0]
-                ):
-                    finding = _finding(
-                        "normalized_note_open_boundary_at_physical_page_break",
-                        file, 0, f"[^{key}]: {body}",
-                        detail=(
-                            f"Normalized note {key} ends with open punctuation exactly at a mapped physical page/part boundary. "
-                            "This is only a visual-review cue; confirm the neighboring page images before changing ownership."
-                        ),
-                        key=str(key), origin="normalized_target",
-                    )
-                    finding["pages"] = [exact_ref[0], int(next_part_source.get("start_page") or 0)]
-                    finding["evidence_target_sha256"] = _sha(target)
-                    record_finding(finding)
-            covered = set(target_consumed)
-            covered.update(target_defs)
-            for index in target_defs:
-                cursor = index + 1
-                while cursor < len(target_lines) and not target_lines[cursor].strip():
-                    cursor += 1
-                if cursor < len(target_lines) and cursor not in covered and not target_lines[cursor].lstrip().startswith("#"):
-                    record_finding(_finding("possible_body_note_boundary_contamination", file, 0, target_lines[cursor].strip(), detail="Unindented body text follows a note definition; verify the page/body boundary and paragraph ownership."))
-
-        # Verify the complete expected note parts against the actual
-        # materialized definitions, including ordering within the chapter-end
-        # file. A resolved sidecar address alone does not prove its text made
-        # it into the EPUB source.
-        expected_by_file: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
-        for expected in expected_notes:
-            if isinstance(expected, Mapping) and expected.get("target_file") and expected.get("output_key"):
-                expected_by_file[str(expected["target_file"])].append(expected)
-        for target_file, expected_rows in expected_by_file.items():
-            actual_rows = target_definition_rows.get(target_file, [])
-            actual_keys = [key for key, _ in actual_rows]
-            key_positions = {key: index for index, key in enumerate(actual_keys)}
-            expected_keys = [str(row["output_key"]) for row in expected_rows]
-            for expected in expected_rows:
-                key = str(expected["output_key"])
-                bodies = [body for actual_key, body in actual_rows if actual_key == key]
-                parts = expected.get("parts") if isinstance(expected.get("parts"), list) else []
-                signature = _alnum(" ".join(str(part) for part in parts))
-                body_signature = _alnum(bodies[0]) if len(bodies) == 1 else ""
-                if len(bodies) != 1 or not signature or signature not in body_signature:
-                    evidence = f"key={key}; expected={signature}; actual_count={len(bodies)}"
-                    finding = _finding(
-                        "applied_note_content_integrity", target_file, 0, evidence,
-                        detail=f"Expected complete note {key} is missing, duplicated, truncated, or has its parts out of order in the materialized chapter-end definition.",
-                        key=key, origin="normalized_target",
-                    )
-                    finding["evidence_target_sha256"] = _sha(target_texts.get(target_file, ""))
-                    refs = expected.get("candidate_refs") if isinstance(expected.get("candidate_refs"), list) else []
-                    finding["candidate_refs"] = refs
-                    if refs:
-                        finding["page"] = refs[0].get("page")
-                    record_finding(finding)
-            if all(key in key_positions for key in expected_keys):
-                positions = [key_positions[key] for key in expected_keys]
-                if positions != sorted(positions) or len(set(positions)) != len(positions):
-                    evidence = f"expected_order={expected_keys}; actual_order={actual_keys}"
-                    finding = _finding(
-                        "applied_note_order_integrity", target_file, 0, evidence,
-                        detail="Materialized chapter-end note definitions do not preserve accepted source order.",
-                        origin="normalized_target",
-                    )
-                    finding["evidence_target_sha256"] = _sha(target_texts.get(target_file, ""))
-                    refs = [
-                        ref for expected in expected_rows
-                        for ref in (expected.get("candidate_refs") if isinstance(expected.get("candidate_refs"), list) else [])
-                    ]
-                    finding["candidate_refs"] = refs
-                    if refs:
-                        finding["page"] = refs[0].get("page")
-                    record_finding(finding)
+        _audit_normalized_targets(target_audit_ctx, record_finding)
 
     dedup: dict[str, dict[str, Any]] = {}
     for item in findings:

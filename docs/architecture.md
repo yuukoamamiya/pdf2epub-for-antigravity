@@ -285,7 +285,7 @@ TOC 中标记为
   也不执行脚注物化。
 - `refine/footnote_status.py`：集中计算脚注归一化 checkpoint 的哈希和 freshness 状态；不依赖
   apply/prepare 编排，供命令层和 readiness 诊断复用。
-- `refine/footnote_result_audit.py`：纯函数生成归一化结果审计与待复核证据，不读取工作区文件、不验证审核提交。
+- `refine/footnote_result_audit.py`：纯函数生成归一化结果审计与待复核证据，不读取工作区文件、不验证审核提交。`audit_footnote_result()` 只做编排；源稿侧的截断定义、跨页注释边界和编号序列分别由 `_audit_truncated_definitions()`、`_audit_cross_page_note_boundaries()`、`_audit_note_numbering()` 负责，归一化稿侧由 `_audit_normalized_targets()` 配合 `_TargetAuditContext` 负责。拆分不改变 finding 身份、task_id 或 evidence 哈希。
 - `refine/footnote_result_review.py`：读取当前源/归一化稿、sidecar、页图和图像 manifest，验证 scoped result review 的地址、决定及 evidence freshness。
 
 按章尾注 scope 是归一化用的派生数据，没有独立 scope 文件；其事实嵌入
