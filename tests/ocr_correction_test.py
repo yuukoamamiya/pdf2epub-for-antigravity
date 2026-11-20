@@ -139,14 +139,14 @@ def test_single_ocr_mode_uses_raw_pages_without_correction_checkpoint(tmp_path: 
     selected, kind = select_refinement_pages(
         tmp_path,
         require_correction=True,
-        config={"ocr": {"secondary": {"enabled": False, "backend": "vision"}}},
+        config={"ocr": {"secondary": {"enabled": False, "backend": "vllm"}}},
     )
 
     assert selected == pages
     assert kind == "ocr"
     assert not ocr_correction_is_current(
         tmp_path,
-        {"ocr": {"secondary": {"enabled": False, "backend": "vision"}}},
+        {"ocr": {"secondary": {"enabled": False, "backend": "vllm"}}},
     )
 
 
@@ -173,7 +173,7 @@ def test_unvalidated_manual_selection_never_falls_back_to_raw_pages(tmp_path: Pa
 
     for config in (
         None,
-        {"ocr": {"secondary": {"enabled": True, "backend": "vision"}}},
+        {"ocr": {"secondary": {"enabled": True, "backend": "vllm"}}},
     ):
         try:
             select_refinement_pages(tmp_path, require_correction=False, config=config)
@@ -221,7 +221,7 @@ def test_two_ocr_correction_checkpoint_requires_current_consensus(
 
     assert not ocr_correction_is_current(
         tmp_path,
-        {"ocr": {"secondary": {"enabled": True, "backend": "vision"}}},
+        {"ocr": {"secondary": {"enabled": True, "backend": "vllm"}}},
     )
 
 

@@ -643,7 +643,7 @@ def test_native_layout_candidates_use_page_coordinates_and_ignore_page_numbers(
 
     report = prepare_footnote_candidates(
         tmp_path,
-        config={"ocr": {"secondary": {"enabled": True, "backend": "vision"}}},
+        config={"ocr": {"secondary": {"enabled": True, "backend": "vllm"}}},
     )
 
     assert report["source_kind"] == "native_text"
@@ -929,7 +929,7 @@ def test_native_footnote_decision_reuses_existing_normalization_pipeline(
     )
 
     config = {
-        "ocr": {"secondary": {"enabled": True, "backend": "vision"}},
+        "ocr": {"secondary": {"enabled": True, "backend": "vllm"}},
         "subagent": {"task_models": {"footnote-prepare": "custom-footnote"}},
     }
     manifest_paths = prepare_footnote_subagent(
@@ -1834,7 +1834,7 @@ def test_single_ocr_config_ignores_stale_consensus_artifact(tmp_path: Path):
 
     report = prepare_footnote_candidates(
         tmp_path,
-        config={"ocr": {"secondary": {"enabled": False, "backend": "vision"}}},
+        config={"ocr": {"secondary": {"enabled": False, "backend": "vllm"}}},
     )
 
     assert report["ocr_evidence_mode"] == "single_ocr"
@@ -1848,7 +1848,7 @@ def test_two_ocr_config_requires_current_consensus(tmp_path: Path):
         1,
         [_block("36 Footnote", 0, label="Footnote", y0=820)],
     )
-    config = {"ocr": {"secondary": {"enabled": True, "backend": "vision"}}}
+    config = {"ocr": {"secondary": {"enabled": True, "backend": "vllm"}}}
 
     with pytest.raises(ValueError, match="current ocr_consensus"):
         prepare_footnote_candidates(tmp_path, config=config)
@@ -1867,7 +1867,7 @@ def test_footnote_validation_rejects_switching_ocr_mode(tmp_path: Path):
 
     result = validate_footnote_decisions(
         tmp_path,
-        config={"ocr": {"secondary": {"enabled": True, "backend": "vision"}}},
+        config={"ocr": {"secondary": {"enabled": True, "backend": "vllm"}}},
     )
 
     assert result["valid"] is False
@@ -1897,7 +1897,7 @@ def test_two_ocr_candidate_difference_is_sent_to_review(tmp_path: Path, monkeypa
         "pdf2epub.refine.pdf_evidence.consensus_is_current",
         lambda output_dir, config: True,
     )
-    config = {"ocr": {"secondary": {"enabled": True, "backend": "vision"}}}
+    config = {"ocr": {"secondary": {"enabled": True, "backend": "vllm"}}}
 
     report = prepare_footnote_candidates(tmp_path, config=config)
 
@@ -2899,7 +2899,7 @@ def test_secondary_only_adjacent_lines_are_one_review_window(
 
     report = prepare_footnote_candidates(
         tmp_path,
-        config={"ocr": {"secondary": {"enabled": True, "backend": "vision"}}},
+        config={"ocr": {"secondary": {"enabled": True, "backend": "vllm"}}},
     )
 
     secondary_only = report["pages"][0]["secondary_only_candidates"]

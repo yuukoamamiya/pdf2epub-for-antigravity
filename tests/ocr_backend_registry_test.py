@@ -11,14 +11,16 @@ import pdf2epub.ocr_pages as ocr_pages
 def test_registry_exposes_all_page_ocr_backends():
     assert set(supported_backends()) == {
         "vllm",
-        "azure",
-        "vision",
         "chandra",
     }
     assert get_backend_spec("vllm").chunk_processor is not None
-    assert get_backend_spec("azure").image_page_processor is not None
-    assert get_backend_spec("vision").image_page_processor is not None
     assert get_backend_spec("chandra").native_page_processor is not None
+
+
+def test_removed_image_backends_are_rejected():
+    for name in ("azure", "vision"):
+        with pytest.raises(ValueError, match="Unknown backend"):
+            get_backend_spec(name)
 
 
 def test_registry_normalizes_names_and_rejects_unknown_backend():

@@ -360,9 +360,10 @@ OCR 后端通过 `ocr/backends/__init__.py` 的 `OCRBackendSpec` 延迟注册。
 | 能力字段 | 用途 |
 |---|---|
 | `chunk_processor` | 兼容旧的 PDF chunk 调用，当前仅由 VLLM 使用 |
-| `image_page_processor` | 输入单页图像并返回 `OCRPageResult`，当前由 Azure/Vision 使用 |
 | `native_page_processor` | 返回原生 layout 证据，当前由 Chandra 使用 |
-| `init_client` | 在第一次实际使用前创建后端客户端或进程代理 |
+
+Azure Document Intelligence 与 Google Cloud Vision 页面后端已移除；配置中出现这两个名字
+时按退役 backend 处理，`doctor`/配置校验会阻断，不会退回其他后端。
 
 启用次 OCR 时，`ocr_pages.py` 会在任何主 OCR 页面 worker 启动前生成
 `ocr_secondary_preflight.json`。它按页数、次 OCR worker 数和

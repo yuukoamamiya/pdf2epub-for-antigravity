@@ -81,7 +81,7 @@ def test_layout_disagreement_is_evidence_not_page_text_block(tmp_path: Path):
         primary_text="Body text",
         secondary_text="Body text",
         primary_backend="chandra",
-        secondary_backend="vision",
+        secondary_backend="vllm",
         config={"ocr": {"consensus": {}}},
         primary_layout={
             "blocks": [
@@ -152,22 +152,22 @@ def test_common_ocr_risk_flags_anomalously_sparse_internal_page():
 
 def test_secondary_ocr_switch_controls_consensus_and_keeps_legacy_alias():
     disabled = {
-        "ocr": {"secondary": {"enabled": False, "backend": "vision"}}
+        "ocr": {"secondary": {"enabled": False, "backend": "vllm"}}
     }
     enabled = {
-        "ocr": {"secondary": {"enabled": True, "backend": "vision"}}
+        "ocr": {"secondary": {"enabled": True, "backend": "vllm"}}
     }
     missing_backend = {"ocr": {"secondary": {"enabled": True}}}
-    legacy = {"ocr": {"secondary_backend": "vision"}}
+    legacy = {"ocr": {"secondary_backend": "vllm"}}
 
     assert secondary_ocr_enabled(disabled) is False
     assert secondary_backend_name(disabled) is None
     assert secondary_ocr_enabled(enabled) is True
-    assert secondary_backend_name(enabled) == "vision"
+    assert secondary_backend_name(enabled) == "vllm"
     assert secondary_ocr_enabled(missing_backend) is True
     assert secondary_backend_name(missing_backend) is None
     assert secondary_ocr_enabled(legacy) is True
-    assert secondary_backend_name(legacy) == "vision"
+    assert secondary_backend_name(legacy) == "vllm"
 
 
 def test_secondary_preflight_requires_explicit_slow_run_confirmation(tmp_path: Path):
@@ -175,7 +175,7 @@ def test_secondary_preflight_requires_explicit_slow_run_confirmation(tmp_path: P
         "ocr": {
             "secondary": {
                 "enabled": True,
-                "backend": "vision",
+                "backend": "vllm",
                 "performance": {
                     "estimated_seconds_per_page": 20,
                     "max_estimated_seconds": 100,
@@ -275,7 +275,7 @@ def test_rebuild_consensus_reuses_existing_page_artifacts(tmp_path: Path):
     )
     config = {
         "ocr": {
-            "secondary": {"enabled": True, "backend": "vision"},
+            "secondary": {"enabled": True, "backend": "vllm"},
             "consensus": {"common_miss": {"sample_every": 0}},
         }
     }

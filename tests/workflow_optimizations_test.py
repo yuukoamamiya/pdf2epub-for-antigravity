@@ -229,7 +229,7 @@ def test_pipeline_policy_centralizes_conversion_and_translation_requirements():
     consensus_translation = PipelinePolicy.from_config(
         {
             "translation": {"source_language": "German", "target_language": "Chinese"},
-            "ocr": {"secondary": {"enabled": True, "backend": "vision"}},
+            "ocr": {"secondary": {"enabled": True, "backend": "vllm"}},
         }
     )
     assert consensus_translation.requires_ocr_correction is True

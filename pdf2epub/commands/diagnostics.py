@@ -792,8 +792,6 @@ def build_doctor(config_path: str | Path = "config.yaml") -> dict[str, Any]:
     required_modules: dict[str, str] = {
         "chandra": "openai",
         "vllm": "anthropic, google.genai, openai, tenacity",
-        "azure": "azure.ai.documentintelligence",
-        "vision": "google.cloud.vision_v1",
     }
     selected_backends = [primary]
     if secondary_enabled and secondary:

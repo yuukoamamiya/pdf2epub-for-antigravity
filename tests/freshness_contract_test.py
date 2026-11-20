@@ -210,7 +210,7 @@ def test_retired_backend_configuration_is_rejected_even_when_disabled():
             {
                 "ocr": {
                     "backend": "chandra",
-                    "secondary": {"enabled": False, "backend": "vision"},
+                    "secondary": {"enabled": False, "backend": "vllm"},
                     "backends": {"mistral": {"model": "legacy"}},
                 }
             }

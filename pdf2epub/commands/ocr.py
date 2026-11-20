@@ -250,20 +250,12 @@ def ocr_pages_command(args):
     backend_config = ocr_config.get('backends', {}).get(backend, {})
     max_workers = args.max_workers or backend_config.get(
         'max_workers',
-        ocr_config.get('vision', {}).get('max_workers', 5),
+        ocr_config.get('max_workers', 5),
     )
 
-    # Get credentials
-    credentials = config.get('credentials', {}).get('providers', {})
-
-    # Setup backend-specific parameters
+    # Legacy chunk callers may still pass credentials explicitly.
     api_key = None
     base_url = None
-
-    if backend == 'azure':
-        azure_config = credentials.get('azure', {})
-        api_key = azure_config.get('api_key')
-        base_url = azure_config.get('endpoint')
 
     try:
         retry_pages = []

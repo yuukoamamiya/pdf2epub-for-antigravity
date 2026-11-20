@@ -292,7 +292,7 @@ def test_dual_ocr_keeps_consensus_correction_semantics_with_snapshot(
     evidence = scan_ocr_page_evidence(tmp_path, persist=False)
     config = {
         "pipeline": "epub_conversion",
-        "ocr": {"secondary": {"enabled": True, "backend": "vision"}},
+        "ocr": {"secondary": {"enabled": True, "backend": "vllm"}},
     }
     monkeypatch.setattr(
         "pdf2epub.ocr_correction.ocr_correction_is_current",

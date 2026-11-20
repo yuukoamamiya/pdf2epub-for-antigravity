@@ -6,8 +6,6 @@ for each page. The pages can later be aggregated into chapters.
 
 Supports multiple backends:
 - vllm: VLLM-based OCR (legacy compatibility)
-- azure: Azure Document Intelligence (for Japanese vertical text)
-- vision: Google Cloud Vision API (for Japanese vertical text)
 - chandra: the default multimodal page OCR backend
 """
 
@@ -42,30 +40,10 @@ from .workflow_contracts import atomic_write_text, sha256_file
 # Configure logger
 logger = configure_logging()
 
-# Cache for Azure/Vision clients (to avoid re-initialization)
-_backend_clients = {}
-
 SECONDARY_PREFLIGHT_SCHEMA_VERSION = 1
 DEFAULT_SECONDARY_MAX_ESTIMATED_SECONDS = 60 * 60
 DEFAULT_SECONDARY_ESTIMATED_SECONDS_PER_PAGE = 2.0
 DEFAULT_PRIMARY_OCR_BACKEND = "chandra"
-
-
-def pdf_to_image(pdf_bytes: bytes, zoom_factor: float = 1.0) -> bytes:
-    """Convert single-page PDF to PNG image bytes for vision backends.
-
-    Args:
-        pdf_bytes: PDF content as bytes (should be single page)
-        zoom_factor: Image quality factor (1.0-3.0, higher = better quality)
-
-    Returns:
-        PNG image bytes
-    """
-    with fitz.open(stream=pdf_bytes, filetype="pdf") as pdf:
-        page = pdf[0]
-        mat = fitz.Matrix(zoom_factor, zoom_factor)
-        pix = page.get_pixmap(matrix=mat)
-        return pix.tobytes("png")
 
 
 def ocr_pdf_chunk(
@@ -105,7 +83,7 @@ def ocr_pdf_chunk(
         backend: OCR backend to use ('vllm')
         api_key: Retained for compatibility with older callers.
         base_url: Retained for compatibility with older callers.
-        config: Configuration dict (required for azure/vision backends)
+        config: Configuration dict (required by the selected backend)
 
     Returns:
         Tuple of (markdown_content, images_info, updated_image_counter)
@@ -129,75 +107,8 @@ def ocr_pdf_chunk(
         kwargs["config"] = config
         return spec.chunk_processor(**kwargs)
 
-    if spec.image_page_processor is not None:
-        if config is None:
-            raise ValueError(f"config is required for {backend} backend")
-        result = _process_image_page_backend(
-            spec, pdf_bytes, config, images_dir, page_number, image_counter
-        )
-        return result
-
     raise ValueError(
         f"Backend {backend!r} only supports native page OCR; use ocr_pdf_page instead"
-    )
-
-
-def _process_image_page_backend(
-    spec,
-    pdf_bytes: bytes,
-    config: Dict,
-    images_dir: Optional[Path],
-    page_number: int,
-    image_counter: int,
-) -> Tuple[str, List, int]:
-    """Run an image-oriented backend through the legacy tuple adapter."""
-    result = _process_image_page_result(
-        spec, pdf_bytes, config, images_dir, page_number, image_counter
-    )
-    return result.markdown, result.images, result.image_counter
-
-
-def _process_image_page_result(
-    spec,
-    pdf_bytes: bytes,
-    config: Dict,
-    images_dir: Optional[Path],
-    page_number: int,
-    image_counter: int,
-) -> OCRPageResult:
-    """Run an image backend while retaining its optional layout artifacts."""
-    global _backend_clients
-    zoom_factor = config.get("vision_ocr_settings", {}).get("zoom_factor", 1.0)
-    img_bytes = pdf_to_image(pdf_bytes, zoom_factor)
-    if spec.name not in _backend_clients:
-        _backend_clients[spec.name] = spec.init_client(config)
-        logger.info(f"Initialized {spec.name} OCR client")
-    result = spec.image_page_processor(
-        client=_backend_clients[spec.name],
-        img_bytes=img_bytes,
-        page_num=page_number,
-        config=config,
-        base_output_dir=images_dir.parent if images_dir else None,
-    )
-    markdown = result.get("text", "")
-    illustrations = result.get("illustrations", [])
-    if illustrations:
-        from .ocr import inject_illustrations_into_text
-        markdown = inject_illustrations_into_text(markdown, illustrations)
-    return OCRPageResult(
-        markdown=markdown,
-        images=illustrations,
-        image_counter=image_counter + len(illustrations),
-        html=result.get("html"),
-        raw_html=result.get("raw_html"),
-        blocks=result.get("blocks", []),
-        page_box=result.get("page_box"),
-        model_input_size=result.get("model_input_size"),
-        token_count=result.get("token_count"),
-        backend=spec.name,
-        model=result.get("model"),
-        model_revision=result.get("model_revision"),
-        assets=result.get("assets", []),
     )
 
 
@@ -229,13 +140,6 @@ def ocr_pdf_page(
             page_number=page_number,
             images_dir=images_dir,
             image_counter=image_counter,
-        )
-
-    if spec.image_page_processor is not None:
-        if config is None:
-            raise ValueError(f"config is required for {backend} backend")
-        return _process_image_page_result(
-            spec, pdf_bytes, config, images_dir, page_number, image_counter
         )
 
     tuple_result = ocr_pdf_chunk(

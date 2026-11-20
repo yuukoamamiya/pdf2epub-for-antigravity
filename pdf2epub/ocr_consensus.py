@@ -47,6 +47,8 @@ RETIRED_OCR_BACKENDS = frozenset(
         "pp-doclayout",
         "ppdoclayout",
         "doclayout",
+        "azure",
+        "vision",
     }
 )
 
@@ -130,7 +132,7 @@ def validate_ocr_config(config: Mapping[str, Any]) -> None:
         raise ValueError(
             "retired OCR backend configuration is present: "
             + ", ".join(sorted(retired_configurations))
-            + "; remove it and use Chandra, VLLM, Azure, or Vision"
+            + "; remove it and use Chandra or VLLM"
         )
     if primary_backend not in supported:
         supported_text = ", ".join(sorted(supported))

@@ -136,7 +136,7 @@ def test_status_only_skips_ocr_correct_for_explicit_native_legacy(tmp_path: Path
     config_path = _config(tmp_path)
     config_path.write_text(
         config_path.read_text(encoding="utf-8").replace(
-            "    enabled: false", "    enabled: true\n    backend: vision"
+            "    enabled: false", "    enabled: true\n    backend: vllm"
         ),
         encoding="utf-8",
     )
@@ -269,7 +269,7 @@ def test_status_reports_ocr_evidence_level(tmp_path: Path, monkeypatch):
 
     config_path.write_text(
         config_path.read_text(encoding="utf-8").replace(
-            "    enabled: false", "    enabled: true\n    backend: vision"
+            "    enabled: false", "    enabled: true\n    backend: vllm"
         ),
         encoding="utf-8",
     )

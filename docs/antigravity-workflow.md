@@ -32,9 +32,10 @@
 |---|---|---|---|
 | Chandra | 主项目 Python 进程 | `ocr/backends/chandra.py` 的 page result | 否；只发布接口和配置模板 |
 
-兼容性页面后端 VLLM、Azure Document Intelligence 和 Google Cloud Vision 仍可作为显式主
-后端使用，但不属于默认双 OCR 路径；它们的 SDK 通过可选依赖安装。配置中出现未注册或退役
-的 backend 时，`doctor` 会直接失败，不能把它当作可选依赖缺失来处理。
+兼容性页面后端 VLLM 仍可作为显式主后端使用，但不属于默认双 OCR 路径；它的 SDK 通过可选
+依赖安装。Azure Document Intelligence 与 Google Cloud Vision 后端已移除；配置中出现
+未注册或退役的 backend（包括这两个旧名字）时，`doctor` 会直接失败，不能把它当作可选依赖
+缺失来处理。
 
 本地凭据只能来自被 Git 忽略的凭据目录；发布源码时只包含凭据读取接口和配置模板，不包含
 `.secrets/` 或 `config.yaml`。

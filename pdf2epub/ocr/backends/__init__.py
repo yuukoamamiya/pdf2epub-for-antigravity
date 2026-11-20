@@ -14,19 +14,16 @@ class OCRBackendSpec:
     """Describe one OCR backend without importing provider clients eagerly.
 
     ``chunk_processor`` is the compatibility interface used by the legacy
-    VLLM adapter.  ``image_page_processor`` is the common
-    interface used by Azure and Google Vision.  Chandra has a richer native
-    page result and therefore uses ``native_page_processor``.
+    VLLM adapter.  Chandra has a richer native page result and therefore uses
+    ``native_page_processor``.
     """
 
     name: str
     chunk_processor: Optional[Callable] = None
-    init_client: Optional[Callable] = None
-    image_page_processor: Optional[Callable] = None
     native_page_processor: Optional[Callable] = None
 
 
-_BACKEND_NAMES = ("vllm", "azure", "vision", "chandra")
+_BACKEND_NAMES = ("vllm", "chandra")
 
 
 def get_backend_spec(backend_name: str) -> OCRBackendSpec:
@@ -57,15 +54,7 @@ def get_backend_spec(backend_name: str) -> OCRBackendSpec:
             ),
         )
 
-    return OCRBackendSpec(
-        name=name,
-        init_client=_lazy_backend_callable(
-            f"pdf2epub.ocr.backends.{name}", "init_client"
-        ),
-        image_page_processor=_lazy_backend_callable(
-            f"pdf2epub.ocr.backends.{name}", "process_page"
-        ),
-    )
+    raise ValueError(f"Unknown backend: {backend_name}. Supported: {', '.join(_BACKEND_NAMES)}")
 
 
 def _lazy_backend_callable(module_name: str, attribute: str) -> Callable:

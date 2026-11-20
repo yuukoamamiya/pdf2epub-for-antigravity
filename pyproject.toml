@@ -56,12 +56,6 @@ ocr-vllm = [
     "openai>=1.102.0",
     "tenacity>=9.1.2",
 ]
-ocr-azure = [
-    "azure-ai-documentintelligence>=1.0.2",
-]
-ocr-vision = [
-    "google-cloud-vision>=3.10.2",
-]
 
 [project.scripts]
 pdf2epub = "pdf2epub.cli:main"
