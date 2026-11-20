@@ -10,6 +10,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lint:
+    name: ruff (critical rules)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install Python 3.12
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      # Only the cheap correctness rules are enforced today; the wider style
+      # set still has pre-existing findings and must be adopted incrementally.
+      - name: Run ruff
+        run: uv run ruff check pdf2epub tests
+
   pytest:
     name: pytest (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

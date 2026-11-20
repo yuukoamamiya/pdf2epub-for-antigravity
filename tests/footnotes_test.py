@@ -443,9 +443,8 @@ def test_collection_scope_inference_is_isolated_per_footnote_key(
 
     assert len(backlinks_for("A local.", html_a)) == 2
     assert len(backlinks_for("B local.", html_b)) == 1
-    assert backlinks_for("Central note.", html_b) == [
-        f"article_a.html#{html_a.xpath('//sup[.//a[contains(., \"[2]\")]]/@id')[0]}"
-    ]
+    marker_id = html_a.xpath('//sup[.//a[contains(., "[2]")]]/@id')[0]
+    assert backlinks_for("Central note.", html_b) == [f"article_a.html#{marker_id}"]
     assert report["forward_hrefs"] == 4
     assert report["backref_hrefs"] == 4
     assert report["unlinked_sup_count"] == 0

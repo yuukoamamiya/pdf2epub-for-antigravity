@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, Mapping
+from typing import Any, Dict, Mapping
 
 from .markdown_handoff_context import MarkdownHandoffRequest, normalize_handoff_context
 from .markdown_handoff_manifest import (

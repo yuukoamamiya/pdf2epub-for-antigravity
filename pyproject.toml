@@ -77,7 +77,19 @@ packages = ["pdf2epub"]
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",
+    "ruff>=0.9",
 ]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+# Start with the checks that already pass on the tree: syntax errors, undefined
+# names and invalid exceptions.  Broader style rules are added one at a time
+# after the existing code is clean; never turn on a rule set that requires a
+# blanket autofix.
+select = ["E9", "F63", "F7", "F82"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
