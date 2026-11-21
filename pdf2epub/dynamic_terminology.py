@@ -733,9 +733,9 @@ def _candidate_sidecars(
             candidates.append({
                 **row,
                 "_dispatch_wave": int(handoff.get("dispatch_wave", 1)),
-                "candidate_sidecar": relative.as_posix(),
+                "candidate_sidecar": posix_path(relative),
                 "candidate_sidecar_sha256": _sha_bytes(sidecar.read_bytes()),
-                "worker_manifest": Path(handoff["manifest"]).as_posix(),
+                "worker_manifest": posix_path(handoff["manifest"]),
                 "worker_manifest_sha256": _sha_bytes(scoped_path.read_bytes()),
             })
     return candidates
