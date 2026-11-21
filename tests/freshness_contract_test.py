@@ -1,6 +1,7 @@
 import hashlib
 import json
 from pathlib import Path
+from urllib.request import Request
 
 import pytest
 
@@ -10,7 +11,10 @@ from pdf2epub.commands.novel import _novel_child_dir
 from pdf2epub.entity_context import entity_context_is_current
 from pdf2epub.entity_extractor import create_entity_template
 from pdf2epub.ocr_consensus import validate_ocr_config
-from pdf2epub.tex_translation.arxiv import normalize_arxiv_id
+from pdf2epub.tex_translation.arxiv import (
+    _ArxivRedirectHandler,
+    normalize_arxiv_id,
+)
 from pdf2epub.tex_translation.document import (
     TexProjectDocument,
     TranslationUnit,
@@ -252,9 +256,53 @@ def test_layout_block_is_rejected_even_when_disabled():
 
 
 def test_arxiv_url_normalization_allows_only_https_arxiv_hosts():
+    for route in ("abs", "pdf", "e-print"):
+        for suffix in ("", ".pdf"):
+            url = f"https://arxiv.org/{route}/hep-th/9901001v2{suffix}"
+            assert normalize_arxiv_id(url) == "hep-th/9901001v2"
     assert normalize_arxiv_id("https://arxiv.org/abs/2301.12345v2") == "2301.12345v2"
+    assert normalize_arxiv_id("https://www.arxiv.org/abs/hep-th/9901001") == "hep-th/9901001"
     with pytest.raises(ValueError, match="HTTPS URLs hosted by arxiv.org"):
         normalize_arxiv_id("https://example.com/abs/2301.12345")
+    for malformed in (
+        "http://arxiv.org/abs/hep-th/9901001",
+        "https://arxiv.org/abs/hep-th/9901001/extra",
+        "https://arxiv.org/abs/not-an-id",
+        "https://arxiv.org.evil.test/abs/hep-th/9901001",
+    ):
+        with pytest.raises(ValueError):
+            normalize_arxiv_id(malformed)
+
+
+def test_arxiv_redirect_handler_validates_legacy_ids_and_rejects_untrusted_urls():
+    handler = _ArxivRedirectHandler()
+    request = Request("https://arxiv.org/abs/2301.12345")
+    assert handler.redirect_request(
+        request,
+        None,
+        302,
+        "Found",
+        {},
+        "https://arxiv.org/abs/hep-th/9901001",
+    ) is not None
+    with pytest.raises(ValueError, match="HTTPS URLs hosted by arxiv.org"):
+        handler.redirect_request(
+            request,
+            None,
+            302,
+            "Found",
+            {},
+            "https://example.com/abs/hep-th/9901001",
+        )
+    with pytest.raises(ValueError, match="supported arXiv URL"):
+        handler.redirect_request(
+            request,
+            None,
+            302,
+            "Found",
+            {},
+            "https://arxiv.org/abs/not-an-id",
+        )
 
 
 def test_entity_checkpoint_rejects_a_new_source_unit(tmp_path: Path):

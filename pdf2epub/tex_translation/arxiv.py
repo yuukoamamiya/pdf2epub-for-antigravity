@@ -34,13 +34,19 @@ def _validated_arxiv_url(value: str) -> str:
     if parsed.scheme.lower() != "https" or host not in _ARXIV_HOSTS:
         raise ValueError("Only HTTPS URLs hosted by arxiv.org are allowed")
     match = re.fullmatch(
-        r"/(?:abs|pdf|e-print)/(?P<id>[^/?#]+?)(?:\.pdf)?",
+        r"/(?:abs|pdf|e-print)/(?P<id>[^?#]+)",
         parsed.path,
         flags=re.IGNORECASE,
     )
     if not match:
         raise ValueError("Not a supported arXiv URL")
-    return urllib.parse.unquote(match.group("id"))
+    source_id = urllib.parse.unquote(match.group("id"))
+    if source_id.lower().endswith(".pdf"):
+        source_id = source_id[:-4]
+    identifier = _ARXIV_ID_RE.fullmatch(source_id)
+    if not identifier:
+        raise ValueError("Not a supported arXiv URL")
+    return identifier.group("id")
 
 
 class _ArxivRedirectHandler(urllib.request.HTTPRedirectHandler):
