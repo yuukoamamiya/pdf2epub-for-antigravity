@@ -38,6 +38,47 @@ def test_list_marked_notes_definition_is_normalized_locally() -> None:
     ) == ["145"]
 
 
+def test_numbered_block_pipeline_matches_golden_output() -> None:
+    """Pin the shared numbered-block loader against a golden normalization."""
+    source = {
+        "chapter_1.md": "Body <sup>1</sup>, <sup>2</sup> and <sup>7</sup>.\n",
+        "notes.md": (
+            "1. First note.\n"
+            "continued line one\n"
+            "continued line two\n"
+            "\n"
+            "2) Second note.\n"
+            "\n"
+            "<sup>7</sup> Html note.\n"
+        ),
+    }
+
+    normalized, report = normalize_endnotes(
+        source,
+        {"chapter_1.md": "", "notes.md": "notes"},
+    )
+
+    assert normalized == {
+        "chapter_1.md": "Body [^1], [^2] and [^7].\n",
+        "notes.md": (
+            "[^1]: First note.\n"
+            "    continued line one\n"
+            "    continued line two\n"
+            "\n"
+            "[^2]: Second note.\n"
+            "\n"
+            "[^7]: Html note.\n"
+        ),
+    }
+    assert report["definition_keys"] == ["1", "2", "7"]
+    assert report["definition_count"] == 3
+    assert report["normalized_definition_count"] == 3
+    assert report["converted_reference_count"] == 3
+    assert report["reference_counts"] == {"1": 1, "2": 1, "7": 1}
+    assert report["orphan_definition_keys"] == []
+    assert report["scope_mode"] == "global"
+
+
 def test_typed_notes_normalize_numbered_html_and_unicode_references() -> None:
     source = {
         "chapter_1.md": "Body <sup class=\"note\">1</sup> and ², but x<sup>99</sup> stays.\n",

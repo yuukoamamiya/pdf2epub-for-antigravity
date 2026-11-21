@@ -407,17 +407,30 @@ def preflight_secondary_ocr(
     return report
 
 
-def run_secondary_ocr_consensus(
+@dataclass(frozen=True)
+class _SecondaryConsensusState:
+    """Static configuration for one secondary-OCR consensus run."""
+
+    secondary_backend: str
+    source_sha256: str
+    source_names: list[str]
+    secondary_dir: Path
+    record_dir: Path
+    secondary_workers: int
+    secondary_max_retries: int
+    secondary_initial_backoff: float
+
+
+def _load_secondary_consensus_state(
     *,
     ocr_pdf: Path,
     output_dir: Path,
     total_pages: int,
     primary_backend: str,
     config: Dict[str, Any],
-    max_workers: int,
     resume: bool,
-) -> Dict[str, Any]:
-    """Run an optional local OCR backend and classify pages for review."""
+) -> tuple[Optional[Dict[str, Any]], Optional[_SecondaryConsensusState]]:
+    """Validate secondary OCR configuration and load resumable state."""
     if secondary_ocr_enabled(config) and not secondary_backend_name(config):
         raise ValueError(
             "ocr.secondary.enabled is true but ocr.secondary.backend is missing"
@@ -428,7 +441,7 @@ def run_secondary_ocr_consensus(
             "enabled": False,
             "review_pages": [],
             "failed_pages": [],
-        }
+        }, None
     if secondary_backend == str(primary_backend or "").strip().lower():
         raise ValueError("ocr secondary backend must differ from the primary backend")
 
@@ -449,9 +462,8 @@ def run_secondary_ocr_consensus(
             "review_pages": review_required_files(output_dir),
             "failed_pages": [],
             "manifest": manifest,
-        }
+        }, None
 
-    from concurrent.futures import ThreadPoolExecutor, as_completed
     from .ocr_consensus import consensus_dir, secondary_page_dir
 
     secondary_dir = secondary_page_dir(output_dir)
@@ -474,58 +486,99 @@ def run_secondary_ocr_consensus(
         )
     except (TypeError, ValueError):
         secondary_initial_backoff = 4.0
+    return None, _SecondaryConsensusState(
+        secondary_backend=secondary_backend,
+        source_sha256=source_sha256,
+        source_names=source_names,
+        secondary_dir=secondary_dir,
+        record_dir=record_dir,
+        secondary_workers=secondary_workers,
+        secondary_max_retries=secondary_max_retries,
+        secondary_initial_backoff=secondary_initial_backoff,
+    )
 
-    def process_page(page_number: int) -> Dict[str, Any]:
-        name = f"page_{page_number:03d}.md"
-        primary_path = output_dir / "pages" / name
-        try:
-            primary_text = primary_path.read_text(encoding="utf-8")
-            pdf_bytes = extract_pdf_pages(ocr_pdf, page_number, page_number)
-            secondary_result = ocr_pdf_page(
-                pdf_bytes,
-                chunk_info=f"Secondary OCR page {page_number}",
-                page_number=page_number,
-                backend=secondary_backend,
-                max_retries=secondary_max_retries,
-                initial_backoff=secondary_initial_backoff,
-                config=config,
-            )
-            # Keep a Chandra-shaped secondary sidecar.  The consensus record
-            # still compares Markdown, but footnote review can now compare
-            # page zones, labels, and numeric note keys as well.
-            save_page_artifacts(secondary_result, secondary_dir, page_number)
-            record = write_page_consensus(
-                output_dir,
-                source_name=name,
-                primary_text=primary_text,
-                secondary_text=secondary_result.markdown,
-                primary_backend=primary_backend,
-                secondary_backend=secondary_backend,
-                config=config,
-                primary_layout=_load_page_sidecar(
-                    output_dir / "pages" / f"page_{page_number:03d}.ocr.json"
-                ),
-                secondary_layout=_load_page_sidecar(
-                    secondary_dir / f"page_{page_number:03d}.ocr.json"
-                ),
-            )
-            record["primary_source_sha256"] = sha256_file(primary_path)
-            primary_sidecar = output_dir / "pages" / f"page_{page_number:03d}.ocr.json"
-            secondary_sidecar = secondary_dir / f"page_{page_number:03d}.ocr.json"
-            if primary_sidecar.is_file():
-                record["primary_layout_sha256"] = sha256_file(primary_sidecar)
-            record["secondary_layout_sha256"] = sha256_file(secondary_sidecar)
-            record_path = record_dir / f"{Path(name).stem}.json"
-            atomic_write_json(record_path, record)
-            return {"page": page_number, "record": record, "error": None}
-        except Exception as exc:
-            return {"page": page_number, "record": None, "error": str(exc)}
+
+def _process_secondary_page(
+    page_number: int,
+    *,
+    state: _SecondaryConsensusState,
+    ocr_pdf: Path,
+    output_dir: Path,
+    config: Dict[str, Any],
+    primary_backend: str,
+) -> Dict[str, Any]:
+    """OCR one page with the secondary backend and persist its record."""
+    name = f"page_{page_number:03d}.md"
+    primary_path = output_dir / "pages" / name
+    try:
+        primary_text = primary_path.read_text(encoding="utf-8")
+        pdf_bytes = extract_pdf_pages(ocr_pdf, page_number, page_number)
+        secondary_result = ocr_pdf_page(
+            pdf_bytes,
+            chunk_info=f"Secondary OCR page {page_number}",
+            page_number=page_number,
+            backend=state.secondary_backend,
+            max_retries=state.secondary_max_retries,
+            initial_backoff=state.secondary_initial_backoff,
+            config=config,
+        )
+        # Keep a Chandra-shaped secondary sidecar.  The consensus record
+        # still compares Markdown, but footnote review can now compare
+        # page zones, labels, and numeric note keys as well.
+        save_page_artifacts(secondary_result, state.secondary_dir, page_number)
+        record = write_page_consensus(
+            output_dir,
+            source_name=name,
+            primary_text=primary_text,
+            secondary_text=secondary_result.markdown,
+            primary_backend=primary_backend,
+            secondary_backend=state.secondary_backend,
+            config=config,
+            primary_layout=_load_page_sidecar(
+                output_dir / "pages" / f"page_{page_number:03d}.ocr.json"
+            ),
+            secondary_layout=_load_page_sidecar(
+                state.secondary_dir / f"page_{page_number:03d}.ocr.json"
+            ),
+        )
+        record["primary_source_sha256"] = sha256_file(primary_path)
+        primary_sidecar = output_dir / "pages" / f"page_{page_number:03d}.ocr.json"
+        secondary_sidecar = state.secondary_dir / f"page_{page_number:03d}.ocr.json"
+        if primary_sidecar.is_file():
+            record["primary_layout_sha256"] = sha256_file(primary_sidecar)
+        record["secondary_layout_sha256"] = sha256_file(secondary_sidecar)
+        record_path = state.record_dir / f"{Path(name).stem}.json"
+        atomic_write_json(record_path, record)
+        return {"page": page_number, "record": record, "error": None}
+    except Exception as exc:
+        return {"page": page_number, "record": None, "error": str(exc)}
+
+
+def _run_secondary_consensus_pages(
+    state: _SecondaryConsensusState,
+    *,
+    ocr_pdf: Path,
+    output_dir: Path,
+    config: Dict[str, Any],
+    total_pages: int,
+    primary_backend: str,
+) -> tuple[Dict[str, Any], List[int]]:
+    """Run secondary OCR workers and collect successful page records."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
     records: Dict[str, Any] = {}
     failed_pages: List[int] = []
-    with ThreadPoolExecutor(max_workers=secondary_workers) as executor:
+    with ThreadPoolExecutor(max_workers=state.secondary_workers) as executor:
         futures = {
-            executor.submit(process_page, page_number): page_number
+            executor.submit(
+                _process_secondary_page,
+                page_number,
+                state=state,
+                ocr_pdf=ocr_pdf,
+                output_dir=output_dir,
+                config=config,
+                primary_backend=primary_backend,
+            ): page_number
             for page_number in range(1, total_pages + 1)
         }
         for future in as_completed(futures):
@@ -539,12 +592,25 @@ def run_secondary_ocr_consensus(
                 )
             else:
                 records[name] = result["record"]
+    return records, failed_pages
 
+
+def _finalize_secondary_consensus(
+    state: _SecondaryConsensusState,
+    *,
+    output_dir: Path,
+    config: Dict[str, Any],
+    primary_backend: str,
+    records: Dict[str, Any],
+    failed_pages: List[int],
+) -> Dict[str, Any]:
+    """Write the consensus manifest and annotate common-risk pages."""
+    source_names = state.source_names
     manifest = {
         "schema_version": OCR_CONSENSUS_SCHEMA_VERSION,
-        "source_sha256": source_sha256,
+        "source_sha256": state.source_sha256,
         "primary_backend": primary_backend,
-        "secondary_backend": secondary_backend,
+        "secondary_backend": state.secondary_backend,
         "config_sha256": secondary_config_hash(config),
         "files": source_names,
         "records": records,
@@ -555,7 +621,7 @@ def run_secondary_ocr_consensus(
         page_texts = {
             name: {
                 "primary": (output_dir / "pages" / name).read_text(encoding="utf-8"),
-                "secondary": (secondary_dir / name).read_text(encoding="utf-8"),
+                "secondary": (state.secondary_dir / name).read_text(encoding="utf-8"),
             }
             for name in source_names
         }
@@ -568,7 +634,7 @@ def run_secondary_ocr_consensus(
             record["action"] = "visual_review"
             record["comparison"]["status"] = "review_required"
             record["comparison"].setdefault("reasons", []).extend(reasons)
-            atomic_write_json(record_dir / f"{Path(name).stem}.json", record)
+            atomic_write_json(state.record_dir / f"{Path(name).stem}.json", record)
     atomic_write_json(output_dir / "ocr_consensus.json", manifest)
     review_pages = sorted(
         name
@@ -577,11 +643,50 @@ def run_secondary_ocr_consensus(
     )
     return {
         "enabled": True,
-        "secondary_backend": secondary_backend,
+        "secondary_backend": state.secondary_backend,
         "review_pages": review_pages,
         "failed_pages": sorted(failed_pages),
         "manifest": manifest,
     }
+
+
+def run_secondary_ocr_consensus(
+    *,
+    ocr_pdf: Path,
+    output_dir: Path,
+    total_pages: int,
+    primary_backend: str,
+    config: Dict[str, Any],
+    max_workers: int,
+    resume: bool,
+) -> Dict[str, Any]:
+    """Run an optional local OCR backend and classify pages for review."""
+    early_result, state = _load_secondary_consensus_state(
+        ocr_pdf=ocr_pdf,
+        output_dir=output_dir,
+        total_pages=total_pages,
+        primary_backend=primary_backend,
+        config=config,
+        resume=resume,
+    )
+    if early_result is not None or state is None:
+        return early_result or {}
+    records, failed_pages = _run_secondary_consensus_pages(
+        state,
+        ocr_pdf=ocr_pdf,
+        output_dir=output_dir,
+        config=config,
+        total_pages=total_pages,
+        primary_backend=primary_backend,
+    )
+    return _finalize_secondary_consensus(
+        state,
+        output_dir=output_dir,
+        config=config,
+        primary_backend=primary_backend,
+        records=records,
+        failed_pages=failed_pages,
+    )
 
 
 @dataclass(frozen=True)
@@ -611,169 +716,158 @@ class _PageRunInputs:
     total_pages: int
 
 
+def _ocr_pending_page(inputs: _PageRunInputs, page_num: int) -> Dict[str, Any]:
+    """OCR one pending page and return its result envelope."""
+    try:
+        pdf_bytes = extract_pdf_pages(inputs.ocr_pdf, page_num, page_num)
+        chunk_info = f"Page {page_num}"
+
+        # Use page_num as image counter base to avoid conflicts
+        page_result = ocr_pdf_page(
+            pdf_bytes,
+            inputs.session,
+            inputs.project_id,
+            inputs.location,
+            chunk_info,
+            inputs.images_dir,
+            page_num,
+            page_num * 100,  # Use page-based counter to avoid conflicts
+            max_retries=inputs.max_retries,
+            initial_backoff=inputs.initial_backoff,
+            backend=inputs.backend,
+            api_key=inputs.api_key,
+            base_url=inputs.base_url,
+            config=inputs.config
+        )
+
+        return {
+            'page_num': page_num,
+            'page_result': page_result,
+            'success': True,
+            'error': None
+        }
+    except Exception as e:
+        import traceback
+        return {
+            'page_num': page_num,
+            'page_result': None,
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }
+
+
+def _apply_page_result(inputs: _PageRunInputs, result: Dict[str, Any]) -> None:
+    """Record one worker result in the page stats and progress maps."""
+    page_num = result['page_num']
+    page_file = inputs.pages_dir / f"page_{page_num:03d}.md"
+    progress = inputs.progress
+    page_stats = inputs.page_stats
+
+    if result['success']:
+        page_result = result['page_result']
+        save_page_artifacts(page_result, inputs.pages_dir, page_num)
+
+        empty_result = _is_empty_page_result(page_result)
+
+        # Count tokens
+        token_count = (
+            page_result.token_count
+            if page_result.token_count is not None
+            else count_tokens(page_result.markdown)
+        )
+
+        # Update stats
+        page_stats[str(page_num)] = {
+            'tokens': token_count,
+            'file': (page_file.relative_to(inputs.output_dir)).as_posix(),
+            'char_count': len(page_result.markdown),
+            'html_file': (
+                (inputs.pages_dir / f"page_{page_num:03d}.html").relative_to(inputs.output_dir).as_posix()
+                if page_result.html is not None
+                else None
+            ),
+            'artifact_file': (
+                (inputs.pages_dir / f"page_{page_num:03d}.ocr.json").relative_to(inputs.output_dir).as_posix()
+            ),
+        }
+
+        # Empty OCR output is not silently accepted.  It can be a real blank
+        # page, but that requires explicit acknowledgement.
+        if empty_result and not inputs.allow_empty_pages:
+            if page_num not in progress["empty_pages"]:
+                progress["empty_pages"].append(page_num)
+            if page_num in progress["pages_processed"]:
+                progress["pages_processed"].remove(page_num)
+            logger.error(
+                f"Page {page_num} produced empty OCR output; review or retry it"
+            )
+        else:
+            if page_num not in progress['pages_processed']:
+                progress['pages_processed'].append(page_num)
+            if empty_result and page_num not in progress["allowed_empty_pages"]:
+                progress["allowed_empty_pages"].append(page_num)
+            if page_num in progress["empty_pages"]:
+                progress["empty_pages"].remove(page_num)
+
+        # Remove from failed list if it was there
+        if page_num in progress.get('failed_pages', []):
+            progress['failed_pages'].remove(page_num)
+
+        if empty_result:
+            logger.warning(
+                f"Saved page {page_num} with no OCR payload ({token_count} tokens)"
+            )
+        else:
+            logger.success(f"Saved page {page_num} ({token_count} tokens)")
+    else:
+        logger.error(f"Failed to process page {page_num}: {result['error']}")
+        logger.debug(result.get('traceback', ''))
+
+        # Record failed page
+        if 'failed_pages' not in progress:
+            progress['failed_pages'] = []
+        if page_num in progress['pages_processed']:
+            progress['pages_processed'].remove(page_num)
+        if page_num not in progress['failed_pages']:
+            progress['failed_pages'].append(page_num)
+
+
+def _save_page_progress(inputs: _PageRunInputs) -> None:
+    """Persist sorted progress and per-page stats after each completion."""
+    progress = inputs.progress
+    progress["pages_processed"] = sorted(set(progress["pages_processed"]))
+    progress["failed_pages"] = sorted(set(progress["failed_pages"]))
+    progress["empty_pages"] = sorted(set(progress["empty_pages"]))
+    progress["allowed_empty_pages"] = sorted(
+        set(progress["allowed_empty_pages"])
+    )
+    progress["missing_pages"] = sorted(
+        set(range(1, inputs.total_pages + 1))
+        - set(progress["pages_processed"])
+    )
+    atomic_write_json(inputs.progress_file, progress)
+    atomic_write_json(inputs.page_stats_file, inputs.page_stats)
+
+
 def _run_page_workers(inputs: _PageRunInputs) -> None:
     """OCR the pending pages in parallel and persist progress per page."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    pages_to_process = inputs.pages_to_process
-    ocr_pdf = inputs.ocr_pdf
-    session = inputs.session
-    project_id = inputs.project_id
-    location = inputs.location
-    images_dir = inputs.images_dir
-    pages_dir = inputs.pages_dir
-    output_dir = inputs.output_dir
-    backend = inputs.backend
-    api_key = inputs.api_key
-    base_url = inputs.base_url
-    config = inputs.config
-    max_workers = inputs.max_workers
-    max_retries = inputs.max_retries
-    initial_backoff = inputs.initial_backoff
-    allow_empty_pages = inputs.allow_empty_pages
-    progress = inputs.progress
-    page_stats = inputs.page_stats
-    progress_file = inputs.progress_file
-    page_stats_file = inputs.page_stats_file
-    total_pages = inputs.total_pages
-    if not pages_to_process:
+    if not inputs.pages_to_process:
         logger.info("All pages already processed")
-    else:
-        logger.info(f"Processing {len(pages_to_process)} pages...")
+        return
+    logger.info(f"Processing {len(inputs.pages_to_process)} pages...")
 
-        # Define worker function
-        def process_single_page(page_num):
-            """Process a single page and return result."""
-            try:
-                pdf_bytes = extract_pdf_pages(ocr_pdf, page_num, page_num)
-                chunk_info = f"Page {page_num}"
+    with ThreadPoolExecutor(max_workers=inputs.max_workers) as executor:
+        futures = {
+            executor.submit(_ocr_pending_page, inputs, page_num): page_num
+            for page_num in inputs.pages_to_process
+        }
 
-                # Use page_num as image counter base to avoid conflicts
-                page_result = ocr_pdf_page(
-                    pdf_bytes,
-                    session,
-                    project_id,
-                    location,
-                    chunk_info,
-                    images_dir,
-                    page_num,
-                    page_num * 100,  # Use page-based counter to avoid conflicts
-                    max_retries=max_retries,
-                    initial_backoff=initial_backoff,
-                    backend=backend,
-                    api_key=api_key,
-                    base_url=base_url,
-                    config=config
-                )
-
-                return {
-                    'page_num': page_num,
-                    'page_result': page_result,
-                    'success': True,
-                    'error': None
-                }
-            except Exception as e:
-                import traceback
-                return {
-                    'page_num': page_num,
-                    'page_result': None,
-                    'success': False,
-                    'error': str(e),
-                    'traceback': traceback.format_exc()
-                }
-
-        # Process pages in parallel
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(process_single_page, page_num): page_num
-                      for page_num in pages_to_process}
-
-            for future in as_completed(futures):
-                result = future.result()
-                page_num = result['page_num']
-                page_file = pages_dir / f"page_{page_num:03d}.md"
-
-                if result['success']:
-                    page_result = result['page_result']
-                    save_page_artifacts(page_result, pages_dir, page_num)
-
-                    empty_result = _is_empty_page_result(page_result)
-
-                    # Count tokens
-                    token_count = (
-                        page_result.token_count
-                        if page_result.token_count is not None
-                        else count_tokens(page_result.markdown)
-                    )
-
-                    # Update stats
-                    page_stats[str(page_num)] = {
-                        'tokens': token_count,
-                        'file': (page_file.relative_to(output_dir)).as_posix(),
-                        'char_count': len(page_result.markdown),
-                        'html_file': (
-                            (pages_dir / f"page_{page_num:03d}.html").relative_to(output_dir).as_posix()
-                            if page_result.html is not None
-                            else None
-                        ),
-                        'artifact_file': (
-                            (pages_dir / f"page_{page_num:03d}.ocr.json").relative_to(output_dir).as_posix()
-                        ),
-                    }
-
-                    # Empty OCR output is not silently accepted.  It can be a
-                    # real blank page, but that requires explicit acknowledgement.
-                    if empty_result and not allow_empty_pages:
-                        if page_num not in progress["empty_pages"]:
-                            progress["empty_pages"].append(page_num)
-                        if page_num in progress["pages_processed"]:
-                            progress["pages_processed"].remove(page_num)
-                        logger.error(
-                            f"Page {page_num} produced empty OCR output; review or retry it"
-                        )
-                    else:
-                        if page_num not in progress['pages_processed']:
-                            progress['pages_processed'].append(page_num)
-                        if empty_result and page_num not in progress["allowed_empty_pages"]:
-                            progress["allowed_empty_pages"].append(page_num)
-                        if page_num in progress["empty_pages"]:
-                            progress["empty_pages"].remove(page_num)
-
-                    # Remove from failed list if it was there
-                    if page_num in progress.get('failed_pages', []):
-                        progress['failed_pages'].remove(page_num)
-
-                    if empty_result:
-                        logger.warning(
-                            f"Saved page {page_num} with no OCR payload ({token_count} tokens)"
-                        )
-                    else:
-                        logger.success(f"Saved page {page_num} ({token_count} tokens)")
-                else:
-                    logger.error(f"Failed to process page {page_num}: {result['error']}")
-                    logger.debug(result.get('traceback', ''))
-
-                    # Record failed page
-                    if 'failed_pages' not in progress:
-                        progress['failed_pages'] = []
-                    if page_num in progress['pages_processed']:
-                        progress['pages_processed'].remove(page_num)
-                    if page_num not in progress['failed_pages']:
-                        progress['failed_pages'].append(page_num)
-
-                # Save progress after each page
-                progress["pages_processed"] = sorted(set(progress["pages_processed"]))
-                progress["failed_pages"] = sorted(set(progress["failed_pages"]))
-                progress["empty_pages"] = sorted(set(progress["empty_pages"]))
-                progress["allowed_empty_pages"] = sorted(
-                    set(progress["allowed_empty_pages"])
-                )
-                progress["missing_pages"] = sorted(
-                    set(range(1, total_pages + 1))
-                    - set(progress["pages_processed"])
-                )
-                atomic_write_json(progress_file, progress)
-                atomic_write_json(page_stats_file, page_stats)
-
+        for future in as_completed(futures):
+            _apply_page_result(inputs, future.result())
+            _save_page_progress(inputs)
 
 
 def _resume_page_progress(

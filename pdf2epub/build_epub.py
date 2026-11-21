@@ -736,6 +736,216 @@ def _ordered_markdown_html_entries(structure: List[Dict]) -> List[Tuple[str, Dic
     return result
 
 
+_CARRYOVER_HEADING_NAMES = {f"h{level}" for level in range(1, 7)}
+
+
+def _iter_html_tags(nodes):
+    from bs4.element import Tag
+
+    for node in nodes:
+        if isinstance(node, Tag):
+            yield node
+            yield from node.find_all(True)
+
+
+def _footnote_reference_keys(nodes, aliases: set[str]):
+    """Count footnote references that target the current unit."""
+    from collections import Counter
+
+    counts: "Counter[str]" = Counter()
+    for tag in _iter_html_tags(nodes):
+        if tag.name.lower() != "a":
+            continue
+        classes = tag.get("class") or []
+        if "footnote-ref" not in classes:
+            continue
+        href = str(tag.get("href") or "")
+        base, separator, fragment = href.partition("#")
+        if not separator or not fragment.startswith("fn-"):
+            continue
+        if base and base not in aliases:
+            continue
+        counts[fragment[3:]] += 1
+    return counts
+
+
+def _rewrite_carryover_footnote_links(
+    nodes,
+    current_aliases: set[str],
+    current_text_aliases: set[str],
+    previous_filename: str,
+    current_stems: set[str],
+    previous_stem: str,
+) -> None:
+    """Retarget moved footnote references and backlinks to the destination."""
+    for tag in _iter_html_tags(nodes):
+        tag_id = str(tag.get("id") or "")
+        for current_stem in current_stems:
+            prefix = f"fnref-{current_stem}-"
+            if tag_id.startswith(prefix):
+                tag["id"] = f"fnref-{previous_stem}-{tag_id[len(prefix):]}"
+                break
+        href = tag.get("href")
+        if not isinstance(href, str):
+            continue
+        base, separator, fragment = href.partition("#")
+        if not separator:
+            if href.startswith("#fnref-"):
+                for current_stem in current_stems:
+                    prefix = f"#fnref-{current_stem}-"
+                    if href.startswith(prefix):
+                        tag["href"] = f"#fnref-{previous_stem}-{href[len(prefix):]}"
+                        break
+            continue
+        rewritten_fragment = fragment
+        for current_stem in current_stems:
+            prefix = f"fnref-{current_stem}-"
+            if rewritten_fragment.startswith(prefix):
+                rewritten_fragment = (
+                    f"fnref-{previous_stem}-"
+                    f"{rewritten_fragment[len(prefix):]}"
+                )
+                break
+        if base in current_aliases:
+            tag["href"] = f"{previous_filename}#{rewritten_fragment}"
+        elif base in {"text/" + alias for alias in current_text_aliases}:
+            tag["href"] = f"text/{previous_filename}#{rewritten_fragment}"
+
+
+def _load_carryover_documents(
+    generated_html: Dict[str, str],
+    html_name: str,
+    entry: Dict,
+    previous_content: Tuple[str, Path, str],
+):
+    """Parse current/previous XHTML and locate the current unit's anchor."""
+    from bs4 import BeautifulSoup
+
+    previous_filename, _previous_path, previous_stem = previous_content
+    previous_html = generated_html.get(previous_filename)
+    if not previous_html:
+        return None
+    soup = BeautifulSoup(generated_html[html_name], "html.parser")
+    body = soup.body
+    anchor = str(entry.get("anchor") or "").lstrip("#")
+    target = body.find(id=anchor) if body is not None and anchor else None
+    if body is None or target is None:
+        return None
+    previous_soup = BeautifulSoup(previous_html, "html.parser")
+    previous_body = previous_soup.body
+    if previous_body is None:
+        return None
+    return soup, body, previous_body, target, previous_filename, previous_stem, previous_soup
+
+
+def _collect_leading_carryover(
+    soup,
+    body,
+    target,
+    previous_soup,
+    current_aliases: set[str],
+) -> tuple[list, set[str]]:
+    """Select leading non-heading blocks and their exclusively used notes."""
+    from bs4.element import Tag
+
+    direct_nodes = list(body.children)
+    try:
+        target_index = direct_nodes.index(target)
+    except ValueError:
+        return [], set()
+
+    # Ancestor headings are structural context and must stay with the current
+    # unit.  Only the initial non-heading blocks are carry-over.
+    leading_nodes: List[Tag] = []
+    for node in direct_nodes[:target_index]:
+        if not isinstance(node, Tag):
+            continue
+        if node.name.lower() in _CARRYOVER_HEADING_NAMES:
+            break
+        leading_nodes.append(node)
+
+    if not leading_nodes:
+        return [], set()
+
+    moved_refs = _footnote_reference_keys(leading_nodes, current_aliases)
+    all_refs = _footnote_reference_keys([soup], current_aliases)
+    movable_keys = {
+        key
+        for key, count in moved_refs.items()
+        if count == all_refs.get(key, 0)
+        and soup.find(id=f"fn-{key}") is not None
+        and previous_soup.find(id=f"fn-{key}") is None
+    }
+    return leading_nodes, movable_keys
+
+
+def _apply_leading_carryover(
+    generated_html: Dict[str, str],
+    html_name: str,
+    soup,
+    previous_body,
+    previous_filename: str,
+    previous_stem: str,
+    previous_soup,
+    leading_nodes,
+    movable_keys: set[str],
+    current_aliases: set[str],
+    current_text_aliases: set[str],
+    current_stems: set[str],
+) -> Dict[str, object]:
+    """Move blocks and their definitions, then persist both XHTML files."""
+    from bs4.element import Tag
+
+    for node in leading_nodes:
+        _rewrite_carryover_footnote_links(
+            [node],
+            current_aliases,
+            current_text_aliases,
+            previous_filename,
+            current_stems,
+            previous_stem,
+        )
+        node.extract()
+
+    definitions = []
+    for definition in soup.find_all(class_="footnote-def"):
+        key = str(definition.get("id") or "")
+        if not key.startswith("fn-") or key[3:] not in movable_keys:
+            continue
+        _rewrite_carryover_footnote_links(
+            [definition],
+            current_aliases,
+            current_text_aliases,
+            previous_filename,
+            current_stems,
+            previous_stem,
+        )
+        definition.extract()
+        definitions.append(definition)
+
+    insertion_point = next(
+        (
+            index
+            for index, node in enumerate(previous_body.contents)
+            if isinstance(node, Tag)
+            and "footnote-def" in (node.get("class") or [])
+        ),
+        len(previous_body.contents),
+    )
+    for node in [*leading_nodes, *definitions]:
+        previous_body.insert(insertion_point, node)
+        insertion_point += 1
+
+    generated_html[previous_filename] = str(previous_soup)
+    generated_html[html_name] = str(soup)
+    return {
+        "source": html_name,
+        "destination": previous_filename,
+        "moved_blocks": len(leading_nodes),
+        "moved_footnotes": sorted(movable_keys),
+    }
+
+
 def relocate_leading_page_carryover(
     generated_html: Dict[str, str],
     structure: List[Dict],
@@ -753,78 +963,8 @@ def relocate_leading_page_carryover(
     definitions used exclusively by those blocks with them.  Footnote links
     are rewritten to the destination file so the link graph remains closed.
     """
-    from collections import Counter
-
-    from bs4 import BeautifulSoup
-    from bs4.element import Tag
-
     ordered = _ordered_markdown_html_entries(structure)
     records: List[Dict[str, object]] = []
-    heading_names = {f"h{level}" for level in range(1, 7)}
-
-    def iter_tags(nodes):
-        for node in nodes:
-            if isinstance(node, Tag):
-                yield node
-                yield from node.find_all(True)
-
-    def footnote_keys(nodes, aliases: set[str]) -> Counter[str]:
-        counts: Counter[str] = Counter()
-        for tag in iter_tags(nodes):
-            if tag.name.lower() != "a":
-                continue
-            classes = tag.get("class") or []
-            if "footnote-ref" not in classes:
-                continue
-            href = str(tag.get("href") or "")
-            base, separator, fragment = href.partition("#")
-            if not separator or not fragment.startswith("fn-"):
-                continue
-            if base and base not in aliases:
-                continue
-            counts[fragment[3:]] += 1
-        return counts
-
-    def rewrite_footnote_links(
-        nodes,
-        current_aliases: set[str],
-        current_text_aliases: set[str],
-        previous_filename: str,
-        current_stems: set[str],
-        previous_stem: str,
-    ) -> None:
-        for tag in iter_tags(nodes):
-            tag_id = str(tag.get("id") or "")
-            for current_stem in current_stems:
-                prefix = f"fnref-{current_stem}-"
-                if tag_id.startswith(prefix):
-                    tag["id"] = f"fnref-{previous_stem}-{tag_id[len(prefix):]}"
-                    break
-            href = tag.get("href")
-            if not isinstance(href, str):
-                continue
-            base, separator, fragment = href.partition("#")
-            if not separator:
-                if href.startswith("#fnref-"):
-                    for current_stem in current_stems:
-                        prefix = f"#fnref-{current_stem}-"
-                        if href.startswith(prefix):
-                            tag["href"] = f"#fnref-{previous_stem}-{href[len(prefix):]}"
-                            break
-                continue
-            rewritten_fragment = fragment
-            for current_stem in current_stems:
-                prefix = f"fnref-{current_stem}-"
-                if rewritten_fragment.startswith(prefix):
-                    rewritten_fragment = (
-                        f"fnref-{previous_stem}-"
-                        f"{rewritten_fragment[len(prefix):]}"
-                    )
-                    break
-            if base in current_aliases:
-                tag["href"] = f"{previous_filename}#{rewritten_fragment}"
-            elif base in {"text/" + alias for alias in current_text_aliases}:
-                tag["href"] = f"text/{previous_filename}#{rewritten_fragment}"
 
     previous_content: Optional[Tuple[str, Path, str]] = None
 
@@ -834,115 +974,54 @@ def relocate_leading_page_carryover(
                 previous_content = (html_name, Path(html_name), source_stem)
             continue
 
+        if previous_content is None:
+            previous_content = (html_name, Path(html_name), source_stem)
+            continue
+
         current_aliases = {html_name, f"{source_stem}.html"}
         current_text_aliases = set(current_aliases)
-        soup = BeautifulSoup(generated_html[html_name], "html.parser")
-        body = soup.body
-        anchor = str(entry.get("anchor") or "").lstrip("#")
-        target = body.find(id=anchor) if body is not None and anchor else None
-        if body is None or target is None or previous_content is None:
+        loaded = _load_carryover_documents(
+            generated_html, html_name, entry, previous_content
+        )
+        if loaded is None:
             previous_content = (html_name, Path(html_name), source_stem)
             continue
-
-        direct_nodes = list(body.children)
-        try:
-            target_index = direct_nodes.index(target)
-        except ValueError:
-            previous_content = (html_name, Path(html_name), source_stem)
-            continue
-
-        # Ancestor headings are structural context and must stay with the
-        # current unit.  Only the initial non-heading blocks are carry-over.
-        leading_nodes: List[Tag] = []
-        for node in direct_nodes[:target_index]:
-            if not isinstance(node, Tag):
-                continue
-            if node.name.lower() in heading_names:
-                break
-            leading_nodes.append(node)
-
+        (
+            soup,
+            body,
+            previous_body,
+            target,
+            previous_filename,
+            previous_stem,
+            previous_soup,
+        ) = loaded
+        leading_nodes, movable_keys = _collect_leading_carryover(
+            soup, body, target, previous_soup, current_aliases
+        )
         if not leading_nodes:
             previous_content = (html_name, Path(html_name), source_stem)
             continue
 
-        previous_filename, _previous_path, previous_stem = previous_content
-        previous_html = generated_html.get(previous_filename)
-        if not previous_html:
-            previous_content = (html_name, Path(html_name), source_stem)
-            continue
-        previous_soup = BeautifulSoup(previous_html, "html.parser")
-        previous_body = previous_soup.body
-        if previous_body is None:
-            previous_content = (html_name, Path(html_name), source_stem)
-            continue
-
-        moved_refs = footnote_keys(leading_nodes, current_aliases)
-        all_refs = footnote_keys([soup], current_aliases)
-        movable_keys = {
-            key
-            for key, count in moved_refs.items()
-            if count == all_refs.get(key, 0)
-            and soup.find(id=f"fn-{key}") is not None
-            and previous_soup.find(id=f"fn-{key}") is None
-        }
-
         current_stems = {source_stem, Path(html_name).stem}
-        for node in leading_nodes:
-            rewrite_footnote_links(
-                [node],
-                current_aliases,
-                current_text_aliases,
-                previous_filename,
-                current_stems,
-                previous_stem,
-            )
-            node.extract()
-
-        definitions = []
-        for definition in soup.find_all(class_="footnote-def"):
-            key = str(definition.get("id") or "")
-            if not key.startswith("fn-") or key[3:] not in movable_keys:
-                continue
-            if definition is None:
-                continue
-            rewrite_footnote_links(
-                [definition],
-                current_aliases,
-                current_text_aliases,
-                previous_filename,
-                current_stems,
-                previous_stem,
-            )
-            definition.extract()
-            definitions.append(definition)
-
-        insertion_point = next(
-            (
-                index
-                for index, node in enumerate(previous_body.contents)
-                if isinstance(node, Tag)
-                and "footnote-def" in (node.get("class") or [])
-            ),
-            len(previous_body.contents),
+        record = _apply_leading_carryover(
+            generated_html,
+            html_name,
+            soup,
+            previous_body,
+            previous_filename,
+            previous_stem,
+            previous_soup,
+            leading_nodes,
+            movable_keys,
+            current_aliases,
+            current_text_aliases,
+            current_stems,
         )
-        for node in [*leading_nodes, *definitions]:
-            previous_body.insert(insertion_point, node)
-            insertion_point += 1
-
-        generated_html[previous_filename] = str(previous_soup)
-        generated_html[html_name] = str(soup)
-        records.append(
-            {
-                "source": html_name,
-                "destination": previous_filename,
-                "moved_blocks": len(leading_nodes),
-                "moved_footnotes": sorted(movable_keys),
-            }
-        )
+        records.append(record)
         logger.info(
-            f"Moved {len(leading_nodes)} page-boundary block(s) from "
+            f"Moved {record['moved_blocks']} page-boundary block(s) from "
             f"{html_name} to {previous_filename}; "
-            f"moved footnotes: {sorted(movable_keys) or 'none'}"
+            f"moved footnotes: {record['moved_footnotes'] or 'none'}"
         )
         previous_content = (html_name, Path(html_name), source_stem)
 
@@ -1305,28 +1384,115 @@ def _prepare_epub_staging(config: BuildEpubConfig) -> Tuple[Path, Dict[str, str]
     return epub_dir, image_mapping
 
 
-def _render_epub_content(
+def _render_unit_parts(
+    entry: Dict,
+    *,
+    book_title: str,
+    part_files: List[str],
+    unit_id: str,
+    language: str,
+    footnote_manager,
+    image_mapping: Dict[str, str],
+    markdown_inventory: MarkdownInventory,
+) -> List[Tuple[str, str]]:
+    """Convert one unit's physical Markdown parts into XHTML documents."""
+    rendered_parts: list[tuple[str, str]] = []
+    for part_idx, part_file in enumerate(part_files):
+        # Read markdown content (shared with anchor placement)
+        content = markdown_text(Path(part_file), markdown_inventory)
+        if content is None:
+            raise FileNotFoundError(f"Chapter Markdown is missing: {part_file}")
+
+        # Process content with correct title and levels
+        # The validated Markdown and canonical ownership projection are
+        # authoritative. Replacing the first similar heading or pruning a
+        # duplicate by text can erase a distinct accepted TOC node.
+        processed = content
+
+        # Convert to HTML with full footnote and image support
+        # Use actual part file name for correct footnote linking
+        part_file_stem = Path(part_file).stem
+        html_content = markdown_to_html(
+            processed,
+            book_title,
+            language,
+            footnote_manager=footnote_manager,
+            image_mapping=image_mapping,
+            source_chapter=part_file_stem,
+        )
+
+        # Determine output filename using unit_id
+        if len(part_files) > 1:
+            html_filename = f"{unit_id}_part{part_idx + 1}.html"
+        else:
+            html_filename = f"{unit_id}.html"
+
+        rendered_parts.append((html_filename, html_content))
+    return rendered_parts
+
+
+def _place_unit_anchors(
+    converter: ContentConverter,
+    entry: Dict,
+    *,
+    part_files: List[str],
+    unit_id: str,
+    rendered_parts: List[Tuple[str, str]],
+    rendered_nodes: Dict[str, Dict],
+    anchor_locations: Dict[str, str],
+    markdown_inventory: MarkdownInventory,
+) -> None:
+    """Place ownership-projected headings in their source-assigned parts."""
+    for part_idx, part_file in enumerate(part_files):
+        filename, html_content = rendered_parts[part_idx]
+        anchors_for_part = entry.get("navigation_anchor_entries_by_part", {}).get(
+            Path(part_file).name, []
+        )
+        if not anchors_for_part:
+            continue
+        from .chapter_identity import ChapterIdentity
+
+        identity = ChapterIdentity.parse(unit_id)
+        chapter_index = identity.index_path[0] if identity and identity.index_path else 0
+        if not chapter_index:
+            raise ValueError(f"Cannot derive chapter index for {unit_id}")
+        anchored, locations = add_subchapter_anchors_to_parts(
+            converter,
+            [(filename, html_content)],
+            chapter_index,
+            anchors_for_part,
+            source_markdown_by_file={
+                Path(part_file).name: (
+                    markdown_text(Path(part_file), markdown_inventory) or ""
+                )
+            },
+        )
+        rendered_parts[part_idx] = anchored[0]
+        anchor_locations.update(locations)
+        for anchor_info in anchors_for_part:
+            node_id = anchor_info.get("node_id")
+            target_node = rendered_nodes.get(str(node_id))
+            anchor_key = str(anchor_info.get("anchor") or "").lstrip("#")
+            if target_node is not None and anchor_key in locations:
+                if anchor_info.get("navigation_expected_title"):
+                    target_node["navigation_expected_title"] = anchor_info["navigation_expected_title"]
+                if anchor_info.get("navigation_display_title"):
+                    target_node["navigation_display_title"] = anchor_info["navigation_display_title"]
+
+
+def _render_markdown_chapters(
     config: BuildEpubConfig,
     epub_dir: Path,
     epub_structure: List[Dict],
     language: str,
     footnote_manager,
-    auto_global: bool,
-    validate_footnote_graph,
     image_mapping: Dict[str, str],
     converter: ContentConverter,
-    builder: EpubBuilder,
-) -> List[str]:
-    """Render chapter XHTML, relocate page carry-over, and write navigation."""
-    from .refine.footnote_options import resolve_footnote_options
-
-    footnote_mode = resolve_footnote_options(config.config).mode
-    # One read-only inventory per build: the chapter loop reads each part for
-    # rendering and again when placing ownership anchors.
-    markdown_inventory = build_markdown_inventory(config.markdown_dir)
-    # Process and convert chapters
-    all_html_files = []
-    generated_html = {}
+    markdown_inventory: MarkdownInventory,
+) -> Tuple[List[str], Dict[str, str], Dict[str, str]]:
+    """Render every structure unit and write its XHTML parts to staging."""
+    all_html_files: List[str] = []
+    generated_html: Dict[str, str] = {}
     anchor_locations: dict[str, str] = {}
     rendered_nodes: dict[str, Dict] = {}
 
@@ -1337,6 +1503,14 @@ def _render_epub_content(
             index_rendered_nodes(item.get("children") or [])
 
     index_rendered_nodes(epub_structure)
+
+    def write_part(html_filename: str, html_content: str) -> None:
+        html_path = epub_dir / "text" / html_filename
+        with open(html_path, 'w', encoding='utf-8') as f:
+            f.write(html_content)
+        all_html_files.append(html_filename)
+        generated_html[html_filename] = html_content
+        logger.debug(f"Created {html_filename}")
 
     def process_chapters(entries: List[Dict]):
         """Recursively process all chapters with files."""
@@ -1355,99 +1529,35 @@ def _render_epub_content(
                     source_chapter=Path(entry['virtual_file_name']).stem,
                 )
                 html_filename = entry['virtual_file_name']
-                html_path = epub_dir / "text" / html_filename
-                with open(html_path, 'w', encoding='utf-8') as f:
-                    f.write(html_content)
-                all_html_files.append(html_filename)
-                generated_html[html_filename] = html_content
+                write_part(html_filename, html_content)
                 logger.debug(f"Created structural container {html_filename}")
 
             if 'file_path' in entry:
                 unit_id = entry.get('unit_id')
                 if unit_id:
-                    # Process this chapter
                     part_files = entry.get('part_files', [entry['file_path']])
-                    rendered_parts: list[tuple[str, str]] = []
-
-                    for part_idx, part_file in enumerate(part_files):
-                        # Read markdown content (shared with anchor placement)
-                        content = markdown_text(Path(part_file), markdown_inventory)
-                        if content is None:
-                            raise FileNotFoundError(f"Chapter Markdown is missing: {part_file}")
-
-                        # Process content with correct title and levels
-                        # The validated Markdown and canonical ownership
-                        # projection are authoritative. Replacing the first
-                        # similar heading or pruning a duplicate by text can
-                        # erase a distinct accepted TOC node.
-                        processed = content
-
-                        # Convert to HTML with full footnote and image support
-                        # Use actual part file name for correct footnote linking
-                        part_file_stem = Path(part_file).stem
-                        html_content = markdown_to_html(
-                            processed,
-                            config.book_title,
-                            language,
-                            footnote_manager=footnote_manager,
-                            image_mapping=image_mapping,
-                            source_chapter=part_file_stem
-                        )
-
-                        # Determine output filename using unit_id
-                        if len(part_files) > 1:
-                            html_filename = f"{unit_id}_part{part_idx + 1}.html"
-                        else:
-                            html_filename = f"{unit_id}.html"
-
-                        rendered_parts.append((html_filename, html_content))
-
-                    # Place every canonical ownership-projected heading in
-                    # its source-assigned physical part, including visible
-                    # structural ancestors embedded in descendant units.
-                    for part_idx, part_file in enumerate(part_files):
-                        filename, html_content = rendered_parts[part_idx]
-                        anchors_for_part = entry.get("navigation_anchor_entries_by_part", {}).get(
-                            Path(part_file).name, []
-                        )
-                        if anchors_for_part:
-                            from .chapter_identity import ChapterIdentity
-
-                            identity = ChapterIdentity.parse(unit_id)
-                            chapter_index = identity.index_path[0] if identity and identity.index_path else 0
-                            if not chapter_index:
-                                raise ValueError(f"Cannot derive chapter index for {unit_id}")
-                            anchored, locations = add_subchapter_anchors_to_parts(
-                                converter,
-                                [(filename, html_content)],
-                                chapter_index,
-                                anchors_for_part,
-                                source_markdown_by_file={
-                                    Path(part_file).name: (
-                                        markdown_text(Path(part_file), markdown_inventory) or ""
-                                    )
-                                },
-                            )
-                            rendered_parts[part_idx] = anchored[0]
-                            anchor_locations.update(locations)
-                            for anchor_info in anchors_for_part:
-                                identity = anchor_info.get("node_id")
-                                target_node = rendered_nodes.get(str(identity))
-                                anchor_key = str(anchor_info.get("anchor") or "").lstrip("#")
-                                if target_node is not None and anchor_key in locations:
-                                    if anchor_info.get("navigation_expected_title"):
-                                        target_node["navigation_expected_title"] = anchor_info["navigation_expected_title"]
-                                    if anchor_info.get("navigation_display_title"):
-                                        target_node["navigation_display_title"] = anchor_info["navigation_display_title"]
-
+                    rendered_parts = _render_unit_parts(
+                        entry,
+                        book_title=config.book_title,
+                        part_files=part_files,
+                        unit_id=unit_id,
+                        language=language,
+                        footnote_manager=footnote_manager,
+                        image_mapping=image_mapping,
+                        markdown_inventory=markdown_inventory,
+                    )
+                    _place_unit_anchors(
+                        converter,
+                        entry,
+                        part_files=part_files,
+                        unit_id=unit_id,
+                        rendered_parts=rendered_parts,
+                        rendered_nodes=rendered_nodes,
+                        anchor_locations=anchor_locations,
+                        markdown_inventory=markdown_inventory,
+                    )
                     for html_filename, html_content in rendered_parts:
-                        html_path = epub_dir / "text" / html_filename
-                        with open(html_path, 'w', encoding='utf-8') as f:
-                            f.write(html_content)
-
-                        all_html_files.append(html_filename)
-                        generated_html[html_filename] = html_content
-                        logger.debug(f"Created {html_filename}")
+                        write_part(html_filename, html_content)
 
             # Process children
             if 'children' in entry:
@@ -1455,27 +1565,43 @@ def _render_epub_content(
 
     process_chapters(epub_structure)
     logger.info(f"Converted {len(all_html_files)} HTML files")
-    relocation_records = relocate_leading_page_carryover(
-        generated_html,
-        epub_structure,
-    )
-    if relocation_records:
-        changed_files = {
-            filename
-            for record in relocation_records
-            for filename in (record["source"], record["destination"])
-        }
-        for filename in changed_files:
-            (epub_dir / "text" / str(filename)).write_text(
-                generated_html[str(filename)],
-                encoding="utf-8",
-            )
-        logger.info(
-            f"Applied {len(relocation_records)} page-boundary carry-over relocation(s)"
-        )
+    return all_html_files, generated_html, anchor_locations
 
-    # Navigation is generated after conversion so child anchors can point to
-    # the actual split part containing their heading rather than always part 1.
+
+def _write_relocated_parts(
+    epub_dir: Path,
+    generated_html: Dict[str, str],
+    relocation_records: List[Dict[str, object]],
+) -> None:
+    """Persist the HTML files changed by page-boundary carry-over moves."""
+    if not relocation_records:
+        return
+    changed_files = {
+        filename
+        for record in relocation_records
+        for filename in (record["source"], record["destination"])
+    }
+    for filename in changed_files:
+        (epub_dir / "text" / str(filename)).write_text(
+            generated_html[str(filename)],
+            encoding="utf-8",
+        )
+    logger.info(
+        f"Applied {len(relocation_records)} page-boundary carry-over relocation(s)"
+    )
+
+
+def _render_epub_navigation(
+    config: BuildEpubConfig,
+    epub_dir: Path,
+    epub_structure: List[Dict],
+    language: str,
+    builder: EpubBuilder,
+    all_html_files: List[str],
+    generated_html: Dict[str, str],
+    anchor_locations: Dict[str, str],
+) -> None:
+    """Resolve navigation after rendering, then write NCX and HTML TOC."""
     resolved_structure = resolve_navigation(
         epub_structure,
         anchor_locations,
@@ -1507,6 +1633,15 @@ def _render_epub_content(
     if not ncx_written or not html_toc_written:
         raise ValueError("Failed to serialize the resolved TOC navigation")
 
+
+def _validate_rendered_footnotes(
+    footnote_manager,
+    footnote_mode: str,
+    generated_html: Dict[str, str],
+    relocation_records: List[Dict[str, object]],
+    validate_footnote_graph,
+) -> None:
+    """Validate the rendered footnote link graph and legacy markers."""
     expected_references = _relocate_expected_footnote_references(
         footnote_manager.expected_reference_contract(), relocation_records
     )
@@ -1538,6 +1673,58 @@ def _render_epub_content(
         f"{footnote_report['backref_hrefs']} backlink(s)"
     )
 
+
+def _render_epub_content(
+    config: BuildEpubConfig,
+    epub_dir: Path,
+    epub_structure: List[Dict],
+    language: str,
+    footnote_manager,
+    auto_global: bool,
+    validate_footnote_graph,
+    image_mapping: Dict[str, str],
+    converter: ContentConverter,
+    builder: EpubBuilder,
+) -> List[str]:
+    """Render chapter XHTML, relocate page carry-over, and write navigation."""
+    from .refine.footnote_options import resolve_footnote_options
+
+    footnote_mode = resolve_footnote_options(config.config).mode
+    # One read-only inventory per build: the chapter loop reads each part for
+    # rendering and again when placing ownership anchors.
+    markdown_inventory = build_markdown_inventory(config.markdown_dir)
+    all_html_files, generated_html, anchor_locations = _render_markdown_chapters(
+        config,
+        epub_dir,
+        epub_structure,
+        language,
+        footnote_manager,
+        image_mapping,
+        converter,
+        markdown_inventory,
+    )
+    relocation_records = relocate_leading_page_carryover(
+        generated_html,
+        epub_structure,
+    )
+    _write_relocated_parts(epub_dir, generated_html, relocation_records)
+    _render_epub_navigation(
+        config,
+        epub_dir,
+        epub_structure,
+        language,
+        builder,
+        all_html_files,
+        generated_html,
+        anchor_locations,
+    )
+    _validate_rendered_footnotes(
+        footnote_manager,
+        footnote_mode,
+        generated_html,
+        relocation_records,
+        validate_footnote_graph,
+    )
     return all_html_files
 
 

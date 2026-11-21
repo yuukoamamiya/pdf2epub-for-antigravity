@@ -212,18 +212,11 @@ def _dry_run_preflight_audit_findings(
         return []
 
 
-def _render_review_prompt(
-    book_title: str,
+def _review_prompt_page_context(
     report: Mapping[str, Any],
-    *,
     ambiguity_count: int,
-    page_review_required: bool,
-    audit: Mapping[str, Any],
-    recovery_required: bool,
-    polish_semantic_blockers: list[Any],
-    model: str,
-) -> str:
-    """Render the footnote review prompt for the current prepared state."""
+) -> tuple[str, str]:
+    """Describe review pages and the source-specific review guidance."""
     review_pages = report["review_pages"]
     page_reports = {
         int(item["page"]): item
@@ -282,6 +275,15 @@ def _render_review_prompt(
             "endnote ambiguities use the final section and write "
             f"`{DECISIONS_FILENAME}`."
         )
+    return page_text, source_guidance
+
+
+def _review_prompt_base(
+    book_title: str,
+    source_guidance: str,
+    page_text: str,
+) -> str:
+    """Render the base footnote review prompt and marker contracts."""
     prompt = f"""# Footnote review\n\nBook: {book_title}\n\nRead `footnote_subagent_manifest.json`, `footnote_review_packet.json`, and `footnote_visual_audit_manifest.json`. The compact packet is hash-bound by the manifest. `footnote_candidates.json` remains the audit and recovery source; do not load it for routine review. Review exact page/source/block references and region IDs in the packet. Retain and inspect every listed adjacent-page window, primary/secondary sidecar, full-page image, and gap-review image even when no continuation candidate was emitted. Do not reread or rewrite the whole book. {source_guidance}\n\nCandidate page sidecars and visual evidence:\n{page_text}\n\nFor every listed review page, open the full-page `visual` PNG first. It is authoritative for the overall body/footnote boundary, page furniture, reading order, and cross-page context. When a `crop` PNG is present, open it as a zoomed supplement for small text and block-level details; never use the crop alone to decide whether a region belongs to the page footer or body. If the full-page image is unavailable, use the crop and sidecar coordinates.\n\nA region audit is one visual decision for the area, but the output must still contain one block decision for every listed review/audit block so the deterministic apply stage can address exact sidecar coordinates. Treat the page image as authoritative for region boundaries, continuations, headers, footers, and OCR omissions.\n\nUse these meanings strictly:\n- `footnote_start`: the beginning of a real page footnote; it will be moved to the end of its logical chapter.\n- `footnote_continuation`: text continuing a real footnote from an earlier page; it will be joined to that footnote.\n- `footnote_definition`: a complete footnote definition already presented as a note block.\n- `citation`: an in-text citation, quoted source, parenthetical/numeric reference, or other scholarly reference; it must stay in the body and must never be moved.\n- `bibliography`: a reference-list/bibliography entry; it must stay in place and must never be moved.\n- `body`: ordinary prose or an uncertain block that is not a footnote.\n\nWrite one `region_audits` entry for every audit region, with its exact `region_id`, a `disposition` of `footnote_region`, `body_region`, or `review_required`, and nested block decisions. A `review_required` region or block is unresolved and will block the workflow. Also keep a flat `decisions` array for compatibility; it may repeat the nested decisions, but do not emit duplicates. For each review/audit block assign exactly one role and keep its page, source, and block number. `source` defaults to `primary`; use `source: "secondary"` only for a candidate listed under `secondary_only_candidates`. For `footnote_start` and `footnote_definition`, copy the visible numeric key when present. For `footnote_continuation`, provide the key of the footnote it continues. A numeric marker alone is not enough to call something a footnote: if it is a citation or reference, use `citation` or `bibliography`.\n\nWrite only valid JSON to `footnote_decisions.json` with this shape:\n\n```json\n{{\n  "schema_version": {FOOTNOTE_PREPARE_SCHEMA_VERSION},\n  "region_audits": [\n    {{\n      "region_id": "page-125-region-01",\n      "disposition": "footnote_region",\n      "decisions": [\n        {{\n          "page": 125,\n          "source": "primary",\n          "block": 8,\n          "role": "footnote_continuation",\n          "key": "36",\n          "confidence": "high"\n        }}\n      ]\n    }}\n  ],\n  "decisions": []\n}}\n```\n\nIf a block or region is genuinely ambiguous, use `role` or `disposition: "review_required"` and explain it in `reason`; do not guess.\n"""
     prompt = prompt.replace(
         "Candidate page sidecars and visual evidence:",
@@ -309,6 +311,12 @@ def _render_review_prompt(
         "will refuse to guess between repeated markers.\n\n"
         "Do not reread or rewrite the whole book.\n"
     )
+    return prompt
+
+
+def _review_prompt_continuation(report: Mapping[str, Any]) -> str:
+    """Render the missing-continuation review section."""
+    prompt = ""
     if report.get("continuation_reviews"):
         continuation_task_lines = []
         for task in report.get("continuation_reviews", []) or []:
@@ -342,6 +350,18 @@ def _render_review_prompt(
             + "\n".join(continuation_task_lines)
             + "\n"
         )
+    return prompt
+
+
+def _apply_review_prompt_mode(
+    prompt: str,
+    book_title: str,
+    report: Mapping[str, Any],
+    *,
+    ambiguity_count: int,
+    page_review_required: bool,
+) -> str:
+    """Replace or extend the base prompt for the current review mode."""
     if report["footnote_mode"] == "disabled":
         prompt = _no_review_prompt(book_title, report)
         if report.get("warnings"):
@@ -356,6 +376,12 @@ def _render_review_prompt(
         prompt = _focused_endnote_prompt(book_title, ambiguity_count)
     else:
         prompt = _no_review_prompt(book_title, report)
+    return prompt
+
+
+def _review_prompt_audit(audit: Mapping[str, Any], report: Mapping[str, Any]) -> str:
+    """Render post-result audit findings for the reviewer."""
+    prompt = ""
     if audit.get("findings") and report["footnote_mode"] != "disabled":
         task_lines = []
         for task in audit["findings"]:
@@ -394,6 +420,15 @@ def _render_review_prompt(
                 "List segments in physical reading order. The apply stage moves only exact footnote segments and leaves body text at its source position; it rejects duplicate, overlapping, stale, or non-unique excerpts. "
                 "Do not use the polished target excerpt to infer source ownership.\n"
             )
+    return prompt
+
+
+def _review_prompt_recovery(
+    polish_semantic_blockers: list[Any],
+    recovery_required: bool,
+) -> str:
+    """Render exact Polish semantic recovery blockers."""
+    prompt = ""
     if recovery_required:
         recovery_rows = []
         for blocker in polish_semantic_blockers:
@@ -413,6 +448,37 @@ def _render_review_prompt(
             + "\n".join(recovery_rows)
             + "\n"
         )
+    return prompt
+
+
+def _render_review_prompt(
+    book_title: str,
+    report: Mapping[str, Any],
+    *,
+    ambiguity_count: int,
+    page_review_required: bool,
+    audit: Mapping[str, Any],
+    recovery_required: bool,
+    polish_semantic_blockers: list[Any],
+    model: str,
+) -> str:
+    """Render the footnote review prompt for the current prepared state."""
+    page_text, source_guidance = _review_prompt_page_context(report, ambiguity_count)
+    # Continuation text is appended after the base contract, matching the
+    # historical ordering.
+    prompt = (
+        _review_prompt_base(book_title, source_guidance, page_text)
+        + _review_prompt_continuation(report)
+    )
+    prompt = _apply_review_prompt_mode(
+        prompt,
+        book_title,
+        report,
+        ambiguity_count=ambiguity_count,
+        page_review_required=page_review_required,
+    )
+    prompt += _review_prompt_audit(audit, report)
+    prompt += _review_prompt_recovery(polish_semantic_blockers, recovery_required)
     prompt += f"\nRecommended model: `{model}`.\n"
     return prompt
 
@@ -1346,20 +1412,35 @@ def _populate_visual_context(
                 task["candidate_refs"] = [ref for ref in refs if ref["block"] >= 0]
 
 
-def prepare_footnote_subagent(
+@dataclass(frozen=True)
+class _PrepareContext:
+    """Inputs loaded once before resolving the result audit."""
+
+    report: dict[str, Any]
+    selected_page_dir: Path
+    model: str
+    records: list[Any]
+    source_texts: dict[str, str]
+    prior_review_data: Any
+    prior_audit_reviews: Any
+    prior_result_audit: Any
+    current_target_inventory: Any
+    audit: dict[str, Any]
+
+
+def _load_footnote_prepare_context(
     output_dir: Path,
     *,
     book_title: str,
-    config: Optional[Mapping[str, Any]] = None,
-    mode: Optional[str] = None,
-    bottom_ratio: Optional[float] = None,
-    bottom_intersection_ratio: Optional[float] = None,
-    context_blocks: Optional[int] = None,
-    auto_accept: Optional[bool] = None,
-    native_max_font_ratio: Optional[float] = None,
-) -> dict[str, Path]:
-    """Write the compact Subagent hand-off for ambiguous layout windows."""
-    output_dir = Path(output_dir)
+    config: Optional[Mapping[str, Any]],
+    mode: Optional[str],
+    bottom_ratio: Optional[float],
+    bottom_intersection_ratio: Optional[float],
+    context_blocks: Optional[int],
+    auto_accept: Optional[bool],
+    native_max_font_ratio: Optional[float],
+) -> "_PrepareContext":
+    """Load the candidate report, source inventory, and prior reviews."""
     report = prepare_footnote_candidates(
         output_dir,
         config=config,
@@ -1422,6 +1503,36 @@ def prepare_footnote_subagent(
     except (OSError, UnicodeError, json.JSONDecodeError):
         prior_result_audit = {}
     current_target_inventory = markdown_inventory(output_dir / "footnote_normalized")
+    return _PrepareContext(
+        report=report,
+        selected_page_dir=selected_page_dir,
+        model=model,
+        records=records,
+        source_texts=source_texts,
+        prior_review_data=prior_review_data,
+        prior_audit_reviews=prior_audit_reviews,
+        prior_result_audit=prior_result_audit,
+        current_target_inventory=current_target_inventory,
+        audit=audit,
+    )
+
+
+def _resolve_result_audit(
+    context: "_PrepareContext",
+    *,
+    output_dir: Path,
+    config: Optional[Mapping[str, Any]],
+    selected_page_dir: Path,
+) -> dict[str, Any]:
+    """Resolve audit tasks from sources, sidecars, and prior reviews."""
+    report = context.report
+    audit = context.audit
+    records = context.records
+    source_texts = context.source_texts
+    prior_review_data = context.prior_review_data
+    prior_audit_reviews = context.prior_audit_reviews
+    prior_result_audit = context.prior_result_audit
+    current_target_inventory = context.current_target_inventory
     _carry_prior_audit_findings(
         prior_result_audit, audit,
         output_dir=output_dir,
@@ -1528,6 +1639,18 @@ def prepare_footnote_subagent(
         if valid_reviews:
             audit["applied_result_audit_reviews"] = valid_reviews
             audit["applied_result_audit_review_tasks"] = valid_tasks
+    return audit
+
+
+def _write_footnote_prepare_artifacts(
+    output_dir: Path,
+    *,
+    report: dict[str, Any],
+    audit: dict[str, Any],
+    model: str,
+    book_title: str,
+) -> dict[str, Path]:
+    """Write packet, contexts, manifest, and prompt for the reviewer."""
     report["result_audit"] = audit
     packet_path, packet_sha256, preparation_evidence_sha256 = write_review_packet(output_dir, report)
     from .footnote_unit_contexts import write_footnote_unit_contexts
@@ -1593,6 +1716,46 @@ def prepare_footnote_subagent(
         "prompt": prompt_path,
         "review_packet": output_dir / packet_path,
     }
+
+
+def prepare_footnote_subagent(
+    output_dir: Path,
+    *,
+    book_title: str,
+    config: Optional[Mapping[str, Any]] = None,
+    mode: Optional[str] = None,
+    bottom_ratio: Optional[float] = None,
+    bottom_intersection_ratio: Optional[float] = None,
+    context_blocks: Optional[int] = None,
+    auto_accept: Optional[bool] = None,
+    native_max_font_ratio: Optional[float] = None,
+) -> dict[str, Path]:
+    """Write the compact Subagent hand-off for ambiguous layout windows."""
+    output_dir = Path(output_dir)
+    context = _load_footnote_prepare_context(
+        output_dir,
+        book_title=book_title,
+        config=config,
+        mode=mode,
+        bottom_ratio=bottom_ratio,
+        bottom_intersection_ratio=bottom_intersection_ratio,
+        context_blocks=context_blocks,
+        auto_accept=auto_accept,
+        native_max_font_ratio=native_max_font_ratio,
+    )
+    audit = _resolve_result_audit(
+        context,
+        output_dir=output_dir,
+        config=config,
+        selected_page_dir=context.selected_page_dir,
+    )
+    return _write_footnote_prepare_artifacts(
+        output_dir,
+        report=context.report,
+        audit=audit,
+        model=context.model,
+        book_title=book_title,
+    )
 
 
 __all__ = ["prepare_footnote_subagent"]

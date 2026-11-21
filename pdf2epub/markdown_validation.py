@@ -805,29 +805,14 @@ def detect_polish_page_furniture(
     return findings
 
 
-def polish_content_integrity_check(
-    source_text: str,
-    target_text: str,
-    file_role: str | None = None,
-) -> Dict[str, Any]:
-    """Detect substantial source-content loss during full-text polishing.
+def _polish_clean_lines(text: str) -> list[str]:
+        return clean_ocr_page_artifacts(str(text or "")).splitlines()
 
-    Polish is allowed to reflow paragraphs, remove confirmed page furniture,
-    and normalize verified footnote superscripts. It is not allowed to drop a
-    substantial amount of visible prose, numbers, or punctuation. This check
-    is deliberately a blocking signal so an accidental truncated Subagent
-    output cannot become the next source stage.
 
-    Note-definition prefixes are only normalized for ``notes`` units. Ordinary
-    body text keeps strict list-number comparison so a dropped ``- 1.`` prefix
-    still counts as content loss.
-    """
 
-    notes_role = str(file_role or "").strip().lower() == "notes"
-
-    def tokens(text: str) -> list[str]:
+def _polish_tokens(text: str, *, notes_role: bool) -> list[str]:
         visible_lines: list[str] = []
-        for line_number, line in enumerate(clean_lines(text), 1):
+        for line_number, line in enumerate(_polish_clean_lines(text), 1):
             candidate = candidate_for_line(line)
             if candidate and candidate.get("confidence") == "high":
                 if candidate.get("ornamented"):
@@ -870,10 +855,9 @@ def polish_content_integrity_check(
         value = re.sub(r"\s+", " ", value).strip()
         return re.findall(r"\w+|[^\w\s]", value, flags=re.UNICODE)
 
-    def clean_lines(text: str) -> list[str]:
-        return clean_ocr_page_artifacts(str(text or "")).splitlines()
 
-    def prose_blocks(text: str) -> list[str]:
+
+def _polish_prose_blocks(text: str, *, notes_role: bool) -> list[str]:
         """Extract substantial prose blocks while ignoring heading-only lines.
 
         A structural parent heading may legitimately have no body.  If a
@@ -906,7 +890,7 @@ def polish_content_integrity_check(
                 blocks.append(value)
             current.clear()
 
-        for line in clean_lines(text):
+        for line in _polish_clean_lines(text):
             if heading_pattern.match(line) or _POLISH_HORIZONTAL_RULE_RE.match(line):
                 flush()
             elif line.strip():
@@ -916,8 +900,13 @@ def polish_content_integrity_check(
         flush()
         return blocks
 
-    source_tokens = tokens(source_text)
-    target_tokens = tokens(target_text)
+
+
+def _polish_removal_metrics(
+    source_tokens: list[str],
+    target_tokens: list[str],
+) -> tuple[int, int, list[str]]:
+    """Return removed token/character counts and missing numeric markers."""
     matcher = difflib.SequenceMatcher(None, source_tokens, target_tokens, autojunk=False)
     removed_tokens = 0
     removed_characters = 0
@@ -935,6 +924,55 @@ def polish_content_integrity_check(
         for number in source_numbers
         if not any(candidate == number for candidate in target_number_iterator)
     ]
+    return removed_tokens, removed_characters, missing_numbers
+
+
+def _polish_duplicated_blocks(
+    source_text: str,
+    target_text: str,
+    *,
+    notes_role: bool,
+) -> list[dict[str, Any]]:
+    """Find prose blocks whose polished copy count exceeds the source."""
+    source_blocks = Counter(_polish_prose_blocks(source_text, notes_role=notes_role))
+    target_blocks = Counter(_polish_prose_blocks(target_text, notes_role=notes_role))
+    duplicated_blocks = [
+        {
+            "text": block[:160],
+            "source_count": source_blocks[block],
+            "target_count": target_blocks[block],
+        }
+        for block in sorted(target_blocks)
+        if target_blocks[block] > 1 and target_blocks[block] > source_blocks[block]
+    ]
+    return duplicated_blocks
+
+
+def polish_content_integrity_check(
+    source_text: str,
+    target_text: str,
+    file_role: str | None = None,
+) -> Dict[str, Any]:
+    """Detect substantial source-content loss during full-text polishing.
+
+    Polish is allowed to reflow paragraphs, remove confirmed page furniture,
+    and normalize verified footnote superscripts. It is not allowed to drop a
+    substantial amount of visible prose, numbers, or punctuation. This check
+    is deliberately a blocking signal so an accidental truncated Subagent
+    output cannot become the next source stage.
+
+    Note-definition prefixes are only normalized for ``notes`` units. Ordinary
+    body text keeps strict list-number comparison so a dropped ``- 1.`` prefix
+    still counts as content loss.
+    """
+
+    notes_role = str(file_role or "").strip().lower() == "notes"
+
+    source_tokens = _polish_tokens(source_text, notes_role=notes_role)
+    target_tokens = _polish_tokens(target_text, notes_role=notes_role)
+    removed_tokens, removed_characters, missing_numbers = _polish_removal_metrics(
+        source_tokens, target_tokens
+    )
     loss_threshold = max(8, math.ceil(len(source_tokens) * 0.02))
     errors: list[str] = []
     if removed_tokens >= loss_threshold:
@@ -948,17 +986,9 @@ def polish_content_integrity_check(
             "polish content integrity loss: source numeric markers are missing "
             f"from polished output: {missing_numbers[:12]!r}"
         )
-    source_blocks = Counter(prose_blocks(source_text))
-    target_blocks = Counter(prose_blocks(target_text))
-    duplicated_blocks = [
-        {
-            "text": block[:160],
-            "source_count": source_blocks[block],
-            "target_count": target_blocks[block],
-        }
-        for block in sorted(target_blocks)
-        if target_blocks[block] > 1 and target_blocks[block] > source_blocks[block]
-    ]
+    duplicated_blocks = _polish_duplicated_blocks(
+        source_text, target_text, notes_role=notes_role
+    )
     if duplicated_blocks:
         errors.append(
             "polish content integrity duplication: prose block appears more times "

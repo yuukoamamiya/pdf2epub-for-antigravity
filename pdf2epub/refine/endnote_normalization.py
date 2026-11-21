@@ -18,7 +18,7 @@ import html
 import json
 import re
 from collections import Counter, defaultdict
-from typing import Any, Mapping, Optional
+from typing import Any, Iterator, Mapping, NamedTuple, Optional
 
 from ..footnote_normalization import (
     _is_math_or_formula_superscript,
@@ -690,21 +690,29 @@ def _resolve_inherited_scope_refs(
     return resolved, inherited, errors
 
 
-def _normalize_scoped(
+class _NumberedBlock(NamedTuple):
+    """One numbered endnote definition line and its continuation lines."""
+
+    file: str
+    line_number: int
+    line_index: int
+    key: str
+    content: str
+    kind: str
+    continuation_lines: list[int]
+    scope_key: Optional[str]
+
+
+def _iter_numbered_blocks(
     source_texts: Mapping[str, str],
-    note_files: set[str],
-    scopes: Mapping[str, Any],
+    file_order: list[str],
     *,
     body_keys: set[str],
-    definition_decisions: Optional[Mapping[tuple[str, int], str]] = None,
-) -> tuple[dict[str, str], dict[str, Any]]:
-    file_order = _note_file_order(scopes, note_files, source_texts)
-    file_order_index = {name: index for index, name in enumerate(file_order)}
-    scope_refs = _scope_ref_map(scopes)
-    decisions = dict(definition_decisions or {})
-
-    occurrences: list[dict[str, Any]] = []
-    definition_errors: list[str] = []
+    decisions: Mapping[tuple[str, int], str],
+    scopes: Optional[Mapping[str, Any]],
+    errors: list[str],
+) -> Iterator[_NumberedBlock]:
+    """Yield numbered definition blocks shared by scoped and legacy modes."""
     for name in file_order:
         lines = source_texts[name].splitlines()
         fenced_lines = markdown_fence_mask(lines)
@@ -729,12 +737,12 @@ def _normalize_scoped(
                 decisions=decisions,
             )
             if error:
-                definition_errors.append(error)
+                errors.append(error)
                 continue
             if skip:
                 continue
             raw_key, content, kind = parsed
-            scope_key = scope_for_line(scopes, name, line_number)
+            scope_key = scope_for_line(scopes, name, line_number) if scopes is not None else None
             continuation_indexes = _definition_continuations(
                 lines,
                 fenced_lines,
@@ -752,31 +760,63 @@ def _normalize_scoped(
                 scopes=scopes,
                 scope_key=scope_key,
             )
-            occurrences.append(
-                {
-                    "file": name,
-                    "line": line_number,
-                    "raw_key": raw_key,
-                    "key": raw_key,
-                    "content": content,
-                    "continuation_lines": continuation_indexes,
-                    "kind": kind,
-                    "scope_key": scope_key,
-                    "double_numbered": False,
-                    "output_key": raw_key,
-                }
+            yield _NumberedBlock(
+                file=name,
+                line_number=line_number,
+                line_index=line_index,
+                key=raw_key,
+                content=content,
+                kind=kind,
+                continuation_lines=continuation_indexes,
+                scope_key=scope_key,
             )
 
-    if definition_errors:
-        raise EndnoteNormalizationError("; ".join(definition_errors))
 
-    if not occurrences:
-        report = _empty_report("no_definitions", note_files)
-        report["scope_mode"] = "global"
-        report["scope_count"] = len(scopes.get("scopes", {}))
-        report["scopes"] = _scope_summary(scopes, occurrences)
-        report["endnote_definition_decisions_sha256"] = _decision_digest(decisions)
-        return dict(source_texts), report
+def _load_scoped_occurrences(
+    source_texts: Mapping[str, str],
+    note_files: set[str],
+    scopes: Mapping[str, Any],
+    *,
+    body_keys: set[str],
+    decisions: Mapping[tuple[str, int], str],
+) -> tuple[list[str], list[dict[str, Any]], list[str]]:
+    """Load page-ordered scoped definitions with their continuation lines."""
+    file_order = _note_file_order(scopes, note_files, source_texts)
+    definition_errors: list[str] = []
+    occurrences: list[dict[str, Any]] = []
+    for block in _iter_numbered_blocks(
+        source_texts,
+        file_order,
+        body_keys=body_keys,
+        decisions=decisions,
+        scopes=scopes,
+        errors=definition_errors,
+    ):
+        occurrences.append(
+            {
+                "file": block.file,
+                "line": block.line_number,
+                "raw_key": block.key,
+                "key": block.key,
+                "content": block.content,
+                "continuation_lines": block.continuation_lines,
+                "kind": block.kind,
+                "scope_key": block.scope_key,
+                "double_numbered": False,
+                "output_key": block.key,
+            }
+        )
+    return file_order, occurrences, definition_errors
+
+
+def _resolve_scoped_occurrences(
+    occurrences: list[dict[str, Any]],
+    scopes: Mapping[str, Any],
+    file_order: list[str],
+) -> dict[str, Any]:
+    """Resolve inheritance, double numbering, uniqueness, and output keys."""
+    file_order_index = {name: index for index, name in enumerate(file_order)}
+    scope_refs = _scope_ref_map(scopes)
 
     provisional_definitions = _definitions_by_scope(occurrences)
     scope_refs, inherited_scopes, scope_errors = _resolve_inherited_scope_refs(
@@ -877,6 +917,32 @@ def _normalize_scoped(
         index = siblings.index(occurrence) + 1
         base = f"fnc-{occurrence['scope_key']}-{occurrence['key']}"
         occurrence["output_key"] = base if index == 1 else f"{base}-o{index}"
+
+    return {
+        "file_order_index": file_order_index,
+        "scope_refs": scope_refs,
+        "definitions_by_scope_key": definitions_by_scope_key,
+        "inherited_scopes": inherited_scopes,
+        "scoped_keys": scoped_keys,
+        "scope_mode": scope_mode,
+    }
+
+
+def _apply_scoped_normalization(
+    source_texts: Mapping[str, str],
+    note_files: set[str],
+    occurrences: list[dict[str, Any]],
+    scopes: Mapping[str, Any],
+    state: Mapping[str, Any],
+    decisions: Mapping[tuple[str, int], str],
+) -> tuple[dict[str, str], dict[str, Any]]:
+    """Rewrite scoped definitions and references, then build the report."""
+    file_order_index = state["file_order_index"]
+    scope_refs = state["scope_refs"]
+    definitions_by_scope_key = state["definitions_by_scope_key"]
+    inherited_scopes = state["inherited_scopes"]
+    scoped_keys = state["scoped_keys"]
+    scope_mode = state["scope_mode"]
 
     definition_edits: dict[str, dict[int, str]] = defaultdict(dict)
     lines_by_file = {name: text.splitlines() for name, text in source_texts.items()}
@@ -990,7 +1056,7 @@ def _normalize_scoped(
     return transformed, {
         "status": "validated",
         "valid": True,
-        "source_files": list(file_order),
+        "source_files": list(file_order_index),
         "definition_keys": sorted(output_keys),
         "definition_count": len(output_keys),
         "normalized_definition_count": normalized_definition_count,
@@ -1012,89 +1078,97 @@ def _normalize_scoped(
     }
 
 
-def _normalize_legacy(
+def _normalize_scoped(
     source_texts: Mapping[str, str],
     note_files: set[str],
+    scopes: Mapping[str, Any],
     *,
+    body_keys: set[str],
     definition_decisions: Optional[Mapping[tuple[str, int], str]] = None,
 ) -> tuple[dict[str, str], dict[str, Any]]:
-    body_keys = _raw_body_keys(source_texts, note_files)
     decisions = dict(definition_decisions or {})
-    definitions: dict[str, tuple[str, str, str]] = {}
-    definition_edits: dict[str, dict[int, str]] = {}
-    errors: list[str] = []
+    file_order, occurrences, definition_errors = _load_scoped_occurrences(
+        source_texts,
+        note_files,
+        scopes,
+        body_keys=body_keys,
+        decisions=decisions,
+    )
+    if definition_errors:
+        raise EndnoteNormalizationError("; ".join(definition_errors))
 
-    for name in sorted(note_files):
-        edits: dict[int, str] = {}
-        lines = source_texts[name].splitlines()
-        fenced_lines = markdown_fence_mask(lines)
-        for line_index, line in enumerate(lines):
-            if fenced_lines[line_index]:
-                continue
-            line_number = line_index + 1
-            previous_line_blank = line_number == 1 or not lines[line_number - 2].strip()
-            previous_line = lines[line_number - 2] if line_number > 1 else None
-            parsed = _definition_line(
-                line,
-                body_keys=body_keys,
-                previous_line_blank=previous_line_blank,
-            )
-            if parsed is None:
-                continue
-            skip, error = _definition_decision_errors(
-                name=name,
-                line_number=line_number,
-                line=line,
-                previous_line=previous_line,
-                decisions=decisions,
-            )
-            if error:
-                errors.append(error)
-                continue
-            if skip:
-                continue
-            key, content, kind = parsed
-            if key in definitions:
-                previous_name, previous_line, _ = definitions[key]
-                errors.append(
-                    f"duplicate centralized endnote key {key}: "
-                    f"{previous_name}:{previous_line} and {name}:{line_number}"
-                )
-                continue
-            definitions[key] = (name, line_number, kind)
-            if kind != "markdown":
-                edits[line_number] = f"[^{key}]: {content}".rstrip()
-                continuation_indexes = _definition_continuations(
-                    lines,
-                    fenced_lines,
-                    line_index,
-                    _next_definition_line(
-                        lines,
-                        fenced_lines,
-                        line_index,
-                        body_keys,
-                        name=name,
-                        decisions=decisions,
-                        scopes=None,
-                    ),
-                    name=name,
-                    scopes=None,
-                    scope_key=None,
-                )
-                for continuation_index in continuation_indexes:
-                    continuation_line = lines[continuation_index]
-                    edits[continuation_index + 1] = f"    {continuation_line}"
-        if edits:
-            definition_edits[name] = edits
-
-    if errors:
-        raise EndnoteNormalizationError("; ".join(errors))
-
-    if not definitions:
+    if not occurrences:
         report = _empty_report("no_definitions", note_files)
+        report["scope_mode"] = "global"
+        report["scope_count"] = len(scopes.get("scopes", {}))
+        report["scopes"] = _scope_summary(scopes, occurrences)
         report["endnote_definition_decisions_sha256"] = _decision_digest(decisions)
         return dict(source_texts), report
 
+    state = _resolve_scoped_occurrences(occurrences, scopes, file_order)
+    return _apply_scoped_normalization(
+        source_texts, note_files, occurrences, scopes, state, decisions
+    )
+
+
+def _load_legacy_blocks(
+    source_texts: Mapping[str, str],
+    note_files: set[str],
+    *,
+    body_keys: set[str],
+    decisions: Mapping[tuple[str, int], str],
+) -> tuple[list[_NumberedBlock], list[str]]:
+    errors: list[str] = []
+    blocks = list(
+        _iter_numbered_blocks(
+            source_texts,
+            sorted(note_files),
+            body_keys=body_keys,
+            decisions=decisions,
+            scopes=None,
+            errors=errors,
+        )
+    )
+    return blocks, errors
+
+
+def _resolve_legacy_definitions(
+    source_texts: Mapping[str, str],
+    blocks: list[_NumberedBlock],
+) -> tuple[
+    dict[str, tuple[str, int, str]],
+    dict[str, dict[int, str]],
+    list[str],
+]:
+    definitions: dict[str, tuple[str, int, str]] = {}
+    definition_edits: dict[str, dict[int, str]] = {}
+    errors: list[str] = []
+    for block in blocks:
+        if block.key in definitions:
+            previous_name, previous_line, _ = definitions[block.key]
+            errors.append(
+                f"duplicate centralized endnote key {block.key}: "
+                f"{previous_name}:{previous_line} and {block.file}:{block.line_number}"
+            )
+            continue
+        definitions[block.key] = (block.file, block.line_number, block.kind)
+        if block.kind == "markdown":
+            continue
+        edits = definition_edits.setdefault(block.file, {})
+        edits[block.line_number] = f"[^{block.key}]: {block.content}".rstrip()
+        lines = source_texts[block.file].splitlines()
+        for continuation_index in block.continuation_lines:
+            edits[continuation_index + 1] = f"    {lines[continuation_index]}"
+    return definitions, definition_edits, errors
+
+
+def _apply_legacy_normalization(
+    source_texts: Mapping[str, str],
+    note_files: set[str],
+    definitions: Mapping[str, tuple[str, int, str]],
+    definition_edits: Mapping[str, Mapping[int, str]],
+    decisions: Mapping[tuple[str, int], str],
+) -> tuple[dict[str, str], dict[str, Any]]:
     definition_keys = set(definitions)
     transformed = dict(source_texts)
     normalized_definition_count = 0
@@ -1135,6 +1209,41 @@ def _normalize_legacy(
         }
     )
     return transformed, report
+
+
+def _normalize_legacy(
+    source_texts: Mapping[str, str],
+    note_files: set[str],
+    *,
+    definition_decisions: Optional[Mapping[tuple[str, int], str]] = None,
+) -> tuple[dict[str, str], dict[str, Any]]:
+    body_keys = _raw_body_keys(source_texts, note_files)
+    decisions = dict(definition_decisions or {})
+    blocks, block_errors = _load_legacy_blocks(
+        source_texts,
+        note_files,
+        body_keys=body_keys,
+        decisions=decisions,
+    )
+    definitions, definition_edits, definition_errors = _resolve_legacy_definitions(
+        source_texts, blocks
+    )
+    errors = block_errors + definition_errors
+    if errors:
+        raise EndnoteNormalizationError("; ".join(errors))
+
+    if not definitions:
+        report = _empty_report("no_definitions", note_files)
+        report["endnote_definition_decisions_sha256"] = _decision_digest(decisions)
+        return dict(source_texts), report
+
+    return _apply_legacy_normalization(
+        source_texts,
+        note_files,
+        definitions,
+        definition_edits,
+        decisions,
+    )
 
 
 def normalize_endnotes(
