@@ -11,10 +11,7 @@ Supports multiple backends:
 """
 
 import json
-import hashlib
 import pymupdf as fitz
-import os
-import tempfile
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, List
 from loguru import logger
@@ -36,7 +33,7 @@ from .ocr_consensus import (
     secondary_config_hash,
     write_page_consensus,
 )
-from .workflow_contracts import atomic_write_text, sha256_file
+from .workflow_contracts import atomic_write_json, atomic_write_text, sha256_file
 
 # Configure logger
 logger = configure_logging()
@@ -162,37 +159,6 @@ def ocr_pdf_page(
     return OCRPageResult.from_tuple(tuple_result, backend=backend)
 
 
-def _atomic_write_text(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            handle.write(content)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary_name, path)
-    finally:
-        if os.path.exists(temporary_name):
-            os.unlink(temporary_name)
-
-
-def _atomic_write_json(path: Path, value: Dict[str, Any]) -> None:
-    """Write a JSON checkpoint atomically."""
-    _atomic_write_text(
-        path,
-        json.dumps(value, ensure_ascii=False, indent=2),
-    )
-
-
-def _file_sha256(path: Path) -> str:
-    """Hash a source PDF for checkpoint provenance."""
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _load_page_sidecar(path: Path) -> Optional[Dict[str, Any]]:
     """Load a layout sidecar when the primary backend provides one."""
     try:
@@ -241,9 +207,9 @@ def save_page_artifacts(result: OCRPageResult, pages_dir: Path, page_number: int
     sidecar_path = pages_dir / f"{stem}.ocr.json"
 
     if result.raw_html is not None:
-        _atomic_write_text(raw_html_path, result.raw_html)
+        atomic_write_text(raw_html_path, result.raw_html)
     if result.html is not None:
-        _atomic_write_text(html_path, result.html)
+        atomic_write_text(html_path, result.html)
 
     sidecar = {
         "schema_version": 1,
@@ -263,8 +229,8 @@ def save_page_artifacts(result: OCRPageResult, pages_dir: Path, page_number: int
         "blocks": result.blocks,
         "assets": result.assets,
     }
-    _atomic_write_json(sidecar_path, sidecar)
-    _atomic_write_text(markdown_path, result.markdown)
+    atomic_write_json(sidecar_path, sidecar)
+    atomic_write_text(markdown_path, result.markdown)
     return markdown_path
 
 
@@ -362,7 +328,7 @@ def preflight_secondary_ocr(
             "reason": "missing_secondary_backend",
             "error": "ocr.secondary.enabled is true but ocr.secondary.backend is missing",
         }
-        _atomic_write_json(output_dir / "ocr_secondary_preflight.json", report)
+        atomic_write_json(output_dir / "ocr_secondary_preflight.json", report)
         raise ValueError(report["error"])
     if not backend:
         report = {
@@ -373,7 +339,7 @@ def preflight_secondary_ocr(
             "estimated_seconds": 0.0,
             "requires_confirmation": False,
         }
-        _atomic_write_json(output_dir / "ocr_secondary_preflight.json", report)
+        atomic_write_json(output_dir / "ocr_secondary_preflight.json", report)
         return report
 
     backend_settings = _secondary_ocr_config(config, backend)
@@ -424,7 +390,7 @@ def preflight_secondary_ocr(
                 ),
             }
         )
-        _atomic_write_json(output_dir / "ocr_secondary_preflight.json", report)
+        atomic_write_json(output_dir / "ocr_secondary_preflight.json", report)
         raise RuntimeError(
             f"Secondary OCR preflight requires confirmation: {report['error']} "
             "See ocr_secondary_preflight.json."
@@ -437,7 +403,7 @@ def preflight_secondary_ocr(
                 "reason": "estimated_runtime_exceeds_limit_but_was_explicitly_allowed",
             }
         )
-    _atomic_write_json(output_dir / "ocr_secondary_preflight.json", report)
+    atomic_write_json(output_dir / "ocr_secondary_preflight.json", report)
     return report
 
 
@@ -466,7 +432,7 @@ def run_secondary_ocr_consensus(
     if secondary_backend == str(primary_backend or "").strip().lower():
         raise ValueError("ocr secondary backend must differ from the primary backend")
 
-    source_sha256 = _file_sha256(ocr_pdf)
+    source_sha256 = sha256_file(ocr_pdf)
     source_names = [f"page_{number:03d}.md" for number in range(1, total_pages + 1)]
     if resume and consensus_is_current(
         output_dir,
@@ -550,7 +516,7 @@ def run_secondary_ocr_consensus(
                 record["primary_layout_sha256"] = sha256_file(primary_sidecar)
             record["secondary_layout_sha256"] = sha256_file(secondary_sidecar)
             record_path = record_dir / f"{Path(name).stem}.json"
-            _atomic_write_json(record_path, record)
+            atomic_write_json(record_path, record)
             return {"page": page_number, "record": record, "error": None}
         except Exception as exc:
             return {"page": page_number, "record": None, "error": str(exc)}
@@ -602,8 +568,8 @@ def run_secondary_ocr_consensus(
             record["action"] = "visual_review"
             record["comparison"]["status"] = "review_required"
             record["comparison"].setdefault("reasons", []).extend(reasons)
-            _atomic_write_json(record_dir / f"{Path(name).stem}.json", record)
-    _atomic_write_json(output_dir / "ocr_consensus.json", manifest)
+            atomic_write_json(record_dir / f"{Path(name).stem}.json", record)
+    atomic_write_json(output_dir / "ocr_consensus.json", manifest)
     review_pages = sorted(
         name
         for name, record in records.items()
@@ -805,8 +771,8 @@ def _run_page_workers(inputs: _PageRunInputs) -> None:
                     set(range(1, total_pages + 1))
                     - set(progress["pages_processed"])
                 )
-                _atomic_write_json(progress_file, progress)
-                _atomic_write_json(page_stats_file, page_stats)
+                atomic_write_json(progress_file, progress)
+                atomic_write_json(page_stats_file, page_stats)
 
 
 
@@ -822,7 +788,7 @@ def _resume_page_progress(
     retry_pages: Optional[list[int]],
 ) -> tuple[Dict[str, Any], Dict[str, Any], int]:
     """Load the page checkpoint, apply retry pages, and clamp the range."""
-    source_sha256 = _file_sha256(ocr_pdf)
+    source_sha256 = sha256_file(ocr_pdf)
     progress_file = pages_dir / "ocr_progress.json"
     page_stats_file = pages_dir / "page_stats.json"
 
@@ -1011,8 +977,8 @@ def _finish_pagewise(inputs: _PagewiseSummaryInputs) -> Dict[str, Any]:
     progress["missing_pages"] = sorted(
         set(range(1, total_pages + 1)) - set(progress["pages_processed"])
     )
-    _atomic_write_json(progress_file, progress)
-    _atomic_write_json(page_stats_file, page_stats)
+    atomic_write_json(progress_file, progress)
+    atomic_write_json(page_stats_file, page_stats)
 
     unacknowledged_empty = sorted(
         set(progress["empty_pages"]) - set(progress["allowed_empty_pages"])
