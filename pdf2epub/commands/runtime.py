@@ -39,6 +39,7 @@ def load_book_context(
     *,
     title: Optional[str] = None,
     init_logging: bool = True,
+    default_pipeline_kind: Optional[str] = None,
 ) -> Optional[BookCommandContext]:
     """Load config, require a title, and initialize operation logging.
 
@@ -46,7 +47,8 @@ def load_book_context(
     behavior and pass the inferred value through ``title``.
     """
     config, config_path = load_command_config(args)
-    if "novel" in operation and PipelinePolicy.from_config(config).special_unit_modes:
+    policy = PipelinePolicy.from_config(config, default_kind=default_pipeline_kind)
+    if policy.special_unit_modes:
         logger.error("translation.special_units is supported only for PDF Markdown translation")
         return None
     book_title = title or config.get("title")

@@ -39,8 +39,9 @@ HTML_BODY_SELF_VALIDATION_RULE = (
 def _load_html_book_context(args, operation: str):
     """Resolve the EPUB, title, output directory, and operation logging once."""
     config = load_config(args.config)
-    from pdf2epub.pipeline_policy import PipelinePolicy
-    if PipelinePolicy.from_config(config).special_unit_modes:
+    from pdf2epub.pipeline_policy import HTML_PIPELINE, PipelinePolicy
+    policy = PipelinePolicy.from_config(config, default_kind=HTML_PIPELINE)
+    if policy.special_unit_modes:
         logger.error("translation.special_units is supported only for PDF Markdown translation")
         return None
     book_title = config.get("title")
@@ -74,7 +75,7 @@ def _load_html_book_context(args, operation: str):
             logger.error("No title found in config and no input file to infer from.")
             return None
 
-    if operation == "html-prepare" and PipelinePolicy.from_config(config).dynamic_terminology_enabled:
+    if operation == "html-prepare" and policy.dynamic_terminology_enabled:
         try:
             from pdf2epub.dynamic_terminology import session_attestation, verify_session_attestation
 
@@ -201,8 +202,9 @@ def _prepare_html_command(args):
     if context is None:
         return 1
     config, book_title, output_dir, epub_path = context
-    from pdf2epub.pipeline_policy import PipelinePolicy
-    dynamic_enabled = PipelinePolicy.from_config(config).dynamic_terminology_enabled
+    from pdf2epub.pipeline_policy import HTML_PIPELINE, PipelinePolicy
+    policy = PipelinePolicy.from_config(config, default_kind=HTML_PIPELINE)
+    dynamic_enabled = policy.dynamic_terminology_enabled
     dynamic_attestation = None
     dynamic_snapshot_sha256 = None
     base_unit_context_files = {}
@@ -284,8 +286,7 @@ def _prepare_html_command(args):
             logger.error(f"Could not load external glossary: {exc}")
             return 1
 
-        translation_config = config.get("translation", {}) or {}
-        require_entities = translation_config.get("require_entities", True)
+        require_entities = policy.requires_entities
         entity_path = output_dir / "translation_entities.json"
         entity_ready = entity_context_is_current(
             output_dir,

@@ -23,7 +23,13 @@ from pdf2epub.ocr_consensus import (
     secondary_backend_name,
 )
 from pdf2epub.ocr_progress import assess_progress
-from pdf2epub.pipeline_policy import PipelinePolicy
+from pdf2epub.pipeline_policy import PDF_PIPELINE_KINDS, PipelinePolicy
+from pdf2epub.workflow_stages import (
+    HTML_WORKFLOW_STAGES,
+    NOVEL_WORKFLOW_STAGES,
+    TEX_WORKFLOW_STAGES,
+    workflow_stages_for,
+)
 from pdf2epub.refine.pdf_evidence import is_native_text_source
 from pdf2epub.utils.paths import book_output_dir
 from pdf2epub.utils.input_paths import resolve_book_input_path
@@ -488,6 +494,9 @@ def _package_stage(
     )
 
 
+_HTML_STAGE_BY_KEY = {stage.key: stage for stage in HTML_WORKFLOW_STAGES}
+
+
 def _html_stages(output_dir: Path) -> list[dict[str, Any]]:
     compressed = output_dir / "compressed_units"
     prepared = compressed.is_dir() and bool(_file_list(compressed)) and (
@@ -496,7 +505,7 @@ def _html_stages(output_dir: Path) -> list[dict[str, Any]]:
     stages = [
         _status_record(
             "html-prepare",
-            "html-prepare",
+            _HTML_STAGE_BY_KEY["html-prepare"].command,
             "passed" if prepared else "pending",
             "compressed HTML units and hand-off are present"
             if prepared
@@ -509,7 +518,7 @@ def _html_stages(output_dir: Path) -> list[dict[str, Any]]:
         [
             _status_record(
                 "translate-html",
-                "html-prepare",
+                _HTML_STAGE_BY_KEY["translate-html"].command,
                 "passed" if validated else "pending",
                 "translated HTML checkpoint is valid"
                 if validated
@@ -517,7 +526,7 @@ def _html_stages(output_dir: Path) -> list[dict[str, Any]]:
             ),
             _status_record(
                 "html-validate",
-                "html-validate",
+                _HTML_STAGE_BY_KEY["html-validate"].command,
                 "passed" if validated else "pending",
                 "all HTML units pass validation" if validated else "run html-validate",
             ),
@@ -528,7 +537,7 @@ def _html_stages(output_dir: Path) -> list[dict[str, Any]]:
         _package_stage(
             output_dir,
             epub_files,
-            command="build-html-epub",
+            command=_HTML_STAGE_BY_KEY["package"].command,
             kinds=("html-translated",),
         )
     )
@@ -850,10 +859,31 @@ def build_status(config_path: str | Path = "config.yaml") -> dict[str, Any]:
         report["stages"] = [_status_record("pipeline", "doctor", "blocked", str(exc))]
         return report
     report["pipeline"] = policy.kind
-    if input_type == "epub":
+    # The documented stage ladder comes from the shared table; the status
+    # command only decides which artifact checks apply to the configured input.
+    workflow_stages_for(policy.kind)
+    if policy.kind in {"novel", "tex"}:
+        stages = [
+            _status_record(
+                "status",
+                "status",
+                "passed",
+                "stage ladder is documented in pdf2epub/workflow_stages.py; "
+                f"run {workflow_stages_for(policy.kind)[1].invocation}",
+            ),
+            _status_record(
+                "package",
+                workflow_stages_for(policy.kind)[-1].command,
+                "pending",
+                "no delivered EPUB artifact is tracked for this pipeline yet",
+            ),
+        ]
+    elif input_type == "epub":
         stages = _html_stages(output_dir)
     else:
         stages = _pdf_stages(output_dir, path, config, input_path)
+    if policy.kind in {"novel", "tex"}:
+        stages = _apply_stage_blockers(stages)
     report["stages"] = stages
     report["ocr_evidence"] = _ocr_evidence(output_dir, config, input_type)
     report["review_gates"] = _review_gates(output_dir) if output_dir.is_dir() else []
@@ -936,6 +966,22 @@ def build_doctor(config_path: str | Path = "config.yaml") -> dict[str, Any]:
     except (OSError, ValueError) as exc:
         input_type, input_path = "unknown", Path()
         check("input", False, str(exc))
+
+    if policy is not None:
+        stages = workflow_stages_for(policy.kind)
+        check(
+            "pipeline_stages",
+            bool(stages),
+            f"{policy.kind}: "
+            + " → ".join(stage.command for stage in stages if stage.key != "status"),
+            severity="info",
+        )
+        if policy.requires_compressed_cache and input_type not in {"epub", "unknown"}:
+            check(
+                "pipeline_input",
+                False,
+                "pipeline: html expects an EPUB/MOBI/AZW3 input",
+            )
 
     ocr = config.get("ocr") if isinstance(config.get("ocr"), Mapping) else {}
     primary = str(ocr.get("backend") or "chandra").strip().lower()

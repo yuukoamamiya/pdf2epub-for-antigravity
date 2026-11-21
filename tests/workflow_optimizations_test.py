@@ -190,13 +190,15 @@ def test_epub_conversion_pipeline_is_language_neutral():
 
 def test_pipeline_policy_centralizes_conversion_and_translation_requirements():
     conversion = PipelinePolicy.from_config({"mode": "ocr_to_epub"})
-    assert conversion.kind == "epub_conversion"
+    assert conversion.kind == "pdf_conversion"
     assert conversion.is_conversion is True
     assert conversion.requires_translation is False
     assert conversion.requires_entities is False
     assert conversion.requires_translated_toc is False
     assert conversion.requires_ocr_correction is False
     assert conversion.requires_polish is True
+    assert conversion.requires_compressed_cache is False
+    assert conversion.requires_compiled_pdf is False
     assert conversion.source_language is None
     assert conversion.target_language is None
 
@@ -210,7 +212,7 @@ def test_pipeline_policy_centralizes_conversion_and_translation_requirements():
             },
         }
     )
-    assert translation.kind == "translation"
+    assert translation.kind == "pdf_translation"
     assert translation.requires_translation is True
     assert translation.requires_entities is False
     assert translation.requires_translated_toc is True
@@ -237,16 +239,54 @@ def test_pipeline_policy_centralizes_conversion_and_translation_requirements():
 
 def test_pipeline_policy_exposes_one_supported_pipeline_registry():
     assert SUPPORTED_PIPELINE_NAMES == {
-        "translation",
-        "epub_conversion",
-        "ocr_to_epub",
+        "pdf_translation",
+        "pdf_conversion",
+        "html",
+        "novel",
+        "tex",
     }
-    assert PipelinePolicy.from_config({"pipeline": "translation"}).kind == "translation"
-    assert PipelinePolicy.from_config({"pipeline": "epub_conversion"}).kind == "epub_conversion"
-    assert PipelinePolicy.from_config({"pipeline": "ocr_to_epub"}).kind == "epub_conversion"
+    assert PipelinePolicy.from_config({"pipeline": "translation"}).kind == "pdf_translation"
+    assert PipelinePolicy.from_config({"pipeline": "epub_conversion"}).kind == "pdf_conversion"
+    assert PipelinePolicy.from_config({"pipeline": "ocr_to_epub"}).kind == "pdf_conversion"
+    assert PipelinePolicy.from_config({"pipeline": "html"}).kind == "html"
+    assert PipelinePolicy.from_config({"pipeline": "novel"}).kind == "novel"
+    assert PipelinePolicy.from_config({"pipeline": "tex"}).kind == "tex"
     import pytest
     with pytest.raises(ValueError, match="unsupported pipeline"):
         PipelinePolicy.from_config({"pipeline": "mystery"})
+
+
+def test_non_pdf_pipelines_declare_their_gate_flags():
+    html = PipelinePolicy.from_config({"pipeline": "html"})
+    assert html.requires_translation is True
+    assert html.requires_entities is True
+    assert html.requires_translated_toc is False
+    assert html.requires_polish is False
+    assert html.requires_compressed_cache is True
+    assert html.requires_compiled_pdf is False
+    assert html.requires_ocr_correction is False
+    assert html.is_pdf is False
+
+    novel = PipelinePolicy.from_config({"pipeline": "novel"})
+    assert novel.requires_translation is True
+    assert novel.requires_polish is False
+    assert novel.requires_compressed_cache is False
+    assert novel.requires_compiled_pdf is False
+
+    tex = PipelinePolicy.from_config({"pipeline": "tex"})
+    assert tex.requires_translation is True
+    assert tex.requires_polish is False
+    assert tex.requires_compiled_pdf is True
+    assert tex.requires_compressed_cache is False
+
+
+def test_pipeline_default_kind_lets_commands_select_their_workflow():
+    config = {"title": "Book"}
+    assert PipelinePolicy.from_config(config).kind == "pdf_translation"
+    assert PipelinePolicy.from_config(config, default_kind="html").kind == "html"
+    # An explicit config value always wins over the command default.
+    explicit = {"pipeline": "pdf_translation"}
+    assert PipelinePolicy.from_config(explicit, default_kind="html").kind == "pdf_translation"
 
 
 def test_legacy_native_source_requires_consistent_page_progress(tmp_path: Path):

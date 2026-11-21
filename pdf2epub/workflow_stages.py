@@ -180,8 +180,122 @@ PDF_WORKFLOW_STAGES: tuple[WorkflowStage, ...] = (
 PDF_STAGE_BY_KEY = {stage.key: stage for stage in PDF_WORKFLOW_STAGES}
 
 
+HTML_WORKFLOW_STAGES: tuple[WorkflowStage, ...] = (
+    WorkflowStage(
+        key="status",
+        command="status",
+        invocation="status",
+        summary="read-only stage, blocker, and next-command report",
+    ),
+    WorkflowStage(
+        key="html-prepare",
+        command="html-prepare",
+        invocation="html-prepare -i mybook.epub",
+        summary="extract compressed HTML units and entity/TOC hand-offs",
+        note="Subagent 写 translation_entities.json；确认实体表后重跑 html-prepare 挂载正文 hand-off",
+    ),
+    WorkflowStage(
+        key="translate-html",
+        command="html-prepare",
+        invocation="html-prepare",
+        summary="prepare body and metadata translation worker hand-offs",
+        note="按 manifest 的 dispatch_plan 分波派发；Subagent 写 translated_compressed/* 与 translated_metadata.json",
+    ),
+    WorkflowStage(
+        key="html-validate",
+        command="html-validate",
+        invocation="html-validate",
+        summary="validate translated compressed units and metadata",
+    ),
+    WorkflowStage(
+        key="package",
+        command="build-html-epub",
+        invocation="build-html-epub",
+        summary="build the delivered translated EPUB from the original container",
+    ),
+)
+
+NOVEL_WORKFLOW_STAGES: tuple[WorkflowStage, ...] = (
+    WorkflowStage(
+        key="status",
+        command="status",
+        invocation="status",
+        summary="read-only stage, blocker, and next-command report",
+    ),
+    WorkflowStage(
+        key="translate-novel",
+        command="translate-novel",
+        invocation="translate-novel -i mybook.epub",
+        summary="extract novel units and prepare the translation hand-off",
+        note="Subagent 只处理 manifest 的 pending_files，写 translated_novel/*",
+    ),
+    WorkflowStage(
+        key="translate-novel-validate",
+        command="translate-novel-validate",
+        invocation="translate-novel-validate",
+        summary="validate translated novel units and metadata",
+    ),
+    WorkflowStage(
+        key="package",
+        command="build-novel-epub",
+        invocation="build-novel-epub",
+        summary="build the delivered translated light-novel EPUB",
+    ),
+)
+
+TEX_WORKFLOW_STAGES: tuple[WorkflowStage, ...] = (
+    WorkflowStage(
+        key="status",
+        command="status",
+        invocation="status",
+        summary="read-only stage, blocker, and next-command report",
+    ),
+    WorkflowStage(
+        key="translate-arxiv",
+        command="translate-arxiv",
+        invocation="translate-arxiv 2503.01800",
+        summary="materialize the TeX project and prepare translation units",
+        note="Subagent 写 translated_tex_units/*；不得修改 source/",
+    ),
+    WorkflowStage(
+        key="translate-arxiv-validate",
+        command="translate-arxiv-validate",
+        invocation="translate-arxiv-validate --output-dir <run_dir>",
+        summary="validate translated units and compile the PDF checkpoint",
+    ),
+)
+
+WORKFLOW_STAGES_BY_KIND: dict[str, tuple[WorkflowStage, ...]] = {
+    "pdf_translation": PDF_WORKFLOW_STAGES,
+    "pdf_conversion": PDF_WORKFLOW_STAGES,
+    "html": HTML_WORKFLOW_STAGES,
+    "novel": NOVEL_WORKFLOW_STAGES,
+    "tex": TEX_WORKFLOW_STAGES,
+    # Compatibility aliases used by older configuration values.
+    "translation": PDF_WORKFLOW_STAGES,
+    "epub_conversion": PDF_WORKFLOW_STAGES,
+    "ocr_to_epub": PDF_WORKFLOW_STAGES,
+}
+
+
+def workflow_stages_for(kind: str) -> tuple[WorkflowStage, ...]:
+    """Return the ordered stage table for one canonical pipeline kind."""
+    try:
+        return WORKFLOW_STAGES_BY_KIND[str(kind).strip().lower()]
+    except KeyError as exc:  # pragma: no cover - guarded by tests
+        raise KeyError(f"unknown pipeline kind: {kind}") from exc
+
+
+def workflow_stage_invocation(kind: str, key: str) -> str:
+    """Return the canonical invocation for one stage of one pipeline."""
+    for stage in workflow_stages_for(kind):
+        if stage.key == key:
+            return stage.invocation
+    raise KeyError(f"unknown workflow stage: {key} for pipeline {kind}")
+
+
 def stage_invocation(key: str) -> str:
-    """Return the canonical invocation for one stage key."""
+    """Return the canonical invocation for one PDF stage key."""
     try:
         return PDF_STAGE_BY_KEY[key].invocation
     except KeyError as exc:  # pragma: no cover - guarded by tests
@@ -224,6 +338,14 @@ def render_cli_epilog() -> str:
             conversion_lines.append("  pdf2epub -c config.yaml check-ready --stage package")
         conversion_lines.extend(_render_stage(stage))
 
+    def render_stage_block(title: str, stages: tuple[WorkflowStage, ...]) -> list[str]:
+        lines = [f"  # {title}:"]
+        for stage in stages:
+            if stage.key == "status":
+                continue
+            lines.extend(_render_stage(stage))
+        return lines
+
     return "\n".join(
         [
             "",
@@ -246,20 +368,11 @@ def render_cli_epilog() -> str:
             "  pdf2epub dispatch-record-failure --task translate --worker-id <id> --assignment-sha256 <sha> --kind rate_limit --actual-peak-concurrency <n>",
             "  pdf2epub dispatch-resume --task translate --reason <why> --confirm-sessions-reconciled --confirm-quota-available",
             "",
-            "  # EPUB 高保真翻译:",
-            "  pdf2epub html-prepare -i mybook.epub",
-            "  # Subagent 写 translated_compressed/* 与 translated_metadata.json",
-            "  pdf2epub html-validate",
-            "  pdf2epub build-html-epub",
+            *render_stage_block("EPUB 高保真翻译", HTML_WORKFLOW_STAGES),
             "",
-            "  # 轻小说:",
-            "  pdf2epub translate-novel -i mybook.epub",
-            "  pdf2epub translate-novel-validate",
-            "  pdf2epub build-novel-epub",
+            *render_stage_block("轻小说", NOVEL_WORKFLOW_STAGES),
             "",
-            "  # arXiv / LaTeX:",
-            "  pdf2epub translate-arxiv 2503.01800",
-            "  pdf2epub translate-arxiv ./latex-source --main-tex paper.tex",
+            *render_stage_block("arXiv / LaTeX", TEX_WORKFLOW_STAGES),
             "===============================================================================",
             "",
         ]
@@ -267,10 +380,16 @@ def render_cli_epilog() -> str:
 
 
 __all__ = [
+    "HTML_WORKFLOW_STAGES",
+    "NOVEL_WORKFLOW_STAGES",
     "PDF_STAGE_BY_KEY",
     "PDF_WORKFLOW_STAGES",
+    "TEX_WORKFLOW_STAGES",
+    "WORKFLOW_STAGES_BY_KIND",
     "WorkflowStage",
     "render_cli_epilog",
     "render_pdf_workflow",
     "stage_invocation",
+    "workflow_stage_invocation",
+    "workflow_stages_for",
 ]

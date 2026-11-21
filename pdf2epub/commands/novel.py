@@ -59,7 +59,7 @@ def translate_novel_command(args):
     from pdf2epub.html_translation.builder import HTMLEpubPipeline
     from pdf2epub.utils.ebook_converter import needs_conversion, convert_to_epub
 
-    context = load_book_context(args, "translate-novel")
+    context = load_book_context(args, "translate-novel", default_pipeline_kind="novel")
     if context is None:
         return 1
     config = context.config
@@ -197,7 +197,7 @@ def translate_novel_validate_command(args):
     from pdf2epub.html_translation.novel_extractor import NovelExtractor
     from pdf2epub.html_translation.builder import HTMLEpubPipeline
 
-    context = load_book_context(args, "translate-novel-validate")
+    context = load_book_context(args, "translate-novel-validate", default_pipeline_kind="novel")
     if context is None:
         return 1
     config = context.config
@@ -394,7 +394,7 @@ def build_novel_epub_command(args):
     from pdf2epub.html_translation.builder import BuildConfig, HTMLEpubBuilder
     from pdf2epub.utils.paths import sanitize_filename
 
-    context = load_book_context(args, "build-novel-epub")
+    context = load_book_context(args, "build-novel-epub", default_pipeline_kind="novel")
     if context is None:
         return 1
     config = context.config

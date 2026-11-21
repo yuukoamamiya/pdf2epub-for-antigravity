@@ -19,10 +19,14 @@ from pdf2epub.commands.diagnostics import build_status
 from pdf2epub.commands.registry import register_command_parsers
 from pdf2epub.ocr_progress import new_progress
 from pdf2epub.workflow_stages import (
+    HTML_WORKFLOW_STAGES,
+    NOVEL_WORKFLOW_STAGES,
     PDF_STAGE_BY_KEY,
     PDF_WORKFLOW_STAGES,
+    TEX_WORKFLOW_STAGES,
     render_cli_epilog,
     stage_invocation,
+    workflow_stages_for,
 )
 
 
@@ -118,3 +122,50 @@ def test_conversion_pipeline_still_reports_known_stages(tmp_path: Path, monkeypa
     assert names <= set(PDF_STAGE_BY_KEY)
     assert "translate" in names
     assert report["stages"][-1]["name"] == "package"
+
+
+def test_non_pdf_stage_tables_cover_their_registered_commands():
+    registered = _registered_commands()
+
+    for stages in (HTML_WORKFLOW_STAGES, NOVEL_WORKFLOW_STAGES, TEX_WORKFLOW_STAGES):
+        keys = [stage.key for stage in stages]
+        assert len(keys) == len(set(keys))
+        assert keys[0] == "status"
+        missing = sorted({stage.command for stage in stages} - registered)
+        assert missing == []
+
+
+def test_workflow_stages_for_normalizes_pipeline_aliases():
+    assert workflow_stages_for("pdf_translation") == PDF_WORKFLOW_STAGES
+    assert workflow_stages_for("translation") == PDF_WORKFLOW_STAGES
+    assert workflow_stages_for("pdf_conversion") == PDF_WORKFLOW_STAGES
+    assert workflow_stages_for("epub_conversion") == PDF_WORKFLOW_STAGES
+    assert workflow_stages_for("html") == HTML_WORKFLOW_STAGES
+    assert workflow_stages_for("novel") == NOVEL_WORKFLOW_STAGES
+    assert workflow_stages_for("tex") == TEX_WORKFLOW_STAGES
+    with pytest.raises(KeyError, match="unknown pipeline kind"):
+        workflow_stages_for("mystery")
+
+
+def test_epilog_documents_html_novel_and_tex_from_the_tables():
+    epilog = render_cli_epilog()
+
+    for stages in (HTML_WORKFLOW_STAGES, NOVEL_WORKFLOW_STAGES, TEX_WORKFLOW_STAGES):
+        for stage in stages:
+            if stage.key == "status":
+                continue
+            assert stage.invocation in epilog, stage.key
+
+
+def test_check_ready_rejects_non_pdf_pipelines(tmp_path: Path, monkeypatch):
+    from pdf2epub.commands.markdown_readiness import run_readiness_check
+
+    config_path = _config(tmp_path)
+    text = config_path.read_text(encoding="utf-8") + "pipeline: html\n"
+    config_path.write_text(text, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    report = run_readiness_check(str(config_path))
+    assert report["ready"] is False
+    assert report["pipeline"] == "html"
+    assert "html-prepare" in report["errors"][0]

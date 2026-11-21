@@ -17,7 +17,8 @@ from pdf2epub.entity_context import entity_context_is_current
 from pdf2epub.ocr_correction import ocr_correction_is_current, select_refinement_pages
 from pdf2epub.ocr_review_selection import manual_review_selection_state
 from pdf2epub.ocr_progress import assess_progress
-from pdf2epub.pipeline_policy import PipelinePolicy
+from pdf2epub.pipeline_policy import PDF_PIPELINE_KINDS, PipelinePolicy
+from pdf2epub.workflow_stages import workflow_stages_for
 from pdf2epub.refine.pdf_evidence import is_native_text_source
 from pdf2epub.utils.paths import book_output_dir
 from pdf2epub.utils.configuration import load_config
@@ -315,6 +316,31 @@ def run_readiness_check(
         report = {
             "schema_version": 1,
             "stage": stage,
+            "ready": False,
+            "checks": checks,
+            "errors": errors,
+            "warnings": [],
+        }
+        output_dir.mkdir(parents=True, exist_ok=True)
+        atomic_write_json(output_dir / "readiness.json", report)
+        return report
+
+    if policy.kind not in PDF_PIPELINE_KINDS:
+        stages = workflow_stages_for(policy.kind)
+        next_stage = next(
+            (item for item in stages if item.key != "status"), stages[0]
+        )
+        record(
+            "pipeline",
+            False,
+            f"check-ready gates the PDF pipelines only; pipeline: {policy.kind} "
+            f"starts with `{next_stage.invocation}`",
+        )
+        report = {
+            "schema_version": 1,
+            "stage": stage,
+            "book_title": book_title,
+            "pipeline": policy.kind,
             "ready": False,
             "checks": checks,
             "errors": errors,
