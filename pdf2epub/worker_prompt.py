@@ -126,6 +126,58 @@ def _scope_worker_prompt(
     return before + heading_header + scoped_section + heading_end + after
 
 
+_CONTROLLED_UNIT_RULES = {
+    "bibliography": (
+        "Translate only the heading. Preserve every bibliography entry byte-"
+        "for-byte: authors, titles, years, editions, DOI/URL/ISBN, page "
+        "numbers, punctuation, bullets, and entry order. Never merge, split, "
+        "add, omit, or reorder entries."
+    ),
+    "index": (
+        "Translate only the heading (when present) and each index term. "
+        "Preserve entry count, order, indentation/hierarchy, bullet prefixes, "
+        "page numbers/ranges, and cross-reference targets exactly. Do not add "
+        "Markdown, newlines, page numbers, citations, or footnotes inside a "
+        "term, and do not guess an ambiguous cross-reference."
+    ),
+}
+
+
+def _translation_controlled_role_instruction(
+    manifest: Mapping[str, Any],
+    files: Iterable[str],
+) -> str:
+    """Give controlled bibliography/index units their dedicated contract."""
+    roles = manifest.get("controlled_roles")
+    if not isinstance(roles, Mapping):
+        roles = {}
+    kinds = manifest.get("controlled_files")
+    if not isinstance(kinds, Mapping):
+        kinds = {}
+    lines: List[str] = []
+    for name in files:
+        label = str(roles.get(name) or "").strip().lower()
+        kind = str(kinds.get(name) or "").strip().lower()
+        if not kind and label.startswith("controlled_"):
+            kind = label[len("controlled_"):]
+        if kind not in {"bibliography", "index"}:
+            continue
+        lines.append(
+            f"- `{name}` (`{label or f'controlled_{kind}'}`): "
+            f"{_CONTROLLED_UNIT_RULES[kind]}"
+        )
+    if not lines:
+        return ""
+    return (
+        "\n\n## Controlled special-unit translation rules (highest priority)\n\n"
+        "These rules override the ordinary-chapter instructions for the listed "
+        "files only. The unit stays in the normal isolated worker channel; its "
+        "JSON result is an audit attachment, not a separate receipt.\n\n"
+        + "\n".join(lines)
+        + "\n"
+    )
+
+
 def _polish_special_role_instruction(
     manifest: Mapping[str, Any],
     files: Iterable[str],
@@ -466,6 +518,8 @@ def render_worker_prompt(
     special_role_instruction = (
         _polish_special_role_instruction(manifest, files)
         if task == "polish"
+        else _translation_controlled_role_instruction(manifest, files)
+        if task == "translate"
         else ""
     )
     self_validation_instruction = ""

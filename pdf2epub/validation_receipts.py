@@ -68,41 +68,8 @@ def build_input_snapshot(
         )
         if dynamic_binding is not None:
             files["dynamic_terminology_snapshot"] = dynamic_binding
-        # Optional controlled-unit artifacts participate only when present,
-        # preserving legacy receipt behavior for projects that never enabled
-        # the feature. Any changed prompt contract, mapping result, or apply
-        # receipt invalidates the full translation receipt.
-        special = {}
-        for path in sorted(output_dir.glob("special_unit_*_*.json")):
-            if not path.name.endswith(("_manifest.json", "_result.json", "_receipt.json")):
-                continue
-            special[path.name] = _file_sha256_or_none(path)
-        if special:
-            files["special_unit_artifacts"] = special
-            contracts = {}
-            try:
-                from .special_unit_context import build_special_unit_context
-                for path in sorted(output_dir.glob("special_unit_*_manifest.json")):
-                    filename = path.name
-                    try:
-                        manifest = json.loads(path.read_text(encoding="utf-8"))
-                        kind = manifest.get("kind")
-                        filename = manifest.get("source_file")
-                        language = (manifest.get("context") or {}).get("language") or {}
-                        if kind not in {"bibliography", "index"} or not isinstance(filename, str):
-                            continue
-                        context = build_special_unit_context(
-                            output_dir, filename, kind,
-                            source_language=language.get("source", "English"),
-                            target_language=language.get("target", "Chinese"),
-                        )
-                        contracts[filename] = context.get("contract_sha256")
-                    except (OSError, UnicodeError, json.JSONDecodeError, ValueError, TypeError):
-                        contracts[filename] = None
-            except ImportError:
-                contracts = {name: None for name in special}
-            files["special_unit_context_contracts"] = contracts
-
+        # Controlled bibliography/index results are audit attachments only;
+        # they no longer participate in the packaging receipt.
     fingerprint: Dict[str, Any] = {
         "toc_sha256": None,
         "pages_sha256": None,
@@ -167,20 +134,13 @@ def _build_inputs_are_complete(snapshot: Mapping[str, Any], *, translated: bool)
         return False
     toc_hash = files.get("toc_tree")
     pages_hash = fingerprint.get("current_pages_sha256")
-    special_contracts = files.get("special_unit_context_contracts")
-    special_contracts_complete = special_contracts is None or (
-        isinstance(special_contracts, Mapping)
-        and bool(special_contracts)
-        and all(isinstance(value, str) and value for value in special_contracts.values())
-    )
     dynamic_snapshot = files.get("dynamic_terminology_snapshot")
     dynamic_snapshot_complete = dynamic_snapshot is None or (
         dynamic_snapshot == "none"
         or (isinstance(dynamic_snapshot, str) and len(dynamic_snapshot) == 64 and all(c in "0123456789abcdef" for c in dynamic_snapshot))
     )
     return (
-        special_contracts_complete
-        and dynamic_snapshot_complete
+        dynamic_snapshot_complete
         and isinstance(toc_hash, str)
         and fingerprint.get("toc_sha256") == toc_hash
         and isinstance(pages_hash, str)

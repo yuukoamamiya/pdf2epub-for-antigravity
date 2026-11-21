@@ -86,6 +86,10 @@ def build_markdown_manifest(data: ManifestBuild) -> dict[str, Any]:
         "pending_reasons": dict(resume.pending_reasons),
         "pending_reason_counts": pending_reason_counts(resume.pending_reasons),
         "special_unit_modes": dict(plan.controlled_files),
+        "controlled_files": dict(plan.controlled_files),
+        "controlled_roles": {
+            name: f"controlled_{kind}" for name, kind in plan.controlled_files.items()
+        },
         "atomic_output_contract": {
             "temporary_pattern": ".<assigned_filename>.tmp",
             "final_pattern": "<assigned_filename>",

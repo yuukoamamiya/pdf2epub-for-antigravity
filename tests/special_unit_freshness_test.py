@@ -201,7 +201,7 @@ def test_prepare_apply_validate_and_resume_reuse_controlled_checkpoint(tmp_path)
 
 
 @pytest.mark.parametrize("artifact", ["result", "unit_context", "parent_context", "target", "source"])
-def test_changed_consumed_artifact_cannot_reuse_or_validate(tmp_path, monkeypatch, artifact):
+def test_controlled_units_reuse_the_ordinary_checkpoint_channel(tmp_path, monkeypatch, artifact):
     fx = _setup(tmp_path)
     _prepare_translate(fx)
     _context, _manifest, result_path, target = _finish_special_unit(fx)
@@ -220,18 +220,15 @@ def test_changed_consumed_artifact_cannot_reuse_or_validate(tmp_path, monkeypatc
     else:
         fx["source"].write_text("# Index\n\nAlpha, 12\nBeta, 14\n", encoding="utf-8")
 
-    # Stale parent snapshots must fail closed. Other changes leave a pending
-    # controlled unit rather than reusing its prior local validation receipt.
-    if artifact == "parent_context":
-        assert _run_formal_file_validator(fx, monkeypatch) == 1
-        resumed = _resume(fx)
-        assert SOURCE_NAME in resumed["special_pending_files"]
-        assert SOURCE_NAME not in resumed["completed_files"]
+    resumed = _resume(fx)
+    assert resumed["special_pending_files"] == []
+    if artifact in {"result", "parent_context"}:
+        # The result JSON is audit-only, and the book-wide parent context is
+        # not a per-unit checkpoint; neither gates reuse.
+        assert SOURCE_NAME in resumed["completed_files"]
     else:
-        resumed = _resume(fx)
-        assert SOURCE_NAME in resumed["special_pending_files"]
+        assert SOURCE_NAME in resumed["pending_files"]
         assert SOURCE_NAME not in resumed["completed_files"]
-        assert _run_formal_file_validator(fx, monkeypatch) == 1
 
 
 @pytest.mark.parametrize(
@@ -249,7 +246,7 @@ def test_language_or_controlled_mode_change_does_not_reuse_checkpoint(
         fx, source_language=source_language, target_language=target_language, controlled=controlled
     )
     assert SOURCE_NAME not in resumed["completed_files"]
-    assert SOURCE_NAME in resumed["pending_files"] or SOURCE_NAME in resumed["special_pending_files"]
+    assert SOURCE_NAME in resumed["pending_files"]
 
 
 @pytest.mark.parametrize("change", ["source", "context"])
@@ -321,7 +318,7 @@ def _write_complete_build_receipt(fx, config_path):
 
 
 @pytest.mark.parametrize("consumed_context", ["parent", "unit"])
-def test_full_build_receipt_invalidated_when_actual_consumed_context_changes(
+def test_controlled_audit_context_changes_do_not_block_packaging(
     tmp_path, consumed_context
 ):
     fx = _setup(tmp_path)
@@ -342,7 +339,8 @@ def test_full_build_receipt_invalidated_when_actual_consumed_context_changes(
 
     changed = fx["parent_context_path"] if consumed_context == "parent" else fx["unit_context_path"]
     _write_json(changed, {"revision": "changed"})
-    assert not validation_receipt_is_current(
+    # Audit-only reproduction context changes do not invalidate packaging.
+    assert validation_receipt_is_current(
         report_path,
         fx["source_dir"],
         fx["target_dir"],

@@ -90,39 +90,25 @@ def test_apply_preserves_crlf_and_missing_final_newline(tmp_path, kind, source_t
     assert produced.read_bytes() == expected.encode("utf-8")
 
 
-def test_prepare_apply_commands_then_normal_validator(tmp_path, monkeypatch):
+def test_prepare_apply_commands_forward_to_the_ordinary_channel(tmp_path, monkeypatch):
     import pdf2epub.commands.markdown as commands
-    import pdf2epub.toc_translation_workflow as toc_workflow
-    from pdf2epub.commands.runtime import BookCommandContext
-    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
-    output = tmp_path / "out"
-    source_dir = output / "polished_markdown" / "validated"
-    source_dir.mkdir(parents=True)
-    (source_dir / "refs.md").write_text("# References\n\n- Smith 2020\n", encoding="utf-8")
-    config = {"pipeline": "translation", "translation": {"require_entities": False, "special_units": {"bibliography": "controlled"}}}
-    context = BookCommandContext(config, tmp_path / "config.yaml", "Book", output)
-    monkeypatch.setattr(commands, "load_book_context", lambda *a, **k: context)
-    monkeypatch.setattr(commands, "_resolve_pdf_markdown_source", lambda *_: (source_dir, "polished"))
-    monkeypatch.setattr(commands, "load_pdf_file_roles", lambda *_: {"refs.md": "bibliography"})
-    monkeypatch.setattr(toc_workflow, "validate_toc_translation_subagent", lambda *_: {"valid": True})
-    monkeypatch.setattr("pdf2epub.special_unit_context.build_special_unit_context", lambda _out, _file, kind, **_: context_for(kind, source_dir / "refs.md") | {"contract_sha256": "test-contract", "entries": []})
+    calls = []
+    monkeypatch.setattr(
+        commands, "translate_command", lambda args: calls.append(("translate", args.file)) or 0
+    )
+    monkeypatch.setattr(
+        commands,
+        "translate_validate_command",
+        lambda args: calls.append(("translate-validate", args.file)) or 0,
+    )
     args = SimpleNamespace(config="config.yaml", kind="bibliography", file="refs.md", skip_entities=False)
     assert commands.special_unit_prepare_command(args) == 0
-    result_path = output / json.loads((output / "special_unit_bibliography_refs_manifest.json").read_text(encoding="utf-8"))["result_file"]
-    result = json.loads(result_path.read_text(encoding="utf-8"))
-    result["heading_translation"] = "参考文献"
-    result_path.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
     assert commands.special_unit_apply_command(args) == 0
-    report = validate_markdown_subagent(
-        output, "translate", source_dir, output / "translated",
-        file_roles={"refs.md": "bibliography"}, selected_files=["refs.md"],
-        target_language="Chinese",
-    )
-    assert "refs.md" in report["valid_files"]
+    assert calls == [("translate", "refs.md"), ("translate-validate", "refs.md")]
 
 
-def test_translate_handoff_keeps_full_inventory_and_separates_controlled_pending(tmp_path):
+def test_controlled_handoff_stays_in_the_isolated_worker_channel(tmp_path):
     from pdf2epub.markdown_handoff import prepare_markdown_subagent
     source = tmp_path / "polished_markdown" / "validated"
     source.mkdir(parents=True)
@@ -142,8 +128,11 @@ def test_translate_handoff_keeps_full_inventory_and_separates_controlled_pending
     )
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
     assert set(manifest["files"]) == {"refs.md", "chapter.md"}
-    assert manifest["pending_files"] == ["chapter.md"]
-    assert manifest["special_pending_files"] == ["refs.md"]
+    assert manifest["special_pending_files"] == []
+    assert set(manifest["pending_files"]) == {"refs.md", "chapter.md"}
+    assert manifest["controlled_files"] == {"refs.md": "bibliography"}
+    assert manifest["controlled_roles"] == {"refs.md": "controlled_bibliography"}
+    assert manifest["special_unit_modes"] == {"refs.md": "bibliography"}
 
 
 def test_index_fixed_mapping_and_cross_reference_are_enforced(tmp_path):
@@ -197,3 +186,34 @@ def test_special_policy_is_opt_in_and_rejects_unknown_or_unsupported(tmp_path):
         PipelinePolicy.from_config({"translation": {"special_units": {"notes": "controlled"}}})
     with pytest.raises(ValueError, match="only by the PDF translation pipeline"):
         PipelinePolicy.from_config({"pipeline": "epub_conversion", "translation": {"special_units": {"index": "controlled"}}})
+
+
+def test_controlled_worker_carries_role_tag_and_dedicated_prompt(tmp_path):
+    from pdf2epub.markdown_handoff import prepare_markdown_subagent
+    from pdf2epub.subagent_runtime import write_worker_handoffs
+
+    source = tmp_path / "polished_markdown" / "validated"
+    source.mkdir(parents=True)
+    (source / "refs.md").write_text("# References\n\n- A 2020\n", encoding="utf-8")
+    (source / "chapter.md").write_text("# Chapter\n\nText.\n", encoding="utf-8")
+    paths = prepare_markdown_subagent(
+        MarkdownHandoffRequest(
+            output_dir=tmp_path,
+            task="translate",
+            source_dir=source,
+            target_dir=tmp_path / "translated",
+            source_language="English",
+            target_language="Chinese",
+            file_roles={"refs.md": "bibliography"},
+            controlled_files={"refs.md": "bibliography"},
+            chapter_groups={"refs": ["refs.md"], "chapter": ["chapter.md"]},
+        )
+    )
+    handoffs = write_worker_handoffs(tmp_path, paths["manifest"], paths["prompt"])
+    controlled = next(item for item in handoffs if "refs.md" in item["assigned_files"])
+    assert controlled["assigned_files"] == ["refs.md"]
+    scoped = json.loads((tmp_path / controlled["manifest"]).read_text(encoding="utf-8"))
+    assert scoped["controlled_roles"] == {"refs.md": "controlled_bibliography"}
+    prompt = (tmp_path / controlled["prompt"]).read_text(encoding="utf-8")
+    assert "Controlled special-unit translation rules (highest priority)" in prompt
+    assert "Translate only the heading" in prompt

@@ -182,41 +182,6 @@ def unit_context_is_current(
     )
 
 
-def controlled_special_checkpoint_is_current(
-    output_dir: Path,
-    target: Path,
-    filename: str,
-    kind: str,
-    source_hash: str,
-    source_language: str,
-    target_language: str,
-) -> bool:
-    """Require a current special-unit apply receipt before reusing a unit."""
-    stem = Path(filename).stem
-    try:
-        manifest = json.loads((output_dir / f"special_unit_{kind}_{stem}_manifest.json").read_text(encoding="utf-8"))
-        if not isinstance(manifest, dict) or manifest.get("kind") != kind or manifest.get("source_file") != filename:
-            return False
-        from pdf2epub.special_unit_context import build_special_unit_context
-        context = build_special_unit_context(
-            output_dir, filename, kind,
-            source_language=source_language,
-            target_language=target_language,
-        )
-        from pdf2epub.special_unit_translation import receipt_is_current
-        root = output_dir.resolve()
-        source_path = (root / manifest["source_path"]).resolve()
-        if source_path != root and root not in source_path.parents:
-            return False
-        if source_path.name != filename:
-            return False
-        return sha256_file(source_path) == source_hash and receipt_is_current(
-            kind, source_path, output_dir, target, context
-        )
-    except (OSError, UnicodeError, json.JSONDecodeError, ValueError, KeyError, TypeError):
-        return False
-
-
 @dataclass(frozen=True)
 class ResumeDecision:
     previous_manifest: Mapping[str, Any] = field(default_factory=dict)
@@ -717,11 +682,6 @@ def decide_resume(
                     or not isinstance(receipt_sources, Mapping)
                     or receipt_sources.get(name) != context.file_role_sources.get(name)):
                 checkpoint_current = False
-        if checkpoint_current and name in controlled:
-            checkpoint_current = controlled_special_checkpoint_is_current(
-                request.output_dir, target, name, controlled[name], source_hash,
-                request.source_language, request.target_language,
-            )
         if checkpoint_current:
             completed.append(name)
         else:
@@ -752,8 +712,10 @@ def decide_resume(
             + ". Ask for a decision first, then use --retry-after-human-review "
             "only if another Subagent retry is explicitly authorized."
         )
-    special_pending = [name for name in pending if name in controlled]
-    pending = [name for name in pending if name not in controlled]
+    # Controlled bibliography/index units share the isolated-worker channel
+    # with every other pending unit. Their JSON result is an audit attachment,
+    # not an independent receipt or a separate pending queue.
+    special_pending: list[str] = []
     previous_reviews = {name: items for name, items in previous_reviews.items() if name in pending}
     pending_stats = {name: stats for name, stats in plan.file_stats.items() if name in pending}
     batching = plan.batching

@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from pdf2epub.workflow_contracts import atomic_write_json, atomic_write_text, sha256_file
+from pdf2epub.workflow_contracts import atomic_write_json, atomic_write_text
 
 POLICY_VERSION = "special-units-v1"
 
@@ -351,42 +351,4 @@ def apply(kind: str, source: Path, output_dir: Path, target_dir: Path, *, contex
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / source.name
     atomic_write_text(target, output)
-    receipt = {"schema_version": 1, "kind": kind, "source_sha256": source_hash,
-               "result_sha256": _hash(json.dumps(result, ensure_ascii=False, sort_keys=True)),
-               "policy_version": POLICY_VERSION,
-               "context_contract_sha256": manifest.get("context_contract_sha256"),
-               "target_sha256": _hash(output)}
-    atomic_write_json(output_dir / f"special_unit_{kind}_{stem}_receipt.json", receipt)
     return target
-
-
-def receipt_is_current(kind: str, source: Path, output_dir: Path, target: Path, context: dict[str, Any]) -> bool:
-    stem = Path(source).stem
-    try:
-        receipt = json.loads((Path(output_dir) / f"special_unit_{kind}_{stem}_receipt.json").read_text(encoding="utf-8"))
-        manifest = json.loads((Path(output_dir) / f"special_unit_{kind}_{stem}_manifest.json").read_text(encoding="utf-8"))
-        if not isinstance(receipt, dict) or not isinstance(manifest, dict):
-            return False
-        result_path = Path(output_dir) / manifest["result_file"]
-        expected_result_name = f"special_unit_{kind}_{stem}_{context.get('contract_sha256', '')[:12]}_result.json"
-        if manifest.get("result_file") != expected_result_name:
-            return False
-        result = json.loads(result_path.read_text(encoding="utf-8"))
-        if not isinstance(result, dict):
-            return False
-        source_hash = sha256_file(Path(source))
-        target_hash = sha256_file(Path(target))
-    except (OSError, UnicodeError, json.JSONDecodeError, TypeError, KeyError, AttributeError):
-        return False
-    result_hash = _hash(json.dumps(result, ensure_ascii=False, sort_keys=True))
-    return (
-        receipt.get("schema_version") == 1
-        and receipt.get("kind") == kind
-        and receipt.get("policy_version") == POLICY_VERSION
-        and receipt.get("source_sha256") == source_hash
-        and manifest.get("source_sha256") == source_hash
-        and receipt.get("target_sha256") == target_hash
-        and receipt.get("result_sha256") == result_hash
-        and receipt.get("context_contract_sha256") == context.get("contract_sha256")
-        and manifest.get("context_contract_sha256") == context.get("contract_sha256")
-    )

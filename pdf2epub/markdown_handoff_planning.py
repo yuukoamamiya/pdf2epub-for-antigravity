@@ -246,6 +246,10 @@ def plan_markdown_handoff(
         if task == "polish"
         else None
     )
+    if controlled:
+        # Controlled bibliography/index units always get their own isolated
+        # worker, whichever task prepared the hand-off.
+        isolated_files = set(isolated_files or ()) | set(controlled)
     task_max_files = batching["polish_max_files"] if task == "polish" else batching["max_files"]
     continuation_metadata = {
         str(name): dict(value)

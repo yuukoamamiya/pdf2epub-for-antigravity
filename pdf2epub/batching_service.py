@@ -26,10 +26,11 @@ DEFAULT_MAX_TINY_CHAPTERS_PER_WORKER = 6
 DEFAULT_TINY_CHAPTER_MAX_TOKENS = 2_000
 DEFAULT_PACKED_SOURCE_TOKEN_MULTIPLIER = 2
 METADATA_LANE_MAX_CONCURRENCY = 1
+CONTROLLED_ROLE_LABELS = frozenset({"controlled_bibliography", "controlled_index"})
 POLISH_ISOLATED_ROLES = frozenset({
     "index", "bibliography", "notes", "author_notes", "toc", "catalog",
     "ad", "copyright", "frontmatter", "metadata", "cover",
-})
+}) | CONTROLLED_ROLE_LABELS
 
 
 def dispatch_thresholds(batching: Mapping[str, Any]) -> tuple[int, int]:

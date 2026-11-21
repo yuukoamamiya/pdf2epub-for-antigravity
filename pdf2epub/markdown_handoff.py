@@ -53,6 +53,7 @@ def preview_markdown_handoff(request: MarkdownHandoffRequest) -> Dict[str, Any]:
         "completed_files": list(decision.completed_files),
         "pending_files": list(decision.pending_files),
         "special_pending_files": list(decision.special_pending_files),
+        "controlled_files": dict(plan.controlled_files),
         "pending_reasons": dict(decision.pending_reasons),
         "pending_reason_counts": dict(sorted(reason_counts.items())),
         "worker_batches": [list(batch) for batch in decision.pending_batches],
