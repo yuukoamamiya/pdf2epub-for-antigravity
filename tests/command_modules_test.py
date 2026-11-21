@@ -18,6 +18,7 @@ from pdf2epub.refine.footnote_status import FOOTNOTE_NORMALIZATION_SCHEMA_VERSIO
 from pdf2epub.refine.footnote_effective_decisions import EFFECTIVE_DECISIONS_VERSION
 from pdf2epub.refine.footnote_contracts import FOOTNOTE_PREPARE_SCHEMA_VERSION
 from pdf2epub.workflow_contracts import markdown_validation_schema_version, sha256_file
+from pdf2epub.workflow_contract import CLI_COMMANDS
 
 
 def test_command_package_exposes_workflow_modules_without_eager_exports():
@@ -44,6 +45,7 @@ def test_command_registry_registers_every_workflow_command():
 
     register_command_parsers(subparsers)
 
+    assert set(subparsers.choices) == set(CLI_COMMANDS)
     assert set(subparsers.choices) == {
         "build-epub",
         "build-html-epub",

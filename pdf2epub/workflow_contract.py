@@ -19,6 +19,7 @@ CLI_COMMANDS: Final[frozenset[str]] = frozenset(
         "check-ready",
         "doctor",
         "dispatch-status",
+        "dispatch-plan",
         "dispatch-record-failure",
         "dispatch-resume",
         "extract-entities",
