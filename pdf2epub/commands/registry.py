@@ -470,7 +470,8 @@ def _register_markdown_commands(subparsers) -> None:
         action="store_true",
         help=(
             "With --resume, print pending reasons and worker batches without "
-            "writing a manifest, prompt or hand-off"
+            "writing a manifest, prompt, hand-off, or dispatch lease; mutually "
+            "exclusive with --refresh-checkpoints"
         ),
     )
     polish_parser.add_argument(
@@ -564,7 +565,8 @@ def _register_markdown_commands(subparsers) -> None:
         action="store_true",
         help=(
             "With --resume, print pending reasons and worker batches without "
-            "writing a manifest, prompt or hand-off"
+            "writing a manifest, prompt, hand-off, or dispatch lease; mutually "
+            "exclusive with --refresh-checkpoints"
         ),
     )
     translate_parser.add_argument(

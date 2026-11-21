@@ -74,7 +74,9 @@ def _print_handoff_preview(preview: Mapping[str, Any]) -> None:
         f"concurrency: {preview['effective_concurrency']} "
         f"({preview['concurrency_reason']})"
     )
-    logger.warning("[dry-run] no manifest, prompt, or worker hand-off was written")
+    logger.warning(
+        "[dry-run] no manifest, prompt, worker hand-off, or dispatch lease was written"
+    )
 
 
 def _prepare_task_source(
@@ -310,6 +312,13 @@ def _prepare_pdf_markdown_task(args, task: str):
     from pdf2epub.markdown_handoff import prepare_markdown_subagent
     from pdf2epub.markdown_handoff_context import MarkdownHandoffRequest
     from pdf2epub.subagent_runtime import resolve_subagent_model
+
+    if getattr(args, "dry_run", False) and getattr(args, "refresh_checkpoints", False):
+        logger.error(
+            "--dry-run and --refresh-checkpoints are mutually exclusive: "
+            "dry-run must not write manifests, prompts, hand-offs, or checkpoints"
+        )
+        return 1
 
     dynamic_attestation = None
     if task == "translate":

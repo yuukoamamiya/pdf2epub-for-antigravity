@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import copy
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -199,9 +200,11 @@ def _dry_run_preflight_audit_findings(
                 continue
             if str(finding.get("evidence_origin") or "") != "source_markdown":
                 continue
-            item = dict(finding)
+            item = copy.deepcopy(finding)
             evidence_file = output_dir / "ocr_markdown" / str(item.get("file") or "")
             item["evidence_file_sha256"] = sha256_file(evidence_file) if evidence_file.is_file() else None
+            # Dry-run metadata is local to this returned finding; the shared
+            # report/manifest item must never be mutated by the preview.
             item["preflight_dry_run"] = True
             surfaced.append(item)
         return surfaced

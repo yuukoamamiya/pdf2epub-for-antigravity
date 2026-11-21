@@ -659,7 +659,9 @@ def test_footnote_prepare_dry_run_preflight_surfaces_source_findings(tmp_path: P
             }
         ],
     }
+    report_snapshot = json.loads(json.dumps(report))
     findings = _dry_run_preflight_audit_findings(tmp_path, report, snapshot)
     assert isinstance(findings, list)
     assert all(item.get("preflight_dry_run") is True for item in findings)
     assert all(item.get("evidence_origin") == "source_markdown" for item in findings)
+    assert report == report_snapshot

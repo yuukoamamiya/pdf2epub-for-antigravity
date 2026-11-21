@@ -755,3 +755,16 @@ def test_html_commands_share_input_and_output_context(tmp_path: Path, monkeypatc
         input_epub.resolve(),
     )
     assert logged == [("HTML Book", "html-validate")]
+
+
+def test_prepare_pdf_markdown_task_rejects_dry_run_with_refresh_checkpoints():
+    from types import SimpleNamespace
+
+    from pdf2epub.commands.markdown import _prepare_pdf_markdown_task
+
+    args = SimpleNamespace(
+        dry_run=True,
+        refresh_checkpoints=True,
+        config="config.yaml",
+    )
+    assert _prepare_pdf_markdown_task(args, "polish") == 1
