@@ -8,11 +8,14 @@ and artifact writing.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
-from ..workflow_contracts import sha256_file
+from ..utils.inventory import read_markdown_text
 from .footnote_candidates import (
     aggregate_secondary_only_candidates,
     candidate_block_indexes,
@@ -46,7 +49,49 @@ from .footnote_structure import (
     structure_excluded_block_indexes,
     structure_exclusion_for_page,
 )
-from .layout_evidence import load_layout_sidecar
+
+
+def _file_signature(path: Path) -> Optional[tuple[str, int, int]]:
+    """Return ``(resolved path, mtime_ns, size)`` for a regular file."""
+    try:
+        if not path.is_file():
+            return None
+        stat = path.stat()
+    except OSError:
+        return None
+    return str(path.resolve()), stat.st_mtime_ns, stat.st_size
+
+
+@lru_cache(maxsize=128)
+def _load_sidecar_payload(path_str: str, mtime_ns: int, size: int) -> tuple[dict[str, Any], str]:
+    """Parse a sidecar and hash its bytes from a single read."""
+    try:
+        raw = Path(path_str).read_bytes()
+    except OSError as exc:
+        raise ValueError(f"Invalid OCR sidecar {path_str}: {exc}") from exc
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Invalid OCR sidecar {path_str}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"OCR sidecar must be an object: {path_str}")
+    if not isinstance(value.get("blocks"), list):
+        raise ValueError(f"OCR sidecar has no blocks array: {path_str}")
+    return value, hashlib.sha256(raw).hexdigest()
+
+
+def load_page_sidecar(path: Path) -> tuple[dict[str, Any], str]:
+    """Load one page sidecar through a stat-keyed per-page cache.
+
+    The same page can be revisited by several candidate passes; the parsed
+    payload and its content hash come from one physical read per version.
+    """
+    sidecar_path = Path(path)
+    signature = _file_signature(sidecar_path)
+    if signature is None:
+        raise ValueError(f"OCR sidecar is missing: {sidecar_path}")
+    return _load_sidecar_payload(*signature)
+
 
 
 @dataclass
@@ -434,19 +479,21 @@ def scan_footnote_page(
     native_font_profile: Optional[Mapping[str, Any]] = None,
 ) -> FootnotePageScanResult:
     """Scan a primary sidecar and update adjacent-page continuation state."""
-    sidecar = load_layout_sidecar(sidecar_path)
+    sidecar, sidecar_sha256 = load_page_sidecar(sidecar_path)
     try:
         page_number = int(sidecar.get("page_number"))
     except (TypeError, ValueError) as exc:
         raise ValueError(f"OCR sidecar has invalid page_number: {sidecar_path}") from exc
     relative_sidecar = sidecar_path.relative_to(output_dir).as_posix()
-    sidecar_hash = (relative_sidecar, sha256_file(sidecar_path))
+    sidecar_hash = (relative_sidecar, sidecar_sha256)
     secondary_sidecar = Path(output_dir) / "ocr_secondary" / sidecar_path.name
+    secondary_payload: Optional[dict[str, Any]] = None
     secondary_hash = None
     if evidence_mode == "two_ocr" and secondary_sidecar.is_file():
+        secondary_payload, secondary_sha256 = load_page_sidecar(secondary_sidecar)
         secondary_hash = (
             secondary_sidecar.relative_to(output_dir).as_posix(),
-            sha256_file(secondary_sidecar),
+            secondary_sha256,
         )
 
     structure_exclusion = structure_exclusion_for_page(structure_units, page_number)
@@ -478,10 +525,7 @@ def scan_footnote_page(
         )
 
     page_markdown_path = output_dir / "pages" / f"page_{page_number:03d}.md"
-    try:
-        page_markdown = page_markdown_path.read_text(encoding="utf-8")
-    except (OSError, UnicodeError):
-        page_markdown = ""
+    page_markdown = read_markdown_text(page_markdown_path) or ""
     layout_profile = page_layout_profile(sidecar)
     excluded_blocks = structure_excluded_block_indexes(
         page_markdown,
@@ -538,7 +582,9 @@ def scan_footnote_page(
     candidate_disagreement = False
     secondary_only_candidates: list[dict[str, Any]] = []
     if evidence_mode == "two_ocr":
-        secondary = load_layout_sidecar(secondary_sidecar)
+        if secondary_payload is None:
+            secondary_payload = load_page_sidecar(secondary_sidecar)[0]
+        secondary = secondary_payload
         secondary_scan = _scan_secondary_candidates(
             page_number,
             secondary,

@@ -21,6 +21,11 @@ from .epub.builder import EpubBuilder, localized_toc_label
 from .epub.converter import ContentConverter
 from .utils.unit_id import generate_unit_id
 from .utils.language import language_code
+from .utils.inventory import (
+    MarkdownInventory,
+    build_markdown_inventory,
+    read_markdown_text,
+)
 from .utils.pdf_utils import extract_cover_image
 from .toc_navigation import (
     ResolvedNavigationNode,
@@ -418,6 +423,15 @@ def has_notes_chapter(chapters: List[Dict]) -> bool:
     return False
 
 
+def markdown_text(path: Path, inventory: Optional[MarkdownInventory] = None) -> Optional[str]:
+    """Return Markdown text from an inventory, falling back to a cached read."""
+    if inventory:
+        entry = inventory.get(Path(path).name)
+        if entry is not None:
+            return entry[0]
+    return read_markdown_text(path)
+
+
 def validate_centralized_endnotes_for_build(
     structure: List[Dict], output_dir: Optional[Path] = None,
     markdown_dir: Optional[Path] = None, translated: bool = False,
@@ -428,6 +442,7 @@ def validate_centralized_endnotes_for_build(
 
     source_texts: dict[str, str] = {}
     file_roles: dict[str, str] = {}
+    inventory = build_markdown_inventory(markdown_dir) if markdown_dir is not None else {}
 
     def visit(entries: List[Dict]) -> None:
         for entry in entries:
@@ -437,10 +452,11 @@ def validate_centralized_endnotes_for_build(
             )
             for part_file in part_files:
                 path = Path(part_file)
-                if not path.is_file():
+                text = markdown_text(path, inventory)
+                if text is None:
                     continue
                 name = path.name
-                source_texts[name] = path.read_text(encoding="utf-8")
+                source_texts[name] = text
                 if role:
                     file_roles[name] = role
             visit(entry.get("children") or [])
@@ -493,6 +509,15 @@ def validate_centralized_endnotes_for_build(
                     expected_dir = translated_dir
                 hashes_match = hashes_match and build_dir.resolve() == expected_dir.resolve()
             endnote_decisions = (decision_validation.get("endnote_definitions") or {}).get("decisions", [])
+            normalized_inventory: dict[str, str] = {}
+
+            def normalized_text(name: str) -> str:
+                text = normalized_inventory.get(name)
+                if text is None:
+                    text = (normalized_dir / name).read_text(encoding="utf-8")
+                    normalized_inventory[name] = text
+                return text
+
             if hashes_match:
                 approved_items = [
                     item for item in endnote_decisions
@@ -523,8 +548,7 @@ def validate_centralized_endnotes_for_build(
                     return counts
 
                 for name, key in approved_key_counts:
-                    normalized_text = (normalized_dir / name).read_text(encoding="utf-8")
-                    source_by_owner = owner_inline_counts(normalized_text)
+                    source_by_owner = owner_inline_counts(normalized_text(name))
                     source_total = sum(count for (owner, raw_key), count in source_by_owner.items() if raw_key == key)
                     if source_total != approved_key_counts[(name, key)]:
                         hashes_match = False
@@ -1165,12 +1189,13 @@ def _prepare_epub_structure(
                 raise ValueError("Invalid source/translated TOC correspondence: " + "; ".join(identity_errors))
             source_texts = {}
             missing_source_files = []
+            source_inventory = build_markdown_inventory(config.output_dir / "ocr_markdown")
             for unit in progress.get("units", []):
                 for name in unit.get("part_files") or [unit.get("file")]:
                     if name:
-                        source_path = config.output_dir / "ocr_markdown" / str(name)
-                        if source_path.is_file():
-                            source_texts[str(name)] = source_path.read_text(encoding="utf-8")
+                        entry = source_inventory.get(str(name))
+                        if entry is not None:
+                            source_texts[str(name)] = entry[0]
                         else:
                             missing_source_files.append(str(name))
             if missing_source_files:
@@ -1296,6 +1321,9 @@ def _render_epub_content(
     from .refine.footnote_options import resolve_footnote_options
 
     footnote_mode = resolve_footnote_options(config.config).mode
+    # One read-only inventory per build: the chapter loop reads each part for
+    # rendering and again when placing ownership anchors.
+    markdown_inventory = build_markdown_inventory(config.markdown_dir)
     # Process and convert chapters
     all_html_files = []
     generated_html = {}
@@ -1342,9 +1370,10 @@ def _render_epub_content(
                     rendered_parts: list[tuple[str, str]] = []
 
                     for part_idx, part_file in enumerate(part_files):
-                        # Read markdown content
-                        with open(part_file, 'r', encoding='utf-8') as f:
-                            content = f.read()
+                        # Read markdown content (shared with anchor placement)
+                        content = markdown_text(Path(part_file), markdown_inventory)
+                        if content is None:
+                            raise FileNotFoundError(f"Chapter Markdown is missing: {part_file}")
 
                         # Process content with correct title and levels
                         # The validated Markdown and canonical ownership
@@ -1394,7 +1423,9 @@ def _render_epub_content(
                                 chapter_index,
                                 anchors_for_part,
                                 source_markdown_by_file={
-                                    Path(part_file).name: Path(part_file).read_text(encoding="utf-8")
+                                    Path(part_file).name: (
+                                        markdown_text(Path(part_file), markdown_inventory) or ""
+                                    )
                                 },
                             )
                             rendered_parts[part_idx] = anchored[0]
