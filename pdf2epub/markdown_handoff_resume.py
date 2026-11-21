@@ -210,7 +210,7 @@ def controlled_special_checkpoint_is_current(
             return False
         if source_path.name != filename:
             return False
-        return hashlib.sha256(source_path.read_bytes()).hexdigest() == source_hash and receipt_is_current(
+        return sha256_file(source_path) == source_hash and receipt_is_current(
             kind, source_path, output_dir, target, context
         )
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError, KeyError, TypeError):

@@ -15,7 +15,7 @@ from typing import Any, Iterable, Mapping
 
 from pdf2epub.glossary import _normalize_match_text
 from pdf2epub.subagent_dispatch import build_assignment_sha256
-from pdf2epub.workflow_contracts import atomic_write_json
+from pdf2epub.workflow_contracts import atomic_write_json, sha256_file
 
 
 def _canonical(value: Any) -> bytes:
@@ -27,7 +27,7 @@ def _sha(value: Any) -> str:
 
 
 def _file_sha(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return sha256_file(path)
 
 
 def _nonempty(value: Any) -> bool:

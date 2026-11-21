@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+from pdf2epub.workflow_contracts import sha256_file
 import json
 import os
 import shutil
@@ -31,7 +32,7 @@ def validation_snapshot_changes(
     target_texts = target_texts or {}
     for name, expected in source_hashes.items():
         try:
-            actual = hashlib.sha256((Path(source_dir) / name).read_bytes()).hexdigest()
+            actual = sha256_file((Path(source_dir) / name))
         except OSError:
             changes[name] = ("source", "source file became unavailable during validation")
             continue
@@ -269,7 +270,7 @@ def capture_pdf_resume_contexts(output_dir: Path, task: str, filenames: list[str
                     stale_link = True
                     break
                 try:
-                    actual_neighbor_hash = hashlib.sha256((source_root / neighbor_name).read_bytes()).hexdigest()
+                    actual_neighbor_hash = sha256_file((source_root / neighbor_name))
                 except OSError:
                     stale_link = True
                     break
@@ -295,7 +296,7 @@ def capture_pdf_resume_contexts(output_dir: Path, task: str, filenames: list[str
                 errors[name] = "prepared unit context path escapes output workspace"
                 continue
             try:
-                actual = hashlib.sha256(path.read_bytes()).hexdigest()
+                actual = sha256_file(path)
             except OSError as exc:
                 errors[name] = f"prepared unit context cannot be read: {exc}"
                 continue

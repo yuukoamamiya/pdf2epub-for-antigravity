@@ -14,7 +14,7 @@ from pdf2epub.glossary import validate_translation_context
 from pdf2epub.markdown_validation import target_language_ratio_check
 from pdf2epub.special_role_audit import validate_special_role_markers
 from pdf2epub.subagent_safety import detect_refusal
-from pdf2epub.workflow_contracts import atomic_write_json
+from pdf2epub.workflow_contracts import atomic_write_json, sha256_file
 from pdf2epub.workflow_contracts import LEGACY_MARKDOWN_VALIDATION_SCHEMA_VERSION
 from .validation import nonempty_lines, tag_mismatch_count
 from .metadata_validation import HTMLMetadataValidator, MetadataValidationWorkspace
@@ -220,7 +220,7 @@ class HTMLTranslationValidator:
                 snapshot_errors.append("HTML manifest has no input EPUB snapshot")
             elif not canonical_input.is_file():
                 snapshot_errors.append("canonical output/input.epub is missing")
-            elif hashlib.sha256(canonical_input.read_bytes()).hexdigest() != expected_input_hash:
+            elif sha256_file(canonical_input) != expected_input_hash:
                 snapshot_errors.append("input EPUB changed after html-prepare")
 
         source_snapshot = {
@@ -292,8 +292,8 @@ class HTMLTranslationValidator:
                 group["sources"].append(src_content)
                 group["targets"].append(tgt_content)
                 group["files"].append(src_file.name)
-            source_sha256[src_file.name] = hashlib.sha256(src_file.read_bytes()).hexdigest()
-            target_sha256[src_file.name] = hashlib.sha256(tgt_file.read_bytes()).hexdigest()
+            source_sha256[src_file.name] = sha256_file(src_file)
+            target_sha256[src_file.name] = sha256_file(tgt_file)
 
             expected_source_hash = snapshot_expected_hashes.get(src_file.name)
             if expected_source_hash and source_sha256[src_file.name] != expected_source_hash:

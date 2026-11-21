@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from pdf2epub.footnote_keys import canonical_numeric_label
+from pdf2epub.workflow_contracts import sha256_file
 
 DIAGNOSTIC_SCHEMA_VERSION = 1
 ARTIFACTS = {
@@ -44,7 +45,7 @@ def _artifact_inventory(output_dir: Path) -> tuple[dict[str, dict[str, Any]], di
         path = output_dir / name
         loaded[key] = _load(path)
         if path.is_file():
-            inventory[name] = {"path": str(path), "status": "readable", "bytes": path.stat().st_size, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+            inventory[name] = {"path": str(path), "status": "readable", "bytes": path.stat().st_size, "sha256": sha256_file(path)}
         else:
             inventory[name] = {"path": str(path), "status": "missing", "bytes": None, "sha256": None}
     return loaded, inventory

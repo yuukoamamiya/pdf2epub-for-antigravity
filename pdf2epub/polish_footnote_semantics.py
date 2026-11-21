@@ -7,6 +7,7 @@ and, when needed, the upstream footnote workflow.
 from __future__ import annotations
 
 import hashlib
+from pdf2epub.workflow_contracts import sha256_file
 import json
 import re
 from pathlib import Path
@@ -394,7 +395,7 @@ def validate_prepared_file_review(
     result["stale_fields"] = sorted(set([*result.get("stale_fields", []), *stale_fields]))
     result["sidecar"] = str(sidecar_relative or "")
     try:
-        result["sidecar_sha256"] = hashlib.sha256(sidecar.read_bytes()).hexdigest()
+        result["sidecar_sha256"] = sha256_file(sidecar)
     except OSError:
         result["sidecar_sha256"] = None
     return result

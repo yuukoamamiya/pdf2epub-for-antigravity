@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from pdf2epub.workflow_contracts import sha256_file
 import json
 import re
 from copy import deepcopy
@@ -101,7 +102,7 @@ def prepare_toc_translation_subagent(
             "target_language": target_language,
             "model": resolve_subagent_model(config, "toc-translation"),
             "source_file": "toc_tree.json",
-            "source_sha256": hashlib.sha256(source_path.read_bytes()).hexdigest(),
+            "source_sha256": sha256_file(source_path),
             "output_file": "toc_tree_translated.json",
             "result_file": "toc_translation_result.json",
             "result_schema_version": TOC_TRANSLATION_RESULT_SCHEMA_VERSION,
@@ -183,7 +184,7 @@ def integrate_toc_translation_task(
         "result_file": "toc_translation_result.json",
         "template_file": Path(toc_paths["template"]).name,
         "prompt_file": Path(toc_paths["prompt"]).name,
-        "source_sha256": hashlib.sha256(toc_source.read_bytes()).hexdigest(),
+        "source_sha256": sha256_file(toc_source),
         "status": "pending",
     }
     atomic_write_json(manifest_path, manifest)
@@ -254,7 +255,7 @@ def validate_toc_translation_subagent(
         if not current_source_path.is_file():
             errors.append("toc_tree.json is missing")
         else:
-            current_source_hash = hashlib.sha256(current_source_path.read_bytes()).hexdigest()
+            current_source_hash = sha256_file(current_source_path)
             if current_source_hash != expected_source_hash:
                 errors.append("toc_tree.json changed after TOC translation was prepared")
             else:

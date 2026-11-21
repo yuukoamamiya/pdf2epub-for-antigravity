@@ -2,6 +2,7 @@
 
 import json
 import hashlib
+from pdf2epub.workflow_contracts import sha256_file
 import re
 import shutil
 from copy import copy
@@ -331,10 +332,10 @@ class RefinedBreakdown:
         source_fingerprint = {
             "schema": REFINE_CHECKPOINT_SCHEMA,
             "page_merger_policy": PAGE_MERGER_POLICY_VERSION,
-            "toc_sha256": hashlib.sha256(toc_tree_file.read_bytes()).hexdigest(),
+            "toc_sha256": sha256_file(toc_tree_file),
             "pages_sha256": pages_fingerprint(pages_dir),
             "illustration_bindings_sha256": (
-                hashlib.sha256(illustration_bindings_path.read_bytes()).hexdigest()
+                sha256_file(illustration_bindings_path)
                 if illustration_bindings_path.is_file()
                 else None
             ),

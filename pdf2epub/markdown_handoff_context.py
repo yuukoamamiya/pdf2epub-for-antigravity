@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+from pdf2epub.workflow_contracts import sha256_file
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional
@@ -86,7 +87,7 @@ def _project_files(output_dir: Path, files: Optional[Mapping[str, Path]], label:
             raise ValueError(f"{label} file not found: {path}")
         key = str(name)
         paths[key] = relative.as_posix()
-        hashes[key] = hashlib.sha256(path.read_bytes()).hexdigest()
+        hashes[key] = sha256_file(path)
     return paths, hashes
 
 

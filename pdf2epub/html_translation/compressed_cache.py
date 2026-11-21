@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Dict
 
-from pdf2epub.workflow_contracts import atomic_write_json
+from pdf2epub.workflow_contracts import atomic_write_json, sha256_file
 from .package_identity import (
     MAPPING_SCHEMA_VERSION,
     unit_id_for_package_path,
@@ -36,7 +36,7 @@ class CompressedExtractionCache:
                 mapping_path.resolve().relative_to(units_root)
             except ValueError as exc:
                 raise ValueError(f"mapping escapes compressed units directory: {mapping_path.name}") from exc
-            files[mapping_path.name] = hashlib.sha256(mapping_path.read_bytes()).hexdigest()
+            files[mapping_path.name] = sha256_file(mapping_path)
             stem = mapping_path.name[:-len(".mapping.json")]
             try:
                 mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
@@ -71,7 +71,7 @@ class CompressedExtractionCache:
                     raise ValueError(f"active compressed file escapes directory: {name}") from exc
                 if not path.is_file():
                     raise ValueError(f"active compressed file is missing: {name}")
-                files[path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
+                files[path.name] = sha256_file(path)
         return files
 
     def is_current(self, *, max_nonempty_lines: int) -> bool:
@@ -84,7 +84,7 @@ class CompressedExtractionCache:
                 return False
             if cache.get("schema_version") != 2:
                 return False
-            if cache.get("input_epub_sha256") != hashlib.sha256(self.epub_path.read_bytes()).hexdigest():
+            if cache.get("input_epub_sha256") != sha256_file(self.epub_path):
                 return False
             if int(cache.get("max_nonempty_lines", 0)) != int(max_nonempty_lines):
                 return False
@@ -102,7 +102,7 @@ class CompressedExtractionCache:
             raise ValueError("cannot write compressed cache receipt without mapped files")
         atomic_write_json(self.path, {
             "schema_version": 2,
-            "input_epub_sha256": hashlib.sha256(self.epub_path.read_bytes()).hexdigest(),
+            "input_epub_sha256": sha256_file(self.epub_path),
             "max_nonempty_lines": int(max_nonempty_lines),
             "compressed_files": compressed_files,
         })

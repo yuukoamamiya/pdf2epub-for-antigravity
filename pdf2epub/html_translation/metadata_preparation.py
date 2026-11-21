@@ -11,7 +11,7 @@ from loguru import logger
 
 from .metadata_values import sort_author_for_library, sort_title_for_library
 from pdf2epub.subagent_runtime import DEFAULT_TRANSLATION_MODEL, resolve_subagent_model
-from pdf2epub.workflow_contracts import atomic_write_json
+from pdf2epub.workflow_contracts import atomic_write_json, sha256_file
 
 
 def detect_source_language(metadata: Mapping[str, Any]) -> str:
@@ -141,7 +141,7 @@ class MetadataTranslationPreparer:
                     for name, path in metadata_context_files.items()
                 },
                 "sha256": {
-                    str(name): hashlib.sha256(Path(path).read_bytes()).hexdigest()
+                    str(name): sha256_file(Path(path))
                     for name, path in metadata_context_files.items()
                 },
             }
@@ -152,7 +152,7 @@ class MetadataTranslationPreparer:
                     for name, path in metadata_audit_context_files.items()
                 },
                 "sha256": {
-                    str(name): hashlib.sha256(Path(path).read_bytes()).hexdigest()
+                    str(name): sha256_file(Path(path))
                     for name, path in metadata_audit_context_files.items()
                 },
             }

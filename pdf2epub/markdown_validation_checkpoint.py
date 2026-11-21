@@ -1,6 +1,7 @@
 """Filesystem checkpoint operations for Markdown validation retries."""
 from __future__ import annotations
 import hashlib
+from pdf2epub.workflow_contracts import sha256_file
 import shutil
 from pathlib import Path
 from typing import Iterable
@@ -52,7 +53,7 @@ def quarantine_invalid_targets(
         quarantine_dir.mkdir(parents=True, exist_ok=True)
         destination = quarantine_dir / raw_name
         if destination.exists():
-            digest = hashlib.sha256(target.read_bytes()).hexdigest()[:12]
+            digest = sha256_file(target)[:12]
             destination = quarantine_dir / f"{Path(raw_name).stem}.{digest}.md"
         try:
             shutil.move(str(target), str(destination))

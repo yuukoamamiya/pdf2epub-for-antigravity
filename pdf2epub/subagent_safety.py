@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from pdf2epub.workflow_contracts import sha256_file
 import re
 from pathlib import Path
 from typing import Any, Mapping
@@ -185,7 +186,7 @@ def protected_workspace_snapshot(output_dir: Path) -> dict[str, Any]:
     files: dict[str, str] = {}
     for path in sorted(paths):
         try:
-            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            digest = sha256_file(path)
         except OSError:
             continue
         files[path.relative_to(root).as_posix()] = digest

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from pdf2epub.workflow_contracts import sha256_file
 import json
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
@@ -20,7 +21,7 @@ def markdown_directory_sha256(directory: Path) -> Dict[str, str]:
     if not directory.is_dir():
         return {}
     return {
-        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+        path.name: sha256_file(path)
         for path in sorted(directory.glob("*.md"))
         if path.is_file()
     }
@@ -28,7 +29,7 @@ def markdown_directory_sha256(directory: Path) -> Dict[str, str]:
 
 def _file_sha256_or_none(path: Path) -> Optional[str]:
     try:
-        return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+        return sha256_file(Path(path))
     except OSError:
         return None
 

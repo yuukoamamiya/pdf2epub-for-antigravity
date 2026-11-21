@@ -23,7 +23,7 @@ from pdf2epub.utils.paths import book_output_dir
 from pdf2epub.utils.configuration import load_config
 from pdf2epub.utils.fingerprints import pages_fingerprint
 from pdf2epub.validation_receipts import validation_receipt_is_current
-from pdf2epub.workflow_contracts import atomic_write_json
+from pdf2epub.workflow_contracts import atomic_write_json, sha256_file
 from pdf2epub.refine.subagent_workflow import validate_toc_tree_data
 from pdf2epub.refine.footnote_options import footnote_mode_warnings
 
@@ -192,7 +192,7 @@ def _record_structure_readiness(
             fingerprint = tree_progress.get("fingerprint", {})
             fingerprint_ready = (
                 fingerprint.get("toc_sha256")
-                == hashlib.sha256(toc_path.read_bytes()).hexdigest()
+                == sha256_file(toc_path)
                 and fingerprint.get("pages_sha256") == pages_fingerprint(pages_dir)
             )
         except (OSError, json.JSONDecodeError, AttributeError, TypeError):

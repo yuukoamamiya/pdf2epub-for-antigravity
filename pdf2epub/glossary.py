@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Mapping, Optional
 import yaml
 
 from pdf2epub.utils.paths import sanitize_filename
-from pdf2epub.workflow_contracts import atomic_write_text
+from pdf2epub.workflow_contracts import atomic_write_text, sha256_file
 
 
 SUPPORTED_SUFFIXES = {".yaml", ".yml", ".json"}
@@ -988,9 +988,9 @@ def load_selected_glossaries(
             prefix = "domain" if kind == "authoritative" else "reference"
             context_name = f"{prefix}_glossary_{index:03d}"
             context_files[context_name] = snapshot_path
-            context_sha256[context_name] = hashlib.sha256(snapshot_path.read_bytes()).hexdigest()
+            context_sha256[context_name] = sha256_file(snapshot_path)
             source_files[context_name] = source_path
-            source_sha256[context_name] = hashlib.sha256(source_path.read_bytes()).hexdigest()
+            source_sha256[context_name] = sha256_file(source_path)
             metadata_by_context[context_name] = dict(metadata)
             selected_records.append(
                 {
@@ -1134,7 +1134,7 @@ def validate_translation_context(
         if not path.is_file():
             errors.append(f"translation context is missing: {relative}")
             continue
-        actual_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+        actual_hash = sha256_file(path)
         if context_hashes.get(name) != actual_hash:
             errors.append(f"translation context changed after task preparation: {relative}")
         if name == "translation_entities":
@@ -1182,7 +1182,7 @@ def validate_translation_context(
         if not path.is_file():
             errors.append(f"unit translation context is missing: {relative}")
             continue
-        actual_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+        actual_hash = sha256_file(path)
         if unit_context_hashes.get(unit_name) != actual_hash:
             errors.append(
                 f"unit translation context changed after task preparation: {relative}"

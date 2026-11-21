@@ -14,6 +14,7 @@ from pdf2epub.dynamic_terminology import (
     publication_target_inventory,
     publication_target_inventory_complete,
 )
+from pdf2epub.workflow_contracts import sha256_file
 from pdf2epub.glossary import _normalize_match_text
 from pdf2epub.pipeline_policy import PipelinePolicy
 
@@ -47,7 +48,7 @@ class _VisibleHTML(HTMLParser):
 
 
 def _sha_file(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return sha256_file(path)
 
 
 def _confined(root: Path, path: str | Path, label: str) -> Path:

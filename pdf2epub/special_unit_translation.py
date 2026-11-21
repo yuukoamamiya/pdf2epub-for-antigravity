@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from pdf2epub.workflow_contracts import atomic_write_json, atomic_write_text
+from pdf2epub.workflow_contracts import atomic_write_json, atomic_write_text, sha256_file
 
 POLICY_VERSION = "special-units-v1"
 
@@ -374,8 +374,8 @@ def receipt_is_current(kind: str, source: Path, output_dir: Path, target: Path, 
         result = json.loads(result_path.read_text(encoding="utf-8"))
         if not isinstance(result, dict):
             return False
-        source_hash = hashlib.sha256(Path(source).read_bytes()).hexdigest()
-        target_hash = hashlib.sha256(Path(target).read_bytes()).hexdigest()
+        source_hash = sha256_file(Path(source))
+        target_hash = sha256_file(Path(target))
     except (OSError, UnicodeError, json.JSONDecodeError, TypeError, KeyError, AttributeError):
         return False
     result_hash = _hash(json.dumps(result, ensure_ascii=False, sort_keys=True))

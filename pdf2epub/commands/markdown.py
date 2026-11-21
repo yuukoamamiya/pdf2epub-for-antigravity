@@ -36,6 +36,7 @@ from pdf2epub.workflow_contracts import (
     atomic_write_json,
     atomic_write_text,
     relative_posix_path,
+    sha256_file,
 )
 from pdf2epub.validation_receipts import (
     build_input_snapshot,
@@ -582,7 +583,7 @@ def _validate_translation_entities(output_dir: Path, config: dict) -> dict:
     if not entity_path.is_file():
         return {"valid": False, "errors": [f"entity context is missing: {entity_relative}"]}
     expected_hash = manifest.get("context_sha256", {}).get("translation_entities")
-    actual_hash = hashlib.sha256(entity_path.read_bytes()).hexdigest()
+    actual_hash = sha256_file(entity_path)
     errors = []
     if expected_hash and expected_hash != actual_hash:
         errors.append("translation_entities.json changed after the translation task was prepared")
@@ -618,7 +619,7 @@ def _validate_translation_entities(output_dir: Path, config: dict) -> dict:
                 source_path = source_dir / str(name)
                 if not source_path.is_file():
                     errors.append(f"entity source file is missing: {name}")
-                elif hashlib.sha256(source_path.read_bytes()).hexdigest() != expected:
+                elif sha256_file(source_path) != expected:
                     errors.append(f"entity source file changed after extraction: {name}")
         except (OSError, json.JSONDecodeError, AttributeError, TypeError, ValueError) as exc:
             errors.append(f"invalid entity_subagent_manifest.json: {exc}")

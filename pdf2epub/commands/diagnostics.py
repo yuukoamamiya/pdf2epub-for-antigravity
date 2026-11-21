@@ -16,6 +16,7 @@ from typing import Any, Mapping
 import yaml
 
 from pdf2epub.ocr.backends import supported_backends
+from pdf2epub.workflow_contracts import sha256_file
 from pdf2epub.ocr_consensus import (
     ocr_evidence_mode,
     secondary_ocr_enabled,
@@ -80,7 +81,7 @@ def _file_list(directory: Path, suffix: str = ".md") -> list[Path]:
 
 def _source_sha256(path: Path) -> str | None:
     try:
-        return hashlib.sha256(path.read_bytes()).hexdigest()
+        return sha256_file(path)
     except OSError:
         return None
 
@@ -136,14 +137,14 @@ def _pdf_tree_status(output_dir: Path, config: Mapping[str, Any]) -> tuple[str, 
         from pdf2epub.ocr_correction import select_refinement_pages
         from pdf2epub.utils.fingerprints import pages_fingerprint
 
-        current_toc = hashlib.sha256(toc_path.read_bytes()).hexdigest()
+        current_toc = sha256_file(toc_path)
         pages_dir, _ = select_refinement_pages(output_dir, config=config)
         current_pages = pages_fingerprint(pages_dir)
         if fingerprint.get("toc_sha256") != current_toc or fingerprint.get("pages_sha256") != current_pages:
             return "pending", "tree_progress.json is stale after a TOC or page change"
         binding_path = output_dir / "illustration_bindings.json"
         expected_binding = fingerprint.get("illustration_bindings_sha256")
-        actual_binding = hashlib.sha256(binding_path.read_bytes()).hexdigest() if binding_path.is_file() else None
+        actual_binding = sha256_file(binding_path) if binding_path.is_file() else None
         if expected_binding != actual_binding:
             return "pending", "tree_progress.json is stale after an illustration binding change"
     except (OSError, TypeError, ValueError):

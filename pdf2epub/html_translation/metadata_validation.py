@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from pdf2epub.subagent_safety import detect_refusal
+from pdf2epub.workflow_contracts import sha256_file
 
 
 @dataclass(frozen=True)
@@ -62,7 +63,7 @@ class HTMLMetadataValidator:
                         f"metadata {context_label} is missing: {relative}"
                     )
                     continue
-                actual_hash = hashlib.sha256(context_path.read_bytes()).hexdigest()
+                actual_hash = sha256_file(context_path)
                 if context_hashes.get(name) != actual_hash:
                     errors.append(
                         f"metadata {context_label} changed after preparation: {relative}"

@@ -8,6 +8,7 @@ Provides:
 
 import shutil
 import hashlib
+from pdf2epub.workflow_contracts import sha256_file
 import tempfile
 import os
 from pathlib import Path
@@ -227,8 +228,8 @@ def preprocess_pdf(input_pdf, output_dir):
     original_pdf = output_dir / "input_original.pdf"
 
     if original_pdf.exists():
-        input_hash = hashlib.sha256(Path(input_pdf).read_bytes()).hexdigest()
-        original_hash = hashlib.sha256(original_pdf.read_bytes()).hexdigest()
+        input_hash = sha256_file(Path(input_pdf))
+        original_hash = sha256_file(original_pdf)
         if input_hash != original_hash:
             raise ValueError(
                 "The configured input PDF differs from output/input_original.pdf; "

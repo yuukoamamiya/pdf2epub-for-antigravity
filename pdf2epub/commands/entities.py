@@ -22,7 +22,7 @@ from pdf2epub.entity_context import (
     validate_entity_source_manifest,
 )
 from pdf2epub.utils.paths import book_output_dir
-from pdf2epub.workflow_contracts import atomic_write_json
+from pdf2epub.workflow_contracts import atomic_write_json, sha256_file
 
 
 def extract_entities_command(args):
@@ -121,7 +121,7 @@ def extract_entities_validate_command(args):
         "task": "extract-entities",
         "valid": not errors,
         "errors": errors,
-        "entity_sha256": hashlib.sha256(entity_path.read_bytes()).hexdigest(),
+        "entity_sha256": sha256_file(entity_path),
         "file": str(entity_path),
     }
     atomic_write_json(

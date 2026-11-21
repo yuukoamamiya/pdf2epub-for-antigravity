@@ -9,6 +9,7 @@ other's private helpers.
 from __future__ import annotations
 
 import hashlib
+from pdf2epub.workflow_contracts import sha256_file
 import json
 from pathlib import Path
 from typing import Any, Mapping
@@ -112,7 +113,7 @@ def prepare_entity_subagent_task(
         if source_stage == "epub-compressed"
         else [],
         "source_sha256": {
-            path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+            path.name: sha256_file(path)
             for path in source_files
         },
         "output_file": "translation_entities.json",
@@ -176,7 +177,7 @@ def validate_entity_source_manifest(
         source_path = source_dir / str(name)
         if not source_path.is_file():
             errors.append(f"entity source file is missing: {name}")
-        elif hashlib.sha256(source_path.read_bytes()).hexdigest() != expected:
+        elif sha256_file(source_path) != expected:
             errors.append(f"entity source file changed after extraction: {name}")
     return errors
 

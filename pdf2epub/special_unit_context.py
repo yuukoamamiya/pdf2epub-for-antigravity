@@ -14,6 +14,7 @@ from pdf2epub.glossary import (
     _term_forms,
     sort_glossary_entries,
 )
+from pdf2epub.workflow_contracts import sha256_file
 from pdf2epub.toc_translation_workflow import build_toc_heading_contexts
 from pdf2epub.toc_model import TOC_HEADING_CONTEXT_PROJECTION_VERSION
 
@@ -151,7 +152,7 @@ def build_special_unit_context(
         raise SpecialUnitContextError("prepared source path escapes its authorized directory") from exc
     if not source_path.is_file():
         raise SpecialUnitContextError(f"prepared source is missing for {filename}")
-    source_sha = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    source_sha = sha256_file(source_path)
     if source_sha != expected_source_hash:
         raise SpecialUnitContextError(f"source changed after translate prepare: {filename}")
     context_path = None
@@ -200,7 +201,7 @@ def build_special_unit_context(
             raise SpecialUnitContextError(f"parent context escapes output directory: {name}") from exc
         if not parent_path.is_file():
             raise SpecialUnitContextError(f"parent context is missing: {name}; rerun translate prepare")
-        actual_hash = hashlib.sha256(parent_path.read_bytes()).hexdigest()
+        actual_hash = sha256_file(parent_path)
         if parent_context_hashes.get(name) != actual_hash:
             raise SpecialUnitContextError(f"parent context changed after translate prepare: {name}; rerun translate prepare")
         current_parent_hashes[str(name)] = actual_hash
@@ -230,7 +231,7 @@ def build_special_unit_context(
     for relative in ("toc_tree.json", "toc_tree_translated.json", "ocr_markdown/tree_progress.json"):
         toc_path = output / relative
         if toc_path.is_file():
-            toc_hashes[relative] = hashlib.sha256(toc_path.read_bytes()).hexdigest()
+            toc_hashes[relative] = sha256_file(toc_path)
     # The full-book context and TOC inventories above are audit-only. The
     # apply freshness contract is intentionally unit-scoped so an unrelated
     # glossary/TOC change does not invalidate this unit's accepted translation.

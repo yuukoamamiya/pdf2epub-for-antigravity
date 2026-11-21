@@ -8,6 +8,7 @@ provides a structural validator for the repaired files.
 from __future__ import annotations
 
 import hashlib
+from pdf2epub.workflow_contracts import sha256_file
 import json
 import re
 import shutil
@@ -146,7 +147,7 @@ def _repair_hints(
 
 
 def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return sha256_file(path)
 
 
 def _load_json_object(path: Path) -> dict[str, Any]:
