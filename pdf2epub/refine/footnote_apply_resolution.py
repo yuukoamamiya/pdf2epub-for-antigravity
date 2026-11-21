@@ -179,6 +179,32 @@ def _locate_block(
                             avg_pos = sum(page_positions) / len(page_positions)
                             matches.sort(key=lambda m: abs(m[1][0] - avg_pos))
                             matches = [matches[0]]
+                        elif claimed_spans and any(s[0] == matches[0][0]["name"] for s in claimed_spans):
+                            same_file_spans = [s[1] for s in claimed_spans if s[0] == matches[0][0]["name"]]
+                            avg_pos = sum(same_file_spans) / len(same_file_spans)
+                            matches.sort(key=lambda m: abs(m[1][0] - avg_pos))
+                            matches = [matches[0]]
+                        else:
+                            for adj_page in (page + 1, page - 1):
+                                if adj_page > 0:
+                                    adj_p = Path(pages_dir) / f"page_{adj_page:03d}.md"
+                                    if adj_p.is_file():
+                                        try:
+                                            adj_lines = [
+                                                al.strip()
+                                                for al in adj_p.read_text(encoding="utf-8").splitlines()
+                                                if len(al.strip()) > 15
+                                                and not al.startswith("#")
+                                                and not al.startswith(("①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"))
+                                            ]
+                                        except (OSError, UnicodeDecodeError):
+                                            adj_lines = []
+                                        adj_positions = [target_text.find(al[:20]) for al in adj_lines if target_text.find(al[:20]) != -1]
+                                        if adj_positions:
+                                            avg_adj = sum(adj_positions) / len(adj_positions)
+                                            matches.sort(key=lambda m: (m[1][0] > avg_adj if adj_page > page else m[1][0] < avg_adj, abs(m[1][0] - avg_adj)))
+                                            matches = [matches[0]]
+                                            break
     if len(matches) != 1:
         if not matches:
             raise ValueError(f"could not locate OCR block text on page {page}")
@@ -452,6 +478,8 @@ def resolve_page_decisions(
             errors.append(f"{page}:{block_index}: footnote text is empty after removing its key")
             continue
         note["parts"].append(note_text)
+        if role == "footnote_continuation":
+            note.setdefault("continuation_pages", []).append(page)
         if source == "primary":
             edits_by_file[record["name"]].append((span[0], span[1], ""))
         resolved.append(
@@ -515,12 +543,17 @@ def bind_note_markers(
         note_record = record_by_name[note["source_file"]]
         source = source_texts[note["source_file"]]
         start = note["start_span"][0]
+        note_spans = [
+            (s, e) for s, e, rep in edits_by_file.get(note["source_file"], [])
+            if rep == ""
+        ]
         claimed_spans = {
             (s, e) for s, e, _ in edits_by_file.get(note["source_file"], [])
         }
         marker_candidates = [
             item for item in _marker_spans(source, note["key"], note["marker_label"])
             if item[1] <= start and (item[0], item[1]) not in claimed_spans
+            and not any(ns <= item[0] < ne or ns < item[1] <= ne for ns, ne in note_spans)
         ]
         target_file = note["source_file"]
 
@@ -534,6 +567,10 @@ def bind_note_markers(
             for earlier_record in reversed(sibling_records):
                 earlier_source = source_texts[earlier_record["name"]]
                 earlier_spans = _marker_spans(earlier_source, note["key"], note["marker_label"])
+                earlier_note_spans = [
+                    (s, e) for s, e, rep in edits_by_file.get(earlier_record["name"], [])
+                    if rep == ""
+                ]
                 claimed_spans = {
                     (start, end)
                     for start, end, _ in edits_by_file.get(earlier_record["name"], [])
@@ -542,6 +579,7 @@ def bind_note_markers(
                     span
                     for span in earlier_spans
                     if (span[0], span[1]) not in claimed_spans
+                    and not any(ns <= span[0] < ne or ns < span[1] <= ne for ns, ne in earlier_note_spans)
                 ]
                 if earlier_spans:
                     target_file = earlier_record["name"]
@@ -565,6 +603,10 @@ def bind_note_markers(
                     for prec_record in preceding_records:
                         prec_source = source_texts[prec_record["name"]]
                         prec_spans = _marker_spans(prec_source, note["key"], note["marker_label"])
+                        prec_note_spans = [
+                            (s, e) for s, e, rep in edits_by_file.get(prec_record["name"], [])
+                            if rep == ""
+                        ]
                         claimed_spans = {
                             (start, end)
                             for start, end, _ in edits_by_file.get(prec_record["name"], [])
@@ -573,6 +615,7 @@ def bind_note_markers(
                             span
                             for span in prec_spans
                             if (span[0], span[1]) not in claimed_spans
+                            and not any(ns <= span[0] < ne or ns < span[1] <= ne for ns, ne in prec_note_spans)
                         ]
                         if prec_spans:
                             target_file = prec_record["name"]

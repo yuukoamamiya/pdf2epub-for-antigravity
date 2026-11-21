@@ -32,7 +32,7 @@ def special_role_numeric_markers(text: str) -> list[str]:
         r"(?:\b(?:vol(?:ume)?|part)\s*\.?\s*"
         r"(?P<english_roman>M{0,3}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3}))\b"
         r"|第\s*"
-        r"(?P<chinese_roman>M{0,3}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3}))(?=卷|部))",
+        r"(?P<chinese_roman>M{0,3}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3}))(?=\s*(?:卷|部)))",
         re.IGNORECASE,
     )
 

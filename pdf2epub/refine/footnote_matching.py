@@ -11,6 +11,7 @@ import json
 import re
 import string
 from difflib import SequenceMatcher
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
@@ -124,6 +125,7 @@ def _append_url_signature(
         index += 1
 
 
+@lru_cache(maxsize=1024)
 def signature_with_map(value: str) -> tuple[str, list[int]]:
     """Normalize OCR/Markdown text while retaining source offsets."""
     value = str(value or "")

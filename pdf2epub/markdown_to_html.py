@@ -34,7 +34,7 @@ TABLE_CELL_RE = re.compile(r'<t[hd](?:\s[^>]*)?>', re.IGNORECASE)
 WIDE_TABLE_COLUMN_THRESHOLD = 8
 FENCED_CODE_RE = re.compile(
     r"(?ms)^ {0,3}(?P<fence>`{3,}|~{3,})[^\n]*\n.*?"
-    r"^ {0,3}(?P=fence)[ \t]*(?=\n|\Z)"
+    r"^ {0,3}(?P=fence)(?=[ \t]*(?:\n|\Z)|\s)"
 )
 INLINE_CODE_RE = re.compile(
     r"(?s)(?<!`)(?P<ticks>`+)(?!`).*?(?<!`)(?P=ticks)(?!`)"

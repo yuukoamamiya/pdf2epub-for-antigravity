@@ -161,9 +161,11 @@ def mask_markdown_code_and_comments(lines: list[str]) -> list[str]:
         offsets.append(offset)
         match = re.match(r"^\s{0,3}(`{3,}|~{3,})", line)
         if fence_char is not None:
-            _blank(chars, offset, offset + len(line))
             if match and match.group(1)[0] == fence_char and len(match.group(1)) >= fence_size:
+                _blank(chars, offset, offset + match.end())
                 fence_char, fence_size = None, 0
+            else:
+                _blank(chars, offset, offset + len(line))
         elif match:
             fence_char, fence_size = match.group(1)[0], len(match.group(1))
             _blank(chars, offset, offset + len(line))

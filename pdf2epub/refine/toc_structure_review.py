@@ -442,7 +442,7 @@ def _validate_candidate_decisions_and_evidence(output_dir: Path, candidates: lis
                 line_count = valid_pages.get(page, {}).get("line_count")
                 if type(insertion_line) is not int or type(line_count) is not int or not 1 <= insertion_line <= line_count + 1:
                     errors.append(f"layout TOC candidate {cid} requires a valid evidence.start_line on its source page")
-            elif "start_line" in loc:
+            elif isinstance(loc, dict) and "start_line" in loc:
                 errors.append(f"supplemental layout evidence {cid} must not override the canonical node start line")
             if record.get("node_id") == cid and not isinstance(record.get("reason"), str):
                 errors.append(f"layout-only TOC node {cid} requires an explicit reviewer reason")
@@ -764,7 +764,7 @@ def _validate_toc_node_source_correspondence(output_dir: Path, tree: Any, toc_li
             start = boundary.get("start_line")
             end = boundary.get("heading_end_line")
             if type(page) is int and type(start) is int and type(end) is int:
-                if any(number_page == page and start <= number_line < end
+                if any(number_page == page and type(number_line) is int and start <= number_line < end
                        for number_page, number_line in page_number_locations):
                     errors.append(f"page_number disposition conflicts with bound heading range for TOC node {node.get('node_id')}")
     return errors

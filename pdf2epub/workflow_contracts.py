@@ -33,8 +33,26 @@ def markdown_validation_schema_version(task: str) -> int:
     return LEGACY_MARKDOWN_VALIDATION_SCHEMA_VERSION
 
 
+from functools import lru_cache
+
+
+@lru_cache(maxsize=4096)
+def _sha256_file_cached(resolved_path: str, mtime_ns: int, size: int) -> str:
+    digest = hashlib.sha256()
+    with open(resolved_path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def sha256_file(path: Path) -> str:
     """Return the SHA-256 digest of a workspace file."""
+    p = Path(path).resolve()
+    try:
+        st = p.stat()
+        return _sha256_file_cached(str(p), st.st_mtime_ns, st.st_size)
+    except OSError:
+        pass
     digest = hashlib.sha256()
     with Path(path).open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):

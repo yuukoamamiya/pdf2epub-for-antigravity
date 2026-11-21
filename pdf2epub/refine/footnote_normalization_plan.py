@@ -88,6 +88,10 @@ def _recover_continuations(
         if len(matches) != 1:
             return f"{review.get('task_id')}: recovered continuation does not identify one exact source note"
         note = matches[0]
+        task_pages = task.get("pages", []) if isinstance(task, Mapping) else []
+        if any(p in task_pages[1:] for p in note.get("continuation_pages", [])):
+            # A reviewed footnote_continuation block on the following page already supplied this continuation.
+            continue
         text = str(review.get("text") or "").strip()
         boundary_kind = str(task.get("boundary_kind") or "") if isinstance(task, Mapping) else ""
         if not boundary_kind:

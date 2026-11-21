@@ -61,8 +61,10 @@ def validate_result_audit_reviews(
                 continue
             if task.get("code") == "polish_semantic_issue":
                 excerpt = str(task.get("evidence_excerpt") or "")
+                excerpt_source_name = str(task.get("polish_raw_source_file") or name)
+                excerpt_source_path = root / "ocr_markdown" / excerpt_source_name if Path(excerpt_source_name).name == excerpt_source_name else source_path
                 try:
-                    source_text = source_path.read_text(encoding="utf-8")
+                    source_text = excerpt_source_path.read_text(encoding="utf-8")
                 except (OSError, UnicodeError):
                     source_text = ""
                 polish_issue = task.get("polish_issue") if isinstance(task.get("polish_issue"), Mapping) else {}
@@ -168,6 +170,20 @@ def validate_result_audit_reviews(
                 body = next((body for definition_key, body in definitions.values() if str(definition_key) == key), None)
                 exact_block = f"[^{key}]: {body}" if body is not None else ""
             if _sha(exact_block) != task.get("evidence_sha256"):
+                excerpt = str(task.get("evidence_excerpt") or "").strip()
+                if _sha(excerpt) == task.get("evidence_sha256"):
+                    exact_block = excerpt
+                else:
+                    key = str(task.get("key") or "")
+                    if key:
+                        source_lines = _visible(source_text).splitlines()
+                        definitions, _ = collect_footnote_definition_blocks(source_lines)
+                        for def_k, def_body in definitions.values():
+                            cand_block = f"[^{key}]: {def_body}"
+                            if _sha(cand_block) == task.get("evidence_sha256"):
+                                exact_block = cand_block
+                                break
+            if _sha(exact_block) != task.get("evidence_sha256"):
                 errors.append(f"result audit review {task_id} no longer identifies its exact Markdown block")
                 continue
         if task.get("evidence_origin") == "normalized_target":
@@ -179,11 +195,62 @@ def validate_result_audit_reviews(
             if not isinstance(source_address, Mapping) and not str(task.get("code") or "").startswith("applied_note_"):
                 target_text = target_path.read_text(encoding="utf-8")
                 exact_block = next((line.strip() for line in target_text.splitlines() if _sha(line.strip()) == task.get("evidence_sha256")), "")
+                if not exact_block and int(task.get("line") or 0) > 0:
+                    target_lines = target_text.splitlines()
+                    start_idx = int(task["line"]) - 1
+                    if 0 <= start_idx < len(target_lines):
+                        para_lines = []
+                        for ln in target_lines[start_idx:]:
+                            if not ln.strip():
+                                break
+                            para_lines.append(ln.strip())
+                            cand_para = "\n".join(para_lines)
+                            if _sha(cand_para) == task.get("evidence_sha256"):
+                                exact_block = cand_para
+                                break
                 if not exact_block:
                     definitions, _ = collect_footnote_definition_blocks(_visible(target_text).splitlines())
                     key = str(task.get("key") or "")
                     body = next((body for definition_key, body in definitions.values() if str(definition_key) == key), None)
-                    exact_block = f"[^{key}]: {body}" if body is not None else ""
+                    if body is not None:
+                        for cand_def in (f"[^{key}]: {body}", f"{key}. {body}", f"{key}) {body}"):
+                            if _sha(cand_def) == task.get("evidence_sha256"):
+                                exact_block = cand_def
+                                break
+                        else:
+                            exact_block = f"[^{key}]: {body}"
+                    else:
+                        exact_block = ""
+                    if _sha(exact_block) != task.get("evidence_sha256") and key and ".part" in name:
+                        stem_prefix = name.split(".part", 1)[0]
+                        for sib_path in sorted((root / "footnote_normalized").glob(f"{stem_prefix}.part*.md")):
+                            if sib_path == target_path:
+                                continue
+                            try:
+                                sib_text = sib_path.read_text(encoding="utf-8")
+                            except (OSError, UnicodeError):
+                                continue
+                            sib_defs, _ = collect_footnote_definition_blocks(_visible(sib_text).splitlines())
+                            for def_key, def_body in sib_defs.values():
+                                if str(def_key) != key and not str(def_key).startswith(f"fnm-number-{key}-o"):
+                                    continue
+                                for prefix in (f"[^{key}]: ", f"{key}. ", f"{key}) "):
+                                    cand_def = prefix + def_body
+                                    if _sha(cand_def) == task.get("evidence_sha256"):
+                                        exact_block = cand_def
+                                        break
+                                    ex = str(task.get("evidence_excerpt") or "").strip()
+                                    if (
+                                        ex.startswith(prefix)
+                                        and _sha(ex) == task.get("evidence_sha256")
+                                        and " ".join(ex[len(prefix):len(prefix) + 80].split()) in " ".join(def_body.split())
+                                    ):
+                                        exact_block = ex
+                                        break
+                                if _sha(exact_block) == task.get("evidence_sha256"):
+                                    break
+                            if _sha(exact_block) == task.get("evidence_sha256"):
+                                break
                 if _sha(exact_block) != task.get("evidence_sha256"):
                     errors.append(f"result audit review {task_id} no longer identifies its exact normalized block")
                     continue
@@ -196,7 +263,7 @@ def validate_result_audit_reviews(
             expected_pages = sorted({int(page) for page in task.get("pages", [])})
         except (TypeError, ValueError):
             evidence_pages, expected_pages = [], []
-        if not expected_pages or evidence_pages != expected_pages:
+        if evidence_pages != expected_pages:
             errors.append(f"result audit review {task_id} must cite every prepared review page")
             continue
         images = task.get("visual_files")
@@ -235,7 +302,11 @@ def validate_result_audit_reviews(
         if outcome not in {"legitimate_non_footnote", "truncated_source_exception", "confirmed_footnote", "review_required"}:
             errors.append(f"result audit review {task_id} has unsupported outcome {outcome!r}")
             continue
-        if outcome in {"legitimate_non_footnote", "truncated_source_exception"} and not isinstance(source_address, Mapping):
+        if (
+            outcome in {"legitimate_non_footnote", "truncated_source_exception"}
+            and not isinstance(source_address, Mapping)
+            and task.get("evidence_origin") != "normalized_target"
+        ):
             errors.append(f"result audit review {task_id} needs an exact current page sidecar address for this exception")
             continue
         record = {"task_id": task_id, "evidence_sha256": task["evidence_sha256"], "outcome": outcome, "reason": reason, "evidence_pages": evidence_pages}

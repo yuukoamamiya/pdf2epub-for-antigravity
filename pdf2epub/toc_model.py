@@ -530,7 +530,7 @@ def project_toc_ownership(
         else:
             stripped_key = toc_title_match_key(
                 normalize_toc_source_label(
-                    re.sub(r"<sup\b[^>]*>\d+</sup>", "", source_title, flags=re.IGNORECASE),
+                    re.sub(r"<sup\b[^>]*>\d+</sup>|(?<=[’'”\")\]])\d+(?=\s|$)", "", source_title, flags=re.IGNORECASE),
                     markdown_source=False,
                 )
             )
@@ -538,6 +538,7 @@ def project_toc_ownership(
                 name: [
                     candidate for candidate in inventory
                     if toc_title_match_key(candidate["visible"]) == stripped_key
+                    or toc_title_match_key(normalize_toc_source_label(re.sub(r"<sup\b[^>]*>\d+</sup>", "", candidate["raw"], flags=re.IGNORECASE))) == stripped_key
                 ]
                 for name, inventory in inventories.items()
             }
@@ -558,7 +559,10 @@ def project_toc_ownership(
         matched = {
             name: [candidate for candidate in inventory
                    if resolved_key is not None
-                   and toc_title_match_key(candidate["visible"]) == resolved_key]
+                   and (
+                       toc_title_match_key(candidate["visible"]) == resolved_key
+                       or toc_title_match_key(normalize_toc_source_label(re.sub(r"<sup\b[^>]*>\d+</sup>", "", candidate["raw"], flags=re.IGNORECASE))) == resolved_key
+                   )]
             for name, inventory in inventories.items()
         }
         candidate_kind = "heading" if any(
