@@ -275,7 +275,7 @@ def test_semantic_issue_is_hard_block_and_preserves_polished_evidence(tmp_path):
     report = validate_markdown_subagent(
         tmp_path, "polish", source_dir, target_dir,
         create_validated_copy=True, require_footnote_semantic_review=True,
-        allow_review_warnings=True,
+        allow_review_warnings=True, human_decision_id="test-human-ack",
     )
     assert report["all_passed"] is False
     assert any(item.get("kind") == "polish_footnote_semantics" for item in report["invalid"])

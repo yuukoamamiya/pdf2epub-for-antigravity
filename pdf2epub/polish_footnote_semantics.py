@@ -7,7 +7,7 @@ and, when needed, the upstream footnote workflow.
 from __future__ import annotations
 
 import hashlib
-from pdf2epub.workflow_contracts import atomic_write_json, sha256_file
+from pdf2epub.workflow_contracts import sha256_file
 import json
 import re
 from pathlib import Path
@@ -19,6 +19,8 @@ SIDECAR_DIRECTORY = "polish_footnote_reviews"
 REFLOW_FILENAME = "polish_footnote_reflow.json"
 REFLOW_SCHEMA_VERSION = 1
 MAX_REFLOW_ROUNDS = 2
+_REFLOW_TASK = "polish_reflow"
+_REFLOW_KIND = "reflow"
 _FOOTNOTE_TOKEN = re.compile(r"\[\^([^\]\r\n]+)\]")
 _HEX = re.compile(r"^[0-9a-f]{64}$")
 _UPSTREAM_CLOSING_OUTCOMES = frozenset({
@@ -125,37 +127,48 @@ def semantic_context_sha256(
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _reflow_path(output_dir: Path) -> Path:
-    return Path(output_dir) / REFLOW_FILENAME
-
-
-def load_reflow_state(output_dir: Path) -> dict[str, Any]:
-    """Load the durable polish->footnote reflow receipt.
-
-    The receipt lives outside the polish manifest so deleting and rebuilding
-    the manifest cannot reset how many reflow rounds a file already consumed.
-    """
-    path = _reflow_path(output_dir)
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        payload = {}
-    if not isinstance(payload, Mapping):
-        payload = {}
-    files = payload.get("files")
+def _reflow_signals(filename: str, *, source_sha256: str = "", task_ids: Any = ()) -> dict[str, Any]:
+    detail = {"source_sha256": str(source_sha256 or "")}
+    ids = sorted({str(item) for item in (task_ids or []) if str(item)})
+    if ids:
+        detail["task_ids"] = ids
     return {
-        "schema_version": REFLOW_SCHEMA_VERSION,
-        "max_rounds": MAX_REFLOW_ROUNDS,
-        "files": {
-            str(name): dict(entry)
-            for name, entry in (files.items() if isinstance(files, Mapping) else [])
-            if isinstance(entry, Mapping)
-        },
+        "file": str(filename),
+        "kind": _REFLOW_KIND,
+        "evidence_hash": str(source_sha256 or ""),
+        "detail": detail,
     }
 
 
-def _write_reflow_state(output_dir: Path, state: Mapping[str, Any]) -> None:
-    atomic_write_json(_reflow_path(output_dir), dict(state))
+def _reflow_projection(entry: Any) -> dict[str, Any]:
+    detail = getattr(entry, "detail", {}) or {}
+    return {
+        "rounds": int(getattr(entry, "retry_count", 0) or 0),
+        "escalated": bool(getattr(entry, "is_human_required", False)),
+        "state": str(getattr(entry, "state", "") or ""),
+        "source_sha256": str(detail.get("source_sha256") or ""),
+        "task_ids": list(detail.get("task_ids") or []),
+        "human_decision_id": getattr(entry, "human_decision_id", None),
+    }
+
+
+def load_reflow_state(output_dir: Path) -> dict[str, Any]:
+    """Project the shared escalation receipt onto polish reflow rounds.
+
+    The rounds live in ``review_escalation.json`` so deleting and rebuilding the
+    polish manifest cannot reset how many reflow rounds a file consumed.
+    """
+    from .review_escalation import load_review_escalations
+
+    files: dict[str, dict[str, Any]] = {}
+    for (task, filename, kind), entry in load_review_escalations(output_dir).items():
+        if task == _REFLOW_TASK and kind == _REFLOW_KIND and entry.state != "resolved":
+            files[filename] = _reflow_projection(entry)
+    return {
+        "schema_version": REFLOW_SCHEMA_VERSION,
+        "max_rounds": MAX_REFLOW_ROUNDS,
+        "files": files,
+    }
 
 
 def record_reflow_round(
@@ -168,44 +181,45 @@ def record_reflow_round(
     """Count one polish->footnote reflow round for a file.
 
     ``escalated`` becomes true once the configured bound is exceeded.  The
-    counter is content-addressed by file only; the recorded source hash exists
-    for audit, so a Reviewer rewrite that keeps reporting an issue still counts
-    as another round instead of silently restarting the loop.
+    counter is keyed by file only; the recorded source hash exists for audit, so
+    a Reviewer rewrite that keeps reporting an issue still counts as another
+    round instead of silently restarting the loop.
     """
-    state = load_reflow_state(output_dir)
-    entry = dict(state["files"].get(str(filename)) or {})
-    entry["rounds"] = int(entry.get("rounds") or 0) + 1
-    if source_sha256:
-        entry["source_sha256"] = str(source_sha256)
-    ids = sorted({str(item) for item in (task_ids or []) if str(item)})
-    if ids:
-        entry["task_ids"] = ids
-    entry["escalated"] = entry["rounds"] > MAX_REFLOW_ROUNDS
-    state["files"][str(filename)] = entry
-    _write_reflow_state(output_dir, state)
-    return dict(entry)
+    from .review_escalation import record_review_signals
+
+    recorded = record_review_signals(
+        output_dir,
+        task=_REFLOW_TASK,
+        signals=[_reflow_signals(filename, source_sha256=source_sha256, task_ids=task_ids)],
+        # Two full reflow rounds are allowed; the third detection escalates.
+        escalate_after=MAX_REFLOW_ROUNDS + 1,
+        increment_same_hash=True,
+    )
+    entry = recorded.get((_REFLOW_TASK, str(filename), _REFLOW_KIND))
+    return _reflow_projection(entry) if entry is not None else {"rounds": 0, "escalated": False}
 
 
 def clear_reflow_round(output_dir: Path, filename: str) -> None:
     """Drop a converged file's reflow counter after a clean semantic review."""
-    state = load_reflow_state(output_dir)
-    if str(filename) in state["files"]:
-        state["files"].pop(str(filename), None)
-        _write_reflow_state(output_dir, state)
+    from .review_escalation import resolve_signals
+
+    resolve_signals(
+        output_dir,
+        task=_REFLOW_TASK,
+        signals=[{"file": str(filename), "kind": _REFLOW_KIND}],
+    )
 
 
 def reset_reflow_round(output_dir: Path, filename: str, *, decision_id: str = "") -> None:
     """Reset one escalated file after an explicit human decision."""
-    state = load_reflow_state(output_dir)
-    entry = state["files"].get(str(filename))
-    if not isinstance(entry, dict):
-        return
-    entry["rounds"] = 0
-    entry["escalated"] = False
-    if decision_id:
-        entry["human_decision_id"] = str(decision_id)
-    state["files"][str(filename)] = entry
-    _write_reflow_state(output_dir, state)
+    from .review_escalation import authorize_retry
+
+    authorize_retry(
+        output_dir,
+        task=_REFLOW_TASK,
+        files=[str(filename)],
+        human_decision_id=str(decision_id or "operator-retry-authorized"),
+    )
 
 
 def escalated_reflow_files(output_dir: Path) -> dict[str, dict[str, Any]]:

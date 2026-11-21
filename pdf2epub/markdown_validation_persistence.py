@@ -532,6 +532,10 @@ def _sync_partial_polish_into_full_report(
 
     total = int(full.get("total") or 0)
     allow_warnings = bool(full.get("allow_review_warnings") or partial_report.get("allow_review_warnings"))
+    if partial_report.get("review_warnings_acknowledged"):
+        full["review_warnings_acknowledged"] = True
+        full["allow_review_warnings"] = True
+        full["human_decision_id"] = partial_report.get("human_decision_id")
     full["all_passed"] = bool(
         total > 0
         and len(full["valid_files"]) == total
@@ -614,6 +618,7 @@ def persist_validation_report(
                     report.get("allow_review_warnings")
                     and any(item.get("file") == name for item in report["review_required"])
                 ),
+                "human_decision_id": report.get("human_decision_id"),
                 "polish_content_integrity": polish_content_integrity.get(name),
                 "polish_structure_audit": polish_structure_audits.get(name),
                 "polish_footnote_semantic_review": report.get("polish_footnote_semantic_reviews", {}).get(name),

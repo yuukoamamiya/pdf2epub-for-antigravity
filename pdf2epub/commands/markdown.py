@@ -49,6 +49,11 @@ def _pdf_file_role_sources(output_dir: Path) -> dict[str, dict[str, Any]]:
     return {name: dict(record["role_origin"]) for name, record in load_pdf_file_role_details(output_dir).items()}
 
 
+def _human_decision_id(args) -> str | None:
+    value = str(getattr(args, "human_decision_id", "") or "").strip()
+    return value or None
+
+
 def polish_command(args):
     """Prepare a local Markdown hand-off for a polishing Subagent."""
     return _prepare_pdf_markdown_task(args, "polish")
@@ -319,6 +324,12 @@ def _prepare_pdf_markdown_task(args, task: str):
             "dry-run must not write manifests, prompts, hand-offs, or checkpoints"
         )
         return 1
+    if getattr(args, "retry_after_human_review", False) and not _human_decision_id(args):
+        logger.error(
+            "--retry-after-human-review is one explicit human adjudication action "
+            "and requires --human-decision-id."
+        )
+        return 1
 
     dynamic_attestation = None
     if task == "translate":
@@ -396,7 +407,9 @@ def _prepare_pdf_markdown_task(args, task: str):
                     )
                     return 1
                 for name in sorted(escalated):
-                    reset_reflow_round(output_dir, name)
+                    reset_reflow_round(
+                        output_dir, name, decision_id=_human_decision_id(args) or "",
+                    )
                 logger.warning(
                     "Human decision accepted; reset the bounded polish->footnote reflow counter for: "
                     + ", ".join(sorted(escalated))
@@ -486,6 +499,7 @@ def _prepare_pdf_markdown_task(args, task: str):
             allow_human_review_retry=bool(
                 getattr(args, "retry_after_human_review", False)
             ),
+            human_decision_id=_human_decision_id(args),
             file_roles=load_pdf_file_roles(output_dir) if task in {"translate", "polish"} else None,
             file_role_sources=_pdf_file_role_sources(output_dir) if task in {"translate", "polish"} else None,
             context_files=context_files or None,
@@ -687,6 +701,12 @@ def _validate_pdf_markdown_task_impl(args, task: str, *, context=None):
     if check_only and not getattr(args, "file", None):
         logger.error("--check-only requires --file")
         return 1
+    if getattr(args, "allow_review_warnings", False) and not _human_decision_id(args):
+        logger.error(
+            "--allow-review-warnings is one explicit human adjudication action and "
+            "requires --human-decision-id."
+        )
+        return 1
     context = context or load_book_context(args, f"{task}-validate", init_logging=not check_only)
     if context is None:
         return 1
@@ -771,6 +791,7 @@ def _validate_pdf_markdown_task_impl(args, task: str, *, context=None):
         allow_review_warnings=bool(
             getattr(args, "allow_review_warnings", False)
         ),
+        human_decision_id=_human_decision_id(args),
         dynamic_terminology_config=config if task == "translate" else None,
         require_footnote_semantic_review=(task == "polish" and footnote_validation_enabled),
     )
@@ -938,9 +959,10 @@ def _validate_pdf_markdown_task_impl(args, task: str, *, context=None):
         "review_warnings_acknowledged"
     ):
         logger.error(
-            "Human review required: the same review signal persisted after a "
-            "Subagent retry. Stop automatic retries and ask for a decision; "
-            "do not use --allow-review-warnings without that decision."
+            "Human review required: the persisted review-escalation receipt shows "
+            "these signals already survived a Subagent retry. Stop automatic retries "
+            "and make one explicit decision; then rerun with --human-decision-id and "
+            "either --retry-after-human-review or --allow-review-warnings."
         )
         for item in report["human_review_required"][:20]:
             logger.error(
@@ -949,8 +971,9 @@ def _validate_pdf_markdown_task_impl(args, task: str, *, context=None):
             )
     if report.get("review_warnings_acknowledged"):
         logger.warning(
-            "Review warnings were explicitly acknowledged; continuing and staging "
-            "the reviewed files."
+            "Review warnings were explicitly acknowledged by human decision "
+            f"'{report.get('human_decision_id')}'; continuing and staging the "
+            "reviewed files."
         )
     if report["all_passed"]:
         if check_only:

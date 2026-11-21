@@ -10,6 +10,7 @@ from .batching_service import markdown_files
 from .markdown_validation_context import load_markdown_validation_context
 from .markdown_validation_audit import audit_markdown_files
 from .markdown_validation_state import resolve_review_state
+from .review_escalation import load_review_escalations, record_review_signals
 from .markdown_validation_persistence import (
     begin_validation_io,
     capture_pdf_resume_contexts,
@@ -37,6 +38,7 @@ def validate_markdown_subagent(
     selected_files: Optional[Iterable[str]] = None,
     target_language: Optional[str] = None,
     allow_review_warnings: bool = False,
+    human_decision_id: Optional[str] = None,
     protected_toc_titles: Optional[Iterable[str]] = None,
     continuation_toc_titles: Optional[
         Mapping[str, Iterable[str]]
@@ -56,6 +58,7 @@ def validate_markdown_subagent(
         selected_files=selected_files,
         target_language=target_language,
         allow_review_warnings=allow_review_warnings,
+        human_decision_id=human_decision_id,
         protected_toc_titles=protected_toc_titles or (),
         continuation_toc_titles=continuation_toc_titles,
         require_footnote_semantic_review=require_footnote_semantic_review,
@@ -65,8 +68,13 @@ def validate_markdown_subagent(
     sources = context.sources
     partial = context.partial
     allow_review_warnings = context.allow_review_warnings
+    human_decision_id = context.human_decision_id
     previous_review_files = set(context.review_snapshot.files)
-    previous_review_keys = set(context.review_snapshot.keys)
+    previous_review_files.update(
+        filename
+        for (signal_task, filename, _kind) in load_review_escalations(context.paths.output_dir)
+        if signal_task == task
+    )
     protected_workspace_blocked = list(context.review_snapshot.protected_workspace_blocked)
     task = context.options.task
     normalized_roles = dict(context.options.file_roles)
@@ -210,8 +218,65 @@ def validate_markdown_subagent(
             {"file": name, "reason": "unexpected extra target file"}
             for name in extras
         )
+    if allow_review_warnings and not str(human_decision_id or "").strip():
+        raise ValueError(
+            "acknowledging review warnings requires an explicit --human-decision-id"
+        )
+    review_signals = [
+        {
+            "file": str(item.get("file") or ""),
+            "kind": str(item.get("kind") or ""),
+            "evidence_hash": str(
+                target_sha256.get(str(item.get("file") or ""))
+                or source_sha256.get(str(item.get("file") or ""))
+                or ""
+            ),
+        }
+        for item in review_required
+        if isinstance(item, Mapping) and item.get("file") and item.get("kind")
+    ]
+    # A read-only self-check must not advance the persisted retry budget.
+    persist_escalation = not (context.partial and not context.create_validated_copy)
+    if persist_escalation:
+        recorded = record_review_signals(
+            context.paths.output_dir,
+            task=task,
+            signals=review_signals,
+            scope_files=[source.name for source in sources],
+            human_decision_id=human_decision_id,
+            acknowledge=bool(allow_review_warnings),
+        )
+        escalation_rows = [
+            {
+                "signal_id": item.signal_id,
+                "file": item.file,
+                "kind": item.kind,
+                "state": item.state,
+                "retry_count": item.retry_count,
+                "human_decision_id": item.human_decision_id,
+            }
+            for item in recorded.values()
+        ]
+    else:
+        prior = load_review_escalations(context.paths.output_dir)
+        escalation_rows = [
+            {
+                "signal_id": item.signal_id,
+                "file": item.file,
+                "kind": item.kind,
+                "state": item.state,
+                "retry_count": item.retry_count,
+                "human_decision_id": item.human_decision_id,
+            }
+            for (signal_task, _name, _kind), item in prior.items()
+            if signal_task == task
+            and any(
+                signal["file"] == item.file and signal["kind"] == item.kind
+                for signal in review_signals
+            )
+        ]
     review_state = resolve_review_state(
-        review_required, missing, invalid, previous_review_files, previous_review_keys
+        review_required, missing, invalid, escalation_rows
     )
     review_required_files = list(review_state.review_required_files)
     human_review_required = list(review_state.human_review_required)
@@ -326,6 +391,8 @@ def validate_markdown_subagent(
         "human_review_required_files": human_review_required_files,
         "previous_review_files": sorted(previous_review_files),
         "allow_review_warnings": bool(allow_review_warnings),
+        "human_decision_id": str(human_decision_id).strip() or None,
+        "review_escalation": escalation_rows,
         "review_warnings_acknowledged": bool(
             allow_review_warnings and review_required
         ),

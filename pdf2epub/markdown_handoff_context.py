@@ -33,6 +33,7 @@ class MarkdownHandoffRequest:
     prompt_context_files: Optional[Mapping[str, Path]] = None
     declared_files: Optional[Iterable[str]] = None
     allow_human_review_retry: bool = False
+    human_decision_id: Optional[str] = None
     secondary_source_dir: Optional[Path] = None
     visual_review_dir: Optional[Path] = None
     review_output_dir: Optional[Path] = None

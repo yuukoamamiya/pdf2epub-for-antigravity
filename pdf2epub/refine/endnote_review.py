@@ -384,6 +384,7 @@ def validate_endnote_definition_decisions(
 
     seen: set[tuple[str, int, str, int]] = set()
     normalized: list[dict[str, Any]] = []
+    human_review_required: list[str] = []
     for raw in decisions:
         if not isinstance(raw, Mapping):
             errors.append("each endnote definition decision must be an object")
@@ -414,10 +415,44 @@ def validate_endnote_definition_decisions(
             errors.append(f"inline endnote decision must include kind and column at {identity[0]}:{identity[1]}")
             continue
         if role in _UNRESOLVED_ROLES:
-            errors.append(
-                f"endnote definition decision is unresolved at "
-                f"{identity[0]}:{identity[1]}; choose definition or continuation"
+            from ..review_escalation import record_review_signals
+
+            item = expected[identity]
+            evidence = "\0".join((
+                identity[0],
+                str(identity[1]),
+                identity[2],
+                str(identity[3]),
+                str(item.get("line_text") or ""),
+                str(item.get("previous_line") or ""),
+                str(item.get("next_line") or ""),
+            ))
+            persisted = record_review_signals(
+                output_dir,
+                task="endnote",
+                signals=[{
+                    "file": identity[0],
+                    "kind": f"endnote_definition:{identity[1]}:{identity[2]}:{identity[3]}",
+                    "evidence_hash": hashlib.sha256(evidence.encode("utf-8")).hexdigest(),
+                }],
+                increment_same_hash=False,
             )
+            entry = persisted.get((
+                "endnote",
+                identity[0],
+                f"endnote_definition:{identity[1]}:{identity[2]}:{identity[3]}",
+            ))
+            if entry is not None and entry.is_human_required:
+                human_review_required.append(f"{identity[0]}:{identity[1]}")
+                errors.append(
+                    f"endnote definition decision already survived a review at "
+                    f"{identity[0]}:{identity[1]}; human review is required"
+                )
+            else:
+                errors.append(
+                    f"endnote definition decision is unresolved at "
+                    f"{identity[0]}:{identity[1]}; choose definition or continuation"
+                )
             continue
         if role not in DECISION_ROLES:
             errors.append(
@@ -452,11 +487,34 @@ def validate_endnote_definition_decisions(
             f"missing endnote definition decision for {identity[0]}:{identity[1]}:{identity[2]}:{identity[3]}"
         )
 
+    if normalized:
+        from ..review_escalation import resolve_signals
+
+        resolve_signals(
+            output_dir,
+            task="endnote",
+            signals=[
+                {
+                    "file": str(item.get("file") or ""),
+                    "kind": (
+                        f"endnote_definition:{item.get('line')}:{item.get('kind')}:"
+                        f"{item.get('column')}"
+                    ),
+                }
+                for item in normalized
+            ],
+        )
+
     result = {
         "schema_version": ENDNOTE_REVIEW_SCHEMA_VERSION,
         "valid": not errors,
-        "status": "validated" if not errors else "retry_required",
+        "status": (
+            "human_review_required" if human_review_required
+            else "validated" if not errors
+            else "retry_required"
+        ),
         "errors": errors,
+        "human_review_required": human_review_required,
         "decisions": normalized,
         "manifest_sha256": manifest_digest,
         "decisions_sha256": decisions_digest,

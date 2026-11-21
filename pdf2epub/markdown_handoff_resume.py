@@ -710,7 +710,16 @@ def decide_resume(
             "Human review is required before another automatic retry for: "
             + ", ".join(blocked)
             + ". Ask for a decision first, then use --retry-after-human-review "
-            "only if another Subagent retry is explicitly authorized."
+            "and --human-decision-id only if another Subagent retry is explicitly authorized."
+        )
+    if request.resume and blocked and request.allow_human_review_retry:
+        from .review_escalation import authorize_retry
+
+        authorize_retry(
+            output_dir,
+            task=task,
+            files=blocked,
+            human_decision_id=str(request.human_decision_id or "operator-retry-authorized"),
         )
     # Controlled bibliography/index units share the isolated-worker channel
     # with every other pending unit. Their JSON result is an audit attachment,

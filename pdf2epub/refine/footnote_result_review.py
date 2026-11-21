@@ -410,4 +410,64 @@ def validate_applied_result_audit_reviews(
     return reviews, tasks, errors
 
 
-__all__ = ["validate_applied_result_audit_reviews", "validate_result_audit_reviews"]
+def record_result_audit_outcomes(
+    output_dir: Any,
+    tasks: Sequence[Mapping[str, Any]],
+    reviews: Sequence[Mapping[str, Any]],
+    *,
+    decisions_digest: str = "",
+) -> dict[str, list[str]]:
+    """Persist scoped outcome escalation in the shared review-escalation receipt.
+
+    A ``review_required`` outcome retries once; when the reviewed content
+    changes and the outcome still needs review, the persisted signal escalates
+    to ``human_review_required``. Re-validating an unchanged decision file does
+    not consume another attempt.
+    """
+    from ..review_escalation import record_review_signals, resolve_signals
+
+    task_index = {
+        str(task.get("task_id")): task
+        for task in tasks if isinstance(task, Mapping) and task.get("task_id")
+    }
+    human: list[str] = []
+    review: list[str] = []
+    for item in reviews:
+        if not isinstance(item, Mapping):
+            continue
+        task_id = str(item.get("task_id") or "")
+        task = task_index.get(task_id, {})
+        filename = str(task.get("file") or "")
+        kind = f"result_audit:{task_id}"
+        outcome = str(item.get("outcome") or "")
+        if outcome == "review_required":
+            evidence = hashlib.sha256("\0".join((
+                task_id,
+                str(task.get("evidence_sha256") or ""),
+                outcome,
+                str(decisions_digest),
+            )).encode("utf-8")).hexdigest()
+            persisted = record_review_signals(
+                Path(output_dir),
+                task="footnote",
+                signals=[{"file": filename, "kind": kind, "evidence_hash": evidence}],
+            )
+            entry = persisted.get(("footnote", filename, kind))
+            if entry is not None and entry.is_human_required:
+                human.append(task_id)
+            else:
+                review.append(task_id)
+        elif task_id:
+            resolve_signals(
+                Path(output_dir),
+                task="footnote",
+                signals=[{"file": filename, "kind": kind}],
+            )
+    return {"human_review_required": human, "review_required": review}
+
+
+__all__ = [
+    "record_result_audit_outcomes",
+    "validate_applied_result_audit_reviews",
+    "validate_result_audit_reviews",
+]

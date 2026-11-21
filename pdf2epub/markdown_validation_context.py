@@ -52,6 +52,7 @@ class MarkdownValidationContext:
     partial: bool
     create_validated_copy: bool
     allow_review_warnings: bool
+    human_decision_id: str | None
     options: MarkdownAuditOptions
     review_snapshot: ManifestReviewSnapshot
 
@@ -101,6 +102,7 @@ def load_markdown_validation_context(
     selected_files: Iterable[str] | None = None,
     target_language: str | None = None,
     allow_review_warnings: bool = False,
+    human_decision_id: str | None = None,
     protected_toc_titles: Iterable[str] = (),
     continuation_toc_titles: Mapping[str, Iterable[str]] | None = None,
     require_footnote_semantic_review: bool = False,
@@ -165,5 +167,5 @@ def load_markdown_validation_context(
     )
     return MarkdownValidationContext(
         paths, sources, selected is not None, create_validated_copy,
-        allow_review_warnings, options, _manifest_snapshot(output_dir, task),
+        allow_review_warnings, human_decision_id, options, _manifest_snapshot(output_dir, task),
     )

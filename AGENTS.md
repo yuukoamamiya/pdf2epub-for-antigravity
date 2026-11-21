@@ -320,6 +320,15 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
   （如 TOC 的安全格式规范化、已确认的重复标题消歧和高置信度参考文献标题修复）不属于阻断。
   人工明确要求再试时，才可在准备命令上使用 `--retry-after-human-review`；该开关只允许再次
   派发 Subagent，不等于接受 warning。
+  所有 `review_required → human_review_required` 升级统一由 `pdf2epub/review_escalation.py`
+  记录到书籍工作区的 `review_escalation.json`：每个信号保存 `signal_id`、`first_seen_hash`、
+  `retry_count`、`state`（`retry`/`human_review_required`/`resolved`）。该回执独立于
+  hand-off manifest，删除并重建 manifest 不会重置计数；同一文件收敛后信号标记为 `resolved`，
+  再次出现时重新获得完整重试额度。`--allow-review-warnings` 和 `--retry-after-human-review`
+  都必须同时提供 `--human-decision-id`，二者共享同一个显式人工裁决：前者确认警告并把信号标记为
+  resolved，后者为该文件重置一次重试预算，裁决本身写入 `human_decisions` 审计。脚注侧的
+  reviewer `override`、`result_audit_reviews` 的 `review_required` 升级、集中尾注未决定义的重复
+  升级也走同一服务，不再依赖可被删除的决定文件或 `review_attempt` 计数。
 
 标准调度循环：
 
@@ -449,7 +458,7 @@ manifest/validation 进入 `human_review_required`，`polish --resume` 也拒绝
 `polish-validate` 还会报告高置信度的残留页码/页边行；这些候选默认进入
 `review_required`；首次出现时必须先让 Subagent 重新判断，复核后仍存在则升级为
 `human_review_required`，不授权本地脚本自动删除或继续。仅在明确确认合法保留后使用
-`--allow-review-warnings`。
+`--allow-review-warnings --human-decision-id <id>`。
 润色还必须保留源稿标题的规范化有序序列和每次出现；删掉重复标题、改变标题文字或交换同级标题都会被校验阻断。
 EPUB、轻小说和 TeX 流程不使用这一 PDF 润色阶段。
 

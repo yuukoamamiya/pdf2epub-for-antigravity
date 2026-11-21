@@ -1331,15 +1331,34 @@ def _link_marker_candidates(
 def _annotate_review_attempts(
     audit: dict[str, Any],
     prior_audit_reviews: Any,
+    *,
+    output_dir: Path | None = None,
 ) -> None:
-    """Apply the review-attempt counter and recompute the audit status."""
+    """Apply the review-attempt counter and recompute the audit status.
+
+    Attempts are persisted in ``review_escalation.json`` so rebuilding the
+    prepared manifest or the result audit cannot reset them.
+    """
     audit["findings"].sort(key=lambda item: str(item.get("task_id")))
     prior_outcomes = {
         str(item.get("task_id")): str(item.get("outcome") or "")
         for item in prior_audit_reviews if isinstance(item, Mapping)
     } if isinstance(prior_audit_reviews, list) else {}
     for task in audit["findings"]:
-        task["review_attempt"] = 2 if prior_outcomes.get(str(task.get("task_id"))) == "review_required" else 1
+        task_id = str(task.get("task_id"))
+        attempt = 2 if prior_outcomes.get(task_id) == "review_required" else 1
+        if output_dir is not None and task_id:
+            from ..review_escalation import escalation_for
+
+            persisted = escalation_for(
+                output_dir,
+                task="footnote",
+                file=str(task.get("file") or ""),
+                kind=f"result_audit:{task_id}",
+            )
+            if persisted is not None and persisted.retry_count >= 1:
+                attempt = 2
+        task["review_attempt"] = attempt
     escalated = bool(audit.get("polish_semantic_escalated"))
     audit["valid"] = not audit["findings"] and not audit.get("polish_semantic_blockers") and not escalated
     audit["status"] = (
@@ -1693,7 +1712,7 @@ def _resolve_result_audit(
     # definition it refers to; keep that linked candidate available for an
     # occurrence-level confirmed_footnote review without moving the body block.
     _link_marker_candidates(audit)
-    _annotate_review_attempts(audit, prior_audit_reviews)
+    _annotate_review_attempts(audit, prior_audit_reviews, output_dir=output_dir)
     _populate_visual_context(
         audit, report,
         output_dir=output_dir,

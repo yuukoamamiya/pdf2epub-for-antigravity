@@ -4,6 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
+from .review_escalation import STATE_HUMAN
+
 
 @dataclass(frozen=True)
 class ReviewState:
@@ -18,11 +20,21 @@ def resolve_review_state(
     review_required: Iterable[Mapping[str, Any]],
     missing: Iterable[str],
     invalid: Iterable[Mapping[str, Any]],
-    previous_review_files: Iterable[str],
-    previous_review_keys: Iterable[tuple[str, str]],
+    escalations: Iterable[Mapping[str, Any]] = (),
 ) -> ReviewState:
+    """Decide which review signals still retry and which need a human.
+
+    Escalation state comes from the persisted review-escalation receipt, not
+    from the hand-off manifest, so rebuilding the manifest cannot reset the
+    retry budget.  An absent signal retries; a signal whose persisted state is
+    ``human_review_required`` stops automatic retries.
+    """
     review = [dict(item) for item in review_required]
-    prev_files, prev_keys = set(previous_review_files), set(previous_review_keys)
+    human_signals = {
+        (str(item.get("file") or ""), str(item.get("kind") or ""))
+        for item in escalations
+        if isinstance(item, Mapping) and item.get("state") == STATE_HUMAN
+    }
     review_files = tuple(sorted({str(i["file"]) for i in review if i.get("file")}))
     human = tuple(
         {
@@ -34,11 +46,7 @@ def resolve_review_state(
             ),
         }
         for item in review
-        if str(item.get("file") or "") in prev_files
-        and (
-            not prev_keys
-            or (str(item.get("file") or ""), str(item.get("kind") or "")) in prev_keys
-        )
+        if (str(item.get("file") or ""), str(item.get("kind") or "")) in human_signals
     )
     human_keys = {(str(i.get("file") or ""), str(i.get("kind") or "")) for i in human}
     retry = [

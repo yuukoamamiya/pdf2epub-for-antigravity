@@ -486,9 +486,13 @@ def _register_markdown_commands(subparsers) -> None:
         "--retry-after-human-review",
         action="store_true",
         help=(
-            "Allow another Subagent retry only after a human has reviewed a "
-            "persistent warning"
+            "One explicit human adjudication: allow another Subagent retry after "
+            "reviewing a persistent warning; requires --human-decision-id"
         ),
+    )
+    polish_parser.add_argument(
+        "--human-decision-id",
+        help="Opaque identifier of the explicit human decision recorded in review_escalation.json",
     )
     polish_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.markdown", "polish_command"))
 
@@ -517,8 +521,13 @@ def _register_markdown_commands(subparsers) -> None:
         action="store_true",
         help=(
             "Explicitly acknowledge residual page-furniture warnings after "
-            "Subagent or human review and stage the files anyway"
+            "Subagent or human review and stage the files anyway; requires "
+            "--human-decision-id"
         ),
+    )
+    polish_validate_parser.add_argument(
+        "--human-decision-id",
+        help="Opaque identifier of the explicit human decision that acknowledged the warnings",
     )
     polish_validate_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.markdown", "polish_validate_command"))
 
@@ -585,9 +594,13 @@ def _register_markdown_commands(subparsers) -> None:
         "--retry-after-human-review",
         action="store_true",
         help=(
-            "Allow another Subagent retry only after a human has reviewed a "
-            "persistent warning"
+            "One explicit human adjudication: allow another Subagent retry after "
+            "reviewing a persistent warning; requires --human-decision-id"
         ),
+    )
+    translate_parser.add_argument(
+        "--human-decision-id",
+        help="Opaque identifier of the explicit human decision recorded in review_escalation.json",
     )
     translate_parser.add_argument(
         "--skip-entities",
@@ -645,8 +658,12 @@ def _register_markdown_commands(subparsers) -> None:
         action="store_true",
         help=(
             "Explicitly acknowledge bilingual-review warnings after Subagent or "
-            "human review and stage the files anyway"
+            "human review and stage the files anyway; requires --human-decision-id"
         ),
+    )
+    translate_validate_parser.add_argument(
+        "--human-decision-id",
+        help="Opaque identifier of the explicit human decision that acknowledged the warnings",
     )
     translate_validate_parser.add_argument(
         "--final",

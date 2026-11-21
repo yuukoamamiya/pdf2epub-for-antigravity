@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, Mapping, Optional
@@ -432,6 +433,13 @@ def validate_footnote_decisions(
     )
     errors.extend(decision_errors)
     human_review_required.extend(decision_review)
+    from ..review_escalation import record_footnote_adjudications
+
+    adjudications = record_footnote_adjudications(
+        output_dir,
+        decisions=normalized,
+        effective_decisions_version=EFFECTIVE_DECISIONS_VERSION,
+    )
     missing = sorted(required - seen)
     errors.extend(
         f"missing decision for review candidate {page}:{source}:{block}"
@@ -451,23 +459,29 @@ def validate_footnote_decisions(
         ordinary_decisions=normalized,
     )
     errors.extend(result_audit_errors)
-    audit_task_index = {
-        str(item.get("task_id")): item
-        for item in result_audit_tasks if isinstance(item, Mapping) and item.get("task_id")
-    }
-    audit_human_review_required = []
-    audit_review_required = []
-    for item in result_audit_reviews:
-        if item.get("outcome") != "review_required":
-            continue
-        task = audit_task_index.get(str(item.get("task_id")), {})
-        if int(task.get("review_attempt") or 1) >= 2:
-            audit_human_review_required.append(str(item.get("task_id")))
-        else:
-            audit_review_required.append(str(item.get("task_id")))
-            errors.append(
-                f"result audit task {item.get('task_id')} remains ambiguous; rerun footnote-prepare for another scoped visual review"
-            )
+    from ..review_escalation import record_footnote_adjudications
+    from .footnote_result_review import record_result_audit_outcomes
+
+    audit_outcomes = record_result_audit_outcomes(
+        output_dir,
+        result_audit_tasks,
+        result_audit_reviews,
+        decisions_digest=(
+            hashlib.sha256(decision_path.read_bytes()).hexdigest()
+            if decision_path.is_file() else ""
+        ),
+    )
+    audit_human_review_required = list(audit_outcomes["human_review_required"])
+    audit_review_required = list(audit_outcomes["review_required"])
+    for task_id in audit_human_review_required:
+        errors.append(
+            f"result audit task {task_id} already survived a scoped visual review; "
+            "human review is required before another automatic retry"
+        )
+    for task_id in audit_review_required:
+        errors.append(
+            f"result audit task {task_id} remains ambiguous; rerun footnote-prepare for another scoped visual review"
+        )
     human_review_required.extend(audit_human_review_required)
 
     if (
@@ -517,6 +531,7 @@ def validate_footnote_decisions(
         "continuation_reviews": continuation_decisions,
         "result_audit_reviews": result_audit_reviews,
         "result_audit_version": audit_data.get("schema_version") if isinstance(audit_data, Mapping) else None,
+        "footnote_adjudications": adjudications,
     }
     _attach_endnote_result(result, endnote_result)
     return _persist_result(

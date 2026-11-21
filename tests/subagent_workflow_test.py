@@ -595,6 +595,7 @@ def test_markdown_validation_requires_review_for_bilingual_warning(tmp_path: Pat
         source_dir,
         target_dir,
         allow_review_warnings=True,
+        human_decision_id="test-human-ack",
     )
     assert acknowledged["all_passed"] is True
     assert acknowledged["review_warnings_acknowledged"] is True
@@ -927,6 +928,7 @@ def test_polish_requires_review_for_page_furniture(tmp_path: Path):
         source_dir,
         target_dir,
         allow_review_warnings=True,
+        human_decision_id="test-human-ack",
     )
     assert acknowledged["all_passed"] is True
     assert (target_dir / "validated" / "unit.md").exists()
