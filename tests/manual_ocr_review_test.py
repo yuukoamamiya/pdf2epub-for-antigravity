@@ -337,3 +337,18 @@ def test_selection_inventory_is_numerically_ordered_past_page_999(tmp_path):
 
     assert contract["page_files"][-2:] == ["page_999.md", "page_1000.md"]
     assert set(contract["requested_files"]) == {"page_1000.md", "page_999.md"}
+
+
+def test_ocr_selection_source_mismatch_reports_location_and_hashes(tmp_path: Path) -> None:
+    from pdf2epub.ocr_review_selection import _read_raw_identity
+
+    context = _workspace(tmp_path / "mismatch")
+    (context.output_dir / "input_original.pdf").write_bytes(b"different source pdf")
+
+    with pytest.raises(ValueError) as info:
+        _read_raw_identity(context.output_dir)
+    message = str(info.value)
+    assert "pages/ocr_progress.json:1:1" in message
+    assert "manifest_sha=" in message
+    assert "source_sha=" in message
+    assert "ocr-pages --resume" in message

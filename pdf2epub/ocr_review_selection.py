@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from pdf2epub.workflow_contracts import atomic_write_json, sha256_file
+from pdf2epub.command_errors import located_reason
 
 
 OCR_REVIEW_SELECTION_SCHEMA_VERSION = 1
@@ -45,36 +46,85 @@ def _read_raw_identity(output_dir: Path) -> dict[str, Any]:
     if not pdf_path.is_file():
         pdf_path = output_dir / "input.pdf"
     if not pdf_path.is_file():
-        raise ValueError("the current source PDF is missing from the book workspace")
+        raise ValueError(located_reason(
+            output_dir / "input_original.pdf",
+            reason="the current source PDF is missing from the book workspace",
+            details="file=input_original.pdf",
+            recovery="ocr-pages --resume",
+        ))
     page_hashes = {
         path.name: sha256_file(path)
         for path in sorted(pages_dir.glob("page_*.md"))
         if path.is_file()
     }
     if not page_hashes:
-        raise ValueError("raw OCR pages are missing")
+        raise ValueError(located_reason(
+            pages_dir / "page_001.md",
+            reason="raw OCR pages are missing",
+            details="page=1 file=pages/page_001.md",
+            recovery="ocr-pages --resume",
+        ))
     try:
         progress = json.loads(
             (pages_dir / "ocr_progress.json").read_text(encoding="utf-8")
         )
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise ValueError("OCR progress is missing or invalid") from exc
+        raise ValueError(located_reason(
+            pages_dir / "ocr_progress.json",
+            reason=f"OCR progress is missing or invalid: {exc}",
+            details="file=pages/ocr_progress.json",
+            recovery="ocr-pages --resume",
+        )) from exc
     if not isinstance(progress, Mapping):
-        raise ValueError("OCR progress must be a JSON object")
+        raise ValueError(located_reason(
+            pages_dir / "ocr_progress.json",
+            reason="OCR progress must be a JSON object",
+            details=f"file=pages/ocr_progress.json type={type(progress).__name__}",
+            recovery="ocr-pages --resume",
+        ))
     source_pdf_sha256 = sha256_file(pdf_path)
     if progress.get("source_sha256") != source_pdf_sha256:
-        raise ValueError("OCR pages do not match the current source PDF; rerun ocr-pages --resume")
+        raise ValueError(located_reason(
+            pages_dir / "ocr_progress.json",
+            reason="OCR pages do not match the current source PDF",
+            details=(
+                f"page/file=pages/ocr_progress.json "
+                f"manifest_sha={progress.get('source_sha256') or 'missing'} "
+                f"source_sha={source_pdf_sha256}"
+            ),
+            recovery="ocr-pages --resume",
+        ))
     raw_total = progress.get("total_pages")
     if not isinstance(raw_total, int) or isinstance(raw_total, bool):
-        raise ValueError("OCR progress has an invalid total page count")
+        raise ValueError(located_reason(
+            pages_dir / "ocr_progress.json",
+            reason="OCR progress has an invalid total page count",
+            details=f"file=pages/ocr_progress.json value={raw_total!r}",
+            recovery="ocr-pages --resume",
+        ))
     try:
         total_pages = int(raw_total)
     except (TypeError, ValueError) as exc:
-        raise ValueError("OCR progress has an invalid total page count") from exc
+        raise ValueError(located_reason(
+            pages_dir / "ocr_progress.json",
+            reason="OCR progress has an invalid total page count",
+            details=f"file=pages/ocr_progress.json value={raw_total!r}",
+            recovery="ocr-pages --resume",
+        )) from exc
     expected_names = [f"page_{number:03d}.md" for number in range(1, total_pages + 1)]
     expected_sidecars = [f"page_{number:03d}.ocr.json" for number in range(1, total_pages + 1)]
     if total_pages <= 0 or len(page_hashes) != total_pages or set(page_hashes) != set(expected_names):
-        raise ValueError("OCR page inventory is incomplete or does not match progress")
+        missing_pages = sorted(set(expected_names) - set(page_hashes))
+        first = missing_pages[0] if missing_pages else "page_001.md"
+        raise ValueError(located_reason(
+            pages_dir / first,
+            reason="OCR page inventory is incomplete or does not match progress",
+            details=(
+                f"page/file=pages/{first} expected={total_pages} "
+                f"actual={len(page_hashes)} missing={missing_pages[:10]}"
+            ),
+            recovery="ocr-pages --resume",
+        ))
     from pdf2epub.ocr_progress import assess_progress
 
     readiness = assess_progress(
@@ -84,10 +134,12 @@ def _read_raw_identity(output_dir: Path) -> dict[str, Any]:
         require_sidecars=True,
     )
     if not readiness["ready"]:
-        raise ValueError(
-            "OCR pages are incomplete or stale; rerun ocr-pages --resume: "
-            + "; ".join(readiness["errors"][:3])
-        )
+        raise ValueError(located_reason(
+            pages_dir / "ocr_progress.json",
+            reason="OCR pages are incomplete or stale",
+            details="page/file=pages/ocr_progress.json; " + "; ".join(readiness["errors"][:3]),
+            recovery="ocr-pages --resume",
+        ))
     sidecar_hashes = {
         name: sha256_file(pages_dir / name) for name in expected_sidecars
     }

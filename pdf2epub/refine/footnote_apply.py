@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from ..workflow_contracts import atomic_write_json, atomic_write_text, sha256_file
+from ..command_errors import located_reason
 from .footnote_normalization_plan import (
     FootnoteNormalizationPlanningInput,
     build_footnote_normalization_plan,
@@ -52,23 +53,49 @@ def _write_normalized_units(
     """Preflight destination inventory, then atomically materialize all units."""
     source_hashes = markdown_inventory(source_dir)
     if source_hashes != dict(expected_source_hashes):
+        mismatched = sorted(
+            name
+            for name in set(source_hashes) | set(expected_source_hashes)
+            if source_hashes.get(name) != expected_source_hashes.get(name)
+        )
+        first = mismatched[0] if mismatched else "<ocr_markdown>"
         raise ValueError(
-            "ocr_markdown changed after footnote planning; rerun footnote-prepare "
-            "and footnote-validate"
+            located_reason(
+                source_dir / first,
+                reason="ocr_markdown changed after footnote planning",
+                details=(
+                    f"file={first} "
+                    f"manifest_sha={expected_source_hashes.get(first) or 'missing'} "
+                    f"source_sha={source_hashes.get(first) or 'missing'}"
+                ),
+                recovery="footnote-prepare then footnote-validate",
+            )
         )
     target_hashes = markdown_inventory(target_dir) if target_dir.is_dir() else {}
     extra_files = sorted(set(target_hashes) - set(source_hashes))
     if extra_files:
         raise ValueError(
-            "footnote_normalized contains stale Markdown units not present "
-            f"in ocr_markdown: {', '.join(extra_files[:20])}"
+            located_reason(
+                target_dir / extra_files[0],
+                reason=(
+                    "footnote_normalized contains stale Markdown units not present "
+                    "in ocr_markdown"
+                ),
+                details="files=" + ", ".join(extra_files[:20]),
+                recovery="remove stale normalized units then footnote-apply --resume",
+            )
         )
     if set(transformed) != set(source_hashes):
         missing = sorted(set(source_hashes) - set(transformed))
         extra = sorted(set(transformed) - set(source_hashes))
+        first = (missing or extra or ["<ocr_markdown>"])[0]
         raise ValueError(
-            "planned Markdown inventory does not match ocr_markdown "
-            f"(missing={missing[:10]}, extra={extra[:10]})"
+            located_reason(
+                source_dir / first,
+                reason="planned Markdown inventory does not match ocr_markdown",
+                details=f"missing={missing[:10]} extra={extra[:10]} file={first}",
+                recovery="footnote-prepare --resume",
+            )
         )
     target_dir.mkdir(parents=True, exist_ok=True)
     for name, text in transformed.items():
@@ -464,7 +491,13 @@ def apply_footnote_normalization(
             source_dir, target_dir, edit_plan.transformed_texts, edit_plan.source_hashes
         )
     except (OSError, UnicodeError, ValueError) as exc:
-        return _write_failure(output_dir, [f"could not write normalized source: {exc}"])
+        failing_file = getattr(exc, "filename", None) or source_dir
+        return _write_failure(output_dir, [located_reason(
+            failing_file,
+            reason=f"could not write normalized source: {exc}",
+            details=f"file={Path(str(failing_file)).name}",
+            recovery="footnote-apply --resume",
+        )])
 
     # Audit only after every unit has been freshly transformed from the
     # original OCR source. The audit report is written before the success
@@ -489,7 +522,13 @@ def apply_footnote_normalization(
 
         page_dir, _page_source_kind = select_refinement_pages(output_dir, config=config)
     except (OSError, ValueError, TypeError) as exc:
-        return _write_failure(output_dir, [f"could not load current page evidence for result audit: {exc}"])
+        failing_page = getattr(exc, "filename", None) or (output_dir / "pages")
+        return _write_failure(output_dir, [located_reason(
+            failing_page,
+            reason=f"could not load current page evidence for result audit: {exc}",
+            details=f"page/file={Path(str(failing_page)).name}",
+            recovery="ocr-pages --resume",
+        )])
     if page_dir.is_dir():
         for page_path in page_dir.glob("page_*.md"):
             try:

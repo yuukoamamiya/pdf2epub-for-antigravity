@@ -15,6 +15,7 @@ from pdf2epub.dynamic_terminology import (
     publication_target_inventory_complete,
 )
 from pdf2epub.workflow_contracts import sha256_file
+from pdf2epub.command_errors import located_reason
 from pdf2epub.glossary import _normalize_match_text
 from pdf2epub.pipeline_policy import PipelinePolicy
 
@@ -174,18 +175,43 @@ def validate_dynamic_terminology_units(
     )
     authoritative = None if authoritative_files is None else set(authoritative_files)
     if authoritative is not None and authoritative != set(source_inventory):
-        raise ValueError("current declared source inventory differs from the prepared manifest")
+        raise ValueError(located_reason(
+            output_dir / "<source-inventory>",
+            reason="current declared source inventory differs from the prepared manifest",
+            details=(
+                f"manifest_sha={hashlib.sha256(json.dumps(sorted(source_inventory), sort_keys=True).encode()).hexdigest()} "
+                f"source_sha={hashlib.sha256(json.dumps(sorted(authoritative), sort_keys=True).encode()).hexdigest()}"
+            ),
+            recovery="run translate --resume",
+        ))
     names = list(selected_files) if selected_files is not None else sorted(authoritative or source_inventory)
     if not names or any(name not in source_inventory for name in names) or (authoritative is not None and any(name not in authoritative for name in names)):
-        raise ValueError("selected files must be present in the authoritative source inventory")
+        bad_name = next((name for name in names if name not in source_inventory), "<none>")
+        raise ValueError(located_reason(
+            output_dir / bad_name,
+            reason="selected files must be present in the authoritative source inventory",
+            details=f"file={bad_name} manifest_sha={source_inventory.get(bad_name) or 'missing'} source_sha=missing",
+            recovery="run translate --resume",
+        ))
     files: dict[str, Any] = {}
     all_errors: list[dict[str, str]] = []
     if selected_files is None and authoritative is None:
         actual_sources = {path.name for path in source_dir.glob("*.md") if path.is_file()}
         if actual_sources != set(source_inventory):
+            manifest_digest = hashlib.sha256(
+                json.dumps(source_inventory, sort_keys=True).encode("utf-8")
+            ).hexdigest()
+            actual_digest = hashlib.sha256(
+                json.dumps({name: name for name in sorted(actual_sources)}, sort_keys=True).encode("utf-8")
+            ).hexdigest()
             all_errors.append({
                 "file": "<source-inventory>",
-                "error": "source unit inventory changed after handoff; rerun translate --resume",
+                "error": located_reason(
+                    source_dir / "<source-inventory>",
+                    reason="source unit inventory changed after handoff",
+                    details=f"manifest_sha={manifest_digest} source_sha={actual_digest}",
+                    recovery="run translate --resume",
+                ),
             })
     for name in names:
         errors: list[str] = []
@@ -196,7 +222,12 @@ def validate_dynamic_terminology_units(
                 raise ValueError("unit path must be a direct Markdown child")
             source_hash = _sha_file(source)
             if source_inventory.get(name) != source_hash:
-                errors.append("source hash differs from prepared manifest; prepare/resume again")
+                errors.append(located_reason(
+                    source,
+                    reason="source hash differs from prepared manifest",
+                    details=f"file={name} manifest_sha={source_inventory.get(name) or 'missing'} source_sha={source_hash}",
+                    recovery="run translate --resume",
+                ))
             base_path = None
             rel = base_contexts.get(name)
             if rel:
@@ -208,20 +239,52 @@ def validate_dynamic_terminology_units(
             )
             prepared_rel = unit_contexts.get(name)
             if not prepared_rel:
-                errors.append("prepared terminology unit context is missing; run translate --resume")
+                errors.append(located_reason(
+                    source,
+                    reason="prepared terminology unit context is missing",
+                    details=f"file={name} manifest_sha=missing source_sha={source_hash}",
+                    recovery="run translate --resume",
+                ))
             else:
                 prepared_path = _confined(output_dir, prepared_rel, "prepared unit context")
                 prepared_bytes = prepared_path.read_bytes()
                 expected_context_hash = unit_context_hashes.get(name)
-                if expected_context_hash != hashlib.sha256(prepared_bytes).hexdigest():
-                    errors.append("prepared unit context hash is stale or missing")
+                actual_context_hash = hashlib.sha256(prepared_bytes).hexdigest()
+                if expected_context_hash != actual_context_hash:
+                    errors.append(located_reason(
+                        prepared_path,
+                        reason="prepared unit context hash is stale or missing",
+                        details=(
+                            f"file={name} manifest_sha={expected_context_hash or 'missing'} "
+                            f"source_sha={actual_context_hash}"
+                        ),
+                        recovery="run translate --resume",
+                    ))
                 prepared = json.loads(prepared_bytes.decode("utf-8"))
                 if not isinstance(prepared, dict) or prepared.get("schema_version") != 1 or not isinstance(prepared.get("entries"), list):
-                    errors.append("prepared dynamic terminology context has unsupported schema")
+                    errors.append(located_reason(
+                        prepared_path,
+                        reason="prepared dynamic terminology context has unsupported schema",
+                        details=f"file={name} manifest_sha={expected_context_hash or 'missing'}",
+                        recovery="run translate --resume",
+                    ))
                 elif prepared.get("source_file") != name or prepared.get("language_pair") != {"source": source_language, "target": target_language}:
-                    errors.append("prepared unit context identity or language pair does not match this task")
+                    errors.append(located_reason(
+                        prepared_path,
+                        reason="prepared unit context identity or language pair does not match this task",
+                        details=f"file={name} manifest_sha={expected_context_hash or 'missing'}",
+                        recovery="run translate --resume",
+                    ))
                 elif prepared["entries"] != projection["entries"]:
-                    errors.append("effective terminology changed since handoff; run translate --resume")
+                    errors.append(located_reason(
+                        prepared_path,
+                        reason="effective terminology changed since handoff",
+                        details=(
+                            f"file={name} manifest_sha={expected_context_hash or 'missing'} "
+                            f"source_sha={actual_context_hash}"
+                        ),
+                        recovery="run translate --resume",
+                    ))
             target_hash = _sha_file(target) if target.is_file() else None
             attestation = {
                 "source_sha256": source_hash,

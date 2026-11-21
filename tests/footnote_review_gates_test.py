@@ -737,3 +737,24 @@ def test_open_parenthetical_continuation_accepts_uppercase_recovery(tmp_path, mo
     assert applied["valid"] is True, applied.get("errors")
     target = (tmp_path / "footnote_normalized" / "chapter_1.md").read_text(encoding="utf-8")
     assert "Hegel closes the parenthetical)." in target
+
+
+def test_normalized_unit_inventory_error_reports_file_line_and_hashes(tmp_path):
+    from pdf2epub.refine.footnote_apply import _write_normalized_units
+
+    source_dir = tmp_path / "ocr_markdown"
+    source_dir.mkdir()
+    (source_dir / "chapter.md").write_text("New source body.", encoding="utf-8")
+
+    with pytest.raises(ValueError) as info:
+        _write_normalized_units(
+            source_dir,
+            tmp_path / "footnote_normalized",
+            {"chapter.md": "New source body."},
+            {"chapter.md": "0" * 64},
+        )
+    message = str(info.value)
+    assert "chapter.md:1:1" in message
+    assert "manifest_sha=" in message
+    assert "source_sha=" in message
+    assert "footnote-prepare" in message

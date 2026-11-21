@@ -570,6 +570,10 @@ def _build_real_publish_fixture(tmp_path, *, retranslate_file=None):
     )
     assert stale["valid"] is False
     assert any("run translate --resume" in item["error"] for item in stale["errors"])
+    assert any(
+        "manifest_sha=" in item["error"] and "source_sha=" in item["error"]
+        for item in stale["errors"]
+    )
     (target / "part1.md").write_text("社会形式，在前一章出现", encoding="utf-8")
     refreshed_hash_only = validation.validate_dynamic_terminology_units(
         output, task="translate", source_dir=source, target_dir=target, config=config,
