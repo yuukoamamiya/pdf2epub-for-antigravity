@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from pdf2epub.workflow_contracts import posix_path
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 from .batching_service import (
@@ -263,7 +264,7 @@ def _write_worker_glossary_context(
     if len(assignment_sha256) != 64:
         raise ValueError("worker context requires a validated assignment SHA-256")
     dynamic_mode = any(
-        "/dynamic_terminology/unit_contexts/" in str(value).replace("\\", "/")
+        "/dynamic_terminology/unit_contexts/" in posix_path(value)
         for value in (unit_contexts or {}).values()
     )
     context_directory = (

@@ -27,7 +27,7 @@ from pdf2epub.terminology_memory import (
     publish_memory,
 )
 from pdf2epub.workflow_contracts import (
-    atomic_write_json, atomic_write_text, markdown_validation_schema_version,
+    atomic_write_json, atomic_write_text, markdown_validation_schema_version, posix_path,
 )
 
 
@@ -733,9 +733,9 @@ def _candidate_sidecars(
             candidates.append({
                 **row,
                 "_dispatch_wave": int(handoff.get("dispatch_wave", 1)),
-                "candidate_sidecar": str(relative).replace("\\", "/"),
+                "candidate_sidecar": relative.as_posix(),
                 "candidate_sidecar_sha256": _sha_bytes(sidecar.read_bytes()),
-                "worker_manifest": str(handoff["manifest"]).replace("\\", "/"),
+                "worker_manifest": Path(handoff["manifest"]).as_posix(),
                 "worker_manifest_sha256": _sha_bytes(scoped_path.read_bytes()),
             })
     return candidates

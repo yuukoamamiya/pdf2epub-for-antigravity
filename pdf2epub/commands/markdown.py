@@ -35,6 +35,7 @@ from pdf2epub.workflow_contracts import (
     markdown_validation_schema_version,
     atomic_write_json,
     atomic_write_text,
+    posix_path,
     relative_posix_path,
     sha256_file,
 )
@@ -610,7 +611,7 @@ def _validate_translation_entities(output_dir: Path, config: dict) -> dict:
             )
             source_dir, _ = _resolve_pdf_markdown_source(output_dir, config)
             expected_dir = relative_posix_path(source_dir, output_dir)
-            manifest_source_dir = str(entity_manifest.get("source_dir") or "").replace("\\", "/")
+            manifest_source_dir = posix_path(entity_manifest.get("source_dir") or "")
             if manifest_source_dir != expected_dir:
                 errors.append(
                     "entity glossary was extracted from a different source stage"

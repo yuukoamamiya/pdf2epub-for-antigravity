@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from pathlib import Path
+from pdf2epub.workflow_contracts import posix_path
 from pathlib import PurePosixPath
 from typing import Any, Mapping, Optional
 
@@ -243,7 +244,7 @@ def load_footnote_apply_inputs(
                     "endnote validation is missing its prepared source hashes; rerun footnote-validate"
                 )
             required_sources = {
-                str(item.get("file") or "").replace("\\", "/")
+                posix_path(item.get("file") or "")
                 for item in ambiguity_items
                 if isinstance(item, Mapping) and item.get("file")
             }

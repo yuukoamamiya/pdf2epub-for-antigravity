@@ -13,6 +13,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
+from pdf2epub.workflow_contracts import posix_path
 from pathlib import PurePosixPath
 from typing import Any, Mapping, Optional
 
@@ -84,7 +85,7 @@ def inline_endnote_candidates(line: str, line_number: int) -> list[dict[str, Any
 
 
 def _normalized_file(value: Any) -> str:
-    return str(value or "").replace("\\", "/")
+    return posix_path(value or "")
 
 
 def _definition_owner_key(line: str) -> str:

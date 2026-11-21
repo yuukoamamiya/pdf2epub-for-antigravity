@@ -139,7 +139,7 @@ class HTMLUnitStore:
                 raise ValueError(
                     f"Reconstructed XHTML path escapes final directory: {final_path}"
                 ) from exc
-            folded_final = str(final_path.relative_to(self.workspace.final_dir)).replace("\\", "/").casefold()
+            folded_final = final_path.relative_to(self.workspace.final_dir).as_posix().casefold()
             if folded_final in final_paths:
                 raise ValueError(f"Multiple translation units reconstruct to the same path: {final_path}")
             final_paths.add(folded_final)

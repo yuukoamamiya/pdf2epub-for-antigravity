@@ -34,6 +34,7 @@ from ..endnote_patterns import (
     UNICODE_DIGITS as _UNICODE_DIGITS,
     UNICODE_SUP_RE as _UNICODE_SUP_RE,
 )
+from pdf2epub.workflow_contracts import posix_path
 
 
 _KEY = r"[A-Za-z0-9_-]+"
@@ -118,7 +119,7 @@ def _definition_line(
 
 
 def _normalized_decision_file(value: Any) -> str:
-    return str(value or "").replace("\\", "/")
+    return posix_path(value or "")
 
 
 def _definition_decision_map(

@@ -18,7 +18,7 @@ def index_sidecar_paths(inventory: Mapping[str, Any], source_root: str) -> dict[
     result: dict[int, str] = {}
     prefix = f"{source_root}/"
     for raw_path in inventory:
-        rel = str(raw_path).replace("\\", "/")
+        rel = Path(raw_path).as_posix()
         match = _PAGE.fullmatch(rel.removeprefix(prefix))
         if not rel.startswith(prefix) or not match:
             raise ValueError(f"sidecar has an invalid {source_root} source mapping: {rel}")

@@ -65,6 +65,21 @@ def relative_posix_path(path: Path, root: Path) -> str:
     return Path(path).resolve().relative_to(Path(root).resolve()).as_posix()
 
 
+def posix_path(value: object) -> str:
+    """Serialize any path-like value with POSIX separators.
+
+    Unlike :func:`relative_posix_path`, this does not resolve against a
+    workspace root, so it is safe for hrefs, manifest strings, and inventory
+    keys that may already be POSIX, absolute, or empty.
+    """
+    if value is None:
+        return ""
+    text = str(value)
+    if not text:
+        return ""
+    return Path(text).as_posix()
+
+
 def atomic_write_text(path: Path, content: str, *, encoding: str = "utf-8") -> None:
     """Write text through a sibling temporary file and replace the target atomically."""
     target = Path(path)
