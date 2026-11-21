@@ -1,16 +1,22 @@
 # ==============================================================================
 # PDF 转 EPUB / 精修 / 翻译配置模版 (Subagent 协同流水线)
 # ==============================================================================
+# 公共默认（pipeline / OCR / 脚注 / Subagent 批处理 / refine）来自 config.base.yaml。
+# 顶层键浅合并：本文件声明了哪个顶层键，就整体替换基文件里的同名键。
+base: config.base.yaml
+
 title: "Your Book Title"
 input_pdf: "input/your_book.pdf"
+author: "Author Name"
 
-# Optional language-neutral PDF -> EPUB conversion.  With this mode, entity
+# Optional language-neutral PDF -> EPUB conversion. With this mode, entity
 # extraction, translated TOC, and translation-only readiness gates are skipped;
-# the validated original-language Markdown is packaged directly.  The polish
-# gate remains required for every PDF pipeline.
+# the validated original-language Markdown is packaged directly. The polish
+# gate remains required for every PDF pipeline. Override the base pipeline:
 # pipeline: epub_conversion
 # (The legacy alias mode: ocr_to_epub is also accepted.)
-# For conversion-only use, the minimal configuration is just:
+# For conversion-only use, the minimal configuration is:
+# base: config.base.yaml
 # title: "Your Book Title"
 # input_pdf: "input/your_book.pdf"
 # pipeline: epub_conversion
@@ -29,108 +35,26 @@ translation:
   # reference_glossaries:
   #   - path: "glossaries/german-classical-philosophy.yaml"
   #     id: german-classical-philosophy
-  # 通常保持 auto：它会选择当前通过校验的 polished_markdown/validated。原生文本 PDF 只跳过
-  # 视觉 OCR，仍需经过 polish 来识别软换行和真实段落；polished 可用于显式要求该阶段。
-  # ocr/native_text 仅为旧配置兼容和原始阶段诊断保留，不能通过普通翻译或打包门禁，不要用于
-  # 正常翻译/构建流程。
+  # auto 会选择当前通过校验的 polished_markdown/validated；ocr/native_text 仅为旧配置
+  # 兼容和诊断保留，不能通过普通翻译或打包门禁。
   source_stage: auto
 
 # 可选：手动覆盖书名页提取的书目信息
 # metadata:
-#   author: "Author Name"
 #   publisher: "Publisher Name"
 
-# Antigravity Subagent 模型（只作为 IDE 子 Agent 的任务提示，不调用任何 API）
-# 翻译、TOC/结构判断和脚注准备使用 gemini-4-hydrogen；常规润色、实体初筛和简单整页插图判断
-# 使用 gemini-3.8-flash。复杂脚注、多栏或段落边界润色由操作员根据结构证据设置单书覆盖。
-# 翻译优先级：task_models -> models[task] -> models.translation -> models.default。
-# 其他任务优先级：task_models -> models[task] -> models.default。
-subagent:
-  models:
-    translation: gemini-4-hydrogen
-    default: inherit
-  # Subagent 批处理建议；仅生成 manifest 和提示，不由 Python 自动调用模型。
-  batching:
-    max_files: 5
-    max_source_tokens: 12000
-    # Units larger than this are always assigned to a single Subagent.
-    single_file_max_bytes: 30000
-    max_concurrency: 3
-    # Pack adjacent short top-level chapters into one worker while preserving
-    # per-chapter terminology scopes.
-    pack_adjacent_chapters: true
-    max_chapters_per_worker: 3
-    # 可选：允许极短特殊单元（toc/notes/bibliography 等）彼此共用 worker；
-    # 特殊单元仍绝不与普通章节混排。默认 false。
-    pack_tiny_special_units: false
-  task_models:
-    refine: gemini-4-hydrogen
-    footnote-prepare: gemini-4-hydrogen
-    polish: gemini-3.8-flash
-    extract-entities: gemini-3.8-flash
-    illustration-prepare: gemini-3.8-flash
-
-# 本地凭据目录（整个目录已加入 .gitignore；不要把密钥写入 YAML）
-credentials:
-  local_dir: .secrets
-
-# OCR 设置 (默认 chandra，支持多模态 OCR)
-ocr:
-  backend: chandra
-  furigana_mode: attach # 日语振假名: attach / remove / ruby
-  # 可选的第二套 OCR。开启后逐页生成结果和共识报告，并把差异交给 Subagent 复核。
-  secondary:
-    enabled: false
-    # 双 OCR 会在第 1 页前估算总耗时；超过此阈值时先暂停，不会静默退回单 OCR。
-    performance:
-      max_estimated_seconds: 3600
-      estimated_seconds_per_page: 5.0
-  consensus:
-    common_miss:
-      sample_every: 20
-      density_ratio: 0.30
-      min_neighbor_chars: 800
-  backends:
-    chandra:
-      base_url: https://chandra.shenshei.fans/v1
-      model: chandra
-      max_workers: 4
-      dpi: 192
-      min_dimension: 1024
-      include_headers_footers: false
-      credentials_file: chandra-access.json
-      request_timeout: 300
-      max_retries: 6
-
-# 脚注页面区域的本地接受策略；清晰区域本地处理，异常区域自动生成视觉审计任务。
-footnotes:
-  auto_accept: true
-  # These are shortlist recall floors only. They do not classify a block as a
-  # footnote; page-relative tail layout and independent semantic evidence are
-  # required for local acceptance. Keep them permissive unless the review
-  # volume for a particular OCR backend is demonstrably too high.
-  bottom_ratio: 0.50
-  bottom_intersection_ratio: 0.08
-  # 原生文字 PDF 的字号证据门槛；只影响 native layout 候选。
-  native_max_font_ratio: 0.88
-
-# 整页彩页/插页复核（只影响疑似候选页，不会自动把普通插图移位）
-illustration:
-  review_dpi: 150
-  large_block_area: 0.55
-  max_text_chars: 180
-
-# Refine 与结构自愈设置
-refine:
-  # TOC analysis is done by an Antigravity workspace subagent.
-  max_tokens: 8000
-  # leaf（默认）为每个 TOC 叶子生成独立单元；top_level 或正整数 N 在指定
-  # 树深度合并单元，子标题仍作为多级导航节点投影到所属单元。
-  unit_granularity: leaf
-  # Split every very large refined unit after merging. Content roles such as
-  # notes/bibliography/index are assigned by the TOC Subagent, not here.
-  # The split files use the existing chapter_N.partM.md contract.
-  oversized_unit_split:
-    enabled: true
-    threshold_tokens: 15000
-    target_tokens: 12000
+# 单书覆盖示例（默认值见 config.base.yaml）：
+# subagent:
+#   models:
+#     translation: gemini-4-hydrogen
+#     default: gemini-3.8-flash
+#   batching:
+#     max_files: 8
+#     max_source_tokens: 15000
+#     max_concurrency: 4
+#   task_models:
+#     refine: gemini-4-hydrogen
+#     footnote-prepare: gemini-4-hydrogen
+#     polish: gemini-3.8-flash
+#     extract-entities: gemini-3.8-flash
+#     illustration-prepare: gemini-3.8-flash

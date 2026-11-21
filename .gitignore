@@ -3,6 +3,8 @@
 /.vscode/
 *.pdf
 /config*.yaml
+# Shared defaults are safe to publish; book-specific configs stay local.
+!/config.base.yaml
 *.epub
 *.env
 *__pycache__/

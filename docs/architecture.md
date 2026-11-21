@@ -80,6 +80,27 @@ Subagent 合同层
 `utils/common.py` 仅为旧调用方保留显式兼容导出；生产模块应直接导入上述职责 owner，避免公共入口
 重新聚合不相关职责或让纯路径工具依赖业务策略。
 
+#### 配置继承（`base:`）
+
+`utils/configuration.py` 支持在配置顶层写 `base: <相对路径>`。路径相对**声明它的配置文件**解析，
+基文件可以继续声明自己的 `base`，循环继承会以 `ValueError` 明确报错。合并规则是**顶层浅合并**：
+书目配置声明了哪个顶层键，就整体替换基文件里的同名键，不做逐层递归合并；要只覆盖
+`subagent.batching.max_concurrency`，必须把整个 `subagent` 段重新写出。解析完成后 `base`
+键不会保留在最终配置中，`validate_ocr_config` 和 `PipelinePolicy.from_config` 仍对合并结果
+做原有校验。
+
+仓库根目录的 `config.base.yaml` 提取了公共默认值（`pipeline`、`ocr`、`footnotes`、
+`subagent.models`/`batching`/`task_models`、`illustration`、`refine`）。两个模板
+`config.yaml.example` 与 `config_epub.yaml.example` 已按此方式迁移，只保留书名、输入文件、
+语言和少量单书覆盖。注意 `config.base.yaml` 通过 `.gitignore` 的 `!/config.base.yaml`
+例外进入版本库，其他 `config*.yaml` 仍是本地私有配置。
+
+其余书目配置**不强制迁移**：现有扁平配置继续有效，`base` 是可选字段。需要缩减重复配置时，
+按模板方式添加 `base: config.base.yaml` 并删掉与基文件完全相同的顶层段；若某个段与基文件
+只有部分子键不同，应整体重写该段，避免误以为会递归合并。不要跨书目共享含书目特有术语表或
+输入路径的配置段，也不要把密钥写入任何 `config*.yaml`。
+
+
 ### 2.1 CLI 层
 
 [`pdf2epub/cli.py`](../pdf2epub/cli.py) 只负责：

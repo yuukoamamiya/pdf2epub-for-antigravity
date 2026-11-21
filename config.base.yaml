@@ -1,0 +1,114 @@
+# ==============================================================================
+# pdf2epub 公共默认配置
+# ==============================================================================
+# 书目配置用一行 `base: config.base.yaml` 复用这里的默认值：
+#
+#   base: config.base.yaml
+#   title: "My Book"
+#   input_pdf: "input/my_book.pdf"
+#   translation:
+#     source_language: German
+#     target_language: Chinese
+#
+# 合并规则（pdf2epub/utils/configuration.py）：
+# - `base` 路径相对声明它的配置文件解析；基文件本身也可以声明 `base`。
+# - 顶层键浅合并：书目配置声明了某个键，就用书目配置里的整个值替换基文件里的同名值，
+#   不会逐层递归合并。要只改 subagent.batching 的一个子键，需要把整个 subagent 段
+#   重新写出。
+# - 解析后 `base` 键不会出现在最终配置里；循环继承会显式报错。
+# - 想从模板复制出一份能独立分发的配置时，把需要的段落从本文件复制进自己的配置即可。
+# ==============================================================================
+
+pipeline: translation
+
+# Antigravity Subagent 模型（只作为 IDE 子 Agent 的任务提示，不调用任何 API）
+# 翻译优先级：task_models -> models[task] -> models.translation -> models.default。
+subagent:
+  models:
+    translation: gemini-4-hydrogen
+    default: inherit
+  # Subagent 批处理建议；仅生成 manifest 和提示，不由 Python 自动调用模型。
+  batching:
+    max_files: 5
+    max_source_tokens: 12000
+    # Units larger than this are always assigned to a single Subagent.
+    single_file_max_bytes: 30000
+    max_concurrency: 3
+    pack_adjacent_chapters: true
+    max_chapters_per_worker: 3
+    pack_tiny_special_units: false
+  task_models:
+    refine: gemini-4-hydrogen
+    footnote-prepare: gemini-4-hydrogen
+    polish: gemini-3.8-flash
+    extract-entities: gemini-3.8-flash
+    illustration-prepare: gemini-3.8-flash
+
+# 本地凭据目录（整个目录已加入 .gitignore；不要把密钥写入 YAML）
+credentials:
+  local_dir: .secrets
+
+# OCR 设置 (默认 chandra，支持多模态 OCR)
+ocr:
+  backend: chandra
+  furigana_mode: attach # 日语振假名: attach / remove / ruby
+  # 可选的第二套 OCR。开启后逐页生成结果和共识报告，并把差异交给 Subagent 复核。
+  secondary:
+    enabled: false
+    # 双 OCR 会在第 1 页前估算总耗时；超过此阈值时先暂停，不会静默退回单 OCR。
+    performance:
+      max_estimated_seconds: 3600
+      estimated_seconds_per_page: 5.0
+  consensus:
+    common_miss:
+      sample_every: 20
+      density_ratio: 0.30
+      min_neighbor_chars: 800
+  backends:
+    chandra:
+      base_url: https://chandra.shenshei.fans/v1
+      model: chandra
+      max_workers: 4
+      dpi: 192
+      min_dimension: 1024
+      include_headers_footers: false
+      credentials_file: chandra-access.json
+      request_timeout: 300
+      max_retries: 6
+
+# 脚注页面区域的本地接受策略；清晰区域本地处理，异常区域自动生成视觉审计任务。
+footnotes:
+  mode: auto
+  auto_accept: true
+  bottom_ratio: 0.50
+  bottom_intersection_ratio: 0.08
+  # 原生文字 PDF 的字号证据门槛；只影响 native layout 候选。
+  native_max_font_ratio: 0.88
+
+# 整页彩页/插页复核（只影响疑似候选页，不会自动把普通插图移位）
+illustration:
+  review_dpi: 150
+  large_block_area: 0.55
+  max_text_chars: 180
+
+# Refine 与结构自愈设置
+refine:
+  max_tokens: 8000
+  unit_granularity: leaf
+  adaptive_page_limit:
+    initial_pages: 150
+    min_pages: 30
+  pdf_compression:
+    payload_limit_mb: 18
+    compress_if_exceeds: true
+    dpi: 50
+    quality: 40
+    grayscale: true
+  oversized_unit_split:
+    enabled: true
+    threshold_tokens: 15000
+    target_tokens: 12000
+    threshold_tokens_by_type:
+      index: 6000
+    target_tokens_by_type:
+      index: 4500

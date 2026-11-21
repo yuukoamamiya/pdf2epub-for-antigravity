@@ -1,6 +1,10 @@
 # ==============================================================================
 # EPUB 高保真翻译配置模版 (Subagent 协同流水线)
 # ==============================================================================
+# 公共默认（OCR / 脚注 / Subagent 模型与批处理）来自 config.base.yaml。
+# 顶层键浅合并：本文件声明了哪个顶层键，就整体替换基文件里的同名键。
+base: config.base.yaml
+
 title: "Your Book Title"
 input_epub: "input/your_book.epub"
 
@@ -16,32 +20,12 @@ translation:
   #   - path: "glossaries/german-classical-philosophy.yaml"
   #     id: german-classical-philosophy
 
-# Antigravity Subagent 模型（只作为 IDE 子 Agent 的任务提示，不调用任何 API）
-# 翻译、TOC/结构判断和脚注准备使用 gemini-4-hydrogen；常规润色、实体初筛和简单整页插图判断
-# 使用 gemini-3.8-flash。复杂脚注、多栏或段落边界润色由操作员根据结构证据设置单书覆盖。
+# Antigravity Subagent 模型（只作为 IDE 子 Agent 的任务提示，不调用任何 API）。
 # 翻译优先级：task_models -> models[task] -> models.translation -> models.default。
-# 其他任务优先级：task_models -> models[task] -> models.default。
-subagent:
-  models:
-    translation: gemini-4-hydrogen
-    default: inherit
-  # Subagent 批处理建议；长文件仍应按完整翻译单元拆分。
-  batching:
-    max_files: 5
-    max_source_tokens: 12000
-    max_concurrency: 3
-    # Pack adjacent short TOC branches into one worker while preserving
-    # per-chapter terminology scopes.
-    pack_adjacent_chapters: true
-    max_chapters_per_worker: 3
-    # 可选：允许极短特殊单元彼此共用 worker；特殊单元仍不与普通章节混排。
-    pack_tiny_special_units: false
-  task_models:
-    refine: gemini-4-hydrogen
-    footnote-prepare: gemini-4-hydrogen
-    polish: gemini-3.8-flash
-    extract-entities: gemini-3.8-flash
-    illustration-prepare: gemini-3.8-flash
+# 复杂脚注、多栏或段落边界润色由操作员根据结构证据设置单书覆盖：
+# subagent:
+#   task_models:
+#     polish: gemini-4-hydrogen
 
 # EPUB 构建与校验选项
 html_translation:
