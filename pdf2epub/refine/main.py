@@ -7,13 +7,13 @@ import re
 import shutil
 from copy import copy
 from pathlib import Path
-from typing import Any, List, Dict
+from typing import Any, List, Dict, Mapping
 from loguru import logger
 import tiktoken
 
 from ..utils.unit_id import generate_unit_id
 from ..utils.fingerprints import pages_fingerprint
-from ..workflow_contracts import atomic_write_json
+from ..workflow_contracts import atomic_write_json, schema_major_matches
 from .toc_tree import TOCNode, dict_list_to_toc_tree
 from .page_merger import PageMerger
 from .subagent_workflow import page_numbers, validate_toc_tree_data
@@ -23,6 +23,7 @@ from .toc_sanitization import sanitize_toc_titles
 from .unit_splitter import split_markdown_unit
 from .footnote_stitcher import scan_boundary_footnotes
 from .illustration_prepare import load_current_illustration_pages
+from .pdf_evidence import write_evidence_receipt
 from ..utils.ocr_artifacts import (
     clean_ocr_page_artifacts,
 )
@@ -42,6 +43,24 @@ DEFAULT_OVERSIZED_SPLIT_TARGETS_BY_TYPE = {"index": 4_500}
 # Kept as a compatibility alias for callers that imported the old private
 # helper; the implementation now lives in one shared utility.
 _pages_fingerprint = pages_fingerprint
+
+
+def _checkpoint_matches(
+    checkpoint: Any,
+    source_fingerprint: Any,
+) -> bool:
+    """Compare resume fingerprints, allowing a checkpoint schema minor bump."""
+    if not isinstance(checkpoint, Mapping) or not isinstance(source_fingerprint, Mapping):
+        return False
+    if not schema_major_matches(
+        checkpoint.get("schema"), source_fingerprint.get("schema")
+    ):
+        return False
+    return {
+        key: value for key, value in checkpoint.items() if key != "schema"
+    } == {
+        key: value for key, value in source_fingerprint.items() if key != "schema"
+    }
 
 
 def _insert_toc_chapter(toc_tree: List[TOCNode], toc_info: Dict) -> TOCNode:
@@ -388,7 +407,7 @@ class RefinedBreakdown:
         if resume and tree_progress_file.exists():
             progress_data = json.loads(tree_progress_file.read_text(encoding="utf-8"))
             checkpoint = progress_data.get("fingerprint")
-            if source_fingerprint and checkpoint == source_fingerprint:
+            if source_fingerprint and _checkpoint_matches(checkpoint, source_fingerprint):
                 logger.success(
                     f"Refined breakdown already complete: {len(progress_data.get('units', []))} units"
                 )
@@ -425,6 +444,15 @@ class RefinedBreakdown:
                 "book_metadata": book_metadata,
             },
         )
+        try:
+            write_evidence_receipt(
+                output_dir,
+                self.config,
+                pages_dir=pages_dir,
+                sidecar_dir=output_dir / "pages",
+            )
+        except (OSError, ValueError) as exc:
+            logger.warning(f"Could not write evidence receipt: {exc}")
         logger.success(f"Refined breakdown complete: {len(work_units)} units")
         return unit_metadata
 

@@ -7,7 +7,11 @@ from typing import Any, Mapping, Optional
 
 from ..workflow_contracts import schema_major_matches, sha256_file
 from .footnote_options import EFFECTIVE_FOOTNOTE_MODES, resolve_effective_footnote_mode
-from .pdf_evidence import pdf_evidence_mode, require_current_consensus
+from .pdf_evidence import (
+    evidence_receipt_is_current,
+    pdf_evidence_mode,
+    require_current_consensus,
+)
 from .footnote_contracts import FOOTNOTE_PREPARE_SCHEMA_VERSION
 from .footnote_page_evidence import page_sidecar_index
 from .layout_evidence import text_from_block
@@ -98,9 +102,19 @@ def validate_candidate_evidence(
         return True
 
     if verify_hashes:
-        hashes_current("sidecar_sha256")
+        receipt = report.get("evidence_receipt")
+        if isinstance(receipt, Mapping):
+            current, receipt_errors = evidence_receipt_is_current(
+                receipt, output_dir, config
+            )
+            if not current:
+                errors.extend(receipt_errors)
+        else:
+            hashes_current("sidecar_sha256")
     secondary_hashes = report.get("secondary_sidecar_sha256", {})
-    if evidence_mode == "two_ocr" and verify_hashes:
+    if evidence_mode == "two_ocr" and verify_hashes and not isinstance(
+        report.get("evidence_receipt"), Mapping
+    ):
         hashes_current("secondary_sidecar_sha256")
     elif secondary_hashes and evidence_mode != "two_ocr":
         errors.append("single-OCR candidate report unexpectedly contains secondary OCR files")

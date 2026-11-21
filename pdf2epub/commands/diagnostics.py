@@ -135,13 +135,35 @@ def _pdf_tree_status(output_dir: Path, config: Mapping[str, Any]) -> tuple[str, 
         return "pending", "tree_progress.json is invalid or lacks its input fingerprint"
     try:
         from pdf2epub.ocr_correction import select_refinement_pages
+        from pdf2epub.refine.pdf_evidence import (
+            evidence_receipt_is_current,
+            load_evidence_receipt,
+        )
         from pdf2epub.utils.fingerprints import pages_fingerprint
 
         current_toc = sha256_file(toc_path)
         pages_dir, _ = select_refinement_pages(output_dir, config=config)
-        current_pages = pages_fingerprint(pages_dir)
-        if fingerprint.get("toc_sha256") != current_toc or fingerprint.get("pages_sha256") != current_pages:
-            return "pending", "tree_progress.json is stale after a TOC or page change"
+        receipt = load_evidence_receipt(output_dir)
+        if receipt is not None:
+            current_evidence, evidence_errors = evidence_receipt_is_current(
+                receipt,
+                output_dir,
+                config,
+                pages_dir=pages_dir,
+                sidecar_dir=output_dir / "pages",
+            )
+            if not current_evidence:
+                return "pending", (
+                    "evidence receipt is stale: "
+                    + "; ".join(evidence_errors)
+                    + "; rerun refine-local"
+                )
+        else:
+            current_pages = pages_fingerprint(pages_dir)
+            if fingerprint.get("pages_sha256") != current_pages:
+                return "pending", "tree_progress.json is stale after a page change"
+        if fingerprint.get("toc_sha256") != current_toc:
+            return "pending", "tree_progress.json is stale after a TOC change"
         binding_path = output_dir / "illustration_bindings.json"
         expected_binding = fingerprint.get("illustration_bindings_sha256")
         actual_binding = sha256_file(binding_path) if binding_path.is_file() else None

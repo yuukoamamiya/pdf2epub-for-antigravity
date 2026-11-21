@@ -24,6 +24,7 @@ from .footnote_windows import (
     build_missing_continuation_reviews,
 )
 from .footnote_options import footnote_mode_warnings
+from .pdf_evidence import build_evidence_receipt
 
 
 def _attach_visual_evidence(
@@ -201,6 +202,7 @@ def build_footnote_report(
         "consensus_visual_review_pages": sorted({int(page) for page in consensus_review_pages}),
         "sidecar_sha256": dict(sidecar_hashes),
         "secondary_sidecar_sha256": dict(secondary_sidecar_hashes),
+        "evidence_receipt": build_evidence_receipt(output_dir, config).to_dict(),
         "pages": page_reports,
         "cross_page_windows": cross_page_windows,
         "continuation_chains": continuation_chains,

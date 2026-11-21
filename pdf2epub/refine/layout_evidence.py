@@ -87,6 +87,15 @@ def normalized_bbox(
     return _scale_to_page(bbox, page_box)
 
 
+def layout_sidecar_paths(pages_dir: Path) -> list[Path]:
+    """Return the sorted layout sidecars owned by an OCR page directory."""
+    return [
+        path
+        for path in Path(pages_dir).glob("page_*.ocr.json")
+        if path.is_file()
+    ]
+
+
 def load_layout_sidecar(
     path: Path,
     *,
@@ -135,6 +144,7 @@ def _scale_to_page(
 
 __all__ = [
     "bbox_from_value",
+    "layout_sidecar_paths",
     "load_layout_sidecar",
     "normalized_bbox",
     "text_from_block",

@@ -31,7 +31,12 @@ from .layout_evidence import (
     normalized_bbox as _normalised_bbox,
     text_from_block as _text_from_block,
 )
-from .pdf_evidence import pdf_evidence_mode, require_current_consensus
+from .pdf_evidence import (
+    build_evidence_receipt,
+    evidence_receipt_is_current,
+    pdf_evidence_mode,
+    require_current_consensus,
+)
 
 
 ILLUSTRATION_PREPARE_SCHEMA_VERSION = 1
@@ -481,6 +486,7 @@ def prepare_illustration_subagent(
                 if page > 0
             }
         ),
+        "evidence_receipt": build_evidence_receipt(output_dir, config).to_dict(),
         "status": report_status,
     }
     report_path = _write_report(output_dir, report)
@@ -717,13 +723,23 @@ def validate_illustration_decisions(
         atomic_write_json(output_dir / "illustration_validation.json", result)
         return result
 
-    source_pages, source_sidecars, source_secondary = _current_source_hashes(output_dir, report)
-    if source_pages != dict(report.get("source_page_hashes", {})):
-        errors.append("one or more source Markdown pages changed or disappeared")
-    if source_sidecars != dict(report.get("source_sidecar_hashes", {})):
-        errors.append("one or more OCR sidecars changed or disappeared")
-    if source_secondary != dict(report.get("source_secondary_hashes", {})):
-        errors.append("one or more secondary OCR files changed or disappeared")
+    receipt_recorded = report.get("evidence_receipt")
+    if isinstance(receipt_recorded, Mapping):
+        # One aggregate receipt replaces the per-file hash walk; a minor
+        # policy/schema bump stays current without touching page files.
+        current, receipt_errors = evidence_receipt_is_current(
+            receipt_recorded, output_dir, config
+        )
+        if not current:
+            errors.extend(receipt_errors)
+    else:
+        source_pages, source_sidecars, source_secondary = _current_source_hashes(output_dir, report)
+        if source_pages != dict(report.get("source_page_hashes", {})):
+            errors.append("one or more source Markdown pages changed or disappeared")
+        if source_sidecars != dict(report.get("source_sidecar_hashes", {})):
+            errors.append("one or more OCR sidecars changed or disappeared")
+        if source_secondary != dict(report.get("source_secondary_hashes", {})):
+            errors.append("one or more secondary OCR files changed or disappeared")
 
     decisions_path = output_dir / "illustration_decisions.json"
     decisions: dict[str, Any] = {}
@@ -780,6 +796,7 @@ def validate_illustration_decisions(
         "source_sidecar_hashes": report.get("source_sidecar_hashes", {}),
         "source_secondary_hashes": report.get("source_secondary_hashes", {}),
         "ocr_evidence_mode": report.get("ocr_evidence_mode"),
+        "evidence_receipt": report.get("evidence_receipt"),
         "decisions": decisions.get("decisions", []),
     }
     atomic_write_json(output_dir / "illustration_validation.json", result)
@@ -835,21 +852,33 @@ def load_current_illustration_pages(
         # A minor schema/policy bump is forward-compatible, and page hashes
         # cannot change the (empty) binding set.
         return set()
-    source_hashes = bindings.get("source_page_hashes")
-    if not isinstance(source_hashes, Mapping):
-        raise ValueError("illustration bindings have no source page hashes")
-    for name, expected in source_hashes.items():
-        path = output_dir / str(name)
-        if not path.is_file() or sha256_file(path) != str(expected):
-            raise ValueError(f"illustration binding is stale for {name}; rerun illustration-prepare")
-    for name, expected in bindings.get("source_sidecar_hashes", {}).items():
-        path = output_dir / str(name)
-        if not path.is_file() or sha256_file(path) != str(expected):
-            raise ValueError(f"illustration binding is stale for {name}; rerun illustration-prepare")
-    for name, expected in bindings.get("source_secondary_hashes", {}).items():
-        path = output_dir / str(name)
-        if not path.is_file() or sha256_file(path) != str(expected):
-            raise ValueError(f"illustration binding is stale for {name}; rerun illustration-prepare")
+    bindings_receipt = bindings.get("evidence_receipt")
+    if isinstance(bindings_receipt, Mapping):
+        current, receipt_errors = evidence_receipt_is_current(
+            bindings_receipt, output_dir, config
+        )
+        if not current:
+            raise ValueError(
+                "illustration binding is stale ("
+                + "; ".join(receipt_errors)
+                + "); rerun illustration-prepare"
+            )
+    else:
+        source_hashes = bindings.get("source_page_hashes")
+        if not isinstance(source_hashes, Mapping):
+            raise ValueError("illustration bindings have no source page hashes")
+        for name, expected in source_hashes.items():
+            path = output_dir / str(name)
+            if not path.is_file() or sha256_file(path) != str(expected):
+                raise ValueError(f"illustration binding is stale for {name}; rerun illustration-prepare")
+        for name, expected in bindings.get("source_sidecar_hashes", {}).items():
+            path = output_dir / str(name)
+            if not path.is_file() or sha256_file(path) != str(expected):
+                raise ValueError(f"illustration binding is stale for {name}; rerun illustration-prepare")
+        for name, expected in bindings.get("source_secondary_hashes", {}).items():
+            path = output_dir / str(name)
+            if not path.is_file() or sha256_file(path) != str(expected):
+                raise ValueError(f"illustration binding is stale for {name}; rerun illustration-prepare")
     pages: set[int] = set()
     for binding in bindings.get("bindings", []):
         if not isinstance(binding, Mapping) or binding.get("kind") != "full_page_insert":
@@ -906,6 +935,7 @@ def apply_illustration_bindings(
         "source_sidecar_hashes": validation.get("source_sidecar_hashes", {}),
         "source_secondary_hashes": validation.get("source_secondary_hashes", {}),
         "ocr_evidence_mode": validation.get("ocr_evidence_mode", "single_ocr"),
+        "evidence_receipt": validation.get("evidence_receipt"),
         "candidate_report_sha256": (
             _load_json(output_dir / "illustration_candidate_report.json", "illustration candidate report").get("report_sha256")
         ),
