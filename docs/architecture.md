@@ -1197,6 +1197,10 @@ commands.novel → NovelExtractor（小说正文提取） + HTMLEpubPipeline met
   casefold 冲突，扁平旧译文只在 basename 唯一时兼容。
 - `package_identity.py`：校验解码后的 package-relative ZIP 成员路径，并根据完整路径生成稳定、
   Windows 文件名安全的翻译单元 ID。
+- `archive_limits.py`：为 EPUB ZIP 中央目录的成员数、单成员展开字节数和总展开字节数提供
+  可注入的库级预算。解包在写入前预检声明值，并以有界流复制再次校验实际展开字节；直接 ZIP
+  解析器也在打开时预检，并累计有界读取的实际字节。默认值为 100,000 个成员、单成员 512 MiB、
+ 归档总展开 2 GiB；调用库 API 可传入 `EPUBArchiveLimits` 覆盖预算。
 - `extraction.py`：准备 XHTML 压缩单元、mapping、分片和提取 cache，并触发单独的 metadata
   handoff 准备；它拥有源正文提取和压缩阶段。
 - `metadata_preparation.py`：生成 `metadata_translation_source.json` 与 prompt，并管理该任务

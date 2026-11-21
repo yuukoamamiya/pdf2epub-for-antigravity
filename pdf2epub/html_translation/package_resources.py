@@ -16,11 +16,22 @@ from loguru import logger
 from pdf2epub.utils.paths import sanitize_filename
 from pdf2epub.utils.html_safety import sanitize_html_document
 from .package_identity import PACKAGE_PATH_MANIFEST, validate_package_relative_path
+from .archive_limits import (
+    DEFAULT_EPUB_ARCHIVE_LIMITS,
+    EPUBArchiveLimitError,
+    EPUBArchiveLimits,
+    validate_archive_limits,
+)
 
 
-def extract_epub(original_epub: Path, extract_dir: Path) -> None:
+def extract_epub(
+    original_epub: Path,
+    extract_dir: Path,
+    limits: EPUBArchiveLimits = DEFAULT_EPUB_ARCHIVE_LIMITS,
+) -> None:
     extract_dir.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(original_epub, 'r') as zf:
+        validate_archive_limits(zf, limits)
         root = Path(extract_dir).resolve()
         seen_members = {}
         for info in zf.infolist():
@@ -40,7 +51,44 @@ def extract_epub(original_epub: Path, extract_dir: Path) -> None:
                     f"EPUB members collide on Windows: {previous!r} and {member_name!r}"
                 )
             seen_members[folded] = member_name
-        zf.extractall(extract_dir)
+        total_written = 0
+        for info in zf.infolist():
+            if info.is_dir():
+                continue
+            member_name = validate_package_relative_path(info.filename)
+            target = root.joinpath(*Path(member_name).parts)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            resolved_target = target.resolve()
+            try:
+                resolved_target.relative_to(root)
+            except ValueError as exc:
+                raise ValueError(
+                    f"EPUB member escapes extraction directory: {info.filename!r}"
+                ) from exc
+            written = 0
+            fd, temporary_name = tempfile.mkstemp(
+                prefix=".epub-", suffix=".tmp", dir=resolved_target.parent
+            )
+            temporary_path = Path(temporary_name)
+            try:
+                with os.fdopen(fd, "wb") as destination, zf.open(info, "r") as source:
+                    while True:
+                        chunk = source.read(64 * 1024)
+                        if not chunk:
+                            break
+                        written += len(chunk)
+                        total_written += len(chunk)
+                        if written > limits.max_file_bytes:
+                            raise EPUBArchiveLimitError(
+                                f"EPUB member actual expanded size exceeds limit: {member_name!r}"
+                            )
+                        if total_written > limits.max_total_bytes:
+                            raise EPUBArchiveLimitError("EPUB actual total expanded size exceeds limit")
+                        destination.write(chunk)
+                os.replace(temporary_path, resolved_target)
+            finally:
+                # Preserve any pre-existing destination; clean only this attempt's temp.
+                temporary_path.unlink(missing_ok=True)
     logger.debug(f"Extracted EPUB to {extract_dir}")
 
 

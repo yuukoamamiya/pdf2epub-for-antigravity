@@ -13,6 +13,7 @@ Uses zipfile + lxml for direct EPUB parsing (no ebooklib dependency).
 import zipfile
 import posixpath
 import re
+from dataclasses import replace
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import unquote_to_bytes, urlsplit
@@ -20,6 +21,13 @@ from loguru import logger
 from lxml import etree
 
 from pdf2epub.command_errors import HtmlParseError, log_warn_only, wrap_error
+from .archive_limits import (
+    DEFAULT_EPUB_ARCHIVE_LIMITS,
+    EPUBArchiveLimitError,
+    EPUBArchiveLimits,
+    read_member_bounded,
+    validate_archive_limits,
+)
 
 
 # Namespaces used in EPUB
@@ -88,7 +96,11 @@ MEDIA_TYPE_CATEGORIES = {
 class EPUBParser:
     """Parse EPUB files and extract structure and resources."""
 
-    def __init__(self, epub_path: str):
+    def __init__(
+        self,
+        epub_path: str,
+        limits: EPUBArchiveLimits = DEFAULT_EPUB_ARCHIVE_LIMITS,
+    ):
         """
         Initialize the EPUB parser.
 
@@ -107,6 +119,14 @@ class EPUBParser:
 
         # Open ZIP and parse structure
         self._zf = zipfile.ZipFile(str(self.epub_path), 'r')
+        self._limits = limits
+        self._member_bytes_read: Dict[str, int] = {}
+        self._total_member_bytes_read = 0
+        try:
+            validate_archive_limits(self._zf, limits)
+        except Exception:
+            self._zf.close()
+            raise
         self._rootfile_path = self._find_rootfile()
         self._rootfile_dir = str(Path(self._rootfile_path).parent)
         if self._rootfile_dir == '.':
@@ -127,11 +147,30 @@ class EPUBParser:
         if hasattr(self, '_zf') and self._zf:
             self._zf.close()
 
+    def _read_member(self, member: str) -> bytes:
+        """Read one member within both per-file and cumulative actual-byte budgets."""
+        previous_size = self._member_bytes_read.get(member, 0)
+        other_members_size = self._total_member_bytes_read - previous_size
+        remaining = self._limits.max_total_bytes - other_members_size
+        if remaining < previous_size:
+            raise EPUBArchiveLimitError("EPUB parser actual total expanded size exceeds limit")
+        read_limits = replace(
+            self._limits,
+            max_file_bytes=min(self._limits.max_file_bytes, remaining),
+        )
+        content = read_member_bounded(self._zf, member, read_limits)
+        updated_size = max(previous_size, len(content))
+        if other_members_size + updated_size > self._limits.max_total_bytes:
+            raise EPUBArchiveLimitError("EPUB parser actual total expanded size exceeds limit")
+        self._member_bytes_read[member] = updated_size
+        self._total_member_bytes_read = other_members_size + updated_size
+        return content
+
     def _find_rootfile(self) -> str:
         """Find the root OPF file path from container.xml."""
         container_path = 'META-INF/container.xml'
         try:
-            container_xml = self._zf.read(container_path)
+            container_xml = self._read_member(container_path)
             tree = etree.fromstring(container_xml, parser=_safe_xml_parser())
             rootfile = tree.find('.//container:rootfile', NAMESPACES)
             if rootfile is not None:
@@ -141,7 +180,7 @@ class EPUBParser:
                 if normalized in ("", ".", "..") or normalized.startswith("../"):
                     raise ValueError("EPUB rootfile path escapes the package root")
                 return normalized
-        except ValueError:
+        except (ValueError, EPUBArchiveLimitError):
             raise
         except Exception as e:
             self._parse_errors.append(
@@ -162,7 +201,7 @@ class EPUBParser:
     def _parse_opf(self) -> etree._Element:
         """Parse the OPF (content.opf) file."""
         try:
-            opf_content = self._zf.read(self._rootfile_path)
+            opf_content = self._read_member(self._rootfile_path)
             return etree.fromstring(opf_content, parser=_safe_xml_parser())
         except Exception as e:
             raise ValueError(f"Failed to parse OPF file: {e}")
@@ -373,7 +412,7 @@ class EPUBParser:
 
             # Read content
             try:
-                content = self._zf.read(item['full_href'])
+                content = self._read_member(item['full_href'])
             except KeyError:
                 logger.warning(f"Resource not found in ZIP: {item['full_href']}")
                 continue
@@ -449,7 +488,7 @@ class EPUBParser:
             return []
 
         try:
-            ncx_content = self._zf.read(ncx_item['full_href'])
+            ncx_content = self._read_member(ncx_item['full_href'])
             ncx_tree = etree.fromstring(ncx_content, parser=_safe_xml_parser())
 
             # Helper: find element by local name (ignores namespace)
@@ -509,6 +548,8 @@ class EPUBParser:
                     toc.append(entry)
 
             return toc
+        except EPUBArchiveLimitError:
+            raise
         except Exception as e:
             self._parse_errors.append(
                 str(wrap_error(
@@ -545,7 +586,7 @@ class EPUBParser:
             return []
 
         try:
-            nav_content = self._zf.read(nav_item['full_href'])
+            nav_content = self._read_member(nav_item['full_href'])
             # Use a non-networking HTML parser for more tolerance.
             from lxml import html as lxml_html
             nav_parser = lxml_html.HTMLParser(
@@ -618,6 +659,8 @@ class EPUBParser:
                     toc.append(entry)
 
             return toc
+        except EPUBArchiveLimitError:
+            raise
         except Exception as e:
             self._parse_errors.append(
                 str(wrap_error(
@@ -648,12 +691,14 @@ class EPUBParser:
             full_href = self._resolve_href(href)
             matches = self._zf.namelist().count(full_href)
             if matches == 1:
-                return self._zf.read(full_href)
+                return self._read_member(full_href)
             if matches > 1:
                 raise ValueError(f"Ambiguous duplicate EPUB ZIP member: {full_href}")
 
             logger.warning(f"File not found in EPUB ZIP: {href}")
             return None
+        except EPUBArchiveLimitError:
+            raise
         except Exception as e:
             message = str(wrap_error(
                 e,
@@ -697,10 +742,12 @@ class EPUBParser:
             if cover_id in self._manifest:
                 item = self._manifest[cover_id]
                 try:
-                    content = self._zf.read(item['full_href'])
+                    content = self._read_member(item['full_href'])
                     ext = item['media_type'].split('/')[-1]
                     logger.info(f"Found cover image via metadata: {item['href']}")
                     return (content, ext)
+                except EPUBArchiveLimitError:
+                    raise
                 except Exception as e:
                     message = str(wrap_error(
                         e,
@@ -720,10 +767,12 @@ class EPUBParser:
             category = MEDIA_TYPE_CATEGORIES.get(item['media_type'], 'other')
             if category == 'images' and 'cover' in item['href'].lower():
                 try:
-                    content = self._zf.read(item['full_href'])
+                    content = self._read_member(item['full_href'])
                     ext = item['media_type'].split('/')[-1]
                     logger.info(f"Found cover image via filename: {item['href']}")
                     return (content, ext)
+                except EPUBArchiveLimitError:
+                    raise
                 except Exception as e:
                     message = str(wrap_error(
                         e,

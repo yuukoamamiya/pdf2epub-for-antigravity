@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import zipfile
+from io import BytesIO
 import json
 from pathlib import Path
 
@@ -62,6 +63,55 @@ def test_uri_escape_is_decoded_once_for_literal_percent_filename(tmp_path: Path)
     try:
         assert parser.spine[0]["full_href"] == "OEBPS/Text/literal%20.xhtml"
         assert parser.get_raw_content(parser.spine[0]["href"]) == body
+    finally:
+        parser._zf.close()
+
+
+def test_parser_repeated_member_read_does_not_consume_archive_budget_twice(
+    tmp_path: Path,
+) -> None:
+    from pdf2epub.html_translation.archive_limits import EPUBArchiveLimits
+
+    epub = tmp_path / "repeated-read.epub"
+    body = b"<html><body>same member</body></html>"
+    _write_epub(epub, href="Text/chapter.xhtml", members={"OEBPS/Text/chapter.xhtml": body})
+    with zipfile.ZipFile(epub) as archive:
+        total_size = sum(info.file_size for info in archive.infolist())
+    parser = EPUBParser(str(epub), limits=EPUBArchiveLimits(max_total_bytes=total_size))
+    try:
+        assert parser.get_raw_content("Text/chapter.xhtml") == body
+        assert parser.get_raw_content("Text/chapter.xhtml") == body
+    finally:
+        parser._zf.close()
+
+
+def test_parser_member_read_enforces_actual_stream_size(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pdf2epub.html_translation.archive_limits import EPUBArchiveLimitError, EPUBArchiveLimits
+
+    epub = tmp_path / "lying-size.epub"
+    _write_epub(
+        epub,
+        href="Text/chapter.xhtml",
+        members={"OEBPS/Text/chapter.xhtml": b"x"},
+    )
+    with zipfile.ZipFile(epub) as archive:
+        max_declared_member = max(info.file_size for info in archive.infolist())
+    original_open = zipfile.ZipFile.open
+
+    def oversized_stream(self, name, *args, **kwargs):
+        if isinstance(name, zipfile.ZipInfo) and name.filename == "OEBPS/Text/chapter.xhtml":
+            return BytesIO(b"x" * (max_declared_member + 1))
+        return original_open(self, name, *args, **kwargs)
+
+    monkeypatch.setattr(zipfile.ZipFile, "open", oversized_stream)
+    parser = EPUBParser(
+        str(epub), limits=EPUBArchiveLimits(max_file_bytes=max_declared_member)
+    )
+    try:
+        with pytest.raises(EPUBArchiveLimitError, match="actual expanded size"):
+            parser.get_raw_content("Text/chapter.xhtml")
     finally:
         parser._zf.close()
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import hashlib
 import zipfile
+from io import BytesIO
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ from pdf2epub.commands.html import _load_html_chapter_groups
 from pdf2epub.html_translation.builder import HTMLEpubPipeline
 from pdf2epub.html_translation.package_identity import unit_id_for_package_path
 from pdf2epub.html_translation.package_resources import EPUBFilePackager, extract_epub
+from pdf2epub.html_translation.archive_limits import EPUBArchiveLimits
 from pdf2epub.html_translation.unit_files import HTMLUnitStore, HTMLUnitWorkspace
 from pdf2epub.html_translation.compressed_cache import CompressedExtractionCache
 
@@ -344,6 +346,95 @@ def test_epub_extraction_rejects_member_paths_that_collide_on_windows(
         archive.writestr("OEBPS/a/page.xhtml", "lower")
     with pytest.raises(ValueError, match="collide on Windows"):
         extract_epub(epub, tmp_path / "extract")
+
+
+@pytest.mark.parametrize(
+    ("members", "limits", "message"),
+    [
+        ({"a": b"1234"}, EPUBArchiveLimits(max_file_bytes=3), "member expanded size"),
+        ({"a": b"12", "b": b"34"}, EPUBArchiveLimits(max_total_bytes=3), "total expanded size"),
+        ({"a": b"1", "b": b"2"}, EPUBArchiveLimits(max_members=1), "member count"),
+    ],
+)
+def test_epub_extraction_enforces_injected_resource_budgets(
+    tmp_path: Path, members: dict[str, bytes], limits: EPUBArchiveLimits, message: str,
+) -> None:
+    epub = tmp_path / "budget.epub"
+    with zipfile.ZipFile(epub, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for name, content in members.items():
+            archive.writestr(name, content)
+    with pytest.raises(ValueError, match=message):
+        extract_epub(epub, tmp_path / "extract", limits=limits)
+    assert not list((tmp_path / "extract").rglob("*"))
+
+
+def test_epub_parser_rejects_archive_member_budget_before_reading(
+    tmp_path: Path,
+) -> None:
+    from pdf2epub.html_translation import epub_parser
+    from pdf2epub.html_translation.archive_limits import EPUBArchiveLimits
+
+    epub = tmp_path / "too-many-members.epub"
+    with zipfile.ZipFile(epub, "w") as archive:
+        archive.writestr("first", b"1")
+        archive.writestr("second", b"2")
+    with pytest.raises(ValueError, match="member count"):
+        epub_parser.EPUBParser(str(epub), limits=EPUBArchiveLimits(max_members=1))
+
+
+def test_epub_extraction_checks_actual_stream_size_and_removes_partial_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pdf2epub.html_translation import package_resources
+    from pdf2epub.html_translation.archive_limits import EPUBArchiveLimits
+
+    epub = tmp_path / "lying-size.epub"
+    with zipfile.ZipFile(epub, "w") as archive:
+        archive.writestr("large.bin", b"x")
+    original_open = zipfile.ZipFile.open
+
+    def oversized_stream(self, name, *args, **kwargs):
+        if isinstance(name, zipfile.ZipInfo) and name.filename == "large.bin":
+            return BytesIO(b"four")
+        return original_open(self, name, *args, **kwargs)
+
+    monkeypatch.setattr(zipfile.ZipFile, "open", oversized_stream)
+    extract_dir = tmp_path / "extract-stream"
+    extract_dir.mkdir()
+    existing = extract_dir / "large.bin"
+    existing.write_bytes(b"keep")
+    with pytest.raises(ValueError, match="actual expanded size"):
+        package_resources.extract_epub(
+            epub, extract_dir, limits=EPUBArchiveLimits(max_file_bytes=3)
+        )
+    assert existing.read_bytes() == b"keep"
+    assert list(extract_dir.iterdir()) == [existing]
+
+
+def test_epub_extraction_checks_actual_aggregate_size(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from pdf2epub.html_translation import package_resources
+    from pdf2epub.html_translation.archive_limits import EPUBArchiveLimits
+
+    epub = tmp_path / "lying-total.epub"
+    with zipfile.ZipFile(epub, "w") as archive:
+        archive.writestr("one", b"1")
+        archive.writestr("two", b"2")
+    original_open = zipfile.ZipFile.open
+
+    def oversized_stream(self, name, *args, **kwargs):
+        if isinstance(name, zipfile.ZipInfo):
+            return BytesIO(b"12")
+        return original_open(self, name, *args, **kwargs)
+
+    monkeypatch.setattr(zipfile.ZipFile, "open", oversized_stream)
+    extract_dir = tmp_path / "extract-total"
+    with pytest.raises(ValueError, match="actual total expanded size"):
+        package_resources.extract_epub(
+            epub, extract_dir,
+            limits=EPUBArchiveLimits(max_file_bytes=4, max_total_bytes=3),
+        )
+    assert not (extract_dir / "two").exists()
+    assert (extract_dir / "one").read_bytes() == b"12"
 
 
 def test_ambiguous_legacy_mapping_fails_before_extraction_writes(
