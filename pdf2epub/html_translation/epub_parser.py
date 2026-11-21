@@ -19,6 +19,8 @@ from urllib.parse import unquote_to_bytes, urlsplit
 from loguru import logger
 from lxml import etree
 
+from pdf2epub.command_errors import HtmlParseError, log_warn_only, wrap_error
+
 
 # Namespaces used in EPUB
 NAMESPACES = {
@@ -99,6 +101,10 @@ class EPUBParser:
 
         logger.info(f"Loading EPUB: {self.epub_path.name}")
 
+        # Parsing problems are collected instead of silently swallowed.  If the
+        # resulting spine is empty, ``spine`` raises with this context.
+        self._parse_errors: List[str] = []
+
         # Open ZIP and parse structure
         self._zf = zipfile.ZipFile(str(self.epub_path), 'r')
         self._rootfile_path = self._find_rootfile()
@@ -138,7 +144,19 @@ class EPUBParser:
         except ValueError:
             raise
         except Exception as e:
-            logger.warning(f"Failed to parse container.xml: {e}")
+            self._parse_errors.append(
+                str(wrap_error(
+                    e,
+                    HtmlParseError,
+                    member="EPUBParser._find_rootfile",
+                    action="failed to parse META-INF/container.xml; using content.opf fallback",
+                ))
+            )
+            log_warn_only(
+                e,
+                member="EPUBParser._find_rootfile",
+                action="failed to parse META-INF/container.xml; using content.opf fallback",
+            )
         return 'content.opf'
 
     def _parse_opf(self) -> etree._Element:
@@ -267,6 +285,11 @@ class EPUBParser:
         """
         if self._spine_items is None:
             self._spine_items = self._extract_spine()
+        if not self._spine_items:
+            details = "; ".join(self._parse_errors) or "OPF contains no spine items"
+            raise HtmlParseError(
+                f"EPUB has no readable spine chapters: {details}"
+            )
         return self._spine_items
 
     def _extract_spine(self) -> List[Dict]:
@@ -487,7 +510,19 @@ class EPUBParser:
 
             return toc
         except Exception as e:
-            logger.warning(f"Failed to parse NCX: {e}")
+            self._parse_errors.append(
+                str(wrap_error(
+                    e,
+                    HtmlParseError,
+                    member="EPUBParser._extract_ncx_toc",
+                    action="failed to parse NCX table of contents",
+                ))
+            )
+            log_warn_only(
+                e,
+                member="EPUBParser._extract_ncx_toc",
+                action="failed to parse NCX table of contents",
+            )
             return []
 
     def _extract_nav_toc(self) -> List[Dict]:
@@ -584,7 +619,19 @@ class EPUBParser:
 
             return toc
         except Exception as e:
-            logger.warning(f"Failed to parse NAV: {e}")
+            self._parse_errors.append(
+                str(wrap_error(
+                    e,
+                    HtmlParseError,
+                    member="EPUBParser._extract_nav_toc",
+                    action="failed to parse EPUB3 NAV table of contents",
+                ))
+            )
+            log_warn_only(
+                e,
+                member="EPUBParser._extract_nav_toc",
+                action="failed to parse EPUB3 NAV table of contents",
+            )
             return []
 
     def get_raw_content(self, href: str) -> Optional[bytes]:
@@ -608,7 +655,14 @@ class EPUBParser:
             logger.warning(f"File not found in EPUB ZIP: {href}")
             return None
         except Exception as e:
-            logger.warning(f"Failed to read content for {href}: {e}")
+            message = str(wrap_error(
+                e,
+                HtmlParseError,
+                member="EPUBParser.get_raw_content",
+                action=f"failed to read EPUB member {href}",
+            ))
+            self._parse_errors.append(message)
+            log_warn_only(e, member="EPUBParser.get_raw_content", action=f"failed to read EPUB member {href}")
             return None
 
     def get_css_content(self, css_href: str) -> Optional[str]:
@@ -647,8 +701,19 @@ class EPUBParser:
                     ext = item['media_type'].split('/')[-1]
                     logger.info(f"Found cover image via metadata: {item['href']}")
                     return (content, ext)
-                except Exception:
-                    pass
+                except Exception as e:
+                    message = str(wrap_error(
+                        e,
+                        HtmlParseError,
+                        member="EPUBParser.extract_cover_image",
+                        action=f"failed to read cover image {item.get('href')!r}",
+                    ))
+                    self._parse_errors.append(message)
+                    log_warn_only(
+                        e,
+                        member="EPUBParser.extract_cover_image",
+                        action=f"failed to read cover image {item.get('href')!r}",
+                    )
 
         # Method 2: Look for items with 'cover' in name
         for item in self._manifest.values():
@@ -659,8 +724,19 @@ class EPUBParser:
                     ext = item['media_type'].split('/')[-1]
                     logger.info(f"Found cover image via filename: {item['href']}")
                     return (content, ext)
-                except Exception:
-                    pass
+                except Exception as e:
+                    message = str(wrap_error(
+                        e,
+                        HtmlParseError,
+                        member="EPUBParser.extract_cover_image",
+                        action=f"failed to read cover image {item.get('href')!r}",
+                    ))
+                    self._parse_errors.append(message)
+                    log_warn_only(
+                        e,
+                        member="EPUBParser.extract_cover_image",
+                        action=f"failed to read cover image {item.get('href')!r}",
+                    )
 
         logger.warning("No cover image found")
         return None

@@ -10,6 +10,13 @@ from pathlib import Path, PurePosixPath
 
 from loguru import logger
 
+from pdf2epub.command_errors import (
+    CommandError,
+    log_command_error,
+    log_warn_only,
+    wrap_error,
+)
+
 from pdf2epub.entity_context import (
     entity_context_is_current,
     prepare_entity_subagent_task,
@@ -55,7 +62,12 @@ def _load_html_book_context(args, operation: str):
                 from pdf2epub.html_translation.epub_parser import EPUBParser
 
                 book_title = EPUBParser(epub_path).get_metadata().get("title") or epub_path.stem
-            except Exception:
+            except Exception as exc:
+                log_warn_only(
+                    exc,
+                    member="commands.html._load_html_book_context",
+                    action="could not infer book title from EPUB metadata; using filename stem",
+                )
                 book_title = epub_path.stem
             logger.info(f"Auto-inferred book title from input file: {book_title}")
         else:
@@ -153,7 +165,12 @@ def _load_html_chapter_groups(pipeline, declared_files):
 
     try:
         toc_entries = TOCExtractor(pipeline.parser).toc
-    except Exception:
+    except Exception as exc:
+        log_warn_only(
+            exc,
+            member="commands.html._load_html_chapter_groups",
+            action="could not read EPUB TOC; falling back to one-file groups",
+        )
         toc_entries = []
     for index, entry in enumerate(toc_entries, 1):
         names = []
@@ -210,7 +227,12 @@ def _prepare_html_command(args):
         try:
             epub_path, _ = convert_to_epub(epub_path, output_dir)
         except Exception as e:
-            logger.error(f"Format conversion failed: {e}")
+            logger.error(str(wrap_error(
+                e,
+                CommandError,
+                member="commands.html.convert_to_epub",
+                action="format conversion failed",
+            )))
             return 1
     elif epub_path.resolve() != input_epub.resolve():
         # EPUB 输入也复制到 output 目录，方便 build-html-epub 找到
@@ -725,7 +747,12 @@ def build_html_epub_command(args):
         try:
             epub_path, _ = convert_to_epub(epub_path, output_dir)
         except Exception as e:
-            logger.error(f"Format conversion failed: {e}")
+            logger.error(str(wrap_error(
+                e,
+                CommandError,
+                member="commands.html.convert_to_epub",
+                action="format conversion failed",
+            )))
             return 1
     elif epub_path.resolve() != input_epub.resolve():
         shutil.copy2(epub_path, input_epub)

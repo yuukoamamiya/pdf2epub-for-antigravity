@@ -861,3 +861,23 @@ def test_subchapter_anchor_requires_unique_unnumbered_fallback_and_avoids_duplic
         [{"title": "Introduction", "anchor": "toc-1-9"}],
     )
     assert locations == {}
+
+
+def test_builder_structural_failures_raise_epub_build_error(tmp_path: Path) -> None:
+    from pdf2epub.command_errors import EpubBuildError
+
+    builder = EpubBuilder(SimpleNamespace(book_title="Book", author="Author", language="en"))
+    unwritable = tmp_path / "cover.html"
+    unwritable.mkdir()
+
+    with pytest.raises(EpubBuildError) as cover_error:
+        builder.create_cover_html("cover.png", unwritable)
+    cover_message = str(cover_error.value)
+    assert "builder.py:" in cover_message
+    assert "create_cover_html" in cover_message
+
+    with pytest.raises(EpubBuildError) as stylesheet_error:
+        builder.create_stylesheet(unwritable)
+    stylesheet_message = str(stylesheet_error.value)
+    assert "builder.py:" in stylesheet_message
+    assert "create_stylesheet" in stylesheet_message

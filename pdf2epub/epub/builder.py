@@ -18,6 +18,7 @@ from typing import Dict, List, Optional, Any
 from loguru import logger
 
 from pdf2epub.workflow_contracts import atomic_publish_file
+from pdf2epub.command_errors import EpubBuildError, wrap_error
 
 
 
@@ -83,8 +84,12 @@ class EpubBuilder:
             logger.success(f"Created cover HTML: {output_path}")
             return True
         except Exception as e:
-            logger.error(f"Failed to create cover HTML: {e}")
-            return False
+            raise wrap_error(
+                e,
+                EpubBuildError,
+                member="EpubBuilder.create_cover_html",
+                action=f"failed to create cover HTML {output_path}",
+            ) from e
     
     def create_stylesheet(self, output_path: Path) -> bool:
         """
@@ -133,8 +138,12 @@ a { text-decoration: none; }
             logger.success(f"Created stylesheet: {output_path}")
             return True
         except Exception as e:
-            logger.error(f"Failed to create stylesheet: {e}")
-            return False
+            raise wrap_error(
+                e,
+                EpubBuildError,
+                member="EpubBuilder.create_stylesheet",
+                action=f"failed to create stylesheet {output_path}",
+            ) from e
     
     def create_container_xml(self, output_path: Path) -> bool:
         """
@@ -162,8 +171,12 @@ a { text-decoration: none; }
             logger.success(f"Created container.xml: {output_path}")
             return True
         except Exception as e:
-            logger.error(f"Failed to create container.xml: {e}")
-            return False
+            raise wrap_error(
+                e,
+                EpubBuildError,
+                member="EpubBuilder.create_container_xml",
+                action=f"failed to create container.xml {output_path}",
+            ) from e
     
     def create_mimetype(self, output_path: Path) -> bool:
         """
@@ -182,8 +195,12 @@ a { text-decoration: none; }
             logger.success(f"Created mimetype: {output_path}")
             return True
         except Exception as e:
-            logger.error(f"Failed to create mimetype: {e}")
-            return False
+            raise wrap_error(
+                e,
+                EpubBuildError,
+                member="EpubBuilder.create_mimetype",
+                action=f"failed to create mimetype {output_path}",
+            ) from e
     
     def create_content_opf(self, structure: Dict[str, Any], epub_dir: Path, 
                            output_path: Path, cover_image: Optional[str] = None,
@@ -323,10 +340,12 @@ a { text-decoration: none; }
             logger.success(f"Created content.opf: {output_path}")
             return True
         except Exception as e:
-            import traceback
-            logger.error(f"Failed to create content.opf: {e}")
-            logger.error(traceback.format_exc())
-            return False
+            raise wrap_error(
+                e,
+                EpubBuildError,
+                member="EpubBuilder.create_content_opf",
+                action=f"failed to create content.opf {output_path}",
+            ) from e
     
     def _get_image_media_type(self, suffix: str) -> Optional[str]:
         """Get the media type for an image file extension."""

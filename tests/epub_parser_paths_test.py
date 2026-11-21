@@ -210,3 +210,30 @@ def test_manifest_rejects_external_or_escaping_paths(tmp_path: Path, href: str) 
     else:
         with pytest.raises(ValueError):
             EPUBParser(str(epub))
+
+
+def test_empty_spine_raises_html_parse_error_with_collected_context(tmp_path: Path) -> None:
+    from pdf2epub.command_errors import HtmlParseError
+
+    epub = tmp_path / "empty-spine.epub"
+    opf = b'''<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf"
+         xmlns:dc="http://purl.org/dc/elements/1.1/" version="3.0">
+  <metadata><dc:title>Empty spine</dc:title><dc:language>en</dc:language></metadata>
+  <manifest><item id="chapter" href="Text/chapter.xhtml" media-type="application/xhtml+xml"/></manifest>
+  <spine></spine>
+</package>'''
+    with zipfile.ZipFile(epub, "w") as archive:
+        archive.writestr(
+            "META-INF/container.xml",
+            b'<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+            b'<rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles></container>',
+        )
+        archive.writestr("OEBPS/content.opf", opf)
+
+    parser = EPUBParser(str(epub))
+    try:
+        with pytest.raises(HtmlParseError, match="no readable spine chapters"):
+            parser.spine
+    finally:
+        parser._zf.close()
