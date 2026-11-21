@@ -66,12 +66,13 @@ class TexCompiler:
 
         command = [
             self.latexmk,
+            "-norc",
             "-g",
             "-xelatex",
             "-interaction=nonstopmode",
             "-halt-on-error",
             "-shell-escape" if self.shell_escape else "-no-shell-escape",
-            main_tex,
+            str(main_path),
         ]
         started = time.perf_counter()
         try:
