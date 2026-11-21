@@ -132,11 +132,16 @@ def prepare_markdown_subagent(request: MarkdownHandoffRequest) -> Dict[str, Path
         visual_dir, secondary_dir, review_dir,
     )
     manifest_path = request.output_dir / f"{request.task}_subagent_manifest.json"
-    if request.refresh_checkpoints and resume_decision.pending_files:
+    from .markdown_handoff_resume import (
+        refresh_version_only_receipts,
+        version_only_pending_names,
+    )
+
+    auto_refresh = request.resume and bool(version_only_pending_names(resume_decision))
+    if (request.refresh_checkpoints or auto_refresh) and resume_decision.pending_files:
         # Capture the current projection through the provisional manifest so
         # the refresh compares against exactly the snapshot validation uses.
         atomic_write_json(manifest_path, manifest)
-        from .markdown_handoff_resume import refresh_version_only_receipts
 
         refreshed = refresh_version_only_receipts(
             request.output_dir,
@@ -152,6 +157,9 @@ def prepare_markdown_subagent(request: MarkdownHandoffRequest) -> Dict[str, Path
                 visual_dir, secondary_dir, review_dir,
             )
             manifest["refreshed_receipts"] = refreshed
+            manifest["refresh_reason"] = (
+                "explicit" if request.refresh_checkpoints else "version_only_auto_forward_roll"
+            )
     atomic_write_json(manifest_path, manifest)
     prompt_path = request.output_dir / f"{request.task}_subagent_prompt.md"
     prompt = render_markdown_prompt(

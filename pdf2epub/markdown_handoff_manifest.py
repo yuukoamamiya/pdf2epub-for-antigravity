@@ -161,6 +161,16 @@ def build_markdown_manifest(data: ManifestBuild) -> dict[str, Any]:
     if context.unit_context_files:
         manifest["unit_context_files"] = dict(context.unit_context_files)
         manifest["unit_context_sha256"] = dict(context.unit_context_sha256)
+    if context.context_sha256 or context.unit_context_sha256:
+        # Terminology provenance is a single chain: the read-only glossary
+        # snapshot (snapshot_sha256) feeds each unit projection
+        # (unit_projection_sha256), which feeds each worker's content-addressed
+        # projection (worker_projection_sha256 in the scoped manifest).
+        manifest["terminology_projection_chain"] = {
+            "schema_version": 1,
+            "snapshot_sha256": dict(context.context_sha256),
+            "unit_projection_sha256": dict(context.unit_context_sha256),
+        }
     if context.chapter_groups:
         manifest["chapter_groups"] = {
             chapter_id: list(names) for chapter_id, names in context.chapter_groups.items()

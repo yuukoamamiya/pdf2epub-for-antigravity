@@ -195,8 +195,9 @@ class ResumeDecision:
     pending_batches: tuple[tuple[str, ...], ...] = ()
     pending_stats: Mapping[str, Mapping[str, int]] = field(default_factory=dict)
     # Why each non-reusable unit is pending: source_changed,
-    # context_version_bumped, context_changed, receipt_missing,
-    # target_missing, review_reopened, checkpoint_invalid or fresh_run.
+    # version_only, projection_bytes_changed, context_changed,
+    # receipt_missing, target_missing, review_reopened,
+    # checkpoint_invalid or fresh_run.
     pending_reasons: Mapping[str, str] = field(default_factory=dict)
     html_invalidated_checkpoints: Mapping[str, str] = field(default_factory=dict)
     effective_concurrency: int = 1
@@ -214,6 +215,21 @@ def pending_reason_counts(reasons: Mapping[str, str]) -> dict[str, int]:
         key = str(reason)
         counts[key] = counts.get(key, 0) + 1
     return dict(sorted(counts.items()))
+
+
+def version_only_pending_names(decision: ResumeDecision) -> list[str]:
+    """Return pending units blocked only by a projection-version stamp.
+
+    These units can be forward-rolled by
+    :func:`refresh_version_only_receipts` without the
+    ``prepare → validate → prepare`` cycle; the helper exists so callers do
+    not re-derive the taxonomy.
+    """
+    return [
+        name
+        for name in decision.pending_files
+        if decision.pending_reasons.get(name) == "version_only"
+    ]
 
 
 def _projection_version_changed(
@@ -283,10 +299,10 @@ def _pending_reason(
         and not isinstance(receipt_hash, str)
     ):
         return "source_changed"
-    if mismatch == "heading_context" and _projection_version_changed(
-        name, previous_manifest, heading_contexts
-    ):
-        return "context_version_bumped"
+    if mismatch == "heading_context":
+        if _projection_version_changed(name, previous_manifest, heading_contexts):
+            return "version_only"
+        return "projection_bytes_changed"
     if mismatch == "receipt_context":
         return "receipt_missing"
     if mismatch is not None:

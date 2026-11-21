@@ -571,6 +571,14 @@ def write_worker_handoffs(
             output_dir, manifest, group, worker_id, files, chapter_mode, chapter_pack,
             unit_contexts, scoped,
         )
+        if worker_context_hashes:
+            # The worker manifest references the projection by one content
+            # hash only; snapshot and unit-level hashes stay in the parent
+            # manifest (terminology_projection_chain).
+            scoped["terminology_projection_chain"] = {
+                "schema_version": 1,
+                "worker_projection_sha256": dict(worker_context_hashes),
+            }
         scoped_name = f"{task}_subagent_manifest_{worker_id}.json"
         scoped_prompt_name = f"{task}_subagent_prompt_{worker_id}.md"
         scoped_path = handoff_dir / scoped_name

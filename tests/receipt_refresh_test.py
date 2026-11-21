@@ -10,7 +10,9 @@ from pdf2epub.markdown_handoff_context import MarkdownHandoffRequest
 from pdf2epub.workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION, sha256_file
 
 
-def _request(tmp_path: Path, *, heading: dict) -> MarkdownHandoffRequest:
+def _request(
+    tmp_path: Path, *, heading: dict, refresh_checkpoints: bool = True
+) -> MarkdownHandoffRequest:
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"
     source_dir.mkdir()
@@ -26,7 +28,7 @@ def _request(tmp_path: Path, *, heading: dict) -> MarkdownHandoffRequest:
         target_language="Chinese",
         resume=True,
         heading_contexts={"unit.md": heading},
-        refresh_checkpoints=True,
+        refresh_checkpoints=refresh_checkpoints,
     )
 
 
@@ -90,6 +92,7 @@ def test_version_only_receipt_is_refreshed_without_revalidating(tmp_path: Path):
 
     assert manifest["pending_files"] == []
     assert manifest["refreshed_receipts"] == ["unit.md"]
+    assert manifest["refresh_reason"] == "explicit"
     ledger = json.loads(
         (tmp_path / "translate_file_validation.json").read_text(encoding="utf-8")
     )
@@ -99,6 +102,26 @@ def test_version_only_receipt_is_refreshed_without_revalidating(tmp_path: Path):
         ]
         == 5
     )
+
+
+def test_version_only_auto_forward_rolls_without_flag(tmp_path: Path):
+    """A version stamp alone no longer needs prepare → validate → prepare."""
+    request = _request(
+        tmp_path,
+        heading={"toc_title": "Chapter", "projection_version": 5},
+        refresh_checkpoints=False,
+    )
+    _write_receipt(
+        tmp_path,
+        heading={"toc_title": "Chapter", "projection_version": 4},
+    )
+
+    paths = prepare_markdown_subagent(request)
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+
+    assert manifest["pending_files"] == []
+    assert manifest["refreshed_receipts"] == ["unit.md"]
+    assert manifest["refresh_reason"] == "version_only_auto_forward_roll"
 
 
 def test_changed_projection_payload_is_not_receipt_refreshed(tmp_path: Path):

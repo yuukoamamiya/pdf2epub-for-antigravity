@@ -88,7 +88,7 @@ def _decision(tmp_path: Path, request, source: Path):
     return decide_resume(request, plan, context), source
 
 
-def test_projection_version_bump_is_reported_as_such(tmp_path: Path):
+def test_projection_version_bump_is_reported_as_version_only(tmp_path: Path):
     request, source, target = _request(
         tmp_path, heading_contexts={"unit.md": {"toc_title": "T", "projection_version": 5}}
     )
@@ -106,7 +106,29 @@ def test_projection_version_bump_is_reported_as_such(tmp_path: Path):
     decision, _ = _decision(tmp_path, request, source)
 
     assert decision.pending_files == ("unit.md",)
-    assert decision.pending_reasons == {"unit.md": "context_version_bumped"}
+    assert decision.pending_reasons == {"unit.md": "version_only"}
+
+
+def test_changed_projection_payload_is_reported_as_bytes_changed(tmp_path: Path):
+    request, source, target = _request(
+        tmp_path,
+        heading_contexts={"unit.md": {"toc_title": "New title", "projection_version": 5}},
+    )
+    _write_manifest(
+        tmp_path,
+        {
+            "source_sha256": {"unit.md": sha256_file(source)},
+            "toc_heading_contexts": {"unit.md": {"toc_title": "Old title", "projection_version": 5}},
+            "unit_context_sha256": {},
+            "special_unit_modes": {},
+        },
+    )
+    _write_ledger(tmp_path, source, target)
+
+    decision, _ = _decision(tmp_path, request, source)
+
+    assert decision.pending_files == ("unit.md",)
+    assert decision.pending_reasons == {"unit.md": "projection_bytes_changed"}
 
 
 def test_source_change_is_reported_as_source_changed(tmp_path: Path):

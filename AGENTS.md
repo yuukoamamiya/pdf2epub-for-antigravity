@@ -514,16 +514,20 @@ validation receipt 可能失效并暂时把所有现有目标列为 pending。�
 只重派上下文/源哈希失效的 assignment，不因 projection 升级盲目重译全书，也不迁移旧树或旧翻译结果。
 
 父 manifest 的 `pending_reasons`（以及汇总的 `pending_reason_counts`）按文件说明 pending 原因：
-`source_changed`、`context_version_bumped`、`context_changed`、`receipt_missing`、
-`target_missing`、`review_reopened`、`checkpoint_invalid`、`fresh_run`。第一次 resume 前先读
-它：若只有 `context_version_bumped`/`receipt_missing`，说明是合同升级或 receipt 缺失，
-不是正文变化，不得据此重译；`source_changed` 或 `review_reopened` 才表示需要 Subagent 重新处理。
-`status` 的 `review_gates` 会同步显示这些计数。该字段只用于诊断，不改变复用判定。
-准备前可用 `translate --resume --dry-run` 或 `polish --resume --dry-run` 只读预览
+`source_changed`、`version_only`、`projection_bytes_changed`、`context_changed`、
+`receipt_missing`、`target_missing`、`review_reopened`、`checkpoint_invalid`、`fresh_run`。
+第一次 resume 前先读它：`version_only` 表示旧 receipt 与当前投影除 `projection_version` 外
+完全一致，本地会自动重盖章并前滚，不需要再跑 `prepare → validate → prepare`；
+`projection_bytes_changed` 才表示投影载荷真的变化，必须交回 Subagent；`source_changed` 或
+`review_reopened` 也表示需要 Subagent 重新处理。`receipt_missing` 只是 receipt 缺失，
+不得据此重译。`status` 的 `review_gates` 会同步显示这些计数。该字段只用于诊断，不改变
+复用判定。准备前可用 `translate --resume --dry-run` 或 `polish --resume --dry-run` 只读预览
 `pending_reasons` 与 worker 批次；preview 不写 manifest、prompt 或 worker handoff。
-若旧 receipt 的上下文快照与当前投影除 `projection_version` 外完全一致，可用
-`--refresh-checkpoints` 直接重盖章；任何投影载荷变化（新增或改动的 heading 字段）仍必须
-按 `prepare → validate → prepare` 处理，refresh 会拒绝。
+`--refresh-checkpoints` 仍可显式要求同一次前滚；任何投影载荷变化都会拒绝，仍按
+`prepare → validate → prepare` 处理。术语链固定为
+`snapshot_sha256 → unit_projection_sha256 → worker_projection_sha256`：父 manifest 保存
+`terminology_projection_chain` 的 snapshot 和 unit 层，scoped worker manifest 只引用自己的
+`worker_projection_sha256`，不需要重复快照或全书 unit 哈希。
 EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编号格式差异；编号只在一侧缺失时，
 仅当去编号后的标题正文精确且全书分片中唯一、没有不同编号冲突时才回退。模糊相似标题不绑定，
 原有 HTML `id` 保留。
@@ -897,10 +901,10 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    映射到 raw source/primary OCR block。后者保留其他可映射任务，但写入结构化 blocker，`footnote-validate` 必须失败；
    由原 Polish Reviewer 修正现有 semantic sidecar 的精确 excerpt 后直接重跑 `footnote-prepare`。不要用
    `polish --resume` 绕过该 blocker，也不要手工改写语义或伪造 OCR 地址。
-   若 translation context/receipt 旧，先运行 `translate --resume` 刷新 manifest/context，但不要按首轮
-   pending 立即派发；接着 `translate-validate` 校验现有译文，然后第二次 `translate --resume`，再按
-   当前报告只派发仍失效的 assignment，并完成全量 `translate-validate`。逐文件 ledger 若单独作为恢复
-   依据，按文件重新校验。规则版本升级本身不要求重跑 OCR。
+   若 translation context/receipt 旧，运行一次 `translate --resume`：`version_only` pending 会由
+   本地自动重盖章前滚；只有 `projection_bytes_changed`、`source_changed` 或
+   `review_reopened` 的 assignment 才重新派发，随后运行全量 `translate-validate`。
+   逐文件 ledger 若单独作为恢复依据，按文件重新校验。规则版本升级本身不要求重跑 OCR。
    polish 还必须清除已确认的页眉、页脚、独立印刷页码和人工 OCR 页码标记；
    诸如 `Preface XII` 的短标题加页码组合在确认属于页边装饰后应整行删除。
    正文数字、标题编号、日期、引用、脚注、参考文献和索引中的页码不得删除。
