@@ -13,9 +13,10 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from pdf2epub.workflow_contracts import posix_path
 from pathlib import PurePosixPath
 from typing import Any, Mapping, Optional
+
+from .normalize import normalize_decision_file as _normalized_file
 
 from ..workflow_contracts import atomic_write_json, sha256_file
 from ..footnote_normalization import _is_math_or_formula_superscript
@@ -82,10 +83,6 @@ def inline_endnote_candidates(line: str, line_number: int) -> list[dict[str, Any
             "content": content,
         })
     return result
-
-
-def _normalized_file(value: Any) -> str:
-    return posix_path(value or "")
 
 
 def _definition_owner_key(line: str) -> str:

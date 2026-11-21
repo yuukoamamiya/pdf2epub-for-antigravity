@@ -35,6 +35,7 @@ from ..endnote_patterns import (
     UNICODE_SUP_RE as _UNICODE_SUP_RE,
 )
 from pdf2epub.workflow_contracts import posix_path
+from .normalize import normalize_decision_file as _normalized_decision_file
 
 
 _KEY = r"[A-Za-z0-9_-]+"
@@ -116,10 +117,6 @@ def _definition_line(
         if match and match.group("key") in body_keys:
             return match.group("key"), match.group("content").strip(), "numbered_space"
     return None
-
-
-def _normalized_decision_file(value: Any) -> str:
-    return posix_path(value or "")
 
 
 def _definition_decision_map(
