@@ -506,7 +506,11 @@ def _register_markdown_commands(subparsers) -> None:
     polish_validate_parser.add_argument(
         "--check-only",
         action="store_true",
-        help="Run single-file validation without writing checkpoints or validated copies",
+        help=(
+            "Run the read-only single-file self-check (own source/target "
+            "ledger entry only) without writing reports, checkpoints, or "
+            "validated copies"
+        ),
     )
     polish_validate_parser.add_argument(
         "--allow-review-warnings",

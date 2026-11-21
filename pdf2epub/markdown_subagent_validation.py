@@ -135,7 +135,10 @@ def validate_markdown_subagent(
                 })
 
     resume_contexts, stale_contexts = capture_pdf_resume_contexts(
-        context.paths.output_dir, task, [source.name for source in sources]
+        context.paths.output_dir, task, [source.name for source in sources],
+        # Read-only worker self-checks verify only this unit's own context
+        # pointer. Formal single-file checkpoints keep the boundary guard.
+        scoped=partial and not context.create_validated_copy,
     )
     for name, reason in stale_contexts.items():
         invalid.append({

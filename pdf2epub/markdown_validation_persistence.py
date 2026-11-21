@@ -154,8 +154,20 @@ def _record_snapshot_changes(
     return recorded
 
 
-def capture_pdf_resume_contexts(output_dir: Path, task: str, filenames: list[str]) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
-    """Capture per-file PDF context receipts and reject stale prepared inputs."""
+def capture_pdf_resume_contexts(
+    output_dir: Path,
+    task: str,
+    filenames: list[str],
+    *,
+    scoped: bool = False,
+) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
+    """Capture per-file PDF context receipts and reject stale prepared inputs.
+
+    ``scoped`` is the read-only single-file self-check path.  It verifies
+    only the named file's own prepared unit-context pointer; neighbor
+    boundary sources and the book-wide refined mapping are book-level gates
+    that a full validation (and a formal ``--file`` checkpoint) evaluates.
+    """
     if task not in {"translate", "polish"}:
         return {}, {}
     manifest_path = output_dir / f"{task}_subagent_manifest.json"
@@ -224,7 +236,7 @@ def capture_pdf_resume_contexts(output_dir: Path, task: str, filenames: list[str
             current_pdf_mapping_error = "prepared boundary mapping source is missing; refresh context and revalidate"
         else:
             current_pdf_mapping_error = "prepared boundary mapping source is malformed"
-    if task == "polish" and should_load_refined_mapping:
+    if task == "polish" and should_load_refined_mapping and not scoped:
         try:
             from .refine.unit_mapping import load_pdf_continuation_files
 
@@ -237,10 +249,10 @@ def capture_pdf_resume_contexts(output_dir: Path, task: str, filenames: list[str
     snapshots: dict[str, dict[str, Any]] = {}
     errors: dict[str, str] = {}
     for name in filenames:
-        if current_pdf_mapping_error is not None and name in boundary_hashes:
+        if not scoped and current_pdf_mapping_error is not None and name in boundary_hashes:
             errors[name] = f"prepared boundary mapping is unreadable: {current_pdf_mapping_error}"
             continue
-        if current_pdf_continuations is not None and name in boundary_hashes:
+        if not scoped and current_pdf_continuations is not None and name in boundary_hashes:
             from .markdown_handoff_planning import _boundary_mapping_projection
 
             mapping_value = _boundary_mapping_projection(name, current_pdf_continuations)
@@ -252,7 +264,7 @@ def capture_pdf_resume_contexts(output_dir: Path, task: str, filenames: list[str
                 continue
         links = boundary_sources.get(name, []) if isinstance(boundary_sources, Mapping) else []
         source_dir_value = manifest.get("source_dir")
-        if links:
+        if links and not scoped:
             source_root_candidate = Path(str(source_dir_value or ""))
             source_root = source_root_candidate if source_root_candidate.is_absolute() else root / source_root_candidate
             source_root = source_root.resolve()

@@ -361,6 +361,136 @@ def test_polish_validate_check_only_writes_no_checkpoint_or_validated_copy(
     assert json.loads(checkpoint.read_text(encoding="utf-8")) == sentinel
 
 
+def test_polish_validate_check_only_does_not_read_sibling_contexts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from pdf2epub.commands import markdown as markdown_commands
+    from pdf2epub import markdown_validation_persistence
+
+    output_dir = tmp_path / "output"
+    source_dir = output_dir / "ocr_markdown"
+    target_dir = output_dir / "polished_markdown"
+    source_dir.mkdir(parents=True)
+    target_dir.mkdir(parents=True)
+    text = "A short but complete paragraph for read-only polish validation.\n"
+    (source_dir / "unit.md").write_text(text, encoding="utf-8")
+    (source_dir / "chapter_other.md").write_text(text, encoding="utf-8")
+    (target_dir / "unit.md").write_text(text, encoding="utf-8")
+    (target_dir / "chapter_other.md").write_text(text, encoding="utf-8")
+    (source_dir / "tree_progress.json").write_text('{"units": []}', encoding="utf-8")
+    from pdf2epub.markdown_handoff_planning import _boundary_mapping_projection
+    from pdf2epub.refine.unit_mapping import load_pdf_continuation_files
+
+    continuations = load_pdf_continuation_files(output_dir, source_dir)
+    mapping_payload = json.dumps(
+        _boundary_mapping_projection("unit.md", continuations),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    import hashlib
+
+    manifest = {
+        "task": "polish",
+        "source_dir": "ocr_markdown",
+        "source_language": "English",
+        "target_language": "Chinese",
+        "unit_context_sha256": {},
+        "unit_context_files": {},
+        "boundary_context_sha256": {"unit.md": "a" * 64},
+        "boundary_context_mapping_sha256": {
+            "unit.md": hashlib.sha256(mapping_payload.encode("utf-8")).hexdigest()
+        },
+        "boundary_context_sources": {
+            "unit.md": [
+                {
+                    "source_file": "chapter_other.md",
+                    "source_sha256": sha256_file(source_dir / "chapter_other.md"),
+                }
+            ]
+        },
+        "boundary_context_mapping_source": "tree_progress",
+    }
+    (output_dir / "polish_subagent_manifest.json").write_text(
+        json.dumps(manifest), encoding="utf-8"
+    )
+
+    context = SimpleNamespace(
+        config={"footnotes": {"mode": "disabled"}},
+        book_title="Book",
+        output_dir=output_dir,
+        config_path=tmp_path / "config.yaml",
+    )
+    monkeypatch.setattr(
+        markdown_commands, "load_book_context", lambda args, stage, **kwargs: context
+    )
+    monkeypatch.setattr(
+        markdown_commands,
+        "_resolve_pdf_polish_source",
+        lambda output, config: (source_dir, "ocr"),
+    )
+    monkeypatch.setattr(markdown_commands, "load_pdf_file_roles", lambda output: {})
+    monkeypatch.setattr(markdown_commands, "_load_pdf_toc_titles", lambda output: [])
+    monkeypatch.setattr(
+        markdown_commands, "_load_pdf_continuation_toc_titles", lambda output: {}
+    )
+
+    reads: list[str] = []
+    mapping_loads: list[str] = []
+    real_sha256_file = markdown_validation_persistence.sha256_file
+    from pdf2epub.refine import unit_mapping as unit_mapping_module
+
+    real_load_continuations = unit_mapping_module.load_pdf_continuation_files
+
+    def recording_sha256_file(path):
+        reads.append(Path(path).name)
+        return real_sha256_file(path)
+
+    def recording_load_continuations(output, source):
+        mapping_loads.append(str(output))
+        return real_load_continuations(output, source)
+
+    monkeypatch.setattr(
+        markdown_validation_persistence, "sha256_file", recording_sha256_file
+    )
+    monkeypatch.setattr(
+        unit_mapping_module, "load_pdf_continuation_files", recording_load_continuations
+    )
+
+    check_args = SimpleNamespace(
+        check_only=True,
+        file="unit.md",
+        allow_review_warnings=False,
+    )
+    assert markdown_commands._validate_pdf_markdown_task(check_args, "polish") == 0
+    assert not (output_dir / "polish_file_validation.json").exists()
+    assert "chapter_other.md" not in reads
+    assert mapping_loads == []
+
+    reads.clear()
+    file_args = SimpleNamespace(
+        check_only=False,
+        file="unit.md",
+        allow_review_warnings=False,
+    )
+    assert markdown_commands._validate_pdf_markdown_task(file_args, "polish") == 0
+    assert (output_dir / "polish_file_validation.json").is_file()
+    # A formal single-file checkpoint keeps the boundary guard.
+    assert "chapter_other.md" in reads
+    assert mapping_loads
+
+    # Full validation evaluates the same book-level boundary context and also
+    # passes when the prepared neighbor hash is current.
+    (tmp_path / "config.yaml").write_text("footnotes: {mode: disabled}\n", encoding="utf-8")
+    full_args = SimpleNamespace(
+        check_only=False,
+        file=None,
+        allow_review_warnings=False,
+    )
+    assert markdown_commands._validate_pdf_markdown_task(full_args, "polish") == 0
+    assert "chapter_other.md" in reads
+
+
 def test_polish_revalidation_replaces_old_schema_receipt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

@@ -370,7 +370,10 @@ def refresh_version_only_receipts(
     from .markdown_validation_persistence import capture_pdf_resume_contexts
 
     snapshots, capture_errors = capture_pdf_resume_contexts(
-        Path(output_dir), task, list(names)
+        Path(output_dir), task, list(names),
+        # A single receipt refresh is a per-file operation; neighbor and
+        # book-wide mapping checks belong to the next full validation.
+        scoped=len(names) == 1,
     )
     current_schema = markdown_validation_schema_version(task)
     receipt_contexts = decision.validation.get("resume_contexts", {})
