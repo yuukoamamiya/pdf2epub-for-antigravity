@@ -524,14 +524,80 @@ _REVIEW_MANIFESTS: tuple[tuple[str, str], ...] = (
     ("translate-html", "translate-html_subagent_manifest.json"),
 )
 
+_REVIEW_VALIDATIONS: dict[str, str] = {
+    "ocr-correct": "ocr-correct_validation.json",
+    "illustration": "illustration_validation.json",
+    "footnote": "footnote_decision_validation.json",
+    "polish": "polish_validation.json",
+    "entities": "translation_entities_validation.json",
+    "translate": "translate_validation.json",
+    "translate-html": "translate-html_validation.json",
+}
+
+_PREPARE_COMMANDS: dict[str, str] = {
+    "refine": "refine-prepare",
+    "ocr-correct": "ocr-correct",
+    "illustration": "illustration-prepare",
+    "footnote": "footnote-prepare",
+    "polish": "polish",
+    "entities": "extract-entities",
+    "translate": "translate",
+    "translate-html": "html-prepare",
+}
+
+
+def _review_validation_summary(
+    output_dir: Path,
+    name: str,
+    manifest_pending: list[str],
+) -> dict[str, Any]:
+    """Reference an existing validation receipt; never recompute its result."""
+    filename = _REVIEW_VALIDATIONS.get(name)
+    if not filename:
+        return {}
+    path = output_dir / filename
+    report = _read_json(path)
+    valid_values = report.get("valid_files")
+    completed = sorted(
+        {str(item) for item in valid_values if item is not None and str(item).strip()}
+    ) if isinstance(valid_values, list) else []
+    pending = sorted(set(manifest_pending) - set(completed))
+    source_sha256 = report.get("source_sha256")
+    return {
+        "file": filename,
+        "present": path.is_file(),
+        "completed": completed,
+        "pending": pending,
+        "source_sha256": dict(source_sha256) if isinstance(source_sha256, Mapping) else {},
+    }
+
+
+def _review_manifest_source_mismatch(
+    manifest: Mapping[str, Any],
+    validation: Mapping[str, Any],
+) -> list[str]:
+    """Return units whose recorded source hashes disagree with the receipt."""
+    manifest_hashes = manifest.get("source_sha256")
+    validation_hashes = validation.get("source_sha256")
+    if not isinstance(manifest_hashes, Mapping) or not isinstance(validation_hashes, Mapping):
+        return []
+    mismatched = []
+    for name in set(manifest_hashes) & set(validation_hashes):
+        if manifest_hashes.get(name) != validation_hashes.get(name):
+            mismatched.append(str(name))
+    return sorted(mismatched)
+
 
 def _review_gates(output_dir: Path) -> list[dict[str, Any]]:
     """Summarize which Subagent hand-offs still need an operator decision.
 
-    ``status`` previously answered only "is the checkpoint there".  Whether a
-    human has to open a Subagent at all is the question operators ask most
-    often, and answering it required opening manifests by hand.
+    The manifest is written by ``decide_resume`` and already carries the
+    pending taxonomy, while the validation receipt carries the authoritative
+    completed set.  ``status`` therefore references those artifacts instead of
+    recomputing pending batches or waves.
     """
+    from pdf2epub.markdown_handoff_resume import pending_reason_counts
+
     gates: list[dict[str, Any]] = []
     for name, filename in _REVIEW_MANIFESTS:
         path = output_dir / filename
@@ -543,6 +609,7 @@ def _review_gates(output_dir: Path) -> list[dict[str, Any]]:
                 {
                     "name": name,
                     "manifest": filename,
+                    "source_manifest_sha": sha256_file(path),
                     "status": "unreadable",
                     "needs_subagent": True,
                     "detail": "manifest exists but could not be parsed; rerun the prepare step",
@@ -551,6 +618,15 @@ def _review_gates(output_dir: Path) -> list[dict[str, Any]]:
             continue
         pending_files = manifest.get("pending_files")
         pending = sorted(pending_files) if isinstance(pending_files, list) else []
+        pending_reasons = manifest.get("pending_reasons")
+        pending_reasons = (
+            {str(key): str(value) for key, value in pending_reasons.items()}
+            if isinstance(pending_reasons, Mapping)
+            else {}
+        )
+        reason_counts = manifest.get("pending_reason_counts")
+        if not isinstance(reason_counts, Mapping) or not reason_counts:
+            reason_counts = pending_reason_counts(pending_reasons)
         handoffs = manifest.get("worker_handoffs")
         workers = [item for item in handoffs if isinstance(item, dict)] if isinstance(handoffs, list) else []
         worker_status: dict[str, int] = {}
@@ -558,17 +634,23 @@ def _review_gates(output_dir: Path) -> list[dict[str, Any]]:
             key = str(worker.get("dispatch_status") or "unknown")
             worker_status[key] = worker_status.get(key, 0) + 1
         waves = manifest.get("dispatch_plan")
+        wave_count = len(waves) if isinstance(waves, list) else 0
+        validation = _review_validation_summary(output_dir, name, pending)
+        mismatched = _review_manifest_source_mismatch(manifest, validation)
         declared_status = str(manifest.get("status") or "").strip()
-        if declared_status:
+        if mismatched:
+            status = "stale_manifest"
+        elif declared_status:
             status = declared_status
-        elif pending:
+        elif pending_reasons or pending:
             status = "pending_review"
         elif workers:
             status = "assigned"
         else:
             status = "clear"
-        needs_subagent = status in {"pending_review", "unreadable"} or status.startswith(
-            "human_review"
+        needs_subagent = (
+            status in {"pending_review", "unreadable", "stale_manifest"}
+            or status.startswith("human_review")
         )
         detail_parts: list[str] = []
         if pending:
@@ -580,31 +662,41 @@ def _review_gates(output_dir: Path) -> list[dict[str, Any]]:
             value = manifest.get(key)
             if isinstance(value, int) and value > 0:
                 detail_parts.append(f"{value} {label}")
-        reason_counts = manifest.get("pending_reason_counts")
-        if isinstance(reason_counts, Mapping) and reason_counts:
+        if reason_counts:
             detail_parts.append(
                 "pending reasons: "
                 + ", ".join(f"{key}={value}" for key, value in sorted(reason_counts.items()))
             )
         if workers:
             detail_parts.append(f"{len(workers)} worker hand-off(s)")
-        if isinstance(waves, list) and waves:
-            detail_parts.append(f"{len(waves)} dispatch wave(s)")
+        if wave_count:
+            detail_parts.append(f"{wave_count} dispatch wave(s)")
         if worker_status:
             detail_parts.append(
                 ", ".join(f"{key}={value}" for key, value in sorted(worker_status.items()))
+            )
+        if mismatched:
+            prepare = _PREPARE_COMMANDS.get(name, "the prepare step")
+            detail_parts.append(
+                "manifest source hashes differ from the validation receipt for "
+                + ", ".join(mismatched[:5])
+                + f"; rerun {prepare}"
             )
         gates.append(
             {
                 "name": name,
                 "manifest": filename,
+                "source_manifest_sha": sha256_file(path),
                 "status": status,
                 "needs_subagent": needs_subagent,
                 "pending_files": len(pending),
                 "pending_file_names": pending[:10],
+                "pending_reasons": pending_reasons,
+                "pending_reason_counts": dict(reason_counts),
+                "validation": validation,
                 "workers": len(workers),
                 "worker_status": worker_status,
-                "waves": len(waves) if isinstance(waves, list) else 0,
+                "waves": wave_count,
                 "detail": "; ".join(detail_parts) or "nothing outstanding",
             }
         )

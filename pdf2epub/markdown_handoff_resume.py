@@ -238,6 +238,19 @@ class ResumeDecision:
     concurrency_reason: str = "no pending files"
 
 
+def pending_reason_counts(reasons: Mapping[str, str]) -> dict[str, int]:
+    """Count the per-unit pending reasons produced by :func:`decide_resume`.
+
+    Kept beside the classifier so every consumer reads the same taxonomy
+    instead of re-deriving categories from pending file names.
+    """
+    counts: dict[str, int] = {}
+    for reason in reasons.values():
+        key = str(reason)
+        counts[key] = counts.get(key, 0) + 1
+    return dict(sorted(counts.items()))
+
+
 def _projection_version_changed(
     name: str,
     previous_manifest: Mapping[str, Any],
