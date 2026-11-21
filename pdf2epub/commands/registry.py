@@ -45,7 +45,7 @@ def _register_dispatch_commands(subparsers) -> None:
     dispatch_status.add_argument("--wave-cap", type=int)
     dispatch_status.add_argument("--wave-reason", choices=["ordinary", "large_units", "extreme_unit"], default="ordinary")
     dispatch_status.add_argument("--available-cap", type=int, help="Actual IDE capacity reported by the operator")
-    dispatch_status.add_argument("--active-workers", type=int, help="Actual running task workers, including metadata, reported by the operator")
+    dispatch_status.add_argument("--active-workers", type=int, help="Actual running body workers reported by the operator (metadata runs in its own lane)")
     dispatch_status.set_defaults(func=_lazy_handler("pdf2epub.commands.dispatch_recovery", "dispatch_status_command"))
 
     dispatch_failure = subparsers.add_parser("dispatch-record-failure", help="Record a provider 429 and recovery timing")

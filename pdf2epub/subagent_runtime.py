@@ -442,7 +442,10 @@ def write_worker_handoffs(
     groups, dispatch_plan, configured_cap = _plan_dispatch_waves(
         groups,
         file_stats,
-        normalized_batching,
+        {
+            **dict(normalized_batching),
+            "metadata_lane": task == "translate-html",
+        },
         strategy=(
             "ordinary_before_large" if task == "translate-html" else "source_order"
         ),
@@ -452,6 +455,11 @@ def write_worker_handoffs(
     manifest["concurrency_reason"] = "ordered_dispatch_plan"
     manifest["dispatch_contract"] = DISPATCH_OPERATOR_CONTRACT
     manifest["dispatch_plan"] = dispatch_plan
+    metadata_lane = next(
+        (wave for wave in dispatch_plan if wave.get("lane") == "metadata"), None
+    )
+    if metadata_lane is not None:
+        manifest["metadata_dispatch_lane"] = metadata_lane
     handoff_dir = output_dir / (
         handoff_dir_name or ("worker_handoffs" if task == "translate" else f"{task}_worker_handoffs")
     )

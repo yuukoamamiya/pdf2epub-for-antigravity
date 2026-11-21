@@ -10,39 +10,54 @@ from .batching_service import (
     DEFAULT_PACKED_SOURCE_TOKEN_MULTIPLIER, DEFAULT_PACK_ADJACENT_CHAPTERS,
     DEFAULT_MAX_CHAPTERS_PER_WORKER, DEFAULT_MAX_TINY_CHAPTERS_PER_WORKER,
     DEFAULT_TINY_CHAPTER_MAX_TOKENS, MAX_BATCH_FILES, MAX_ACTIVE_SUBAGENTS,
-    DEFAULT_BATCH_MAX_CONCURRENCY,
+    DEFAULT_BATCH_MAX_CONCURRENCY, METADATA_LANE_MAX_CONCURRENCY,
     DEFAULT_LARGE_FILE_TOKEN_THRESHOLD, DEFAULT_EXTREME_FILE_TOKEN_THRESHOLD,
     positive_int, recommended_batches, POLISH_ISOLATED_ROLES,
+    batching_config, classify_unit_severity,
 )
 from .document_roles import infer_translation_file_role
 
 
-def _plan_dispatch_waves(
+def _normalized_batching(config: Mapping[str, Any]) -> Dict[str, Any]:
+    """Accept either a full book config or an already-flattened batching map."""
+    if not isinstance(config, Mapping):
+        return batching_config({})
+    source = config
+    if isinstance(config.get("subagent"), Mapping) or isinstance(config.get("batching"), Mapping):
+        normalized = batching_config(config)
+    else:
+        normalized = batching_config({"subagent": {"batching": dict(config)}})
+    # Scheduling-only flags are not part of the persisted batching block.
+    if "metadata_lane" in source:
+        normalized["metadata_lane"] = bool(source.get("metadata_lane"))
+    return normalized
+
+
+def plan_waves(
     groups: List[Dict[str, Any]],
     file_stats: Mapping[str, Mapping[str, Any]],
-    batching: Mapping[str, Any],
+    config: Mapping[str, Any],
     *,
     strategy: str = "source_order",
-) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], int]:
-    """Annotate worker groups with ordered operator dispatch waves.
+) -> List[Dict[str, Any]]:
+    """Plan ordered dispatch waves from worker groups (pure, no annotations).
 
     Severity is based on each group's largest individual file, not its total
-    assigned tokens. The returned groups are copies and the plan has no runtime
-    semaphore semantics; it is an explicit scheduling contract for operators.
+    assigned tokens.  The returned plan has no runtime semaphore semantics; it
+    is an explicit scheduling contract for operators.  Metadata work is planned
+    in its own low-priority lane and never consumes a body-wave slot.
+
+    ``config`` may be the full book configuration (with ``subagent.batching``)
+    or an already normalized batching mapping.
     """
+    batching = _normalized_batching(config)
     configured_cap = min(
         MAX_ACTIVE_SUBAGENTS,
         positive_int(batching.get("max_concurrency"), DEFAULT_BATCH_MAX_CONCURRENCY),
     )
-    large_threshold = positive_int(
-        batching.get("large_file_token_threshold"),
-        DEFAULT_LARGE_FILE_TOKEN_THRESHOLD,
-    )
-    extreme_threshold = positive_int(
-        batching.get("extreme_file_token_threshold"),
-        DEFAULT_EXTREME_FILE_TOKEN_THRESHOLD,
-    )
-    planned_groups = [dict(group) for group in groups]
+    if strategy not in {"source_order", "ordinary_before_large"}:
+        raise ValueError(f"Unknown dispatch strategy: {strategy}")
+    reordered = strategy == "ordinary_before_large"
 
     def severity(group: Mapping[str, Any]) -> str:
         largest_file = max(
@@ -52,19 +67,15 @@ def _plan_dispatch_waves(
             ),
             default=0,
         )
-        if largest_file >= extreme_threshold:
-            return "extreme_unit"
-        if largest_file >= large_threshold:
-            return "large_units"
-        return "ordinary"
+        return classify_unit_severity(largest_file, batching)
 
     # HTML translation can keep ordinary IDE slots busy while avoiding an
     # ordinary/large alternation that would otherwise create many singleton
-    # waves. Extreme units remain hard ordering barriers. Keep the returned
-    # group list in its original order; only dispatch annotations and plan
-    # order follow this scheduling view.
-    scheduling_groups = planned_groups
-    if strategy == "ordinary_before_large":
+    # waves. Extreme units remain hard ordering barriers. Only the wave order
+    # and per-group annotations follow this scheduling view; the caller's group
+    # list is never reordered.
+    scheduling_groups = list(groups)
+    if reordered:
         scheduling_groups = []
         segment: List[Dict[str, Any]] = []
 
@@ -79,15 +90,13 @@ def _plan_dispatch_waves(
             )
             segment.clear()
 
-        for group in planned_groups:
+        for group in groups:
             if severity(group) == "extreme_unit":
                 flush_segment()
                 scheduling_groups.append(group)
             else:
                 segment.append(group)
         flush_segment()
-    elif strategy != "source_order":
-        raise ValueError(f"Unknown dispatch strategy: {strategy}")
 
     plan: List[Dict[str, Any]] = []
     wave_groups: List[Dict[str, Any]] = []
@@ -97,24 +106,19 @@ def _plan_dispatch_waves(
         nonlocal wave_groups, wave_severity
         if not wave_groups or wave_severity is None:
             return
-        wave_number = len(plan) + 1
         cap = (
             1 if wave_severity == "extreme_unit"
             else min(2, configured_cap) if wave_severity == "large_units"
             else configured_cap
         )
-        worker_ids = []
-        for group in wave_groups:
-            group["dispatch_wave"] = wave_number
-            group["dispatch_wave_max_concurrency"] = cap
-            group["dispatch_wave_reason"] = wave_severity
-            worker_ids.append(group["worker_id"])
         plan.append(
             {
-                "wave": wave_number,
-                "worker_ids": worker_ids,
+                "wave": len(plan) + 1,
+                "worker_ids": [group["worker_id"] for group in wave_groups],
                 "max_concurrency": cap,
                 "reason": wave_severity,
+                "lane": "body",
+                "reordered_for_dispatch": reordered,
             }
         )
         wave_groups = []
@@ -136,7 +140,55 @@ def _plan_dispatch_waves(
         if len(wave_groups) >= cap:
             finish_wave()
     finish_wave()
-    return planned_groups, plan, configured_cap
+
+    # Metadata is a separate low-priority lane: it does not use body-wave
+    # slots, is capped at one worker, and must not overlap an extreme unit.
+    if batching.get("metadata_lane"):
+        plan.append(
+            {
+                "wave": len(plan) + 1,
+                "worker_ids": [],
+                "max_concurrency": METADATA_LANE_MAX_CONCURRENCY,
+                "reason": "metadata",
+                "lane": "metadata",
+                "priority": "low",
+                "overlaps_extreme_wave": False,
+                "reordered_for_dispatch": False,
+            }
+        )
+    return plan
+
+
+def _plan_dispatch_waves(
+    groups: List[Dict[str, Any]],
+    file_stats: Mapping[str, Mapping[str, Any]],
+    batching: Mapping[str, Any],
+    *,
+    strategy: str = "source_order",
+) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], int]:
+    """Compatibility wrapper: annotate group copies with the shared plan."""
+    planned_groups = [dict(group) for group in groups]
+    waves = plan_waves(planned_groups, file_stats, batching, strategy=strategy)
+    wave_by_worker = {
+        worker_id: wave
+        for wave in waves
+        if wave.get("lane") == "body"
+        for worker_id in wave.get("worker_ids", [])
+    }
+    for group in planned_groups:
+        wave = wave_by_worker.get(group["worker_id"])
+        if wave is None:  # pragma: no cover - every body group gets a wave
+            continue
+        group["dispatch_wave"] = wave["wave"]
+        group["dispatch_wave_max_concurrency"] = wave["max_concurrency"]
+        group["dispatch_wave_reason"] = wave["reason"]
+    normalized = _normalized_batching(batching)
+    configured_cap = min(
+        MAX_ACTIVE_SUBAGENTS,
+        positive_int(normalized.get("max_concurrency"), DEFAULT_BATCH_MAX_CONCURRENCY),
+    )
+    return planned_groups, waves, configured_cap
+
 
 def _balanced_worker_groups(
     queue: List[Dict[str, Any]],

@@ -50,7 +50,7 @@ def _dispatch_status(args: Any) -> int:
     if args.json:
         print(json.dumps(value, ensure_ascii=False, indent=2))
     else:
-        print(f"task={args.task} next_retry_at={value.get('next_retry_at')} cooldown_active={value.get('cooldown_active')} operator_blocked={bool((value.get('task_block') or {}).get('operator_blocked'))} concurrency_cap={value.get('concurrency_cap')} new_worker_slots={value.get('new_worker_slots')} effective_cap={value.get('effective_cap')} (report actual running workers and free slots)")
+        print(f"task={args.task} next_retry_at={value.get('next_retry_at')} cooldown_active={value.get('cooldown_active')} operator_blocked={bool((value.get('task_block') or {}).get('operator_blocked'))} concurrency_cap={value.get('concurrency_cap')} 可派发槽位N={value.get('dispatchable_slots')} new_worker_slots={value.get('new_worker_slots')} effective_cap={value.get('effective_cap')} (N = min(cap, wave, temp) - active; report actual running workers and free slots)")
     return 0
 
 
@@ -106,6 +106,10 @@ def _dispatch_plan(args: Any) -> int:
                     "wave": wave.get("wave"),
                     "max_concurrency": wave.get("max_concurrency"),
                     "reason": wave.get("reason"),
+                    "lane": wave.get("lane") or "body",
+                    "reordered_for_dispatch": bool(
+                        wave.get("reordered_for_dispatch")
+                    ),
                     "workers": [
                         {
                             "worker_id": worker_id,

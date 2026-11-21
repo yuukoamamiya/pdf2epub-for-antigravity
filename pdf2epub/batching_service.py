@@ -15,18 +15,45 @@ DEFAULT_BATCH_MAX_CONCURRENCY = 3
 MAX_ACTIVE_SUBAGENTS = 6
 DEFAULT_SINGLE_FILE_MAX_BYTES = 30_000
 DEFAULT_BATCH_MAX_NONEMPTY_LINES = 350
-DEFAULT_LARGE_FILE_TOKEN_THRESHOLD = 12_000
-DEFAULT_EXTREME_FILE_TOKEN_THRESHOLD = 24_000
+# Single source of the dispatch severity thresholds.  A "large" unit is the
+# ordinary per-worker source-token budget; "extreme" is exactly twice that.
+DEFAULT_LARGE_FILE_TOKEN_THRESHOLD = DEFAULT_BATCH_MAX_SOURCE_TOKENS
+DEFAULT_EXTREME_FILE_TOKEN_THRESHOLD = DEFAULT_LARGE_FILE_TOKEN_THRESHOLD * 2
 DEFAULT_GLOBAL_TOC_TOKENS = 1_200
 DEFAULT_PACK_ADJACENT_CHAPTERS = True
 DEFAULT_MAX_CHAPTERS_PER_WORKER = 3
 DEFAULT_MAX_TINY_CHAPTERS_PER_WORKER = 6
 DEFAULT_TINY_CHAPTER_MAX_TOKENS = 2_000
 DEFAULT_PACKED_SOURCE_TOKEN_MULTIPLIER = 2
+METADATA_LANE_MAX_CONCURRENCY = 1
 POLISH_ISOLATED_ROLES = frozenset({
     "index", "bibliography", "notes", "author_notes", "toc", "catalog",
     "ad", "copyright", "frontmatter", "metadata", "cover",
 })
+
+
+def dispatch_thresholds(batching: Mapping[str, Any]) -> tuple[int, int]:
+    """Return the single authoritative (large, extreme) token thresholds."""
+    large = positive_int(
+        batching.get("large_file_token_threshold"),
+        DEFAULT_LARGE_FILE_TOKEN_THRESHOLD,
+    )
+    extreme = positive_int(
+        batching.get("extreme_file_token_threshold"),
+        DEFAULT_EXTREME_FILE_TOKEN_THRESHOLD,
+    )
+    return large, extreme
+
+
+def classify_unit_severity(largest_tokens: int, batching: Mapping[str, Any]) -> str:
+    """Classify one worker by its largest individual file's token estimate."""
+    large, extreme = dispatch_thresholds(batching)
+    if int(largest_tokens) >= extreme:
+        return "extreme_unit"
+    if int(largest_tokens) >= large:
+        return "large_units"
+    return "ordinary"
+
 
 
 def markdown_files(directory: Path) -> List[Path]:
@@ -161,20 +188,57 @@ def effective_max_concurrency(
     large_threshold: int = DEFAULT_LARGE_FILE_TOKEN_THRESHOLD,
     extreme_threshold: int = DEFAULT_EXTREME_FILE_TOKEN_THRESHOLD,
 ) -> tuple[int, str]:
-    """Choose a conservative worker cap from the pending source inventory."""
-    large = [
-        name for name, stats in file_stats.items()
-        if int(stats.get("estimated_tokens", 0)) >= large_threshold
-    ]
-    extreme = [
-        name for name, stats in file_stats.items()
-        if int(stats.get("estimated_tokens", 0)) >= extreme_threshold
-    ]
+    """Choose a conservative worker cap from the pending source inventory.
+
+    The decision is delegated to the single ``plan_waves`` scheduler so the
+    pre-handoff cap and the ordered dispatch plan cannot drift apart.  The
+    planner is imported lazily because ``worker_grouping`` builds on this
+    module's constants and helpers; a module-level import would create a cycle.
+    """
+    from importlib import import_module
+
+    plan_waves = import_module(".worker_grouping", __package__).plan_waves
+
     configured = min(MAX_ACTIVE_SUBAGENTS, max(1, int(configured)))
-    if extreme or len(large) >= 2:
-        return min(configured, 1), "extreme_or_multiple_large_units"
-    if large:
-        return min(configured, 2), "large_unit_present"
+    config = {
+        "subagent": {
+            "batching": {
+                "max_concurrency": configured,
+                "large_file_token_threshold": large_threshold,
+                "extreme_file_token_threshold": extreme_threshold,
+            }
+        }
+    }
+    groups = [
+        {"worker_id": f"unit_{index:03d}", "files": [name]}
+        for index, name in enumerate(file_stats, 1)
+    ]
+    waves = plan_waves(groups, file_stats, config)
+    batching = batching_config(config)
+    severities = [
+        classify_unit_severity(
+            max(
+                (
+                    int((file_stats.get(name, {}) or {}).get("estimated_tokens", 0))
+                    for name in group.get("files", [])
+                ),
+                default=0,
+            ),
+            batching,
+        )
+        for group in groups
+    ]
+    if "extreme_unit" in severities:
+        return 1, "extreme_or_multiple_large_units"
+    large_count = severities.count("large_units")
+    if large_count >= 2:
+        return 1, "extreme_or_multiple_large_units"
+    if large_count == 1:
+        cap = min(
+            (int(wave.get("max_concurrency") or configured) for wave in waves),
+            default=configured,
+        )
+        return min(configured, cap, 2), "large_unit_present"
     return configured, "no_large_units"
 
 

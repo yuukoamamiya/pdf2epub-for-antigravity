@@ -22,9 +22,9 @@ DISPATCH_OPERATOR_CONTRACT = (
     "Report the actual peak concurrency; do not claim unused slots. "
     "Never send a new assignment or later wave to an old worker conversation to "
     "queue work or accumulate context. A repair retry for the same assignment "
-    "may keep its original conversation. Count separate metadata workers "
-    "against the same wave cap; metadata may use ordinary/large-unit capacity, "
-    "but never run metadata during an extreme_unit wave. Never exceed the "
+    "may keep its original conversation. Metadata work runs in its own "
+    "low-priority lane, capped at one worker: it does not consume body-wave "
+    "slots, but never run metadata during an extreme_unit wave. Never exceed the "
     "configured global cap "
     "(at most 6), large-unit cap (at most 2), or extreme-unit cap (1). "
     "On completion, the main agent "
@@ -169,12 +169,12 @@ def render_dispatch_operator_prompt(
         f"Parent manifest: `{manifest_path}`",
         "",
         "This guide is for the main agent. Do not give it to a worker. Each worker gets only its own scoped manifest and prompt.",
-        f"Before every wave and after recovery, run `uv run pdf2epub -c {config_arg} dispatch-status --task {task} --wave-reason <ordinary|large_units|extreme_unit> --available-cap <observed free IDE slots> --active-workers <running task workers including metadata> --json` and use `new_worker_slots` as the maximum number of new workers to dispatch. The concurrency cap includes already-running task workers; neither leases nor this status are an IDE semaphore. Use `uv run pdf2epub -c {config_arg} dispatch-record-failure --task {task} ...` to record a provider failure with the current worker assignment digest. Reconcile real IDE sessions and leases, inspect validation results, then use `uv run pdf2epub -c {config_arg} dispatch-resume --task {task} --reason <operator evidence> --confirm-sessions-reconciled` only for pending/invalid work (quota exhaustion also needs `--confirm-quota-available`). These commands do not make network requests, validate translations, release leases, or prove that IDE sessions ended.",
+        f"Before every wave and after recovery, run `uv run pdf2epub -c {config_arg} dispatch-status --task {task} --wave-reason <ordinary|large_units|extreme_unit> --available-cap <observed free IDE slots> --active-workers <running body workers; metadata lane separate> --json` and use `dispatchable_slots` (可派发槽位N = min(cap, wave, temp) - active) as the maximum number of new body workers to dispatch. The concurrency cap includes already-running task workers; neither leases nor this status are an IDE semaphore. Use `uv run pdf2epub -c {config_arg} dispatch-record-failure --task {task} ...` to record a provider failure with the current worker assignment digest. Reconcile real IDE sessions and leases, inspect validation results, then use `uv run pdf2epub -c {config_arg} dispatch-resume --task {task} --reason <operator evidence> --confirm-sessions-reconciled` only for pending/invalid work (quota exhaustion also needs `--confirm-quota-available`). These commands do not make network requests, validate translations, release leases, or prove that IDE sessions ended.",
         "",
         DISPATCH_OPERATOR_CONTRACT,
         "",
         "Before resuming, inspect actual active Subagent conversations and the dispatch lease. Do not reopen assignments marked assigned/running or active_same_assignment; reconnect/review that exact assignment and wait. A conflict blocks opening a new worker until resolved. If any extreme_unit assignment is actually active, do not start an ordinary or large wave beside it. Static status is not proof that a conversation has started or ended.",
-        "Retry only the failed worker's assigned_files. Preserve assignment identity only when the source and context assignment is unchanged; changed source/context produces a new assignment and supersedes the old one. Keep metadata within the same wave cap and never overlap it with an extreme_unit wave.",
+        "Retry only the failed worker's assigned_files. Preserve assignment identity only when the source and context assignment is unchanged; changed source/context produces a new assignment and supersedes the old one. Metadata runs in its own low-priority lane (one worker, not charged to body-wave slots) and must never overlap an extreme_unit wave.",
         "",
         "## Waves",
         "",
@@ -182,10 +182,19 @@ def render_dispatch_operator_prompt(
     handoffs_by_id = {str(item.get("worker_id")): item for item in handoffs}
     for wave in dispatch_plan:
         wave_number = wave.get("wave")
+        lane = str(wave.get("lane") or "body")
         lines.append(
-            f"### Wave {wave_number}: {wave.get('reason')} (cap {wave.get('max_concurrency')})"
+            f"### Wave {wave_number}: {wave.get('reason')} "
+            f"(lane {lane}, cap {wave.get('max_concurrency')})"
         )
         lines.append("")
+        if lane == "metadata":
+            lines.append(
+                "- Metadata lane: run at most one metadata worker here; it does "
+                "not consume body-wave slots and must not overlap an extreme_unit wave."
+            )
+            lines.append("")
+            continue
         for worker_id in wave.get("worker_ids", []):
             item = handoffs_by_id.get(str(worker_id), {})
             assigned = ", ".join(

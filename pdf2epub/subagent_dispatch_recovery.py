@@ -134,11 +134,28 @@ def snapshot(path: Path, task: str, *, now: datetime | None = None, configured_c
         caps.append(available_cap)
     result["concurrency_cap"] = min(configured_cap, wave_cap or configured_cap, result.get("temporary_cap") or configured_cap)
     result["effective_cap"] = min(caps)
+    # Operator-facing single formula: dispatchable body slots are the tightest
+    # cap (configured, wave, temporary) minus workers already running.
+    dispatchable = None
+    if active_workers is not None:
+        dispatchable = max(
+            0,
+            result["concurrency_cap"] - active_workers,
+        )
+    result["dispatchable_slots"] = dispatchable
+    # Backwards-compatible alias; available_cap remains an operator-reported
+    # observation and does not widen the cap formula.
     result["new_worker_slots"] = (
         0 if available_cap == 0
-        else None if available_cap is None or active_workers is None
-        else max(0, min(available_cap, result["concurrency_cap"] - active_workers))
+        else None if available_cap is None or dispatchable is None
+        else min(available_cap, dispatchable)
     )
+    result["metadata_lane"] = {
+        "lane": "metadata",
+        "priority": "low",
+        "max_concurrency": 1,
+        "counts_against_body_wave": False,
+    }
     result["cap_inputs"] = {"configured_cap": configured_cap, "wave_cap": wave_cap, "temporary_cap": result.get("temporary_cap"), "available_cap": available_cap, "active_workers": active_workers}
     return result
 

@@ -178,3 +178,22 @@ def test_manifest_path_escape_rejected(tmp_path):
     outside.write_text(manifest.read_text(encoding="utf-8"), encoding="utf-8")
     with pytest.raises(ValueError, match="inside the task output directory"):
         record_failure(recovery_state_path(tmp_path, "translate"), outside, "worker_001", "unknown_429", expected_assignment_sha256=DIGEST, actual_peak_concurrency=1)
+
+
+def test_dispatchable_slots_uses_min_cap_wave_temp_minus_active(tmp_path):
+    path = recovery_state_path(tmp_path, "translate")
+    assert snapshot(
+        path, "translate", configured_cap=4, wave_cap=2, active_workers=1
+    )["dispatchable_slots"] == 1
+    assert snapshot(
+        path, "translate", configured_cap=6, wave_cap=1, active_workers=0
+    )["dispatchable_slots"] == 1
+    assert snapshot(
+        path, "translate", configured_cap=4, active_workers=4
+    )["dispatchable_slots"] == 0
+    assert snapshot(
+        path, "translate", configured_cap=4, active_workers=None
+    )["dispatchable_slots"] is None
+    value = snapshot(path, "translate", configured_cap=4, active_workers=1)
+    assert value["metadata_lane"]["max_concurrency"] == 1
+    assert value["metadata_lane"]["counts_against_body_wave"] is False

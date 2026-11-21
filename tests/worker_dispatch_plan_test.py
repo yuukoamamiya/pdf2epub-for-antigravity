@@ -4,7 +4,7 @@ from pathlib import Path
 from pdf2epub.markdown_handoff import prepare_markdown_subagent
 from pdf2epub.markdown_handoff_context import MarkdownHandoffRequest
 from pdf2epub.subagent_runtime import write_worker_handoffs
-from pdf2epub.worker_grouping import _plan_dispatch_waves
+from pdf2epub.worker_grouping import _plan_dispatch_waves, plan_waves
 
 
 def _prepared(
@@ -77,10 +77,10 @@ def test_mixed_pending_inventory_dispatches_ordinary_wave_before_exclusive_extre
     assert all(item["dispatch_wave"] == 1 for item in handoffs if "ordinary" in item["files"][0])
     assert manifest["effective_max_concurrency"] == 4
     assert "operator scheduling" in manifest["dispatch_contract"].lower()
-    assert "separate metadata workers" in manifest["dispatch_contract"]
+    assert "low-priority lane" in manifest["dispatch_contract"]
     assert "never run metadata during an extreme_unit wave" in manifest["dispatch_contract"]
     parent_prompt = paths["prompt"].read_text(encoding="utf-8")
-    assert "separate metadata workers" in parent_prompt
+    assert "low-priority lane" in parent_prompt
     assert "must never run during an" in parent_prompt
 
     scoped = json.loads((tmp_path / extreme_handoff["manifest"]).read_text(encoding="utf-8"))
@@ -170,6 +170,8 @@ def test_dispatch_severity_uses_largest_file_not_worker_aggregate():
             "worker_ids": ["worker_001"],
             "max_concurrency": 4,
             "reason": "ordinary",
+            "lane": "body",
+            "reordered_for_dispatch": False,
         }
     ]
     assert groups[0]["dispatch_wave_max_concurrency"] == 4
@@ -257,11 +259,16 @@ def test_write_worker_handoffs_applies_repacking_only_to_html_and_keeps_assignme
     html_plan = html_manifest["dispatch_plan"]
 
     assert len(html_handoffs) == 24
-    assert len(html_plan) == 9
-    assert [wave["reason"] for wave in html_plan] == ["ordinary"] * 3 + [
+    body_plan = [wave for wave in html_plan if wave.get("lane") == "body"]
+    metadata_plan = [wave for wave in html_plan if wave.get("lane") == "metadata"]
+    assert len(body_plan) == 9
+    assert len(metadata_plan) == 1
+    assert metadata_plan[0]["worker_ids"] == []
+    assert metadata_plan[0]["priority"] == "low"
+    assert [wave["reason"] for wave in body_plan] == ["ordinary"] * 3 + [
         "large_units"
     ] * 6
-    assert not any(len(wave["worker_ids"]) == 1 for wave in html_plan)
+    assert not any(len(wave["worker_ids"]) == 1 for wave in body_plan)
     assert [item["worker_id"] for item in html_handoffs] == [
         f"chapter_unit_{index:02d}_part_001" for index in range(1, 25)
     ]
@@ -613,3 +620,66 @@ def test_non_tiny_special_unit_never_packs_with_a_tiny_special_unit():
     manifest["file_stats"]["toc.md"]["estimated_tokens"] = 5000
     groups = _chapter_worker_groups(manifest)
     assert [group["files"] for group in groups] == [["toc.md"], ["notes.md"]]
+
+
+def test_plan_waves_is_pure_and_reports_reordering_explicitly():
+    groups = [
+        {"worker_id": "w1", "files": ["ordinary.md"]},
+        {"worker_id": "w2", "files": ["large.md"]},
+        {"worker_id": "w3", "files": ["extreme.md"]},
+    ]
+    stats = {
+        "ordinary.md": {"estimated_tokens": 20},
+        "large.md": {"estimated_tokens": 150},
+        "extreme.md": {"estimated_tokens": 500},
+    }
+    config = {
+        "max_concurrency": 4,
+        "large_file_token_threshold": 100,
+        "extreme_file_token_threshold": 400,
+    }
+    original = [dict(group) for group in groups]
+
+    waves = plan_waves(groups, stats, config, strategy="ordinary_before_large")
+
+    assert groups == original
+    assert [wave["reason"] for wave in waves] == [
+        "ordinary",
+        "large_units",
+        "extreme_unit",
+    ]
+    assert all(wave["lane"] == "body" for wave in waves)
+    assert all(wave["reordered_for_dispatch"] is True for wave in waves)
+
+
+def test_plan_waves_places_metadata_in_a_separate_low_priority_lane():
+    groups = [{"worker_id": "w1", "files": ["a.md"]}]
+    stats = {"a.md": {"estimated_tokens": 20}}
+    config = {
+        "max_concurrency": 2,
+        "metadata_lane": True,
+    }
+
+    source = plan_waves(groups, stats, config)
+    reordered = plan_waves(groups, stats, config, strategy="ordinary_before_large")
+
+    assert [wave["lane"] for wave in source] == ["body", "metadata"]
+    metadata = source[-1]
+    assert metadata["worker_ids"] == []
+    assert metadata["max_concurrency"] == 1
+    assert metadata["priority"] == "low"
+    assert metadata["overlaps_extreme_wave"] is False
+    # The body wave is unchanged by the metadata lane.
+    assert reordered[0] == {
+        **source[0],
+        "reordered_for_dispatch": True,
+    }
+
+
+def test_plan_waves_accepts_a_full_book_config():
+    waves = plan_waves(
+        [{"worker_id": "w1", "files": ["a.md"]}],
+        {"a.md": {"estimated_tokens": 20}},
+        {"subagent": {"batching": {"max_concurrency": 3}}},
+    )
+    assert waves[0]["max_concurrency"] == 3
