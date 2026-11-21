@@ -1859,4 +1859,36 @@ def prepare_footnote_subagent(
     )
 
 
-__all__ = ["prepare_footnote_subagent"]
+def scan_footnote_candidates(
+    output_dir: Path,
+    *,
+    book_title: str,
+    config: Optional[Mapping[str, Any]] = None,
+    mode: Optional[str] = None,
+    bottom_ratio: Optional[float] = None,
+    bottom_intersection_ratio: Optional[float] = None,
+    context_blocks: Optional[int] = None,
+    auto_accept: Optional[bool] = None,
+    native_max_font_ratio: Optional[float] = None,
+) -> dict[str, Any]:
+    """Run the layout candidate scan before ``refine-local``.
+
+    The candidate report depends only on ``pages/`` and its layout sidecars,
+    so the visual review windows can be prepared while the TOC Subagent is
+    still running.  The later ``footnote-prepare`` performs the same scan and
+    then adds the refined-unit scope; this dry run never writes decisions or
+    requires ``ocr_markdown/``.
+    """
+    return prepare_footnote_candidates(
+        output_dir,
+        config=config,
+        mode=mode,
+        bottom_ratio=bottom_ratio,
+        bottom_intersection_ratio=bottom_intersection_ratio,
+        context_blocks=context_blocks,
+        auto_accept=auto_accept,
+        native_max_font_ratio=native_max_font_ratio,
+    )
+
+
+__all__ = ["prepare_footnote_subagent", "scan_footnote_candidates"]

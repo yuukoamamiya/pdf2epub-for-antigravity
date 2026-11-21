@@ -29,6 +29,24 @@ from pdf2epub.refine.subagent_workflow import validate_toc_tree_data
 from pdf2epub.refine.footnote_options import footnote_mode_warnings
 
 
+# Readiness stages that mirror the parallel tracks of the PDF pipeline.
+# ``structure`` covers the OCR/correction gates that both ``refine-prepare``
+# and ``illustration-prepare`` need; ``translate-prep`` covers the polished
+# source gate that both the source-language EPUB build and the entity/TOC
+# preparation need.  The two book-level gates (``translate``/``package``)
+# remain the final checks.
+PARALLEL_STAGE_STRUCTURE = "structure"
+PARALLEL_STAGE_TRANSLATION_PREP = "translate-prep"
+READINESS_STAGES = (
+    PARALLEL_STAGE_STRUCTURE,
+    PARALLEL_STAGE_TRANSLATION_PREP,
+    "translate",
+    "package",
+)
+_BOOK_LEVEL_STAGES = frozenset({"translate", "package"})
+_STRUCTURE_STAGES = frozenset({PARALLEL_STAGE_TRANSLATION_PREP, "translate", "package"})
+
+
 def _record_ocr_readiness(
     record: Callable[..., None],
     *,
@@ -174,40 +192,60 @@ def _record_structure_readiness(
 ) -> dict:
     """Record TOC, refinement, footnote and source-stage gates."""
     toc_path = output_dir / "toc_tree.json"
-    toc_errors: list[str] = []
-    if toc_path.is_file() and available:
-        try:
-            toc_data = json.loads(toc_path.read_text(encoding="utf-8"))
-            toc_errors = validate_toc_tree_data(toc_data, max(available), available)
-        except (OSError, json.JSONDecodeError) as exc:
-            toc_errors = [f"invalid toc_tree.json: {exc}"]
+    structure_gate = stage in _STRUCTURE_STAGES
+    if not structure_gate:
+        # ``structure`` readiness exists so refine-prepare and
+        # illustration-prepare can run in parallel: it must not wait for a TOC
+        # tree that neither command produces.
+        record(
+            "toc_tree",
+            True,
+            "not required for the parallel structure track; refine-prepare owns toc_tree.json",
+        )
+        record(
+            "refine_local",
+            True,
+            "not required for the parallel structure track; run refine-local after TOC and illustration review",
+        )
     else:
-        toc_errors = ["toc_tree.json or OCR pages are missing"]
-    record("toc_tree", not toc_errors, "; ".join(toc_errors[:5]) or "TOC structure is valid")
+        toc_errors: list[str] = []
+        if toc_path.is_file() and available:
+            try:
+                toc_data = json.loads(toc_path.read_text(encoding="utf-8"))
+                toc_errors = validate_toc_tree_data(toc_data, max(available), available)
+            except (OSError, json.JSONDecodeError) as exc:
+                toc_errors = [f"invalid toc_tree.json: {exc}"]
+        else:
+            toc_errors = ["toc_tree.json or OCR pages are missing"]
+        record(
+            "toc_tree",
+            not toc_errors,
+            "; ".join(toc_errors[:5]) or "TOC structure is valid",
+        )
 
-    tree_progress_path = output_dir / "ocr_markdown" / "tree_progress.json"
-    fingerprint_ready = False
-    if tree_progress_path.is_file() and toc_path.is_file() and pages_dir.is_dir():
-        try:
-            tree_progress = json.loads(tree_progress_path.read_text(encoding="utf-8"))
-            fingerprint = tree_progress.get("fingerprint", {})
-            fingerprint_ready = (
-                fingerprint.get("toc_sha256")
-                == sha256_file(toc_path)
-                and fingerprint.get("pages_sha256") == pages_fingerprint(pages_dir)
-            )
-        except (OSError, json.JSONDecodeError, AttributeError, TypeError):
-            fingerprint_ready = False
-    record(
-        "refine_local",
-        fingerprint_ready,
-        "OCR work units match the current TOC and page snapshot"
-        if fingerprint_ready
-        else "ocr_markdown/tree_progress.json is missing or stale",
-    )
+        tree_progress_path = output_dir / "ocr_markdown" / "tree_progress.json"
+        fingerprint_ready = False
+        if tree_progress_path.is_file() and toc_path.is_file() and pages_dir.is_dir():
+            try:
+                tree_progress = json.loads(tree_progress_path.read_text(encoding="utf-8"))
+                fingerprint = tree_progress.get("fingerprint", {})
+                fingerprint_ready = (
+                    fingerprint.get("toc_sha256")
+                    == sha256_file(toc_path)
+                    and fingerprint.get("pages_sha256") == pages_fingerprint(pages_dir)
+                )
+            except (OSError, json.JSONDecodeError, AttributeError, TypeError):
+                fingerprint_ready = False
+        record(
+            "refine_local",
+            fingerprint_ready,
+            "OCR work units match the current TOC and page snapshot"
+            if fingerprint_ready
+            else "ocr_markdown/tree_progress.json is missing or stale",
+        )
 
     footnote_status = {"current": True, "detail": "not required at this stage"}
-    if stage in {"translate", "package"} and policy.requires_polish:
+    if stage in _STRUCTURE_STAGES and policy.requires_polish:
         from pdf2epub.refine.footnote_status import footnote_normalization_status
 
         footnote_status = footnote_normalization_status(output_dir, config=config)
@@ -226,6 +264,18 @@ def _record_structure_readiness(
             ),
         )
 
+    if not structure_gate:
+        record(
+            "source_stage",
+            True,
+            "not required for the parallel structure track; the OCR and correction gates above are authoritative",
+        )
+        return {
+            "source_dir": output_dir / "ocr_markdown",
+            "source_stage": "structure",
+            "source_ready": True,
+            "footnote_status": footnote_status,
+        }
     try:
         source_dir, source_stage = _resolve_pdf_markdown_source(
             output_dir, config, ocr_evidence
@@ -254,7 +304,7 @@ def _record_structure_readiness(
             if source_ready
             else f"{source_stage} source is missing or not validated",
         )
-    if stage in {"translate", "package"} and policy.requires_polish:
+    if stage in _STRUCTURE_STAGES and policy.requires_polish:
         record(
             "polish_required",
             source_stage == "polished" and source_ready,
@@ -401,7 +451,15 @@ def run_readiness_check(
         record("dynamic_terminology", memory_ready, memory_detail)
 
     translation = config.get("translation", {}) or {}
-    if not policy.requires_translation:
+    book_level_gate = stage in _BOOK_LEVEL_STAGES
+    if not book_level_gate:
+        stage_label = (
+            "parallel structure track"
+            if stage == PARALLEL_STAGE_STRUCTURE
+            else "parallel translation-preparation track"
+        )
+        record("translation_entities", True, f"not required for the {stage_label}")
+    elif not policy.requires_translation:
         record("translation_entities", True, "not applicable for pipeline: epub_conversion")
     elif policy.requires_entities and not skip_entities:
         entity_ready = (
@@ -448,7 +506,9 @@ def run_readiness_check(
     glossary_ready = True
     configured_glossaries = translation.get("glossaries", []) or []
     configured_reference_glossaries = translation.get("reference_glossaries", []) or []
-    if not policy.requires_translation:
+    if not book_level_gate:
+        glossary_detail = "not required for this parallel readiness track"
+    elif not policy.requires_translation:
         glossary_detail = "not applicable for pipeline: epub_conversion"
     elif configured_glossaries or configured_reference_glossaries:
         try:
@@ -474,7 +534,7 @@ def run_readiness_check(
 
     toc_ready = True
     toc_detail = "not required at this stage"
-    if stage in {"translate", "package"} and policy.requires_translated_toc:
+    if stage in _BOOK_LEVEL_STAGES and policy.requires_translated_toc:
         from pdf2epub.toc_translation_workflow import validate_toc_translation_subagent
 
         toc_report = validate_toc_translation_subagent(output_dir)
@@ -485,8 +545,10 @@ def run_readiness_check(
             else "; ".join(toc_report["errors"][:5])
         )
         record("translated_toc", toc_ready, toc_detail)
-    elif stage in {"translate", "package"}:
+    elif stage in _BOOK_LEVEL_STAGES:
         record("translated_toc", True, "not required for pipeline: epub_conversion")
+    else:
+        record("translated_toc", True, "not required for this parallel readiness track")
 
     if stage == "package" and policy.requires_translation:
         translated_dir = output_dir / "translated" / "validated"

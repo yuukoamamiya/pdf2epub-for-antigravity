@@ -697,15 +697,17 @@ ocr-pages 可选：主 OCR + 配置的次 OCR（文本/版面共识）→ ocr_co
 （ocr.secondary.enabled=false 时直接使用 pages/，不运行 OCR 纠错）
 refine-prepare + 工作区 Subagent
   → toc_tree.json
-illustration-prepare + 工作区 Subagent（只复核疑似整页插图页）
+illustration-prepare + 工作区 Subagent（只复核疑似整页插图页；只读 pages/+sidecar，
+                                  不以 toc_tree.json 为前提，可与 refine-prepare 并行）
   → illustration_candidate_report.json → illustration-validate → illustration-apply
   → illustration_bindings.json
-refine-local
+refine-local（合流：同时校验 TOC structure receipt 与 illustration binding receipt）
   → pagination_map.json + toc_title_normalization.json
   → refine_boundary_preview.json（只读跨页交界预检，供 polish 使用）
   → 当前 review 行投影（heading source ranges + page-number dispositions）
   → ocr_markdown/ + tree_progress.json
-footnote-prepare +（必要时）工作区 Subagent
+footnote-prepare（可在 refine-local 前用 --scan-only 只做候选扫描）；
+  正式运行在 refine-local 后把候选绑定到实际 unit scope
   → footnote_candidates.json → footnote-validate → footnote-apply
   → footnote_normalized/
 polish + 工作区 Subagent + polish-validate（所有 PDF 必需；review_required 默认阻断，持续则人工；另做内容保真检查）
@@ -722,9 +724,10 @@ worker 自检通过不代表 checkpoint 已建立。check-only 即使识别出 M
 validated 副本和 checkpoint 以该内容为准。后续打包和翻译门禁只认主 Agent 的权威校验记录。
 
 翻译分支：
-build-epub（原语言正式书名 EPUB）→ 检查目录/段落/脚注/插图排版
-extract-entities + 工作区 Subagent + extract-entities-validate
-  → translation_entities.json
+check-ready --stage translate-prep（只校验 polished source receipt，不要求实体/TOC）
+├─ build-epub（原语言正式书名 EPUB）→ 检查目录/段落/脚注/插图排版
+└─ extract-entities + 工作区 Subagent + extract-entities-validate
+     → translation_entities.json
 translate-toc + 工作区 Subagent + translate-toc-validate → check-ready --stage translate
   → toc_translation_result.json →（本地合并）toc_tree_translated.json
 translate + 按 TOC 顺序装箱的 worker_handoffs + 工作区 Subagent

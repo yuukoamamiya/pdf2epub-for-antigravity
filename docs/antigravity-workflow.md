@@ -420,11 +420,13 @@ sidecar 的 `source_kind`/`backend` 是否属于同一运行；元数据无法�
 ```text
 ocr-pages
 →（two_ocr：ocr-correct → ocr-correct-validate）
-→ refine-prepare → Subagent 写 toc_tree.json
-→ illustration-prepare →（pending_review：Subagent 写 illustration_decisions.json）
-→ illustration-validate → illustration-apply
-→ refine-local
-→ footnote-prepare →（pending_review：Subagent 写 footnote_decisions.json）
+├─ refine-prepare → Subagent 写 toc_tree.json
+└─ illustration-prepare（只读 pages/ 与 sidecar，不等待 toc_tree.json）
+     →（pending_review：Subagent 写 illustration_decisions.json）
+     → illustration-validate → illustration-apply
+→ refine-local（同时校验 TOC structure receipt 与 illustration binding receipt）
+→ footnote-prepare（可在 refine-local 前用 --scan-only 预扫描候选）
+→（pending_review：Subagent 写 footnote_decisions.json）
 → footnote-validate → footnote-apply
 → polish → polish-validate
 ```
@@ -434,6 +436,7 @@ ocr-pages
 ```text
 uv run pdf2epub -c config.yaml refine-prepare
 工作区 Subagent 阅读 refine_subagent_prompt.md 并按结构审阅合同写入 toc_tree.json
+# 可与上一条并行：
 uv run pdf2epub -c config.yaml illustration-prepare
 # 如果 manifest 为 pending_review：工作区 Subagent 写 illustration_decisions.json
 uv run pdf2epub -c config.yaml illustration-validate
@@ -445,9 +448,14 @@ uv run pdf2epub -c config.yaml footnote-validate
 uv run pdf2epub -c config.yaml footnote-apply
 ```
 
-`illustration-prepare` 必须先于 `refine-local`，因为已确认的整页插图会影响页面合并；
-`footnote-prepare` 必须后于 `refine-local`，因为脚注归并范围取自实际生成的
-`tree_progress.json` 单元，而不是抽象的顶层 TOC。
+`refine-prepare` 与 `illustration-prepare` 是两条并行轨道：两者都只读 `pages/` 和版面
+sidecar，`illustration-prepare` 不以 `toc_tree.json` 为前提（存在 TOC 时只启用封面确定性
+快速通道，缺少 TOC 时所有候选都进入 Subagent）。`refine-local` 是合流点，会同时校验当前
+TOC structure receipt 和 illustration binding receipt；`check-ready --stage structure`
+可只检查两轨共同依赖的 OCR/纠错门禁。
+`footnote-prepare --scan-only` 只提前做版面候选扫描并写 `footnote_candidates.json`，
+不写决定或归一化源稿；正式 `footnote-prepare` 必须在 `refine-local` 后完成 unit scope
+绑定，因为脚注归并范围取自实际生成的 `tree_progress.json` 单元，而不是抽象的顶层 TOC。
 
 `refine-prepare` 同时生成 schema 2 的 `toc_heading_candidates.json` 和
 `toc_structure_review_manifest.json`。前者按源哈希记录每页行数、候选清单及有限的版面事实；后者
@@ -1204,8 +1212,10 @@ MathML 是当前默认策略，因为它不增加系统级 TeX 依赖，已满�
 
 ```text
 ocr-pages → ocr-correct → ocr-correct-validate → polish → polish-validate →
-build-epub（原语言正式书名 EPUB）→ 检查目录/段落/脚注/插图排版 → extract-entities →
-extract-entities-validate → translate-toc → translate-toc-validate → check-ready → translate → translate-validate → build-epub --only-translated
+check-ready --stage translate-prep →
+[build-epub（原语言正式书名 EPUB）→ 检查目录/段落/脚注/插图排版 ‖ extract-entities →
+extract-entities-validate → translate-toc → translate-toc-validate] →
+check-ready --stage translate → translate → translate-validate → build-epub --only-translated
 ```
 
 `polish` 在启用第二套 OCR 时只处理前置 OCR 纠错之后的换行、段落边界和块级结构；已通过

@@ -409,24 +409,28 @@ artifact only）；双 OCR 模式下，`footnote-prepare` 和 `illustration-prep
 这两类逻辑。共享层只提供坐标和文本事实，脚注/插图模块仍分别负责自己的候选语义和 Subagent
 决定。
 
-PDF 结构阶段按以下顺序执行：
+PDF 结构阶段按以下并行轨道执行：
 
 ```text
 ocr-pages
 → [two_ocr: ocr-correct → ocr-correct-validate]
-→ refine-prepare → 工作区 Subagent 写 toc_tree.json
-→ illustration-prepare
-→ [有候选: 工作区 Subagent 写 illustration_decisions.json]
-→ illustration-validate → illustration-apply
-→ refine-local
-→ footnote-prepare
+├─ A1 refine-prepare → 工作区 Subagent 写 toc_tree.json / toc_structure_decisions.json
+└─ A2 illustration-prepare（只读 pages/ 与 sidecar，不等待 toc_tree.json）
+       → [有候选: 工作区 Subagent 写 illustration_decisions.json]
+       → illustration-validate → illustration-apply
+→ refine-local（合并时同时校验 TOC structure receipt 与 illustration binding receipt）
+→ footnote-prepare（可用 --scan-only 在 refine-local 前预扫描候选；之后只做 unit scope 绑定）
 → [有待复核: 工作区 Subagent 写 footnote_decisions.json]
 → footnote-validate → footnote-apply
 → polish → polish-validate
 ```
 
-`illustration-prepare` 必须在 `refine-local` 前完成，因为它影响页面合并；
-`footnote-prepare` 必须在 `refine-local` 后完成，因为它按实际生成的 TOC 单元归并章末脚注。
+`refine-prepare` 与 `illustration-prepare` 是独立轨道：两者都只读 `pages/` 和版面
+sidecar，`illustration-prepare` 不以 `toc_tree.json` 为前提（存在 TOC 时只启用封面确定性
+快速通道）；`refine-local` 在合流时同时要求当前 TOC structure receipt 和 illustration
+binding receipt。可用 `check-ready --stage structure` 只检查两轨共同依赖的 OCR/纠错门禁。
+`footnote-prepare` 必须在 `refine-local` 后完成 scope 绑定，因为脚注归并范围取自实际生成的
+TOC 单元；`--scan-only` 只提前做候选版面扫描，不写决定或归一化源稿。
 没有候选时仍保留本地生成的报告和 manifest，并继续执行下一个阶段。
 
 对所有 PDF，`polish` 都是翻译前的必经质量闸门，不是可选的版式优化；只有
@@ -462,15 +466,17 @@ manifest/validation 进入 `human_review_required`，`polish --resume` 也拒绝
 润色还必须保留源稿标题的规范化有序序列和每次出现；删掉重复标题、改变标题文字或交换同级标题都会被校验阻断。
 EPUB、轻小说和 TeX 流程不使用这一 PDF 润色阶段。
 
-PDF 的具体循环为：`ocr-pages →（若启用第二套 OCR：ocr-correct → ocr-correct-validate）→ refine-prepare → illustration-prepare →（有候选时交给 Subagent）→ illustration-validate → illustration-apply → refine-local → footnote-prepare →（有待复核时交给 Subagent）→ footnote-validate → footnote-apply → polish → polish-validate`。
-随后先执行 `build-epub` 并检查原语言 EPUB 的目录、段落、脚注和插图排版，再执行
-`extract-entities → translate-toc → translate-toc-validate → translate →
-translate-validate → build-epub --only-translated`。可搜索但由扫描图像叠加 OCR 文字层的 PDF 仍必须重新
-视觉 OCR。
+PDF 的具体循环为：`ocr-pages →（若启用第二套 OCR：ocr-correct → ocr-correct-validate）→ [refine-prepare ‖ illustration-prepare] →（有候选时交给 Subagent）→ illustration-validate → illustration-apply → refine-local → footnote-prepare →（有待复核时交给 Subagent）→ footnote-validate → footnote-apply → polish → polish-validate`。
+`polish-validate` 之后，原语言 `build-epub` 与 `extract-entities`/`translate-toc` 是两条
+可并行轨道：三者都只读当前 `polished_markdown/validated/`，互不写对方产物，可用
+`check-ready --stage translate-prep` 确认共同前提，不必等原稿 EPUB 构建完成再开始实体/TOC
+准备。随后执行
+`translate-toc-validate → translate → translate-validate → build-epub --only-translated`。
+可搜索但由扫描图像叠加 OCR 文字层的 PDF 仍必须重新视觉 OCR。
 
 PDF 纯转换模式使用 `pipeline: epub_conversion`（兼容别名
 `mode: ocr_to_epub`），循环为：
-`ocr-pages →（若启用第二套 OCR：ocr-correct → ocr-correct-validate）→ refine-prepare → illustration-prepare →（有候选时交给 Subagent）→ illustration-validate → illustration-apply → refine-local → footnote-prepare →（有待复核时交给 Subagent）→ footnote-validate → footnote-apply → polish → polish-validate → build-epub`。
+`ocr-pages →（若启用第二套 OCR：ocr-correct → ocr-correct-validate）→ [refine-prepare ‖ illustration-prepare] →（有候选时交给 Subagent）→ illustration-validate → illustration-apply → refine-local → footnote-prepare →（有待复核时交给 Subagent）→ footnote-validate → footnote-apply → polish → polish-validate → build-epub`。
 该模式不读取语言设置，不执行实体提取、翻译 TOC 或正文翻译；但 polish 仍是所有 PDF
 必须通过的结构质量门禁。构建时不得使用 `build-epub --translated` 或
 `build-epub --only-translated`。

@@ -119,9 +119,13 @@ def _register_diagnostics_commands(subparsers) -> None:
     )
     check_ready_parser.add_argument(
         "--stage",
-        choices=["translate", "package"],
+        choices=["structure", "translate-prep", "translate", "package"],
         default="translate",
-        help="Readiness stage to check (default: translate)",
+        help=(
+            "Readiness stage to check (default: translate). 'structure' gates the "
+            "parallel refine-prepare/illustration-prepare track; 'translate-prep' "
+            "gates the parallel source-EPUB/entity/TOC track."
+        ),
     )
     check_ready_parser.add_argument(
         "--skip-entities",
@@ -382,6 +386,15 @@ def _register_footnote_commands(subparsers) -> None:
         description=(
             "Read OCR layout sidecars, identify high-confidence footnote candidates, "
             "and send only ambiguous local windows to a workspace Subagent."
+        ),
+    )
+    footnote_prepare_parser.add_argument(
+        "--scan-only",
+        action="store_true",
+        help=(
+            "Dry-run the layout candidate scan before refine-local: reads only "
+            "pages/+sidecars and writes footnote_candidates.json without unit "
+            "scope, decisions, or normalized source"
         ),
     )
     footnote_prepare_parser.add_argument(

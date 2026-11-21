@@ -87,12 +87,16 @@ def refine_prepare_command(args):
     logger.success(f"Wrote TOC candidate inventory: {paths['candidates']}")
     logger.success(f"Wrote TOC review manifest: {paths['structure_review_manifest']}")
     logger.info(
+        "refine-prepare 与 illustration-prepare 可并行执行：两者只读 pages/ 与版面 sidecar，"
+        "illustration-prepare 不以 toc_tree.json 为前提（TOC 只启用封面快速通道）。"
         "请让工作区 Subagent 阅读 refine_subagent_prompt.md 和 toc_heading_candidates.json，"
-        "逐页复核并在同一目录写入 toc_tree.json 与 toc_structure_decisions.json。"
+        "逐页复核并在同一目录写入 toc_tree.json 与 toc_structure_decisions.json；同时可运行 "
+        "pdf2epub illustration-prepare，并在有候选时交给工作区 Subagent。"
     )
     logger.info(
-        "完成后先运行 illustration-prepare（如有候选则交给工作区 Subagent，"
-        "再运行 illustration-validate/illustration-apply），最后运行 pdf2epub refine-local。"
+        "两条轨道都完成后运行 illustration-validate → illustration-apply，再运行 "
+        "pdf2epub refine-local --resume；refine-local 合并时会同时校验 TOC structure receipt "
+        "与 illustration binding receipt，缺一即阻断。"
     )
     return 0
 
@@ -186,6 +190,11 @@ def illustration_prepare_command(args):
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
     candidate_count = len(manifest.get("candidate_pages", []) or [])
     review_count = len(manifest.get("review_pages", []) or [])
+    if not (context.output_dir / "toc_tree.json").is_file():
+        logger.info(
+            "toc_tree.json 尚不存在；illustration-prepare 只使用 pages/ 与 sidecar，"
+            "因此可与 refine-prepare/目录 Subagent 并行。缺少 TOC 时只会关闭封面确定性快速通道。"
+        )
     logger.success(f"Wrote illustration candidate report: {paths['report']}")
     logger.success(f"Wrote illustration subagent manifest: {paths['manifest']}")
     logger.success(f"Wrote illustration subagent prompt: {paths['prompt']}")
@@ -271,6 +280,40 @@ def footnote_prepare_command(args):
     if context is None:
         return 1
     output_dir = context.output_dir
+    bottom_ratio = getattr(args, "bottom_ratio", None)
+    bottom_intersection_ratio = getattr(args, "bottom_intersection_ratio", None)
+    context_blocks = getattr(args, "context_blocks", None)
+    native_max_font_ratio = getattr(args, "native_max_font_ratio", None)
+    if getattr(args, "scan_only", False):
+        # Parallel structure track: scan pages/+sidecars while the TOC
+        # Subagent is still running.  No decisions, scope, or refine-local
+        # output is required; the later footnote-prepare reuses this scan and
+        # adds unit scope.
+        from pdf2epub.refine.footnote_handoff import scan_footnote_candidates
+
+        try:
+            report = scan_footnote_candidates(
+                output_dir,
+                book_title=context.book_title,
+                config=context.config,
+                bottom_ratio=bottom_ratio,
+                bottom_intersection_ratio=bottom_intersection_ratio,
+                context_blocks=context_blocks,
+                native_max_font_ratio=native_max_font_ratio,
+            )
+        except Exception as exc:
+            logger.error(f"Could not scan footnote candidates: {exc}")
+            return 1
+        _log_footnote_mode_warnings(report.get("warnings", []))
+        logger.success(
+            "Wrote pre-refine footnote candidate scan: "
+            f"{output_dir / 'footnote_candidates.json'}"
+        )
+        logger.info(
+            "Scan-only dry run: no footnote decisions or normalized source were written. "
+            "After refine-local, rerun footnote-prepare to bind candidates to refined units."
+        )
+        return 0
     if not (output_dir / "toc_tree.json").is_file():
         logger.error("footnote-prepare requires toc_tree.json; run refine-local first")
         return 1
@@ -278,10 +321,6 @@ def footnote_prepare_command(args):
         logger.error("footnote-prepare requires ocr_markdown; run refine-local first")
         return 1
 
-    bottom_ratio = getattr(args, "bottom_ratio", None)
-    bottom_intersection_ratio = getattr(args, "bottom_intersection_ratio", None)
-    context_blocks = getattr(args, "context_blocks", None)
-    native_max_font_ratio = getattr(args, "native_max_font_ratio", None)
     # Let the preparation layer resolve the config. The CLI flag is an
     # explicit override for this command only.
     auto_accept = False if bool(getattr(args, "review_all", False)) else None

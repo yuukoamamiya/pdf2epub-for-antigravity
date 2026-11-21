@@ -487,6 +487,11 @@ def prepare_illustration_subagent(
             }
         ),
         "evidence_receipt": build_evidence_receipt(output_dir, config).to_dict(),
+        # The TOC is optional here on purpose: refine-prepare and
+        # illustration-prepare both read only pages/+sidecars and run in
+        # parallel.  A TOC only enables the narrow deterministic cover fast
+        # path; without it every candidate still reaches the Subagent.
+        "toc_tree_available": (output_dir / "toc_tree.json").is_file(),
         "status": report_status,
     }
     report_path = _write_report(output_dir, report)
