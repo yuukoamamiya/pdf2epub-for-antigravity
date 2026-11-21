@@ -173,11 +173,12 @@ PDF translate 使用 Markdown validator schema 5，polish 使用 schema 6。各�
 旧 polish 目标要先运行 `polish --resume`，交 worker 完成当前脚注语义检查并写入 sidecar，再运行正式
 `polish-validate` 建立 receipt 和 validated 副本。旧目标可作为复核输入保留。只有新报告列出 pending/invalid
 或源上下文确实变化时才重新润色。规则升级本身不要求重跑 OCR。
-对于旧 TOC projection，先运行一次 `translate --resume` 刷新 manifest/context，但不要按这次准备输出
-立即派发 pending；schema 3 的旧验证 receipt 本来就不会被复用，第一次可能把现有目标都标成 pending。
-然后先运行 `translate-validate` 校验现有译文并建立 schema 5 receipt，再运行第二次
-`translate --resume`。这时 current receipt 与 `projection_version: 5` context 会让有效目标重新成为
-completed；只派发仍列为 pending/invalid 的 assignment，完成后再做全量 `translate-validate`。
+对于旧 TOC projection，运行一次 `translate --resume` 即可：`version_only` pending 会由本地
+自动重盖章前滚，`projection_bytes_changed`、`source_changed` 或 `review_reopened` 的 assignment
+才需要重新派发，随后运行全量 `translate-validate`。`translate --resume --dry-run` 已在 preview
+中打印 check-ready 门禁和 pending 原因，不需要再单独运行 `check-ready`。TOC heading binding
+是增量门：单文件 `translate-validate --file` 立即检查本文件，全量只汇总已验证文件；`--final`
+才强制全书清单，不会等到最后一份文件完成才统一爆错。
 旧 polish receipt 需先用 `polish --resume` 刷新 sidecar 合同并完成 worker 语义复核，再运行正式 `polish-validate`。
 当前有效的旧目标可在校验后进入 validated 副本；只把内容或 semantic review 实际失败的文件交回 Subagent。
 Markdown worker 的提示词还明确禁止修改 `pdf2epub/`、`tests/`、`docs/`、`glossaries/` 和项目

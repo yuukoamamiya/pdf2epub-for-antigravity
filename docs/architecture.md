@@ -556,10 +556,11 @@ worker `dispatch_status` 计数与波次数，用于判断是否需要开 Subage
   含内容的后代。显式容器在源候选分配前跳过可见标题匹配，不消耗同名候选；可见节点仍按原有
   occurrence/count 和 DOM 锚点合同校验。`visible` 节点的投影锚点缺失或落在不同标题时阻断构建。
   新 handoff context 使用 `projection_version: 5`。旧 projection 不可用于 TOC heading binding。
-  先运行 `translate --resume` 只刷新准备 context，暂不派发；随后用 `translate-validate` 校验现有译文，
-  写出 schema 5 receipt。再运行一次 `translate --resume`，让当前 projection 和 receipt 共同决定
-  completed/pending；只派发仍失效的 assignment，最后运行全量 `translate-validate`。若第一次准备报告
-  所有文件 pending，不要直接据此重译整本书。对 normalization 变化后的 polished 文本也先做
+  旧 context 运行一次 `translate --resume` 即可：`version_only` pending 自动重盖章前滚，只有
+  `projection_bytes_changed`、`source_changed` 或 `review_reopened` 的 assignment 才需要重新派发，
+  最后运行全量 `translate-validate`。TOC heading binding 是增量门：单文件 validate 立即检查
+  本文件，全量 validate 只汇总当前已验证文件（`_aggregate_toc_heading_bindings`），未完工文件
+  记为 pending；`--final` 才强制全书清单。对 normalization 变化后的 polished 文本也先做
   `polish-validate`，仅将实际失败项交回 Subagent。
 
 Subagent 合同由上述具体模块按职责拥有，不新增聚合式兼容门面。`subagent_runtime.py` 仍只为

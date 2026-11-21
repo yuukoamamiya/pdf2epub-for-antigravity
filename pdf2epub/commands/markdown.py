@@ -84,6 +84,24 @@ def _print_handoff_preview(preview: Mapping[str, Any]) -> None:
     )
 
 
+def _print_readiness_preview(readiness: Mapping[str, Any]) -> None:
+    """Print the check-ready gates inside a ``--dry-run`` preview.
+
+    The dry run is the single operator command for "what is pending and what
+    is missing"; it reuses the same readiness service instead of asking the
+    operator to run ``check-ready`` separately first.
+    """
+    logger.info(
+        f"[dry-run] readiness stage {readiness['stage']}: "
+        + ("ready" if readiness["ready"] else "NOT ready")
+    )
+    for name, check in readiness.get("checks", {}).items():
+        status = "ready" if check.get("ready") else "blocked"
+        logger.info(f"[dry-run] {name}: {status} - {check.get('detail', '')}")
+    for error in readiness.get("errors", []):
+        logger.error(f"[dry-run] readiness: {error}")
+
+
 def _prepare_task_source(
     args,
     task: str,
@@ -330,6 +348,13 @@ def _prepare_pdf_markdown_task(args, task: str):
             "and requires --human-decision-id."
         )
         return 1
+    if task == "translate" and getattr(args, "dry_run", False):
+        readiness = run_readiness_check(
+            args.config,
+            "translate",
+            bool(getattr(args, "skip_entities", False)),
+        )
+        _print_readiness_preview(readiness)
 
     dynamic_attestation = None
     if task == "translate":
@@ -827,17 +852,11 @@ def _validate_pdf_markdown_task_impl(args, task: str, *, context=None):
             if not toc_report["valid"]:
                 for error in toc_report["errors"]:
                     logger.error(f"TOC: {error}")
-            from pdf2epub.toc_translation_workflow import validate_toc_heading_bindings
-
-            if book_outputs_complete or force_full_final:
-                heading_report = validate_toc_heading_bindings(output_dir)
-            else:
-                heading_report = {
-                    "valid": True,
-                    "skipped": True,
-                    "reason": "translated outputs are incomplete",
-                    "pending_files": list(report.get("missing", []) or []),
-                }
+            heading_report = _aggregate_toc_heading_bindings(
+                output_dir,
+                report,
+                force_full_final=force_full_final,
+            )
             report["toc_heading_bindings"] = heading_report
             report["all_passed"] = report["all_passed"] and heading_report["valid"]
             if not heading_report["valid"]:
@@ -1042,6 +1061,47 @@ def _sync_subagent_manifest_progress(
     atomic_write_json(manifest_path, manifest)
 
 
+def _aggregate_toc_heading_bindings(
+    output_dir: Path,
+    report: Mapping[str, Any],
+    *,
+    force_full_final: bool = False,
+) -> dict:
+    """Aggregate the scoped TOC heading gate without deferring it.
+
+    Each single-file ``translate-validate`` already checks that file's own
+    visible TOC headings.  The book-level run must summarise those same gates
+    instead of raising every missing heading only at the moment the last file
+    lands: it checks every currently validated file and reports the others as
+    pending, not as binding errors.
+    """
+    from pdf2epub.toc_translation_workflow import validate_toc_heading_bindings
+
+    if force_full_final:
+        return validate_toc_heading_bindings(output_dir)
+    valid_files = [
+        str(name) for name in (report.get("valid_files") or []) if str(name).strip()
+    ]
+    if not valid_files:
+        return {
+            "valid": True,
+            "skipped": True,
+            "reason": "no validated translated files yet",
+            "pending_files": list(report.get("missing", []) or []),
+        }
+    heading_report = validate_toc_heading_bindings(
+        output_dir, only_files=valid_files
+    )
+    pending = [
+        str(name)
+        for name in (report.get("missing") or [])
+        if str(name) not in set(valid_files)
+    ]
+    if pending:
+        heading_report["pending_files"] = pending
+    return heading_report
+
+
 def _apply_local_toc_heading_binding(
     output_dir: Path,
     report: dict,
@@ -1200,6 +1260,11 @@ def translate_command(args):
             "translation hand-off is disabled."
         )
         return 1
+    if getattr(args, "dry_run", False):
+        # The dry-run preview embeds check-ready gates itself and never writes
+        # a manifest, prompt, or hand-off; a missing gate must not hide the
+        # preview the operator asked for.
+        return _prepare_pdf_markdown_task(args, "translate")
     readiness = run_readiness_check(
         args.config,
         "translate",

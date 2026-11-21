@@ -506,12 +506,14 @@ renderer 语义提取可见文本；HTML 已渲染文本只提取可见文本，
 `container_only`）。同一逻辑单元优先使用标题候选，即使其位于后续 part；只有没有标题候选时才用
 段落候选。源 Markdown 计数与生成 HTML 锚点匹配必须使用相同候选类别，并严格核对 occurrence 和
 count。可见标题缺少已绑定锚点时必须阻断 EPUB 构建；容器节点按合同落到所属内容文件或首个有内容
-的后代。新 `toc_heading_contexts` 使用 `projection_version: 5`；旧 context 必须先运行一次
-`translate --resume` 刷新 manifest/context，但不能按这次准备结果立即派发 pending，因为旧
-validation receipt 可能失效并暂时把所有现有目标列为 pending。随后运行
-`translate-validate` 校验现有译文并建立当前 receipt，再运行第二次 `translate --resume`；
-只派发仍列为 pending/invalid 的 assignment，完成后运行全量 `translate-validate`。
-只重派上下文/源哈希失效的 assignment，不因 projection 升级盲目重译全书，也不迁移旧树或旧翻译结果。
+的后代。新 `toc_heading_contexts` 使用 `projection_version: 5`；旧 context 运行一次
+`translate --resume` 即可，`version_only` pending 会由本地自动重盖章前滚；只有
+`projection_bytes_changed`、`source_changed` 或 `review_reopened` 的 assignment 需要重新派发，
+完成后运行全量 `translate-validate`。只重派上下文/源哈希失效的 assignment，不因 projection
+升级盲目重译全书，也不迁移旧树或旧翻译结果。
+TOC heading binding 是增量门：单文件 `translate-validate --file` 立即校验本文件的可见标题，
+全量校验只汇总当前所有已验证文件的同一门，未完工文件记为 pending 而不是最后统一爆错；
+`--final` 才强制检查全书清单。
 
 父 manifest 的 `pending_reasons`（以及汇总的 `pending_reason_counts`）按文件说明 pending 原因：
 `source_changed`、`version_only`、`projection_bytes_changed`、`context_changed`、
@@ -522,7 +524,8 @@ validation receipt 可能失效并暂时把所有现有目标列为 pending。�
 `review_reopened` 也表示需要 Subagent 重新处理。`receipt_missing` 只是 receipt 缺失，
 不得据此重译。`status` 的 `review_gates` 会同步显示这些计数。该字段只用于诊断，不改变
 复用判定。准备前可用 `translate --resume --dry-run` 或 `polish --resume --dry-run` 只读预览
-`pending_reasons` 与 worker 批次；preview 不写 manifest、prompt 或 worker handoff。
+`pending_reasons` 与 worker 批次；translate dry-run 同时打印 `check-ready` 的全部门禁结果，
+不需要先单独运行 `check-ready`。preview 不写 manifest、prompt 或 worker handoff。
 `--refresh-checkpoints` 仍可显式要求同一次前滚；任何投影载荷变化都会拒绝，仍按
 `prepare → validate → prepare` 处理。术语链固定为
 `snapshot_sha256 → unit_projection_sha256 → worker_projection_sha256`：父 manifest 保存

@@ -451,9 +451,11 @@ def test_validate_existing_outputs_before_second_resume_avoids_full_redelegation
     first_resume = decide_resume(request, plan, context)
     assert first_resume.completed_files == ()
     assert first_resume.pending_files == ("unit.md",)
+    assert first_resume.pending_reasons == {"unit.md": "version_only"}
 
-    # Refreshing preparation context alone cannot replace the old validation
-    # receipt. A second resume remains pending until formal validation runs.
+    # A version-only projection bump is forward-rolled automatically: the
+    # receipt payload is identical apart from the stamp, so the existing
+    # translation stays valid without prepare → validate → prepare.
     refreshed = prepare_markdown_subagent(
         MarkdownHandoffRequest(
             output_dir=tmp_path,
@@ -466,11 +468,15 @@ def test_validate_existing_outputs_before_second_resume_avoids_full_redelegation
             heading_contexts={"unit.md": refreshed_context},
         )
     )
-    assert __import__("json").loads(refreshed["manifest"].read_text(encoding="utf-8"))["pending_files"] == ["unit.md"]
+    refreshed_manifest = __import__("json").loads(
+        refreshed["manifest"].read_text(encoding="utf-8")
+    )
+    assert refreshed_manifest["pending_files"] == []
+    assert refreshed_manifest["refreshed_receipts"] == ["unit.md"]
 
     second_resume = decide_resume(request, plan, context)
-    assert second_resume.completed_files == ()
-    assert second_resume.pending_files == ("unit.md",)
+    assert second_resume.completed_files == ("unit.md",)
+    assert second_resume.pending_files == ()
     assert validate_markdown_subagent(tmp_path, "translate", source_dir, target_dir)["all_passed"]
     final = prepare_markdown_subagent(
         MarkdownHandoffRequest(
