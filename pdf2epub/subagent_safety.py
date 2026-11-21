@@ -135,6 +135,62 @@ def detect_refusal(source_text: str, translated_text: str) -> Optional[str]:
     return None
 
 
+_UNTRUSTED_OPEN = "<untrusted>"
+_UNTRUSTED_CLOSE = "</untrusted>"
+_UNTRUSTED_REGION_RE = re.compile(
+    re.escape(_UNTRUSTED_OPEN) + r".*?" + re.escape(_UNTRUSTED_CLOSE), re.DOTALL
+)
+
+
+def fence_untrusted(text: str, *, label: str = "") -> str:
+    """Wrap foreign TOC/glossary text in an explicit untrusted fence.
+
+    Any fence marker embedded in the payload is escaped so the wrapped text
+    cannot close the fence early and smuggle instructions into the prompt.
+    """
+    cleaned = (
+        str(text)
+        .replace(_UNTRUSTED_OPEN, "&lt;untrusted&gt;")
+        .replace(_UNTRUSTED_CLOSE, "&lt;/untrusted&gt;")
+    )
+    header = _UNTRUSTED_OPEN + "\n" + (f"[{label}]\n" if label else "")
+    return f"{header}{cleaned}\n{_UNTRUSTED_CLOSE}"
+
+
+def _normalize_snippet(text: str) -> str:
+    return " ".join(str(text).split())
+
+
+def untrusted_fence_warnings(
+    prompt: str, foreign_texts: Any, *, min_length: int = 3
+) -> list[str]:
+    """Warn when foreign TOC/glossary text appears outside an untrusted fence.
+
+    This is a diagnostic guard, not a content classifier: it only proves that
+    a known foreign snippet leaked into unfenced instruction text. Short
+    snippets are skipped because they collide with ordinary prose.
+    """
+    if isinstance(foreign_texts, str):
+        foreign_texts = [foreign_texts]
+    unfenced = _UNTRUSTED_REGION_RE.sub(" ", str(prompt))
+    normalized_prompt = _normalize_snippet(unfenced)
+    if not normalized_prompt:
+        return []
+    warnings: list[str] = []
+    seen: set[str] = set()
+    for snippet in foreign_texts or ():
+        normalized = _normalize_snippet(snippet)
+        if len(normalized) < min_length or normalized in seen:
+            continue
+        seen.add(normalized)
+        if normalized in normalized_prompt:
+            warnings.append(
+                "foreign text appears outside an <untrusted> fence: "
+                + repr(normalized[:120])
+            )
+    return warnings
+
+
 def _repository_root(output_dir: Path) -> Optional[Path]:
     """Find the project root without assuming a particular output location."""
     candidate = Path(output_dir).resolve()
@@ -215,6 +271,8 @@ def protected_workspace_changes(
 
 __all__ = [
     "detect_refusal",
+    "fence_untrusted",
     "protected_workspace_changes",
     "protected_workspace_snapshot",
+    "untrusted_fence_warnings",
 ]

@@ -40,21 +40,55 @@ def local_credential_path(
     return local_credentials_dir(config) / candidate
 
 
+class LocalCredentialsError(RuntimeError):
+    """Raised when a credential file exists but cannot be read or parsed.
+
+    A missing file is a supported "no local credentials" state; a corrupt or
+    unreadable file is not, because silently treating it as absent turns a
+    configuration mistake into repeated provider 401s.
+    """
+
+
+def read_json_file(path: Path) -> Optional[dict[str, Any]]:
+    """Read a credential JSON object.
+
+    Returns ``None`` only when the file does not exist. Unreadable files,
+    invalid JSON, and non-object roots raise :class:`LocalCredentialsError`.
+    """
+    resolved = Path(path)
+    try:
+        text = resolved.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except (OSError, UnicodeError) as exc:
+        raise LocalCredentialsError(
+            f"cannot read local credentials file {resolved}: {exc}"
+        ) from exc
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise LocalCredentialsError(
+            f"local credentials file is not valid JSON: {resolved}: {exc}"
+        ) from exc
+    if not isinstance(value, dict):
+        raise LocalCredentialsError(
+            f"local credentials file must contain a JSON object: {resolved}"
+        )
+    return value
+
+
 def read_local_json(
     config: Optional[Mapping[str, Any]], filename: str
 ) -> Optional[dict[str, Any]]:
     """Read a local JSON credential object without logging its contents."""
-    path = local_credential_path(config, filename)
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        return None
-    return value if isinstance(value, dict) else None
+    return read_json_file(local_credential_path(config, filename))
 
 
 __all__ = [
     "DEFAULT_LOCAL_CREDENTIALS_DIR",
+    "LocalCredentialsError",
     "local_credential_path",
     "local_credentials_dir",
+    "read_json_file",
     "read_local_json",
 ]

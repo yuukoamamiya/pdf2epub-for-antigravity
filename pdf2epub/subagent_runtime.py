@@ -48,6 +48,9 @@ from .worker_prompt import (
     render_worker_prompt,
 )
 from .worker_glossary_context import build_worker_glossary_context
+from .subagent_safety import untrusted_fence_warnings
+
+from loguru import logger
 
 DEFAULT_TRANSLATION_MODEL = "gemini-4-hydrogen"
 DEFAULT_SUBAGENT_MODEL = "inherit"
@@ -66,6 +69,25 @@ _TRANSLATION_TASKS = {
     "toc-translation",
     "metadata-translation",
 }
+
+
+def _scoped_heading_titles(contexts: Mapping[str, Any]) -> list[str]:
+    """Collect visible TOC titles injected into one worker prompt."""
+    titles: list[str] = []
+    for context in contexts.values():
+        if not isinstance(context, Mapping):
+            continue
+        title = str(context.get("toc_title") or "").strip()
+        if title and str(context.get("binding_mode") or "visible") != "container_only":
+            titles.append(title)
+        for child in context.get("children", []) or []:
+            if not isinstance(child, Mapping):
+                continue
+            child_title = str(child.get("title") or "").strip()
+            child_mode = str(child.get("binding_mode") or "visible")
+            if child_title and child_mode != "container_only":
+                titles.append(child_title)
+    return titles
 
 
 def resolve_subagent_model(
@@ -552,6 +574,10 @@ def write_worker_handoffs(
             files=files, manifest=manifest, group=group, chapter_pack=chapter_pack,
             worker_context_files=worker_context_files, scoped_name=scoped_name,
         )
+        for warning in untrusted_fence_warnings(
+            scoped_prompt, _scoped_heading_titles(scoped_heading_contexts)
+        ):
+            logger.warning(f"worker {worker_id} prompt safety: {warning}")
         atomic_write_text(scoped_prompt_path, scoped_prompt)
         entry = {
             "worker_id": worker_id,

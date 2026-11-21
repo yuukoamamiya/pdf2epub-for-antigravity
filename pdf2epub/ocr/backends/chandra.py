@@ -30,7 +30,11 @@ from openai import OpenAI
 from PIL import Image
 
 from ..artifacts import OCRPageResult
-from ...local_credentials import local_credential_path
+from ...local_credentials import (
+    LocalCredentialsError,
+    local_credential_path,
+    read_json_file,
+)
 
 
 ALLOWED_TAGS = [
@@ -556,15 +560,22 @@ class ChandraClient:
                 Path.home() / ".config" / "pdf2epub" / "chandra-access.json",
                 Path("chandra-access.json"),
             ]:
-                if cred_path and cred_path.is_file():
-                    try:
-                        cred_data = json.loads(cred_path.read_text(encoding="utf-8"))
-                        access_client_id = cred_data.get("client_id")
-                        access_client_secret = cred_data.get("client_secret")
-                        if access_client_id and access_client_secret:
-                            break
-                    except Exception:
-                        pass
+                if not cred_path or not cred_path.is_file():
+                    continue
+                # Missing files are a normal "not configured" state, but a
+                # corrupt credential file must fail loudly here instead of
+                # sending unauthenticated requests that burn retries on 401s.
+                try:
+                    cred_data = read_json_file(cred_path)
+                except LocalCredentialsError as exc:
+                    raise LocalCredentialsError(
+                        f"invalid Chandra credentials file: {exc}"
+                    ) from exc
+                if cred_data:
+                    access_client_id = cred_data.get("client_id")
+                    access_client_secret = cred_data.get("client_secret")
+                    if access_client_id and access_client_secret:
+                        break
 
         if bool(access_client_id) != bool(access_client_secret):
             raise ValueError(
