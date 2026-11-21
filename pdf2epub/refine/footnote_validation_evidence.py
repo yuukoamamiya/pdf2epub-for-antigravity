@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
-from ..workflow_contracts import sha256_file
+from ..workflow_contracts import schema_major_matches, sha256_file
 from .footnote_options import EFFECTIVE_FOOTNOTE_MODES, resolve_effective_footnote_mode
 from .pdf_evidence import pdf_evidence_mode, require_current_consensus
 from .footnote_contracts import FOOTNOTE_PREPARE_SCHEMA_VERSION
@@ -17,15 +17,24 @@ def validate_candidate_evidence(
     output_dir: Path,
     report: Mapping[str, Any],
     config: Optional[Mapping[str, Any]],
+    *,
+    verify_hashes: bool = True,
 ) -> dict[str, Any]:
-    """Read current config/evidence and return fields/errors in contract order."""
+    """Read current config/evidence and return fields/errors in contract order.
+
+    ``verify_hashes=False`` is the zero-candidate shortcut: there is no page
+    candidate whose evidence could change, so re-hashing every sidecar only
+    creates false staleness.
+    """
     source_kind = str(report.get("source_kind") or "ocr")
     evidence_mode = str(report.get("ocr_evidence_mode") or "single_ocr")
     footnote_mode = str(report.get("footnote_mode") or "footnotes").strip().lower()
     configured_footnote_mode: Optional[str] = None
     footnote_mode_source: Optional[str] = None
     errors: list[str] = []
-    if report.get("schema_version") != FOOTNOTE_PREPARE_SCHEMA_VERSION:
+    if not schema_major_matches(
+        report.get("schema_version"), FOOTNOTE_PREPARE_SCHEMA_VERSION
+    ):
         errors.append(
             "candidate report uses an older footnote contract; rerun footnote-prepare"
         )
@@ -88,14 +97,15 @@ def validate_candidate_evidence(
             return False
         return True
 
-    hashes_current("sidecar_sha256")
+    if verify_hashes:
+        hashes_current("sidecar_sha256")
     secondary_hashes = report.get("secondary_sidecar_sha256", {})
-    if evidence_mode == "two_ocr":
+    if evidence_mode == "two_ocr" and verify_hashes:
         hashes_current("secondary_sidecar_sha256")
-    elif secondary_hashes:
+    elif secondary_hashes and evidence_mode != "two_ocr":
         errors.append("single-OCR candidate report unexpectedly contains secondary OCR files")
     manifest_path = Path(output_dir) / "footnote_subagent_manifest.json"
-    if manifest_path.is_file():
+    if verify_hashes and manifest_path.is_file():
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             from .footnote_review_packet import validate_review_packet

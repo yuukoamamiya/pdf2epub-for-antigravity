@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
-from ..workflow_contracts import sha256_file
+from ..workflow_contracts import schema_major_matches, sha256_file
 from .footnote_matching import _load_json
 from .footnote_source import markdown_inventory
 from .footnote_options import (
@@ -101,12 +101,17 @@ def footnote_normalization_status(
         fail("result_audit_candidate_stale", "footnote result audit is bound to a different candidate report")
     if audit_report.get("decision_validation_sha256") != sha256_file(output_dir / "footnote_decision_validation.json"):
         fail("result_audit_validation_stale", "footnote result audit is bound to a different decision validation")
-    if candidate_report.get("schema_version") != FOOTNOTE_PREPARE_SCHEMA_VERSION:
+    if not schema_major_matches(
+        candidate_report.get("schema_version"), FOOTNOTE_PREPARE_SCHEMA_VERSION
+    ):
         fail(
             "candidate_report_schema_mismatch",
             "footnote_candidates.json uses an older or missing prepare contract; rerun footnote-prepare",
         )
-    candidate_evidence = validate_candidate_evidence(output_dir, candidate_report, config)
+    if str(validation.get("status") or "") == "not_applicable":
+        candidate_evidence = {"errors": []}
+    else:
+        candidate_evidence = validate_candidate_evidence(output_dir, candidate_report, config)
     if candidate_evidence.get("errors"):
         fail(
             "candidate_page_evidence_stale",
@@ -142,7 +147,9 @@ def footnote_normalization_status(
             "applied result audit history no longer matches its original/current visual evidence: "
             + "; ".join(history_errors[:5] or ["historical reviews no longer match their evidence"]),
         )
-    if validation.get("schema_version") != FOOTNOTE_PREPARE_SCHEMA_VERSION:
+    if not schema_major_matches(
+        validation.get("schema_version"), FOOTNOTE_PREPARE_SCHEMA_VERSION
+    ):
         fail(
             "decision_validation_schema_mismatch",
             "footnote_decision_validation.json uses an older or missing prepare contract; rerun footnote-validate",

@@ -9,7 +9,7 @@ from pdf2epub.workflow_contracts import posix_path
 from pathlib import PurePosixPath
 from typing import Any, Mapping, Optional
 
-from ..workflow_contracts import sha256_file
+from ..workflow_contracts import schema_major_matches, sha256_file
 from .footnote_contracts import FOOTNOTE_PREPARE_SCHEMA_VERSION
 from .footnote_options import EFFECTIVE_FOOTNOTE_MODES, resolve_effective_footnote_mode
 from .footnote_source import FootnoteSourceSnapshot, load_footnote_source_snapshot
@@ -77,11 +77,15 @@ def load_footnote_apply_inputs(
         raise FootnoteApplyInputError(str(exc)) from exc
 
     report_mode = str(report.get("ocr_evidence_mode") or "single_ocr")
-    if report.get("schema_version") != FOOTNOTE_PREPARE_SCHEMA_VERSION:
+    if not schema_major_matches(
+        report.get("schema_version"), FOOTNOTE_PREPARE_SCHEMA_VERSION
+    ):
         raise FootnoteApplyInputError(
             "footnote candidate report uses an older marker contract; rerun footnote-prepare"
         )
-    if validation.get("schema_version") != FOOTNOTE_PREPARE_SCHEMA_VERSION:
+    if not schema_major_matches(
+        validation.get("schema_version"), FOOTNOTE_PREPARE_SCHEMA_VERSION
+    ):
         raise FootnoteApplyInputError(
             "footnote decision validation uses an older marker contract; rerun footnote-validate"
         )
@@ -154,6 +158,7 @@ def load_footnote_apply_inputs(
     if validation.get("valid") is not True or validation.get("status") not in {
         "validated",
         "no_subagent_review_required",
+        "not_applicable",
     }:
         raise FootnoteApplyInputError(
             "footnote decisions are not validated; run footnote-validate after the Subagent review"
@@ -162,12 +167,13 @@ def load_footnote_apply_inputs(
         raise FootnoteApplyInputError(
             "footnote candidate report changed after decision validation; rerun footnote-validate"
         )
-    evidence = validate_candidate_evidence(output_dir, report, config)
-    if evidence.get("errors"):
-        raise FootnoteApplyInputError(
-            "footnote page/layout evidence changed after validation: "
-            + "; ".join(str(item) for item in evidence.get("errors", [])[:5])
-        )
+    if str(validation.get("status") or "") != "not_applicable":
+        evidence = validate_candidate_evidence(output_dir, report, config)
+        if evidence.get("errors"):
+            raise FootnoteApplyInputError(
+                "footnote page/layout evidence changed after validation: "
+                + "; ".join(str(item) for item in evidence.get("errors", [])[:5])
+            )
     audit_data = report.get("result_audit") if isinstance(report.get("result_audit"), Mapping) else {}
     current_audit_tasks = [
         *(audit_data.get("findings", []) if isinstance(audit_data.get("findings"), list) else []),

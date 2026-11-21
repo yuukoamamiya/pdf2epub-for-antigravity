@@ -61,7 +61,9 @@ Subagent。既有 EPUB 故障定位所需的局部版面核对按授权维护范
    pending/review 任务时才打开工作区 Subagent 并交付其 scoped handoff。主 Agent 不在聊天中翻译、
    代写译文或自行作书稿语义决定。
 6. Subagent 完成后先跑对应的单文件校验，再跑全量校验。脚注、插图阶段即使无待复核项，也必须运行
-   各自的 validate/apply；只有当前源哈希、checkpoint、结构校验和安全审计都通过，才可进入下一阶段或打包。
+   各自的 validate/apply（零候选时写入 `status: not_applicable` 短路收据，只绑定
+   `candidate_report_sha256`，不重跑 Subagent、不重算页面证据；schema 仅 major 变化才失效，
+   minor 升级自动前滚）；只有当前源哈希、checkpoint、结构校验和安全审计都通过，才可进入下一阶段或打包。
 7. 中断或失败时保留已有产物，先校验，再使用原命令的 `--resume`；只重做 pending/invalid 项。
 
 常用验收命令：

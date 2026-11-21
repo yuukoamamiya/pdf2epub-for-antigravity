@@ -5,7 +5,7 @@ import hashlib
 import json
 from typing import Any, Mapping
 
-from ..workflow_contracts import atomic_write_json, sha256_file
+from ..workflow_contracts import atomic_write_json, schema_major_matches, sha256_file
 from .footnote_contracts import FOOTNOTE_PREPARE_SCHEMA_VERSION
 from .footnote_page_evidence import resolve_page_sidecar_path
 
@@ -166,7 +166,9 @@ def validate_review_packet(output_dir, manifest: Mapping[str, Any]) -> dict[str,
         packet = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise ValueError(f"footnote review packet is unreadable; rerun footnote-prepare: {exc}") from exc
-    if not isinstance(packet, Mapping) or packet.get("schema_version") != FOOTNOTE_PREPARE_SCHEMA_VERSION:
+    if not isinstance(packet, Mapping) or not schema_major_matches(
+        packet.get("schema_version"), FOOTNOTE_PREPARE_SCHEMA_VERSION
+    ):
         raise ValueError("footnote review packet schema is stale; rerun footnote-prepare")
     recorded_evidence_hash = manifest.get("preparation_evidence_sha256")
     if not isinstance(recorded_evidence_hash, str) or packet.get("preparation_evidence_sha256") != recorded_evidence_hash:

@@ -6,11 +6,12 @@ import json
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
-from ..workflow_contracts import atomic_write_json, sha256_file
+from ..workflow_contracts import atomic_write_json, schema_major_matches, sha256_file
 from .endnote_review import (
     load_endnote_definition_ambiguities,
     validate_endnote_definition_decisions,
 )
+from .footnote_contracts import FOOTNOTE_SHORTCUT_POLICY_VERSION
 from .footnote_report import FOOTNOTE_PREPARE_SCHEMA_VERSION
 from .footnote_validation_audit import (
     audit_region_decisions,
@@ -52,7 +53,11 @@ def _attach_endnote_result(
     result["endnote_definitions"] = dict(endnote_result)
     if endnote_result.get("valid") is not True:
         result["valid"] = False
-        if result.get("status") in {"validated", "no_subagent_review_required"}:
+        if result.get("status") in {
+            "validated",
+            "no_subagent_review_required",
+            "not_applicable",
+        }:
             result["status"] = str(endnote_result.get("status") or "retry_required")
         errors = result.setdefault("errors", [])
         for error in endnote_result.get("errors", []) or []:
@@ -151,6 +156,48 @@ def _current_source_hashes(output_dir: Path) -> tuple[dict[str, str], Optional[s
     return dict(snapshot.source_hashes), None
 
 
+def _report_has_no_candidates(report: Mapping[str, Any]) -> bool:
+    """Return whether the candidate report contains no reviewable content.
+
+    A high-confidence candidate that was auto-accepted is still a candidate:
+    it needs deterministic normalization, so it must not take the zero-work
+    shortcut.
+    """
+    for page in report.get("pages", []) or []:
+        if not isinstance(page, Mapping):
+            continue
+        for key in ("candidates", "audit_candidates", "secondary_only_candidates"):
+            value = page.get(key)
+            if isinstance(value, list) and value:
+                return False
+    if report.get("continuation_reviews"):
+        return False
+    if report.get("review_required"):
+        return False
+    audit = report.get("result_audit")
+    if isinstance(audit, Mapping):
+        for key in ("findings", "reviewed_candidate_tasks"):
+            value = audit.get(key)
+            if isinstance(value, list) and value:
+                return False
+    return True
+
+
+def _zero_candidate_shortcut(
+    report: Mapping[str, Any],
+    endnote_result: Mapping[str, Any],
+    decision_path: Path,
+) -> bool:
+    """Zero page candidates and no endnote ambiguity need no Subagent."""
+    return (
+        _report_has_no_candidates(report)
+        and str(report.get("footnote_mode") or "footnotes").strip().lower()
+        == "footnotes"
+        and not endnote_result.get("source_sha256")
+        and not decision_path.exists()
+    )
+
+
 def validate_footnote_decisions(
     output_dir: Path,
     *,
@@ -188,7 +235,10 @@ def validate_footnote_decisions(
         )
 
     endnote_result = _endnote_definition_result(output_dir)
-    evidence = validate_candidate_evidence(output_dir, report, config)
+    zero_candidate_report = _report_has_no_candidates(report)
+    evidence = validate_candidate_evidence(
+        output_dir, report, config, verify_hashes=not zero_candidate_report
+    )
     errors = list(evidence["errors"])
     base_fields = {
         "schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
@@ -217,6 +267,30 @@ def validate_footnote_decisions(
             "status": "retry_required",
             "errors": errors,
             "decisions": [],
+        }
+        _attach_endnote_result(result, endnote_result)
+        return _persist_result(output_dir, report_path, report, result)
+
+    if _zero_candidate_shortcut(report, endnote_result, decision_path):
+        # No page footnote and no endnote ambiguity: the receipt binds only the
+        # candidate report hash.  Skip per-sidecar evidence hashing; a minor
+        # schema bump keeps this shortcut current.
+        source_sha256, source_error = _current_source_hashes(output_dir)
+        shortcut_errors = [source_error] if source_error else []
+        result = {
+            **base_fields,
+            "valid": not shortcut_errors,
+            "status": "not_applicable" if not shortcut_errors else "retry_required",
+            "errors": shortcut_errors,
+            "decisions": [],
+            "effective_decisions_version": EFFECTIVE_DECISIONS_VERSION,
+            "effective_decisions": [],
+            "source_sha256": source_sha256,
+            "continuation_reviews": [],
+            "shortcut": {
+                "kind": "zero_candidates",
+                "policy_version": FOOTNOTE_SHORTCUT_POLICY_VERSION,
+            },
         }
         _attach_endnote_result(result, endnote_result)
         return _persist_result(output_dir, report_path, report, result)
@@ -281,7 +355,9 @@ def validate_footnote_decisions(
     human_review_required: list[str] = []
     if (
         not isinstance(decisions_data, dict)
-        or decisions_data.get("schema_version") != FOOTNOTE_PREPARE_SCHEMA_VERSION
+        or not schema_major_matches(
+            decisions_data.get("schema_version"), FOOTNOTE_PREPARE_SCHEMA_VERSION
+        )
     ):
         errors.append("decision file has an unsupported schema_version")
     if not isinstance(decisions, list):

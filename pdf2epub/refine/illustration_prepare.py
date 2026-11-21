@@ -18,7 +18,13 @@ import tempfile
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
-from ..workflow_contracts import atomic_write_json, atomic_write_text, relative_posix_path, sha256_file
+from ..workflow_contracts import (
+    atomic_write_json,
+    atomic_write_text,
+    relative_posix_path,
+    schema_major_matches,
+    sha256_file,
+)
 from ..subagent_runtime import resolve_subagent_model
 from .layout_evidence import (
     load_layout_sidecar,
@@ -30,6 +36,10 @@ from .pdf_evidence import pdf_evidence_mode, require_current_consensus
 
 ILLUSTRATION_PREPARE_SCHEMA_VERSION = 1
 ILLUSTRATION_BINDINGS_SCHEMA_VERSION = 1
+# Zero-candidate runs do not need a Subagent, page hashes, or a full evidence
+# receipt.  This policy version only participates in the shortcut receipt, so
+# a minor schema bump can forward-roll it without rerunning the Subagent.
+ILLUSTRATION_SHORTCUT_POLICY_VERSION = 1
 DEFAULT_REVIEW_DPI = 150
 DEFAULT_LARGE_BLOCK_AREA = 0.55
 DEFAULT_MAX_TEXT_CHARS = 180
@@ -647,7 +657,9 @@ def validate_illustration_decisions(
     except ValueError as exc:
         return {"schema_version": ILLUSTRATION_PREPARE_SCHEMA_VERSION, "valid": False, "status": "invalid", "errors": [str(exc)]}
 
-    if report.get("schema_version") != ILLUSTRATION_PREPARE_SCHEMA_VERSION:
+    if not schema_major_matches(
+        report.get("schema_version"), ILLUSTRATION_PREPARE_SCHEMA_VERSION
+    ):
         errors.append("unsupported illustration candidate report schema")
     if report.get("report_sha256") != _report_digest(report):
         errors.append("illustration candidate report hash mismatch")
@@ -678,6 +690,33 @@ def validate_illustration_decisions(
             "illustration manifest candidate_pages do not match the candidate report; "
             "rerun illustration-prepare"
         )
+    zero_candidates = (
+        not expected_pages
+        and not manifest_candidate_pages
+        and str(report.get("status") or "") != "pending_review"
+    )
+    if zero_candidates:
+        # No Subagent decision is possible, so per-page hashes carry no
+        # information.  Bind the short-circuit receipt to the candidate
+        # report hash only; a minor policy/schema bump keeps it valid.
+        result = {
+            "schema_version": ILLUSTRATION_PREPARE_SCHEMA_VERSION,
+            "task": "illustration-validate",
+            "valid": not errors,
+            "status": "not_applicable" if not errors else "invalid",
+            "errors": errors,
+            "candidate_pages": [],
+            "candidate_report_sha256": report.get("report_sha256"),
+            "shortcut": {
+                "kind": "zero_candidates",
+                "policy_version": ILLUSTRATION_SHORTCUT_POLICY_VERSION,
+            },
+            "ocr_evidence_mode": report.get("ocr_evidence_mode"),
+            "decisions": [],
+        }
+        atomic_write_json(output_dir / "illustration_validation.json", result)
+        return result
+
     source_pages, source_sidecars, source_secondary = _current_source_hashes(output_dir, report)
     if source_pages != dict(report.get("source_page_hashes", {})):
         errors.append("one or more source Markdown pages changed or disappeared")
@@ -697,7 +736,9 @@ def validate_illustration_decisions(
             except ValueError as exc:
                 errors.append(str(exc))
     if expected_pages and decisions_path.is_file():
-        if decisions.get("schema_version") != ILLUSTRATION_PREPARE_SCHEMA_VERSION:
+        if not schema_major_matches(
+            decisions.get("schema_version"), ILLUSTRATION_PREPARE_SCHEMA_VERSION
+        ):
             errors.append("unsupported illustration decisions schema")
         if decisions.get("candidate_report_sha256") != report.get("report_sha256"):
             errors.append("illustration decisions are not bound to the current candidate report")
@@ -780,12 +821,20 @@ def load_current_illustration_pages(
                     "illustration bindings require a current ocr_consensus.json; "
                     "rerun illustration-prepare"
                 ) from exc
-    if bindings.get("schema_version") != ILLUSTRATION_BINDINGS_SCHEMA_VERSION or bindings.get("status") != "validated":
+    bindings_status = str(bindings.get("status") or "")
+    if not schema_major_matches(
+        bindings.get("schema_version"), ILLUSTRATION_BINDINGS_SCHEMA_VERSION
+    ) or bindings_status not in {"validated", "not_applicable"}:
         raise ValueError("illustration_bindings.json is not a validated checkpoint")
     if bindings.get("ocr_evidence_mode") != candidate_report.get("ocr_evidence_mode"):
         raise ValueError("illustration bindings have a different OCR evidence mode; rerun illustration-apply")
     if bindings.get("candidate_report_sha256") != candidate_report.get("report_sha256"):
         raise ValueError("illustration bindings do not match the current candidate report; rerun illustration-apply")
+    if bindings_status == "not_applicable":
+        # Zero candidates: the receipt binds the candidate report hash only.
+        # A minor schema/policy bump is forward-compatible, and page hashes
+        # cannot change the (empty) binding set.
+        return set()
     source_hashes = bindings.get("source_page_hashes")
     if not isinstance(source_hashes, Mapping):
         raise ValueError("illustration bindings have no source page hashes")
@@ -822,6 +871,18 @@ def apply_illustration_bindings(
     validation = validate_illustration_decisions(output_dir, config=config)
     if not validation.get("valid"):
         return validation
+    if validation.get("status") == "not_applicable":
+        result = {
+            "schema_version": ILLUSTRATION_BINDINGS_SCHEMA_VERSION,
+            "task": "illustration-apply",
+            "status": "not_applicable",
+            "candidate_report_sha256": validation.get("candidate_report_sha256"),
+            "shortcut": dict(validation.get("shortcut") or {}),
+            "ocr_evidence_mode": validation.get("ocr_evidence_mode", "single_ocr"),
+            "bindings": [],
+        }
+        atomic_write_json(output_dir / "illustration_bindings.json", result)
+        return {**result, "valid": True}
     decisions = validation.get("decisions", [])
     bindings = []
     for decision in decisions:

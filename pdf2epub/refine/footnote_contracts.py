@@ -5,6 +5,9 @@ from __future__ import annotations
 
 FOOTNOTE_PREPARE_SCHEMA_VERSION = 4
 FOOTNOTE_UNIT_CONTEXT_PROJECTION_VERSION = 1
+# Zero-candidate shortcut receipt policy.  Only a schema *major* change may
+# invalidate it; a minor bump forward-rolls without another Subagent review.
+FOOTNOTE_SHORTCUT_POLICY_VERSION = 1
 
 
 DECISION_ROLES = frozenset(
@@ -26,6 +29,7 @@ MOVED_ROLES = frozenset(
 __all__ = [
     "DECISION_ROLES",
     "FOOTNOTE_PREPARE_SCHEMA_VERSION",
+    "FOOTNOTE_SHORTCUT_POLICY_VERSION",
     "FOOTNOTE_UNIT_CONTEXT_PROJECTION_VERSION",
     "MOVED_ROLES",
 ]

@@ -33,6 +33,39 @@ def markdown_validation_schema_version(task: str) -> int:
     return LEGACY_MARKDOWN_VALIDATION_SCHEMA_VERSION
 
 
+def schema_major(value: Any) -> Optional[int]:
+    """Return the major part of a schema version, or ``None`` if unusable.
+
+    Schemas are integers today (``5``), but a compatible contract may publish
+    a dotted minor such as ``5.1``.  Treating ``5.1`` as different from ``5``
+    would discard a checkpoint that is still readable.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    text = str(value or "").strip()
+    if not text:
+        return None
+    major = text.split(".", 1)[0]
+    try:
+        return int(major)
+    except ValueError:
+        return None
+
+
+def schema_major_matches(recorded: Any, current: Any) -> bool:
+    """Compare schema versions by major component only.
+
+    A minor bump (``5`` -> ``5.1``) is a forward-compatible contract extension
+    and must keep existing checkpoints valid; a major bump (``5`` -> ``6``)
+    changes the contract and invalidates them.
+    """
+    recorded_major = schema_major(recorded)
+    current_major = schema_major(current)
+    return recorded_major is not None and recorded_major == current_major
+
+
 from functools import lru_cache
 
 
