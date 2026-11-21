@@ -429,6 +429,18 @@ polish handoff 按显式 part mapping 为每个单元提供前后各最多 256 t
 resume 失效。脚注模式启用时，`polish_footnote_reviews/<stem>.json` 采用按需上报模式：干净分片免写 sidecar（缺失即隐式 `clear`），且只读 `footnote_contexts` 变更不再使 `source_sha256` 与边界上下文未变的 `polish` 产物失效。仅当发现漏网的脚注粘连或跨页续注污染时，才写出 `status: issues` 的 sidecar 并按报告回到
 `footnote-prepare` 的单页视觉复核、`footnote-validate` 和 `footnote-apply`；若所有上报 issue 对应的精确 `task_id` 均已在当前有效的 `footnote_normalization.json` 及已应用结果审计裁决（`confirmed_not_a_footnote`、`legitimate_non_footnote`、`truncated_source_exception`、`deferred_to_polish`）中正式关闭，`polish` 语义校验收敛通过，不再循环退回脚注阶段。正式 `polish-validate`（含 `--file` 单文件校验同步合并更新主 `polish_validation.json`）会更新
 当前 receipt 和 validated 副本并由 `polish --resume` 复用；不得手工重算哈希恢复旧检查点。
+polish 语义问题到脚注工作流的分流是**有界**的：每次 `polish-validate` 对同一文件再次确认
+`status: issues` 就记一轮，回执写入 `polish_footnote_reflow.json`（不依赖 polish manifest，
+删除并重建 manifest 不会重置轮数）。最多允许 2 轮 `footnote-prepare → footnote-validate →
+footnote-apply → polish --resume`；超过后 `footnote-prepare` 不再派发新的视觉任务，
+manifest/validation 进入 `human_review_required`，`polish --resume` 也拒绝继续，必须由人工作出
+一次明确决定后显式使用 `polish --resume --retry-after-human-review` 才重置该文件的计数并允许再走
+一轮。语义 sidecar 变回 `clear` 时本地会清除该文件的轮次回执。Polish issue 的 `task_id` 按
+`source_sha256 + 规范化 source_excerpt` 内容寻址，Reviewer 改 `issue_id` 或只调整空白不会产生
+新任务 ID；真正改变引用文本才会形成新任务。单个 issue 无法唯一映射到 primary OCR block 时不再
+全局阻断：该 issue 写入 `polish_semantic_unmapped` 警告并保持未映射，其他可映射 issue 照常生成
+视觉任务、校验和 apply；只有 malformed/coverage 失败的语义 sidecar 仍作为全局 blocker。修复
+未映射 issue 后重跑 `footnote-prepare` 即可，不需要重置整个脚注阶段。
 `refine-local` 的页面合并器会保守地拼接跨页未完的普通正文；完整句子、标题、列表、脚注、
 图片和表格仍保持块边界。Markdown→XHTML 默认遵循标准 Markdown 语义：单换行是软换行，
 空行才创建新段落；只有显式 `<br />` 才生成硬换行。

@@ -260,14 +260,29 @@ def validate_footnote_decisions(
             f"{blocker.get('mapping_stage')}): "
             f"{blocker.get('message')}; {blocker.get('recovery')}"
         )
+    polish_escalated = audit_data.get("polish_semantic_escalated", []) if isinstance(audit_data, Mapping) else []
+    polish_escalated = polish_escalated if isinstance(polish_escalated, list) else []
+    for item in polish_escalated:
+        if not isinstance(item, Mapping):
+            continue
+        errors.append(
+            "Polish semantic reflow requires a human decision "
+            f"({item.get('file')}, issue {item.get('issue_id') or 'unknown'}, "
+            f"{item.get('rounds')}/{item.get('max_rounds')} rounds): {item.get('recovery')}"
+        )
     if errors:
         result = {
             **base_fields,
             "valid": False,
-            "status": "retry_required",
+            "status": "human_review_required" if polish_escalated else "retry_required",
             "errors": errors,
             "decisions": [],
         }
+        if polish_escalated:
+            result["human_review_required"] = sorted({
+                str(item.get("task_id") or item.get("file") or "")
+                for item in polish_escalated if isinstance(item, Mapping)
+            } - {""})
         _attach_endnote_result(result, endnote_result)
         return _persist_result(output_dir, report_path, report, result)
 

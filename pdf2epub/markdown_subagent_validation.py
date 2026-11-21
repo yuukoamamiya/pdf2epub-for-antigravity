@@ -102,8 +102,14 @@ def validate_markdown_subagent(
 
     semantic_reviews: dict[str, Any] = {}
     semantic_blocked_names: set[str] = set()
+    reflow_state: dict[str, Any] = {}
     if task == "polish" and context.options.require_footnote_semantic_review:
-        from .polish_footnote_semantics import validate_prepared_file_review
+        from .polish_footnote_semantics import (
+            clear_reflow_round,
+            polish_issue_task_id,
+            record_reflow_round,
+            validate_prepared_file_review,
+        )
 
         for source in sources:
             name = source.name
@@ -119,6 +125,19 @@ def validate_markdown_subagent(
                     context.paths.output_dir, name, source_text=source_text,
                     target_text=target_text, required=True,
                 ) or {"valid": False, "contract_valid": False, "status": "missing", "errors": ["semantic review unavailable"], "issues": []}
+                if result.get("contract_valid") is True and result.get("status") == "issues":
+                    reflow_state[name] = record_reflow_round(
+                        context.paths.output_dir,
+                        name,
+                        source_sha256=str(result.get("source_sha256") or ""),
+                        task_ids=[
+                            polish_issue_task_id(name, issue)
+                            for issue in result.get("issues", [])
+                            if isinstance(issue, Mapping)
+                        ],
+                    )
+                elif result.get("valid") is True:
+                    clear_reflow_round(context.paths.output_dir, name)
             semantic_reviews[name] = result
             if not result.get("valid"):
                 semantic_blocked_names.add(name)
@@ -199,6 +218,42 @@ def validate_markdown_subagent(
     retry_required = list(review_state.retry_required)
     retry_required_files = list(review_state.retry_required_files)
     human_review_required_files = list(review_state.human_review_required_files)
+    reflow_escalated = {
+        name: entry for name, entry in reflow_state.items()
+        if isinstance(entry, Mapping) and entry.get("escalated") is True
+    }
+    if reflow_escalated:
+        escalated_names = set(reflow_escalated)
+        retry_required = [
+            item for item in retry_required
+            if str(item.get("file") or "") not in escalated_names
+        ]
+        retry_required_files = [
+            name for name in retry_required_files if name not in escalated_names
+        ]
+        already_human = {
+            str(item.get("file") or "") for item in human_review_required
+            if isinstance(item, Mapping)
+        }
+        for name, entry in sorted(reflow_escalated.items()):
+            for item in invalid:
+                if str(item.get("file") or "") == name and item.get("kind") == "polish_footnote_semantics":
+                    item["action"] = "ask_human"
+            if name in already_human:
+                continue
+            human_review_required.append({
+                "file": name,
+                "kind": "polish_footnote_reflow",
+                "action": "ask_human",
+                "rounds": int(entry.get("rounds") or 0),
+                "max_rounds": int(entry.get("max_rounds") or 0) or None,
+                "reason": (
+                    "the polish->footnote reflow already exceeded its bounded rounds; "
+                    "automatic prepare/validate/polish retries are paused"
+                ),
+            })
+            human_review_required_files.append(name)
+        human_review_required_files = sorted(set(human_review_required_files))
     if not allow_review_warnings:
         for name in review_required_files:
             if name in valid_files:
@@ -262,6 +317,7 @@ def validate_markdown_subagent(
             for name, item in semantic_reviews.items()
             if isinstance(item, Mapping) and item.get("sidecar_sha256")
         },
+        "polish_footnote_reflow": reflow_state,
         "review_required": review_required,
         "review_required_files": review_required_files,
         "retry_required": retry_required,

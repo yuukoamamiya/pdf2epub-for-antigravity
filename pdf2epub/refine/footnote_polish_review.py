@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from ..workflow_contracts import sha256_file
-from ..polish_footnote_semantics import validate_prepared_file_review
+from ..polish_footnote_semantics import polish_issue_task_id, validate_prepared_file_review
 from .footnote_matching import block_text_variants
 
 def polish_semantic_issue_tasks(
@@ -252,8 +252,7 @@ def polish_semantic_issue_tasks(
                 ensure_ascii=False, sort_keys=True, separators=(",", ":"),
             ).encode("utf-8")).hexdigest()
             line = raw_text.count("\n", 0, raw_start) + 1
-            issue_identity = "\0".join((filename, str(issue.get("issue_id") or ""), str(issue.get("source_sha256") or ""), str(issue.get("target_sha256") or ""), str(issue.get("context_sha256") or "")))
-            task_id = "fra-" + hashlib.sha256(issue_identity.encode("utf-8")).hexdigest()[:20]
+            task_id = polish_issue_task_id(filename, issue)
             linked_pages = {page}
             linked_refs = {(page, source_kind, block_index), *extra_linked_refs}
             for collection in ("continuation_chains", "cross_page_windows"):

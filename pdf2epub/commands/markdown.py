@@ -379,6 +379,28 @@ def _prepare_pdf_markdown_task(args, task: str):
         except ValueError as exc:
             logger.error(f"Invalid footnotes configuration: {exc}")
             return 1
+        if getattr(args, "resume", False):
+            from pdf2epub.polish_footnote_semantics import (
+                escalated_reflow_files,
+                reset_reflow_round,
+            )
+
+            escalated = escalated_reflow_files(output_dir)
+            if escalated:
+                if not getattr(args, "retry_after_human_review", False):
+                    logger.error(
+                        "Human review is required before another polish->footnote reflow round for: "
+                        + ", ".join(sorted(escalated))
+                        + ". The reflow is bounded; make one explicit decision, then rerun "
+                        "polish --resume --retry-after-human-review only if another round is authorized."
+                    )
+                    return 1
+                for name in sorted(escalated):
+                    reset_reflow_round(output_dir, name)
+                logger.warning(
+                    "Human decision accepted; reset the bounded polish->footnote reflow counter for: "
+                    + ", ".join(sorted(escalated))
+                )
     if task == "translate":
         from pdf2epub.glossary import load_selected_glossaries
 

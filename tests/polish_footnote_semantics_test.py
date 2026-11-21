@@ -7,6 +7,12 @@ from pdf2epub.markdown_handoff_context import MarkdownHandoffRequest
 from pdf2epub.polish_footnote_semantics import (
     SIDECAR_DIRECTORY,
     build_semantic_review_contract,
+    clear_reflow_round,
+    escalated_reflow_files,
+    load_reflow_state,
+    polish_issue_task_id,
+    record_reflow_round,
+    reset_reflow_round,
     validate_semantic_review_sidecar,
 )
 
@@ -307,3 +313,111 @@ def test_semantic_review_binds_the_normalized_polish_target(tmp_path):
     assert report["all_passed"] is True
     assert (target_dir / "unit.md").read_text(encoding="utf-8") == normalized_target
     assert report["target_sha256"]["unit.md"] == hashlib.sha256(normalized_target.encode()).hexdigest()
+
+
+def test_polish_issue_task_id_is_content_addressed():
+    issue = {
+        "issue_id": "issue-1",
+        "source_sha256": "a" * 64,
+        "source_excerpt": "36 Note body.",
+        "target_sha256": "b" * 64,
+        "context_sha256": "c" * 64,
+    }
+
+    base = polish_issue_task_id("chapter.md", issue)
+    renamed = polish_issue_task_id("chapter.md", {**issue, "issue_id": "renamed"})
+    spaced = polish_issue_task_id("chapter.md", {**issue, "source_excerpt": "36  Note\nbody."})
+    changed = polish_issue_task_id("chapter.md", {**issue, "source_excerpt": "36 Other body."})
+
+    assert base == renamed == spaced
+    assert base != changed
+    assert base.startswith("fra-")
+
+
+def test_reflow_rounds_persist_outside_manifest_and_escalate_after_two(tmp_path):
+    for expected in (1, 2):
+        entry = record_reflow_round(tmp_path, "chapter.md", source_sha256="a" * 64)
+        assert entry["rounds"] == expected
+        assert entry["escalated"] is False
+    assert escalated_reflow_files(tmp_path) == {}
+
+    # Deleting and rebuilding the polish manifest must not reset the counter.
+    (tmp_path / "polish_subagent_manifest.json").write_text("{}", encoding="utf-8")
+    entry = record_reflow_round(tmp_path, "chapter.md", source_sha256="d" * 64)
+    assert entry["rounds"] == 3
+    assert entry["escalated"] is True
+    assert escalated_reflow_files(tmp_path)["chapter.md"]["source_sha256"] == "d" * 64
+
+    reset_reflow_round(tmp_path, "chapter.md", decision_id="human-1")
+    assert escalated_reflow_files(tmp_path) == {}
+    state = load_reflow_state(tmp_path)
+    assert state["files"]["chapter.md"]["human_decision_id"] == "human-1"
+    assert state["files"]["chapter.md"]["rounds"] == 0
+
+    record_reflow_round(tmp_path, "chapter.md")
+    clear_reflow_round(tmp_path, "chapter.md")
+    assert load_reflow_state(tmp_path)["files"] == {}
+
+
+def test_third_semantic_issue_round_escalates_to_human_review(tmp_path):
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
+
+    source_dir = tmp_path / "ocr_markdown"
+    target_dir = tmp_path / "polished_markdown"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    source = "Body line.\n\n[^1]: apparent note text.\n"
+    target = source
+    (source_dir / "chapter.md").write_bytes(source.encode())
+    (target_dir / "chapter.md").write_bytes(target.encode())
+    contract = build_semantic_review_contract("chapter.md", source)
+    manifest = {
+        "task": "polish", "source_sha256": {"chapter.md": contract["source_sha256"]},
+        "footnote_semantics": {"schema_version": 1, "enabled": True, "files": {"chapter.md": contract}},
+    }
+    manifest_path = tmp_path / "polish_subagent_manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    issue = {
+        "issue_id": "issue-1", "code": "possible_body_in_footnote",
+        "source_excerpt": "apparent note text.", "target_excerpt": "apparent note text.",
+        "reason": "This may be a continuation of the body paragraph, not note content.",
+        "file": "chapter.md", "unit_id": None,
+        "source_sha256": contract["source_sha256"],
+        "target_sha256": hashlib.sha256(target.encode()).hexdigest(),
+        "context_sha256": contract["context_sha256"],
+    }
+    sidecar = tmp_path / contract["sidecar"]
+    sidecar.parent.mkdir()
+    sidecar.write_text(
+        json.dumps(_review(source, target, contract, status="issues", issues=[issue])),
+        encoding="utf-8",
+    )
+
+    first = validate_markdown_subagent(
+        tmp_path, "polish", source_dir, target_dir,
+        create_validated_copy=False, require_footnote_semantic_review=True,
+    )
+    assert first["polish_footnote_reflow"]["chapter.md"]["rounds"] == 1
+    assert first["human_review_required"] == []
+
+    second = validate_markdown_subagent(
+        tmp_path, "polish", source_dir, target_dir,
+        create_validated_copy=False, require_footnote_semantic_review=True,
+    )
+    assert second["polish_footnote_reflow"]["chapter.md"]["rounds"] == 2
+    assert second["human_review_required"] == []
+
+    # Rebuilding the manifest must not reset the persisted round count.
+    manifest_path.unlink()
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    third = validate_markdown_subagent(
+        tmp_path, "polish", source_dir, target_dir,
+        create_validated_copy=False, require_footnote_semantic_review=True,
+    )
+    assert third["polish_footnote_reflow"]["chapter.md"]["rounds"] == 3
+    assert third["human_review_required_files"] == ["chapter.md"]
+    escalated = third["human_review_required"][0]
+    assert escalated["kind"] == "polish_footnote_reflow"
+    assert escalated["action"] == "ask_human"
+    assert "chapter.md" not in third["retry_required_files"]
+    assert third["all_passed"] is False

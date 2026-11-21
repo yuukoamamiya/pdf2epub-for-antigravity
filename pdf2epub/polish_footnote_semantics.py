@@ -7,7 +7,7 @@ and, when needed, the upstream footnote workflow.
 from __future__ import annotations
 
 import hashlib
-from pdf2epub.workflow_contracts import sha256_file
+from pdf2epub.workflow_contracts import atomic_write_json, sha256_file
 import json
 import re
 from pathlib import Path
@@ -16,6 +16,9 @@ from typing import Any, Mapping
 
 SCHEMA_VERSION = 1
 SIDECAR_DIRECTORY = "polish_footnote_reviews"
+REFLOW_FILENAME = "polish_footnote_reflow.json"
+REFLOW_SCHEMA_VERSION = 1
+MAX_REFLOW_ROUNDS = 2
 _FOOTNOTE_TOKEN = re.compile(r"\[\^([^\]\r\n]+)\]")
 _HEX = re.compile(r"^[0-9a-f]{64}$")
 _UPSTREAM_CLOSING_OUTCOMES = frozenset({
@@ -26,14 +29,22 @@ _UPSTREAM_CLOSING_OUTCOMES = frozenset({
 })
 
 
+def normalize_excerpt_text(text: Any) -> str:
+    """Collapse whitespace so cosmetic Reviewer edits keep one identity."""
+    return " ".join(str(text or "").split())
+
+
 def polish_issue_task_id(filename: str, issue: Mapping[str, Any]) -> str:
-    """Compute the canonical upstream footnote audit task_id for one polish issue."""
+    """Compute the content-addressed upstream footnote audit task_id.
+
+    Identity binds the file, the exact Polish source hash, and the normalized
+    source excerpt. Rewording an ``issue_id`` or changing only whitespace inside
+    the quoted excerpt does not create a new review task.
+    """
     identity = "\0".join((
         str(filename),
-        str(issue.get("issue_id") or ""),
         str(issue.get("source_sha256") or ""),
-        str(issue.get("target_sha256") or ""),
-        str(issue.get("context_sha256") or ""),
+        normalize_excerpt_text(issue.get("source_excerpt")),
     ))
     return "fra-" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:20]
 
@@ -112,6 +123,99 @@ def semantic_context_sha256(
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _reflow_path(output_dir: Path) -> Path:
+    return Path(output_dir) / REFLOW_FILENAME
+
+
+def load_reflow_state(output_dir: Path) -> dict[str, Any]:
+    """Load the durable polish->footnote reflow receipt.
+
+    The receipt lives outside the polish manifest so deleting and rebuilding
+    the manifest cannot reset how many reflow rounds a file already consumed.
+    """
+    path = _reflow_path(output_dir)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        payload = {}
+    if not isinstance(payload, Mapping):
+        payload = {}
+    files = payload.get("files")
+    return {
+        "schema_version": REFLOW_SCHEMA_VERSION,
+        "max_rounds": MAX_REFLOW_ROUNDS,
+        "files": {
+            str(name): dict(entry)
+            for name, entry in (files.items() if isinstance(files, Mapping) else [])
+            if isinstance(entry, Mapping)
+        },
+    }
+
+
+def _write_reflow_state(output_dir: Path, state: Mapping[str, Any]) -> None:
+    atomic_write_json(_reflow_path(output_dir), dict(state))
+
+
+def record_reflow_round(
+    output_dir: Path,
+    filename: str,
+    *,
+    source_sha256: str = "",
+    task_ids: Any = (),
+) -> dict[str, Any]:
+    """Count one polish->footnote reflow round for a file.
+
+    ``escalated`` becomes true once the configured bound is exceeded.  The
+    counter is content-addressed by file only; the recorded source hash exists
+    for audit, so a Reviewer rewrite that keeps reporting an issue still counts
+    as another round instead of silently restarting the loop.
+    """
+    state = load_reflow_state(output_dir)
+    entry = dict(state["files"].get(str(filename)) or {})
+    entry["rounds"] = int(entry.get("rounds") or 0) + 1
+    if source_sha256:
+        entry["source_sha256"] = str(source_sha256)
+    ids = sorted({str(item) for item in (task_ids or []) if str(item)})
+    if ids:
+        entry["task_ids"] = ids
+    entry["escalated"] = entry["rounds"] > MAX_REFLOW_ROUNDS
+    state["files"][str(filename)] = entry
+    _write_reflow_state(output_dir, state)
+    return dict(entry)
+
+
+def clear_reflow_round(output_dir: Path, filename: str) -> None:
+    """Drop a converged file's reflow counter after a clean semantic review."""
+    state = load_reflow_state(output_dir)
+    if str(filename) in state["files"]:
+        state["files"].pop(str(filename), None)
+        _write_reflow_state(output_dir, state)
+
+
+def reset_reflow_round(output_dir: Path, filename: str, *, decision_id: str = "") -> None:
+    """Reset one escalated file after an explicit human decision."""
+    state = load_reflow_state(output_dir)
+    entry = state["files"].get(str(filename))
+    if not isinstance(entry, dict):
+        return
+    entry["rounds"] = 0
+    entry["escalated"] = False
+    if decision_id:
+        entry["human_decision_id"] = str(decision_id)
+    state["files"][str(filename)] = entry
+    _write_reflow_state(output_dir, state)
+
+
+def escalated_reflow_files(output_dir: Path) -> dict[str, dict[str, Any]]:
+    """Return files whose polish->footnote loop already exceeded its rounds."""
+    state = load_reflow_state(output_dir)
+    return {
+        name: dict(entry)
+        for name, entry in state["files"].items()
+        if entry.get("escalated") is True
+    }
 
 
 def build_semantic_review_contract(
@@ -402,8 +506,12 @@ def validate_prepared_file_review(
 
 
 __all__ = [
+    "MAX_REFLOW_ROUNDS", "REFLOW_FILENAME", "REFLOW_SCHEMA_VERSION",
     "SCHEMA_VERSION", "SIDECAR_DIRECTORY", "build_semantic_review_contract",
-    "footnote_identities", "semantic_context_sha256", "sha256_text",
+    "clear_reflow_round", "escalated_reflow_files",
+    "footnote_identities", "load_reflow_state", "normalize_excerpt_text",
+    "polish_issue_task_id", "record_reflow_round", "reset_reflow_round",
+    "semantic_context_sha256", "sha256_text",
     "validate_semantic_review_sidecar",
     "validate_prepared_file_review",
 ]

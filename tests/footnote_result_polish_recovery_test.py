@@ -13,7 +13,7 @@ from pdf2epub.refine.footnote_handoff import prepare_footnote_subagent
 from pdf2epub.refine.footnote_validation import validate_footnote_decisions
 
 
-@pytest.mark.parametrize("scenario", ["mapped", "mapping_blocker", "blocker_only", "invalid_review", "stale_hash"])
+@pytest.mark.parametrize("scenario", ["mapped", "mapping_blocker", "blocker_only", "invalid_review", "stale_hash", "reflow_escalated"])
 def test_polish_issue_recovery_distinguishes_current_mapping_and_contract_failures(tmp_path, monkeypatch, scenario):
     helper = runpy.run_path(str(Path(__file__).with_name("footnote_review_gates_test.py")))
     helper["_prepare_continuation_book"](tmp_path, monkeypatch)
@@ -101,9 +101,32 @@ def test_polish_issue_recovery_distinguishes_current_mapping_and_contract_failur
     if scenario == "stale_hash":
         sidecar_data["target_sha256"] = "0" * 64
     (tmp_path / contract["sidecar"]).write_text(json.dumps(sidecar_data), encoding="utf-8")
+    if scenario == "reflow_escalated":
+        from pdf2epub.polish_footnote_semantics import record_reflow_round
+
+        for _ in range(3):
+            record_reflow_round(tmp_path, "chapter_1.md", source_sha256=contract["source_sha256"])
 
     paths = prepare_footnote_subagent(tmp_path, book_title="Synthetic Review Book")
     report = json.loads(paths["report"].read_text(encoding="utf-8"))
+    if scenario == "reflow_escalated":
+        audit = report["result_audit"]
+        assert audit["polish_semantic_blockers"] == []
+        assert not any(item["code"] == "polish_semantic_issue" for item in audit["findings"])
+        escalated = audit["polish_semantic_escalated"]
+        assert [item["issue_id"] for item in escalated] == ["issue-1"]
+        assert escalated[0]["rounds"] == 3
+        assert audit["valid"] is False
+        assert audit["status"] == "human_review_required"
+        manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+        assert manifest["status"] == "human_review_required"
+        assert manifest["recovery_required"] is False
+        assert "bounded polish/footnote reflow" in paths["prompt"].read_text(encoding="utf-8")
+        validation = validate_footnote_decisions(tmp_path)
+        assert validation["valid"] is False
+        assert validation["status"] == "human_review_required"
+        assert any("Polish semantic reflow requires a human decision" in item for item in validation["errors"])
+        return
     if scenario == "stale_hash":
         audit = report["result_audit"]
         assert audit["polish_semantic_diagnostics"][0]["kind"] == "stale_contract"
@@ -111,29 +134,48 @@ def test_polish_issue_recovery_distinguishes_current_mapping_and_contract_failur
         assert audit["polish_semantic_stale_files"] == ["chapter_1.md"]
         return
 
-    if scenario in {"mapping_blocker", "blocker_only", "invalid_review"}:
+    if scenario in {"mapping_blocker", "blocker_only"}:
+        audit = report["result_audit"]
+        expected_kind = "current_issue_mapping_failure"
+        assert audit["polish_semantic_blockers"] == []
+        unmapped = audit["polish_semantic_unmapped"]
+        assert unmapped, audit.get("polish_semantic_diagnostics")
+        assert unmapped[0]["kind"] == expected_kind
+        assert unmapped[0]["issue_id"] == "issue-1"
+        assert unmapped[0]["mapping_stage"] == "primary_ocr_block"
+        assert unmapped[0]["match_count"] == 0
+        assert audit["polish_semantic_unmapped_issue_ids"] == ["issue-1"]
+        assert "original Polish Reviewer" in " ".join(audit["warnings"])
+        assert "rerun footnote-prepare" in unmapped[0]["recovery"]
+        expected_mapped = ["issue-2"] if scenario == "mapping_blocker" else []
+        assert [item["polish_issue"]["issue_id"] for item in audit["findings"] if item["code"] == "polish_semantic_issue"] == expected_mapped
+        if scenario == "mapping_blocker":
+            # The mappable issue still proceeds; only the unmapped issue stays blocked.
+            assert audit["valid"] is False
+            assert audit["status"] == "review_required"
+            manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+            assert manifest["recovery_required"] is False
+            validation = validate_footnote_decisions(tmp_path)
+            assert all("unresolved current Polish semantic review blocker" not in item for item in validation.get("errors", []))
+        else:
+            # Partial proceed: nothing else needs review, so the run is not blocked.
+            assert audit["valid"] is True
+            assert audit["status"] == "validated"
+            manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+            assert manifest["recovery_required"] is False
+            assert manifest["status"] in {"pending_review", "no_subagent_review_required"}
+        return
+
+    if scenario == "invalid_review":
         audit = report["result_audit"]
         assert audit["polish_semantic_blockers"], audit.get("polish_semantic_diagnostics")
         blocker = audit["polish_semantic_blockers"][0]
-        expected_kind = "current_issue_mapping_failure" if scenario in {"mapping_blocker", "blocker_only"} else "invalid_review"
-        assert blocker["kind"] == expected_kind
-        if scenario in {"mapping_blocker", "blocker_only"}:
-            assert blocker["issue_id"] == "issue-1"
-            assert blocker["mapping_stage"] == "primary_ocr_block"
-            assert blocker["match_count"] == 0
+        assert blocker["kind"] == "invalid_review"
         assert audit["valid"] is False
         assert audit["status"] == "blocked"
-        expected_mapped = ["issue-2"] if scenario == "mapping_blocker" else [] if scenario == "blocker_only" else ["issue-1"]
-        assert [item["polish_issue"]["issue_id"] for item in audit["findings"] if item["code"] == "polish_semantic_issue"] == expected_mapped
+        assert [item["polish_issue"]["issue_id"] for item in audit["findings"] if item["code"] == "polish_semantic_issue"] == ["issue-1"]
         assert "original Polish Reviewer" in " ".join(audit["warnings"])
         assert "rerun footnote-prepare" in blocker["recovery"]
-        if scenario == "blocker_only":
-            manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
-            prompt = paths["prompt"].read_text(encoding="utf-8")
-            assert manifest["recovery_required"] is True
-            assert manifest["status"] == "recovery_required"
-            assert "Polish semantic recovery required" in prompt
-            assert "do not add a footnote decision for a blocker" in prompt
         validation = validate_footnote_decisions(tmp_path)
         assert validation["valid"] is False
         assert any("unresolved current Polish semantic review blocker" in item for item in validation["errors"])

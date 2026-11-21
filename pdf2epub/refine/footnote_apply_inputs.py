@@ -175,6 +175,11 @@ def load_footnote_apply_inputs(
                 + "; ".join(str(item) for item in evidence.get("errors", [])[:5])
             )
     audit_data = report.get("result_audit") if isinstance(report.get("result_audit"), Mapping) else {}
+    if isinstance(audit_data, Mapping) and audit_data.get("polish_semantic_escalated"):
+        raise FootnoteApplyInputError(
+            "Polish semantic reflow requires an explicit human decision before footnote apply; "
+            "ask for that decision, then rerun footnote-prepare with the authorized retry"
+        )
     current_audit_tasks = [
         *(audit_data.get("findings", []) if isinstance(audit_data.get("findings"), list) else []),
         *(audit_data.get("reviewed_candidate_tasks", []) if isinstance(audit_data.get("reviewed_candidate_tasks"), list) else []),

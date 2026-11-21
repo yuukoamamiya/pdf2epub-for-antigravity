@@ -10,7 +10,7 @@ import json
 import hashlib
 import copy
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
@@ -451,6 +451,29 @@ def _review_prompt_recovery(
     return prompt
 
 
+def _review_prompt_escalation(escalated: list[Any]) -> str:
+    """Render the bounded-reflow human decision stop."""
+    rows = []
+    for item in escalated:
+        if not isinstance(item, Mapping):
+            continue
+        rows.append(
+            f"- file `{item.get('file')}`, issue `{item.get('issue_id') or 'unknown'}`, "
+            f"rounds {item.get('rounds')}/{item.get('max_rounds')}: {item.get('message')}. "
+            f"Recovery: {item.get('recovery')}"
+        )
+    if not rows:
+        return ""
+    return (
+        "\n\n## Human review required: bounded polish/footnote reflow\n\n"
+        "These files already consumed the bounded polish->footnote reflow rounds. Do not add "
+        "new visual tasks or decisions for them, and do not rerun footnote apply. Ask a human "
+        "for one explicit decision, then resume with that decision.\n\n"
+        + "\n".join(rows)
+        + "\n"
+    )
+
+
 def _render_review_prompt(
     book_title: str,
     report: Mapping[str, Any],
@@ -461,6 +484,7 @@ def _render_review_prompt(
     recovery_required: bool,
     polish_semantic_blockers: list[Any],
     model: str,
+    polish_semantic_escalated: list[Any] | None = None,
 ) -> str:
     """Render the footnote review prompt for the current prepared state."""
     page_text, source_guidance = _review_prompt_page_context(report, ambiguity_count)
@@ -479,6 +503,7 @@ def _render_review_prompt(
     )
     prompt += _review_prompt_audit(audit, report)
     prompt += _review_prompt_recovery(polish_semantic_blockers, recovery_required)
+    prompt += _review_prompt_escalation(list(polish_semantic_escalated or []))
     prompt += f"\nRecommended model: `{model}`.\n"
     return prompt
 
@@ -499,7 +524,8 @@ class _ManifestInputs:
     ambiguity_count: int
     page_review_required: bool
     polish_semantic_blockers: list[Any]
-    recovery_required: bool
+    recovery_required: bool = False
+    polish_semantic_escalated: list[Any] = field(default_factory=list)
 
 
 def _build_prepare_manifest(inputs: _ManifestInputs) -> dict[str, Any]:
@@ -557,6 +583,8 @@ def _build_prepare_manifest(inputs: _ManifestInputs) -> dict[str, Any]:
         "result_audit_tasks": audit.get("findings", []),
         "polish_semantic_diagnostics": audit.get("polish_semantic_diagnostics", []),
         "polish_semantic_blockers": polish_semantic_blockers,
+        "polish_semantic_unmapped": audit.get("polish_semantic_unmapped", []),
+        "polish_semantic_escalated": inputs.polish_semantic_escalated,
         "recovery_required": recovery_required,
         "result_audit_version": audit.get("schema_version"),
         "result_audit_status": audit.get("status"),
@@ -579,7 +607,8 @@ def _build_prepare_manifest(inputs: _ManifestInputs) -> dict[str, Any]:
         "endnote_decision_file": DECISIONS_FILENAME,
         "endnote_definition_file": AMBIGUITIES_FILENAME,
         "status": (
-            "recovery_required" if recovery_required
+            "human_review_required" if inputs.polish_semantic_escalated
+            else "recovery_required" if recovery_required
             else "pending_review"
             if page_review_required or ambiguity_count
             else "no_subagent_review_required"
@@ -660,23 +689,56 @@ def _attach_polish_semantic_tasks(
 ) -> None:
     """Attach polish semantic review tasks and their exact page blocks."""
     if records:
+        from ..polish_footnote_semantics import (
+            MAX_REFLOW_ROUNDS,
+            escalated_reflow_files,
+        )
+
+        escalated_files = escalated_reflow_files(output_dir)
         polish_tasks, polish_diagnostics = polish_semantic_issue_tasks(
             output_dir, records, source_texts, exact_sidecars, report,
         )
-        audit["findings"].extend(polish_tasks)
-        audit["polish_semantic_diagnostics"] = polish_diagnostics
         stale_semantic_files = sorted({
             str(item.get("file")) for item in polish_diagnostics
             if isinstance(item, Mapping) and item.get("kind") == "stale_contract"
         })
+        # Malformed reviews cannot be mapped at all and still need the original
+        # Reviewer. Mapping failures are only per-issue: the issue is surfaced
+        # as a warning while every other mappable issue continues.
         mapping_blockers = [
             item for item in polish_diagnostics
-            if isinstance(item, Mapping) and item.get("kind") in {
-                "current_issue_mapping_failure", "invalid_review",
-            }
+            if isinstance(item, Mapping) and item.get("kind") == "invalid_review"
         ]
+        unmapped_issues = [
+            item for item in polish_diagnostics
+            if isinstance(item, Mapping) and item.get("kind") == "current_issue_mapping_failure"
+        ]
+        escalated_tasks = [task for task in polish_tasks if str(task.get("file") or "") in escalated_files]
+        polish_tasks = [task for task in polish_tasks if str(task.get("file") or "") not in escalated_files]
         audit["polish_semantic_stale_files"] = stale_semantic_files
         audit["polish_semantic_blockers"] = mapping_blockers
+        audit["polish_semantic_unmapped"] = unmapped_issues
+        audit["polish_semantic_unmapped_issue_ids"] = sorted({
+            str(item.get("issue_id")) for item in unmapped_issues if item.get("issue_id")
+        })
+        audit["polish_semantic_escalated"] = [
+            {
+                "file": str(task.get("file") or ""),
+                "issue_id": str((task.get("polish_issue") or {}).get("issue_id") or ""),
+                "task_id": str(task.get("task_id") or ""),
+                "rounds": int(escalated_files.get(str(task.get("file") or ""), {}).get("rounds") or 0),
+                "max_rounds": MAX_REFLOW_ROUNDS,
+                "message": (
+                    "the polish->footnote reflow already exceeded its bounded rounds; "
+                    "automatic retries are paused"
+                ),
+                "recovery": (
+                    "ask a human to decide the remaining Polish semantic issue, then use "
+                    "polish --resume --retry-after-human-review with that decision"
+                ),
+            }
+            for task in escalated_tasks
+        ]
         if stale_semantic_files:
             audit.setdefault("warnings", []).append(
                 "Polish semantic contracts are stale for " + ", ".join(stale_semantic_files)
@@ -684,9 +746,22 @@ def _attach_polish_semantic_tasks(
             )
         if mapping_blockers:
             audit.setdefault("warnings", []).append(
-                "Current unresolved Polish semantic issues could not be mapped to exact primary OCR blocks; "
-                "the result audit is blocked. Have the original Polish Reviewer revise the listed source_excerpt "
-                "in its existing semantic sidecar, then rerun footnote-prepare."
+                "Current unresolved Polish semantic reviews are malformed or fail coverage validation; "
+                "the result audit is blocked. Have the original Polish Reviewer repair the listed semantic "
+                "sidecar, then rerun footnote-prepare."
+            )
+        if unmapped_issues:
+            audit.setdefault("warnings", []).append(
+                "Some current Polish semantic issues could not be mapped to exact primary OCR blocks; "
+                "those issues are reported as unmapped and only they stay blocked, while every other "
+                "mappable issue proceeds. Have the original Polish Reviewer revise the listed source_excerpt "
+                "to a unique continuous excerpt in one primary OCR block, then rerun footnote-prepare."
+            )
+        if audit["polish_semantic_escalated"]:
+            audit.setdefault("warnings", []).append(
+                "Polish semantic reflow reached its bounded round limit for "
+                + ", ".join(sorted({item["file"] for item in audit["polish_semantic_escalated"]}))
+                + "; footnote tasks are not dispatched again until a human decides."
             )
         for task in polish_tasks:
             address = task.get("source_address", {})
@@ -717,6 +792,8 @@ def _attach_polish_semantic_tasks(
             rows = page_row.setdefault(field, [])
             if not any(isinstance(row, Mapping) and int(row.get("block", -1)) == candidate["block"] and str(row.get("source") or "primary") == candidate["source"] for row in rows):
                 rows.append(candidate)
+        audit["findings"].extend(polish_tasks)
+        audit["polish_semantic_diagnostics"] = polish_diagnostics
 
 
 def _restore_admitted_candidates(
@@ -1263,9 +1340,11 @@ def _annotate_review_attempts(
     } if isinstance(prior_audit_reviews, list) else {}
     for task in audit["findings"]:
         task["review_attempt"] = 2 if prior_outcomes.get(str(task.get("task_id"))) == "review_required" else 1
-    audit["valid"] = not audit["findings"] and not audit.get("polish_semantic_blockers")
+    escalated = bool(audit.get("polish_semantic_escalated"))
+    audit["valid"] = not audit["findings"] and not audit.get("polish_semantic_blockers") and not escalated
     audit["status"] = (
         "blocked" if audit.get("polish_semantic_blockers")
+        else "human_review_required" if escalated
         else "review_required" if audit["findings"] else "validated"
     )
 
@@ -1679,6 +1758,7 @@ def _write_footnote_prepare_artifacts(
         and report["footnote_mode"] != "disabled"
     )
     polish_semantic_blockers = audit.get("polish_semantic_blockers", [])
+    polish_semantic_escalated = audit.get("polish_semantic_escalated", []) or []
     recovery_required = bool(polish_semantic_blockers)
     manifest = _build_prepare_manifest(_ManifestInputs(
         output_dir=output_dir,
@@ -1694,6 +1774,7 @@ def _write_footnote_prepare_artifacts(
         page_review_required=page_review_required,
         polish_semantic_blockers=polish_semantic_blockers,
         recovery_required=recovery_required,
+        polish_semantic_escalated=polish_semantic_escalated,
     ))
     manifest_path = output_dir / "footnote_subagent_manifest.json"
     atomic_write_json(manifest_path, manifest)
@@ -1707,6 +1788,7 @@ def _write_footnote_prepare_artifacts(
         recovery_required=recovery_required,
         polish_semantic_blockers=polish_semantic_blockers,
         model=model,
+        polish_semantic_escalated=polish_semantic_escalated,
     )
     prompt_path = output_dir / "footnote_subagent_prompt.md"
     atomic_write_text(prompt_path, prompt)
