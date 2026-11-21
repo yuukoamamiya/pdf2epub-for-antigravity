@@ -110,6 +110,31 @@ def atomic_write_json(
     )
 
 
+def atomic_publish_file(staging: Path, final: Path) -> None:
+    """Fsync a staged binary artifact then atomically publish it.
+
+    Both EPUB builders stage a ``.tmp`` beside the destination and call
+    ``os.replace``. Centralizing fsync+replace here guarantees crash-safe
+    publish and uniform cleanup of the staging file on failure.
+    """
+    staging_path = Path(staging)
+    final_path = Path(final)
+    final_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with staging_path.open("rb") as handle:
+            try:
+                os.fsync(handle.fileno())
+            except OSError:
+                pass
+        os.replace(staging_path, final_path)
+    except BaseException:
+        try:
+            staging_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
 def load_json_object(path: Path, *, default: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Load a JSON object, returning ``default`` for missing/invalid files."""
     fallback = dict(default or {})

@@ -19,6 +19,7 @@ from .compressed_cache import CompressedExtractionCache
 from .unit_files import PART_FILE_RE
 from pdf2epub.document_roles import infer_translation_file_role, infer_translation_file_role_with_reason
 from pdf2epub.subagent_runtime import DEFAULT_TRANSLATION_MODEL
+from pdf2epub.workflow_contracts import atomic_publish_file
 
 
 from .build_contracts import (
@@ -172,7 +173,7 @@ class HTMLEpubBuilder:
                 self.output_path = staging_path
                 self._package_epub(extract_dir)
                 self._validate_output_epub()
-                os.replace(staging_path, final_path)
+                atomic_publish_file(staging_path, final_path)
             finally:
                 self.output_path = final_path
                 staging_path.unlink(missing_ok=True)

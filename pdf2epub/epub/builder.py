@@ -17,6 +17,8 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any
 from loguru import logger
 
+from pdf2epub.workflow_contracts import atomic_publish_file
+
 
 
 def localized_toc_label(language: str) -> str:
@@ -380,7 +382,7 @@ a { text-decoration: none; }
                 bad_member = epub.testzip()
                 if bad_member is not None:
                     raise zipfile.BadZipFile(f"Corrupt EPUB member: {bad_member}")
-            os.replace(temporary_path, output_path)
+            atomic_publish_file(temporary_path, output_path)
             logger.success(f"Created EPUB: {output_path}")
             return True
         except BaseException:
