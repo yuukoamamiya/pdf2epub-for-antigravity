@@ -413,3 +413,31 @@ def test_status_has_no_review_gates_without_manifests(tmp_path: Path, monkeypatc
     report = build_status(config_path)
 
     assert report["review_gates"] == []
+
+
+def test_native_text_source_is_the_single_truth_predicate(tmp_path: Path) -> None:
+    import pytest
+
+    from pdf2epub.refine.pdf_evidence import is_native_text_source
+
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    (pages / "ocr_progress.json").write_text(
+        json.dumps({"mode": "native_text"}), encoding="utf-8"
+    )
+    assert is_native_text_source(tmp_path) is True
+
+    (pages / "ocr_progress.json").write_text(
+        json.dumps({"mode": "ocr"}), encoding="utf-8"
+    )
+    assert is_native_text_source(tmp_path) is False
+
+    (pages / "ocr_progress.json").write_text(
+        json.dumps({"mode": "native_text"}), encoding="utf-8"
+    )
+    (tmp_path / "pdf_text_probe.json").write_text(
+        json.dumps({"recommendation": "ocr_required", "schema_version": 3}),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="conflicting PDF source metadata"):
+        is_native_text_source(tmp_path)

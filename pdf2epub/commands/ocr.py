@@ -381,9 +381,9 @@ def ocr_correct_command(args):
     supplied_files = list(getattr(args, "file", None) or [])
     selection_state = manual_review_selection_state(output_dir)
     had_manual_selection = selection_state["present"]
-    from pdf2epub.ocr_source import is_legacy_native_source
+    from pdf2epub.refine.pdf_evidence import is_native_text_source
     try:
-        legacy_native = is_legacy_native_source(output_dir)
+        legacy_native = is_native_text_source(output_dir)
     except ValueError as exc:
         logger.error(str(exc))
         return 1
@@ -613,9 +613,9 @@ def ocr_correct_validate_command(args):
                 "Manual OCR selection has no matching current hand-off; rerun ocr-correct --resume"
             )
             return 1
-    from pdf2epub.ocr_source import is_legacy_native_source
+    from pdf2epub.refine.pdf_evidence import is_native_text_source
     try:
-        legacy_native = is_legacy_native_source(output_dir)
+        legacy_native = is_native_text_source(output_dir)
     except ValueError as exc:
         logger.error(str(exc))
         return 1

@@ -19,7 +19,7 @@ from .markdown_handoff_prompt import (
     render_markdown_prompt,
 )
 from .markdown_handoff_resume import decide_resume
-from .ocr_source import is_legacy_native_source
+from .refine.pdf_evidence import is_native_text_source
 from .subagent_runtime import resolve_subagent_model
 from .subagent_safety import protected_workspace_snapshot
 from .workflow_contracts import atomic_write_json, atomic_write_text, relative_posix_path
@@ -179,7 +179,7 @@ def prepare_markdown_subagent(request: MarkdownHandoffRequest) -> Dict[str, Path
             config=request.config,
             previous_review_required=resume_decision.previous_review_required,
             legacy_native_source=(
-                request.task == "polish" and is_legacy_native_source(request.output_dir)
+                request.task == "polish" and is_native_text_source(request.output_dir)
             ),
         )
     )

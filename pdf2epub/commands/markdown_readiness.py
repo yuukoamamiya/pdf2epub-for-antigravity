@@ -18,7 +18,7 @@ from pdf2epub.ocr_correction import ocr_correction_is_current, select_refinement
 from pdf2epub.ocr_review_selection import manual_review_selection_state
 from pdf2epub.ocr_progress import assess_progress
 from pdf2epub.pipeline_policy import PipelinePolicy
-from pdf2epub.ocr_source import is_legacy_native_source
+from pdf2epub.refine.pdf_evidence import is_native_text_source
 from pdf2epub.utils.paths import book_output_dir
 from pdf2epub.utils.configuration import load_config
 from pdf2epub.utils.fingerprints import pages_fingerprint
@@ -68,7 +68,7 @@ def _record_ocr_readiness(
     ocr_evidence = scan_ocr_page_evidence(output_dir)
     anomaly_report = ocr_evidence.report
     try:
-        legacy_native_text = is_legacy_native_source(output_dir)
+        legacy_native_text = is_native_text_source(output_dir)
         source_error = None
     except ValueError as exc:
         legacy_native_text = False

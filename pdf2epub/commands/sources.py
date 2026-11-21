@@ -171,8 +171,8 @@ def _require_reviewed_ocr_anomalies(
     from pdf2epub.ocr_review_selection import manual_review_selection_state
 
     selection = manual_review_selection_state(output_dir)
-    from pdf2epub.ocr_source import is_legacy_native_source
-    if is_legacy_native_source(output_dir):
+    from pdf2epub.refine.pdf_evidence import is_native_text_source
+    if is_native_text_source(output_dir):
         if selection["present"]:
             raise ValueError(
                 "manual visual OCR selection cannot apply to a legacy native-text run"

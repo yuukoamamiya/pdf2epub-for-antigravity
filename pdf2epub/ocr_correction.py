@@ -588,8 +588,8 @@ def select_refinement_pages(
             or "manual OCR page selection is stale; rerun ocr-correct"
         )
     # Only a current legacy page-progress record selects the native evidence path.
-    from pdf2epub.ocr_source import is_legacy_native_source
-    if is_legacy_native_source(output_dir):
+    from pdf2epub.refine.pdf_evidence import is_native_text_source
+    if is_native_text_source(output_dir):
         if selection["present"]:
             raise ValueError("manual visual OCR correction cannot apply to legacy native-text pages")
         return raw, "native_text"

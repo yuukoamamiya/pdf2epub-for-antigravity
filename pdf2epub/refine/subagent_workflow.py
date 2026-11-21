@@ -48,8 +48,8 @@ def prepare_refine_subagent(
 
     model = resolve_subagent_model(config, "refine")
     page_source_kind = selected_page_source_kind(output_dir, pages_dir)
-    from pdf2epub.ocr_source import is_legacy_native_source
-    if is_legacy_native_source(output_dir):
+    from pdf2epub.refine.pdf_evidence import is_native_text_source
+    if is_native_text_source(output_dir):
         page_source_kind = "native_text"
     # OCR keeps the untouched source beside the processed input.  Native PDF
     # bookmarks must be read from that original whenever it is available.

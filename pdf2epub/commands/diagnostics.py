@@ -24,7 +24,7 @@ from pdf2epub.ocr_consensus import (
 )
 from pdf2epub.ocr_progress import assess_progress
 from pdf2epub.pipeline_policy import PipelinePolicy
-from pdf2epub.ocr_source import is_legacy_native_source
+from pdf2epub.refine.pdf_evidence import is_native_text_source
 from pdf2epub.utils.paths import book_output_dir
 from pdf2epub.utils.input_paths import resolve_book_input_path
 
@@ -215,7 +215,7 @@ def _pdf_stages(
     stages.append(_status_record("ocr-pages", "ocr-pages --resume", ocr_status, ocr_detail))
 
     try:
-        native_text = is_legacy_native_source(output_dir)
+        native_text = is_native_text_source(output_dir)
     except ValueError as exc:
         stages.append(_status_record("ocr-source", "ocr-pages --resume", "blocked", str(exc)))
         native_text = False
@@ -661,7 +661,7 @@ def _ocr_evidence(
     if input_type != "pdf":
         return None
     try:
-        legacy = is_legacy_native_source(output_dir)
+        legacy = is_native_text_source(output_dir)
     except ValueError as exc:
         return {
             "mode": "indeterminate",
