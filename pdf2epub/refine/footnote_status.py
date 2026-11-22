@@ -424,8 +424,58 @@ def footnote_normalization_is_current(
     return bool(footnote_normalization_status(output_dir, config=config)["current"])
 
 
+def footnote_normalization_baseline_is_attested(output_dir: Path) -> bool:
+    """Check whether an older successful normalization remains a safe source.
+
+    Candidate and decision receipts are intentionally excluded: they are refreshed
+    during reflow and their freshness belongs to final readiness, not source choice.
+    The applied baseline remains usable only while its raw/normalized inventories
+    and the structural inputs recorded by the successful apply receipt are intact.
+    """
+    output_dir = Path(output_dir)
+    try:
+        report = _load_json(
+            output_dir / "footnote_normalization.json",
+            "footnote_normalization.json",
+        )
+    except (OSError, UnicodeError, ValueError, TypeError):
+        return False
+    if (
+        report.get("schema_version") != FOOTNOTE_NORMALIZATION_SCHEMA_VERSION
+        or report.get("valid") is not True
+        or report.get("status") != "validated"
+        or report.get("source_dir") != "ocr_markdown"
+        or report.get("target_dir") != "footnote_normalized"
+    ):
+        return False
+    source_dir = output_dir / "ocr_markdown"
+    target_dir = output_dir / "footnote_normalized"
+    source = markdown_inventory(source_dir)
+    target = markdown_inventory(target_dir)
+    if not source or set(target) != set(source):
+        return False
+    if report.get("source_sha256") != source or report.get("target_sha256") != target:
+        return False
+    tree_hash = report.get("tree_progress_sha256")
+    tree_path = source_dir / "tree_progress.json"
+    if (not isinstance(tree_hash, str) or len(tree_hash) != 64
+            or not tree_path.is_file() or sha256_file(tree_path) != tree_hash):
+        return False
+    toc_hash = report.get("toc_tree_sha256")
+    toc_path = output_dir / "toc_tree.json"
+    if toc_hash is not None and (
+        not isinstance(toc_hash, str) or len(toc_hash) != 64
+        or not toc_path.is_file() or sha256_file(toc_path) != toc_hash
+    ):
+        return False
+    if toc_hash is None and toc_path.is_file():
+        return False
+    return True
+
+
 __all__ = [
     "FOOTNOTE_NORMALIZATION_SCHEMA_VERSION",
     "footnote_normalization_is_current",
     "footnote_normalization_status",
+    "footnote_normalization_baseline_is_attested",
 ]

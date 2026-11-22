@@ -845,6 +845,8 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    `primary_blocks`；当同编号 marker 不止一个时附带 `marker_context`。不满足合同的决定属于
    `retry_required`/阻断，不得靠 `--allow-review-warnings` 放行。
 
+候选/决定报告在重流准备期间刷新时，polish 源选择可继续使用仍与 OCR、归一化稿及已记录结构输入匹配的成功基线；这仅用于准备修复，不表示脚注阶段当前有效。Readiness 与 EPUB 构建仍要求完整当前的脚注验证和 apply 收据。
+
    `footnote-apply` 会在生成 `footnote_normalized/` 后写入 `footnote_result_audit.json`，再决定是否写有效 normalization checkpoint。该结果审计报告残留数字上标/疑似编号注释、明确 scope 内的编号缺口、疑似未闭合或截断定义，以及归一化后的注释边界和物化完整性问题。编号顺序按 TOC/refinement scope 逐项核对，覆盖单文件和多分片章节；有精确页面边界或不同 `section_id` 的下降序列作为重启，不跨该边界推断缺号，缺少这类边界证据时生成 `scoped_numbering_reset_uncertain` 视觉复核。审计产生的语义疑问由视觉复核决定，apply 不移动未确认内容或翻译内容。
 
    另有一项上游候选召回改进：首次 `footnote-prepare` 会把通用 `Text` 块中的行首数字 `<sup>…</sup>` 作为视觉复核候选，即使常规候选逻辑会把该块压制为普通编号列表上下文，也按精确页/来源/block 和侧车哈希交给 Subagent。图像复核该块角色。apply 后的结果审计只检查转换后的稿件；若仍需复核，下一次 `footnote-prepare` 会把当前结果报告中的任务投影为补充视觉任务，且仅在报告绑定的源稿与归一化稿哈希仍匹配时复用。代码/注释、Markdown 脚注定义及其续行等结构会排除在对应残留标记扫描之外。主/次 OCR 及旧原生 layout 沿用各自当前证据模式；`endnotes_only` 不扫描页脚注候选，但会审计尾注定义、截断及归一化物化完整性；`disabled` 的状态为 `not_applicable`。

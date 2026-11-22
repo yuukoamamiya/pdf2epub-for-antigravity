@@ -1038,6 +1038,9 @@ Subagent 将结果放入既有 `footnote_decisions.json` 的 `result_audit_revie
 重新执行 `footnote-validate → footnote-apply`。apply 会重新生成 `footnote_normalized/`，不得直接编辑该派生目录或
 手工修改 checkpoint。
 
+候选/决定报告在重流准备期间刷新时，polish 源选择可继续使用仍与 OCR、归一化稿及已记录结构输入匹配的成功基线；这仅用于准备修复，不表示脚注阶段当前有效。Readiness 与 EPUB 构建仍要求完整当前的脚注验证和 apply 收据。
+
+
 ### 页边界线索与精确物理页证据
 
 脚注结果审计的标点提示只在脚注定义末尾为逗号、冒号或分号，且 apply 的 `expected_notes` 能通过精确

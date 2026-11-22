@@ -101,6 +101,8 @@ PDF 的页脚注抽取会复核疑似跨页断词缺口；需要时会把相邻�
 单页 `ocr-correct-validate --file PAGE.md` 只记录该页，完成整书复核后仍须运行无 `--file` 的全量 validate，
 才会生成可供后续结构整理使用的 validated OCR。请求绑定源 PDF、数字排序的完整 OCR 页清单及逐页 Markdown/sidecar 哈希。
 源变化后需更新复核。已有 handoff 记录人工页选择时，缺失或损坏请求合同也不会允许回退到未经验证的原始 OCR。
+候选/决定报告在重流准备期间刷新时，polish 源选择可继续使用仍与 OCR、归一化稿及已记录结构输入匹配的成功基线；这仅用于准备修复，不表示脚注阶段当前有效。Readiness 与 EPUB 构建仍要求完整当前的脚注验证和 apply 收据。
+
 页脚注应用后还会生成 `footnote_result_audit.json`，复核残留上标、疑似编号注释、适用范围内的编号缺口和注释边界。需要判断的发现会回到既有视觉复核、校验和应用流程；结果审计未通过时，不会生成有效脚注检查点或继续到 polish/EPUB 构建。Polish 语义 issue 回流时，过期哈希/合同与当前 issue 无法唯一映射到 primary OCR block 会分别记录；后一种情况保留其他可映射任务，但阻断脚注校验。原 Polish Reviewer 修正现有 semantic sidecar 的精确 source_excerpt 后，重跑 `footnote-prepare`。`endnotes_only` 跳过页脚注候选扫描，但仍审计适用的尾注定义、截断和物化完整性；`disabled` 会记录为不适用。审计输出复核信号，语义决定由既有审阅流程完成。
 结果审计现用独立 version 4，`footnote_normalization.json` 使用 schema 10，脚注决定以 effective decision version 1 统一记录候选来源和复核决定。旧 normalization schema 1–9、结果审计 version 1–3 或缺少有效决定集的 receipt，需通过 `footnote-prepare`、待复核项处理、`footnote-validate` 和 `footnote-apply` 重建，之后用 `polish --resume` 刷新润色语义复核。
 上一页脚注以断词连字符结束、下一页 OCR 将续词误标为普通 `Text` 时，行内上标通常不会让候选静默消失，与脚注列对齐且有独立脚注证据的块会带精确页/块地址进入视觉复核和 unit context。视觉复核仍决定该块是否真为续注。

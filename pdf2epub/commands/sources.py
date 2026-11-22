@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from pdf2epub.refine.footnote_status import footnote_normalization_is_current
+from pdf2epub.refine.footnote_status import footnote_normalization_baseline_is_attested
 from pdf2epub.validation_receipts import validation_receipt_is_current
 from pdf2epub.workflow_contracts import sha256_file
 
@@ -104,9 +105,27 @@ def _resolve_pdf_polish_source(
     """
     output_dir = Path(output_dir)
     _require_reviewed_ocr_anomalies(output_dir, config, ocr_evidence)
+    from ..refine.footnote_options import resolve_footnote_options
+
+    resolve_footnote_options(config)
     normalized_dir = output_dir / "footnote_normalized"
     if footnote_normalization_is_current(output_dir, config=config):
         return normalized_dir, "footnote_normalized"
+    receipt_path = output_dir / "footnote_normalization.json"
+    normalized_exists = normalized_dir.is_dir() and any(normalized_dir.glob("*.md"))
+    if receipt_path.exists() or normalized_exists:
+        from ..refine.footnote_options import resolve_effective_footnote_mode
+
+        mode_resolution = resolve_effective_footnote_mode(output_dir, config)
+        if mode_resolution["effective"] == "disabled":
+            return output_dir / "ocr_markdown", "ocr"
+        if footnote_normalization_baseline_is_attested(output_dir):
+            return normalized_dir, "footnote_normalized"
+        raise ValueError(
+            "footnote_normalized exists but its successful baseline receipt is missing, "
+            "corrupt, or no longer matches the source/target inventory or structural inputs; "
+            "repair the footnote checkpoint with footnote-prepare, footnote-validate, and footnote-apply"
+        )
     return output_dir / "ocr_markdown", "ocr"
 
 

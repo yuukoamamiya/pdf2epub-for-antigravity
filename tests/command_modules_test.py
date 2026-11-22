@@ -645,6 +645,8 @@ def test_polish_prefers_current_footnote_normalized_source(tmp_path: Path):
                 "schema_version": FOOTNOTE_NORMALIZATION_SCHEMA_VERSION,
                 "valid": True,
                 "status": "validated",
+                "source_dir": "ocr_markdown",
+                "target_dir": "footnote_normalized",
                 "ocr_evidence_mode": "single_ocr",
                 "effective_decisions_version": EFFECTIVE_DECISIONS_VERSION,
                 "effective_decisions": [],
@@ -652,6 +654,8 @@ def test_polish_prefers_current_footnote_normalized_source(tmp_path: Path):
                 "target_sha256": {
                     "chapter_1.md": sha256_file(normalized_dir / "chapter_1.md")
                 },
+                "tree_progress_sha256": sha256_file(source_dir / "tree_progress.json"),
+                "toc_tree_sha256": sha256_file(tmp_path / "toc_tree.json"),
                 "candidate_report_sha256": sha256_file(
                     tmp_path / "footnote_candidates.json"
                 ),
@@ -670,6 +674,91 @@ def test_polish_prefers_current_footnote_normalized_source(tmp_path: Path):
     assert _resolve_pdf_polish_source(
         tmp_path, {"footnotes": {"mode": "disabled"}}
     ) == (source_dir, "ocr")
+
+    # Reflow refreshes candidate and decision metadata before apply. The prior
+    # normalized text remains the source baseline while those receipts are stale.
+    candidates_path.write_text(json.dumps({"schema_version": FOOTNOTE_PREPARE_SCHEMA_VERSION,
+                                          "continuation_reviews": [], "refreshed": True}),
+                               encoding="utf-8")
+    assert _resolve_pdf_polish_source(
+        tmp_path, {"footnotes": {"mode": "footnotes"}}
+    ) == (normalized_dir, "footnote_normalized")
+    from pdf2epub.refine.footnote_status import footnote_normalization_status
+    assert footnote_normalization_status(
+        tmp_path, config={"footnotes": {"mode": "footnotes"}}
+    )["current"] is False
+    assert _resolve_pdf_polish_source(
+        tmp_path, {"footnotes": {"mode": "footnotes"}}
+    ) == (normalized_dir, "footnote_normalized")
+
+
+def test_normalized_source_selection_fails_closed_on_bad_baseline_or_mode(tmp_path: Path):
+    source_dir = tmp_path / "ocr_markdown"
+    normalized_dir = tmp_path / "footnote_normalized"
+    source_dir.mkdir()
+    normalized_dir.mkdir()
+    source = source_dir / "chapter.md"
+    target = normalized_dir / "chapter.md"
+    source.write_text("source", encoding="utf-8")
+    target.write_text("normalized", encoding="utf-8")
+    (source_dir / "tree_progress.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "toc_tree.json").write_text("{}", encoding="utf-8")
+    receipt = tmp_path / "footnote_normalization.json"
+    receipt.write_text(json.dumps({
+        "schema_version": FOOTNOTE_NORMALIZATION_SCHEMA_VERSION,
+        "valid": True, "status": "validated", "source_dir": "ocr_markdown",
+        "target_dir": "footnote_normalized",
+        "source_sha256": {source.name: sha256_file(source)},
+        "target_sha256": {target.name: sha256_file(target)},
+        "tree_progress_sha256": sha256_file(source_dir / "tree_progress.json"),
+        "toc_tree_sha256": sha256_file(tmp_path / "toc_tree.json"),
+    }), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="footnotes.mode"):
+        _resolve_pdf_polish_source(tmp_path, {"footnotes": {"mode": "bogus"}})
+
+    source.write_text("changed", encoding="utf-8")
+    with pytest.raises(ValueError, match="baseline receipt"):
+        _resolve_pdf_polish_source(tmp_path, {"footnotes": {"mode": "footnotes"}})
+
+    source.write_text("source", encoding="utf-8")
+    receipt_data = json.loads(receipt.read_text(encoding="utf-8"))
+    receipt_data["source_sha256"][source.name] = sha256_file(source)
+    receipt.write_text(json.dumps(receipt_data), encoding="utf-8")
+    target.write_text("changed target", encoding="utf-8")
+    with pytest.raises(ValueError, match="baseline receipt"):
+        _resolve_pdf_polish_source(tmp_path, {"footnotes": {"mode": "footnotes"}})
+
+    target.write_text("normalized", encoding="utf-8")
+    receipt_data["target_sha256"][target.name] = sha256_file(target)
+    receipt.write_text(json.dumps(receipt_data), encoding="utf-8")
+    (tmp_path / "toc_tree.json").write_text("changed structure", encoding="utf-8")
+    with pytest.raises(ValueError, match="baseline receipt"):
+        _resolve_pdf_polish_source(tmp_path, {"footnotes": {"mode": "footnotes"}})
+
+    target.write_text("normalized", encoding="utf-8")
+    receipt_data["target_sha256"][target.name] = sha256_file(target)
+    receipt_data["source_sha256"][source.name] = sha256_file(source)
+    receipt_data["tree_progress_sha256"] = sha256_file(source_dir / "tree_progress.json")
+    receipt_data["toc_tree_sha256"] = sha256_file(tmp_path / "toc_tree.json")
+    receipt.write_text(json.dumps(receipt_data), encoding="utf-8")
+    target.unlink()
+    with pytest.raises(ValueError, match="baseline receipt"):
+        _resolve_pdf_polish_source(tmp_path, {"footnotes": {"mode": "footnotes"}})
+
+    target.write_text("normalized", encoding="utf-8")
+    (source_dir / "extra.md").write_text("extra", encoding="utf-8")
+    with pytest.raises(ValueError, match="baseline receipt"):
+        _resolve_pdf_polish_source(tmp_path, {"footnotes": {"mode": "footnotes"}})
+    (source_dir / "extra.md").unlink()
+
+    receipt.unlink()
+    with pytest.raises(ValueError, match="baseline receipt"):
+        _resolve_pdf_polish_source(tmp_path, {"footnotes": {"mode": "footnotes"}})
+    receipt.write_text(json.dumps(receipt_data), encoding="utf-8")
+    receipt.write_text("{}", encoding="utf-8")
+    with pytest.raises(ValueError, match="baseline receipt"):
+        _resolve_pdf_polish_source(tmp_path, {"footnotes": {"mode": "footnotes"}})
 
 
 def test_pdf_source_stage_auto_falls_back_to_ocr_without_native_probe(tmp_path: Path):
