@@ -102,6 +102,49 @@ def _print_readiness_preview(readiness: Mapping[str, Any]) -> None:
         logger.error(f"[dry-run] readiness: {error}")
 
 
+def _pdf_translation_footnote_hints(
+    output_dir: Path, source_dir: Path, target_dir: Path,
+) -> dict[str, list[dict[str, Any]]]:
+    """Carry validated upstream move hints into existing translation targets.
+
+    A changed polished target is expected after polish review. Freshness is
+    instead anchored to the unchanged normalized source recorded by the polish
+    manifest, then rebound to the actual polished and translated bytes.
+    """
+    try:
+        polish_manifest = json.loads((output_dir / "polish_subagent_manifest.json").read_text(encoding="utf-8"))
+        hints = polish_manifest.get("footnote_change_hints", {})
+        normalized_hashes = polish_manifest.get("source_sha256", {})
+        if not isinstance(hints, Mapping) or not isinstance(normalized_hashes, Mapping):
+            return {}
+        result = {}
+        normalized_dir = output_dir / "footnote_normalized"
+        for name, rows in hints.items():
+            source_path, target_path = source_dir / str(name), target_dir / str(name)
+            normalized_path = normalized_dir / str(name)
+            if not source_path.is_file() or not target_path.is_file() or not normalized_path.is_file() or not isinstance(rows, list):
+                continue
+            normalized_hash = sha256_file(normalized_path)
+            if normalized_hash != normalized_hashes.get(str(name)):
+                continue
+            source_hash = sha256_file(source_path)
+            translation_hash = sha256_file(target_path)
+            current = [
+                {
+                    **dict(row),
+                    "polished_source_sha256": source_hash,
+                    "existing_translation_sha256": translation_hash,
+                }
+                for row in rows
+                if isinstance(row, Mapping) and row.get("new_source_sha256") == normalized_hash
+            ]
+            if current:
+                result[str(name)] = current
+        return result
+    except (OSError, UnicodeError, ValueError, TypeError):
+        return {}
+
+
 def _prepare_task_source(
     args,
     task: str,
@@ -129,12 +172,23 @@ def _prepare_task_source(
     chapter_groups = {}
     dynamic_snapshot_sha256 = None
     dynamic_entries = []
+    footnote_change_hints = {}
+    footnote_translation_change_hints = {}
     if task == "polish":
+        if getattr(args, "resume", False) and not getattr(args, "dry_run", False):
+            from pdf2epub.refine.footnote_versions import recover_interrupted_apply
+
+            recover_interrupted_apply(output_dir)
         try:
             source_dir, _ = _resolve_pdf_polish_source(output_dir, config)
         except ValueError as exc:
             logger.error(str(exc))
             return None
+        if (getattr(args, "resume", False) and not getattr(args, "dry_run", False)
+                and source_dir.name == "footnote_normalized"):
+            from pdf2epub.refine.footnote_versions import sync_polished_targets
+
+            footnote_change_hints = sync_polished_targets(output_dir)
         target_dir = output_dir / "polished_markdown"
         rules = [
             "Repair source layout and line wrapping while preserving meaning and document structure.",
@@ -313,6 +367,10 @@ def _prepare_task_source(
         # Native glossary snapshots are audit inputs; workers receive only
         # per-unit projections through unit_context_files.
         prompt_context_files = {}
+    if task == "translate" and getattr(args, "resume", False):
+        footnote_translation_change_hints = _pdf_translation_footnote_hints(
+            output_dir, source_dir, target_dir,
+        )
     return {
         "source_dir": source_dir,
         "target_dir": target_dir,
@@ -328,6 +386,8 @@ def _prepare_task_source(
         "dynamic_snapshot_sha256": dynamic_snapshot_sha256,
         "dynamic_entries": dynamic_entries,
         "chapter_groups": chapter_groups,
+        "footnote_change_hints": footnote_change_hints,
+        "footnote_translation_change_hints": footnote_translation_change_hints,
     }
 
 
@@ -482,6 +542,8 @@ def _prepare_pdf_markdown_task(args, task: str):
     dynamic_snapshot_sha256 = prepared["dynamic_snapshot_sha256"]
     dynamic_entries = prepared["dynamic_entries"]
     chapter_groups = prepared["chapter_groups"]
+    footnote_change_hints = prepared.get("footnote_change_hints", {})
+    footnote_translation_change_hints = prepared.get("footnote_translation_change_hints", {})
     try:
         controlled_files = {}
         if task == "translate":
@@ -541,6 +603,8 @@ def _prepare_pdf_markdown_task(args, task: str):
             controlled_files=controlled_files or None,
             footnote_semantics_enabled=task == "polish" and footnote_mode != "disabled",
             refresh_checkpoints=bool(getattr(args, "refresh_checkpoints", False)),
+            footnote_change_hints=footnote_change_hints or None,
+            footnote_translation_change_hints=footnote_translation_change_hints or None,
         )
         if getattr(args, "dry_run", False):
             from pdf2epub.markdown_handoff import preview_markdown_handoff

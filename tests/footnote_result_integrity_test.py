@@ -227,6 +227,37 @@ def test_apply_result_audit_rejects_mutated_multiline_note_materialization(
     assert checkpoint["valid"] is False
 
 
+def test_failed_reapply_keeps_last_good_source_but_blocks_current_gate(tmp_path, monkeypatch):
+    from pdf2epub.commands.sources import _resolve_pdf_polish_source
+    from pdf2epub.refine.footnote_status import footnote_normalization_baseline_is_attested
+
+    _prepare_book(tmp_path)
+    first = apply_footnote_normalization(tmp_path)
+    assert first["valid"] is True
+    receipt_path = tmp_path / "footnote_normalization.json"
+    receipt_before = receipt_path.read_bytes()
+    target_path = tmp_path / "footnote_normalized" / "chapter_1.md"
+    target_before = target_path.read_bytes()
+
+    monkeypatch.setattr(footnote_apply, "audit_footnote_result", lambda *args, **kwargs: {
+        "schema_version": footnote_apply.AUDIT_VERSION,
+        "valid": False,
+        "status": "review_required",
+        "findings": [{"task_id": "synthetic", "detail": "unresolved"}],
+    })
+    second = apply_footnote_normalization(tmp_path)
+
+    assert second["valid"] is False
+    assert receipt_path.read_bytes() == receipt_before
+    assert target_path.read_bytes() == target_before
+    assert json.loads((tmp_path / "footnote_normalization_attempt.json").read_text(encoding="utf-8"))["valid"] is False
+    assert footnote_normalization_baseline_is_attested(tmp_path) is True
+    assert footnote_normalization_status(tmp_path)["current"] is False
+    source_dir, stage = _resolve_pdf_polish_source(tmp_path, {})
+    assert source_dir == tmp_path / "footnote_normalized"
+    assert stage == "footnote_normalized"
+
+
 def test_endnotes_only_reports_dangling_unclosed_declared_definition_without_page_scan(
     tmp_path: Path,
 ):

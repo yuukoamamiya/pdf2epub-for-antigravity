@@ -22,7 +22,12 @@ from .markdown_handoff_resume import decide_resume
 from .refine.pdf_evidence import is_native_text_source
 from .subagent_runtime import resolve_subagent_model
 from .subagent_safety import protected_workspace_snapshot
-from .workflow_contracts import atomic_write_json, atomic_write_text, relative_posix_path
+from .workflow_contracts import (
+    atomic_write_json,
+    atomic_write_text,
+    relative_posix_path,
+    sha256_file,
+)
 
 
 def preview_markdown_handoff(request: MarkdownHandoffRequest) -> Dict[str, Any]:
@@ -108,6 +113,46 @@ def _build_manifest(request, plan, context, decision, model, visual_dir, seconda
             "files": semantic_contracts,
             "recovery": "footnote-prepare, footnote-validate, footnote-apply",
         }
+        if request.footnote_change_hints:
+            source_hashes = manifest.get("source_sha256", {})
+            scoped_hints = {}
+            target_hashes = {}
+            for name, rows in request.footnote_change_hints.items():
+                if not isinstance(rows, list):
+                    continue
+                target_path = request.target_dir / str(name)
+                if not target_path.is_file():
+                    continue
+                target_hash = sha256_file(target_path)
+                fresh = [row for row in rows if isinstance(row, Mapping)
+                         and row.get("new_source_sha256") == (source_hashes or {}).get(name)
+                         and row.get("new_target_sha256") == target_hash]
+                if fresh:
+                    scoped_hints[str(name)] = fresh
+                    target_hashes[str(name)] = target_hash
+            if scoped_hints:
+                manifest["footnote_change_hints"] = scoped_hints
+                manifest["footnote_change_target_sha256"] = target_hashes
+    if request.task == "translate" and request.footnote_translation_change_hints:
+        source_hashes = manifest.get("source_sha256", {})
+        translated_hints = {}
+        translated_target_hashes = {}
+        for name, rows in request.footnote_translation_change_hints.items():
+            source_path = request.source_dir / str(name)
+            target_path = request.target_dir / str(name)
+            if not source_path.is_file() or not target_path.is_file() or not isinstance(rows, list):
+                continue
+            target_hash = sha256_file(target_path)
+            source_hash = (source_hashes or {}).get(name)
+            fresh = [row for row in rows if isinstance(row, Mapping)
+                     and row.get("polished_source_sha256") == source_hash
+                     and row.get("existing_translation_sha256") == target_hash]
+            if fresh:
+                translated_hints[str(name)] = fresh
+                translated_target_hashes[str(name)] = target_hash
+        if translated_hints:
+            manifest["footnote_translation_change_hints"] = translated_hints
+            manifest["footnote_translation_target_sha256"] = translated_target_hashes
     return manifest
 
 

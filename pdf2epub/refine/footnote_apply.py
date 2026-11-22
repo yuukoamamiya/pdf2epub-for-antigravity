@@ -27,6 +27,16 @@ from .footnote_effective_decisions import EFFECTIVE_DECISIONS_VERSION
 from .footnote_page_evidence import page_sidecar_index
 
 
+from .footnote_versions import (
+    capture_last_good,
+    publish_success,
+    recover_interrupted_apply,
+    preserve_failed_attempt,
+    mark_apply_running,
+    mark_apply_complete,
+)
+
+
 def _write_failure(output_dir: Path, errors: list[str], *, status: str = "human_review_required") -> dict[str, Any]:
     result = {
         "schema_version": FOOTNOTE_NORMALIZATION_SCHEMA_VERSION,
@@ -34,7 +44,26 @@ def _write_failure(output_dir: Path, errors: list[str], *, status: str = "human_
         "valid": False,
         "errors": errors,
     }
-    atomic_write_json(Path(output_dir) / "footnote_normalization.json", result)
+    output_dir = Path(output_dir)
+    receipt_path = output_dir / "footnote_normalization.json"
+    try:
+        import json
+        previous = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError, TypeError):
+        previous = {}
+    if previous.get("valid") is True and previous.get("status") == "validated":
+        attempt_dir = preserve_failed_attempt(output_dir)
+        if attempt_dir:
+            result["attempt_evidence_dir"] = attempt_dir
+        restored = recover_interrupted_apply(output_dir)
+        if not restored:
+            result["errors"].append("last successful normalized baseline could not be restored; manual recovery is required")
+            atomic_write_json(receipt_path, result)
+            atomic_write_json(output_dir / "footnote_normalization_attempt.json", result)
+            return result
+        atomic_write_json(output_dir / "footnote_normalization_attempt.json", result)
+        return result
+    atomic_write_json(receipt_path, result)
     return result
 
 
@@ -437,6 +466,22 @@ def apply_footnote_normalization(
     """
 
     output_dir = Path(output_dir)
+    recover_interrupted_apply(output_dir)
+    previous_version = capture_last_good(output_dir)
+    try:
+        import json
+        prior_receipt = json.loads((output_dir / "footnote_normalization.json").read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError, TypeError):
+        prior_receipt = {}
+    if (prior_receipt.get("valid") is True and prior_receipt.get("status") == "validated"
+            and previous_version is None):
+        failure = {
+            "schema_version": FOOTNOTE_NORMALIZATION_SCHEMA_VERSION,
+            "status": "retry_required", "valid": False,
+            "errors": ["could not snapshot the successful normalized baseline; apply was not started"],
+        }
+        atomic_write_json(output_dir / "footnote_normalization_attempt.json", failure)
+        return failure
     try:
         inputs = load_footnote_apply_inputs(output_dir, config)
     except FootnoteApplyInputError as exc:
@@ -486,6 +531,7 @@ def apply_footnote_normalization(
     edit_plan = planning.edit_plan
     validation_for_resolution = {"decisions": list(planning.validation_decisions)}
 
+    mark_apply_running(output_dir, edit_plan.transformed_texts, previous_version)
     try:
         source_hashes, target_hashes = _write_normalized_units(
             source_dir, target_dir, edit_plan.transformed_texts, edit_plan.source_hashes
@@ -622,7 +668,17 @@ def apply_footnote_normalization(
         return _write_failure(output_dir, [
             "footnote source, target, decision, candidate, TOC, or page evidence changed during apply; rerun footnote-prepare and footnote-validate"
         ])
-    return _write_success_report(output_dir, result)
+    saved = _write_success_report(output_dir, result)
+    publish_success(output_dir, previous_version)
+    mark_apply_complete(output_dir, (output_dir / "footnote_normalization.json").is_file() and json.loads(
+        (output_dir / "footnote_normalization.json").read_text(encoding="utf-8")
+    ).get("version_id"))
+    attempt_path = output_dir / "footnote_normalization_attempt.json"
+    if attempt_path.is_file():
+        atomic_write_json(attempt_path, {"schema_version": FOOTNOTE_NORMALIZATION_SCHEMA_VERSION,
+                                         "status": "resolved", "valid": True,
+                                         "resolved_by_version": saved.get("version_id")})
+    return saved
 
 
 __all__ = [

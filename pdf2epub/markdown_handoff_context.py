@@ -46,6 +46,9 @@ class MarkdownHandoffRequest:
     # version.  This is narrower than a general "source hash matches" refresh:
     # a changed projection payload still requires the validate step.
     refresh_checkpoints: bool = False
+    # Conservative local synchronization findings from footnote apply.
+    footnote_change_hints: Optional[Mapping[str, Any]] = None
+    footnote_translation_change_hints: Optional[Mapping[str, Any]] = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "output_dir", Path(self.output_dir))

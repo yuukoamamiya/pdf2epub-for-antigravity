@@ -127,6 +127,52 @@ def _worker_manifest_projection(
             if subset:
                 projected["footnote_semantics"] = subset
 
+    change_hints = manifest.get("footnote_change_hints")
+    if isinstance(change_hints, Mapping):
+        source_hashes = manifest.get("source_sha256", {})
+        target_hashes = manifest.get("footnote_change_target_sha256", {})
+        subset = {}
+        for name in files:
+            rows = change_hints.get(name)
+            if name not in change_hints or not isinstance(rows, list):
+                continue
+            current_hash = source_hashes.get(name) if isinstance(source_hashes, Mapping) else None
+            current_target_hash = target_hashes.get(name) if isinstance(target_hashes, Mapping) else None
+            is_hash = lambda value: isinstance(value, str) and len(value) == 64 and all(ch in "0123456789abcdef" for ch in value)
+            if not is_hash(current_hash) or not is_hash(current_target_hash):
+                continue
+            fresh_rows = [row for row in rows if isinstance(row, Mapping)
+                          and row.get("new_source_sha256") == current_hash
+                          and row.get("new_target_sha256") == current_target_hash]
+            if fresh_rows:
+                subset[name] = fresh_rows
+        if subset:
+            projected["footnote_change_hints"] = subset
+            projected["footnote_change_target_sha256"] = {
+                name: target_hashes[name] for name in subset
+            }
+
+    translation_hints = manifest.get("footnote_translation_change_hints")
+    if isinstance(translation_hints, Mapping):
+        source_hashes = manifest.get("source_sha256", {})
+        target_hashes = manifest.get("footnote_translation_target_sha256", {})
+        subset = {}
+        for name in files:
+            rows = translation_hints.get(name)
+            current_source = source_hashes.get(name) if isinstance(source_hashes, Mapping) else None
+            current_target = target_hashes.get(name) if isinstance(target_hashes, Mapping) else None
+            valid_hash = lambda value: isinstance(value, str) and len(value) == 64 and all(ch in "0123456789abcdef" for ch in value)
+            if not isinstance(rows, list) or not valid_hash(current_source) or not valid_hash(current_target):
+                continue
+            fresh = [row for row in rows if isinstance(row, Mapping)
+                     and row.get("polished_source_sha256") == current_source
+                     and row.get("existing_translation_sha256") == current_target]
+            if fresh:
+                subset[name] = fresh
+        if subset:
+            projected["footnote_translation_change_hints"] = subset
+            projected["footnote_translation_target_sha256"] = {name: target_hashes[name] for name in subset}
+
     continuation = manifest.get("continuation_files")
     if isinstance(continuation, Mapping):
         subset = {name: continuation[name] for name in files if name in continuation}

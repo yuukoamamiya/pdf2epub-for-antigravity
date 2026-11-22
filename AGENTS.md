@@ -97,7 +97,7 @@ uv run pdf2epub -c config.yaml doctor
 `boundary_preview` 汇总 `refine-local` 写出的跨页交界可疑数与其单元，供 polish 前判断。
 跨 Agent 交接与当前遗留项见 [`docs/agent-collaboration.md`](docs/agent-collaboration.md)。
 维护者可用 `uv run pdf2epub -c config.yaml footnote-review-summary --json` 只读汇总脚注复核成本；它是独立诊断，不能替代 `footnote-validate`，也不建议删除相邻页上下文窗口。
-脚注 unit context 使用独立 projection version。加载时必须依据当前候选报告、精确页侧车哈希索引和 refined unit mapping 重算完整投影。Polish boundary context projection version 2 首次恢复时用 `polish --resume` 刷新 sidecar/context 并运行正式 `polish-validate`。之后 halo 外邻片变化不使已完成 sidecar/receipt 失效，但完整 source provenance 与 inventory 检查仍须通过。脚注证据在 `tree_progress.json` 提供显式、合法的 `part_page_ranges` 时按该分片页范围投影以缩小失效半径；缺少精确 part→page 映射时继续使用章节级证据与失效范围，不推断分片级页范围。旧脚注 unit context 版本或脚注证据变化时，先重跑 `footnote-prepare`、`footnote-validate`，保留原 decision 文件，不把刷新上下文当作语义决定通过。
+脚注 unit context 使用独立 projection version。加载时必须依据当前候选报告、精确页侧车哈希索引和 refined unit mapping 重算完整投影。Polish boundary context projection version 2 首次恢复时用 `polish --resume` 刷新 sidecar/context 并运行正式 `polish-validate`。之后 halo 外邻片变化不使已完成 sidecar/receipt 失效，但完整 source provenance 与 inventory 检查仍须通过。脚注证据在 `tree_progress.json` 提供显式、合法的 `part_page_ranges` 时按该分片页范围投影以缩小失效半径；缺少精确 part→page 映射时继续使用章节级证据与失效范围，不推断分片级页范围。旧脚注 unit context 版本或脚注证据变化时，先重跑 `footnote-prepare`、`footnote-validate`，保留原 decision 文件，不把刷新上下文当作语义决定通过。`footnote-apply` 保留最后成功版本；失败/中断恢复不得认证无效输出。`polish --resume` 按版本哈希链仅同步唯一精确块，模糊项带文件级提示进入 scoped handoff，且仍须正常 polish 校验。PDF `translate --resume` 可携带文件级脚注变更摘要供 worker 参考；提示仅供建议，必须绑定当前源稿与已有译文哈希，不自动改写译文。
 
 ## 0.2 依赖和 OCR 后端快速配置
 

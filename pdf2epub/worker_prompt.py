@@ -510,6 +510,30 @@ def render_worker_prompt(
             "Do not alter the expected hashes.\n\n"
             + json.dumps(semantic_files, ensure_ascii=False, indent=2)
         )
+    change_hints_notice = ""
+    change_hints = scoped.get("footnote_change_hints", {})
+    if task == "polish" and isinstance(change_hints, Mapping) and change_hints:
+        change_hints_notice = (
+            "\n\n## Footnote apply change hints\n\n"
+            "These per-file records include automatically synchronized exact blocks "
+            "(`status: synchronized`) and changes that need your local review "
+            "(`status: review_required` or a `reason`). Review only the listed "
+            "assigned files and preserve unrelated polish. Never replace a whole "
+            "file from source or infer a match from partial text.\n\n"
+            + json.dumps(change_hints, ensure_ascii=False, indent=2)
+        )
+    translation_change_notice = ""
+    translation_hints = scoped.get("footnote_translation_change_hints", {})
+    if task == "translate" and isinstance(translation_hints, Mapping) and translation_hints:
+        translation_change_notice = (
+            "\n\n## Existing translation footnote change hints\n\n"
+            "These hints are bound to the current polished source and existing "
+            "translated target. Preserve the existing translation and reconcile "
+            "only the listed footnote move/block changes; do not retransmit or "
+            "retranslate unrelated content. No source-to-target text replacement "
+            "has been performed automatically.\n\n"
+            + json.dumps(translation_hints, ensure_ascii=False, indent=2)
+        )
     scoped_prompt = _scope_worker_prompt(
         prompt,
         {} if chapter_mode else scoped.get("unit_context_files", {}),
@@ -578,6 +602,8 @@ def render_worker_prompt(
         + preceding_notice
         + succeeding_notice
         + footnote_semantics_notice
+        + change_hints_notice
+        + translation_change_notice
         + "\n"
         + task_boundary_instruction
         + worker_context_instruction

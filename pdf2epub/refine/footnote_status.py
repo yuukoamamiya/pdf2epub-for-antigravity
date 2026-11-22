@@ -80,6 +80,13 @@ def footnote_normalization_status(
             "normalization_not_validated",
             "footnote_normalization.json is not a validated checkpoint",
         )
+    if (output_dir / "footnote_normalization_attempt.json").is_file():
+        try:
+            attempt = _load_json(output_dir / "footnote_normalization_attempt.json", "footnote_normalization_attempt.json")
+            if attempt.get("valid") is not True or attempt.get("status") != "resolved":
+                fail("normalization_attempt_failed", "a later footnote apply attempt failed; rerun footnote-apply successfully")
+        except (OSError, UnicodeError, ValueError, TypeError) as exc:
+            fail("normalization_attempt_invalid", f"footnote apply attempt receipt is unreadable: {exc}")
     if validation.get("valid") is not True:
         fail(
             "decision_validation_failed",
