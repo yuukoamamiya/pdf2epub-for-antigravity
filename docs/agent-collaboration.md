@@ -14,7 +14,7 @@
 ```text
 git status --short          # 先看有没有别人的改动；不要清理、不要纳入本次提交
 git branch --show-current   # 必须是 main；不要建临时分支
-uv run pytest -q            # 基线：1645 个测试（4 skipped），约 40 秒
+uv run pytest -q            # 当前验收以最近主代理记录为准，避免沿用旧测试计数
 uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲染
 ```
 
@@ -55,9 +55,29 @@ uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲
 | 脚注 / 尾注合同 | `refine/footnote_*.py`, `refine/endnote_*.py` | `tests/endnote_normalization_test.py`, `tests/footnote_*_test.py` |
 | 翻译/润色校验 | `markdown_validation*.py` | `tests/markdown_*_test.py` |
 | EPUB 构建与渲染 | `build_epub.py`, `epub/`, `html_translation/` | `tests/epub_visual_regression_test.py`, `tests/html_epub_builder_test.py` |
-| CI | `.github/workflows/tests.yml` | GitHub Actions（Windows + Linux 跑 pytest；Ubuntu 跑 ruff 关键规则，Python 3.12） |
+| 当前 CI | `.github/workflows/tests.yml` | push 到 main / pull request：Windows + Linux 跑 `uv run pytest -q`；Ubuntu 跑 `uv run ruff check pdf2epub tests`；Python 3.12 |
 
-## 4. 2026-11-20 审计批次已完成项
+## 4. 2026-11-22 五批恢复与防返工改进
+
+这五批共同处理原 handoff 的重复返工风险：保留已经验证的稳定基线，只根据当前源、验证 receipt、
+结构证据和尚未完成 assignment 决定局部恢复；不因中断重新做已完成的语义工作，也不新增审批或收据流程。
+
+| 批次 | 已完成/本轮范围 | 证据或状态 |
+|---|---|---|
+| 1. 稳定基线 | 选择可复用的源基线，避免格式刷新被误判为语义重做 | `73f2ebd` |
+| 2. 恢复与同步 | 保留 last-good 版本及尝试证据；polish 精确累计同步，translate 只接收 scoped 文件建议 | `e220eb3`；全量 `1775 passed, 4 skipped` |
+| 3. 幂等重流与续行 | 对相同证据的重试保持幂等；补足中等几何/排版续行证据保留和审计轨迹 | `18250d3`；全量 `1781 passed, 4 skipped` |
+| 4. 增量实体保留 | entity snapshot 绑定源范围，增量更新保留未变条目和既有决定 | `2ae0edc`；全量 `1800 passed, 4 skipped`；12 个 Python 文件 DeepSec 零 findings |
+| 5. 真实目标与会话恢复 | package 按 pipeline 逐目标核验 receipt；恢复说明处理旧会话/不可用模型标识，只重派 pending/invalid scoped handoff | 全量 `1805 passed, 4 skipped`；Ruff 和 diff 检查通过；主代理 DeepSec 扫描 4 个 Python 文件/测试为 0 findings；不会声称能控制外部 IDE executor |
+
+已有书籍恢复时，先读 `status` 和 manifest 的 pending 列表，并对现有输出运行对应单文件校验及适用的全量校验，
+把已完成但尚未验证的输出纳入当前 checkpoint；复用当前校验通过的文件，对失效项用原准备命令 `--resume`，
+再从最新 `dispatch-plan` 只派发 pending handoff。旧 IDE 会话已结束或
+模型标识不可用时，新建实际工作区会话并选当前可用的继承/默认模型；先核对真实 lease，不能自动释放活跃 lease。
+翻译 pipeline 的 package 目标是译文 EPUB，原语言版不能掩盖译文 receipt 缺失或过期；receiptless 历史 EPUB
+仍按历史产物兼容规则通过，并明确目标归属未知，不从文件名猜测。
+
+## 5. 2026-11-20 审计批次已完成项
 
 这些改动已经落地并各自独立提交；接手时不要重复修，也不要回退它们的测试。
 
@@ -98,7 +118,7 @@ uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲
 | `d9abb32` | `build-epub` / `build-html-epub` 写入 `epub_build_receipt.json`；`status` 的 `package` 阶段据此报告 `stale`，无 receipt 的历史产物保持通过并标注 |
 | `996d0aa` | `refine-local` 写只读 `refine_boundary_preview.json`（跨页脚注/正文合并、开句跨页）；polish 规则与 `status.boundary_preview` 使用它，减少 footnote→polish 返工 |
 
-## 5. 已知遗留 backlog
+## 6. 已知遗留 backlog
 
 1. **`.gitattributes` 与工作区换行**（P2，已缓解）
    仓库索引是 LF、工作区是 CRLF，`git status` 会列出大量 stat-only 改动。
@@ -122,7 +142,7 @@ uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲
 - **`pages_fingerprint` 复用哈希缓存**：实测 1330 个页面文件 0.040 s（直接读）vs 0.118 s
   （走 `sha256_file` 的 mtime 缓存，多出 resolve/stat 开销）。当前实现更快，不要"优化"。
 
-## 6. 协作约定
+## 7. 协作约定
 
 - **提交粒度**：一个可独立验证的功能/修复一个提交；提交信息写"为什么"而不只是"改了什么"。
   不把无关的既有改动夹带进来，不 `git add .`。
@@ -137,7 +157,7 @@ uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲
 - **不要碰书稿**：本文件的读者默认在做仓库维护；新翻译/润色/OCR 结构判断必须回到
   `AGENTS.md` 的工作区 Subagent 流程。
 
-## 7. 交接模板
+## 8. 交接模板
 
 收尾时按这个结构汇报，下一个 Agent 才能无缝接手：
 

@@ -112,6 +112,8 @@ def test_translated_mode_continues_after_english_build_failure(
     assert any(
         "Translated EPUB created" in message for message in log_messages
     )
+    assert any("EPUB build results:" in message and "English failed" in message and "Translated succeeded" in message for message in log_messages)
+    assert any(str(tmp_path / "book.epub") in message for message in log_messages)
 
 
 def test_only_translated_skips_english_build(
@@ -146,6 +148,7 @@ def test_translated_build_failure_is_reported(
 
     assert result == 1
     assert any("[Translated Build Failed]" in message for message in log_messages)
+    assert any("intended target: builder-selected output path" in message for message in log_messages)
 
 
 def test_original_build_failure_is_reported(

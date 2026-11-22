@@ -783,8 +783,12 @@ check-ready --stage package → build-epub → 原语言 EPUB
 
 `build-epub` 与 `build-html-epub` 在产物旁写入 `epub_build_receipt.json`，记录 EPUB 的
 sha256 和构建时的输入检查点（polish/translate/HTML validation、toc_tree 等）。`status`
-的 `package` 阶段据此判断产物是否对应当前检查点；没有 receipt 的历史 EPUB 仍可通过，
-但会在 detail 中标注 `no build receipt`。
+的 `package` 阶段按 pipeline 目标分别判断产物是否对应当前检查点：翻译 pipeline 要求
+`pdf-translated` receipt，转换 pipeline 要求 `pdf-source` receipt。一个 kind 当前不能遮盖
+另一个 kind 的 stale/missing 状态；`targets` 字段列出每个 kind、状态和 receipt 记录的路径。
+receiptless 历史 EPUB 仍按兼容规则通过并标明 legacy/`no build receipt`，其目标语言归属保持未知，
+不会按文件名猜测。`build-epub` 默认仍只生成原语言版；`--translated` 生成两版，
+`--only-translated` 只生成译文版。
 
 ### Controlled bibliography and index units
 

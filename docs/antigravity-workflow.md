@@ -144,6 +144,11 @@ provider 429 的操作员恢复状态与译文验证 receipt 分开，使用 `di
 恢复时先核对 IDE 活跃会话、lease 与 validation，再用 `dispatch-resume --confirm-sessions-reconciled`
 （quota 类还需 `--confirm-quota-available`）。这只记录操作员审计，不释放 lease、不校验译文、
 不重试网络请求或切换模型；只恢复 pending/invalid 单元。降低并发不保证解决小时额度耗尽。
+若旧工作区会话已结束，或保存的模型标识在当前执行环境不可用，保留已有输出，先运行对应的单文件校验
+和适用的全量校验以确认已完成结果；再运行原准备命令 `--resume`
+更新 pending/invalid handoff，再看最新 `dispatch-plan` 的 scoped prompt 和 assigned files，
+只将 pending assignment 交给新的工作区会话，并选用当前可用的继承/默认模型。不要重复尝试失效会话或旧模型标识；
+确认会话结束后才释放 lease。上述状态命令不读取或控制 IDE 会话，也不会自动释放活跃 lease。
 
 
 `translate-html` 按原 worker 顺序保留 assignment 身份，只调整 dispatch wave：每个 extreme
@@ -629,6 +634,11 @@ title: "Your Book Title"
 input_pdf: "input/your_book.pdf"
 pipeline: epub_conversion
 ```
+
+`build-epub` 默认只生成原语言版；`--translated` 生成原语言和译文两版，
+`--only-translated` 只生成译文版。`status` 的 package 阶段按 pipeline 目标逐项核对 receipt：
+翻译要求译文版，转换要求原语言版。receiptless 历史 EPUB 保留兼容通过并标为 legacy，
+不会按文件名推断语言。
 
 `refine-prepare` 会在 `output/<title>/` 生成 `refine_subagent_prompt.md` 和 `refine_subagent_manifest.json`。视觉 OCR PDF 中，Subagent 阅读经过校验的 `ocr_corrected_pages/validated/page_*.md`；旧原生文字运行仍读取 `pages/page_*.md`。它只负责写入 `toc_tree.json`。随后 `refine-local`：
 

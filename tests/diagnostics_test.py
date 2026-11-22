@@ -1,6 +1,7 @@
 import hashlib
 import json
 from pathlib import Path
+import pytest
 
 from pdf2epub.commands.diagnostics import build_doctor, build_status
 from pdf2epub.commands.diagnostics import _entity_stage_status
@@ -251,7 +252,8 @@ def test_status_marks_downstream_artifacts_stale_and_withholds_command(
     assert stages["package"]["status"] == "stale"
     assert stages["package"]["current"] is False
     assert stages["package"]["reachable"] is False
-    assert "artifact exists but is stale" in stages["package"]["detail"]
+    assert "legacy artifact is not verified" in stages["package"]["detail"]
+    assert "target attribution unknown" in stages["package"]["detail"]
     assert stages["refine-prepare"]["reachable"] is False
     # No runnable command may be advertised while the ladder is blocked.
     assert report["next_command"] is None
@@ -359,7 +361,128 @@ def test_package_stage_keeps_legacy_artifacts_readable(tmp_path: Path):
         tmp_path, [epub], command="build-epub", kinds=("pdf-source",)
     )
     assert stage["status"] == "passed"
-    assert "no build receipt" in stage["detail"]
+    assert stage["targets"][0]["status"] == "legacy"
+    assert "without a build receipt" in stage["detail"]
+    assert "target attribution unknown" in stage["detail"]
+
+
+def test_package_stage_requires_every_requested_target_and_reports_paths(tmp_path: Path):
+    from pdf2epub.build_receipt import PDF_SOURCE, PDF_TRANSLATED, write_build_receipt
+    from pdf2epub.commands.diagnostics import _package_stage
+
+    for name, data in (
+        ("toc_tree.json", b"{}"),
+        ("polish_validation.json", b"{}"),
+        ("translate_validation.json", b"{}"),
+    ):
+        (tmp_path / name).write_bytes(data)
+    source = tmp_path / "original.epub"
+    translated = tmp_path / "translated.epub"
+    source.write_bytes(b"en")
+    translated.write_bytes(b"zh")
+    write_build_receipt(tmp_path, source, kind=PDF_SOURCE)
+    write_build_receipt(tmp_path, translated, kind=PDF_TRANSLATED)
+
+    (tmp_path / "translate_validation.json").write_text('{"changed": true}', encoding="utf-8")
+    stage = _package_stage(
+        tmp_path, [source, translated], command="build-epub", kinds=(PDF_SOURCE, PDF_TRANSLATED)
+    )
+    assert stage["status"] == "stale"
+    assert [target["status"] for target in stage["targets"]] == ["current", "stale"]
+    assert [target["artifact"] for target in stage["targets"]] == [
+        "original.epub", "translated.epub"
+    ]
+
+
+def test_translation_target_missing_receipt_is_pending_even_with_source_receipt(tmp_path: Path):
+    from pdf2epub.build_receipt import PDF_SOURCE, PDF_TRANSLATED, write_build_receipt
+    from pdf2epub.commands.diagnostics import _package_stage
+
+    (tmp_path / "toc_tree.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "polish_validation.json").write_text("{}", encoding="utf-8")
+    source = tmp_path / "original.epub"
+    source.write_bytes(b"en")
+    write_build_receipt(tmp_path, source, kind=PDF_SOURCE)
+
+    stage = _package_stage(
+        tmp_path, [source], command="build-epub --only-translated", kinds=(PDF_TRANSLATED,)
+    )
+    assert stage["status"] == "pending"
+    assert stage["targets"][0]["status"] == "pending"
+    assert stage["targets"][0]["artifact"] is None
+
+
+@pytest.mark.parametrize(
+    "pipeline,receipt_kind,expected_kind,expected_command",
+    [
+        ("pdf_translation", "pdf-source", "pdf-translated", "build-epub --only-translated"),
+        ("epub_conversion", "pdf-translated", "pdf-source", "build-epub"),
+    ],
+)
+def test_pipeline_status_recommends_missing_required_target(
+    tmp_path: Path, monkeypatch, pipeline, receipt_kind, expected_kind, expected_command
+):
+    import pdf2epub.commands.diagnostics as diagnostics
+    import pdf2epub.toc_translation_workflow as toc_translation
+
+    config_path = _config(tmp_path)
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8") + f"pipeline: {pipeline}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    output_dir = tmp_path / "output" / "Diagnostics Book"
+    (output_dir / "ocr_markdown").mkdir(parents=True)
+    (output_dir / "ocr_markdown" / "tree_progress.json").write_text("{}", encoding="utf-8")
+    (output_dir / "ocr_markdown" / "chapter.md").write_text("source", encoding="utf-8")
+    (output_dir / "illustration_candidate_report.json").write_text('{"candidates":[]}', encoding="utf-8")
+    (output_dir / "illustration_bindings.json").write_text('{"status":"validated"}', encoding="utf-8")
+    artifact = output_dir / "original.epub"
+    artifact.write_bytes(b"en")
+    for name in ("toc_tree.json", "polish_validation.json", "translate_validation.json"):
+        (output_dir / name).write_text("{}", encoding="utf-8")
+    from pdf2epub.build_receipt import PDF_SOURCE, PDF_TRANSLATED, write_build_receipt
+
+    write_build_receipt(
+        output_dir,
+        artifact,
+        kind={"pdf-source": PDF_SOURCE, "pdf-translated": PDF_TRANSLATED}[receipt_kind],
+    )
+    monkeypatch.setattr(diagnostics, "_pdf_ocr_status", lambda *_args: ("passed", "current"))
+    monkeypatch.setattr(diagnostics, "is_native_text_source", lambda _path: True)
+    monkeypatch.setattr(diagnostics.PipelinePolicy, "requires_visual_ocr_review", lambda *_args: False)
+    monkeypatch.setattr(diagnostics, "_pdf_tree_status", lambda *_args: ("passed", "current"))
+    monkeypatch.setattr(diagnostics, "_current_polish", lambda *_args: True)
+    monkeypatch.setattr(diagnostics, "_entity_stage_status", lambda *_args: (True, "current"))
+    monkeypatch.setattr(toc_translation, "validate_toc_translation_subagent", lambda *_args, **_kwargs: {"valid": True})
+    monkeypatch.setattr(diagnostics, "_current_translation", lambda *_args: True)
+    monkeypatch.setattr(
+        "pdf2epub.refine.footnote_status.footnote_normalization_is_current",
+        lambda *_args, **_kwargs: True,
+    )
+
+    report = build_status(config_path)
+    package = next(stage for stage in report["stages"] if stage["name"] == "package")
+    assert package["status"] == "pending"
+    assert package["command"] == expected_command
+    assert package["targets"][0]["kind"] == expected_kind
+    assert report["next_command"].endswith(expected_command)
+
+
+def test_legacy_package_remains_current_when_upstream_is_current(tmp_path: Path):
+    from pdf2epub.commands.diagnostics import _apply_stage_blockers, _package_stage
+
+    artifact = tmp_path / "old.epub"
+    artifact.write_bytes(b"legacy")
+    package = _package_stage(
+        tmp_path, [artifact], command="build-epub", kinds=("pdf-source",)
+    )
+    stages = _apply_stage_blockers(
+        [{"name": "upstream", "command": "noop", "status": "passed", "detail": "current"}, package]
+    )
+    assert stages[1]["status"] == "passed"
+    assert stages[1]["current"] is True
+    assert stages[1]["targets"][0]["status"] == "legacy"
 
 
 def test_status_reports_the_cross_page_boundary_preview(tmp_path: Path, monkeypatch):

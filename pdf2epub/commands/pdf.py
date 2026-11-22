@@ -146,17 +146,29 @@ def _run_epub_build_stages(stages, build_fn=None):
     if build_fn is None:
         build_fn = _load_build_epub()
     all_succeeded = True
+    results = []
     for label, build_config in stages:
+        intended = getattr(build_config, "output_epub", None)
+        target = str(intended) if intended is not None else "builder-selected output path"
+        logger.info(f"Building {label} EPUB; intended target: {target}")
         try:
             epub_path = build_fn(build_config)
         except Exception as exc:
             all_succeeded = False
+            results.append((label, "failed", target))
             logger.error(
-                f"[{label} Build Failed] {label} EPUB build failed: {exc}"
+                f"[{label} Build Failed] {label} EPUB build failed; intended target: {target}; {exc}"
             )
             traceback.print_exc()
             continue
+        results.append((label, "succeeded", str(epub_path)))
         logger.success(f"{label} EPUB created: {epub_path}")
+    if len(stages) > 1:
+        summary = "; ".join(
+            f"{label} {state}: {path}"
+            for label, state, path in results
+        )
+        logger.info(f"EPUB build results: {summary}")
     return all_succeeded
 
 

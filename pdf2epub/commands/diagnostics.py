@@ -444,12 +444,22 @@ def _pdf_stages(
         )
 
     epub_files = [path for path in output_dir.glob("*.epub") if path.is_file()]
+    package_kinds = (
+        ("pdf-translated",)
+        if policy.requires_translation
+        else ("pdf-source",)
+    )
+    package_command = (
+        "build-epub --only-translated"
+        if policy.requires_translation
+        else "build-epub"
+    ) if input_path.suffix.lower() == ".pdf" else "build-html-epub"
     stages.append(
         _package_stage(
             output_dir,
             epub_files,
-            command="build-epub" if input_path.suffix.lower() == ".pdf" else "build-html-epub",
-            kinds=("pdf-source", "pdf-translated"),
+            command=package_command,
+            kinds=package_kinds,
         )
     )
     return _apply_stage_blockers(stages)
@@ -479,35 +489,60 @@ def _package_stage(
     command: str,
     kinds: tuple[str, ...],
 ) -> dict[str, Any]:
-    """Report a packaged EPUB together with its build receipt.
+    """Report every pipeline-required EPUB target against its own receipt."""
+    from pdf2epub.build_receipt import receipt_path, receipt_status
 
-    Legacy artifacts built before receipts existed keep the old ``passed``
-    reading; an artifact whose receipt no longer matches the current
-    checkpoints becomes ``stale`` instead of masquerading as finished.
-    """
-    if not epub_files:
-        return _status_record("package", command, "pending", "no generated EPUB found")
-    from pdf2epub.build_receipt import receipt_status
+    receipt_file = receipt_path(output_dir)
+    try:
+        receipt = json.loads(receipt_file.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        receipt = {}
+    builds = receipt.get("builds") if isinstance(receipt, Mapping) else None
+    builds = builds if isinstance(builds, Mapping) else {}
+    target_states: list[dict[str, Any]] = []
+    for kind in kinds:
+        entry = builds.get(kind)
+        relative = str(entry.get("epub") or "") if isinstance(entry, Mapping) else ""
+        state, detail = receipt_status(output_dir, kind)
+        if state == "missing":
+            # A receiptless directory may contain old EPUBs, but their language
+            # cannot be inferred from names. A receipt that omits this kind is
+            # an explicitly missing target, not a legacy artifact.
+            if not receipt_file.exists() and epub_files:
+                state = "legacy"
+                detail = "legacy EPUB artifact(s) present; target attribution unknown"
+            else:
+                state = "pending"
+                detail = f"{kind} EPUB has no build receipt"
+        target_states.append({
+            "kind": kind,
+            "status": state,
+            "artifact": relative if relative else None,
+            "detail": detail,
+        })
 
-    states = [receipt_status(output_dir, kind) for kind in kinds]
-    current = [detail for state, detail in states if state == "current"]
-    stale = [detail for state, detail in states if state == "stale"]
-    count = len(epub_files)
-    if current:
-        return _status_record(
-            "package",
-            command,
-            "passed",
-            f"{current[0]} ({count} EPUB artifact(s))",
-        )
-    if stale:
-        return _status_record("package", command, "stale", "; ".join(stale))
-    return _status_record(
-        "package",
-        command,
-        "passed",
-        f"{count} EPUB artifact(s) found (no build receipt)",
-    )
+    statuses = [item["status"] for item in target_states]
+    if "stale" in statuses:
+        aggregate = "stale"
+    elif "pending" in statuses:
+        aggregate = "pending"
+    elif "legacy" in statuses:
+        # Preserve the historic pass behavior for receiptless artifacts while
+        # making clear that no output language/target can be established.
+        aggregate = "passed"
+    else:
+        aggregate = "passed"
+    summary = "; ".join(
+        f"{item['kind']}: {item['status']}"
+        + (f" ({item['artifact']})" if item["artifact"] else "")
+        + f"; {item['detail']}"
+        for item in target_states
+    ) or "no package target is required"
+    if "legacy" in statuses:
+        summary = "legacy artifact accepted without a build receipt; target attribution unknown; " + summary
+    record = _status_record("package", command, aggregate, summary)
+    record["targets"] = target_states
+    return record
 
 
 _HTML_STAGE_BY_KEY = {stage.key: stage for stage in HTML_WORKFLOW_STAGES}
@@ -772,10 +807,18 @@ def _apply_stage_blockers(stages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         stage["reachable"] = upstream_current and stage["status"] != "blocked"
         if stage["status"] == "passed" and not stage["current"]:
             stage["status"] = "stale"
-            stage["detail"] = (
-                "artifact exists but is stale because an earlier stage is not "
-                "current; rebuild it after resolving that stage"
-            )
+            if any(
+                isinstance(target, Mapping) and target.get("status") == "legacy"
+                for target in stage.get("targets", [])
+            ):
+                stage["detail"] += (
+                    "; legacy artifact is not verified against current upstream stages"
+                )
+            else:
+                stage["detail"] = (
+                    "artifact exists but is stale because an earlier stage is not "
+                    "current; rebuild it after resolving that stage"
+                )
         if stage["status"] == "stale" and blocking_stages:
             stage["blocked_by"] = list(blocking_stages)
         if stage["status"] == "blocked" and blocking_stages:

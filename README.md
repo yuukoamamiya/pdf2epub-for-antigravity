@@ -117,6 +117,11 @@ PDF 润色/翻译校验规则升级可能使旧验证记录或脚注归一化 ch
 PDF 和 EPUB 的结果通常位于 `output/<书名>/`：PDF 翻译生成原语言 EPUB 和译文 EPUB，PDF 只转换时生成原语言 EPUB，
 EPUB 翻译生成译文 EPUB。
 
+`build-epub` 默认行为保持为只构建原语言 EPUB；`--translated` 构建原语言与译文两版，
+`--only-translated` 只构建译文版。`status` 按配置的 pipeline 目标检查：翻译 pipeline 要求
+译文 EPUB 当前，原语言 EPUB 不能代替它；转换 pipeline 要求原语言 EPUB。每个 receipt target
+会单独显示状态和文件路径。无 receipt 的旧 EPUB 仍标为历史产物并按兼容规则通过，但不会根据文件名猜测语言。
+
 高保真 EPUB 重建可配置外部 EPUBCheck。需安装官方 W3C EPUBCheck Java 发布版本，并通过 PATH 或
 `html_translation.epubcheck_path` 指定；warn 模式缺少工具时会记录跳过，不代表检查通过，strict 模式会失败。
 
@@ -138,6 +143,13 @@ uv run pdf2epub -c config.yaml dispatch-resume --task translate --reason "sessio
 ```
 
 `dispatch-resume` 只写入操作员审计，不会释放 lease、验证译文、重试网络请求或切换模型。降低并发不保证解决小时额度耗尽。
+
+如果旧工作区会话已结束，或其中保存的模型标识在当前执行环境不可用，先核对真实会话和 lease，
+随后对现有输出运行对应的单文件校验及适用的全量校验，确认哪些工作已完成；再运行对应任务的 `--resume`
+准备命令刷新 pending/invalid 列表，并用 `dispatch-plan --task <task>`
+查看最新 scoped prompt 和 assigned files。已通过当前校验的输出保留并复用；只把仍 pending 的 handoff
+交给新的工作区会话，选择当前环境可用的继承/默认模型。不要在失效会话或旧模型标识上反复重试；
+只有确认会话结束后才释放对应 lease，不能自动释放仍活跃的 lease。上述状态命令不能读取 IDE 会话本身。
 
 ## 文档
 

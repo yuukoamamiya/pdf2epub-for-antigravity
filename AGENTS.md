@@ -92,8 +92,10 @@ uv run pdf2epub -c config.yaml doctor
 "下一步要不要开 Subagent"，但它是只读摘要，不能替代 manifest 本身和正式校验。
 `ocr_evidence` 段标明页面证据等级：`two_ocr`（已交叉验证）、`single_ocr`（正常页未经
 第二套 OCR 验证，只有异常页进入视觉复核）或 `legacy_native`（旧原生版面证据）。
-`package` 阶段会核对 EPUB 的构建 receipt 与当前 polish/translate 检查点；receipt 过期时显示
-`stale`，旧版本生成、没有 receipt 的 EPUB 仍按历史产物通过并标注 `no build receipt`。
+`package` 阶段会按 pipeline 目标逐一核对 EPUB 构建 receipt 与当前检查点：PDF 翻译要求当前译文 EPUB，
+PDF 转换要求原语言 EPUB；原语言 receipt 不能遮住缺失或过期的译文 receipt。package 阶段的 `targets`
+字段逐项列出 kind、状态和 receipt 记录的产物路径。receipt 过期显示 `stale`；receiptless 历史 EPUB
+仍按兼容规则通过并标注为 legacy/`no build receipt`，不根据文件名推断语言。
 `boundary_preview` 汇总 `refine-local` 写出的跨页交界可疑数与其单元，供 polish 前判断。
 跨 Agent 交接与当前遗留项见 [`docs/agent-collaboration.md`](docs/agent-collaboration.md)。
 维护者可用 `uv run pdf2epub -c config.yaml footnote-review-summary --json` 只读汇总脚注复核成本；它是独立诊断，不能替代 `footnote-validate`，也不建议删除相邻页上下文窗口。
@@ -348,6 +350,11 @@ Subagent 直接写文件 → 单文件校验 → 收集完成结果 → 下一�
 Provider 429 恢复使用 `dispatch-record-failure` / `dispatch-status` / `dispatch-resume` 操作员命令。每波前读取最新状态；短时 `rate_limit` 与 `unknown_429` 使用有界退避，`quota_exhausted` 必须记录 reset 时间，缺失时保持人工阻断。恢复前核对真实 IDE 会话、lease 和验证报告，只重新处理 pending/invalid 项；确认会话结束后再按原规则释放 lease。操作员确认只记审计，不自动释放 lease、重试网络请求或验证译文。小时额度下调并发可能仍无法避免额度耗尽。
 `dispatch-plan --task <task>` 只读打印 manifest 的分波计划、每个 worker 的 scoped prompt 与
 assigned_files，不写文件、不占额度；它不能替代真实 IDE 会话与 `dispatch-status` 的容量核对。
+若旧工作区会话已结束或其模型标识在当前执行环境不可用，先核对真实会话、lease 与当前校验结果，
+随后对现有输出运行对应的单文件校验和适用的全量校验，确认可复用的已完成工作；再用原准备命令
+`--resume` 更新 pending/invalid handoff，按最新 `dispatch-plan` 只派发待处理 assignment，
+在新的 IDE 会话中使用当前可用的继承/默认模型。保留已验证输出；不得反复重试失效会话/模型标识，也不得
+自动释放仍活跃 lease。工具状态不代表 IDE 会话状态。
 
 ### 1.1 主 Agent 的快速执行表
 
