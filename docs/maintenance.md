@@ -251,7 +251,9 @@ git diff --check
 
 基线以当前提交为准；如果全量测试数量变化，确认是新增测试而不是跳过/删除测试。
 
-仓库当前不配置自动 CI。维护任务按改动范围在本地运行验收命令；常用命令如下：
+GitHub Actions 在 push 到 `main` 和 pull request 时运行自动检查：Ubuntu、Windows 使用 Python 3.12
+运行 `uv run pytest -q`，Ubuntu 另运行 `uv run ruff check pdf2epub tests`。本地维护任务仍按改动范围
+运行验收命令；常用命令如下：
 
 ```text
 uv run pytest -q
@@ -267,12 +269,12 @@ uv run python scripts/check_maintenance.py
 ```
 
 该脚本只使用标准库编排 pytest、workflow contract、固定版本 Ruff 和 `git diff --check`；
-它不启用 CI，也不增加项目依赖。视觉回归测试默认只使用 pytest 临时目录。若需保存合成
+它不替代 GitHub Actions，也不增加项目依赖。视觉回归测试默认只使用 pytest 临时目录。若需保存合成
 EPUB 和页面/联系表 PNG 供人工检查，可显式设置 `PDF2EPUB_VISUAL_QA_DIR` 后运行对应测试；
 项目验收入口不设置该变量。
 
 文档专属任务通常只需运行 `git diff --check`；维护代码时按改动范围运行相关测试，必要时再运行
-全量测试。`scripts/check_workflow_contract.py` 和 Ruff 检查仍可手动运行，不代表启用了自动 CI。
+全量测试。`scripts/check_workflow_contract.py` 是额外的本地检查，不属于当前 GitHub Actions workflow。
 
 ### 4.5 文档
 
