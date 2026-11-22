@@ -691,16 +691,38 @@ def _suppress_soft_continuation_candidates(
     context_only: list[dict[str, Any]] = []
     for raw_candidate in candidates:
         candidate = dict(raw_candidate)
+        evidence = candidate.get("continuation_evidence")
+        positive = list(evidence.get("positive_signals", [])) if isinstance(evidence, Mapping) else []
+        negative = list(evidence.get("negative_signals", [])) if isinstance(evidence, Mapping) else []
+        trace = {
+            "generation": "cross_page_backtrack" if candidate.get("continuous_region_evidence") else "candidate_expansion",
+            "score": evidence.get("score") if isinstance(evidence, Mapping) else None,
+            "confidence": evidence.get("confidence") if isinstance(evidence, Mapping) else None,
+            "positive_signals": positive,
+            "negative_signals": negative,
+        }
+        candidate["lifecycle_trace"] = [trace]
         if candidate.get("key") or not candidate.get("continuous_region_evidence"):
+            trace["disposition"] = (
+                "retained_for_visual_review"
+                if candidate.get("disposition") == "review_required"
+                else "retained_existing_disposition"
+            )
+            trace["reason"] = "explicit_key_or_outside_soft_backtrack_gate"
             active.append(candidate)
             continue
 
         label = str(candidate.get("label") or "").strip()
         if _FOOTNOTE_LABEL_RE.search(label):
+            trace["disposition"] = (
+                "retained_for_visual_review"
+                if candidate.get("disposition") == "review_required"
+                else "retained_existing_disposition"
+            )
+            trace["reason"] = "explicit_footnote_label"
             active.append(candidate)
             continue
 
-        evidence = candidate.get("continuation_evidence")
         confidence = evidence.get("confidence") if isinstance(evidence, Mapping) else None
         semantic = (
             evidence.get("semantic_comparison")
@@ -709,6 +731,18 @@ def _suppress_soft_continuation_candidates(
         )
         has_explicit_note_labels = bool(
             candidate.get("continuous_region_has_footnote_label")
+        )
+        geometry_signals = {
+            "left_edge_aligned", "left_edge_near", "note_column_left_edge_aligned",
+        }
+        typography_signals = {
+            "font_size_matches_previous_note", "font_family_matches_previous_note",
+        }
+        layout_support_signals = geometry_signals.intersection(positive) | typography_signals.intersection(positive)
+        supported_by_layout = (
+            confidence == "medium"
+            and bool(geometry_signals.intersection(positive))
+            and bool(typography_signals.intersection(positive))
         )
         suppress_reason: Optional[str] = None
         if (
@@ -734,13 +768,19 @@ def _suppress_soft_continuation_candidates(
             and has_explicit_note_labels
             and "current_text_starts_as_continuation"
             not in evidence.get("positive_signals", [])
+            and not supported_by_layout
         ):
             suppress_reason = "weak_cross_page_evidence_before_labeled_notes"
 
         if suppress_reason is None:
+            trace["disposition"] = "retained_for_visual_review"
+            trace["reason"] = "layout_supported_continuation" if supported_by_layout else "not_suppressed"
+            trace["layout_support_signals"] = sorted(layout_support_signals)
             active.append(candidate)
             continue
 
+        trace["disposition"] = "context_only"
+        trace["reason"] = suppress_reason
         candidate["confidence"] = "context"
         candidate["disposition"] = "context_only"
         candidate["review_reason"] = "soft_continuation_context"

@@ -127,15 +127,29 @@ def semantic_context_sha256(
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _reflow_signals(filename: str, *, source_sha256: str = "", task_ids: Any = ()) -> dict[str, Any]:
-    detail = {"source_sha256": str(source_sha256 or "")}
+def _reflow_signals(
+    filename: str,
+    *,
+    source_sha256: str = "",
+    target_sha256: str = "",
+    context_sha256: str = "",
+    task_ids: Any = (),
+) -> dict[str, Any]:
     ids = sorted({str(item) for item in (task_ids or []) if str(item)})
-    if ids:
-        detail["task_ids"] = ids
+    detail = {
+        "source_sha256": str(source_sha256 or ""),
+        "target_sha256": str(target_sha256 or ""),
+        "context_sha256": str(context_sha256 or ""),
+        "task_ids": ids,
+    }
+    # Only machine-stable evidence participates: reviewer wording and issue order
+    # do not turn a repeated validation into another attempted repair.
+    evidence = json.dumps(detail, sort_keys=True, separators=(",", ":"))
+    evidence_hash = hashlib.sha256(evidence.encode("utf-8")).hexdigest()
     return {
         "file": str(filename),
         "kind": _REFLOW_KIND,
-        "evidence_hash": str(source_sha256 or ""),
+        "evidence_hash": evidence_hash,
         "detail": detail,
     }
 
@@ -176,24 +190,29 @@ def record_reflow_round(
     filename: str,
     *,
     source_sha256: str = "",
+    target_sha256: str = "",
+    context_sha256: str = "",
     task_ids: Any = (),
 ) -> dict[str, Any]:
     """Count one polish->footnote reflow round for a file.
 
     ``escalated`` becomes true once the configured bound is exceeded.  The
-    counter is keyed by file only; the recorded source hash exists for audit, so
-    a Reviewer rewrite that keeps reporting an issue still counts as another
-    round instead of silently restarting the loop.
+    counter is keyed by file and advances only when its source, target, context,
+    or normalized issue identity changes. Repeated validation of the same review
+    evidence is idempotent.
     """
     from .review_escalation import record_review_signals
 
     recorded = record_review_signals(
         output_dir,
         task=_REFLOW_TASK,
-        signals=[_reflow_signals(filename, source_sha256=source_sha256, task_ids=task_ids)],
+        signals=[_reflow_signals(
+            filename, source_sha256=source_sha256, target_sha256=target_sha256,
+            context_sha256=context_sha256, task_ids=task_ids,
+        )],
         # Two full reflow rounds are allowed; the third detection escalates.
         escalate_after=MAX_REFLOW_ROUNDS + 1,
-        increment_same_hash=True,
+        increment_same_hash=False,
     )
     entry = recorded.get((_REFLOW_TASK, str(filename), _REFLOW_KIND))
     return _reflow_projection(entry) if entry is not None else {"rounds": 0, "escalated": False}

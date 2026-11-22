@@ -13,6 +13,7 @@ from pdf2epub.refine.footnote_contracts import FOOTNOTE_PREPARE_SCHEMA_VERSION
 from pdf2epub.refine.footnote_status import FOOTNOTE_NORMALIZATION_SCHEMA_VERSION
 from pdf2epub.refine.footnote_effective_decisions import EFFECTIVE_DECISIONS_VERSION
 from pdf2epub.refine.footnote_candidates import candidate_for_block
+from pdf2epub.refine.footnote_continuation import _suppress_soft_continuation_candidates
 from pdf2epub.refine.footnote_handoff import prepare_footnote_subagent
 from pdf2epub.refine.footnote_apply_resolution import (
     _locate_block,
@@ -1468,6 +1469,154 @@ def test_orphan_continuation_without_new_numbered_note_is_reviewed(tmp_path: Pat
     assert candidate["review_reason"] == "orphan_continuation"
     assert candidate["continuation_evidence"]["matched_previous_key"] == "36"
     assert report["review_required"] is True
+
+
+@pytest.mark.parametrize("text", [
+    "(ii) A second comparison continues through another paragraph.",
+    "(B) A second comparison continues through another paragraph.",
+    '“A second comparison continues through another paragraph.”',
+])
+def test_medium_layout_supported_backtrack_remains_visual_review_candidate(text: str):
+    candidate = {
+        "page": 2,
+        "source": "primary",
+        "block": 7,
+        "label": "Text",
+        "text": text,
+        "continuous_region_evidence": True,
+        "continuous_region_has_footnote_label": True,
+        "disposition": "review_required",
+        "review_reason": "orphan_continuation",
+        "continuation_evidence": {
+            "score": 7,
+            "confidence": "medium",
+            "positive_signals": [
+                "previous_page_footnote_evidence",
+                "left_edge_aligned",
+                "font_size_matches_previous_note",
+            ],
+            "negative_signals": [],
+        },
+    }
+
+    active, suppressed = _suppress_soft_continuation_candidates([candidate])
+
+    assert len(active) == 1
+    assert suppressed == []
+    assert active[0]["disposition"] == "review_required"
+    trace = active[0]["lifecycle_trace"][-1]
+    assert trace["generation"] == "cross_page_backtrack"
+    assert trace["score"] == 7
+    assert trace["disposition"] == "retained_for_visual_review"
+    assert trace["layout_support_signals"] == [
+        "font_size_matches_previous_note",
+        "left_edge_aligned",
+    ]
+
+
+def test_medium_continuation_without_independent_layout_support_stays_context_only():
+    candidate = {
+        "page": 2,
+        "source": "primary",
+        "block": 7,
+        "label": "Text",
+        "text": "(ii) A second comparison continues through another paragraph.",
+        "continuous_region_evidence": True,
+        "continuous_region_has_footnote_label": True,
+        "review_reason": "orphan_continuation",
+        "continuation_evidence": {
+            "score": 5,
+            "confidence": "medium",
+            "positive_signals": ["previous_page_footnote_evidence"],
+            "negative_signals": [],
+        },
+    }
+
+    active, suppressed = _suppress_soft_continuation_candidates([candidate])
+
+    assert active == []
+    assert suppressed[0]["suppression_reason"] == "weak_cross_page_evidence_before_labeled_notes"
+    assert suppressed[0]["lifecycle_trace"][-1]["disposition"] == "context_only"
+
+
+def test_low_confidence_body_is_not_recalled_from_correlated_geometry_alone():
+    candidate = {
+        "page": 2,
+        "source": "primary",
+        "block": 7,
+        "label": "Text",
+        "text": "An ordinary body paragraph with similar line width.",
+        "continuous_region_evidence": True,
+        "continuous_region_has_footnote_label": True,
+        "review_reason": "orphan_continuation",
+        "continuation_evidence": {
+            "score": 1,
+            "confidence": "low",
+            "positive_signals": ["previous_page_footnote_evidence", "left_edge_aligned", "line_width_similar"],
+            "negative_signals": [],
+        },
+    }
+
+    active, suppressed = _suppress_soft_continuation_candidates([candidate])
+
+    assert active == []
+    assert suppressed[0]["suppression_reason"] == "weak_cross_page_evidence_before_labeled_notes"
+
+
+def test_prepare_report_keeps_layout_supported_multiparagraph_backtrack_reviewable(tmp_path: Path):
+    previous = _block(
+        "36 The note concludes with an account of the archive.",
+        0,
+        label="Footnote",
+        y0=820,
+    )
+    previous.update({"bbox": [100, 820, 920, 860], "font_size": 10})
+    _write_sidecar(tmp_path, 1, [previous])
+
+    body = _block("Ordinary body prose concludes near the middle of this page.", 0, y0=120)
+    continuation = _block(
+        "(ii) A second comparison continues with independent examples from elsewhere.",
+        1,
+        y0=680,
+    )
+    continuation.update({"bbox": [100, 680, 920, 735], "font_size": 10})
+    first_note = _block("37 A new note begins here.", 2, label="Footnote", y0=770)
+    first_note.update({"bbox": [100, 770, 920, 810], "font_size": 10})
+    second_note = _block("38 Another note begins here.", 3, label="Footnote", y0=830)
+    second_note.update({"bbox": [100, 830, 920, 870], "font_size": 10})
+    _write_sidecar(tmp_path, 2, [body, continuation, first_note, second_note])
+
+    report = prepare_footnote_candidates(tmp_path)
+
+    page = next(row for row in report["pages"] if row["page"] == 2)
+    candidate = next(row for row in page["candidates"] if row["block"] == 1)
+    assert candidate["key"] is None
+    assert candidate["disposition"] == "review_required"
+    assert candidate["continuation_evidence"]["confidence"] == "medium"
+    assert {"left_edge_aligned", "font_size_matches_previous_note"}.issubset(
+        candidate["continuation_evidence"]["positive_signals"]
+    )
+    assert candidate["lifecycle_trace"][-1]["disposition"] == "retained_for_visual_review"
+    assert all(row["block"] != 1 for row in page["suppressed_continuation_candidates"])
+
+    from pdf2epub.refine.footnote_review_packet import build_review_packet
+    from pdf2epub.refine.footnote_unit_contexts import _unit_fact_projection
+
+    packet_before = build_review_packet(report)
+    address = "2:primary:1"
+    page_context = {"sidecar": "pages/page_002.ocr.json"}
+    projection_before = _unit_fact_projection(packet_before["candidates"][address], page_context)
+    candidate["lifecycle_trace"][-1]["reason"] = "changed audit wording"
+    packet_after = build_review_packet(report)
+    assert packet_after == packet_before
+    projection_after = _unit_fact_projection(packet_after["candidates"][address], page_context)
+    projection_before_hash = hashlib.sha256(
+        json.dumps(projection_before, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    projection_after_hash = hashlib.sha256(
+        json.dumps(projection_after, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    assert projection_after_hash == projection_before_hash
 
 
 def test_orphan_continuation_flags_citation_continuation_after_complete_note(

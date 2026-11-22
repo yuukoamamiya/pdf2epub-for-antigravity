@@ -284,6 +284,9 @@ def authorize_retry(
             retry_count=0,
             state=STATE_RETRY,
             human_decision_id=decision_id,
+            # The next observation is the first authorized retry even when it
+            # reports the same evidence as the human-reviewed signal.
+            last_seen_hash="",
         )
         payload["signals"][key] = updated.as_dict()
         authorized.append(updated)

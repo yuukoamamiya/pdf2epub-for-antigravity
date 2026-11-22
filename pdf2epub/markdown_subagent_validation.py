@@ -138,6 +138,8 @@ def validate_markdown_subagent(
                         context.paths.output_dir,
                         name,
                         source_sha256=str(result.get("source_sha256") or ""),
+                        target_sha256=str(result.get("target_sha256") or ""),
+                        context_sha256=str(result.get("context_sha256") or ""),
                         task_ids=[
                             polish_issue_task_id(name, issue)
                             for issue in result.get("issues", [])

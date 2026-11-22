@@ -104,8 +104,15 @@ def test_polish_issue_recovery_distinguishes_current_mapping_and_contract_failur
     if scenario == "reflow_escalated":
         from pdf2epub.polish_footnote_semantics import record_reflow_round
 
-        for _ in range(3):
-            record_reflow_round(tmp_path, "chapter_1.md", source_sha256=contract["source_sha256"])
+        for repair_state in range(1, 4):
+            record_reflow_round(
+                tmp_path,
+                "chapter_1.md",
+                source_sha256=contract["source_sha256"],
+                target_sha256=f"{repair_state:064x}",
+                context_sha256=contract["context_sha256"],
+                task_ids=["same-issue"],
+            )
 
     paths = prepare_footnote_subagent(tmp_path, book_title="Synthetic Review Book")
     report = json.loads(paths["report"].read_text(encoding="utf-8"))

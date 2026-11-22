@@ -334,19 +334,27 @@ def test_polish_issue_task_id_is_content_addressed():
     assert base.startswith("fra-")
 
 
-def test_reflow_rounds_persist_outside_manifest_and_escalate_after_two(tmp_path):
-    for expected in (1, 2):
-        entry = record_reflow_round(tmp_path, "chapter.md", source_sha256="a" * 64)
-        assert entry["rounds"] == expected
-        assert entry["escalated"] is False
-    assert escalated_reflow_files(tmp_path) == {}
-
-    # Deleting and rebuilding the polish manifest must not reset the counter.
+def test_reflow_rounds_are_idempotent_for_same_evidence_and_escalate_on_changes(tmp_path):
+    stable = {
+        "source_sha256": "a" * 64,
+        "target_sha256": "b" * 64,
+        "context_sha256": "c" * 64,
+        "task_ids": ["same-issue"],
+    }
+    # Repeated validation, reordered IDs, or manifest recreation are not repairs.
     (tmp_path / "polish_subagent_manifest.json").write_text("{}", encoding="utf-8")
-    entry = record_reflow_round(tmp_path, "chapter.md", source_sha256="d" * 64)
+    for _ in range(3):
+        repeated = record_reflow_round(
+            tmp_path, "chapter.md", **{**stable, "task_ids": ["same-issue", "same-issue"]}
+        )
+        assert repeated["rounds"] == 1
+    entry = record_reflow_round(tmp_path, "chapter.md", **{**stable, "target_sha256": "d" * 64})
+    assert entry["rounds"] == 2
+    entry = record_reflow_round(tmp_path, "chapter.md", **{**stable, "task_ids": ["changed-issue"]})
     assert entry["rounds"] == 3
     assert entry["escalated"] is True
-    assert escalated_reflow_files(tmp_path)["chapter.md"]["source_sha256"] == "d" * 64
+    assert escalated_reflow_files(tmp_path)["chapter.md"]["rounds"] == 3
+    assert escalated_reflow_files(tmp_path)["chapter.md"]["source_sha256"] == "a" * 64
 
     reset_reflow_round(tmp_path, "chapter.md", decision_id="human-1")
     assert escalated_reflow_files(tmp_path) == {}
@@ -354,12 +362,15 @@ def test_reflow_rounds_persist_outside_manifest_and_escalate_after_two(tmp_path)
     assert state["files"]["chapter.md"]["human_decision_id"] == "human-1"
     assert state["files"]["chapter.md"]["rounds"] == 0
 
-    record_reflow_round(tmp_path, "chapter.md")
+    # After human authorization, the first observation counts even if unchanged.
+    retried = record_reflow_round(tmp_path, "chapter.md", **stable)
+    assert retried["rounds"] == 1
+    assert retried["escalated"] is False
     clear_reflow_round(tmp_path, "chapter.md")
     assert load_reflow_state(tmp_path)["files"] == {}
 
 
-def test_third_semantic_issue_round_escalates_to_human_review(tmp_path):
+def test_repeated_semantic_validation_and_manifest_rebuild_are_idempotent(tmp_path):
     from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 
     source_dir = tmp_path / "ocr_markdown"
@@ -404,20 +415,16 @@ def test_third_semantic_issue_round_escalates_to_human_review(tmp_path):
         tmp_path, "polish", source_dir, target_dir,
         create_validated_copy=False, require_footnote_semantic_review=True,
     )
-    assert second["polish_footnote_reflow"]["chapter.md"]["rounds"] == 2
+    assert second["polish_footnote_reflow"]["chapter.md"]["rounds"] == 1
     assert second["human_review_required"] == []
 
-    # Rebuilding the manifest must not reset the persisted round count.
+    # Rebuilding the manifest cannot consume another retry either.
     manifest_path.unlink()
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-    third = validate_markdown_subagent(
+    repeat_after_manifest_rebuild = validate_markdown_subagent(
         tmp_path, "polish", source_dir, target_dir,
         create_validated_copy=False, require_footnote_semantic_review=True,
     )
-    assert third["polish_footnote_reflow"]["chapter.md"]["rounds"] == 3
-    assert third["human_review_required_files"] == ["chapter.md"]
-    escalated = third["human_review_required"][0]
-    assert escalated["kind"] == "polish_footnote_reflow"
-    assert escalated["action"] == "ask_human"
-    assert "chapter.md" not in third["retry_required_files"]
-    assert third["all_passed"] is False
+    assert repeat_after_manifest_rebuild["human_review_required"] == []
+
+    assert repeat_after_manifest_rebuild["polish_footnote_reflow"]["chapter.md"]["rounds"] == 1
