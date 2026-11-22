@@ -452,6 +452,9 @@ def build_novel_epub_command(args):
             output_path=output_epub,
             book_title=book_title,
             translated_metadata=translated_metadata,
+            # Metadata enrichment runs only after the novel-specific translation
+            # validation above has passed.
+            enrichment_plan=None,
             epubcheck_mode=config.get("html_translation", {}).get(
                 "epubcheck_mode", "warn"
             ),
@@ -459,8 +462,36 @@ def build_novel_epub_command(args):
                 "epubcheck_path"
             ),
         )
+        from pdf2epub.pipeline_policy import PipelinePolicy
+        policy = PipelinePolicy.from_config(config, default_kind="novel")
+        enrichment_plan = {"status": "disabled", "metadata": {}, "verified_fields": []}
+        if policy.metadata_enrichment_mode != "disabled":
+            from pdf2epub.metadata_enrichment.service import resolve_enrichment
+            try:
+                enrichment_plan = resolve_enrichment(output_dir, config, config_path=context.config_path)
+            except Exception:
+                if policy.metadata_enrichment_mode == "required":
+                    raise
+                enrichment_plan = None
+                enrichment_outcome = {"status": "fallback", "reason": "metadata evidence/decision could not be resolved; original package metadata preserved"}
+                logger.warning("Optional metadata enrichment could not be resolved; packaging original metadata")
+        else:
+            enrichment_outcome = {"status": "disabled"}
+        meta_options = config.get("metadata_enrichment") or {}
+        if enrichment_plan is not None:
+            enrichment_plan["mode"] = policy.metadata_enrichment_mode
+            enrichment_plan["cover_policy"] = meta_options.get("cover_policy", "preserve")
+        build_config.enrichment_plan = enrichment_plan
+        build_config.enrichment_outcome = enrichment_outcome
+        build_config.enrichment_mode = policy.metadata_enrichment_mode
+        build_config.cover_policy = meta_options.get("cover_policy", "preserve")
+        build_config.config_path = context.config_path
         builder = HTMLEpubBuilder(build_config)
         builder.build()
+        from pdf2epub.build_receipt import NOVEL_TRANSLATED, write_build_receipt
+        write_build_receipt(output_dir, output_epub, kind=NOVEL_TRANSLATED,
+                            metadata_plan=getattr(builder.config, "enrichment_applied_plan", enrichment_plan),
+                            metadata_outcome=getattr(builder.config, "enrichment_outcome", enrichment_outcome))
         logger.success(f"Built EPUB: {output_epub}")
         return 0
 

@@ -122,7 +122,9 @@ class HTMLEpubBuilder:
         self._reset_navigation_report()
 
         # Create temp directory for extraction
-        with tempfile.TemporaryDirectory() as temp_dir:
+        # Windows file scanners can briefly hold generated package members.
+        # Best-effort scratch cleanup must not fail an already published EPUB.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             temp_path = Path(temp_dir)
             extract_dir = temp_path / "epub_content"
 
@@ -154,6 +156,24 @@ class HTMLEpubBuilder:
                             "Re-run with --allow-navigation-warnings only after "
                             "reviewing the navigation report."
                         )
+
+            if self.config.enrichment_plan:
+                from ..metadata_package import apply_package_metadata, enrichment_outcome
+                try:
+                    apply_package_metadata(
+                        self._find_opf_path(extract_dir), self.config.enrichment_plan,
+                        cover_policy=getattr(self.config, "cover_policy", "preserve"),
+                    )
+                    self.config.enrichment_applied_plan = self.config.enrichment_plan
+                    self.config.enrichment_outcome = enrichment_outcome(self.config.enrichment_plan)
+                    if self.config.enrichment_outcome["status"] in {"partial", "skipped"}:
+                        logger.warning(self.config.enrichment_outcome["reason"])
+                except Exception:
+                    if getattr(self.config, "enrichment_mode", "auto") == "required":
+                        raise
+                    self.config.enrichment_applied_plan = None
+                    self.config.enrichment_outcome = {"status": "fallback", "requested_fields": list(self.config.enrichment_plan.get("verified_fields", [])), "reason": "metadata could not be applied; original package metadata preserved"}
+                    logger.warning("Optional metadata enrichment could not be applied; packaging existing metadata")
 
             # Step 4: Normalize fragile source CSS before packaging
             self._normalize_css(extract_dir)
@@ -284,6 +304,9 @@ def build_html_epub(
     epubcheck_path: Optional[str] = None,
     navigation_report: Optional[Dict[str, Any]] = None,
     allow_navigation_warnings: bool = False,
+    config: Optional[Dict[str, Any]] = None,
+    output_dir: Optional[Path] = None,
+    config_path: Optional[Path] = None,
 ) -> Path:
     """
     Convenience function to build translated EPUB.
@@ -304,6 +327,26 @@ def build_html_epub(
     if output_path is None:
         output_path = original_epub.parent / f"translated_{original_epub.name}"
 
+    book_config = config or {}
+    from ..pipeline_policy import PipelinePolicy
+    policy = PipelinePolicy.from_config(book_config, default_kind="html")
+    enrichment_plan = {"status": "disabled", "metadata": {}, "verified_fields": []}
+    enrichment_outcome = {"status": "applied"}
+    if policy.metadata_enrichment_mode != "disabled":
+        from ..metadata_enrichment.service import resolve_enrichment
+        try:
+            enrichment_plan = resolve_enrichment(Path(output_dir or Path(translated_dir).parent), book_config, config_path=config_path)
+        except Exception:
+            if policy.metadata_enrichment_mode == "required":
+                raise
+            enrichment_plan = None
+            enrichment_outcome = {"status": "fallback", "reason": "metadata evidence/decision could not be resolved; original package metadata preserved"}
+            logger.warning("Optional metadata enrichment could not be resolved; packaging original metadata")
+    else:
+        enrichment_outcome = {"status": "disabled"}
+    if enrichment_plan is not None:
+        enrichment_plan["mode"] = policy.metadata_enrichment_mode
+        enrichment_plan["cover_policy"] = (book_config.get("metadata_enrichment", {}) or {}).get("cover_policy", "preserve")
     config = BuildConfig(
         original_epub=original_epub,
         translated_dir=translated_dir,
@@ -314,13 +357,20 @@ def build_html_epub(
         epubcheck_mode=epubcheck_mode,
         epubcheck_path=epubcheck_path,
         allow_navigation_warnings=allow_navigation_warnings,
+        enrichment_plan=enrichment_plan,
+        enrichment_outcome=enrichment_outcome,
+        cover_policy=(book_config.get("metadata_enrichment", {}) or {}).get("cover_policy", "preserve"),
+        config_path=config_path,
+        enrichment_mode=policy.metadata_enrichment_mode,
     )
 
     builder = HTMLEpubBuilder(config)
     epub_path = builder.build()
     from ..build_receipt import HTML_TRANSLATED, write_build_receipt
 
-    write_build_receipt(Path(translated_dir).parent, epub_path, kind=HTML_TRANSLATED)
+    write_build_receipt(Path(output_dir or Path(translated_dir).parent), epub_path, kind=HTML_TRANSLATED,
+                        metadata_plan=getattr(builder.config, "enrichment_applied_plan", enrichment_plan),
+                        metadata_outcome=getattr(builder.config, "enrichment_outcome", enrichment_outcome))
     return epub_path
 
 
@@ -346,11 +396,13 @@ class HTMLEpubPipeline:
         self,
         epub_path: Path,
         output_dir: Path,
-        config: Dict
+        config: Dict,
+        config_path: Optional[Path] = None,
     ):
         self.epub_path = epub_path
         self.output_dir = output_dir
         self.config = config
+        self.config_path = config_path
 
         # Parse EPUB
         self.parser = EPUBParser(str(epub_path))
@@ -567,6 +619,7 @@ class HTMLEpubPipeline:
             source_epub=Path(self.epub_path),
             book_title=getattr(self, "book_title", Path(self.epub_path).stem),
             config=getattr(self, "config", {}),
+            config_path=getattr(self, "config_path", None),
             navigation_report=getattr(self, "navigation_report", {}),
             validate_units=self.validate_translated_units,
             merge_parts=self._merge_part_files,

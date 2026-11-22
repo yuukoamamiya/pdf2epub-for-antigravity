@@ -52,6 +52,7 @@ class PipelinePolicy:
     source_language: Optional[str]
     target_language: Optional[str]
     dynamic_terminology_enabled: bool = False
+    metadata_enrichment_mode: str = "auto"
     requires_ocr_correction: bool = False
     requires_compressed_cache: bool = False
     requires_compiled_pdf: bool = False
@@ -126,6 +127,12 @@ class PipelinePolicy:
 
         translation = config.get("translation")
         translation = translation if isinstance(translation, Mapping) else {}
+        from pdf2epub.metadata_enrichment.options import metadata_options
+        enrichment_mode = metadata_options(dict(config)) ["mode"]
+        if kind == TEX_PIPELINE and enrichment_mode == "required":
+            raise ValueError("metadata_enrichment.mode: required is not supported by the TeX pipeline")
+        if kind == TEX_PIPELINE:
+            enrichment_mode = "disabled"
         dynamic = translation.get("dynamic_terminology", {}) or {}
         if not isinstance(dynamic, Mapping):
             raise ValueError("translation.dynamic_terminology must be a mapping")
@@ -191,6 +198,7 @@ class PipelinePolicy:
             source_language=str(source_language) if source_language else None,
             target_language=str(target_language) if target_language else None,
             dynamic_terminology_enabled=dynamic_enabled,
+            metadata_enrichment_mode=enrichment_mode,
         )
 
 

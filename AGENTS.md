@@ -192,6 +192,16 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
 
 任何一项无法确认，都停在准备阶段。
 
+## 0.3 书目元数据识别与补全
+
+新 PDF→EPUB 与 EPUB/HTML 生产在 `metadata_enrichment.mode: auto|required` 时必须安排独立元数据阶段；只有 `disabled` 才主动省略。默认 `mode: auto` 尽力获取、有限复核和补全书目字段；`required` 在省略 `required_fields` 时要求所有 `fields`，显式非空列表时只要求该子集；required 模式显式配置空列表属于配置错误；`disabled` 跳过此功能。自动模式遇到 uncertain、查询失败或部分成功时记录实际状态、跳过未核验部分、保留已有信息并继续，最终应简短提示元数据补全未完成，不得报告为全部已核验；未安排/未尝试的阶段不能伪报成失败；只有合法的 `not_applicable` 或配置要求的字段均当前有效时，required 才能通过。适用性仍为 `uncertain` 时不能当作完成。省略 `required_fields` 时 required 模式要求当前 `fields`；指定非空列表则仅对该子集强制，显式空列表会配置报错。status 命令只读。配置和产物合同见 [`docs/metadata-enrichment.md`](docs/metadata-enrichment.md)。
+
+每个新生产任务依次运行 `metadata-prepare`、检查 prompt/manifest/`pending_fields`、把 scoped handoff 交给 Antigravity 工作区 Subagent 判断适用性。确认 publication 后运行 `metadata-fetch` 获取有限目录候选，再交 Subagent 复核并运行 `metadata-validate`；`disabled` 不创建此任务。metadata worker 占用 `subagent.batching.max_concurrency` 全局额度，不得与 extreme wave 重叠，也不得调度其他 worker；Subagent 负责作品身份、出版物适用性、来源匹配和字段语义复核。Codex 主 Agent 不做这些语义判断。候选本身不能直接用于打包。运行 `metadata-validate` 后再查看 `metadata-status`；当前源与 evidence/decision 哈希不匹配时重新准备并复核。旧产物如需单独补全，可按同一命令恢复流程操作。
+
+不按缺少 ISBN 或文件名判定非出版物。私人文稿、笔记或混合集合无法判断时保持 `uncertain`；auto 跳过补全继续原流程，required 阻断等待 Subagent 复核，必要时再交人类判断；已确认非出版物可记为 `not_applicable`。扫描或重排版可在证据支持时关联出版底本；论文可使用 DOI/ISSN，不要求 ISBN。区分底本与译制文件，保留作者/编者/译者角色，出版日期不得写成本地生成时间。网络失败或部分字段未核验时，auto 使用可用的已验证字段并保留其他现值。`cover_policy: preserve` 保留既有封面，不采用候选；`fill_missing` 仅在封面缺失时补入，`prefer_verified` 才可优先替换。候选由 Antigravity Subagent 查看并复核后才进入构建。
+
+打包只消费当前已验证的元数据，并将实际采用值和证据绑定到构建收据；这不会放宽 OCR、结构、正文校验或 package readiness 门禁，也不会触发正文重译。详见 [`docs/metadata-enrichment.md`](docs/metadata-enrichment.md)。
+
 ## 1. 通用执行边界
 
 - Python 只做拆分、压缩、校验、合并和打包，不调用翻译 API，不创建模型客户端。

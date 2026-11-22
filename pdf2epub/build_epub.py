@@ -53,6 +53,7 @@ class BuildEpubConfig:
     config: Optional[Dict] = None
     output_epub: Optional[Path] = None
     combined_markdown_path: Optional[Path] = None
+    config_path: Optional[Path] = None
 
 
 def _usable_metadata_value(value) -> str:
@@ -1759,6 +1760,22 @@ def _package_epub(
         cover_image,
         all_html_files
     )
+    if getattr(config, "enrichment_plan", None):
+        from .metadata_package import apply_package_metadata, enrichment_outcome
+        enrichment_cfg = (config.config or {}).get("metadata_enrichment") or {}
+        try:
+            apply_package_metadata(epub_dir / "content.opf", config.enrichment_plan,
+                                   cover_policy=enrichment_cfg.get("cover_policy", "preserve"))
+            config.enrichment_applied_plan = config.enrichment_plan
+            config.enrichment_outcome = enrichment_outcome(config.enrichment_plan)
+            if config.enrichment_outcome["status"] in {"partial", "skipped"}:
+                logger.warning(config.enrichment_outcome["reason"])
+        except Exception:
+            if enrichment_cfg.get("mode", "auto") == "required":
+                raise
+            config.enrichment_applied_plan = None
+            config.enrichment_outcome = {"status": "fallback", "requested_fields": list(config.enrichment_plan.get("verified_fields", [])), "reason": "metadata could not be applied; original package metadata preserved"}
+            logger.warning("Optional metadata enrichment could not be applied; packaging existing metadata")
 
     # Create final EPUB with sanitized filename
     from .utils.paths import sanitize_filename
@@ -1825,6 +1842,27 @@ def build_epub(config: BuildEpubConfig) -> Path:
                     + ("; ".join(reasons) or "current effective terminology validation failed")
                 )
 
+    from .pipeline_policy import PipelinePolicy
+    policy = PipelinePolicy.from_config(config.config or {})
+    enrichment_plan = {"status": "disabled", "metadata": {}, "verified_fields": []}
+    if policy.metadata_enrichment_mode != "disabled":
+        from .metadata_enrichment.service import resolve_enrichment
+        try:
+            enrichment_plan = resolve_enrichment(config.output_dir, config.config or {}, config_path=config.config_path)
+        except Exception:
+            if policy.metadata_enrichment_mode == "required":
+                raise
+            enrichment_plan = None
+            config.enrichment_applied_plan = None
+            config.enrichment_outcome = {"status": "fallback", "reason": "metadata evidence/decision could not be resolved; original package metadata preserved"}
+            logger.warning("Optional metadata enrichment could not be resolved; packaging existing metadata")
+    else:
+        config.enrichment_outcome = {"status": "disabled"}
+    enrichment_settings = (config.config or {}).get("metadata_enrichment") or {}
+    if enrichment_plan is not None:
+        enrichment_plan["mode"] = policy.metadata_enrichment_mode
+        enrichment_plan["cover_policy"] = enrichment_settings.get("cover_policy", "preserve")
+    config.enrichment_plan = enrichment_plan
     original_toc_tree, toc_tree = _load_build_toc(config)
 
     epub_structure = _prepare_epub_structure(config, toc_tree, original_toc_tree)
@@ -1907,6 +1945,8 @@ def build_epub(config: BuildEpubConfig) -> Path:
         config.output_dir,
         epub_path,
         kind=PDF_TRANSLATED if config.translated else PDF_SOURCE,
+        metadata_plan=getattr(config, "enrichment_applied_plan", enrichment_plan),
+        metadata_outcome=getattr(config, "enrichment_outcome", {"status": "applied", "requested_fields": list(enrichment_plan.get("verified_fields", []))}),
     )
     return epub_path
 

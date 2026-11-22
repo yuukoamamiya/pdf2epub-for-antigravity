@@ -132,6 +132,19 @@ PDF_WORKFLOW_STAGES: tuple[WorkflowStage, ...] = (
         summary="validate polished Markdown and rebuild the receipt",
     ),
     WorkflowStage(
+        key="metadata-prepare",
+        command="metadata-prepare",
+        invocation="metadata-prepare",
+        summary="prepare evidence-bound metadata enrichment review",
+        note="可选补全书目信息；required 模式须完成 Subagent review 和本地校验",
+    ),
+    WorkflowStage(
+        key="metadata-validate",
+        command="metadata-validate",
+        invocation="metadata-validate",
+        summary="validate current metadata enrichment decision",
+    ),
+    WorkflowStage(
         key="extract-entities",
         command="extract-entities",
         invocation="extract-entities",
@@ -208,6 +221,18 @@ HTML_WORKFLOW_STAGES: tuple[WorkflowStage, ...] = (
         summary="validate translated compressed units and metadata",
     ),
     WorkflowStage(
+        key="metadata-prepare",
+        command="metadata-prepare",
+        invocation="metadata-prepare",
+        summary="prepare evidence-bound metadata enrichment review",
+    ),
+    WorkflowStage(
+        key="metadata-validate",
+        command="metadata-validate",
+        invocation="metadata-validate",
+        summary="validate current metadata enrichment decision",
+    ),
+    WorkflowStage(
         key="package",
         command="build-html-epub",
         invocation="build-html-epub",
@@ -234,6 +259,18 @@ NOVEL_WORKFLOW_STAGES: tuple[WorkflowStage, ...] = (
         command="translate-novel-validate",
         invocation="translate-novel-validate",
         summary="validate translated novel units and metadata",
+    ),
+    WorkflowStage(
+        key="metadata-prepare",
+        command="metadata-prepare",
+        invocation="metadata-prepare",
+        summary="prepare evidence-bound metadata enrichment review",
+    ),
+    WorkflowStage(
+        key="metadata-validate",
+        command="metadata-validate",
+        invocation="metadata-validate",
+        summary="validate current metadata enrichment decision",
     ),
     WorkflowStage(
         key="package",

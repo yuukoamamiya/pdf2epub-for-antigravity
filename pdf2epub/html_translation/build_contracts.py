@@ -19,3 +19,8 @@ class BuildConfig:
     epubcheck_path: Optional[str] = None
     navigation_report: Optional[Dict[str, Any]] = None
     allow_navigation_warnings: bool = False
+    enrichment_plan: Optional[Dict[str, Any]] = None
+    cover_policy: str = "preserve"
+    enrichment_mode: str = "auto"
+    config_path: Optional[Path] = None
+    enrichment_outcome: Optional[Dict[str, Any]] = None

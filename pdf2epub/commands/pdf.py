@@ -316,6 +316,7 @@ def build_epub_command(args):
             translated=False,
             target_language=source_language,
             config=config,
+            config_path=context.config_path,
             output_epub=english_epub,
         )
         stages.append((source_language, english_config))
@@ -331,6 +332,7 @@ def build_epub_command(args):
         translated=build_translated,
         target_language=target_language if build_translated else source_language,
         config=config,
+        config_path=context.config_path,
     )
 
     stages.append(("Translated" if build_translated else "Original", build_config))

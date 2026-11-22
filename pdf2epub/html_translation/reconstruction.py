@@ -29,6 +29,7 @@ class HTMLReconstructionContext:
     logical_records: Callable[[Optional[Dict[str, str]]], list[dict[str, Any]]]
     write_report: Callable[..., Path]
     build_epub: Callable[..., Path]
+    config_path: Optional[Path] = None
 
 
 class HTMLReconstructor:
@@ -121,6 +122,9 @@ class HTMLReconstructor:
                 epubcheck_mode=translation_config.get("epubcheck_mode", "warn"),
                 epubcheck_path=translation_config.get("epubcheck_path"),
                 allow_navigation_warnings=allow_navigation_warnings,
+                config=context.config,
+                output_dir=context.output_dir,
+                config_path=context.config_path,
             )
         except NavigationUpdateError:
             context.write_report(output_epub=output_epub, phase="build_blocked")

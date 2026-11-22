@@ -12,6 +12,8 @@ Antigravity 工作区 Agent 负责翻译和需要语义判断的内容，本地 
 | 轻小说 EPUB | 使用独立文本流程翻译与构建 | 轻小说 EPUB |
 | arXiv 或本地 TeX | 翻译 TeX 源文件并通过编译校验 | 校验后的 TeX 工程 |
 
+新书目元数据识别与补全按证据合同交由 Antigravity 工作区 Subagent 复核；`auto` 默认尽力补全，校验后的字段可供 PDF/HTML EPUB 构建使用。身份不确定时 auto 跳过未核验补全并继续，最终状态会提示未完成；required 阻断等待复核；私人文稿或混合集合不会按缺 ISBN 或文件名猜测。命令、decision schema、恢复方式和边界见 [元数据识别与补全](docs/metadata-enrichment.md)。Calibre 自动入库不在当前版本范围内。
+
 工作流支持恢复中断任务，并可使用术语表帮助统一译名。EPUB ZIP 在提取时会限制成员数量、
 单文件展开大小和总展开大小，并在写入前预检；这些是库级安全预算，不是书籍配置项。
 PDF 新运行都使用视觉 OCR；EPUB 和 TeX

@@ -302,6 +302,12 @@ handoff 指定的稀疏上下文。
 
 TeX 使用独立的 `tex_units/` 和 `translated_tex_units/` 文件。`source/` 恢复时要求旁置身份记录、输入身份/内容指纹及完整源树 SHA-256 匹配；旧的无记录快照仅在本地输入可用且树摘要相同的情况下接受，其他情况失败并保留旧快照。校验时本地程序检查每个单元都存在，再从这些单元重建 `project/` 并编译，因此不会把初始原文工程误判为“已经翻完”。TeX manifest schema 2 在编译成功后记录 `validated_units` 和各单元的 `validated_target_sha256`。`--resume` 只有在源指纹、布局指纹、源/目标语言、主文件、`unit_chars`、单元源哈希及目标文件哈希都与上次验证一致时才保留检查点；编译期间目标文件发生变化也不会被标记为已验证。旧 manifest 缺少目标哈希时保守地清空已验证检查点，需重新交给 Subagent 并运行 `translate-arxiv-validate`。项目编译使用 `latexmk -norc`，防止从不可信的项目目录加载 `.latexmkrc` 等 Perl 配置；主文件以绝对路径参数传入，避免以连字符开头的文件名被识别为选项。`-no-shell-escape` 仍单独控制 XeLaTeX 的 shell escape 功能。TeX 流程中的 XeLaTeX 只用于 `translate-arxiv-validate` 的项目编译门禁，不代表 EPUB 公式也会走 XeLaTeX。
 
+## 元数据识别与补全 handoff
+
+PDF/HTML EPUB 的书目元数据补全使用独立 `metadata_enrichment` 目录和 evidence-bound decision，不与原有翻译元数据 worker 混为一谈。运行 `metadata-prepare` 后，只把生成的 `metadata_subagent_prompt.md`、manifest 与 `evidence.json` 交给工作区 Subagent；decision 必须引用 evidence 项的精确 location 和 SHA-256。Subagent 判断 publication applicability、作品身份和底本关系，并只填写 requested fields。metadata worker 占用 `subagent.batching.max_concurrency` 全局额度，不与 extreme wave 重叠，也不得调度其他 worker。身份/适用性不确定时报告 `uncertain`；auto 跳过未核验补全继续，required 阻断等待复核；不以无 ISBN 或文件名作为非出版物证据。
+
+当前决定通过 `metadata-validate` 后才可消费。可选 `metadata-fetch` 只在已有复核身份后查询候选；所有候选必须重新由 Subagent 核验。auto 模式允许字段部分成功，未完成时最终状态须简短提示；required 模式省略 `required_fields` 时按 `fields` 阻断，指定非空子集时只要求子集，disabled 跳过。源证据变化时重新 prepare 和复核，不通过手改哈希恢复。命令、schema 与完整例子见 [`metadata-enrichment.md`](metadata-enrichment.md)。
+
 ## EPUB 高保真翻译
 
 ```text

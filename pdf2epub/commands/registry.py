@@ -34,6 +34,25 @@ def register_command_parsers(subparsers) -> None:
     _register_build_commands(subparsers)
     _register_html_commands(subparsers)
     _register_novel_commands(subparsers)
+    _register_metadata_commands(subparsers)
+
+
+def _register_metadata_commands(subparsers) -> None:
+    """Register publication metadata enrichment commands."""
+    for name, handler, help_text in (
+        ("metadata-prepare", "metadata_prepare_command", "Prepare local metadata evidence and reviewer handoff"),
+        ("metadata-fetch", "metadata_fetch_command", "Fetch bibliographic candidates for reviewed identity"),
+        ("metadata-validate", "metadata_validate_command", "Validate current metadata decisions"),
+        ("metadata-status", "metadata_status_command", "Show metadata enrichment status"),
+    ):
+        parser = subparsers.add_parser(name, help=help_text)
+        parser.add_argument("--json", action="store_true")
+        if name == "metadata-prepare":
+            parser.add_argument("--resume", action="store_true", help="Reuse an unchanged evidence and handoff")
+        if name == "metadata-fetch":
+            parser.add_argument("--retry", action="store_true", help="Retry previously failed requests")
+            parser.add_argument("--cover-url", help="Download a cover candidate for human visual review")
+        parser.set_defaults(func=_lazy_handler("pdf2epub.commands.metadata", handler))
 
 
 def _register_dispatch_commands(subparsers) -> None:

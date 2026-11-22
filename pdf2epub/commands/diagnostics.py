@@ -454,12 +454,35 @@ def _pdf_stages(
         if policy.requires_translation
         else "build-epub"
     ) if input_path.suffix.lower() == ".pdf" else "build-html-epub"
+    enrichment_status = _metadata_enrichment_status(output_dir, config, config_path=config_path)
+    if enrichment_status:
+        required = enrichment_status.get("mode") == "required"
+        ready = enrichment_status.get("required_complete") is True if required else (
+            enrichment_status.get("current") is True and not enrichment_status.get("errors")
+            and enrichment_status.get("state") in {"valid", "not_applicable"})
+        partial = enrichment_status.get("current") is True and enrichment_status.get("eligible") is True and any(
+            item.get("verified") for item in enrichment_status.get("fields", {}).values() if isinstance(item, Mapping)
+        )
+        meta_state = "passed" if ready or (not required and partial) else ("pending" if required else "skipped")
+        meta_detail = ("metadata decision is valid and current" if ready else
+                       "partial verified metadata will be applied; unresolved fields keep package values" if partial else
+                       "required metadata enrichment is not ready" if required else
+                       "optional metadata enrichment has no current verified fields; package keeps its values")
+        meta_state, meta_detail = _apply_metadata_outcome_to_stage(
+            output_dir, package_kinds[0], enrichment_status.get("mode", "auto"), meta_state, meta_detail
+        )
+        stages.extend([
+            _status_record("metadata-prepare", "metadata-prepare", meta_state, meta_detail),
+            _status_record("metadata-validate", "metadata-validate", meta_state, meta_detail),
+        ])
     stages.append(
         _package_stage(
             output_dir,
             epub_files,
             command=package_command,
             kinds=package_kinds,
+            config=config,
+            config_path=config_path,
         )
     )
     return _apply_stage_blockers(stages)
@@ -488,6 +511,8 @@ def _package_stage(
     *,
     command: str,
     kinds: tuple[str, ...],
+    config: Mapping[str, Any] | None = None,
+    config_path: Path | None = None,
 ) -> dict[str, Any]:
     """Report every pipeline-required EPUB target against its own receipt."""
     from pdf2epub.build_receipt import receipt_path, receipt_status
@@ -503,7 +528,7 @@ def _package_stage(
     for kind in kinds:
         entry = builds.get(kind)
         relative = str(entry.get("epub") or "") if isinstance(entry, Mapping) else ""
-        state, detail = receipt_status(output_dir, kind)
+        state, detail = receipt_status(output_dir, kind, config=config, config_path=config_path)
         if state == "missing":
             # A receiptless directory may contain old EPUBs, but their language
             # cannot be inferred from names. A receipt that omits this kind is
@@ -520,6 +545,11 @@ def _package_stage(
             "artifact": relative if relative else None,
             "detail": detail,
         })
+        outcome = entry.get("metadata_enrichment_outcome") if isinstance(entry, Mapping) else None
+        if isinstance(outcome, Mapping) and outcome.get("status") == "fallback":
+            target_states[-1]["detail"] += "; metadata enrichment failed safely and original package metadata was preserved"
+            if config and str((config.get("metadata_enrichment") or {}).get("mode", "auto")) == "required":
+                target_states[-1]["status"] = "stale"
 
     statuses = [item["status"] for item in target_states]
     if "stale" in statuses:
@@ -545,10 +575,35 @@ def _package_stage(
     return record
 
 
+def _metadata_enrichment_status(output_dir: Path, config: Mapping[str, Any], *, config_path: Path | None = None) -> dict[str, Any]:
+    try:
+        from pdf2epub.metadata_enrichment.service import enrichment_status
+        return enrichment_status(output_dir, config, config_path=config_path)
+    except (ImportError, OSError, TypeError, ValueError):
+        return {}
+
+
+def _metadata_build_outcome(output_dir: Path, kind: str) -> dict[str, Any]:
+    receipt = _read_json(output_dir / "epub_build_receipt.json")
+    builds = receipt.get("builds") if isinstance(receipt.get("builds"), Mapping) else {}
+    entry = builds.get(kind) if isinstance(builds, Mapping) else None
+    outcome = entry.get("metadata_enrichment_outcome") if isinstance(entry, Mapping) else None
+    return dict(outcome) if isinstance(outcome, Mapping) else {}
+
+
+def _apply_metadata_outcome_to_stage(output_dir: Path, kind: str, mode: str, state: str, detail: str) -> tuple[str, str]:
+    outcome = _metadata_build_outcome(output_dir, kind)
+    if outcome.get("status") != "fallback":
+        return state, detail
+    if mode == "required":
+        return "pending", "required metadata was not applied; rebuild after correcting metadata"
+    return "skipped", "metadata was not applied for this package build; original package metadata was preserved"
+
+
 _HTML_STAGE_BY_KEY = {stage.key: stage for stage in HTML_WORKFLOW_STAGES}
 
 
-def _html_stages(output_dir: Path) -> list[dict[str, Any]]:
+def _html_stages(output_dir: Path, config: Mapping[str, Any], config_path: Path | None = None) -> list[dict[str, Any]]:
     compressed = output_dir / "compressed_units"
     prepared = compressed.is_dir() and bool(_file_list(compressed)) and (
         output_dir / "translate-html_subagent_manifest.json"
@@ -583,6 +638,27 @@ def _html_stages(output_dir: Path) -> list[dict[str, Any]]:
             ),
         ]
     )
+    enrichment_status = _metadata_enrichment_status(output_dir, config, config_path=config_path)
+    if enrichment_status:
+        required = enrichment_status.get("mode") == "required"
+        ready = enrichment_status.get("required_complete") is True if required else (
+            enrichment_status.get("current") is True and not enrichment_status.get("errors")
+            and enrichment_status.get("state") in {"valid", "not_applicable"})
+        partial = enrichment_status.get("current") is True and enrichment_status.get("eligible") is True and any(
+            item.get("verified") for item in enrichment_status.get("fields", {}).values() if isinstance(item, Mapping)
+        )
+        meta_state = "passed" if ready or (not required and partial) else ("pending" if required else "skipped")
+        meta_detail = ("metadata decision is valid and current" if ready else
+                       "partial verified metadata will be applied; unresolved fields keep original values" if partial else
+                       "required metadata enrichment is not ready" if required else
+                       "optional metadata enrichment has no current verified fields; package keeps its values")
+        meta_state, meta_detail = _apply_metadata_outcome_to_stage(
+            output_dir, "html-translated", enrichment_status.get("mode", "auto"), meta_state, meta_detail
+        )
+        stages.extend([
+            _status_record("metadata-prepare", "metadata-prepare", meta_state, meta_detail),
+            _status_record("metadata-validate", "metadata-validate", meta_state, meta_detail),
+        ])
     epub_files = [path for path in output_dir.glob("*.epub") if path.is_file()]
     stages.append(
         _package_stage(
@@ -590,8 +666,46 @@ def _html_stages(output_dir: Path) -> list[dict[str, Any]]:
             epub_files,
             command=_HTML_STAGE_BY_KEY["package"].command,
             kinds=("html-translated",),
+            config=config,
+            config_path=config_path,
         )
     )
+    return _apply_stage_blockers(stages)
+
+
+def _novel_stages(output_dir: Path, config: Mapping[str, Any], config_path: Path) -> list[dict[str, Any]]:
+    validation = _read_json(output_dir / "translate-novel_validation.json")
+    translated = validation.get("all_passed") is True
+    stages = [
+        _status_record("translate-novel", "translate-novel", "passed" if translated else "pending",
+                       "validated novel units are current" if translated else "run translate-novel and translate-novel-validate"),
+        _status_record("translate-novel-validate", "translate-novel-validate", "passed" if translated else "pending",
+                       "novel translation validation passed" if translated else "run translate-novel-validate"),
+    ]
+    meta = _metadata_enrichment_status(output_dir, config, config_path=config_path)
+    if meta:
+        required = meta.get("mode") == "required"
+        ready = meta.get("required_complete") is True if required else (
+            meta.get("current") is True and not meta.get("errors")
+            and meta.get("state") in {"valid", "not_applicable"})
+        partial = meta.get("current") is True and meta.get("eligible") is True and any(
+            item.get("verified") for item in meta.get("fields", {}).values() if isinstance(item, Mapping)
+        )
+        state = "passed" if ready or (not required and partial) else ("pending" if required else "skipped")
+        detail = "metadata decision is valid and current" if ready else (
+            "partial verified metadata will be applied; unresolved fields keep original values" if partial else
+            "required metadata enrichment is not ready" if required else
+            "optional metadata enrichment has no current verified fields; package keeps its values")
+        meta_state, detail = _apply_metadata_outcome_to_stage(
+            output_dir, "novel-translated", meta.get("mode", "auto"), state, detail
+        )
+        stages.extend([
+            _status_record("metadata-prepare", "metadata-prepare", meta_state, detail),
+            _status_record("metadata-validate", "metadata-validate", meta_state, detail),
+        ])
+    epub_files = [p for p in output_dir.glob("*.epub") if p.is_file()]
+    stages.append(_package_stage(output_dir, epub_files, command="build-novel-epub",
+                                 kinds=("novel-translated",), config=config, config_path=config_path))
     return _apply_stage_blockers(stages)
 
 
@@ -921,7 +1035,9 @@ def build_status(config_path: str | Path = "config.yaml") -> dict[str, Any]:
     # The documented stage ladder comes from the shared table; the status
     # command only decides which artifact checks apply to the configured input.
     workflow_stages_for(policy.kind)
-    if policy.kind in {"novel", "tex"}:
+    if policy.kind == "novel":
+        stages = _novel_stages(output_dir, config, path)
+    elif policy.kind == "tex":
         stages = [
             _status_record(
                 "status",
@@ -938,12 +1054,14 @@ def build_status(config_path: str | Path = "config.yaml") -> dict[str, Any]:
             ),
         ]
     elif input_type == "epub":
-        stages = _html_stages(output_dir)
+        stages = _html_stages(output_dir, config, path)
     else:
         stages = _pdf_stages(output_dir, path, config, input_path)
-    if policy.kind in {"novel", "tex"}:
+    if policy.kind == "tex":
         stages = _apply_stage_blockers(stages)
     report["stages"] = stages
+    if output_dir.is_dir():
+        report["metadata_enrichment"] = _metadata_enrichment_status(output_dir, config, config_path=path)
     report["ocr_evidence"] = _ocr_evidence(output_dir, config, input_type)
     report["review_gates"] = _review_gates(output_dir) if output_dir.is_dir() else []
     report["boundary_preview"] = (

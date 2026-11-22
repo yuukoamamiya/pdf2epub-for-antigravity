@@ -59,7 +59,9 @@ def load_config(config_path: str = "config.yaml") -> Dict:
     """
     config = _load_with_base(Path(config_path), set())
     from pdf2epub.ocr_consensus import validate_ocr_config
+    from pdf2epub.metadata_enrichment.options import validate_config as validate_metadata_config
 
     validate_ocr_config(config)
+    validate_metadata_config(config)
     PipelinePolicy.from_config(config)
     return config

@@ -13,7 +13,7 @@ import tempfile
 import uuid
 import zipfile
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 from loguru import logger
 
@@ -220,7 +220,7 @@ a { text-decoration: none; }
         """
         try:
             # Get current date
-            date = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+            date = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             
             # Start OPF document
             author = getattr(self.config, "author", "") or "Unknown"
@@ -237,7 +237,7 @@ a { text-decoration: none; }
         <dc:creator opf:role="aut">{html.escape(author)}</dc:creator>
 {publisher_element}        <dc:language>{self.config.language}</dc:language>
         <dc:identifier id="BookId" opf:scheme="UUID">{self.uid}</dc:identifier>
-        <dc:date>{date}</dc:date>
+        <meta name="dcterms:modified" content="{date}"/>
         <meta name="generator" content="PDF2EPUB v3"/>
         {f'<meta name="cover" content="cover-image"/>' if cover_image else ''}
     </metadata>

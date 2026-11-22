@@ -1154,6 +1154,12 @@ PDF/EPUB 的 Markdown→XHTML 处理目前采用两级公式策略：
 SVG，必须作为显式可选能力设计：配置开关、工具链预检、缓存目录、SVG 安全清洗、失败策略、
 跨平台测试和 README/AGENTS/维护文档必须同时更新，不能让构建隐式要求安装系统 TeX。
 
+### 3.2.1 书目元数据识别与补全
+
+`metadata_enrichment` 是 PDF→EPUB 与 HTML/EPUB 构建前的独立、证据绑定阶段。`metadata-prepare` 只收集限量本地证据并写 scoped handoff；Antigravity Subagent 对作品身份、出版物适用性、底本关系和字段作语义判断。`metadata-fetch` 在身份和适用性已审核后查询有限公共目录，写入候选缓存；候选不会自动成为可打包值。`metadata-validate` 检查当前 source/evidence 哈希、decision schema、精确 evidence references 和 requested fields；构建器只接收有效报告中的 verified 字段。`metadata-status` 查看阶段状态。默认 `mode: auto`，`required` 仅对明确列出的字段应用要求，`disabled` 跳过。
+
+PDF 和 HTML/EPUB 构建器将 verified metadata 映射到 OPF，并在 build receipt 中绑定有效元数据及其证据/封面依赖；失效或过期收据不能代表当前 package。metadata enrichment 不重跑正文翻译，也不绕过正文和 pipeline readiness 门禁。字段关系、handoff schema、恢复路径和操作员边界见 [`metadata-enrichment.md`](metadata-enrichment.md)。Calibre 自动入库当前不属于系统边界。
+
 ### 3.2 高保真 EPUB 工作流
 
 ```text

@@ -247,7 +247,8 @@ def _prepare_html_command(args):
         pipeline = HTMLEpubPipeline(
             epub_path=epub_path,
             output_dir=output_dir,
-            config=config
+            config=config,
+            config_path=Path(args.config),
         )
 
         # Auto-detect source language from EPUB metadata

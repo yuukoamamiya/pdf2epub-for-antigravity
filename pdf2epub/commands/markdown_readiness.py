@@ -610,6 +610,15 @@ def run_readiness_check(
             else "polish receipt is missing, stale, or does not attest package inputs",
         )
 
+    if stage == "package" and policy.metadata_enrichment_mode == "required":
+        try:
+            from pdf2epub.metadata_enrichment.service import resolve_enrichment
+            resolve_enrichment(output_dir, config, config_path=Path(config_path))
+            metadata_ready, metadata_detail = True, "required metadata decision is current and validated"
+        except Exception as exc:
+            metadata_ready, metadata_detail = False, str(exc)
+        record("metadata_enrichment", metadata_ready, metadata_detail)
+
     report = {
         "schema_version": 1,
         "stage": stage,
