@@ -463,9 +463,13 @@ worker `dispatch_status` 计数与波次数，用于判断是否需要开 Subage
 - `document_roles.py`：集中维护特殊翻译角色、参考文献/前置内容识别、目标语言密度豁免和
   文件名角色回退规则。编号书目标题仅按有限多语言完整标签识别；续页需要重复的书目条目结构，
   普通正文的年份、引用或 DOI/URL 本身不触发豁免。它只处理文本与文件名事实，不读取工作流状态，也不执行写入。
-- `entity_context.py`：集中维护 PDF/EPUB 共用的书内实体源文件选择、Subagent 交接和源哈希
-  新鲜度检查。`commands.entities` 只负责命令参数和 PDF 前置条件，HTML、Markdown 与诊断模块
-  直接依赖该格式无关服务，不再跨 command 导入私有 helper。
+- `entity_context.py`：集中维护 PDF/EPUB 共用的实体增量交接、已完成快照和当前性检查。
+  准备快照身份由有序 Markdown 结构与语言对确定，普通空白/换行刷新可复用；变更文件进入
+  增量复核并附有限长邻片摘录。模板保留已有条目，输出 metadata 回写快照身份；准备不推进
+  已完成基线，只有成功的 `extract-entities-validate` 才记录新基线。可证明的 polish 脚注移动
+  还要求有效规范化版本链、未变 OCR provenance、哈希匹配的旧 polish 备份、逐补丁精确重建和
+  脚注定义内容守恒。`commands.entities` 负责验证并写入完成回执；HTML、Markdown、glossary
+  validation 和诊断均消费共享合同。
 - `dynamic_terminology.py` 与 `terminology_memory.py`：提供默认关闭的动态术语候选、作用域投影、
   Reviewer packet 和不可变快照发布。候选绑定 worker assignment、语言对、源/目标哈希和章节；
   本地流程不批准候选。worker 默认提交章节 scope；只有显式提出 book scope 且 Reviewer 批准后才跨章节
@@ -1316,9 +1320,11 @@ Format workflow services  → shared utilities/domain services
 3. 当前源文件、该单元的 TOC 上下文、实体/术语投影和对应记录一致；全书级上下文变化不再默认使未受影响单元失效；
 4. 普通正文的目标语言审计、特殊角色数字保护、TOC 绑定和全量流程报告全部通过后，才允许打包。
 
-实体表的恢复条件还包括源文件集合与 manifest 完全一致；只要集合新增或删除，即使剩余文件
-哈希未变，也必须重新生成实体 handoff。OCR 的第二套后端则在配置加载阶段完成一致性校验，
-避免策略层、命令层和实际 OCR 执行层对同一开关产生不同解释。
+实体表恢复以最后一个成功完成的源快照为基线；prepare 重写 manifest 不会认证旧结果。新增、
+删除或修改单元进入局部增量复核，未变化单元保留。格式刷新或满足脚注迁移证明的结果可机械复用；
+legacy 输出只在旧成功验证报告哈希与源清单可证明时保留为明确标注的旧基线，否则进入 bootstrap。
+语言对变化需重新复核。OCR 的第二套后端则在配置加载阶段完成一致性校验，避免策略层、命令层和
+实际 OCR 执行层对同一开关产生不同解释。
 
 脚注候选报告至少绑定主 OCR sidecar 哈希、`source_kind`、证据模式和（双 OCR 时）次 OCR
 sidecar 哈希；旧原生文字运行还必须保留 `coordinate_system: page_points` 的 sidecar。脚注决定

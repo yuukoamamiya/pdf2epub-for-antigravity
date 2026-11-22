@@ -8,7 +8,11 @@ import pytest
 from pdf2epub.html_translation import builder as html_builder
 from pdf2epub.html_translation.builder import HTMLEpubPipeline
 from pdf2epub.commands.novel import _novel_child_dir
-from pdf2epub.entity_context import entity_context_is_current
+from pdf2epub.entity_context import (
+    entity_context_is_current,
+    prepare_entity_subagent_task,
+    record_completed_entity_snapshot,
+)
 from pdf2epub.entity_extractor import create_entity_template
 from pdf2epub.ocr_consensus import validate_ocr_config
 from pdf2epub.tex_translation.arxiv import (
@@ -310,40 +314,131 @@ def test_entity_checkpoint_rejects_a_new_source_unit(tmp_path: Path):
     source_dir.mkdir()
     source = source_dir / "chapter.md"
     source.write_text("Source", encoding="utf-8")
-    (tmp_path / "translation_entities.json").write_text(
-        json.dumps(
-            {
-                **create_entity_template("Book", "English", "Chinese", [source.name]),
-                "metadata": {
-                    "book_title": "Book",
-                    "source_language": "English",
-                    "target_language": "Chinese",
-                    "source_files": [source.name],
-                    "extraction_complete": True,
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
-    (tmp_path / "entity_subagent_manifest.json").write_text(
-        json.dumps(
-            {
-                "source_dir": "compressed_units",
-                "source_sha256": {
-                    source.name: hashlib.sha256(source.read_bytes()).hexdigest()
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
+    prepare_entity_subagent_task(tmp_path, "Book", source_dir, "epub-compressed", "English", "Chinese", {})
+    manifest = json.loads((tmp_path / "entity_subagent_manifest.json").read_text(encoding="utf-8"))
+    template = json.loads((tmp_path / "translation_entities.template.json").read_text(encoding="utf-8"))
+    template["metadata"]["extraction_complete"] = True
+    (tmp_path / "translation_entities.json").write_text(json.dumps(template), encoding="utf-8")
+    record_completed_entity_snapshot(tmp_path, manifest, tmp_path / "translation_entities.json")
 
     assert entity_context_is_current(
         tmp_path, source_dir, "English", "Chinese"
     ) is True
     (source_dir / "new.md").write_text("New source", encoding="utf-8")
+    prepare_entity_subagent_task(tmp_path, "Book", source_dir, "epub-compressed", "English", "Chinese", {})
     assert entity_context_is_current(
         tmp_path, source_dir, "English", "Chinese"
     ) is False
+
+
+def test_entity_repeated_prepare_and_format_only_refresh_are_stable(tmp_path: Path):
+    source_dir = tmp_path / "compressed_units"
+    source_dir.mkdir()
+    source = source_dir / "chapter.md"
+    source.write_text("# Heading\n\nA paragraph with words.\n", encoding="utf-8")
+    prepare_entity_subagent_task(tmp_path, "Book", source_dir, "epub-compressed", "English", "Chinese", {})
+    first = json.loads((tmp_path / "entity_subagent_manifest.json").read_text(encoding="utf-8"))
+    template = json.loads((tmp_path / "translation_entities.template.json").read_text(encoding="utf-8"))
+    template["metadata"]["extraction_complete"] = True
+    (tmp_path / "translation_entities.json").write_text(json.dumps(template), encoding="utf-8")
+    record_completed_entity_snapshot(tmp_path, first, tmp_path / "translation_entities.json")
+
+    source.write_bytes("# Heading   \r\n\r\nA   paragraph with\r\nwords.   \r\n".encode("utf-8"))
+    prepare_entity_subagent_task(tmp_path, "Book", source_dir, "epub-compressed", "English", "Chinese", {})
+    refreshed = json.loads((tmp_path / "entity_subagent_manifest.json").read_text(encoding="utf-8"))
+    assert refreshed["mode"] == "refresh"
+    assert refreshed["pending_files"] == []
+    assert refreshed["snapshot_id"] == first["snapshot_id"]
+    assert entity_context_is_current(tmp_path, source_dir, "English", "Chinese")
+    prepare_entity_subagent_task(tmp_path, "Book", source_dir, "epub-compressed", "English", "Chinese", {})
+    repeated = json.loads((tmp_path / "entity_subagent_manifest.json").read_text(encoding="utf-8"))
+    assert repeated["snapshot_id"] == first["snapshot_id"]
+
+
+def test_entity_substantive_change_localizes_pending_source_units(tmp_path: Path):
+    source_dir = tmp_path / "compressed_units"
+    source_dir.mkdir()
+    for name in ("chapter_1.md", "chapter_2.md"):
+        (source_dir / name).write_text(f"Original {name}", encoding="utf-8")
+    prepare_entity_subagent_task(tmp_path, "Book", source_dir, "epub-compressed", "English", "Chinese", {})
+    manifest = json.loads((tmp_path / "entity_subagent_manifest.json").read_text(encoding="utf-8"))
+    template = json.loads((tmp_path / "translation_entities.template.json").read_text(encoding="utf-8"))
+    template["metadata"]["extraction_complete"] = True
+    (tmp_path / "translation_entities.json").write_text(json.dumps(template), encoding="utf-8")
+    record_completed_entity_snapshot(tmp_path, manifest, tmp_path / "translation_entities.json")
+    (source_dir / "chapter_1.md").write_text("Substantively changed wording", encoding="utf-8")
+
+    prepare_entity_subagent_task(tmp_path, "Book", source_dir, "epub-compressed", "English", "Chinese", {})
+    changed = json.loads((tmp_path / "entity_subagent_manifest.json").read_text(encoding="utf-8"))
+    assert changed["pending_files"] == ["chapter_1.md"]
+    assert changed["mode"] == "incremental_review"
+    assert entity_context_is_current(tmp_path, source_dir, "English", "Chinese") is False
+
+
+def test_entity_added_and_removed_units_are_reported_without_reassigning_unchanged_units(tmp_path: Path):
+    source_dir = tmp_path / "compressed_units"
+    source_dir.mkdir()
+    for name in ("chapter_1.md", "chapter_2.md"):
+        (source_dir / name).write_text(f"Source {name}", encoding="utf-8")
+    prepare_entity_subagent_task(tmp_path, "Book", source_dir, "epub-compressed", "English", "Chinese", {})
+    manifest = json.loads((tmp_path / "entity_subagent_manifest.json").read_text(encoding="utf-8"))
+    template = json.loads((tmp_path / "translation_entities.template.json").read_text(encoding="utf-8"))
+    template["metadata"]["extraction_complete"] = True
+    (tmp_path / "translation_entities.json").write_text(json.dumps(template), encoding="utf-8")
+    record_completed_entity_snapshot(tmp_path, manifest, tmp_path / "translation_entities.json")
+
+    (source_dir / "chapter_2.md").unlink()
+    (source_dir / "chapter_3.md").write_text("New source", encoding="utf-8")
+    prepare_entity_subagent_task(tmp_path, "Book", source_dir, "epub-compressed", "English", "Chinese", {})
+    changed = json.loads((tmp_path / "entity_subagent_manifest.json").read_text(encoding="utf-8"))
+    assert changed["pending_files"] == ["chapter_3.md"]
+    assert changed["removed_files"] == ["chapter_2.md"]
+    assert changed["assigned_files"] == ["chapter_3.md"]
+
+
+def test_entity_neighbor_context_is_bounded_to_excerpt_sidecars(tmp_path: Path):
+    source_dir = tmp_path / "compressed_units"
+    source_dir.mkdir()
+    (source_dir / "chapter_1.md").write_text("PREVIOUS-START " + "x" * 5000 + " PREVIOUS-END", encoding="utf-8")
+    (source_dir / "chapter_2.md").write_text("Original middle unit", encoding="utf-8")
+    (source_dir / "chapter_3.md").write_text("NEXT-START " + "y" * 5000 + " NEXT-END", encoding="utf-8")
+    prepare_entity_subagent_task(tmp_path, "Book", source_dir, "epub-compressed", "English", "Chinese", {})
+    manifest = json.loads((tmp_path / "entity_subagent_manifest.json").read_text(encoding="utf-8"))
+    template = json.loads((tmp_path / "translation_entities.template.json").read_text(encoding="utf-8"))
+    template["metadata"]["extraction_complete"] = True
+    (tmp_path / "translation_entities.json").write_text(json.dumps(template), encoding="utf-8")
+    record_completed_entity_snapshot(tmp_path, manifest, tmp_path / "translation_entities.json")
+
+    (source_dir / "chapter_2.md").write_text("Changed middle unit", encoding="utf-8")
+    prepare_entity_subagent_task(tmp_path, "Book", source_dir, "epub-compressed", "English", "Chinese", {})
+    manifest = json.loads((tmp_path / "entity_subagent_manifest.json").read_text(encoding="utf-8"))
+    context_paths = manifest["context_files"]["chapter_2.md"]
+    assert len(context_paths) == 1
+    context_text = (tmp_path / context_paths[0]).read_text(encoding="utf-8")
+    assert len(context_text) < 1800
+    assert "PREVIOUS-START" not in context_text
+    assert "PREVIOUS-END" in context_text
+    assert "NEXT-START" in context_text
+    assert "NEXT-END" not in context_text
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        ("A `red fox` glove.", "A `red`fox`glove."),
+        ("- parent\n  - child\n", "- parent\n- child\n"),
+        ("```text\n  code\n```\n", "```text\n code\n```\n"),
+        ("[^1]: note\n  continuation\n", "[^1]: note\n continuation\n"),
+    ],
+)
+def test_entity_format_identity_keeps_code_and_structure_significant(tmp_path: Path, before: str, after: str):
+    from pdf2epub.entity_context import _format_identity
+
+    path = tmp_path / "source.md"
+    path.write_text(before, encoding="utf-8")
+    first = _format_identity(path)
+    path.write_text(after, encoding="utf-8")
+    assert _format_identity(path) != first
 
 
 def test_novel_manifest_directory_cannot_escape_output(tmp_path: Path):

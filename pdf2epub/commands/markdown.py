@@ -14,6 +14,7 @@ from typing import Any, Dict, Mapping, Optional
 from loguru import logger
 
 from pdf2epub.command_errors import log_command_error
+from pdf2epub.entity_context import entity_context_status
 from pdf2epub.commands.runtime import load_book_context
 from pdf2epub.commands.markdown_readiness import run_readiness_check
 from pdf2epub.commands.sources import (
@@ -739,27 +740,18 @@ def _validate_translation_entities(output_dir: Path, config: dict) -> dict:
         )
     except (OSError, json.JSONDecodeError) as exc:
         errors.append(f"invalid translation_entities.json: {exc}")
-    entity_manifest_path = output_dir / "entity_subagent_manifest.json"
-    if entity_manifest_path.is_file():
-        try:
-            entity_manifest = json.loads(
-                entity_manifest_path.read_text(encoding="utf-8")
-            )
-            source_dir, _ = _resolve_pdf_markdown_source(output_dir, config)
-            expected_dir = relative_posix_path(source_dir, output_dir)
-            manifest_source_dir = posix_path(entity_manifest.get("source_dir") or "")
-            if manifest_source_dir != expected_dir:
-                errors.append(
-                    "entity glossary was extracted from a different source stage"
-                )
-            for name, expected in (entity_manifest.get("source_sha256", {}) or {}).items():
-                source_path = source_dir / str(name)
-                if not source_path.is_file():
-                    errors.append(f"entity source file is missing: {name}")
-                elif sha256_file(source_path) != expected:
-                    errors.append(f"entity source file changed after extraction: {name}")
-        except (OSError, json.JSONDecodeError, AttributeError, TypeError, ValueError) as exc:
-            errors.append(f"invalid entity_subagent_manifest.json: {exc}")
+    try:
+        source_dir, _ = _resolve_pdf_markdown_source(output_dir, config)
+        current, detail = entity_context_status(
+            output_dir,
+            source_dir,
+            (config.get("translation", {}) or {}).get("source_language"),
+            (config.get("translation", {}) or {}).get("target_language"),
+        )
+        if not current:
+            errors.append(detail)
+    except (OSError, ValueError, TypeError) as exc:
+        errors.append(f"could not verify entity source snapshot: {exc}")
     return {
         "valid": not errors,
         "errors": errors,

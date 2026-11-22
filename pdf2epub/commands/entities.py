@@ -18,7 +18,9 @@ from pdf2epub.commands.sources import (
 )
 from pdf2epub.pipeline_policy import PipelinePolicy
 from pdf2epub.entity_context import (
+    _load_accepted_entities,
     prepare_entity_subagent_task,
+    record_completed_entity_snapshot,
     validate_entity_source_manifest,
 )
 from pdf2epub.utils.paths import book_output_dir
@@ -101,28 +103,68 @@ def extract_entities_validate_command(args):
     except (OSError, json.JSONDecodeError) as exc:
         logger.error(f"Invalid entity JSON: {exc}")
         return 1
-    errors = validate_entities(
-        data,
-        book_title,
-        policy.source_language,
-        policy.target_language,
-    )
+    errors = []
+    original_data = data
+    merge_audit = {"restored": [], "reviewed_removals": [], "updated": []}
     manifest_path = entity_path.parent / "entity_subagent_manifest.json"
+    manifest = None
     if manifest_path.is_file():
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             source_dir = entity_path.parent / manifest.get("source_dir", "")
-            errors.extend(
-                validate_entity_source_manifest(manifest, entity_path.parent, source_dir)
-            )
+            errors.extend(validate_entity_source_manifest(manifest, entity_path.parent, source_dir))
+            if manifest.get("schema_version", 1) >= 2:
+                if manifest.get("mode") == "legacy_reuse":
+                    baseline_path = entity_path.parent / "entity_completed_snapshot.json"
+                    try:
+                        baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+                    except (OSError, json.JSONDecodeError):
+                        baseline = {}
+                    if (baseline.get("origin") != "legacy_validated"
+                            or baseline.get("entity_sha256") != sha256_file(entity_path)
+                            or baseline.get("source_sha256") != manifest.get("source_sha256")
+                            or manifest.get("pending_files") or manifest.get("removed_files")):
+                        errors.append("legacy entity reuse is not backed by an unchanged successful validation")
+                else:
+                    baseline_path = entity_path.parent / "entity_completed_snapshot.json"
+                    try:
+                        baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+                    except (OSError, json.JSONDecodeError):
+                        baseline = {}
+                    metadata = data.get("metadata") if isinstance(data, dict) else None
+                    metadata = metadata if isinstance(metadata, dict) else {}
+                    if metadata.get("extraction_snapshot_id") != manifest.get("snapshot_id"):
+                        errors.append("entity output is not bound to the prepared source snapshot")
+                    if manifest.get("mode") in {"incremental_review", "bootstrap"} and metadata.get("extraction_complete") is not True:
+                        errors.append("metadata.extraction_complete must be true after entity review")
+                    if not errors and isinstance(data, dict):
+                        accepted = _load_accepted_entities(entity_path.parent, baseline)
+                        if accepted is not None:
+                            from pdf2epub.entity_extractor import preserve_completed_entries
+
+                            allowed_sources = set(manifest.get("assigned_files", [])) | set(manifest.get("removed_files", []))
+                            data, merge_audit = preserve_completed_entries(
+                                data, accepted, allowed_removal_sources=allowed_sources
+                            )
+        except ValueError as exc:
+            errors.append(str(exc))
         except (OSError, json.JSONDecodeError, TypeError):
             errors.append("invalid entity_subagent_manifest.json")
+    else:
+        errors.append("entity_subagent_manifest.json is missing")
+    errors.extend(validate_entities(data, book_title, policy.source_language, policy.target_language))
+    if not errors and data != original_data:
+        try:
+            atomic_write_json(entity_path, data)
+        except OSError as exc:
+            errors.append(f"could not publish merged entity output: {exc}")
     report = {
         "task": "extract-entities",
         "valid": not errors,
         "errors": errors,
         "entity_sha256": sha256_file(entity_path),
         "file": str(entity_path),
+        "entry_merge": merge_audit,
     }
     atomic_write_json(
         entity_path.parent / "translation_entities_validation.json",
@@ -132,5 +174,14 @@ def extract_entities_validate_command(args):
         for error in errors:
             logger.error(error)
         return 1
+    if manifest and manifest.get("schema_version", 1) >= 2 and manifest.get("mode") != "legacy_reuse":
+        try:
+            record_completed_entity_snapshot(entity_path.parent, manifest, entity_path)
+        except (OSError, ValueError, TypeError) as exc:
+            report["valid"] = False
+            report["errors"] = [f"could not preserve completed entity snapshot: {exc}"]
+            atomic_write_json(entity_path.parent / "translation_entities_validation.json", report)
+            logger.error(report["errors"][0])
+            return 1
     logger.success(f"Entity Subagent output validated: {entity_path}")
     return 0

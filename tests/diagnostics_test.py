@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 
 from pdf2epub.commands.diagnostics import build_doctor, build_status
+from pdf2epub.commands.diagnostics import _entity_stage_status
 from pdf2epub.ocr_progress import new_progress
 
 
@@ -24,6 +25,42 @@ def _config(tmp_path: Path, *, pipeline: str | None = None, backend: str = "chan
     config_path = tmp_path / "config.yaml"
     config_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return config_path
+
+
+def test_entity_status_explains_incremental_review_and_format_refresh(tmp_path: Path, monkeypatch):
+    from pdf2epub.commands import sources
+
+    output = tmp_path / "output" / "Book"
+    source_dir = output / "polished_markdown" / "validated"
+    source_dir.mkdir(parents=True)
+    source_file = source_dir / "chapter_1.md"
+    source_file.write_text("Current source", encoding="utf-8")
+    monkeypatch.setattr(sources, "_resolve_pdf_markdown_source", lambda *_a, **_kw: (source_dir, "polished"))
+    config = {"title": "Book", "translation": {"source_language": "English", "target_language": "Chinese"}}
+    from pdf2epub.entity_context import prepare_entity_subagent_task
+
+    prepare_entity_subagent_task(output, "Book", source_dir, "polished", "English", "Chinese", {})
+    manifest_path = output / "entity_subagent_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.update({"mode": "incremental_review", "pending_files": ["chapter_1.md"], "assigned_files": ["chapter_1.md"]})
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    ready, detail = _entity_stage_status(output, config)
+    assert ready is False
+    assert "incremental review required" in detail
+    assert "chapter_1.md" in detail
+
+    manifest.update({"mode": "refresh", "pending_files": [], "assigned_files": []})
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    ready, detail = _entity_stage_status(output, config)
+    assert ready is False
+    assert "formatting refresh only" in detail
+    assert "no Subagent review needed" in detail
+
+    source_file.write_text("A substantive source edit", encoding="utf-8")
+    ready, detail = _entity_stage_status(output, config)
+    assert ready is False
+    assert "source changed after preparation" in detail
+    assert "formatting refresh only" not in detail
 
 
 def test_status_empty_output_points_to_ocr(tmp_path: Path, monkeypatch):

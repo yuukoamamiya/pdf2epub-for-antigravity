@@ -233,6 +233,13 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
   正文和元数据 worker 都不得直接读取完整原生参考表快照。
 - `translate`、`polish`、`refine`、`extract-entities`、`translate-toc` 只准备交接或
   执行本地处理；命令成功不代表正文已经完成。
+- `extract-entities` compares against the last validated entity snapshot. Repeated preparation
+  does not advance that baseline. Formatting-only refreshes reuse the existing table; substantive
+  changes create a scoped review for changed units with bounded adjacent excerpts. Preserve prior
+  entity entries, and an unchanged table is a valid reviewer result when no new terms are found.
+  `extract-entities-validate` binds successful output to the prepared snapshot. Legacy tables are
+  reusable only when their prior successful validation and source inventory can be proven; otherwise
+  preparation offers a bootstrap using existing entries as proposals.
 - `polish` 会按 `subagent.batching.max_concurrency` 生成
   `polish_worker_handoffs/`；`translate` 使用 `worker_handoffs/`。每个 worker
   只能处理自己 manifest 中的 `assigned_files`。PDF/EPUB `translate` 按 TOC 顺序把

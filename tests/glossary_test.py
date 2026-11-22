@@ -407,6 +407,31 @@ def test_unit_glossary_context_is_compact_and_omits_empty_entity_notes(tmp_path:
     ]
 
 
+def test_empty_entity_authority_keeps_sparse_projection_stable_across_provenance_updates(tmp_path: Path):
+    import hashlib
+
+    output = tmp_path / "output"
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    (source_dir / "unit.md").write_text("No listed entity appears here.\n", encoding="utf-8")
+    entity_path = output / "translation_entities.json"
+    entity_path.parent.mkdir(parents=True)
+    entity_path.write_text(json.dumps({
+        "metadata": {"extraction_snapshot_id": "old", "extraction_complete": True},
+        "characters": [], "places": [], "organizations": [], "terms": [], "races": [], "items": [],
+    }), encoding="utf-8")
+
+    before = build_unit_glossary_contexts(output, source_dir, {}, entity_path)
+    before_hash = hashlib.sha256(before["unit.md"].read_bytes()).hexdigest()
+    context = json.loads(before["unit.md"].read_text(encoding="utf-8"))
+    assert context["entries"] == []
+    entity = json.loads(entity_path.read_text(encoding="utf-8"))
+    entity["metadata"]["extraction_snapshot_id"] = "new-provenance-only"
+    entity_path.write_text(json.dumps(entity), encoding="utf-8")
+    after = build_unit_glossary_contexts(output, source_dir, {}, entity_path)
+    assert hashlib.sha256(after["unit.md"].read_bytes()).hexdigest() == before_hash
+
+
 def test_unit_glossary_matching_normalizes_unicode_allows_short_terms_and_writes_audit(
     tmp_path: Path,
 ):

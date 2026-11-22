@@ -45,7 +45,8 @@ from pdf2epub.markdown_validation import (
 )
 from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
 from pdf2epub.footnote_normalization import validate_polish_footnote_normalization
-from pdf2epub.commands.entities import extract_entities_command
+from pdf2epub.commands.entities import extract_entities_command, extract_entities_validate_command
+from pdf2epub.commands import entities as entity_commands
 from pdf2epub.commands.markdown import (
     _prepare_pdf_markdown_task,
     _validate_translation_entities,
@@ -2303,6 +2304,210 @@ def test_epub_entity_extraction_excludes_deterministic_appendices(tmp_path: Path
         "Cover.md",
         "Index.md",
     ]
+
+
+def test_legacy_entity_baseline_reuses_without_rewriting_entity_output(tmp_path: Path, monkeypatch):
+    from pdf2epub.entity_extractor import create_entity_template
+    from pdf2epub.entity_context import entity_context_is_current
+
+    output = tmp_path / "output" / "Book"
+    source_dir = output / "compressed_units"
+    source_dir.mkdir(parents=True)
+    source = source_dir / "chapter.md"
+    source.write_text("Hegel appears.", encoding="utf-8")
+    entity = create_entity_template("Book", "English", "Chinese", [source.name])
+    entity["metadata"]["extraction_complete"] = True
+    entity["terms"].append({"original": "Hegel", "suggested_translation": "黑格尔"})
+    entity_path = output / "translation_entities.json"
+    entity_path.write_text(json.dumps(entity, ensure_ascii=False), encoding="utf-8")
+    entity_bytes = entity_path.read_bytes()
+    source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+    (output / "entity_subagent_manifest.json").write_text(json.dumps({
+        "schema_version": 1, "source_dir": "compressed_units", "source_stage": "epub-compressed",
+        "source_language": "English", "target_language": "Chinese", "source_filter_version": 1,
+        "files": [source.name], "excluded_files": [], "source_sha256": {source.name: source_hash},
+    }), encoding="utf-8")
+    (output / "translation_entities_validation.json").write_text(json.dumps({
+        "valid": True, "entity_sha256": hashlib.sha256(entity_bytes).hexdigest(),
+    }), encoding="utf-8")
+
+    prepare_entity_subagent_task(output, "Book", source_dir, "epub-compressed", "English", "Chinese", {})
+    manifest = json.loads((output / "entity_subagent_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["mode"] == "legacy_reuse"
+    assert manifest["pending_files"] == []
+    assert entity_path.read_bytes() == entity_bytes
+
+    monkeypatch.setattr(entity_commands, "load_book_context", lambda *_a, **_kw: SimpleNamespace(
+        config={"title": "Book", "translation": {"source_language": "English", "target_language": "Chinese"}},
+        book_title="Book", output_dir=output,
+    ))
+    result = extract_entities_validate_command(SimpleNamespace())
+    assert result == 0
+    assert entity_path.read_bytes() == entity_bytes
+    assert json.loads((output / "entity_completed_snapshot.json").read_text(encoding="utf-8"))["origin"] == "legacy_validated"
+    assert entity_context_is_current(output, source_dir, "English", "Chinese") is True
+
+
+def test_entity_recovery_preserves_exact_accepted_bytes(tmp_path: Path):
+    output = tmp_path / "output" / "Book"
+    source_dir = output / "compressed_units"
+    source_dir.mkdir(parents=True)
+    (source_dir / "chapter.md").write_text("Hegel appears.", encoding="utf-8")
+    prepare_entity_subagent_task(output, "Book", source_dir, "epub-compressed", "English", "Chinese", {})
+    manifest = json.loads((output / "entity_subagent_manifest.json").read_text(encoding="utf-8"))
+    entity_path = output / "translation_entities.json"
+    data = json.loads((output / "translation_entities.template.json").read_text(encoding="utf-8"))
+    data["metadata"]["extraction_complete"] = True
+    data["terms"].append({"original": "Hegel", "suggested_translation": "黑格尔"})
+    accepted_bytes = json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("}", "}\r\n", 1).encode("utf-8")
+    entity_path.write_bytes(accepted_bytes)
+    from pdf2epub.entity_context import record_completed_entity_snapshot
+
+    record_completed_entity_snapshot(output, manifest, entity_path)
+    baseline = json.loads((output / "entity_completed_snapshot.json").read_text(encoding="utf-8"))
+    assert baseline["entity_sha256"] == hashlib.sha256(accepted_bytes).hexdigest()
+    assert baseline["accepted_sha256"] == hashlib.sha256(accepted_bytes).hexdigest()
+
+    partial = dict(data)
+    partial["terms"] = []
+    entity_path.write_text(json.dumps(partial, ensure_ascii=False), encoding="utf-8")
+    prepare_entity_subagent_task(output, "Book", source_dir, "epub-compressed", "English", "Chinese", {})
+    assert entity_path.read_bytes() == accepted_bytes
+    template = json.loads((output / "translation_entities.template.json").read_text(encoding="utf-8"))
+    assert template["terms"] == data["terms"]
+
+
+def test_incremental_entity_no_new_terms_binds_review_and_failed_validation_keeps_baseline(tmp_path: Path, monkeypatch):
+    from pdf2epub.entity_context import record_completed_entity_snapshot
+
+    output = tmp_path / "output" / "Book"
+    source_dir = output / "compressed_units"
+    source_dir.mkdir(parents=True)
+    source = source_dir / "chapter.md"
+    source.write_text("Hegel appears.", encoding="utf-8")
+    prepare_entity_subagent_task(output, "Book", source_dir, "epub-compressed", "English", "Chinese", {})
+    manifest = json.loads((output / "entity_subagent_manifest.json").read_text(encoding="utf-8"))
+    template = json.loads((output / "translation_entities.template.json").read_text(encoding="utf-8"))
+    template["metadata"]["extraction_complete"] = True
+    template["terms"].append({"original": "Hegel", "suggested_translation": "黑格尔"})
+    entity_path = output / "translation_entities.json"
+    entity_path.write_text(json.dumps(template, ensure_ascii=False), encoding="utf-8")
+    record_completed_entity_snapshot(output, manifest, entity_path)
+    prior_arrays = {key: template[key] for key in ("characters", "places", "organizations", "terms", "races", "items")}
+    prior_baseline = (output / "entity_completed_snapshot.json").read_bytes()
+
+    source.write_text("Hegel appears in the changed chapter.", encoding="utf-8")
+    prepare_entity_subagent_task(output, "Book", source_dir, "epub-compressed", "English", "Chinese", {})
+    changed_manifest = json.loads((output / "entity_subagent_manifest.json").read_text(encoding="utf-8"))
+    retained_template = json.loads((output / "translation_entities.template.json").read_text(encoding="utf-8"))
+    assert changed_manifest["pending_files"] == ["chapter.md"]
+    for key, entries in prior_arrays.items():
+        assert retained_template[key] == entries
+
+    monkeypatch.setattr(entity_commands, "load_book_context", lambda *_a, **_kw: SimpleNamespace(
+        config={"title": "Book", "translation": {"source_language": "English", "target_language": "Chinese"}},
+        book_title="Book", output_dir=output,
+    ))
+    unbound = dict(retained_template)
+    unbound["metadata"] = dict(retained_template["metadata"])
+    unbound["metadata"]["extraction_snapshot_id"] = "wrong-snapshot"
+    unbound["terms"] = []
+    entity_path = output / "translation_entities.json"
+    entity_path.write_text(json.dumps(unbound, ensure_ascii=False), encoding="utf-8")
+    unbound_bytes = entity_path.read_bytes()
+    assert extract_entities_validate_command(SimpleNamespace()) == 1
+    assert entity_path.read_bytes() == unbound_bytes
+    assert (output / "entity_completed_snapshot.json").read_bytes() == prior_baseline
+
+    # A partial worker output is archived and never becomes the next template's accepted baseline.
+    partial = dict(retained_template)
+    partial["terms"] = []
+    partial["metadata"] = dict(retained_template["metadata"])
+    partial["metadata"]["extraction_snapshot_id"] = "stale-partial"
+    entity_path.write_text(json.dumps(partial, ensure_ascii=False), encoding="utf-8")
+    prepare_entity_subagent_task(output, "Book", source_dir, "epub-compressed", "English", "Chinese", {})
+    retained_template = json.loads((output / "translation_entities.template.json").read_text(encoding="utf-8"))
+    assert retained_template["terms"] == prior_arrays["terms"]
+    assert list((output / "entity_unvalidated").glob("*.json"))
+
+    # A no-new-terms review may keep all arrays identical; only provenance changes.
+    retained_template["metadata"]["extraction_complete"] = True
+    entity_path.write_text(json.dumps(retained_template, ensure_ascii=False), encoding="utf-8")
+    assert extract_entities_validate_command(SimpleNamespace()) == 0
+    final = json.loads(entity_path.read_text(encoding="utf-8"))
+    for key, entries in prior_arrays.items():
+        assert final[key] == entries
+    assert final["metadata"]["extraction_snapshot_id"] == changed_manifest["snapshot_id"]
+
+    source.write_text("A second substantive update.", encoding="utf-8")
+    prepare_entity_subagent_task(output, "Book", source_dir, "epub-compressed", "English", "Chinese", {})
+    current_manifest = json.loads((output / "entity_subagent_manifest.json").read_text(encoding="utf-8"))
+    candidate = json.loads((output / "translation_entities.template.json").read_text(encoding="utf-8"))
+    candidate["metadata"]["extraction_complete"] = True
+    candidate["terms"] = [{"original": "New term", "suggested_translation": "新术语"}]
+    entity_path.write_text(json.dumps(candidate, ensure_ascii=False), encoding="utf-8")
+    assert extract_entities_validate_command(SimpleNamespace()) == 0
+    merged = json.loads(entity_path.read_text(encoding="utf-8"))
+    assert {entry["original"] for entry in merged["terms"]} == {"Hegel", "New term"}
+    merge_report = json.loads((output / "translation_entities_validation.json").read_text(encoding="utf-8"))
+    assert merge_report["entry_merge"]["restored"] == ["terms:Hegel"]
+    assert merged["metadata"]["extraction_snapshot_id"] == current_manifest["snapshot_id"]
+
+    source.write_text("A third reviewed update.", encoding="utf-8")
+    prepare_entity_subagent_task(output, "Book", source_dir, "epub-compressed", "English", "Chinese", {})
+    candidate = json.loads((output / "translation_entities.template.json").read_text(encoding="utf-8"))
+    candidate["metadata"]["extraction_complete"] = True
+    candidate["metadata"]["reviewed_removals"] = [{
+        "collection": "terms", "original": "Hegel", "source_file": "chapter.md",
+        "reason": "No longer appears in the reviewed source unit.",
+    }]
+    candidate["terms"] = [entry for entry in candidate["terms"] if entry["original"] != "Hegel"]
+    entity_path.write_text(json.dumps(candidate, ensure_ascii=False), encoding="utf-8")
+    assert extract_entities_validate_command(SimpleNamespace()) == 0
+    final_terms = json.loads(entity_path.read_text(encoding="utf-8"))["terms"]
+    assert [entry["original"] for entry in final_terms] == ["New term"]
+
+
+def test_entity_validation_rejects_out_of_scope_removal_without_mutating_outputs(tmp_path: Path, monkeypatch):
+    from pdf2epub.entity_context import record_completed_entity_snapshot
+
+    output = tmp_path / "output" / "Book"
+    source_dir = output / "compressed_units"
+    source_dir.mkdir(parents=True)
+    source = source_dir / "chapter.md"
+    source.write_text("Hegel appears.", encoding="utf-8")
+    prepare_entity_subagent_task(output, "Book", source_dir, "epub-compressed", "English", "Chinese", {})
+    manifest = json.loads((output / "entity_subagent_manifest.json").read_text(encoding="utf-8"))
+    accepted = json.loads((output / "translation_entities.template.json").read_text(encoding="utf-8"))
+    accepted["metadata"]["extraction_complete"] = True
+    accepted["terms"].append({"original": "Hegel", "suggested_translation": "黑格尔"})
+    entity_path = output / "translation_entities.json"
+    entity_path.write_text(json.dumps(accepted, ensure_ascii=False), encoding="utf-8")
+    record_completed_entity_snapshot(output, manifest, entity_path)
+    baseline_bytes = (output / "entity_completed_snapshot.json").read_bytes()
+
+    source.write_text("Hegel appears in a changed chapter.", encoding="utf-8")
+    prepare_entity_subagent_task(output, "Book", source_dir, "epub-compressed", "English", "Chinese", {})
+    proposal = json.loads((output / "translation_entities.template.json").read_text(encoding="utf-8"))
+    proposal["metadata"]["extraction_complete"] = True
+    proposal["metadata"]["reviewed_removals"] = [{
+        "collection": "terms", "original": "Hegel", "source_file": "unassigned.md",
+        "reason": "This removal cites a source outside the assigned review scope.",
+    }]
+    proposal["terms"] = []
+    entity_path.write_text(json.dumps(proposal, ensure_ascii=False), encoding="utf-8")
+    proposal_bytes = entity_path.read_bytes()
+
+    monkeypatch.setattr(entity_commands, "load_book_context", lambda *_a, **_kw: SimpleNamespace(
+        config={"title": "Book", "translation": {"source_language": "English", "target_language": "Chinese"}},
+        book_title="Book", output_dir=output,
+    ))
+    assert extract_entities_validate_command(SimpleNamespace()) == 1
+    assert entity_path.read_bytes() == proposal_bytes
+    assert (output / "entity_completed_snapshot.json").read_bytes() == baseline_bytes
+    report = json.loads((output / "translation_entities_validation.json").read_text(encoding="utf-8"))
+    assert report["valid"] is False
+    assert any("assigned source_file" in error for error in report["errors"])
 
 
 

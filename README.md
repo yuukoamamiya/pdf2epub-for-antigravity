@@ -67,6 +67,9 @@ EPUB、MOBI、AZW3 将 [config_epub.yaml.example](config_epub.yaml.example) 复�
 
 在 Antigravity 中打开本仓库，让 Agent 按照 [AGENTS.md](AGENTS.md) 处理书稿。例如：
 
+书内实体表会按上次成功校验的源快照增量复核。格式刷新可自动复用；内容变化只需复核变更单元，
+并保留已接受的实体条目。准备命令不会把未校验的输出认证为完成。
+
 ```text
 请按 AGENTS.md 的流程翻译 input/我的书.pdf，完成原文 EPUB 检查、翻译和本地校验。
 ```

@@ -191,21 +191,39 @@ def _current_polish(output_dir: Path, config: Mapping[str, Any]) -> bool:
         return False
 
 
-def _current_entities(output_dir: Path, config: Mapping[str, Any]) -> bool:
+def _entity_stage_status(output_dir: Path, config: Mapping[str, Any]) -> tuple[bool, str]:
     try:
-        from pdf2epub.entity_context import entity_context_is_current
+        from pdf2epub.entity_context import entity_context_status, validate_entity_source_manifest
         from pdf2epub.commands.sources import _resolve_pdf_markdown_source
 
         source_dir, _ = _resolve_pdf_markdown_source(output_dir, dict(config))
         report = _read_json(output_dir / "translation_entities_validation.json")
-        return report.get("valid") is True and entity_context_is_current(
+        current, reason = entity_context_status(
             output_dir,
             source_dir,
             (config.get("translation") or {}).get("source_language", "English"),
             (config.get("translation") or {}).get("target_language", "Chinese"),
         )
+        if report.get("valid") is True and current:
+            return True, "validated book terminology is current"
+        manifest = _read_json(output_dir / "entity_subagent_manifest.json")
+        if manifest:
+            if validate_entity_source_manifest(manifest, output_dir, source_dir):
+                return False, "entity source changed after preparation; rerun extract-entities to refresh the scoped change inventory"
+            mode = manifest.get("mode")
+            pending = manifest.get("pending_files", [])
+            removed = manifest.get("removed_files", [])
+            if mode == "refresh":
+                return False, "source formatting refresh only; run extract-entities and extract-entities-validate (no Subagent review needed)"
+            if mode == "legacy_reuse" and not pending and not removed:
+                return False, "legacy entity baseline is reusable; run extract-entities-validate to retain it"
+            if mode in {"incremental_review", "bootstrap"}:
+                units = [*pending, *(f"removed: {name}" for name in removed)]
+                label = ", ".join(str(name) for name in units) or "bootstrap source set"
+                return False, f"{mode.replace('_', ' ')} required for: {label}; run extract-entities and review only assigned units"
+        return False, reason
     except (OSError, TypeError, ValueError):
-        return False
+        return False, "entity baseline is missing or could not be verified; prepare an entity bootstrap task"
 
 
 def _current_translation(output_dir: Path, config_path: Path, config: Mapping[str, Any]) -> bool:
@@ -385,15 +403,13 @@ def _pdf_stages(
             ]
         )
     else:
-        entities_current = _current_entities(output_dir, config) if policy.requires_entities else True
+        entities_current, entity_detail = _entity_stage_status(output_dir, config) if policy.requires_entities else (True, "not required")
         stages.append(
             _status_record(
                 "extract-entities",
                 "extract-entities",
                 "passed" if entities_current else "pending",
-                "validated book terminology is current"
-                if entities_current
-                else "run extract-entities and validate the Subagent output",
+                entity_detail,
             )
         )
         try:

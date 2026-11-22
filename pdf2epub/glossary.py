@@ -678,6 +678,7 @@ def build_unit_glossary_contexts(
             domain_entries.append({"kind": kind, **entry})
 
     entity_entries: List[Dict[str, Any]] = []
+    entity_authority_present = bool(entity_path and Path(entity_path).is_file())
     if entity_path and Path(entity_path).is_file():
         try:
             data = json.loads(Path(entity_path).read_text(encoding="utf-8"))
@@ -715,7 +716,7 @@ def build_unit_glossary_contexts(
         except (OSError, UnicodeError, json.JSONDecodeError, TypeError):
             pass
 
-    if not domain_entries and not entity_entries:
+    if not domain_entries and not entity_entries and not entity_authority_present:
         return {}
 
     result: Dict[str, Path] = {}

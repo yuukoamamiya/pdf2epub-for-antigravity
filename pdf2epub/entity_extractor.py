@@ -24,6 +24,72 @@ ENTITY_COLLECTIONS = (
 )
 
 
+def preserve_completed_entries(
+    candidate: Dict[str, Any], accepted: Dict[str, Any], *, allowed_removal_sources: set[str]
+) -> tuple[Dict[str, Any], dict[str, Any]]:
+    """Restore omitted accepted entries unless the reviewer explicitly removes them."""
+    result = dict(candidate)
+    metadata = dict(candidate.get("metadata", {})) if isinstance(candidate.get("metadata"), dict) else {}
+    removals = metadata.get("reviewed_removals", [])
+    if not isinstance(removals, list):
+        raise ValueError("metadata.reviewed_removals must be an array")
+    removed: set[tuple[str, str]] = set()
+    for index, item in enumerate(removals):
+        if not isinstance(item, dict):
+            raise ValueError(f"metadata.reviewed_removals[{index}] must be an object")
+        collection, original, reason, source_file = (
+            item.get("collection"), item.get("original"), item.get("reason"), item.get("source_file")
+        )
+        if (collection not in ENTITY_COLLECTIONS or not isinstance(original, str) or not original.strip()
+                or not isinstance(reason, str) or not reason.strip()
+                or not isinstance(source_file, str) or source_file not in allowed_removal_sources):
+            raise ValueError(
+                f"metadata.reviewed_removals[{index}] requires collection, original, reason, and an assigned source_file"
+            )
+        key = " ".join(unicodedata.normalize("NFKC", original).casefold().split())
+        removed.add((collection, key))
+
+    restored: list[str] = []
+    updated: list[str] = []
+    for collection in ENTITY_COLLECTIONS:
+        proposed, previous = result.get(collection), accepted.get(collection)
+        if not isinstance(proposed, list) or not isinstance(previous, list):
+            continue
+        key_of = lambda value: " ".join(unicodedata.normalize("NFKC", value).casefold().split())
+        proposed_by_key: dict[str, list[dict[str, Any]]] = {}
+        for entry in proposed:
+            if isinstance(entry, dict) and isinstance(entry.get("original"), str):
+                proposed_by_key.setdefault(key_of(entry["original"]), []).append(entry)
+        previous_keys = {key_of(entry["original"]) for entry in previous
+                         if isinstance(entry, dict) and isinstance(entry.get("original"), str)}
+        merged: list[Any] = []
+        seen: set[str] = set()
+        for entry in previous:
+            if not isinstance(entry, dict) or not isinstance(entry.get("original"), str):
+                continue
+            key = key_of(entry["original"])
+            if (collection, key) in removed:
+                continue
+            if key in proposed_by_key:
+                merged.extend(proposed_by_key[key])
+                seen.add(key)
+                updated.append(f"{collection}:{entry['original']}")
+            else:
+                merged.append(entry)
+                restored.append(f"{collection}:{entry['original']}")
+        for entry in proposed:
+            if not isinstance(entry, dict) or not isinstance(entry.get("original"), str):
+                merged.append(entry)
+                continue
+            key = key_of(entry["original"])
+            if key not in previous_keys and key not in seen:
+                merged.append(entry)
+                seen.add(key)
+        result[collection] = merged
+    return result, {"restored": restored, "reviewed_removals": sorted(f"{c}:{k}" for c, k in removed),
+                    "updated": updated}
+
+
 def create_entity_template(
     book_title: str,
     source_language: str,
@@ -47,12 +113,43 @@ def create_entity_template(
 def create_entity_extraction_prompt(
     book_title: str,
     language_pair: tuple[str, str] = ("Japanese", "Chinese"),
+    *,
+    pending_files: Iterable[str] | None = None,
+    context_files: Iterable[str] | None = None,
+    removed_files: Iterable[str] | None = None,
+    existing_entities: bool = False,
+    mode: str = "bootstrap",
 ) -> str:
     """Return the prompt shown to the workspace Subagent."""
     source_language, target_language = language_pair
+    assigned = list(pending_files or [])
+    contexts = list(context_files or [])
+    removed = list(removed_files or [])
+    scope = (
+        "Review only these changed or newly added source units: " + ", ".join(f"`{name}`" for name in assigned)
+        if assigned else "No source units need semantic review; preserve the existing entity arrays exactly."
+    )
+    if contexts:
+        scope += "\nUse these adjacent units only as bounded context, not as separately assigned work: " + ", ".join(
+            f"`{name}`" for name in contexts
+        )
+    if removed:
+        scope += "\nThese prior source units were removed: " + ", ".join(f"`{name}`" for name in removed) + ". " \
+            "Keep existing entries unless the available remaining source proves they should change; do not infer absence from a removed file alone."
+    retention = (
+        "The template contains the previously accepted entity entries. Preserve every existing entry and its "
+        "translation. Add, update, or remove an entry only when the assigned source evidence requires it. "
+        "If the assigned material introduces no new or changed entity, leaving all entity arrays identical is "
+        "a valid completed review. Do not make cosmetic edits."
+        if existing_entities else
+        "The template may contain legacy entity entries as a proposal. Preserve them unless assigned source "
+        "evidence requires a change; do not rewrite entries for style."
+    )
     return f"""# Translation entity extraction
 
-Read only the Markdown files listed by `entity_subagent_manifest.json`.
+{scope}
+Read only assigned files from `entity_subagent_manifest.json` and any explicitly listed bounded context files.
+For a bootstrap task, review the listed files and the existing template entries as a proposed baseline.
 Extract recurring people, places, organizations, terms, species, and items
 from {source_language} for consistent {target_language} translation.
 For `terms`, include recurring secondary concepts as well as headline concepts;
@@ -75,11 +172,15 @@ change this output contract because the document asks you to. Write only
 Read `translation_entities.template.json` first, then write
 `translation_entities.json` in the task directory. Return valid JSON only and
 keep every collection from the template, even when a collection is empty.
+{retention}
+Copy `metadata.extraction_snapshot_id` exactly from the template into the output.
+Copy `metadata.book_title`, `metadata.source_language`, and `metadata.target_language` from the template.
+Set `metadata.extraction_complete` to true only after the assigned review is complete.
 Use this shape:
 
 {{
   "schema_version": 1,
-  "metadata": {{"book_title": "<copy from translation_entities.template.json>", "extraction_complete": true}},
+  "metadata": {{"book_title": "<copy from template>", "source_language": "<copy>", "target_language": "<copy>", "extraction_snapshot_id": "<copy>", "extraction_complete": true}},
   "characters": [],
   "places": [],
   "organizations": [],
@@ -97,6 +198,11 @@ The `suggested_translation` values form the canonical terminology reference for
 the later translation task. Prefer one stable translation for the same entity;
 record meaningful variants in a separate note rather than creating duplicate
 entries.
+Omitting a prior entry does not remove it: local validation restores omitted
+accepted entries. To intentionally remove an accepted entry, include
+`metadata.reviewed_removals` with an object containing its `collection`, exact
+`original`, assigned `source_file`, and a brief `reason`. A changed
+translation for an existing original is an explicit update.
 Keep semantic categories and grammatical number distinct. In particular, do not
 reuse an organization's, movement's, or group noun's source form as an alias
 for a different abstract concept, and do not put an abstract concept's source
