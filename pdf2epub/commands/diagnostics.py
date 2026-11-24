@@ -49,14 +49,12 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 def _read_config(path: Path) -> tuple[dict[str, Any], list[str]]:
     try:
-        value = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        from pdf2epub.utils.configuration import _load_with_base
+        return _load_with_base(Path(path), set()), []
     except FileNotFoundError:
         return {}, [f"configuration file does not exist: {path}"]
-    except (OSError, UnicodeError, yaml.YAMLError) as exc:
+    except (OSError, UnicodeError, yaml.YAMLError, ValueError) as exc:
         return {}, [f"configuration could not be read: {exc}"]
-    if not isinstance(value, dict):
-        return {}, ["configuration root must be a YAML mapping"]
-    return value, []
 
 
 def _status_record(

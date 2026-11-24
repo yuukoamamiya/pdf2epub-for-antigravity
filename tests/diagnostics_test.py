@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from pdf2epub.commands.diagnostics import build_doctor, build_status
-from pdf2epub.commands.diagnostics import _entity_stage_status
+from pdf2epub.commands.diagnostics import _entity_stage_status, _read_config
 from pdf2epub.ocr_progress import new_progress
 
 
@@ -74,6 +74,20 @@ def test_status_empty_output_points_to_ocr(tmp_path: Path, monkeypatch):
     assert report["stages"][0]["name"] == "ocr-pages"
     assert report["stages"][0]["status"] == "pending"
     assert report["next_command"].endswith("ocr-pages --resume")
+
+
+def test_diagnostics_reads_inherited_configuration(tmp_path: Path):
+    base = tmp_path / "base.yaml"
+    base.write_text("ocr:\n  backend: chandra\nfootnotes:\n  mode: auto\n", encoding="utf-8")
+    child = tmp_path / "book.yaml"
+    child.write_text("base: base.yaml\ntitle: Inherited Book\n", encoding="utf-8")
+
+    config, errors = _read_config(child)
+
+    assert errors == []
+    assert config["title"] == "Inherited Book"
+    assert config["ocr"]["backend"] == "chandra"
+    assert config["footnotes"]["mode"] == "auto"
 
 
 def test_unknown_pipeline_is_blocked_by_doctor_and_status(tmp_path: Path, monkeypatch):

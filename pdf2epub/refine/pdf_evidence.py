@@ -106,6 +106,8 @@ class EvidenceReceipt:
 
     @classmethod
     def from_mapping(cls, value: Any) -> Optional["EvidenceReceipt"]:
+        if isinstance(value, cls):
+            return value
         if not isinstance(value, Mapping):
             return None
         if not schema_major_matches(

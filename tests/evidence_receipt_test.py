@@ -37,6 +37,16 @@ def test_evidence_receipt_minor_upgrade_forward_rolls(tmp_path: Path):
     assert any("malformed" in error for error in errors)
 
 
+def test_evidence_receipt_instance_is_accepted_as_current(tmp_path: Path):
+    _write_evidence(tmp_path)
+    receipt = build_evidence_receipt(tmp_path, {})
+
+    current, errors = evidence_receipt_is_current(receipt, tmp_path, {})
+
+    assert current is True
+    assert errors == []
+
+
 def test_evidence_receipt_detects_changed_pages_and_policy(tmp_path: Path):
     _write_evidence(tmp_path)
     receipt = build_evidence_receipt(tmp_path, {})
