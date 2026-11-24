@@ -68,13 +68,19 @@ def _workspace(root: Path, page_count: int = 3) -> SimpleNamespace:
 
 def _patch_commands(monkeypatch, context, *, review_pages=()):
     monkeypatch.setattr(ocr_commands, "load_book_context", lambda *_args: context)
+    context.rendered_page_sets = []
 
-    def render(output_dir, *, dpi=150, resume=False):
+    def render(output_dir, *, dpi=150, resume=False, page_names=None):
         image_dir = Path(output_dir) / "ocr_review_images"
         image_dir.mkdir(exist_ok=True)
         page_count = len(list((Path(output_dir) / "pages").glob("page_*.md")))
-        images = [f"page_{page:03d}.png" for page in range(1, page_count + 1)]
-        for number, image in enumerate(images, 1):
+        selected = list(page_names) if page_names is not None else [
+            f"page_{page:03d}.md" for page in range(1, page_count + 1)
+        ]
+        context.rendered_page_sets.append(tuple(selected))
+        images = [f"{Path(name).stem}.png" for name in selected]
+        for name, image in zip(selected, images):
+            number = int(Path(name).stem.split("_")[-1])
             (image_dir / image).write_bytes(f"synthetic image {number}".encode())
         manifest = {
             "schema_version": 1,
@@ -84,6 +90,9 @@ def _patch_commands(monkeypatch, context, *, review_pages=()):
             "page_count": page_count,
             "image_dir": "ocr_review_images",
             "images": images,
+            "image_sha256": {
+                image: sha256_file(image_dir / image) for image in images
+            },
         }
         (Path(output_dir) / "ocr_review_images.json").write_text(
             json.dumps(manifest), encoding="utf-8"
@@ -151,6 +160,7 @@ def test_manual_ocr_review_prepare_single_file_and_full_validation_e2e(tmp_path,
     _patch_commands(monkeypatch, context)
 
     assert ocr_commands.ocr_correct_command(_args(file=["page_001.md"])) == 0
+    assert context.rendered_page_sets[-1] == ("page_001.md",)
     first_manifest = json.loads(
         (context.output_dir / "ocr-correct_subagent_manifest.json").read_text()
     )
@@ -171,7 +181,9 @@ def test_manual_ocr_review_prepare_single_file_and_full_validation_e2e(tmp_path,
     assert ocr_commands.ocr_correct_command(
         _args(file=["page_002.md"], resume=True)
     ) == 0
+    assert context.rendered_page_sets[-1] == ("page_001.md", "page_002.md")
     assert ocr_commands.ocr_correct_command(_args(resume=True)) == 0
+    assert context.rendered_page_sets[-1] == ("page_001.md", "page_002.md")
     manifest = json.loads(
         (context.output_dir / "ocr-correct_subagent_manifest.json").read_text()
     )
@@ -212,6 +224,7 @@ def test_dual_ocr_manual_selection_is_union_with_consensus_pages(tmp_path, monke
     update_manual_review_selection(context.output_dir, ["page_001.md"])
 
     assert ocr_commands.ocr_correct_command(_args(resume=True)) == 0
+    assert context.rendered_page_sets[-1] == ("page_001.md", "page_002.md")
     manifest = json.loads(
         (context.output_dir / "ocr-correct_subagent_manifest.json").read_text()
     )

@@ -147,7 +147,7 @@ def _validate_ready_case(tmp_path: Path) -> tuple[dict, dict, list[dict]]:
     return paths, report, tasks
 
 
-@pytest.mark.parametrize("changed_evidence", ["sidecar", "page_markdown", "image"])
+@pytest.mark.parametrize("changed_evidence", ["sidecar", "page_markdown", "image", "pdf"])
 def test_applied_result_exception_is_revalidated_against_exact_evidence_on_third_prepare(
     tmp_path, changed_evidence
 ):
@@ -186,6 +186,10 @@ def test_applied_result_exception_is_revalidated_against_exact_evidence_on_third
     assert saved_task["evidence_page_file"] == task["evidence_page_file"]
     assert saved_task["evidence_page_sha256"] == task["evidence_page_sha256"]
     assert saved_task["source_address"] == task["source_address"]
+    canonical_image = None
+    if changed_evidence == "image":
+        image_path = tmp_path / task["visual_files"][str(task["pages"][0])]["path"]
+        canonical_image = image_path.read_bytes()
 
     # Third prepare sees changed exact evidence even though the complete source
     # Markdown inventory is byte-for-byte unchanged, so it must drop the old exception.
@@ -199,18 +203,33 @@ def test_applied_result_exception_is_revalidated_against_exact_evidence_on_third
     elif changed_evidence == "page_markdown":
         page_path = tmp_path / task["evidence_page_file"]
         page_path.write_text("Changed exact page Markdown evidence\n", encoding="utf-8")
-    else:
+    elif changed_evidence == "image":
         image_path = tmp_path / task["visual_files"][str(task["pages"][0])]["path"]
         image_path.write_bytes(image_path.read_bytes() + b" changed image pixels")
+    else:
+        pdf_path = tmp_path / "input_original.pdf"
+        changed_pdf = fitz.open(pdf_path)
+        changed_pdf[0].insert_text((40, 50), "current source changed")
+        changed_path = tmp_path / "changed.pdf"
+        changed_pdf.save(changed_path)
+        changed_pdf.close()
+        changed_path.replace(pdf_path)
     paths = prepare_footnote_subagent(tmp_path, book_title="Freshness Review")
     third = json.loads(paths["report"].read_text(encoding="utf-8"))["result_audit"]
-    assert third.get("applied_result_audit_reviews", []) == []
-    assert any(
-        isinstance(item.get("source_address"), dict)
-        and (item["source_address"].get("page"), item["source_address"].get("source"), item["source_address"].get("block"))
-        == (task["source_address"].get("page"), task["source_address"].get("source"), task["source_address"].get("block"))
-        for item in third["findings"]
-    )
+    if changed_evidence == "image":
+        # The renderer verifies the PDF hash and repairs a tampered cache with
+        # canonical pixels. Since the exact source PDF is unchanged, the
+        # original review still refers to the same visual evidence.
+        assert image_path.read_bytes() == canonical_image
+        assert third.get("applied_result_audit_reviews", []) == [review]
+    else:
+        assert third.get("applied_result_audit_reviews", []) == []
+        assert any(
+            isinstance(item.get("source_address"), dict)
+            and (item["source_address"].get("page"), item["source_address"].get("source"), item["source_address"].get("block"))
+            == (task["source_address"].get("page"), task["source_address"].get("source"), task["source_address"].get("block"))
+            for item in third["findings"]
+        )
     assert markdown_inventory(tmp_path / "ocr_markdown") == source_inventory
 
 

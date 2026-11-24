@@ -141,13 +141,15 @@ def render_review_images(
     *,
     dpi: int = DEFAULT_REVIEW_IMAGE_DPI,
     resume: bool = False,
+    page_names: Optional[Iterable[str]] = None,
 ) -> Dict[str, Any]:
     """Render one visual-review PNG per source PDF page.
 
     The original PDF is preferred so synthetic OCR page stamps and any
     pre-processing used by the OCR backend are not mistaken for book content.
-    Existing images are reused only when the PDF hash, page count, and DPI all
-    match the current render manifest.
+    Existing images are reused only when the PDF hash, page count, DPI, and
+    requested page set match the current render manifest. When ``page_names``
+    is supplied, unrelated pages are not rendered.
     """
     import pymupdf as fitz
 
@@ -167,30 +169,63 @@ def render_review_images(
     image_dir.mkdir(parents=True, exist_ok=True)
     with fitz.open(pdf_path) as document:
         total_pages = len(document)
-        expected_names = [f"page_{number:03d}.png" for number in range(1, total_pages + 1)]
+        if page_names is None:
+            expected_names = [f"page_{number:03d}.png" for number in range(1, total_pages + 1)]
+        else:
+            expected_names = []
+            for name in sorted({str(value) for value in page_names}):
+                match = re.fullmatch(r"page_(\d+)\.md", name)
+                if not match or not 1 <= int(match.group(1)) <= total_pages:
+                    raise ValueError(f"invalid OCR review page name: {name}")
+                expected_names.append(f"page_{int(match.group(1)):03d}.png")
 
-        previous = _load_review_manifest(output_dir) if resume else {}
+        previous = _load_review_manifest(output_dir)
         try:
             previous_dpi = int(previous.get("dpi", 0) or 0)
             previous_page_count = int(previous.get("page_count", 0) or 0)
         except (TypeError, ValueError):
             previous_dpi = 0
             previous_page_count = 0
-        reusable = (
+        previous_names = previous.get("images")
+        previous_hashes = previous.get("image_sha256")
+        reusable_base = (
             previous.get("schema_version") == OCR_REVIEW_IMAGE_SCHEMA_VERSION
             and previous.get("source_sha256") == source_sha256
             and previous_dpi == dpi
             and previous_page_count == total_pages
-            and all((image_dir / name).is_file() for name in expected_names)
+            and isinstance(previous_names, list)
+            and isinstance(previous_hashes, Mapping)
         )
-        if not reusable:
+        reusable_names = []
+        if reusable_base:
+            reusable_names = [
+                str(name)
+                for name in previous_names
+                if re.fullmatch(r"page_\d{3,}\.png", str(name))
+                and (image_dir / str(name)).is_file()
+                and previous_hashes.get(name) == sha256_file(image_dir / str(name))
+            ]
+        if reusable_base and set(expected_names).issubset(reusable_names):
+            # Preserve manifest bytes when a sparse OCR review is already
+            # covered by a current full-page render used by another stage.
+            return previous
+        if reusable_base:
+            retained_names = reusable_names
+            missing_names = [name for name in expected_names if name not in retained_names]
+        else:
+            retained_names = []
+            missing_names = expected_names
+        if missing_names:
             matrix = fitz.Matrix(dpi / 72.0, dpi / 72.0)
-            for page_number, page in enumerate(document, 1):
+            for image_name in missing_names:
+                page_number = int(Path(image_name).stem.split("_")[-1])
+                page = document[page_number - 1]
                 pixmap = page.get_pixmap(matrix=matrix, alpha=False)
                 _atomic_write_bytes(
-                    image_dir / f"page_{page_number:03d}.png",
+                    image_dir / image_name,
                     pixmap.tobytes("png"),
                 )
+        expected_names = sorted(set(retained_names) | set(expected_names), key=lambda name: int(Path(name).stem.split("_")[-1]))
 
     manifest = {
         "schema_version": OCR_REVIEW_IMAGE_SCHEMA_VERSION,
@@ -200,12 +235,17 @@ def render_review_images(
         "page_count": total_pages,
         "image_dir": image_dir.name,
         "images": expected_names,
+        "image_sha256": {
+            name: sha256_file(image_dir / name) for name in expected_names
+        },
     }
     atomic_write_json(Path(output_dir) / "ocr_review_images.json", manifest)
     return manifest
 
 
-def review_images_are_current(output_dir: Path) -> bool:
+def review_images_are_current(
+    output_dir: Path, page_names: Optional[Iterable[str]] = None
+) -> bool:
     """Return whether every visual-review image matches the current PDF."""
     manifest = _load_review_manifest(output_dir)
     pdf_path = _review_pdf(Path(output_dir))
@@ -224,11 +264,27 @@ def review_images_are_current(output_dir: Path) -> bool:
         return False
     if manifest.get("source_sha256") != sha256_file(pdf_path):
         return False
-    expected_names = [f"page_{number:03d}.png" for number in range(1, page_count + 1)]
-    if [str(name) for name in names] != expected_names:
+    if page_names is None:
+        expected_names = [f"page_{number:03d}.png" for number in range(1, page_count + 1)]
+    else:
+        expected_names = []
+        for name in sorted({str(value) for value in page_names}):
+            match = re.fullmatch(r"page_(\d+)\.md", name)
+            if not match or not 1 <= int(match.group(1)) <= page_count:
+                return False
+            expected_names.append(f"page_{int(match.group(1)):03d}.png")
+    if not set(expected_names).issubset({str(name) for name in names}):
         return False
     image_dir = review_image_dir(output_dir)
-    return all((image_dir / name).is_file() for name in expected_names)
+    hashes = manifest.get("image_sha256")
+    return (
+        isinstance(hashes, Mapping)
+        and all(
+            (image_dir / name).is_file()
+            and hashes.get(name) == sha256_file(image_dir / name)
+            for name in expected_names
+        )
+    )
 
 
 def _load_correction_report(output_dir: Path) -> Dict[str, Any]:
@@ -558,7 +614,7 @@ def ocr_correction_is_current(
     # When every page was accepted by the two local OCR results, no visual
     # review image or per-page visual record is needed. The auto-accepted
     # checkpoint still has to contain every current page and matching hashes.
-    if review_files and not review_images_are_current(output_dir):
+    if review_files and not review_images_are_current(output_dir, review_files):
         return False
     return validate_ocr_correction_reviews(
         output_dir,

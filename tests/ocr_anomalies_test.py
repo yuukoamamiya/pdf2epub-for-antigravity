@@ -7,6 +7,7 @@ from pdf2epub.workflow_contracts import sha256_file
 import pytest
 import json
 from types import SimpleNamespace
+import hashlib
 
 
 def test_detects_quoted_incident_and_variants():
@@ -38,6 +39,301 @@ def test_scan_reports_current_page_hash_and_reasons(tmp_path: Path):
     assert report["review_required_files"] == ["page_001.md"]
     assert report["page_hashes"]["page_001.md"]
     assert (tmp_path / "ocr_anomaly_report.json").is_file()
+
+
+def _long_text() -> str:
+    return " ".join(["transcribed"] * 90)
+
+
+def _write_scan_pdf(output_dir: Path, draw=None) -> str:
+    import pymupdf as fitz
+
+    pdf = output_dir / "input_original.pdf"
+    document = fitz.open()
+    page = document.new_page(width=300, height=400)
+    if draw is not None:
+        draw(page)
+    document.save(pdf)
+    document.close()
+    digest = hashlib.sha256(pdf.read_bytes()).hexdigest()
+    pages = output_dir / "pages"
+    pages.mkdir(exist_ok=True)
+    (pages / "ocr_progress.json").write_text(
+        json.dumps({"source_sha256": digest, "total_pages": 1}), encoding="utf-8"
+    )
+    return digest
+
+
+def test_long_text_on_blank_pdf_page_requires_targeted_review_and_reuses_evidence(tmp_path):
+    from pdf2epub.ocr_anomalies import scan_ocr_page_evidence
+
+    _write_scan_pdf(tmp_path)
+    pages = tmp_path / "pages"
+    (pages / "page_001.md").write_text(_long_text(), encoding="utf-8")
+    first = scan_ocr_page_evidence(tmp_path, persist=True).report
+    assert first["review_required_files"] == ["page_001.md"]
+    assert first["anomalies"]["page_001.md"]["image_evidence"] == "blank_body"
+
+    (pages / "page_002.md").write_text("An unrelated page was edited.", encoding="utf-8")
+    second = scan_ocr_page_evidence(tmp_path, persist=False).report
+    assert second["review_required_files"] == ["page_001.md"]
+    assert second["anomalies"]["page_001.md"]["sha256"] == first["anomalies"]["page_001.md"]["sha256"]
+
+
+def test_processed_pdf_stamps_do_not_replace_original_ocr_evidence(tmp_path):
+    import pymupdf as fitz
+    from pdf2epub.ocr_anomalies import scan_ocr_pages
+
+    digest = _write_scan_pdf(tmp_path)
+    (tmp_path / "pages" / "page_001.md").write_text(_long_text(), encoding="utf-8")
+    processed = fitz.open()
+    page = processed.new_page(width=300, height=400)
+    page.draw_rect(fitz.Rect(0, 0, 300, 20), color=(0, 0, 0), fill=(0, 0, 0))
+    page.insert_text((8, 15), "synthetic OCR page stamp", fontsize=8, color=(1, 1, 1))
+    processed.save(tmp_path / "input.pdf")
+    processed.close()
+
+    report = scan_ocr_pages(tmp_path)
+
+    assert report["source_sha256"] == digest
+    assert report["review_required_files"] == ["page_001.md"]
+
+
+def test_changed_pdf_and_tampered_rendered_image_cannot_certify_blankness(tmp_path):
+    from pdf2epub.ocr_anomalies import _render_page, scan_ocr_pages
+
+    digest = _write_scan_pdf(tmp_path)
+    pages = tmp_path / "pages"
+    (pages / "page_001.md").write_text(_long_text(), encoding="utf-8")
+    assert scan_ocr_pages(tmp_path)["review_required_files"] == ["page_001.md"]
+
+    import pymupdf as fitz
+    pdf = tmp_path / "input_original.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=300, height=400)
+    page.insert_text((100, 160), "changed PDF", fontsize=10)
+    replacement = tmp_path / "replacement.pdf"
+    doc.save(replacement)
+    doc.close()
+    pdf.write_bytes(replacement.read_bytes())
+    changed = scan_ocr_pages(tmp_path, persist=False)
+    assert changed["review_required_files"] == []
+    assert changed["scan_diagnostics"]
+
+    # Restore a current source, then prove an image without a matching content
+    # hash in the render receipt cannot supply blankness evidence.
+    digest = _write_scan_pdf(tmp_path)
+    image_dir = tmp_path / "ocr_review_images"
+    image_dir.mkdir(exist_ok=True)
+    image_path = image_dir / "page_001.png"
+    image_bytes = _render_page(tmp_path / "input_original.pdf", 1)
+    image_path.write_bytes(image_bytes)
+    (tmp_path / "ocr_review_images.json").write_text(json.dumps({
+        "source_sha256": digest,
+        "page_count": 1,
+        "images": ["page_001.png"],
+        "image_sha256": {"page_001.png": hashlib.sha256(image_bytes).hexdigest()},
+    }), encoding="utf-8")
+    image_path.write_bytes(b"tampered")
+    (tmp_path / "ocr_anomaly_report.json").unlink(missing_ok=True)
+    stale_image = scan_ocr_pages(tmp_path, persist=False)
+    assert stale_image["review_required_files"] == []
+    assert "blankness_evidence_insufficient" in stale_image["advisory_pages"]["page_001.md"]
+
+
+def test_malformed_cached_candidate_is_recomputed(tmp_path, monkeypatch):
+    from pdf2epub import ocr_anomalies
+
+    _write_scan_pdf(tmp_path)
+    (tmp_path / "pages" / "page_001.md").write_text(_long_text(), encoding="utf-8")
+    original = ocr_anomalies.scan_ocr_pages(tmp_path)
+    original["visual_candidates"]["page_001.md"]["body_ink_ratio"] = "invalid"
+    (tmp_path / "ocr_anomaly_report.json").write_text(json.dumps(original), encoding="utf-8")
+    renders = []
+    render = ocr_anomalies._render_page
+
+    def counted_render(pdf, page_number):
+        renders.append(page_number)
+        return render(pdf, page_number)
+
+    monkeypatch.setattr(ocr_anomalies, "_render_page", counted_render)
+    report = ocr_anomalies.scan_ocr_pages(tmp_path)
+    assert renders == [1]
+    assert report["review_required_files"] == ["page_001.md"]
+
+
+def test_blankness_candidates_are_conservative_for_noise_sparse_text_and_edge_imprint(tmp_path):
+    from pdf2epub.ocr_anomalies import scan_ocr_pages
+
+    def draw_scanner_noise(page):
+        for x, y in ((140, 190), (142, 220), (160, 205), (180, 180)):
+            page.draw_circle((x, y), 0.15, color=(0, 0, 0), fill=(0, 0, 0))
+
+    _write_scan_pdf(tmp_path, draw_scanner_noise)
+    pages = tmp_path / "pages"
+    (pages / "page_001.md").write_text(_long_text(), encoding="utf-8")
+    report = scan_ocr_pages(tmp_path)
+    assert report["review_required_files"] == ["page_001.md"]
+
+    def draw_sparse(page):
+        page.insert_text((145, 200), "A citation", fontsize=10)
+
+    _write_scan_pdf(tmp_path, draw_sparse)
+    (pages / "page_001.md").write_text(_long_text(), encoding="utf-8")
+    report = scan_ocr_pages(tmp_path)
+    assert report["review_required_files"] == []
+    assert "long_ocr_candidate_with_visible_body_content" in report["advisory_pages"]["page_001.md"]
+
+    def draw_edge_imprint(page):
+        page.insert_text((2, 9), "XVII", fontsize=6)
+
+    _write_scan_pdf(tmp_path, draw_edge_imprint)
+    report = scan_ocr_pages(tmp_path)
+    assert report["review_required_files"] == []
+    assert "body_sparse_but_full_page_content_present" in report["advisory_pages"]["page_001.md"]
+
+
+def test_repeated_long_ocr_text_is_advisory_and_missing_pdf_is_insufficient(tmp_path):
+    from pdf2epub.ocr_anomalies import scan_ocr_pages
+
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    text = _long_text()
+    (pages / "page_001.md").write_text(text, encoding="utf-8")
+    (pages / "page_002.md").write_text(text, encoding="utf-8")
+    (pages / "ocr_progress.json").write_text('{"source_sha256":"missing"}', encoding="utf-8")
+    report = scan_ocr_pages(tmp_path)
+    assert report["review_required_files"] == []
+    assert "repeated_ocr_text" in report["advisory_pages"]["page_001.md"]
+    assert "blankness_evidence_insufficient" in report["advisory_pages"]["page_001.md"]
+    assert report["scan_diagnostics"]
+
+
+def test_read_only_scan_does_not_render_or_write_when_candidate_image_is_missing(tmp_path, monkeypatch):
+    from pdf2epub import ocr_anomalies
+
+    digest = _write_scan_pdf(tmp_path)
+    (tmp_path / "pages" / "page_001.md").write_text(_long_text(), encoding="utf-8")
+    monkeypatch.setattr(
+        ocr_anomalies,
+        "_render_page",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("read-only scan rendered")),
+    )
+
+    report = ocr_anomalies.scan_ocr_pages(tmp_path, persist=False)
+
+    assert report["source_sha256"] == digest
+    assert report["review_required_files"] == []
+    assert report["scan_diagnostics"]
+    assert not (tmp_path / "ocr_anomaly_report.json").exists()
+
+
+def test_genuine_english_citation_with_visible_ink_is_not_a_blank_page_anomaly(tmp_path):
+    import pymupdf as fitz
+    from pdf2epub.ocr_anomalies import scan_ocr_pages
+
+    citation = "Smith, J. (2020). Evidence and inference in historical research. Journal of History, 12(3), 44–61. " * 5
+    def draw_citation(page):
+        page.insert_textbox(fitz.Rect(35, 80, 265, 240), citation, fontsize=10)
+
+    _write_scan_pdf(tmp_path, draw_citation)
+    (tmp_path / "pages" / "page_001.md").write_text(citation, encoding="utf-8")
+    report = scan_ocr_pages(tmp_path)
+    assert report["review_required_files"] == []
+
+
+def test_ocr_correct_cli_resume_reuses_unchanged_page_review(tmp_path, monkeypatch):
+    import pymupdf as fitz
+    from pdf2epub.commands import ocr as ocr_commands
+    from pdf2epub.ocr_correction import ocr_correction_is_current
+    from pdf2epub.ocr_progress import new_progress
+
+    pdf = tmp_path / "input_original.pdf"
+    document = fitz.open()
+    document.new_page(width=300, height=400)
+    document.new_page(width=300, height=400)
+    document.new_page(width=300, height=400)
+    document.save(pdf)
+    document.close()
+    digest = sha256_file(pdf)
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    long_text = _long_text()
+    for number in (1, 2):
+        (pages / f"page_{number:03d}.md").write_text(long_text, encoding="utf-8")
+    (pages / "page_003.md").write_text("Ordinary printed page.", encoding="utf-8")
+    progress = new_progress(source_sha256=digest, total_pages=3, backend="synthetic")
+    progress["pages_processed"] = [1, 2, 3]
+    progress["missing_pages"] = []
+    (pages / "ocr_progress.json").write_text(json.dumps(progress), encoding="utf-8")
+
+    context = SimpleNamespace(
+        output_dir=tmp_path,
+        config={"ocr": {"secondary": {"enabled": False}}},
+        config_path=tmp_path / "config.yaml",
+    )
+    monkeypatch.setattr(ocr_commands, "load_book_context", lambda *_args: context)
+    monkeypatch.setattr(ocr_commands, "_require_complete_ocr_pages", lambda *_args, **_kwargs: True)
+    first_args = SimpleNamespace(resume=False, file=None, dpi=None)
+    assert ocr_commands.ocr_correct_command(first_args) == 0
+
+    source_dir = pages
+    work_dir = tmp_path / "ocr_corrected_pages"
+    image_dir = tmp_path / "ocr_review_images"
+    record_dir = tmp_path / "ocr_correction_reviews"
+    work_dir.mkdir(exist_ok=True)
+    record_dir.mkdir(exist_ok=True)
+    for number in (1, 2):
+        name = f"page_{number:03d}.md"
+        source = source_dir / name
+        target = work_dir / name
+        target.write_text(f"Printed ledger entry {number}.", encoding="utf-8")
+        image = image_dir / f"page_{number:03d}.png"
+        record = {
+            "schema_version": OCR_PAGE_REVIEW_SCHEMA_VERSION,
+            "source_file": name,
+            "visual_file": f"ocr_review_images/page_{number:03d}.png",
+            "reviewed": True,
+            "coverage": "complete",
+            "uncertain": False,
+            "source_line_count": 1,
+            "source_nonempty_line_count": 1,
+            "target_line_count": 1,
+            "target_nonempty_line_count": 1,
+            "anomaly_decision": "transcribed",
+            "source_sha256": sha256_file(source),
+            "target_sha256": sha256_file(target),
+            "image_sha256": sha256_file(image),
+        }
+        (record_dir / f"page_{number:03d}.json").write_text(json.dumps(record), encoding="utf-8")
+
+    assert ocr_commands.ocr_correct_validate_command(SimpleNamespace(file=None)) == 0
+    assert ocr_correction_is_current(tmp_path, context.config) is True
+
+    from pdf2epub.ocr_correction import render_review_images
+    render_review_images(tmp_path, resume=True)
+    assert ocr_correction_is_current(tmp_path, context.config) is True
+    manifest_path = tmp_path / "ocr_review_images.json"
+    manifest_before = manifest_path.read_bytes()
+    render_review_images(tmp_path, resume=True, page_names=["page_001.md"])
+    assert manifest_path.read_bytes() == manifest_before
+
+    (pages / "page_002.md").write_text(_long_text() + " revised", encoding="utf-8")
+    from pdf2epub import ocr_anomalies
+    rendered_candidates = []
+    original_render = ocr_anomalies._render_page
+
+    def track_render(pdf_path, page_number):
+        rendered_candidates.append(page_number)
+        return original_render(pdf_path, page_number)
+
+    monkeypatch.setattr(ocr_anomalies, "_render_page", track_render)
+    second_args = SimpleNamespace(resume=True, file=None, dpi=None)
+    assert ocr_commands.ocr_correct_command(second_args) == 0
+    assert rendered_candidates == [2]
+    manifest = json.loads((tmp_path / "ocr-correct_subagent_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["pending_files"] == ["page_002.md"]
+    assert manifest["completed_files"] == ["page_001.md"]
 
 
 def test_detects_mixed_transcription_and_commentary_paragraph():
@@ -151,7 +447,7 @@ def test_single_ocr_validate_command_stages_reviewed_anomaly_and_pass_through(
     )
     monkeypatch.setattr(ocr_commands, "load_book_context", lambda *_args: context)
     monkeypatch.setattr(ocr_commands, "_require_complete_ocr_pages", lambda _path: True)
-    monkeypatch.setattr("pdf2epub.ocr_correction.review_images_are_current", lambda _path: True)
+    monkeypatch.setattr("pdf2epub.ocr_correction.review_images_are_current", lambda *_args: True)
 
     def fake_markdown_validation(_output, _task, source_dir, work_dir, **_kwargs):
         validated = work_dir / "validated"

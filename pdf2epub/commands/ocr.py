@@ -483,6 +483,7 @@ def ocr_correct_command(args):
             output_dir,
             dpi=dpi,
             resume=bool(getattr(args, "resume", False)),
+            page_names=review_files,
         )
         rules = [
             "This is a visual OCR-correction task, not a translation or a prose-polishing task.",
@@ -658,7 +659,7 @@ def ocr_correct_validate_command(args):
             sorted(set(all_pages) - set(consensus_review_files) - set(manual_files)),
         )
     review_files = sorted(set(consensus_review_files or []) | set(manual_files))
-    if review_files and not review_images_are_current(output_dir):
+    if review_files and not review_images_are_current(output_dir, review_files):
         logger.error(
             "OCR review images are missing or stale; rerun ocr-correct before validation"
         )

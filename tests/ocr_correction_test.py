@@ -32,6 +32,7 @@ def _write_current_review_manifest(output_dir: Path) -> None:
                 "page_count": 1,
                 "image_dir": image_dir.name,
                 "images": ["page_001.png"],
+                "image_sha256": {"page_001.png": sha256_file(image_dir / "page_001.png")},
             }
         ),
         encoding="utf-8",
