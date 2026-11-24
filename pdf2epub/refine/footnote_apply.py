@@ -9,6 +9,8 @@ and ordinary body blocks stay in their original unit.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Optional
@@ -311,6 +313,15 @@ def _bind_admitted_candidates(
         sidecar_index = page_sidecar_index(output_dir, report)
     except Exception:
         sidecar_index = {}
+    task_by_address = {}
+    for task in candidate_audit_tasks if isinstance(candidate_audit_tasks, list) else []:
+        if not isinstance(task, Mapping) or not isinstance(task.get("source_address"), Mapping):
+            continue
+        try:
+            addr = task["source_address"]
+            task_by_address[(int(addr["page"]), str(addr.get("source") or "primary"), int(addr["block"]))] = task
+        except (KeyError, TypeError, ValueError):
+            continue
     for page_row in report.get("pages", []) or []:
         if not isinstance(page_row, Mapping):
             continue
@@ -330,9 +341,18 @@ def _bind_admitted_candidates(
                 if not isinstance(sidecar_entry, Mapping):
                     continue
                 admitted_addrs.add((c_page, c_source, c_block))
+                try:
+                    sidecar_data = json.loads((output_dir / str(sidecar_entry["path"])).read_text(encoding="utf-8"))
+                    block_data = sidecar_data["blocks"][c_block]
+                except (OSError, UnicodeError, json.JSONDecodeError, KeyError, IndexError, TypeError):
+                    block_data = None
+                task = task_by_address.get((c_page, c_source, c_block), {})
                 newly_admitted.append({
                     "preserved_candidate_only": True,
                     "key": str(cand.get("key") or ""),
+                    "task_id": str(task.get("task_id") or ""),
+                    "file": str(task.get("file") or ""),
+                    "block_content_sha256": _footnote_block_content_sha256(block_data),
                     "source_address": {
                         "page": c_page,
                         "source": c_source,
@@ -341,6 +361,23 @@ def _bind_admitted_candidates(
                         "sidecar_sha256": sidecar_entry.get("sha256"),
                     },
                 })
+    for item in newly_admitted:
+        if not isinstance(item, dict) or not isinstance(item.get("source_address"), Mapping):
+            continue
+        address = item["source_address"]
+        if item.get("block_content_sha256"):
+            continue
+        try:
+            page, source, block = int(address["page"]), str(address.get("source") or "primary"), int(address["block"])
+            entry = sidecar_index.get(page, {}).get(source)
+            data = json.loads((output_dir / str(entry["path"])).read_text(encoding="utf-8")) if isinstance(entry, Mapping) else {}
+            block_data = data["blocks"][block]
+        except (OSError, UnicodeError, json.JSONDecodeError, KeyError, IndexError, TypeError, ValueError):
+            continue
+        item["block_content_sha256"] = _footnote_block_content_sha256(block_data)
+        task = task_by_address.get((page, source, block), {})
+        item.setdefault("task_id", str(task.get("task_id") or ""))
+        item.setdefault("file", str(task.get("file") or ""))
     result_audit["reviewed_candidate_tasks"] = [
         *(prior_reviewed_tasks if isinstance(prior_reviewed_tasks, list) else []),
         *newly_admitted,
@@ -352,6 +389,29 @@ def _bind_admitted_candidates(
         for item in reviewed_audit_tasks
         if isinstance(item, Mapping) and str(item.get("task_id") or "") in review_task_by_id
     ]
+    # Persist exact page-block identity for every successful visual review,
+    # including marker tasks whose candidate_ref points at a different note.
+    for item in result_audit["applied_result_audit_review_tasks"]:
+        if not isinstance(item, dict) or not isinstance(item.get("source_address"), Mapping):
+            continue
+        address = item["source_address"]
+        try:
+            page, source, block = int(address["page"]), str(address.get("source") or "primary"), int(address["block"])
+            entry = sidecar_index.get(page, {}).get(source)
+            data = json.loads((output_dir / str(entry["path"])).read_text(encoding="utf-8")) if isinstance(entry, Mapping) else {}
+            block_data = data["blocks"][block]
+        except (OSError, UnicodeError, json.JSONDecodeError, KeyError, IndexError, TypeError, ValueError):
+            continue
+        item["block_content_sha256"] = _footnote_block_content_sha256(block_data)
+        task = task_by_address.get((page, source, block), {})
+        item.setdefault("file", str(task.get("file") or ""))
+
+
+def _footnote_block_content_sha256(block: Any) -> str:
+    if not isinstance(block, Mapping):
+        return ""
+    payload = {key: str(block.get(key) or "") for key in ("text", "html", "label")}
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 @dataclass(frozen=True)
 class _SuccessReceiptInputs:
@@ -426,6 +486,7 @@ def _build_success_result(inputs: _SuccessReceiptInputs) -> dict[str, Any]:
             for notes in edit_plan.notes_by_chapter.values()
             for note in notes
         ],
+        "decision_evidence": _successful_decision_evidence(output_dir, report, planning),
         "resolved_blocks": list(edit_plan.resolved_blocks),
         "endnotes": dict(edit_plan.endnotes_report),
         "reviewed_inline_continuations": [
@@ -450,6 +511,43 @@ def _build_success_result(inputs: _SuccessReceiptInputs) -> dict[str, Any]:
         ),
     }
     return result
+
+
+def _successful_decision_evidence(output_dir: Path, report: Mapping[str, Any], planning: Any) -> list[dict[str, Any]]:
+    """Persist content identities for decisions from the successful apply."""
+    from .footnote_source import unit_records
+    try:
+        records = unit_records(output_dir)
+        sidecars = page_sidecar_index(output_dir, report)
+    except (OSError, ValueError, TypeError):
+        return []
+    output = []
+    for decision in getattr(planning, "effective_decisions", []) or []:
+        if not isinstance(decision, Mapping):
+            continue
+        try:
+            page, source, block_index = int(decision["page"]), str(decision.get("source") or "primary"), int(decision["block"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        owners = {str(item.get("name") or "") for item in records if int(item.get("start_page", -1)) <= page <= int(item.get("end_page", -1))}
+        record = next((item for item in records if str(item.get("name") or "") in owners), {}) if len(owners) == 1 else {}
+        entry = sidecars.get(page, {}).get(source)
+        if not isinstance(entry, Mapping):
+            continue
+        try:
+            data = json.loads((output_dir / str(entry["path"])).read_text(encoding="utf-8"))
+            block = data["blocks"][block_index]
+        except (OSError, UnicodeError, json.JSONDecodeError, KeyError, IndexError, TypeError):
+            continue
+        content_hash = _footnote_block_content_sha256(block)
+        if not content_hash:
+            continue
+        output.append({
+            "file": str(record.get("name") or ""), "page": page, "source": source,
+            "block": block_index, "role": str(decision.get("effective_role") or decision.get("role") or ""),
+            "key": str(decision.get("key") or ""), "block_content_sha256": content_hash,
+        })
+    return output
 
 
 def apply_footnote_normalization(

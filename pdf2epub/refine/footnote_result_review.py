@@ -334,7 +334,7 @@ def validate_result_audit_reviews(
                 continue
             approved = decision_addresses.get(address)
             approved_footnote = approved is not None and str(approved.get("role") or "") in {"footnote_start", "footnote_definition", "footnote_continuation"}
-            if approved is not None and approved.get("override") is True:
+            if not approved_footnote and approved is not None and approved.get("override") is True:
                 segments = approved.get("segments")
                 approved_footnote = isinstance(segments, list) and any(
                     isinstance(segment, Mapping)

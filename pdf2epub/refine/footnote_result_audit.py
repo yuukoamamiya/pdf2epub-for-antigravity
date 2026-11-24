@@ -377,6 +377,12 @@ def _audit_normalized_targets(
                 )
                 finding["occurrence_sha256"] = occurrence_id
                 finding["evidence_target_sha256"] = _sha(target)
+                before = line[:match.start()]
+                if key in {"40", "80"} and re.search(r"\b(?:18|19|20)\d{2}\s*$", before):
+                    finding["review_hint"] = (
+                        f"Check whether year + superscript {key} is a degree symbol transcription "
+                        f"(4°/8°); preserve the source unless visual evidence confirms it."
+                    )
                 record_finding(finding)
             for occurrence, match in enumerate(_UNICODE_SUP_RE.finditer(line) if target_marker_scan else ()):
                 if equation_like:
@@ -827,6 +833,11 @@ def audit_footnote_result(
                 })
                 finding = _finding("unexplained_numeric_superscript", file, number, line.strip(), detail=f"Raw superscript {key} remains in body text.", key=key, identity=f"occurrence={occurrence_id}")
                 finding["occurrence_sha256"] = occurrence_id
+                if key in {"40", "80"} and re.search(r"\b(?:18|19|20)\d{2}\s*$", before):
+                    finding["review_hint"] = (
+                        f"Check whether year + superscript {key} is a degree symbol transcription "
+                        f"(4°/8°); preserve the source unless visual evidence confirms it."
+                    )
                 record_finding(finding)
             for occurrence, match in enumerate((_UNICODE_SUP_RE.finditer(line) if scan_source_markers else ())):
                 if equation_like:
@@ -867,12 +878,14 @@ def audit_footnote_result(
                 finding = _finding("suspected_numbered_note_definition", file, number, line.strip(), detail=f"Numbered block {key} resembles a note definition but is not a Markdown footnote.")
                 record_finding(finding)
             stripped_line = line.strip()
-            if stripped_line and stripped_line[0].islower() and re.match(r"[a-zà-öø-ÿ]{3,}\b", stripped_line):
+            if scan_source_markers and stripped_line and stripped_line[0].islower() and re.match(r"[a-zà-öø-ÿ]{3,}\b", stripped_line):
                 lowercase_body_starts[scope].append((file, number, stripped_line, part_index))
 
-        _audit_truncated_definitions(file, definitions, record_finding)
+        if target_texts is None:
+            _audit_truncated_definitions(file, definitions, record_finding)
 
-    _audit_cross_page_note_boundaries(open_definitions, lowercase_body_starts, source_by_scope, record_finding)
+    if target_texts is None:
+        _audit_cross_page_note_boundaries(open_definitions, lowercase_body_starts, source_by_scope, record_finding)
 
     _audit_note_numbering(ordered_definitions, body_numeric_refs, mode, record_finding)
 

@@ -109,6 +109,9 @@ def _build_footnote_page_context(
                 "key": candidate.get("key"),
                 "label": label,
                 "text": _text_from_block(block)[:500],
+                # Boundary checks need the physical ending, not an arbitrary
+                # prefix that can make a long note look open or closed.
+                "text_ending": _text_from_block(block)[-160:],
                 "bbox": _normalise_bbox(block, sidecar),
                 "font_size": block.get("font_size"),
                 "font_names": block.get("font_names"),
@@ -156,6 +159,15 @@ def _text_starts_as_continuation(text: str) -> bool:
     if not value:
         return False
     return value[0].islower() or value[0] in ",.;:)]}%\"'”’"
+
+
+def _has_open_note_boundary(text: str) -> bool:
+    """Require a physical split-word or genuinely unmatched delimiter ending."""
+    value = str(text or "").strip()
+    if re.search(r"[-‐‑‒–—]\s*$", value):
+        return True
+    pairs = (("(", ")"), ("[", "]"), ("{", "}"), ("（", "）"), ("［", "］"), ("｛", "｝"))
+    return any(value.count(opening) > value.count(closing) for opening, closing in pairs)
 
 
 def _semantic_tokens(text: str) -> set[str]:
@@ -868,6 +880,24 @@ def _expand_orphan_continuation_candidates(
     existing = {int(item["block"]) for item in candidates}
     expanded = list(candidates)
     orphan_indexes: set[int] = set()
+    previous_note = previous_page_context["last_physical_footnote"]
+    ending = str(previous_note.get("text_ending") or "").strip()
+    top_recall = _has_open_note_boundary(ending)
+    top_recall_index = None
+    if top_recall:
+        for index in sorted(range(len(blocks)), key=lambda i: (blocks[i].get("order", i) if isinstance(blocks[i], Mapping) else i, i)):
+            block = blocks[index]
+            if not isinstance(block, Mapping) or index in excluded or index in existing:
+                continue
+            text = _text_from_block(block)
+            label = str(block.get("label") or "").strip()
+            bbox = _normalise_bbox(block, sidecar)
+            if (not text or _FURNITURE_LABEL_RE.search(label) or _CITATION_LABEL_RE.search(label)
+                    or _FOOTNOTE_LABEL_RE.search(label) or label.casefold() != "text"
+                    or not bbox or bbox[1] >= 0.35):
+                continue
+            top_recall_index = index
+            break
     for block_index, block in enumerate(blocks):
         if not isinstance(block, Mapping):
             continue
@@ -884,7 +914,8 @@ def _expand_orphan_continuation_candidates(
         bbox = _normalise_bbox(block, sidecar)
         if not bbox:
             continue
-        if bbox[3] < float(bottom_ratio) - 0.16:
+        is_top_recall = block_index == top_recall_index
+        if not is_top_recall and bbox[3] < float(bottom_ratio) - 0.16:
             continue
         if native_text_source:
             candidate = _candidate_for_native_block(
@@ -914,6 +945,12 @@ def _expand_orphan_continuation_candidates(
                 page_markdown=page_markdown,
                 layout_profile=layout_profile,
             )
+        if is_top_recall:
+            candidate["top_note_recall"] = True
+            candidate["auto_continuation"] = False
+            candidate["confidence"] = "review"
+            candidate["disposition"] = "review_required"
+            candidate["review_reason"] = "possible_top_of_page_note_continuation"
         if candidate is None:
             continue
         candidate["confidence"] = "review"

@@ -103,6 +103,20 @@ def _write_recovery_book(tmp_path: Path, monkeypatch) -> bytes:
 
 def test_missed_nonleading_note_recovers_through_exact_visual_review(tmp_path, monkeypatch):
     source_bytes = _write_recovery_book(tmp_path, monkeypatch)
+    # A second unit is present from the first successful apply so edits to it
+    # exercise local rather than book-wide candidate recovery.
+    source_dir = tmp_path / "ocr_markdown"
+    (source_dir / "chapter_2.md").write_text("Unrelated chapter prose.\n", encoding="utf-8")
+    (source_dir / "tree_progress.json").write_text(json.dumps({"units": [
+        {"unit_id": "chapter_1", "index_path": [1], "file": "chapter_1.md", "page_range": [1, 1]},
+        {"unit_id": "chapter_2", "index_path": [2], "file": "chapter_2.md", "page_range": [2, 2]},
+    ]}), encoding="utf-8")
+    (tmp_path / "pages" / "page_002.ocr.json").write_text(json.dumps({
+        "schema_version": 1, "page_number": 2, "backend": "synthetic",
+        "page_box": [0, 0, 1000, 1000],
+        "blocks": [{"order": 0, "label": "Text", "bbox": [80, 100, 920, 130], "html": "Unrelated chapter prose."}],
+    }), encoding="utf-8")
+    (tmp_path / "pages" / "page_002.md").write_text("Unrelated chapter prose.\n", encoding="utf-8")
     source_path = tmp_path / "ocr_markdown" / "chapter_1.md"
     sidecar_path = tmp_path / "pages" / "page_001.ocr.json"
     sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
@@ -278,6 +292,137 @@ def test_missed_nonleading_note_recovers_through_exact_visual_review(tmp_path, m
     assert refreshed_apply["valid"] is True, refreshed_apply.get("errors")
     assert target_path.read_bytes() == first_target_bytes
     assert footnote_normalization_status(tmp_path)["current"] is True
+
+    # A polish cleanup can refresh the sidecar envelope without changing the
+    # admitted block. The sibling chapter edit must not invalidate its review.
+    sidecar_path = tmp_path / "pages" / "page_001.ocr.json"
+    sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    sidecar["cleanup_metadata"] = {"removed_stale_annotations": True}
+    sidecar_path.write_text(json.dumps(sidecar, ensure_ascii=False), encoding="utf-8")
+    (tmp_path / "ocr_markdown" / "chapter_2.md").write_text(
+        "Unrelated chapter prose changed after polish.\n", encoding="utf-8"
+    )
+    recovered_paths = prepare_footnote_subagent(tmp_path, book_title="Result Audit Recovery")
+    recovered_report = json.loads(recovered_paths["report"].read_text(encoding="utf-8"))
+    recovered_page = next(row for row in recovered_report["pages"] if row["page"] == 1)
+    assert any(
+        candidate.get("result_audit_admitted") is True
+        and (candidate["page"], candidate["source"], candidate["block"]) == (1, "primary", 1)
+        for candidate in recovered_page["candidates"]
+    )
+    recovered_validation = validate_footnote_decisions(tmp_path)
+    assert recovered_validation["valid"] is True, recovered_validation["errors"]
+    recovered_apply = apply_footnote_normalization(tmp_path)
+    assert recovered_apply["valid"] is True, recovered_apply.get("errors")
+    assert target_path.read_bytes() == first_target_bytes
+    retry_state = json.loads((tmp_path / "review_escalation.json").read_text(encoding="utf-8"))
+
+    repeat_paths = prepare_footnote_subagent(tmp_path, book_title="Result Audit Recovery")
+    repeat_validation = validate_footnote_decisions(tmp_path)
+    assert repeat_validation["valid"] is True, repeat_validation["errors"]
+    repeat_apply = apply_footnote_normalization(tmp_path)
+    assert repeat_apply["valid"] is True, repeat_apply.get("errors")
+    assert json.loads((tmp_path / "review_escalation.json").read_text(encoding="utf-8")) == retry_state
+
+    sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    duplicate_index = len(sidecar["blocks"])
+    sidecar["blocks"].append(dict(sidecar["blocks"][1]))
+    sidecar_path.write_text(json.dumps(sidecar, ensure_ascii=False), encoding="utf-8")
+    duplicate_paths = prepare_footnote_subagent(tmp_path, book_title="Result Audit Recovery")
+    duplicate_report = json.loads(duplicate_paths["report"].read_text(encoding="utf-8"))
+    assert not any(item["code"] == "admitted_candidate_evidence_changed"
+                   for item in duplicate_report["result_audit"]["findings"])
+
+    # A changed related note block must become a current visual task and retain
+    # its source ownership, rather than disappearing with the old admission.
+    sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    sidecar["blocks"][1]["html"] += " changed OCR evidence"
+    sidecar["blocks"][duplicate_index]["html"] = sidecar["blocks"][1]["html"]
+    sidecar_path.write_text(json.dumps(sidecar, ensure_ascii=False), encoding="utf-8")
+    current_note = sidecar["blocks"][1]["html"]
+    source_path.write_text(source_path.read_text(encoding="utf-8").replace(
+        "17. This is a note with citation to Smith 1999, page 14, and enough identifying text to match this source block exactly.",
+        current_note,
+    ), encoding="utf-8")
+    (tmp_path / "pages" / "page_001.md").write_text(source_path.read_text(encoding="utf-8"), encoding="utf-8")
+    changed_paths = prepare_footnote_subagent(tmp_path, book_title="Result Audit Recovery")
+    changed_report = json.loads(changed_paths["report"].read_text(encoding="utf-8"))
+    changed_task = next(
+        item for item in changed_report["result_audit"]["findings"]
+        if item["code"] == "admitted_candidate_evidence_changed"
+    )
+    assert changed_task["file"] == "chapter_1.md"
+    assert changed_task["source_address"]["sidecar_sha256"] == hashlib.sha256(sidecar_path.read_bytes()).hexdigest()
+    decisions_path = tmp_path / "footnote_decisions.json"
+    decisions = json.loads(decisions_path.read_text(encoding="utf-8"))
+    decisions.setdefault("result_audit_reviews", []).append({
+        "task_id": changed_task["task_id"],
+        "evidence_sha256": changed_task["evidence_sha256"],
+        "outcome": "confirmed_footnote",
+        "candidate_ref": {"page": 1, "source": "primary", "block": 1},
+        "reason": "The current page image confirms this block remains the page note.",
+        "evidence_pages": [1],
+    })
+    decisions_path.write_text(json.dumps(decisions), encoding="utf-8")
+    changed_validation = validate_footnote_decisions(tmp_path)
+    assert changed_validation["valid"] is True, changed_validation["errors"]
+    changed_apply = apply_footnote_normalization(tmp_path)
+    assert changed_apply["valid"] is True, changed_apply.get("errors")
+
+    # Exercise ordinary successful decisions too: only the previously admitted
+    # result-audit candidate above uses the separate admission restoration path.
+    decisions_path = tmp_path / "footnote_decisions.json"
+    decisions = json.loads(decisions_path.read_text(encoding="utf-8"))
+    decisions["decisions"].append({"page": 1, "source": "primary", "block": 4,
+                                   "role": "footnote_start", "key": "16", "confidence": "high"})
+    decisions_path.write_text(json.dumps(decisions), encoding="utf-8")
+    sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    sidecar["blocks"][4]["html"] += " revised"
+    sidecar_path.write_text(json.dumps(sidecar, ensure_ascii=False), encoding="utf-8")
+    chapter_text = source_path.read_text(encoding="utf-8")
+    source_path.write_text(chapter_text.replace(
+        "16. An already identified page note provides an initial candidate.",
+        sidecar["blocks"][4]["html"],
+    ), encoding="utf-8")
+    (tmp_path / "pages" / "page_001.md").write_text(source_path.read_text(encoding="utf-8"), encoding="utf-8")
+    ordinary_paths = prepare_footnote_subagent(tmp_path, book_title="Result Audit Recovery")
+    ordinary_report = json.loads(ordinary_paths["report"].read_text(encoding="utf-8"))
+    ordinary_task = next(
+        item for item in ordinary_report["result_audit"]["findings"]
+        if item["code"] == "successful_decision_evidence_changed"
+    )
+    assert ordinary_task["source_address"]["sidecar_sha256"] == hashlib.sha256(sidecar_path.read_bytes()).hexdigest()
+    decisions = json.loads(decisions_path.read_text(encoding="utf-8"))
+    decisions.setdefault("result_audit_reviews", []).append({
+        "task_id": ordinary_task["task_id"],
+        "evidence_sha256": ordinary_task["evidence_sha256"],
+        "outcome": "confirmed_footnote",
+        "candidate_ref": {"page": 1, "source": "primary", "block": 4},
+        "reason": "The current page image confirms this remains the page note.",
+        "evidence_pages": [1],
+    })
+    decisions_path.write_text(json.dumps(decisions), encoding="utf-8")
+    ordinary_validation = validate_footnote_decisions(tmp_path)
+    assert ordinary_validation["valid"] is True, ordinary_validation["errors"]
+    ordinary_apply = apply_footnote_normalization(tmp_path)
+    assert ordinary_apply["valid"] is True, ordinary_apply.get("errors")
+
+    # The former address is gone and identical content now has two possible
+    # owners in the same unit. Preparation must surface both as local review.
+    sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    reviewed_block = dict(sidecar["blocks"][1])
+    sidecar["blocks"][1] = {**sidecar["blocks"][1], "html": "Intervening OCR text."}
+    sidecar["blocks"][duplicate_index]["html"] = "Intervening OCR text."
+    sidecar["blocks"].extend([dict(reviewed_block), dict(reviewed_block)])
+    sidecar_path.write_text(json.dumps(sidecar, ensure_ascii=False), encoding="utf-8")
+    ambiguous_paths = prepare_footnote_subagent(tmp_path, book_title="Result Audit Recovery")
+    ambiguous_report = json.loads(ambiguous_paths["report"].read_text(encoding="utf-8"))
+    ambiguous = next(
+        item for item in ambiguous_report["result_audit"]["findings"]
+        if item["code"] == "admitted_candidate_evidence_changed"
+    )
+    assert len(ambiguous["candidate_refs"]) == 2
+    assert len({(item["page"], item["source"], item["block"]) for item in ambiguous["candidate_refs"]}) == 2
 
 
 def test_repeated_unresolved_result_review_escalates_after_second_attempt(tmp_path, monkeypatch):

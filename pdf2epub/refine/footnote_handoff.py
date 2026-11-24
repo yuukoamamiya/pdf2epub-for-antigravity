@@ -796,6 +796,36 @@ def _attach_polish_semantic_tasks(
         audit["polish_semantic_diagnostics"] = polish_diagnostics
 
 
+def _load_explicit_part_page_ranges(output_dir: Path) -> dict[str, tuple[int, int]]:
+    """Read only valid, explicit part-to-page ranges from current progress."""
+    try:
+        progress = json.loads((output_dir / "ocr_markdown" / "tree_progress.json").read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return {}
+    ranges: dict[str, tuple[int, int]] = {}
+    for unit in progress.get("units", []) if isinstance(progress, Mapping) else []:
+        if not isinstance(unit, Mapping):
+            continue
+        chapter_range = unit.get("page_range")
+        raw_parts = unit.get("part_page_ranges")
+        if not isinstance(chapter_range, list) or len(chapter_range) != 2 or not isinstance(raw_parts, Mapping):
+            continue
+        try:
+            chapter_start, chapter_end = int(chapter_range[0]), int(chapter_range[1])
+        except (TypeError, ValueError):
+            continue
+        for name, value in raw_parts.items():
+            if not isinstance(value, list) or len(value) != 2:
+                continue
+            try:
+                start, end = int(value[0]), int(value[1])
+            except (TypeError, ValueError):
+                continue
+            if chapter_start <= start <= end <= chapter_end and Path(str(name)).name == str(name):
+                ranges[str(name)] = (start, end)
+    return ranges
+
+
 def _restore_admitted_candidates(
     audit: dict[str, Any],
     report: dict[str, Any],
@@ -804,17 +834,89 @@ def _restore_admitted_candidates(
     prior_result_audit: Mapping[str, Any],
     exact_sidecars: Mapping[Any, Any],
     prior_review_data: Mapping[str, Any],
+    records: list[Mapping[str, Any]],
 ) -> None:
-    """Re-admit candidates that a previous run approved and whose sidecar is unchanged."""
-    if (
-        isinstance(prior_result_audit, Mapping)
-        and prior_result_audit.get("source_sha256") == markdown_inventory(output_dir / "ocr_markdown")
-        and prior_result_audit.get("target_sha256") == markdown_inventory(output_dir / "footnote_normalized")
-    ):
-        audit["reviewed_candidate_tasks"] = [
-            dict(item) for item in prior_result_audit.get("admitted_candidates", [])
-            if isinstance(item, Mapping) and not item.get("preserved_candidate_only")
+    """Restore reviewed candidates using their owner unit and exact block evidence."""
+    part_ranges = _load_explicit_part_page_ranges(output_dir)
+    if isinstance(prior_result_audit, Mapping):
+        restored_review_tasks = [
+            item for item in [
+                *(prior_result_audit.get("reviewed_candidate_tasks", []) if isinstance(prior_result_audit.get("reviewed_candidate_tasks"), list) else []),
+                *(prior_result_audit.get("applied_result_audit_review_tasks", []) if isinstance(prior_result_audit.get("applied_result_audit_review_tasks"), list) else []),
+            ] if isinstance(item, Mapping) and item.get("task_id")
         ]
+        audit["reviewed_candidate_tasks"] = list({str(item["task_id"]): dict(item) for item in restored_review_tasks}.values())
+        dropped_review_ids = set()
+        decisions_changed = False
+        for reviewed in audit["reviewed_candidate_tasks"]:
+            address = reviewed.get("source_address")
+            expected_hash = str(reviewed.get("block_content_sha256") or "")
+            if not isinstance(address, Mapping) or not expected_hash:
+                continue
+            try:
+                old_page = int(address["page"])
+                old_source = str(address.get("source") or "primary")
+            except (KeyError, TypeError, ValueError):
+                continue
+            owner = str(reviewed.get("file") or "")
+            unit = next((record for record in records if str(record.get("name") or "") == owner), None)
+            if unit is None:
+                unit = next((record for record in records if int(record.get("start_page", -1)) <= old_page <= int(record.get("end_page", -1))), None)
+            owner_name = str(unit.get("name") or owner) if unit else owner
+            start, end = part_ranges.get(owner_name, (int(unit.get("start_page", old_page)), int(unit.get("end_page", old_page)))) if unit else (old_page, old_page)
+            allowed = set(range(start, end + 1))
+            matches = []
+            for candidate_page, sources in exact_sidecars.items():
+                if int(candidate_page) not in allowed or not isinstance(sources, Mapping):
+                    continue
+                entry = sources.get(old_source)
+                if not isinstance(entry, Mapping):
+                    continue
+                try:
+                    data = json.loads((output_dir / str(entry["path"])).read_text(encoding="utf-8"))
+                except (OSError, UnicodeError, json.JSONDecodeError, TypeError):
+                    continue
+                for index, block in enumerate(data.get("blocks", []) if isinstance(data, Mapping) else []):
+                    if not isinstance(block, Mapping):
+                        continue
+                    content = {key: str(block.get(key) or "") for key in ("text", "html", "label")}
+                    digest = hashlib.sha256(json.dumps(content, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+                    if digest == expected_hash:
+                        matches.append((int(candidate_page), index, entry, block))
+            if len(matches) == 1:
+                new_page, new_block, entry, block = matches[0]
+                reviewed["source_address"] = {"page": new_page, "source": old_source, "block": new_block,
+                    "sidecar": entry.get("path"), "sidecar_sha256": entry.get("sha256")}
+                reviewed["evidence_sha256"] = hashlib.sha256(json.dumps(
+                    {"sidecar_sha256": entry.get("sha256"), "block": block},
+                    ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+                ).encode("utf-8")).hexdigest()
+                for raw in prior_review_data.get("result_audit_reviews", []) if isinstance(prior_review_data, Mapping) else []:
+                    if isinstance(raw, dict) and str(raw.get("task_id") or "") == str(reviewed.get("task_id")):
+                        raw["evidence_sha256"] = reviewed["evidence_sha256"]
+                        candidate_ref = raw.get("candidate_ref")
+                        if isinstance(candidate_ref, Mapping) and (
+                            int(candidate_ref.get("page", -1)) == old_page
+                            and str(candidate_ref.get("source") or "primary") == old_source
+                            and int(candidate_ref.get("block", -1)) == int(address.get("block", -2))
+                        ):
+                            raw["candidate_ref"] = {"page": new_page, "source": old_source, "block": new_block}
+                        decisions_changed = True
+            elif matches or old_page in exact_sidecars:
+                dropped_review_ids.add(str(reviewed.get("task_id") or ""))
+        if dropped_review_ids and isinstance(prior_review_data, dict):
+            prior_review_data["result_audit_reviews"] = [
+                item for item in prior_review_data.get("result_audit_reviews", [])
+                if not isinstance(item, Mapping) or str(item.get("task_id") or "") not in dropped_review_ids
+            ]
+            audit["reviewed_candidate_tasks"] = [
+                item for item in audit["reviewed_candidate_tasks"]
+                if str(item.get("task_id") or "") not in dropped_review_ids
+            ]
+            decisions_changed = True
+        if decisions_changed and isinstance(prior_review_data, dict):
+            from ..workflow_contracts import atomic_write_json
+            atomic_write_json(output_dir / "footnote_decisions.json", prior_review_data)
         for saved in prior_result_audit.get("admitted_candidates", []) or []:
             if not isinstance(saved, Mapping) or not isinstance(saved.get("source_address"), Mapping):
                 continue
@@ -826,17 +928,148 @@ def _restore_admitted_candidates(
             except (KeyError, TypeError, ValueError):
                 continue
             sidecar_entry = exact_sidecars.get(page, {}).get(source)
-            if (
-                not isinstance(sidecar_entry, Mapping)
-                or str(sidecar_entry.get("path")) != str(address.get("sidecar"))
-                or str(sidecar_entry.get("sha256")) != str(address.get("sidecar_sha256"))
-            ):
-                continue
-            try:
-                sidecar_data = json.loads((output_dir / str(sidecar_entry["path"])).read_text(encoding="utf-8"))
-                block_data = sidecar_data["blocks"][block_index]
-            except (OSError, UnicodeError, json.JSONDecodeError, KeyError, IndexError, TypeError):
-                continue
+            owner_file = str(saved.get("file") or "")
+            owner_unit = next((record for record in records if str(record.get("name") or "") == owner_file), None)
+            if owner_unit is None:
+                owner_unit = next((record for record in records if int(record.get("start_page", -1)) <= page <= int(record.get("end_page", -1))), None)
+                if owner_unit is not None:
+                    owner_file = str(owner_unit.get("name") or "")
+            allowed_pages = set()
+            if owner_unit is not None:
+                owner_name = str(owner_unit.get("name") or owner_file)
+                start, end = part_ranges.get(owner_name, (int(owner_unit.get("start_page", page)), int(owner_unit.get("end_page", page))))
+                allowed_pages.update(range(start, end + 1))
+            else:
+                allowed_pages.add(page)
+            if page not in allowed_pages:
+                sidecar_entry = None
+            block_data = None
+            if isinstance(sidecar_entry, Mapping):
+                try:
+                    sidecar_data = json.loads((output_dir / str(sidecar_entry["path"])).read_text(encoding="utf-8"))
+                    blocks = sidecar_data.get("blocks", [])
+                    if 0 <= block_index < len(blocks):
+                        possible = blocks[block_index]
+                        content = {key: str(possible.get(key) or "") for key in ("text", "html", "label")} if isinstance(possible, Mapping) else {}
+                        digest = hashlib.sha256(json.dumps(content, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+                        if digest == str(saved.get("block_content_sha256") or ""):
+                            block_data = possible
+                except (OSError, UnicodeError, json.JSONDecodeError, KeyError, IndexError, TypeError):
+                    block_data = None
+            # Sidecar block indices can move during polish cleanup. Recover only
+            # a unique exact content match from the successful apply receipt.
+            if block_data is None:
+                expected_hash = str(saved.get("block_content_sha256") or "")
+                matches = []
+                if expected_hash:
+                    for candidate_page, sources in exact_sidecars.items():
+                        if int(candidate_page) not in allowed_pages:
+                            continue
+                        entry = sources.get(source)
+                        if not isinstance(entry, Mapping):
+                            continue
+                        for candidate_source in (source,):
+                            try:
+                                data = json.loads((output_dir / str(entry["path"])).read_text(encoding="utf-8"))
+                            except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError):
+                                continue
+                            for index, block in enumerate(data.get("blocks", []) if isinstance(data, Mapping) else []):
+                                if not isinstance(block, Mapping):
+                                    continue
+                                content = {key: str(block.get(key) or "") for key in ("text", "html", "label")}
+                                digest = hashlib.sha256(json.dumps(content, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+                                if digest == expected_hash:
+                                    matches.append((int(candidate_page), str(candidate_source), index, entry, block))
+                    if len(matches) == 1:
+                        page, source, block_index, sidecar_entry, block_data = matches[0]
+                        address = {**dict(address), "page": page, "source": source, "block": block_index,
+                                   "sidecar": sidecar_entry.get("path"), "sidecar_sha256": sidecar_entry.get("sha256")}
+                if block_data is None:
+                    # Do not silently drop an approved candidate when evidence
+                    # changed or became ambiguous. Surface a scoped review task.
+                    current = None
+                    if isinstance(sidecar_entry, Mapping):
+                        try:
+                            data = json.loads((output_dir / str(sidecar_entry["path"])).read_text(encoding="utf-8"))
+                            blocks = data.get("blocks", [])
+                            if 0 <= block_index < len(blocks) and isinstance(blocks[block_index], Mapping):
+                                current = blocks[block_index]
+                        except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError):
+                            current = None
+                    task_id = str(saved.get("task_id") or "")
+                    if not task_id:
+                        identity = f"{owner_file}:{page}:{source}:{block_index}:{expected_hash}"
+                        task_id = "fra-" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:20]
+                    current_sidecar = sidecar_entry if isinstance(sidecar_entry, Mapping) else {}
+                    current_address = {"page": page, "source": source, "block": block_index,
+                                       "sidecar": current_sidecar.get("path"),
+                                       "sidecar_sha256": current_sidecar.get("sha256")}
+                    current_text = str(current.get("text") or current.get("html") or "") if isinstance(current, Mapping) else str(saved.get("evidence_excerpt") or "")
+                    review_refs = [{"page": page, "source": source, "block": block_index}]
+                    if len(matches) > 1:
+                        review_refs = []
+                        for match_page, match_source, match_block, match_entry, match_data in matches:
+                            review_refs.append({"page": match_page, "source": match_source, "block": match_block})
+                            match_row = next((row for row in report.get("pages", []) or [] if isinstance(row, dict) and int(row.get("page", 0)) == match_page), None)
+                            if match_row is None:
+                                match_row = {"page": match_page, "candidates": [], "secondary_only_candidates": []}
+                                report.setdefault("pages", []).append(match_row)
+                            match_field = "secondary_only_candidates" if match_source == "secondary" else "candidates"
+                            match_rows = match_row.setdefault(match_field, [])
+                            if not any(isinstance(row, Mapping) and int(row.get("block", -1)) == match_block and str(row.get("source") or "primary") == match_source for row in match_rows):
+                                match_rows.append({"page": match_page, "source": match_source, "block": match_block,
+                                    "order": match_data.get("order", match_block), "label": str(match_data.get("label") or "Text"),
+                                    "bbox": match_data.get("bbox"), "key": str(saved.get("key") or ""),
+                                    "confidence": "review", "disposition": "review_required",
+                                    "text": str(match_data.get("text") or match_data.get("html") or "")[:240],
+                                    "result_audit_admitted": True, "review_reason": "admitted_candidate_mapping_ambiguous"})
+                        first_page, first_source, first_block, first_entry, first_data = matches[0]
+                        page, source, block_index = first_page, first_source, first_block
+                        current_sidecar = first_entry
+                        current_address = {"page": page, "source": source, "block": block_index,
+                                           "sidecar": first_entry.get("path"), "sidecar_sha256": first_entry.get("sha256")}
+                        current = first_data
+                        current_text = str(current.get("text") or current.get("html") or "")
+                    finding_digest = hashlib.sha256(json.dumps(
+                        {"sidecar_sha256": current_sidecar.get("sha256"), "block": current},
+                        ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+                    ).encode("utf-8")).hexdigest() if isinstance(current, Mapping) else hashlib.sha256(current_text.encode("utf-8")).hexdigest()
+                    p_row = next((row for row in report.get("pages", []) or [] if isinstance(row, dict) and int(row.get("page", 0)) == page), None)
+                    if p_row is None:
+                        p_row = {"page": page, "candidates": [], "secondary_only_candidates": []}
+                        report.setdefault("pages", []).append(p_row)
+                    field = "secondary_only_candidates" if source == "secondary" else "candidates"
+                    candidate_rows = p_row.setdefault(field, [])
+                    if not any(isinstance(row, Mapping) and int(row.get("block", -1)) == block_index and str(row.get("source") or "primary") == source for row in candidate_rows):
+                        candidate_rows.append({"page": page, "source": source, "block": block_index,
+                            "order": current.get("order", block_index) if isinstance(current, Mapping) else block_index,
+                            "label": str(current.get("label") or "Text") if isinstance(current, Mapping) else "Text",
+                            "bbox": current.get("bbox") if isinstance(current, Mapping) else None,
+                            "key": str(saved.get("key") or ""), "confidence": "review",
+                            "disposition": "review_required", "text": current_text[:240],
+                            "result_audit_admitted": True,
+                            "review_reason": "admitted_candidate_evidence_changed"})
+                    audit.setdefault("findings", []).append({
+                        "task_id": task_id,
+                        "code": "admitted_candidate_evidence_changed",
+                        "file": owner_file,
+                        "line": None,
+                        "page": page,
+                        "key": str(saved.get("key") or ""),
+                        "evidence_sha256": finding_digest,
+                        "detail": "Previously reviewed candidate evidence changed or maps ambiguously; review this candidate in its owning unit.",
+                        "requires_visual_review": True,
+                        "source_address": current_address,
+                        "evidence_origin": "source_sidecar",
+                        "unit_scope": owner_file,
+                        "candidate_refs": review_refs,
+                        "evidence_excerpt": current_text[:280],
+                        "evidence_target_sha256": None,
+                        "review_attempt": 1,
+                    })
+                    continue
+            if isinstance(sidecar_entry, Mapping):
+                address = {**dict(address), "sidecar": sidecar_entry.get("path"), "sidecar_sha256": sidecar_entry.get("sha256")}
             page_row = next((row for row in report.get("pages", []) or [] if isinstance(row, dict) and int(row.get("page", 0)) == page), None)
             if not isinstance(page_row, dict):
                 page_row = {"page": page, "candidates": [], "secondary_only_candidates": []}
@@ -856,46 +1089,172 @@ def _restore_admitted_candidates(
             candidates = page_row.setdefault(field, [])
             if not any(isinstance(item, Mapping) and int(item.get("block", -1)) == block_index and str(item.get("source") or "primary") == source for item in candidates):
                 candidates.append(candidate)
-        decided_addresses = {
-            (int(d["page"]), str(d.get("source") or "primary"), int(d["block"]))
-            for d in (prior_review_data.get("decisions") or [])
-            if isinstance(d, Mapping)
-            and str(d.get("page", "")).lstrip("-").isdigit()
-            and str(d.get("block", "")).lstrip("-").isdigit()
-        } if isinstance(prior_review_data, Mapping) else set()
-        if decided_addresses:
+
+
+def _restore_successful_decision_addresses(
+    audit: dict[str, Any],
+    *,
+    report: dict[str, Any],
+    output_dir: Path,
+    receipt: Mapping[str, Any],
+    review_data: Mapping[str, Any],
+    records: list[Mapping[str, Any]],
+    exact_sidecars: Mapping[Any, Any],
+    admitted_candidate_addresses: set[tuple[int, str, int]],
+) -> None:
+    """Rebase prior decisions only when their exact content has one local owner."""
+    if receipt.get("valid") is not True or receipt.get("status") != "validated":
+        return
+    evidence_rows = receipt.get("decision_evidence")
+    decisions = review_data.get("decisions")
+    if not isinstance(evidence_rows, list) or not isinstance(decisions, list):
+        return
+    from ..workflow_contracts import atomic_write_json
+    part_ranges = _load_explicit_part_page_ranges(output_dir)
+    changed = False
+    for decision in decisions:
+        if not isinstance(decision, dict):
+            continue
+        try:
+            old = (int(decision["page"]), str(decision.get("source") or "primary"), int(decision["block"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if old in admitted_candidate_addresses:
+            continue
+        saved = None
+        for item in evidence_rows:
+            if not isinstance(item, Mapping):
+                continue
             try:
-                prior_candidate_report = json.loads((output_dir / "footnote_candidates.json").read_text(encoding="utf-8"))
-            except (OSError, UnicodeError, json.JSONDecodeError):
-                prior_candidate_report = {}
-            for prior_page in prior_candidate_report.get("pages", []) or [] if isinstance(prior_candidate_report, Mapping) else []:
-                if not isinstance(prior_page, Mapping):
+                address = (int(item.get("page", -1)), str(item.get("source") or "primary"), int(item.get("block", -1)))
+            except (TypeError, ValueError):
+                continue
+            if (address == old and str(item.get("role") or "") == str(decision.get("role") or "")
+                    and str(item.get("key") or "") == str(decision.get("key") or "")):
+                saved = item
+                break
+        if not isinstance(saved, Mapping) or not saved.get("block_content_sha256"):
+            continue
+        owner = str(saved.get("file") or "")
+        record = next((item for item in records if str(item.get("name") or "") == owner), None)
+        if record is None:
+            possible_owners = [item for item in records if int(item.get("start_page", -1)) <= old[0] <= int(item.get("end_page", -1))]
+            unique_names = {str(item.get("name") or "") for item in possible_owners}
+            record = possible_owners[0] if len(unique_names) == 1 and possible_owners else None
+            owner = str(record.get("name") or "") if record else ""
+        owner_resolved = record is not None
+        if record is None:
+            # Without an unambiguous owner, exact same-address reuse remains
+            # possible, but block relocation across overlapping parts is not.
+            start = end = old[0]
+        else:
+            start, end = part_ranges.get(owner, (int(record.get("start_page", old[0])), int(record.get("end_page", old[0]))))
+        allowed_pages = set(range(start, end + 1))
+        # Preserve exact same-address content without requiring uniqueness
+        # against duplicate text elsewhere in the owner unit.
+        direct_entry = exact_sidecars.get(old[0], {}).get(old[1])
+        direct_block = None
+        if isinstance(direct_entry, Mapping):
+            try:
+                direct_data = json.loads((output_dir / str(direct_entry["path"])).read_text(encoding="utf-8"))
+                direct_block = direct_data["blocks"][old[2]]
+            except (OSError, UnicodeError, json.JSONDecodeError, KeyError, IndexError, TypeError):
+                direct_block = None
+        if isinstance(direct_block, Mapping):
+            direct_content = {key: str(direct_block.get(key) or "") for key in ("text", "html", "label")}
+            direct_hash = hashlib.sha256(json.dumps(direct_content, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+            if direct_hash == str(saved["block_content_sha256"]):
+                continue
+        matches = []
+        if owner_resolved:
+            for page, sources in exact_sidecars.items():
+                if int(page) not in allowed_pages:
                     continue
-                for prior_field in ("candidates", "secondary_only_candidates"):
-                    for prior_cand in prior_page.get(prior_field, []) or []:
-                        if not isinstance(prior_cand, Mapping) or not prior_cand.get("result_audit_admitted"):
-                            continue
-                        try:
-                            p_page = int(prior_cand["page"])
-                            p_source = str(prior_cand.get("source") or "primary")
-                            p_block = int(prior_cand["block"])
-                        except (KeyError, TypeError, ValueError):
-                            continue
-                        if (p_page, p_source, p_block) not in decided_addresses:
-                            continue
-                        if not isinstance(exact_sidecars.get(p_page, {}).get(p_source), Mapping):
-                            continue
-                        p_row = next((row for row in report.get("pages", []) or [] if isinstance(row, dict) and int(row.get("page", 0)) == p_page), None)
-                        if not isinstance(p_row, dict):
-                            p_row = {"page": p_page, "candidates": [], "secondary_only_candidates": []}
-                            report.setdefault("pages", []).append(p_row)
-                        target_field = "secondary_only_candidates" if p_source == "secondary" else "candidates"
-                        target_list = p_row.setdefault(target_field, [])
-                        if not any(isinstance(item, Mapping) and int(item.get("block", -1)) == p_block and str(item.get("source") or "primary") == p_source for item in target_list):
-                            target_list.append(dict(prior_cand))
-
-
-
+                entry = sources.get(old[1]) if isinstance(sources, Mapping) else None
+                if not isinstance(entry, Mapping):
+                    continue
+                try:
+                    sidecar = json.loads((output_dir / str(entry["path"])).read_text(encoding="utf-8"))
+                except (OSError, UnicodeError, json.JSONDecodeError, TypeError):
+                    continue
+                for index, block in enumerate(sidecar.get("blocks", []) if isinstance(sidecar, Mapping) else []):
+                    if not isinstance(block, Mapping):
+                        continue
+                    content = {key: str(block.get(key) or "") for key in ("text", "html", "label")}
+                    digest = hashlib.sha256(json.dumps(content, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+                    if digest == str(saved["block_content_sha256"]):
+                        matches.append((int(page), index))
+        if len(matches) == 1:
+            new_page, new_block = matches[0]
+            if (new_page, new_block) != (old[0], old[2]):
+                decision["page"], decision["block"] = new_page, new_block
+                changed = True
+        else:
+            task_id = "fra-" + hashlib.sha256(f"decision:{owner}:{old[1]}:{saved['block_content_sha256']}".encode("utf-8")).hexdigest()[:20]
+            refs = [{"page": page, "source": old[1], "block": block} for page, block in matches]
+            current_address = old
+            current_entry = direct_entry
+            current_block = direct_block
+            if len(matches) > 1:
+                current_page, current_block_index = matches[0]
+                current_entry = exact_sidecars.get(current_page, {}).get(old[1])
+                if isinstance(current_entry, Mapping):
+                    try:
+                        current_data = json.loads((output_dir / str(current_entry["path"])).read_text(encoding="utf-8"))
+                        current_block = current_data["blocks"][current_block_index]
+                        current_address = (current_page, old[1], current_block_index)
+                    except (OSError, UnicodeError, json.JSONDecodeError, KeyError, IndexError, TypeError):
+                        current_block = None
+            if not isinstance(current_entry, Mapping) or not isinstance(current_block, Mapping):
+                # The saved decision has no current visual target. Preserve the
+                # block-local failure in the audit, with no false source proof.
+                audit.setdefault("findings", []).append({
+                    "task_id": task_id, "code": "successful_decision_evidence_unavailable",
+                    "file": owner, "line": None, "page": old[0], "key": str(saved.get("key") or ""),
+                    "evidence_sha256": str(saved["block_content_sha256"]),
+                    "detail": "Previously applied decision content has no current exact page block in its owning scope; restore the source page mapping before reviewing it.",
+                    "requires_visual_review": True, "unit_scope": owner,
+                    "candidate_refs": [], "evidence_excerpt": "",
+                })
+                continue
+            content_text = str(current_block.get("text") or current_block.get("html") or "")
+            current_evidence = hashlib.sha256(json.dumps(
+                {"sidecar_sha256": current_entry.get("sha256"), "block": current_block},
+                ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+            ).encode("utf-8")).hexdigest()
+            current_address_mapping = {"page": current_address[0], "source": current_address[1], "block": current_address[2],
+                                      "sidecar": current_entry.get("path"), "sidecar_sha256": current_entry.get("sha256")}
+            if not refs:
+                refs = [{"page": current_address[0], "source": current_address[1], "block": current_address[2]}]
+            p_row = next((row for row in report.get("pages", []) or [] if isinstance(row, dict) and int(row.get("page", 0)) == current_address[0]), None)
+            if p_row is None:
+                p_row = {"page": current_address[0], "candidates": [], "secondary_only_candidates": []}
+                report.setdefault("pages", []).append(p_row)
+            field = "secondary_only_candidates" if old[1] == "secondary" else "candidates"
+            row_list = p_row.setdefault(field, [])
+            if not any(isinstance(item, Mapping) and int(item.get("block", -1)) == current_address[2] and str(item.get("source") or "primary") == old[1] for item in row_list):
+                row_list.append({"page": current_address[0], "source": old[1], "block": current_address[2],
+                    "order": current_block.get("order", current_address[2]), "label": str(current_block.get("label") or "Text"),
+                    "bbox": current_block.get("bbox"), "key": str(saved.get("key") or ""),
+                    "confidence": "review", "disposition": "review_required", "text": content_text[:240],
+                    "review_reason": "successful_decision_evidence_changed"})
+            audit.setdefault("findings", []).append({
+                "task_id": task_id, "code": "successful_decision_evidence_changed",
+                "file": owner, "line": None, "page": current_address[0], "key": str(saved.get("key") or ""),
+                "evidence_sha256": current_evidence,
+                "detail": (
+                    "The prior owner unit cannot be resolved, so automatic block relocation is blocked; restore the source unit/page mapping and review this page-local proposal."
+                    if not owner_resolved else
+                    "Previously applied decision content changed or maps ambiguously inside its owning unit; review the current matching blocks."
+                ),
+                "requires_visual_review": True,
+                "source_address": current_address_mapping, "evidence_origin": "source_sidecar",
+                "unit_scope": owner, "candidate_refs": refs,
+                "evidence_excerpt": content_text[:280],
+                "review_attempt": 1,
+            })
+    if changed:
+        atomic_write_json(output_dir / "footnote_decisions.json", review_data)
 def _resolve_truncated_definitions(
     audit: dict[str, Any],
     *,
@@ -1402,9 +1761,10 @@ def _populate_visual_context(
                         continue
                     if not task_page and not start <= page_number <= end:
                         continue
-                    for candidate in page_row.get("candidates", []) or []:
-                        if isinstance(candidate, Mapping) and str(candidate.get("key") or "") in keys:
-                            refs.append({"page": page_number, "source": str(candidate.get("source") or "primary"), "block": int(candidate.get("block", -1))})
+                    for source_field, default_source in (("candidates", "primary"), ("audit_candidates", "primary"), ("secondary_only_candidates", "secondary")):
+                        for candidate in page_row.get(source_field, []) or []:
+                            if isinstance(candidate, Mapping) and str(candidate.get("key") or "") in keys:
+                                refs.append({"page": page_number, "source": str(candidate.get("source") or default_source), "block": int(candidate.get("block", -1))})
                 audit_task["candidate_refs"] = refs
             pages_for_task = sorted({int(ref["page"]) for ref in refs if isinstance(ref, Mapping) and ref.get("page")})
             if not pages_for_task and (audit_task.get("source_address") or {}).get("page"):
@@ -1501,12 +1861,13 @@ def _populate_visual_context(
             task["source_pdf_sha256"] = image_manifest_data.get("source_sha256") if isinstance(image_manifest_data, Mapping) else None
             task["unit_scope"] = str(record.get("chapter_id") or task.get("file"))
             if not task.get("candidate_refs"):
-                page_row = next((item for item in report.get("pages", []) or [] if int(item.get("page", -1)) == page), {})
                 refs = []
-                for source_field, default_source in (("candidates", "primary"), ("audit_candidates", "primary"), ("secondary_only_candidates", "secondary")):
-                    for candidate in page_row.get(source_field, []) or []:
-                        if isinstance(candidate, Mapping) and str(candidate.get("key") or "") == str(task.get("key") or ""):
-                            refs.append({"page": page, "source": str(candidate.get("source") or default_source), "block": int(candidate.get("block", -1))})
+                for page_num in task_pages:
+                    page_row = next((item for item in report.get("pages", []) or [] if int(item.get("page", -1)) == page_num), {})
+                    for source_field, default_source in (("candidates", "primary"), ("audit_candidates", "primary"), ("secondary_only_candidates", "secondary")):
+                        for candidate in page_row.get(source_field, []) or []:
+                            if isinstance(candidate, Mapping) and str(candidate.get("key") or "") == str(task.get("key") or ""):
+                                refs.append({"page": page_num, "source": str(candidate.get("source") or default_source), "block": int(candidate.get("block", -1))})
                 task["candidate_refs"] = [ref for ref in refs if ref["block"] >= 0]
 
 
@@ -1522,6 +1883,7 @@ class _PrepareContext:
     prior_review_data: Any
     prior_audit_reviews: Any
     prior_result_audit: Any
+    prior_normalization: Any
     current_target_inventory: Any
     audit: dict[str, Any]
 
@@ -1539,6 +1901,10 @@ def _load_footnote_prepare_context(
     native_max_font_ratio: Optional[float],
 ) -> "_PrepareContext":
     """Load the candidate report, source inventory, and prior reviews."""
+    try:
+        prior_normalization = json.loads((output_dir / "footnote_normalization.json").read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        prior_normalization = {}
     report = prepare_footnote_candidates(
         output_dir,
         config=config,
@@ -1610,6 +1976,7 @@ def _load_footnote_prepare_context(
         prior_review_data=prior_review_data,
         prior_audit_reviews=prior_audit_reviews,
         prior_result_audit=prior_result_audit,
+        prior_normalization=prior_normalization,
         current_target_inventory=current_target_inventory,
         audit=audit,
     )
@@ -1630,6 +1997,7 @@ def _resolve_result_audit(
     prior_review_data = context.prior_review_data
     prior_audit_reviews = context.prior_audit_reviews
     prior_result_audit = context.prior_result_audit
+    prior_normalization = context.prior_normalization
     current_target_inventory = context.current_target_inventory
     _carry_prior_audit_findings(
         prior_result_audit, audit,
@@ -1660,6 +2028,22 @@ def _resolve_result_audit(
         ):
             raise ValueError(f"cannot resolve exact result-audit sidecar inventory: {exc}") from exc
         exact_sidecars = {}
+    _restore_successful_decision_addresses(
+        audit,
+        report=report,
+        output_dir=output_dir,
+        receipt=prior_normalization,
+        review_data=prior_review_data if isinstance(prior_review_data, Mapping) else {},
+        records=records,
+        exact_sidecars=exact_sidecars,
+        admitted_candidate_addresses={
+            (int(item.get("source_address", {}).get("page", -1)),
+             str(item.get("source_address", {}).get("source") or "primary"),
+             int(item.get("source_address", {}).get("block", -1)))
+            for item in prior_result_audit.get("admitted_candidates", [])
+            if isinstance(item, Mapping) and isinstance(item.get("source_address"), Mapping)
+        } if isinstance(prior_result_audit, Mapping) else set(),
+    )
     _attach_polish_semantic_tasks(
         audit, report,
         output_dir=output_dir,
@@ -1673,6 +2057,7 @@ def _resolve_result_audit(
         prior_result_audit=prior_result_audit,
         exact_sidecars=exact_sidecars,
         prior_review_data=prior_review_data,
+        records=records,
     )
     # Truncated source/target definitions need exact owning-page evidence and
     # the following physical page when available. Reassociate by the complete

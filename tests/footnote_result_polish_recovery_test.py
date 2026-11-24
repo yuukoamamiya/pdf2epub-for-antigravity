@@ -17,6 +17,18 @@ from pdf2epub.refine.footnote_validation import validate_footnote_decisions
 def test_polish_issue_recovery_distinguishes_current_mapping_and_contract_failures(tmp_path, monkeypatch, scenario):
     helper = runpy.run_path(str(Path(__file__).with_name("footnote_review_gates_test.py")))
     helper["_prepare_continuation_book"](tmp_path, monkeypatch)
+    if scenario == "mapped":
+        source_dir = tmp_path / "ocr_markdown"
+        (source_dir / "chapter_2.md").write_text("Sibling chapter before recovery.\n", encoding="utf-8")
+        (source_dir / "tree_progress.json").write_text(json.dumps({"units": [
+            {"unit_id": "chapter_1", "file": "chapter_1.md", "page_range": [1, 2]},
+            {"unit_id": "chapter_2", "file": "chapter_2.md", "page_range": [3, 3]},
+        ]}), encoding="utf-8")
+        (tmp_path / "pages" / "page_003.ocr.json").write_text(json.dumps({
+            "schema_version": 1, "page_number": 3, "backend": "synthetic",
+            "page_box": [0, 0, 1000, 1000], "blocks": [],
+        }), encoding="utf-8")
+        (tmp_path / "pages" / "page_003.md").write_text("Sibling chapter before recovery.\n", encoding="utf-8")
     assert (tmp_path / "page_001.png").is_file()
     import pdf2epub.refine.footnote_handoff as handoff_module
     monkeypatch.setattr(handoff_module, "ensure_visual_review_images", lambda *_: {
@@ -264,3 +276,24 @@ def test_polish_issue_recovery_distinguishes_current_mapping_and_contract_failur
     clear_report = json.loads(clear_paths["report"].read_text(encoding="utf-8"))
     assert clear_report["result_audit"].get("polish_semantic_stale_files") == []
     assert not any(item["code"] == "polish_semantic_issue" for item in clear_report["result_audit"]["findings"])
+    if scenario == "mapped":
+        # The semantic correction has been applied and its contract sidecar is
+        # no longer needed. An unrelated unit edit must not re-open its task.
+        (tmp_path / refreshed_contract["sidecar"]).unlink()
+        (tmp_path / "ocr_markdown" / "chapter_2.md").write_text(
+            "Sibling chapter edited independently.\n", encoding="utf-8"
+        )
+        resumed_paths = prepare_footnote_subagent(tmp_path, book_title="Synthetic Review Book")
+        resumed_report = json.loads(resumed_paths["report"].read_text(encoding="utf-8"))
+        assert not any(item["code"] == "polish_semantic_issue" for item in resumed_report["result_audit"]["findings"])
+        resumed_validation = validate_footnote_decisions(tmp_path)
+        assert resumed_validation["valid"] is True, resumed_validation["errors"]
+        resumed_apply = apply_footnote_normalization(tmp_path)
+        assert resumed_apply["valid"] is True, resumed_apply.get("errors")
+        result_after_resume = (tmp_path / "footnote_normalized" / "chapter_1.md").read_text(encoding="utf-8")
+        assert "[^36]: Note body." in result_after_resume
+        repeat_paths = prepare_footnote_subagent(tmp_path, book_title="Synthetic Review Book")
+        repeat_report = json.loads(repeat_paths["report"].read_text(encoding="utf-8"))
+        assert not any(item["code"] == "polish_semantic_issue" for item in repeat_report["result_audit"]["findings"])
+        assert validate_footnote_decisions(tmp_path)["valid"] is True
+        assert apply_footnote_normalization(tmp_path)["valid"] is True

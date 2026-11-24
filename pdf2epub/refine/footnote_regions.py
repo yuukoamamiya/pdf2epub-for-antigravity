@@ -515,8 +515,14 @@ def _build_region(
         continuation_key = _auto_continuation_key(item)
         if continuation_key and not item.get("key"):
             item["key"] = continuation_key
-            item["auto_continuation"] = True
-            item["local_role"] = "footnote_continuation"
+            if item.get("top_note_recall") is True:
+                item["auto_continuation"] = False
+                item["local_role"] = None
+                item["confidence"] = "review"
+                item["disposition"] = "review_required"
+            else:
+                item["auto_continuation"] = True
+                item["local_role"] = "footnote_continuation"
     keys = [str(item.get("key")) for item in item_candidates if item.get("key")]
     numeric_keys: list[int] = []
     for key in keys:
