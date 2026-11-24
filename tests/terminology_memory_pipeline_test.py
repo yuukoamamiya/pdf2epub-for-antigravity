@@ -73,7 +73,7 @@ def test_pdf_memory_consistency_failure_keeps_raw_target_and_blocks_validated_co
     assert "part1.md" not in report["valid_files"]
     assert any("consistency review" in item["error"] for item in report["dynamic_terminology"]["errors"])
     assert target_part.read_bytes() == raw_bytes
-    assert not (output / "translated" / "validated" / "part1.md").exists()
+    assert (output / "translated" / "validated" / "part1.md").is_file()
     assert not (output / "scratch" / "translate" / "invalid_outputs" / "part1.md").exists()
 
 

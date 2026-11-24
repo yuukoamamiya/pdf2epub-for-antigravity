@@ -139,7 +139,7 @@ def test_partial_receipt_persists_snapshot_and_rejects_unprepared_context_change
         )
         assert (target / "a.md").is_file()
         assert (target / "a.md").read_bytes() == target_bytes
-        assert not (target / "validated" / "a.md").exists()
+        assert (target / "validated" / "a.md").is_file()
         ledger = _read_manifest(tmp_path / "translate_file_validation.json")
         assert ledger["files"]["a.md"]["valid"] is False
         assert ledger["files"]["a.md"]["resume_context"] is None

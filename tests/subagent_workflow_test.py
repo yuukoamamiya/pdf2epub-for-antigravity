@@ -391,7 +391,7 @@ def test_formal_validation_still_quarantines_invalid_target(tmp_path: Path):
     assert (tmp_path / "polish_file_validation.json").is_file()
 
 
-def test_partial_missing_target_invalidates_only_its_checkpoint_and_staging(
+def test_partial_missing_target_invalidates_checkpoint_but_retains_last_copy(
     tmp_path: Path,
 ):
     from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
@@ -419,11 +419,11 @@ def test_partial_missing_target_invalidates_only_its_checkpoint_and_staging(
     assert report["missing"] == ["one.md"]
     assert current["files"]["one.md"]["valid"] is False
     assert current["files"]["other.md"] == previous["files"]["other.md"]
-    assert not (target_dir / "validated" / "one.md").exists()
+    assert (target_dir / "validated" / "one.md").read_text(encoding="utf-8") == "Body.\n"
     assert (target_dir / "validated" / "other.md").is_file()
 
 
-def test_partial_protected_workspace_block_clears_only_selected_staging(
+def test_partial_protected_workspace_block_retains_last_staging_copy(
     tmp_path: Path,
 ):
     from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
@@ -454,7 +454,7 @@ def test_partial_protected_workspace_block_clears_only_selected_staging(
     )
 
     assert report["safety_blocked"]
-    assert not (target_dir / "validated" / "one.md").exists()
+    assert (target_dir / "validated" / "one.md").read_text(encoding="utf-8") == "Body.\n"
     assert (target_dir / "validated" / "other.md").is_file()
 
 
@@ -488,7 +488,7 @@ def test_partial_refusal_invalidates_only_its_own_staging_and_ledger(
     assert after["files"]["refusal.md"]["valid"] is False
     assert after["files"]["unselected.md"] == before["files"]["unselected.md"]
     assert (target_dir / "validated" / "good.md").is_file()
-    assert not (target_dir / "validated" / "refusal.md").exists()
+    assert (target_dir / "validated" / "refusal.md").is_file()
     assert (target_dir / "validated" / "unselected.md").is_file()
 
 

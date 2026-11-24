@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
-from typing import Any, Dict, Iterable, Mapping, Optional
+from typing import Any, Callable, Dict, Iterable, Mapping, Optional
 
 from .batching_service import markdown_files
 from .markdown_validation_context import load_markdown_validation_context
@@ -15,7 +15,7 @@ from .markdown_validation_persistence import (
     begin_validation_io,
     capture_pdf_resume_contexts,
     validation_snapshot_changes,
-    stage_normalized_and_validated_targets,
+    apply_normalized_targets,
     persist_validation_report,
 )
 from .workflow_contracts import markdown_validation_schema_version
@@ -45,6 +45,7 @@ def validate_markdown_subagent(
     ] = None,
     dynamic_terminology_config: Optional[Mapping[str, Any]] = None,
     require_footnote_semantic_review: bool = False,
+    pre_persist_hook: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> Dict:
     """Validate a Subagent markdown hand-off and optionally stage it."""
     context = load_markdown_validation_context(
@@ -352,14 +353,7 @@ def validate_markdown_subagent(
         retry_required.append(dict(finding))
         if name not in retry_required_files:
             retry_required_files.append(name)
-    invalid_names = {str(item.get("file")) for item in invalid if item.get("file")}
-    target_hashes = stage_normalized_and_validated_targets(
-        context, normalized_targets, sources, invalid_names, set(review_required_files),
-        missing=missing, invalid=invalid, safety_blocked=safety_blocked,
-        review_required=review_required,
-        protected_workspace_blocked=bool(protected_workspace_blocked),
-        hard_blocked_names=dynamic_blocked_names | semantic_blocked_names,
-    )
+    target_hashes = apply_normalized_targets(context, normalized_targets)
     target_sha256.update(target_hashes)
 
     report = {
@@ -431,6 +425,8 @@ def validate_markdown_subagent(
             and (allow_review_warnings or not review_required)
         ),
     }
+    if pre_persist_hook is not None:
+        pre_persist_hook(report)
     return persist_validation_report(
         context,
         report,

@@ -664,6 +664,7 @@ def validate_toc_heading_bindings(
     output_dir: Path,
     *,
     only_files: Optional[Iterable[str]] = None,
+    target_dir: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """Check translated TOC labels with conservative presentation tolerance."""
     output_dir = Path(output_dir)
@@ -682,7 +683,7 @@ def validate_toc_heading_bindings(
         return {"valid": False, "errors": ["current TOC ownership projection is missing; rerun refine-prepare and translate"]}
     if requested is None and not isinstance(contexts, Mapping):
         contexts = {}
-    target_dir = output_dir / "translated" / "validated"
+    target_dir = Path(target_dir) if target_dir is not None else output_dir / "translated" / "validated"
     errors = []
     checked = []
     skipped = []

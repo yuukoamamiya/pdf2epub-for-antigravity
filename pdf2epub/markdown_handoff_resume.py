@@ -471,7 +471,7 @@ def decide_resume(
                                 validation["file_roles"].update(roles)
                             if isinstance(sources, Mapping):
                                 validation["file_role_sources"].update(sources)
-                if loaded.get("safety_blocked") or loaded.get("protected_workspace_blocked"):
+                if loaded.get("protected_workspace_blocked"):
                     workspace_blocked = True
                     validated_files.clear()
                 for item in loaded.get("review_required", []) or []:

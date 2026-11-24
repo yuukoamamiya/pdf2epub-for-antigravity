@@ -395,32 +395,90 @@ def _archive_superseded_partial_checkpoint(output_dir: Path, task: str) -> dict[
     }
 
 
+def _archive_obsolete_validated_targets(
+    output_dir: Path, task: str, validated_dir: Path, active_names: set[str]
+) -> None:
+    """Move obsolete accepted copies out of the active build inventory."""
+    obsolete = [
+        path for path in sorted(Path(validated_dir).glob("*.md"))
+        if path.name not in active_names and path.is_file()
+    ]
+    if not obsolete:
+        return
+    root = Path(output_dir).resolve()
+    validated_root = Path(validated_dir).resolve()
+    if validated_root != root and root not in validated_root.parents:
+        raise ValueError("validated directory escapes output workspace")
+    archive_dir = root / "scratch" / task / "retired_validated"
+    archive_root = archive_dir.resolve()
+    if archive_root != root and root not in archive_root.parents:
+        raise ValueError("retired validated archive escapes output workspace")
+    for path in obsolete:
+        source_path = path.resolve()
+        if source_path != path.absolute() or (source_path != validated_root and validated_root not in source_path.parents):
+            raise ValueError("obsolete validated target escapes validated directory")
+        digest = sha256_file(path)
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        archive_root = archive_dir.resolve()
+        if archive_root != root and root not in archive_root.parents:
+            raise ValueError("retired validated archive escapes output workspace")
+        destination = archive_dir / path.name
+        if destination.exists():
+            destination = archive_dir / f"{path.stem}.{digest[:12]}.md"
+            suffix = 1
+            while destination.exists() and sha256_file(destination) != digest:
+                destination = archive_dir / f"{path.stem}.{digest[:12]}.{suffix}.md"
+                suffix += 1
+        resolved_destination = destination.resolve()
+        if resolved_destination != root and root not in resolved_destination.parents:
+            raise ValueError("retired validated archive escapes output workspace")
+        shutil.move(str(source_path), str(destination))
+
+
+def _archive_accepted_copy_before_promotion(
+    output_dir: Path, task: str, accepted_path: Path
+) -> None:
+    """Keep content-addressed last-good bytes recoverable across promotion failure."""
+    if not accepted_path.is_file():
+        return
+    root = Path(output_dir).resolve()
+    validated_root = accepted_path.parent.resolve()
+    source_path = accepted_path.resolve()
+    if (
+        source_path != accepted_path.absolute()
+        or (validated_root != root and root not in validated_root.parents)
+        or (source_path != validated_root and validated_root not in source_path.parents)
+    ):
+        raise ValueError("accepted validation copy escapes output workspace")
+    digest = sha256_file(accepted_path)
+    archive_dir = root / "scratch" / task / "previous_validated"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    archive_root = archive_dir.resolve()
+    if archive_root != root and root not in archive_root.parents:
+        raise ValueError("promotion recovery archive escapes output workspace")
+    destination = archive_dir / f"{accepted_path.stem}.{digest[:12]}.md"
+    suffix = 1
+    while destination.exists() and sha256_file(destination) != digest:
+        destination = archive_dir / f"{accepted_path.stem}.{digest[:12]}.{suffix}.md"
+        suffix += 1
+    if not destination.exists():
+        _atomic_copy(accepted_path, destination)
+
+
 def begin_validation_io(context: MarkdownValidationContext) -> list[str]:
-    """Clean only current assigned temp siblings and invalidate stale full staging."""
+    """Clean only current assigned temp siblings while retaining accepted copies."""
     if not context.create_validated_copy:
         return []
-    if context.paths.validated_dir.exists() and not context.partial:
-        shutil.rmtree(context.paths.validated_dir)
     return discard_abandoned_temp_targets(
         context.paths.target_dir, [source.name for source in context.sources]
     )
 
 
-def stage_normalized_and_validated_targets(
+def apply_normalized_targets(
     context: MarkdownValidationContext,
     normalized_targets: Mapping[str, str],
-    sources: tuple[Path, ...],
-    invalid_names: set[str],
-    review_names: set[str],
-    *,
-    missing: list[str],
-    invalid: list[dict[str, Any]],
-    safety_blocked: list[str],
-    review_required: list[dict[str, Any]],
-    protected_workspace_blocked: bool,
-    hard_blocked_names: set[str] | None = None,
 ) -> dict[str, str]:
-    """Apply normalization plans, then stage only a passing current scope."""
+    """Apply safe normalization edits before the final checkpoint snapshot."""
     if not context.create_validated_copy:
         return {}
     target_dir, validated_dir = context.paths.target_dir, context.paths.validated_dir
@@ -428,35 +486,22 @@ def stage_normalized_and_validated_targets(
     for name, text in normalized_targets.items():
         atomic_write_text(target_dir / name, text)
         target_hashes[name] = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    if context.partial:
-        remove_names = set(invalid_names) | set(missing) | set(hard_blocked_names or ())
-        if protected_workspace_blocked:
-            # A changed protected workspace invalidates every checkpoint in this
-            # submitted scope, even when the Markdown itself passed its audit.
-            remove_names.update(source.name for source in sources)
-        if not context.allow_review_warnings:
-            remove_names.update(review_names)
-        for name in remove_names:
-            (validated_dir / name).unlink(missing_ok=True)
-    if not missing and not invalid and not safety_blocked and (
-        context.allow_review_warnings or not review_required
-    ) and not hard_blocked_names:
-        validated_dir.mkdir(parents=True, exist_ok=True)
-        for source in sources:
-            _atomic_copy(target_dir / source.name, validated_dir / source.name)
     return target_hashes
 
 
-def _sync_partial_polish_into_full_report(
+def _sync_partial_into_full_report(
     output_dir: Path,
     partial_report: Mapping[str, Any],
 ) -> None:
-    """Merge single-file polish validation results into polish_validation.json.
+    """Merge scoped file validation results into the current full report.
 
-    Keeping the primary polish_validation.json synchronized prevents status
-    split-brain between full validation snapshots and --file checkpoints.
+    Keeping the full report synchronized prevents old successful receipts from
+    certifying retained copies after a scoped validation failure.
     """
-    full_path = Path(output_dir) / "polish_validation.json"
+    task = str(partial_report.get("task") or "")
+    if task not in {"translate", "polish"}:
+        return
+    full_path = Path(output_dir) / f"{task}_validation.json"
     if not full_path.is_file():
         return
     try:
@@ -465,8 +510,8 @@ def _sync_partial_polish_into_full_report(
         return
     if (
         not isinstance(full, dict)
-        or full.get("task") != "polish"
-        or full.get("schema_version") != markdown_validation_schema_version("polish")
+        or full.get("task") != task
+        or full.get("schema_version") != markdown_validation_schema_version(task)
     ):
         return
     checked = [str(name) for name in (partial_report.get("files_checked") or []) if name]
@@ -530,19 +575,78 @@ def _sync_partial_polish_into_full_report(
                     existing_map.pop(name, None)
         full[map_key] = existing_map
 
+    if task == "translate":
+        full_dynamic = full.get("dynamic_terminology")
+        partial_dynamic = partial_report.get("dynamic_terminology")
+        if isinstance(full_dynamic, Mapping) and isinstance(partial_dynamic, Mapping):
+            merged_dynamic = dict(full_dynamic)
+            full_files = dict(full_dynamic.get("files") or {}) if isinstance(full_dynamic.get("files"), Mapping) else {}
+            partial_files = partial_dynamic.get("files")
+            if isinstance(partial_files, Mapping):
+                for name in checked:
+                    if name in partial_files:
+                        full_files[name] = partial_files[name]
+                    else:
+                        full_files.pop(name, None)
+            full_errors = [
+                item for item in (full_dynamic.get("errors") or [])
+                if not (isinstance(item, Mapping) and str(item.get("file") or "") in checked_set)
+            ]
+            full_errors.extend(
+                item for item in (partial_dynamic.get("errors") or [])
+                if isinstance(item, Mapping)
+                and (str(item.get("file") or "") in checked_set or str(item.get("file") or "").startswith("<"))
+            )
+            merged_dynamic["errors"] = full_errors
+            full_contexts = dict(full_dynamic.get("prepared_unit_context_sha256") or {}) if isinstance(full_dynamic.get("prepared_unit_context_sha256"), Mapping) else {}
+            partial_contexts = partial_dynamic.get("prepared_unit_context_sha256")
+            if isinstance(partial_contexts, Mapping):
+                for name in checked:
+                    if name in partial_contexts:
+                        full_contexts[name] = partial_contexts[name]
+                    else:
+                        full_contexts.pop(name, None)
+            merged_dynamic["prepared_unit_context_sha256"] = full_contexts
+            merged_dynamic["files"] = full_files
+            merged_dynamic["valid"] = bool(
+                partial_dynamic.get("valid") is True
+                and not full_errors
+                and all(
+                    isinstance(item, Mapping) and item.get("valid") is True
+                    for item in full_files.values()
+                )
+            )
+            full["dynamic_terminology"] = merged_dynamic
+
     total = int(full.get("total") or 0)
+    was_full_passed = full.get("all_passed") is True
     allow_warnings = bool(full.get("allow_review_warnings") or partial_report.get("allow_review_warnings"))
     if partial_report.get("review_warnings_acknowledged"):
         full["review_warnings_acknowledged"] = True
         full["allow_review_warnings"] = True
         full["human_decision_id"] = partial_report.get("human_decision_id")
     full["all_passed"] = bool(
-        total > 0
+        was_full_passed
+        and total > 0
         and len(full["valid_files"]) == total
         and not full.get("missing")
         and not full.get("invalid")
         and not full.get("safety_blocked")
         and not full.get("protected_workspace_blocked")
+        and not full.get("extra")
+        and (
+            not isinstance(full.get("dynamic_terminology"), Mapping)
+            or not full["dynamic_terminology"].get("enabled")
+            or full["dynamic_terminology"].get("valid") is True
+        )
+        and (
+            task != "translate"
+            or all(
+                isinstance(full.get(key), Mapping)
+                and full[key].get("valid") is True
+                for key in ("entities", "toc", "toc_heading_bindings", "translation_context")
+            )
+        )
         and (allow_warnings or not full.get("review_required"))
     )
     atomic_write_json(full_path, full)
@@ -578,12 +682,88 @@ def persist_validation_report(
         report.get("resume_contexts", {}),
     ))
     changed_files = _record_snapshot_changes(report, snapshot_changes)
-    if changed_files:
-        remove_files = (
-            set(report.get("files_checked", [])) if not partial else changed_files
+    # Stage each passing file beside its accepted copy. Only atomically replace
+    # accepted files after checking staged bytes and final input snapshots.
+    staged: dict[str, Path] = {}
+    if report.get("scope") in {"files", "full"}:
+        passing = set(str(name) for name in report.get("valid_files", []))
+        passing.difference_update(changed_files)
+        passing.difference_update(str(name) for name in report.get("missing", []))
+        passing.difference_update(str(name) for name in report.get("safety_blocked", []))
+        report["valid_files"] = sorted(passing)
+        for name in sorted(passing):
+            if name not in report.get("target_sha256", {}):
+                continue
+            source_path = context.paths.target_dir / name
+            if not source_path.is_file():
+                changed_files.update(_record_snapshot_changes(report, {
+                    name: ("target", "target file became unavailable before checkpoint promotion")
+                }))
+                continue
+            context.paths.validated_dir.mkdir(parents=True, exist_ok=True)
+            descriptor, temporary_name = tempfile.mkstemp(
+                prefix=f".{name}.", suffix=".pending", dir=context.paths.validated_dir
+            )
+            os.close(descriptor)
+            temporary = Path(temporary_name)
+            try:
+                _atomic_copy(source_path, temporary)
+                if sha256_file(temporary) != report["target_sha256"].get(name):
+                    temporary.unlink(missing_ok=True)
+                    changed_files.update(_record_snapshot_changes(report, {
+                        name: ("target", "staged target bytes did not match the audited snapshot")
+                    }))
+                    continue
+            except BaseException:
+                temporary.unlink(missing_ok=True)
+                for staged_path in staged.values():
+                    staged_path.unlink(missing_ok=True)
+                raise
+            staged[name] = temporary
+
+        # A source or target can change while staged copies are being written.
+        # Downgrade the receipt and retain the last accepted copy.
+        post_promotion_changes = validation_snapshot_changes(
+            context.paths.output_dir,
+            str(report.get("task") or ""),
+            context.paths.source_dir,
+            context.paths.target_dir,
+            report.get("source_sha256", {}),
+            report.get("target_sha256", {}),
+            report.get("polish_footnote_semantic_reviews", {}),
         )
-        for name in remove_files:
-            (context.paths.validated_dir / name).unlink(missing_ok=True)
+        post_promotion_changes.update(resume_context_snapshot_changes(
+            context.paths.output_dir,
+            str(report.get("task") or ""),
+            report.get("resume_contexts", {}),
+        ))
+        post_changed = _record_snapshot_changes(report, post_promotion_changes)
+        if post_changed:
+            report["valid_files"] = sorted(
+                set(report.get("valid_files", [])) - post_changed
+            )
+            changed_files.update(post_changed)
+        try:
+            for name, temporary in staged.items():
+                if name in post_changed or name not in report.get("valid_files", []):
+                    continue
+                accepted_path = context.paths.validated_dir / name
+                _archive_accepted_copy_before_promotion(
+                    context.paths.output_dir,
+                    str(report.get("task") or ""),
+                    accepted_path,
+                )
+                os.replace(temporary, accepted_path)
+        finally:
+            for temporary in staged.values():
+                temporary.unlink(missing_ok=True)
+        if not partial and report.get("all_passed") is True:
+            _archive_obsolete_validated_targets(
+                context.paths.output_dir,
+                str(report.get("task") or ""),
+                context.paths.validated_dir,
+                set(str(name) for name in report.get("source_sha256", {})),
+            )
     ledger: dict[str, Any] | None = None
     if partial:
         existing: dict[str, Any] = {}
@@ -636,8 +816,8 @@ def persist_validation_report(
             "files": records,
         }
         atomic_write_json(report_path, ledger)
-        if report["task"] == "polish":
-            _sync_partial_polish_into_full_report(context.paths.output_dir, report)
+        if report["task"] in {"translate", "polish"}:
+            _sync_partial_into_full_report(context.paths.output_dir, report)
     else:
         if report["task"] in {"translate", "polish"}:
             # A full PDF validation covers every source unit, so any older
@@ -666,13 +846,24 @@ def persist_validation_report(
     for item in report["invalid"]:
         if isinstance(item, Mapping) and item.get("file"):
             errors_by_file.setdefault(str(item["file"]), []).append(item)
+    retryable_input_changes = {
+        name for name, items in errors_by_file.items()
+        if items and all(
+            item.get("kind") in {"prepared_context", "validation_snapshot_changed"}
+            or any(
+                marker in str(item.get("reason") or "").lower()
+                for marker in ("source read error:", "target read error:")
+            )
+            for item in items
+        )
+    }
     stale_context_names = {
         name for name, items in errors_by_file.items()
         if items and all(item.get("kind") in {"prepared_context", "validation_snapshot_changed"} for item in items)
     }
     quarantined = quarantine_invalid_targets(
         context.paths.output_dir, report["task"], context.paths.target_dir,
-        invalid_names - stale_context_names - semantic_issue_names,
+        invalid_names - retryable_input_changes - stale_context_names - semantic_issue_names,
     )
     report["discarded_temp_files"] = discarded_temp_files
     report["quarantined_files"] = quarantined
@@ -680,8 +871,8 @@ def persist_validation_report(
         ledger["discarded_temp_files"] = discarded_temp_files
         ledger["quarantined_files"] = quarantined
         atomic_write_json(report_path, ledger)
-        if report["task"] == "polish":
-            _sync_partial_polish_into_full_report(context.paths.output_dir, report)
+        if report["task"] in {"translate", "polish"}:
+            _sync_partial_into_full_report(context.paths.output_dir, report)
     else:
         atomic_write_json(report_path, report)
     return report

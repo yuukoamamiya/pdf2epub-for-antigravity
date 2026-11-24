@@ -875,6 +875,16 @@ def _validate_pdf_markdown_task_impl(args, task: str, *, context=None):
         human_decision_id=_human_decision_id(args),
         dynamic_terminology_config=config if task == "translate" else None,
         require_footnote_semantic_review=(task == "polish" and footnote_validation_enabled),
+        pre_persist_hook=(
+            lambda candidate_report: _apply_local_toc_heading_binding(
+                output_dir,
+                candidate_report,
+                str(selected_file),
+                target_dir=target_dir,
+            )
+            if task == "translate" and selected_file
+            else None
+        ),
     )
     selected_scope = bool(getattr(args, "file", None))
     book_outputs_complete = not selected_scope and not report.get("missing")
@@ -891,7 +901,6 @@ def _validate_pdf_markdown_task_impl(args, task: str, *, context=None):
         # without making a book-level TOC/context decision, while still
         # checking that unit's own visible TOC heading bindings.
         if getattr(args, "file", None):
-            _apply_local_toc_heading_binding(output_dir, report, str(selected_file))
             if not check_only:
                 _persist_file_validation_checkpoint(output_dir, report, task)
         else:
@@ -1162,12 +1171,14 @@ def _apply_local_toc_heading_binding(
     output_dir: Path,
     report: dict,
     selected_file: str,
+    *,
+    target_dir: Path | None = None,
 ) -> dict:
     """Apply the scoped TOC heading gate to a single-file validation report."""
     from pdf2epub.toc_translation_workflow import validate_toc_heading_bindings
 
     heading_report = validate_toc_heading_bindings(
-        output_dir, only_files=[selected_file]
+        output_dir, only_files=[selected_file], target_dir=target_dir
     )
     report["toc_heading_bindings_local"] = heading_report
     if heading_report.get("valid", True):
@@ -1195,8 +1206,6 @@ def _apply_local_toc_heading_binding(
             if isinstance(item, dict) and item.get("file")
         }
     )
-    validated_path = Path(output_dir) / "translated" / "validated" / selected_file
-    validated_path.unlink(missing_ok=True)
     logger.error(f"TOC heading binding failed for {selected_file}: {reason}")
     return heading_report
 
@@ -1285,6 +1294,13 @@ def _persist_file_validation_checkpoint(output_dir: Path, report: dict, task: st
             "files": records,
         },
     )
+    if task in {"translate", "polish"}:
+        # The translate file path applies its local TOC binding after the
+        # validator's persistence hook. Reconcile again here so that local
+        # failures cannot leave an older full receipt current.
+        from pdf2epub.markdown_validation_persistence import _sync_partial_into_full_report
+
+        _sync_partial_into_full_report(Path(output_dir), report)
 
 
 

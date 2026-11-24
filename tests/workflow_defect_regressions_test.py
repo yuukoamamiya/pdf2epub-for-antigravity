@@ -147,9 +147,10 @@ def test_polish_resume_merges_file_validation_semantic_review_hash(tmp_path: Pat
     assert partial_report["all_passed"]
     assert partial_report["valid_files"] == ["ch2.md"]
 
-    # Single-file polish validation must also synchronize primary polish_validation.json.
+    # Single-file validation updates per-file progress but cannot certify the
+    # full report until its final full-scope gates are rerun.
     synced_full = json.loads((tmp_path / "polish_validation.json").read_text(encoding="utf-8"))
-    assert synced_full["all_passed"] is True
+    assert synced_full["all_passed"] is False
     assert sorted(synced_full["valid_files"]) == ["ch1.md", "ch2.md"]
     assert synced_full["invalid"] == []
 

@@ -7,7 +7,7 @@ import pytest
 
 from pdf2epub.markdown_handoff import prepare_markdown_subagent
 from pdf2epub.markdown_handoff_context import MarkdownHandoffRequest
-from pdf2epub.commands.markdown import _apply_local_toc_heading_binding
+from pdf2epub.commands.markdown import _apply_local_toc_heading_binding, _persist_file_validation_checkpoint
 from pdf2epub.commands.markdown_context import _load_pdf_continuation_toc_titles
 from pdf2epub.commands.ocr import _load_current_probe
 from pdf2epub.pipeline_policy import PipelinePolicy, SUPPORTED_PIPELINE_NAMES
@@ -32,7 +32,7 @@ from pdf2epub.toc_translation_workflow import (
 from pdf2epub.toc_model import TOC_HEADING_CONTEXT_PROJECTION_VERSION
 from pdf2epub.utils.common import is_epub_conversion_pipeline
 from pdf2epub.validation_receipts import validation_receipt_is_current
-from pdf2epub.workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION
+from pdf2epub.workflow_contracts import MARKDOWN_VALIDATION_SCHEMA_VERSION, markdown_validation_schema_version, sha256_file
 
 
 def _make_native_pdf(path: Path, *, full_page_image: bool = False) -> None:
@@ -2170,6 +2170,7 @@ def test_single_file_heading_binding_failure_updates_report(tmp_path: Path):
         output, "# Chapter One\n\nBody\n"
     )
     report = {
+        "task": "translate",
         "all_passed": True,
         "valid_files": ["chapter_1.part1.md"],
         "retry_required": [],
@@ -2193,7 +2194,7 @@ def test_single_file_heading_binding_failure_updates_report(tmp_path: Path):
         }
     ]
     assert report["retry_required_files"] == ["chapter_1.part1.md"]
-    assert not target.exists()
+    assert target.read_text(encoding="utf-8") == "# Chapter One\n\nBody\n"
 
 
 def test_single_file_heading_binding_success_retains_validated_copy(
@@ -2219,6 +2220,135 @@ def test_single_file_heading_binding_success_retains_validated_copy(
     assert report["valid_files"] == ["chapter_1.part1.md"]
     assert report["retry_required"] == []
     assert target.exists()
+
+
+def test_single_file_heading_failure_downgrades_existing_full_translate_receipt(tmp_path: Path):
+    output = tmp_path / "output"
+    target = _write_single_file_heading_fixture(output, "# Chapter One\n\nBody\n")
+    source_dir = output / "ocr_markdown"
+    source = source_dir / "chapter_1.part1.md"
+    source.write_text("source body\n", encoding="utf-8")
+    prior_target_hash = hashlib.sha256("# 第一章\n\nBody\n".encode("utf-8")).hexdigest()
+    (output / "translate_validation.json").write_text(json.dumps({
+        "schema_version": markdown_validation_schema_version("translate"),
+        "task": "translate",
+        "scope": "full",
+        "all_passed": True,
+        "total": 1,
+        "valid_files": [source.name],
+        "source_sha256": {source.name: sha256_file(source)},
+        "target_sha256": {source.name: prior_target_hash},
+        "entities": {"valid": True},
+        "toc": {"valid": True},
+        "toc_heading_bindings": {"valid": True},
+        "translation_context": {"valid": True},
+        "missing": [],
+        "invalid": [],
+        "safety_blocked": [],
+        "protected_workspace_blocked": False,
+        "review_required": [],
+    }), encoding="utf-8")
+    report = {
+        "task": "translate",
+        "all_passed": True,
+        "valid_files": [source.name],
+        "files_checked": [source.name],
+        "source_sha256": {source.name: sha256_file(source)},
+        "target_sha256": {source.name: sha256_file(target)},
+        "file_roles": {},
+        "file_role_sources": {},
+        "resume_contexts": {},
+        "invalid": [],
+        "missing": [],
+        "safety_blocked": [],
+        "target_language_blocked": [],
+        "target_language_audits": {},
+        "review_required": [],
+        "retry_required": [],
+        "human_review_required": [],
+        "polish_footnote_semantic_reviews": {},
+        "dynamic_terminology": {"enabled": False, "valid": True, "files": {}},
+    }
+
+    heading_report = _apply_local_toc_heading_binding(output, report, source.name)
+    _persist_file_validation_checkpoint(output, report, "translate")
+
+    current = json.loads((output / "translate_validation.json").read_text(encoding="utf-8"))
+    assert heading_report["valid"] is False
+    assert report["valid_files"] == []
+    assert current["all_passed"] is False
+    assert source.name not in current["valid_files"]
+
+
+@pytest.mark.parametrize("check_only", [False, True])
+def test_translate_file_command_checks_heading_before_promoting_candidate(
+    tmp_path: Path, monkeypatch, check_only: bool
+):
+    from types import SimpleNamespace
+    from pdf2epub.commands import markdown as markdown_commands
+    from pdf2epub.workflow_contracts import markdown_validation_schema_version
+
+    output = tmp_path / "output"
+    accepted = _write_single_file_heading_fixture(output, "# 第一章\n\n一段足够长的中文正文，用于确保核心内容校验通过。\n")
+    source_dir = output / "ocr_markdown"
+    source = source_dir / "chapter_1.part1.md"
+    source.write_text("# Chapter One\n\nThis is sufficiently long English source prose for a local translation validation fixture.\n", encoding="utf-8")
+    target_dir = output / "translated"
+    raw_target = target_dir / source.name
+    raw_target.write_text("# Wrong title\n\n一段足够长的中文正文，用于确保核心内容校验通过。\n", encoding="utf-8")
+    accepted_before = accepted.read_bytes()
+    full_path = output / "translate_validation.json"
+    full_path.write_text(json.dumps({
+        "schema_version": markdown_validation_schema_version("translate"),
+        "task": "translate",
+        "scope": "full",
+        "all_passed": True,
+        "total": 1,
+        "valid_files": [source.name],
+        "source_sha256": {source.name: sha256_file(source)},
+        "target_sha256": {source.name: sha256_file(accepted)},
+        "entities": {"valid": True},
+        "toc": {"valid": True},
+        "toc_heading_bindings": {"valid": True},
+        "translation_context": {"valid": True},
+        "missing": [],
+        "invalid": [],
+        "safety_blocked": [],
+        "protected_workspace_blocked": False,
+        "review_required": [],
+    }), encoding="utf-8")
+    full_before = full_path.read_bytes()
+    context = SimpleNamespace(
+        config={"translation": {"source_language": "English", "target_language": "Chinese"}, "footnotes": {"mode": "disabled"}},
+        book_title="Fixture",
+        output_dir=output,
+        config_path=tmp_path / "config.yaml",
+    )
+    monkeypatch.setattr(markdown_commands, "_resolve_pdf_markdown_source", lambda *_args: (source_dir, "ocr"))
+    monkeypatch.setattr(markdown_commands, "load_pdf_file_roles", lambda *_args: {})
+    report_path = output / "translate_file_validation.json"
+    result = markdown_commands._validate_pdf_markdown_task_impl(
+        SimpleNamespace(
+            file=source.name,
+            check_only=check_only,
+            allow_review_warnings=False,
+            human_decision_id=None,
+            fix_reference_heading=False,
+        ),
+        "translate",
+        context=context,
+    )
+
+    assert result == 1
+    assert accepted.read_bytes() == accepted_before
+    assert raw_target.is_file()
+    if check_only:
+        assert full_path.read_bytes() == full_before
+        assert not report_path.exists()
+    else:
+        current = json.loads(full_path.read_text(encoding="utf-8"))
+        assert current["all_passed"] is False
+        assert source.name not in current["valid_files"]
 
 
 def test_batching_caps_configured_worker_file_count():
