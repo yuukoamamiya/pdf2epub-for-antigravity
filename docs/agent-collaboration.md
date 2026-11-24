@@ -77,7 +77,16 @@ uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲
 翻译 pipeline 的 package 目标是译文 EPUB，原语言版不能掩盖译文 receipt 缺失或过期；receiptless 历史 EPUB
 仍按历史产物兼容规则通过，并明确目标归属未知，不从文件名猜测。
 
-## 5. 2026-11-20 审计批次已完成项
+## 5. 2026-11-24 校验保留与复核证据
+
+- Markdown validated 副本采用 last-good 提升：失败校验和 check-only 保留已接受副本；候选经哈希与上下文复核后原子替换。替换前保存旧字节，全量成功后才归档已退出清单的副本。单文件 TOC 局部门禁在提升前运行。
+- 全量报告中的普通逐文件安全拒答只使对应文件 pending；其他当前有效的逐文件收据可在 `--resume` 复用。`protected_workspace_blocked` 仍是全局阻断，会清空可复用集合。
+- 脚注 apply 恢复只在拥有单元内按已应用文件和 OCR block 内容哈希唯一映射旧决定；不可唯一定位时保留决定并创建局部复核。上一页脚注开放时，下一页页首疑似续文仅作 review-only recall，不自动分类或移动。
+- 单 OCR 长文本空白页复核仅覆盖至少 80 词或 400 个非空白字符的页稿；阈值和 advisory 见 `AGENTS.md`。它不做通用语言检测。复核图像绑定整份 PDF 哈希；PDF 改变使旧图像失效，同一 PDF 下的局部 OCR 文本变化可保留不相关页面的当前决定。
+
+本节记录实现范围；具体验收数量以本轮实际命令输出为准，不沿用历史测试总数。
+
+## 6. 2026-11-20 审计批次已完成项
 
 这些改动已经落地并各自独立提交；接手时不要重复修，也不要回退它们的测试。
 
@@ -118,7 +127,7 @@ uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲
 | `d9abb32` | `build-epub` / `build-html-epub` 写入 `epub_build_receipt.json`；`status` 的 `package` 阶段据此报告 `stale`，无 receipt 的历史产物保持通过并标注 |
 | `996d0aa` | `refine-local` 写只读 `refine_boundary_preview.json`（跨页脚注/正文合并、开句跨页）；polish 规则与 `status.boundary_preview` 使用它，减少 footnote→polish 返工 |
 
-## 6. 已知遗留 backlog
+## 7. 已知遗留 backlog
 
 1. **`.gitattributes` 与工作区换行**（P2，已缓解）
    仓库索引是 LF、工作区是 CRLF，`git status` 会列出大量 stat-only 改动。
@@ -142,7 +151,7 @@ uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲
 - **`pages_fingerprint` 复用哈希缓存**：实测 1330 个页面文件 0.040 s（直接读）vs 0.118 s
   （走 `sha256_file` 的 mtime 缓存，多出 resolve/stat 开销）。当前实现更快，不要"优化"。
 
-## 7. 协作约定
+## 8. 协作约定
 
 - **提交粒度**：一个可独立验证的功能/修复一个提交；提交信息写"为什么"而不只是"改了什么"。
   不把无关的既有改动夹带进来，不 `git add .`。
@@ -157,7 +166,7 @@ uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲
 - **不要碰书稿**：本文件的读者默认在做仓库维护；新翻译/润色/OCR 结构判断必须回到
   `AGENTS.md` 的工作区 Subagent 流程。
 
-## 8. 交接模板
+## 9. 交接模板
 
 收尾时按这个结构汇报，下一个 Agent 才能无缝接手：
 

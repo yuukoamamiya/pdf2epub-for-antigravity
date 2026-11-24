@@ -101,6 +101,8 @@ PDF 转换要求原语言 EPUB；原语言 receipt 不能遮住缺失或过期�
 维护者可用 `uv run pdf2epub -c config.yaml footnote-review-summary --json` 只读汇总脚注复核成本；它是独立诊断，不能替代 `footnote-validate`，也不建议删除相邻页上下文窗口。
 脚注 unit context 使用独立 projection version。加载时必须依据当前候选报告、精确页侧车哈希索引和 refined unit mapping 重算完整投影。Polish boundary context projection version 2 首次恢复时用 `polish --resume` 刷新 sidecar/context 并运行正式 `polish-validate`。之后 halo 外邻片变化不使已完成 sidecar/receipt 失效，但完整 source provenance 与 inventory 检查仍须通过。脚注证据在 `tree_progress.json` 提供显式、合法的 `part_page_ranges` 时按该分片页范围投影以缩小失效半径；缺少精确 part→page 映射时继续使用章节级证据与失效范围，不推断分片级页范围。旧脚注 unit context 版本或脚注证据变化时，先重跑 `footnote-prepare`、`footnote-validate`，保留原 decision 文件，不把刷新上下文当作语义决定通过。`footnote-apply` 保留最后成功版本；失败/中断恢复不得认证无效输出。`polish --resume` 按版本哈希链仅同步唯一精确块，模糊项带文件级提示进入 scoped handoff，且仍须正常 polish 校验。PDF `translate --resume` 可携带文件级脚注变更摘要供 worker 参考；提示仅供建议，必须绑定当前源稿与已有译文哈希，不自动改写译文。
 
+成功 apply 收据另存每个已应用决定的所属文件和 OCR block 内容哈希。恢复时只在该所属单元内按内容唯一匹配，block 序号变化可据证据重新定位；内容变化或匹配歧义时保留旧决定并生成局部视觉复核。上一页脚注尾部有断词连字符/开放括号时，下一页页首候选只作为 review-only recall，不自动归类或移动。重复运行当前决定不额外消耗 review retry，也不单独升级全书 schema。
+
 ## 0.2 依赖和 OCR 后端快速配置
 
 主项目环境只安装 `pyproject.toml` 中的依赖：
@@ -122,6 +124,8 @@ ocr:
 footnotes:
   mode: auto
 ```
+
+单 OCR 的长文本空白页检查只扫描至少 80 词或 400 个非空白字符的页稿；正文区域灰度小于 200 的像素比例不高于 0.0005，才可列为图像支持的疑似空白页。全页墨迹至少 0.005 或页边墨迹至少 0.0001 时只产生 advisory；重复页文和缺失当前图像证据只作提示。该检查不做通用语言检测或自动清空。复核仅使用 assigned 页图；已有可信整页图覆盖稀疏复核页时可复用。同一 PDF 下仅 OCR 文本变化会重算相应页面的异常候选，其他当前页面证据可复用；PDF 哈希变化会使旧页图失效。
 
 模型推荐按 `task_models[task]` → `models[task]` → 通用模型配置回退；翻译任务的通用顺序为
 `models.translation` → `models.default`，其他任务为 `models.default`。配置均未命中时，翻译默认
@@ -325,6 +329,9 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
   只有源文件、校验 checkpoint 和该单元上下文都未变化时才复用。全书上下文哈希变化不会
   自动使所有单元失效；缺少单元哈希的旧 manifest 无法安全定位影响范围时，才采用整批重做
   的兼容兜底。
+- Markdown 校验保留最后成功的 `validated/` 副本。全量失败时仍保存当前逐文件有效证明，
+  `--resume` 只重派缺失、变化或无效单元。新副本先暂存，匹配审计目标哈希并复查源/目标/上下文快照后才原子替换；
+  替换前将旧成功字节按内容哈希留存在 `scratch/<task>/previous_validated/`，失败或中断时可恢复。当前全量 receipt 失效时保留副本不能通过 readiness 或 build；全量成功后才把清单之外的旧 Markdown 副本移入 `scratch/<task>/retired_validated/`。translate 单文件校验先对原始目标运行局部 TOC 标题门禁，再决定是否提升副本；check-only 不改副本。translate 的单文件结果不会把失败的全量报告重新认证为通过，必须再次运行全量校验。
 - 中文目标语言的普通正文翻译必须通过目标语言内容审计：高置信度的原文长段落未变化、
   中文密度明显不足或模型敷衍套话都会进入失败报告。`bibliography` 和 `index` 文件
   不使用中文密度门禁，但仍保留数字标记与拒答检测。密度审计会先剥离
@@ -1013,7 +1020,7 @@ Bibliography 仅翻译标题，条目正文
    ```
 
    单文件校验会检查本文件绑定的可见 TOC 标题（`toc_heading_bindings_local`）；绑定失败时
-   该文件会移出 `valid_files`、删除对应的 `translated/validated/` 副本并进入
+   该文件会移出 `valid_files`，保留既有成功的 `translated/validated/` 副本，并进入
    `retry_required`。单文件结果仍只作为 checkpoint，不能替代最终全量校验。
 7. 所有单元完成后运行 `translate-validate`。翻译未完工时，全量命令会先输出完成度和
    pending 清单，并暂缓 TOC heading binding；只有所有目标文件存在时才运行该终审门，或显式

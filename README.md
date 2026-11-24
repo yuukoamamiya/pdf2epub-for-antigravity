@@ -98,6 +98,11 @@ PDF 结构复核还要求逐项处置独立数字，明确绑定标题的源行�
 校验现有译文，再按新的恢复报告派发失效单元；具体步骤见 [AGENTS.md](AGENTS.md)。规则版本变化本身
 不要求重新 OCR 或重译全书。书目、索引、注释和作者注释可从明确标注的 TOC 节点沿普通章节结构继承；
 角色或来源变化只会使对应文件的翻译校验失效，需重新校验后再恢复复用。
+正式 Markdown 校验会保留最后成功的 `validated/` 文件副本。校验失败时，当前失败文件不能作为有效证明，
+但已通过当前校验的其他文件会继续供 `--resume` 复用；读取失败或校验中发生变化的输入会重试，不当作损坏内容隔离。
+新副本先暂存并核对文件哈希及源、目标、上下文快照，再原子替换旧副本。旧副本不会让过期全量报告通过 readiness 或打包；
+替换前旧成功字节会按哈希保存到 `scratch/<task>/previous_validated/`。只有全量校验成功后，源清单之外的旧副本才会移入
+`scratch/<task>/retired_validated/` 保存。translate `--file` 会在提升副本前先检查该文件的 TOC 标题；失败时保留最后成功副本，check-only 不写文件。
 
 PDF 的页脚注抽取会复核疑似跨页断词缺口；需要时会把相邻两页图像交给工作区 Subagent，
 由图像证据确认原文截断或恢复缺失续文。`footnotes.mode: disabled` 会关闭页脚注自动提取和链接创建；
@@ -106,6 +111,10 @@ PDF 的页脚注抽取会复核疑似跨页断词缺口；需要时会把相邻�
 单页 `ocr-correct-validate --file PAGE.md` 只记录该页，完成整书复核后仍须运行无 `--file` 的全量 validate，
 才会生成可供后续结构整理使用的 validated OCR。请求绑定源 PDF、数字排序的完整 OCR 页清单及逐页 Markdown/sidecar 哈希。
 源变化后需更新复核。已有 handoff 记录人工页选择时，缺失或损坏请求合同也不会允许回退到未经验证的原始 OCR。
+单 OCR 的空白页召回只检查至少 80 个词或 400 个非空白字符的 OCR 页稿，并要求当前 PDF 页图正文区域灰度小于 200 的像素比例不高于
+0.0005。全页墨迹比例达到 0.005 或页边墨迹比例达到 0.0001 时仅作 advisory；重复页文和缺失当前图像证据也只作提示。
+该检查不做通用语言识别、不自动清空页面，异常仍由人对照整页和边缘证据复核。页图按复核页稀疏生成并记录哈希；已有覆盖这些页面的可信整页图可复用。
+同一 PDF 下修改某页 OCR 文本只重算该页异常候选，其他当前决定可复用；PDF 哈希变化会使旧页图失效。
 候选/决定报告在重流准备期间刷新时，polish 源选择可继续使用仍与 OCR、归一化稿及已记录结构输入匹配的成功基线；这仅用于准备修复，不表示脚注阶段当前有效。Readiness 与 EPUB 构建仍要求完整当前的脚注验证和 apply 收据。
 
 页脚注应用后还会生成 `footnote_result_audit.json`，复核残留上标、疑似编号注释、适用范围内的编号缺口和注释边界。需要判断的发现会回到既有视觉复核、校验和应用流程；结果审计未通过时，不会生成有效脚注检查点或继续到 polish/EPUB 构建。Polish 语义 issue 回流时，过期哈希/合同与当前 issue 无法唯一映射到 primary OCR block 会分别记录；后一种情况保留其他可映射任务，但阻断脚注校验。原 Polish Reviewer 修正现有 semantic sidecar 的精确 source_excerpt 后，重跑 `footnote-prepare`。 相同 source/target/context 和 issue 身份的重复校验不会消耗额外回流轮次；只有修订后仍存在问题才计为新一轮，计数记录在 `review_escalation.json` 中并跨 manifest 重建保留。每次 `footnote-apply` 保留最近成功版本；失败会另存诊断和 staged 文件证据，再恢复旧稿。成功版本变化形成逐文件哈希链；`polish --resume` 只同步唯一匹配的完整 Markdown 块，保留旧润色备份，并将模糊项作为 assigned-file scoped hints 交给 worker。PDF `translate --resume` 可将文件级脚注变更摘要作为建议传给对应 worker；提示绑定当前源稿和已有译文哈希，不会自动修改译文。`endnotes_only` 跳过页脚注候选扫描，但仍审计适用的尾注定义、截断和物化完整性；`disabled` 会记录为不适用。审计输出复核信号，语义决定由既有审阅流程完成。
@@ -113,6 +122,10 @@ PDF 的页脚注抽取会复核疑似跨页断词缺口；需要时会把相邻�
 上一页脚注以断词连字符结束、下一页 OCR 将续词误标为普通 `Text` 时，行内上标通常不会让候选静默消失，与脚注列对齐且有独立脚注证据的块会带精确页/块地址进入视觉复核和 unit context。视觉复核仍决定该块是否真为续注。
 维护者可运行 `uv run pdf2epub -c config.yaml footnote-review-summary --json` 汇总既有脚注复核的页面、区域、候选块和决定覆盖；该命令纯只读，输出是成本诊断，不代表生产校验通过。
 脚注 worker 的精简 unit context 由候选报告、精确页侧车映射和当前 refined unit mapping 重算校验。侧车哈希变化或旧 projection 版本会要求重跑 `footnote-prepare` 与 `footnote-validate`，既有语义决定文件会保留。polish 邻片边界上下文 projection version 为 2，旧 receipt 会按受影响单元重新 prepare、validate。
+成功 apply 收据会记录已应用决定对应的文件归属和 block 内容哈希。恢复时在所属单元内查找唯一相同内容；
+清理导致 block 序号变化时可据此恢复决定地址。内容变化、匹配缺失或出现多个匹配时，原决定保留并生成局部视觉复核任务。
+上一物理页脚注以连字符或开放括号等形式结束时，下一页顶部的首个合格文本块可作为 top recall 候选进入视觉复核；此召回只增加审阅，
+不自动将正文分类为脚注或移动文本。相同当前决定重复运行保持幂等，不因刷新全书 schema 而重新派发。
 PDF 润色/翻译校验规则升级可能使旧验证记录或脚注归一化 checkpoint 失效；恢复时按 [AGENTS.md](AGENTS.md)
 重跑对应流程，不需要仅因规则版本变化而重新 OCR。polish schema 6 恢复要求先用 `polish --resume` 完成新的语义复核，再以正式 `polish-validate` 建立 receipt 和 validated 副本；原有润色目标会保留供复核。脚注结果审计合同升级后，旧 normalization receipt 也须重建；原始 OCR 与原稿保留，apply 阶段重建归一化派生稿。
 

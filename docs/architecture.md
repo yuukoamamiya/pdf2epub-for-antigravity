@@ -397,6 +397,7 @@ Azure Document Intelligence 与 Google Cloud Vision 页面后端已移除；配�
 `ocr_anomaly_report.json`。异常页进入现有视觉纠错 handoff，未异常页仅作未复核直通副本。校验
 要求异常决定绑定原始页、纠正稿和页图哈希；下游还要求纠正检查点与 `refine-local` 页面指纹当前。
 启发式只提供复核信号，不能推断正确转录，也可能漏报或误报。
+同一扫描还窄范围检查至少 80 词或 400 个非空白字符的 OCR 页稿：PDF 当前页图的正文区域灰度小于 200 的像素比例不高于 0.0005 时才生成空白页 review finding；全页墨迹比例不低于 0.005 或页边墨迹比例不低于 0.0001 时作为 advisory。重复文本只作 advisory，缺失或过期图像不支持空白判断。扫描不调用语言检测，也不自动删除页文。review image manifest 记录 PDF 身份与每张图的 SHA-256；稀疏页需求可由当前完整整页图覆盖，同一 PDF 下 OCR 文本的局部变化只使对应页面异常证据重算。
 
 手动 OCR 纠错请求由 `ocr-correct --file PAGE.md` 显式选择，可重复传入并累积，无 `--file` 的 `--resume` 恢复原选择。
 请求合同绑定 PDF、数字排序的完整原始页清单及逐页 Markdown/sidecar 哈希。单文件 validate 只写单页检查点。全量
@@ -1129,6 +1130,7 @@ Polish issue 回流诊断区分 `stale_contract` 与当前 `current_issue_mappin
 候选/决定报告在重流准备期间刷新时，polish 源选择可继续使用仍与 OCR、归一化稿及已记录结构输入匹配的成功基线；这仅用于准备修复，不表示脚注阶段当前有效。Readiness 与 EPUB 构建仍要求完整当前的脚注验证和 apply 收据。
 
 apply 写入 `footnote_normalized/` 后运行 `footnote_result_audit.json`（version 4），并把其文件哈希/版本绑定到 `footnote_normalization.json`（schema 10）。有效决定使用 effective decision version 1，边界上下文投影使用 version 2。该报告也绑定源稿、归一化稿、候选报告和决定校验的当前哈希。只有审计通过，apply 才写有效 normalization checkpoint，未解决 findings 不会通过 `footnote_normalization_status()`，因此 polish/readiness/build 门禁也会阻断。即使派生 Markdown 已写出，它仍是未验证结果，不能据文件存在推断阶段完成。
+成功 apply receipt 另记录每个已应用决定的拥有文件和 OCR block 内容哈希。恢复时在 owning unit 内按内容做唯一匹配；若 cleanup 仅改变 block 序号，可据证据重绑决定地址；内容变化或匹配歧义则保留决定并生成局部视觉复核。上一物理脚注末尾出现断词连字符或开放括号等 continuation signal 时，可把下一页第一个合格页首文本块纳入 review-only top recall。召回不会自动决定脚注角色或移动正文；相同当前决定再次运行保持幂等，不提升全局 schema。
 
 apply 后的结果审计输出需视觉判读的线索，包括归一化稿中残留数字上标/疑似编号注释、可能截断或未闭合的定义、定义后的正文边界污染，以及确认候选未进入应用计划。每个非脚注例外绑定一个精确 marker occurrence identity。同一 key 或同一文本重复出现时仍逐 occurrence 核查。疑似注释内标题只有在 reviewed TOC heading span 与实际 consumed source span 于同一页唯一定位并相交时才标为 `confirmed_toc_heading_in_note`，其他情况都保持 `suspected_heading_in_note` 并交视觉复核。编号范围依据 TOC/refinement unit 与章节映射，单文件章节和多分片章节均按实际顺序检查。下降序列仅在精确页面边界分隔记录或 `section_id` 明确变化时作为编号重启，缺少边界证据时生成 `scoped_numbering_reset_uncertain` 视觉复核，不跨重启推断缺号。上游候选召回会把通用 OCR `Text` 块中行首 `<sup>…</sup>` 补入视觉任务，跨页续词若被 OCR 标为普通 `Text` 且含行内上标，在上一物理脚注开放、文本续接断词、脚注列几何对齐并有独立字号/字体或词汇证据时，也会以无 key 的低置信度精确地址进入 visual audit 和 unit context。它只创建复核任务，不自动分类或移动。后续 prepare 会把当前 apply 报告中的未决结果任务投影到同一审阅流程，仅在源稿与归一化稿哈希匹配时复用。已识别的脚注定义和缩进行续段、代码及注释排除在相应正文标记扫描外。
 
@@ -1330,6 +1332,8 @@ Format workflow services  → shared utilities/domain services
 3. 当前源文件、该单元的 TOC 上下文、实体/术语投影和对应记录一致；全书级上下文变化不再默认使未受影响单元失效；
 4. 普通正文的目标语言审计、特殊角色数字保护、TOC 绑定和全量流程报告全部通过后，才允许打包。
 
+Markdown validated 副本遵循 last-good 保留：启动校验不会清空接受目录；各文件通过审计后先写临时候选，核对候选内容哈希及源/目标/上下文快照，再原子替换接受副本。替换前的旧成功字节按内容哈希保存于 `scratch/<task>/previous_validated/`，因此多个文件依次提升时的中断仍留有恢复来源。全量失败的报告只认证当前逐文件结果；旧副本不能替代全量 receipt 通过 readiness/build。全量成功后清单之外的旧副本移至 `scratch/<task>/retired_validated/`，防止旧文件使当前目录 inventory 永远失配。translate 单文件校验在提升候选前检查原始目标的局部 TOC 标题；失败保留旧副本。单文件成功也不把此前失败的 full report 升级为成功，仍需完整的全量校验。
+
 实体表恢复以最后一个成功完成的源快照为基线；prepare 重写 manifest 不会认证旧结果。新增、
 删除或修改单元进入局部增量复核，未变化单元保留。格式刷新或满足脚注迁移证明的结果可机械复用；
 legacy 输出只在旧成功验证报告哈希与源清单可证明时保留为明确标注的旧基线，否则进入 bootstrap。
@@ -1407,8 +1411,8 @@ ocr-pages --resume
   重建候选；不能用手工改 JSON 或 `--allow-review-warnings` 绕过。
 
 单文件校验会先执行该文件绑定的可见 TOC heading 局部检查，报告写入
-`toc_heading_bindings_local`；绑定失败时该文件从 `valid_files` 移除，对应的
-`translated/validated/` 副本被删除，并写入 `retry_required`。单文件结果仍只提供
+`toc_heading_bindings_local`；绑定失败时该文件从 `valid_files` 移除，保留对应的
+`translated/validated/` 副本并写入 `retry_required`。该局部门禁在候选提升前针对原始目标执行；check-only 不修改副本。单文件结果仍只提供
 checkpoint，不能替代全量校验。源稿、实体表、TOC 或术语上下文变化
 只应使受影响的 checkpoint 重新进入 `pending`；旧 manifest 没有单元级上下文哈希时，
 为安全起见按整批重新处理。父 manifest 是完整审计/恢复索引，worker handoff 则是只含

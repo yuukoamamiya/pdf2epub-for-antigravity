@@ -85,9 +85,12 @@ subagent:
 
 正文任务按文件拆分。使用 `--resume` 重新准备任务时，manifest 会根据目标目录写出 `completed_files` 和 `pending_files`；提示词要求 Subagent 只处理 `pending_files`。已经通过校验的输出不会被重新覆盖。新 manifest 还会按单元比较 `unit_context_sha256` 和精确 TOC 上下文，因此外部术语表变化只会使受影响单元重新进入 `pending`；没有单元哈希的旧 manifest 才采用整批重做的兼容策略。Subagent 输出遵守 `atomic_output_contract`：先写临时同级文件，再原子替换正式文件；校验器会清理遗留临时文件，并把无效目标移到可恢复的 scratch 区。恢复前建议先运行对应的 `*-validate`，这样可以先发现空文件、行数不一致或标签损坏。
 
-PDF `translate`/`polish` 的全量报告和逐文件 ledger 会保存 validation-time `unit_context_sha256` 与 TOC heading context。上下文改变或移除后，重复 prepare 不能刷新旧 receipt；先 prepare 更新 manifest，再正式 validate 现有目标，之后 resume 才能复用。旧 receipt 缺少上下文快照时，若当前单元没有上下文仍兼容复用；若已有 unit/heading 或全书 context，则要求一次正式校验。校验发现 `prepared_context` 文件实际哈希与 manifest 不符时，只清除该单元的 validated 副本并提示刷新 context、重新校验；合法 target 保留不移动。若同单元另有内容错误，内容错误仍会隔离 target。Full validation 替代旧 partial ledger 前会保留原始 ledger bytes 到 `scratch/<task>/superseded_checkpoints/`，并在最新报告记录相对路径和 SHA-256；check-only 不创建此归档。
+PDF `translate`/`polish` 的全量报告和逐文件 ledger 会保存 validation-time `unit_context_sha256` 与 TOC heading context。上下文改变或移除后，重复 prepare 不能刷新旧 receipt；先 prepare 更新 manifest，再正式 validate 现有目标，之后 resume 才能复用。旧 receipt 缺少上下文快照时，若当前单元没有上下文仍兼容复用；若已有 unit/heading 或全书 context，则要求一次正式校验。校验发现 `prepared_context` 文件实际哈希与 manifest 不符时，保留最后成功的 validated 副本并提示刷新 context、重新校验；合法 target 保留不移动。若同单元另有内容错误，内容错误仍会隔离当前 target。Full validation 替代旧 partial ledger 前会保留原始 ledger bytes 到 `scratch/<task>/superseded_checkpoints/`，并在最新报告记录相对路径和 SHA-256；check-only 不创建此归档。
+
+正式 Markdown 校验不会在开始时清空 `validated/`。每个通过核心校验的文件先写入临时候选副本，再核对候选 SHA-256 与审计目标，并复查源、目标、语义侧车和 prepared context 快照；只有这些检查通过才原子替换接受副本。替换前的最后成功字节按内容哈希保存到 `scratch/<task>/previous_validated/`，以便中断或后续替换失败时恢复。全量失败仍保存逐文件结果，当前有效的兄弟文件可由 `--resume` 复用；但旧副本本身不能让过期全量 receipt 通过 readiness/build。全量成功时，源清单之外的接受副本移至 `scratch/<task>/retired_validated/`，避免阻塞新的完整 inventory。translate `--file` 的局部 TOC 标题检查在候选提升前对原始目标运行；失败时只更新文件 checkpoint，不删除旧接受副本。translate 的局部成功不会把之前失败的全量 receipt 升级为通过，需再次运行全量校验。多个文件的候选提升中断时，已替换的旧内容仍在 `previous_validated/`，混合目录哈希也会使旧 receipt 失效。
 
 脚注 handoff 的 unit context 使用独立的 `projection_version`：当单元在 `tree_progress.json` 中提供显式、合法的 `part_page_ranges` 时按该分片页范围投影以缩小失效半径；缺少精确 part→page 映射时继续使用章节级证据与失效范围，不推断分片级页范围。加载时以候选报告和 review packet 的页来源重新核对侧车路径，context 自身的页/fact/hash 不能作为来源证明。旧 context 缺少当前 projection version 时，重新运行 `footnote-prepare` 与 `footnote-validate`，原有 decision 文件保留，只有当前证据身份仍一致且校验通过时才可复用。此刷新不会调用 OCR，也不会放宽语义决定门禁。
+成功 apply receipt 还会记录已应用决定的拥有文件和 OCR block 内容哈希。恢复时仅在该文件所属单元内查找唯一内容匹配；若清理改变了 block 序号，可据此恢复地址，内容变化、无匹配或多重匹配会保留旧决定并创建局部视觉复核。上一页最后物理脚注以断词连字符、开放括号等形式结束时，下一页页首候选可作为 review-only top recall 进入现有审阅流程；它不会自动分类或移动正文。重复准备/校验同一当前决定保持幂等，不增加 retry 计数；这次证据字段变化没有提升全局 schema。
 
 PDF/EPUB 的 `translate` manifest 会在 `worker_handoffs/` 按 TOC 顺序为相邻短章节装箱，生成隔离的最小 manifest 和提示词；拆分单元的后续 part 会收到只读的 `preceding_context`（前一分片的源文尾部，已剔除脚注定义），仅用于承接代词和论证语气，不计入输出、不得翻译或复制；父级 manifest 保留完整审计索引，worker 只接收自己的文件、批次、上下文哈希和必要的章节元数据，不重复携带全书文件统计、章节映射或审计快照路径；
 `polish` 使用独立的 `polish_worker_handoffs/`，避免不同阶段的任务被误认。每个 Subagent
@@ -532,8 +535,13 @@ manifest 状态为 `auto_resolved`，本地会生成带候选报告哈希的
 以页图为准恢复实际印刷内容，混合页保留可辨识正文；不确定输出不能通过。异常决策须绑定源稿、
 目标稿和页图哈希。该启发式只发出复核信号，不自动删除或补写内容，且可能漏报或误报。
 
-本地程序会从原始 PDF 渲染一张
-与每个物理页对应的审阅图，并生成 `ocr-correct_worker_handoffs/`；工作区 Subagent 只能处理
+空白页召回只用于至少 80 词或 400 个非空白字符的长 OCR 页稿：正文区域中灰度值小于 200 的像素比例不高于 0.0005，才进入图像支持的复核；
+全页墨迹比例至少 0.005 或页边墨迹比例至少 0.0001 时只记 advisory。相同文本重复页只记 advisory，缺少当前 PDF 页图时不作空白页判断。
+此规则没有通用语言检测，也不自动清空页面。复核图像清单可以稀疏，并绑定当前 PDF、图像字节哈希；完整且当前的整页图可作为稀疏页请求的超集复用。
+相同 PDF 下仅 OCR 文本变化时只重算变化页的异常判断；源 PDF 哈希改变则所有旧页图都不再当前。
+
+本地程序按当前复核任务渲染所需页图，并生成 `ocr-correct_worker_handoffs/`；manifest 可只列
+稀疏复核页，已绑定同一 PDF 且当前的完整整页图集合可作为超集复用。工作区 Subagent 只能处理
 自己 manifest 的 `assigned_files`，对照同名页图修正有直接视觉证据的识别错误，结果写入
 `ocr_corrected_pages/`，并为每页写入 `ocr_correction_reviews/page_NNN.json`。随后运行
 `ocr-correct-validate` 会检查 UTF-8、输出完整性、逐页审阅记录、结构和哈希，并将通过结果
@@ -1392,8 +1400,8 @@ translate-validate --file chapter_5.3.2.md
 ```
 
 单文件模式会同时检查该文件绑定的可见 TOC 标题：结果写入
-`report["toc_heading_bindings_local"]`，绑定失败时从 `valid_files` 移除该文件、删除
-`translated/validated/` 中的副本并写入 `retry_required`。单文件结果会写入
+`report["toc_heading_bindings_local"]`，绑定失败时从 `valid_files` 移除该文件，但保留
+`translated/validated/` 中的 last-good 副本，并写入 `retry_required`。单文件结果会写入
 `translate_file_validation.json`，供 `--resume` 使用；它不等同于全书校验。
 未完工时运行不带 `--file` 的校验会输出 `[完成/总数]` 和 pending 清单，并暂缓 TOC heading
 binding；所有目标文件存在后才运行该门禁。需要显式提前做不完整终审时使用
