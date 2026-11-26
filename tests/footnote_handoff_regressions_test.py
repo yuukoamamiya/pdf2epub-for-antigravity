@@ -304,3 +304,191 @@ def test_degree_ambiguity_hint_survives_source_and_target_audits_without_changin
     assert target_finding["task_id"] == raw_finding["task_id"]
     assert raw_finding["requires_visual_review"] is True
     assert target_finding["requires_visual_review"] is True
+
+
+def test_restore_admitted_candidates_drops_stale_source_markdown_review(tmp_path):
+    from pdf2epub.refine.footnote_handoff import _restore_admitted_candidates
+
+    ocr_dir = tmp_path / "ocr_markdown"
+    ocr_dir.mkdir()
+    unit_path = ocr_dir / "chapter_1.md"
+    unit_path.write_text("Updated body text where the original excerpt is gone.\n", encoding="utf-8")
+
+    pages_dir = tmp_path / "pages"
+    pages_dir.mkdir()
+    block = {"text": "18. Note block", "html": "18. Note block", "label": "Footnote"}
+    sidecar_path = pages_dir / "page_001.ocr.json"
+    sidecar_path.write_text(json.dumps({"blocks": [block]}), encoding="utf-8")
+    sidecar_sha = sha256_file(sidecar_path)
+    exact_sidecars = {1: {"primary": {"path": "pages/page_001.ocr.json", "sha256": sidecar_sha}}}
+
+    reviewed_task = {
+        "task_id": "task-stale-source",
+        "code": "unexplained_numeric_superscript",
+        "file": "chapter_1.md",
+        "evidence_origin": "source_markdown",
+        "evidence_file_sha256": "old-file-hash",
+        "block_content_sha256": _content_hash(block),
+        "source_address": {"page": 1, "source": "primary", "block": 0},
+    }
+    polish_task = {
+        "task_id": "task-stale-polish",
+        "code": "polish_semantic_issue",
+        "file": "chapter_1.md",
+        "evidence_origin": "source_markdown",
+        "evidence_file_sha256": "old-file-hash",
+        "evidence_excerpt": "Missing excerpt from earlier OCR",
+        "polish_issue": {"raw_source_excerpt_sha256": hashlib.sha256(b"Missing excerpt from earlier OCR").hexdigest()},
+        "block_content_sha256": _content_hash(block),
+        "source_address": {"page": 1, "source": "primary", "block": 0},
+    }
+    audit = {"findings": [], "reviewed_candidate_tasks": []}
+    report = {"pages": [{"page": 1, "candidates": []}]}
+    prior_review_data = {
+        "result_audit_reviews": [
+            {"task_id": "task-stale-source"},
+            {"task_id": "task-stale-polish"},
+        ]
+    }
+    _restore_admitted_candidates(
+        audit,
+        report,
+        output_dir=tmp_path,
+        prior_result_audit={"reviewed_candidate_tasks": [reviewed_task, polish_task]},
+        exact_sidecars=exact_sidecars,
+        prior_review_data=prior_review_data,
+        records=[{"name": "chapter_1.md", "start_page": 1, "end_page": 1}],
+    )
+
+    assert audit["reviewed_candidate_tasks"] == []
+    assert prior_review_data["result_audit_reviews"] == []
+
+
+def test_admit_truncated_continuation_blocks_recalls_across_parts_and_normalizes_pixels(tmp_path, monkeypatch):
+    import pdf2epub.refine.footnote_handoff as handoff
+
+    ocr_dir = tmp_path / "ocr_markdown"
+    ocr_dir.mkdir()
+    (ocr_dir / "ch1.part1.md").write_text("Body[^1]\n", encoding="utf-8")
+    (ocr_dir / "ch1.part2.md").write_text("Continued prose.\n", encoding="utf-8")
+    source_inv = {"ch1.part1.md": sha256_file(ocr_dir / "ch1.part1.md"), "ch1.part2.md": sha256_file(ocr_dir / "ch1.part2.md")}
+
+    pages_dir = tmp_path / "pages"
+    pages_dir.mkdir()
+    note_text = "This truncated footnote on page 1 ends mid-word with trans-"
+    p1_sidecar = {
+        "page_box": [0, 0, 2000, 3000],
+        "coordinate_system": "page",
+        "blocks": [{"order": 0, "label": "Footnote", "bbox": [100, 2400, 1800, 2700], "html": note_text}],
+    }
+    p2_sidecar = {
+        "page_box": [0, 0, 2000, 3000],
+        "coordinate_system": "page",
+        "blocks": [
+            {"order": 0, "label": "Text", "bbox": [100, 200, 1800, 400], "html": "<p>lation from the previous page.</p>"},
+            {"order": 1, "label": "Text", "bbox": [100, 1400, 1800, 1500], "html": "<p>Continuation before footer.</p>"},
+            {"order": 2, "label": "Footnote", "bbox": [100, 2500, 1800, 2700], "html": "2. Next footnote."},
+        ],
+    }
+    (pages_dir / "page_001.ocr.json").write_text(json.dumps(p1_sidecar), encoding="utf-8")
+    (pages_dir / "page_002.ocr.json").write_text(json.dumps(p2_sidecar), encoding="utf-8")
+    exact_sidecars = {
+        1: {"primary": {"path": "pages/page_001.ocr.json", "sha256": sha256_file(pages_dir / "page_001.ocr.json")}},
+        2: {"primary": {"path": "pages/page_002.ocr.json", "sha256": sha256_file(pages_dir / "page_002.ocr.json")}},
+    }
+
+    monkeypatch.setattr(
+        handoff,
+        "ensure_visual_review_images",
+        lambda _dir, pages, _cfg=None: {"files": {str(p): f"ocr_review_images/page_{int(p):03d}.png" for p in pages}},
+    )
+
+    report = {
+        "review_pages": [5],
+        "visual_evidence": {"files": {"5": "ocr_review_images/page_005.png"}},
+        "pages": [
+            {"page": 1, "candidates": []},
+            {"page": 2, "candidates": [{"page": 2, "source": "primary", "block": 2, "bbox": [0.05, 0.83, 0.9, 0.9]}]},
+        ],
+    }
+    records = [
+        {"name": "ch1.part1.md", "chapter_id": "ch1", "start_page": 1, "end_page": 1},
+        {"name": "ch1.part2.md", "chapter_id": "ch1", "start_page": 2, "end_page": 2},
+    ]
+    handoff._admit_truncated_continuation_blocks(
+        report,
+        output_dir=tmp_path,
+        prior_result_audit={
+            "source_sha256": source_inv,
+            "findings": [{"code": "normalized_note_truncated", "file": "ch1.part1.md", "evidence_excerpt": f"[^1]: {note_text}"}],
+        },
+        records=records,
+        exact_sidecars=exact_sidecars,
+    )
+
+    p2_cands = {c["block"]: c for c in report["pages"][1]["candidates"]}
+    assert 0 in p2_cands and 1 in p2_cands
+    assert p2_cands[0]["result_audit_admitted"] is True
+    assert p2_cands[1]["result_audit_admitted"] is True
+    assert "lation from the previous page." in p2_cands[0]["text"]
+    assert p2_cands[0]["bbox"] == [0.05, 200 / 3000, 0.9, 400 / 3000]
+    assert report["review_pages"] == [2, 5]
+    assert report["pages"][1]["visual_file"] == "ocr_review_images/page_002.png"
+
+
+def test_resolve_result_audit_deduplicates_findings_and_reviewed_tasks(tmp_path, monkeypatch):
+    import pdf2epub.refine.footnote_handoff as handoff
+
+    ocr_dir = tmp_path / "ocr_markdown"
+    ocr_dir.mkdir()
+    unit_path = ocr_dir / "chapter_1.md"
+    unit_path.write_text("Body.\n", encoding="utf-8")
+    (ocr_dir / "tree_progress.json").write_text(json.dumps({
+        "units": [{"unit_id": "ch1", "index_path": [1], "file": "chapter_1.md", "page_range": [1, 1]}]
+    }), encoding="utf-8")
+    pages_dir = tmp_path / "pages"
+    pages_dir.mkdir()
+    (pages_dir / "page_001.ocr.json").write_text(json.dumps({"blocks": []}), encoding="utf-8")
+
+    monkeypatch.setattr(handoff, "_carry_prior_audit_findings", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(handoff, "_restore_successful_decision_addresses", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(handoff, "_attach_polish_semantic_tasks", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(handoff, "_restore_admitted_candidates", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(handoff, "_resolve_truncated_definitions", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(handoff, "_admit_truncated_continuation_blocks", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(handoff, "_admit_leading_superscripts", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(handoff, "_add_supplemental_note_tasks", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(handoff, "_bind_supplemental_candidates", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(handoff, "_bind_heading_tasks", lambda *_args, **_kwargs: None)
+
+    def _inject_dups(audit, *_args, **_kwargs):
+        audit["findings"] = [
+            {"task_id": "dup-1", "file": "chapter_1.md", "pages": []},
+            {"task_id": "dup-1", "file": "chapter_1.md", "pages": [], "extra": "kept"},
+        ]
+        audit["reviewed_candidate_tasks"] = [
+            {"task_id": "dup-1", "file": "chapter_1.md"},
+            {"task_id": "keep-2", "file": "chapter_1.md"},
+        ]
+
+    monkeypatch.setattr(handoff, "_link_marker_candidates", _inject_dups)
+    monkeypatch.setattr(handoff, "ensure_visual_review_images", lambda *_args, **_kwargs: {"files": {}})
+
+    ctx = handoff._PrepareContext(
+        report={"pages": [{"page": 1, "sidecar": "pages/page_001.ocr.json"}]},
+        selected_page_dir=pages_dir,
+        model="inherit",
+        records=[{"name": "chapter_1.md", "chapter_id": "ch1", "start_page": 1, "end_page": 1}],
+        source_texts={"chapter_1.md": "Body.\n"},
+        prior_review_data={},
+        prior_audit_reviews=[],
+        prior_result_audit={},
+        prior_normalization={},
+        current_target_inventory={},
+        audit={"findings": [], "reviewed_candidate_tasks": []},
+    )
+    audit = handoff._resolve_result_audit(ctx, output_dir=tmp_path, config={}, selected_page_dir=pages_dir)
+
+    assert [f["task_id"] for f in audit["findings"]] == ["dup-1"]
+    assert audit["findings"][0]["extra"] == "kept"
+    assert [t["task_id"] for t in audit["reviewed_candidate_tasks"]] == ["keep-2"]

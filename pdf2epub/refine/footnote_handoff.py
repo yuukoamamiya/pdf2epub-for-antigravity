@@ -33,6 +33,8 @@ from .footnote_structure import FOOTNOTE_STRUCTURE_EXEMPT_TYPES
 from .footnote_visual import ensure_visual_review_images
 from .footnote_matching import block_text_variants
 from .footnote_result_audit import AUDIT_VERSION, _task_id
+from .footnote_signals import _FURNITURE_LABEL_RE
+from .layout_evidence import normalized_bbox, text_from_block
 
 def _endnote_ambiguity_section(ambiguity_count: int) -> str:
     """Return the focused centralized-endnote review instructions."""
@@ -891,6 +893,57 @@ def _restore_admitted_candidates(
                     {"sidecar_sha256": entry.get("sha256"), "block": block},
                     ensure_ascii=False, sort_keys=True, separators=(",", ":"),
                 ).encode("utf-8")).hexdigest()
+                if reviewed.get("evidence_origin") == "source_markdown":
+                    if not owner_name or Path(owner_name).name != owner_name:
+                        dropped_review_ids.add(str(reviewed.get("task_id") or ""))
+                        continue
+                    owner_path = output_dir / "ocr_markdown" / owner_name
+                    if not owner_path.is_file():
+                        dropped_review_ids.add(str(reviewed.get("task_id") or ""))
+                        continue
+                    current_file_sha = sha256_file(owner_path)
+                    if reviewed.get("code") == "polish_semantic_issue":
+                        excerpt = str(reviewed.get("evidence_excerpt") or "")
+                        excerpt_name = str(reviewed.get("polish_raw_source_file") or owner_name)
+                        excerpt_path = output_dir / "ocr_markdown" / excerpt_name if Path(excerpt_name).name == excerpt_name else owner_path
+                        try:
+                            excerpt_text = excerpt_path.read_text(encoding="utf-8")
+                        except (OSError, UnicodeError):
+                            excerpt_text = ""
+                        polish_issue = reviewed.get("polish_issue") if isinstance(reviewed.get("polish_issue"), Mapping) else {}
+                        raw_excerpt_hash = polish_issue.get("raw_source_excerpt_sha256")
+                        if (
+                            not excerpt
+                            or excerpt_text.count(excerpt) != 1
+                            or (raw_excerpt_hash and hashlib.sha256(excerpt.encode("utf-8")).hexdigest() != raw_excerpt_hash)
+                        ):
+                            dropped_review_ids.add(str(reviewed.get("task_id") or ""))
+                            continue
+                        reviewed["evidence_file_sha256"] = current_file_sha
+                    else:
+                        matches_existing_file = current_file_sha == reviewed.get("evidence_file_sha256")
+                        matches_span = False
+                        span = reviewed.get("source_span")
+                        if (
+                            not matches_existing_file
+                            and reviewed.get("evidence_source_span_sha256")
+                            and isinstance(span, (list, tuple))
+                            and len(span) == 2
+                        ):
+                            try:
+                                from .footnote_source import project_footnote_source_text
+
+                                span_start, span_end = int(span[0]), int(span[1])
+                                projected = project_footnote_source_text(owner_path.read_bytes())
+                                span_hash = hashlib.sha256(projected[span_start:span_end].encode("utf-8")).hexdigest()
+                                matches_span = span_hash == reviewed.get("evidence_source_span_sha256")
+                            except (OSError, UnicodeError, TypeError, ValueError):
+                                matches_span = False
+                        if matches_existing_file or matches_span:
+                            reviewed["evidence_file_sha256"] = current_file_sha
+                        else:
+                            dropped_review_ids.add(str(reviewed.get("task_id") or ""))
+                            continue
                 for raw in prior_review_data.get("result_audit_reviews", []) if isinstance(prior_review_data, Mapping) else []:
                     if isinstance(raw, dict) and str(raw.get("task_id") or "") == str(reviewed.get("task_id")):
                         raw["evidence_sha256"] = reviewed["evidence_sha256"]
@@ -904,16 +957,17 @@ def _restore_admitted_candidates(
                         decisions_changed = True
             elif matches or old_page in exact_sidecars:
                 dropped_review_ids.add(str(reviewed.get("task_id") or ""))
-        if dropped_review_ids and isinstance(prior_review_data, dict):
-            prior_review_data["result_audit_reviews"] = [
-                item for item in prior_review_data.get("result_audit_reviews", [])
-                if not isinstance(item, Mapping) or str(item.get("task_id") or "") not in dropped_review_ids
-            ]
+        if dropped_review_ids:
             audit["reviewed_candidate_tasks"] = [
                 item for item in audit["reviewed_candidate_tasks"]
                 if str(item.get("task_id") or "") not in dropped_review_ids
             ]
-            decisions_changed = True
+            if isinstance(prior_review_data, dict):
+                prior_review_data["result_audit_reviews"] = [
+                    item for item in prior_review_data.get("result_audit_reviews", [])
+                    if not isinstance(item, Mapping) or str(item.get("task_id") or "") not in dropped_review_ids
+                ]
+                decisions_changed = True
         if decisions_changed and isinstance(prior_review_data, dict):
             from ..workflow_contracts import atomic_write_json
             atomic_write_json(output_dir / "footnote_decisions.json", prior_review_data)
@@ -1330,6 +1384,317 @@ def _resolve_truncated_definitions(
         audit_task["candidate_refs"] = [{"page": page, "source": source, "block": block_index}]
         audit_task["pages"] = sorted({page, *(int(value) for value in audit_task.get("pages", []) if str(value).isdigit())})
         audit_task["context_status"] = "exact_truncated_definition_page_resolved"
+
+
+def _admit_truncated_continuation_blocks(
+    report: dict[str, Any],
+    *,
+    output_dir: Path,
+    prior_result_audit: Mapping[str, Any],
+    prior_normalization: Optional[Mapping[str, Any]] = None,
+    prior_review_data: Optional[Mapping[str, Any]] = None,
+    records: list[Mapping[str, Any]],
+    exact_sidecars: Mapping[Any, Any],
+    config: Optional[Mapping[str, Any]] = None,
+) -> None:
+    """Admit prior continuation decisions and next-page recall blocks for truncated notes."""
+    if not isinstance(prior_result_audit, Mapping) or not isinstance(prior_result_audit.get("findings"), list):
+        return
+    if prior_result_audit.get("source_sha256") != markdown_inventory(output_dir / "ocr_markdown"):
+        return
+
+    sidecar_cache: dict[tuple[int, str], Optional[dict[str, Any]]] = {}
+
+    def _load_sidecar(page_num: int, source_name: str) -> Optional[dict[str, Any]]:
+        cache_key = (page_num, source_name)
+        if cache_key in sidecar_cache:
+            return sidecar_cache[cache_key]
+        entry = exact_sidecars.get(page_num, {}).get(source_name)
+        if not isinstance(entry, Mapping):
+            sidecar_cache[cache_key] = None
+            return None
+        try:
+            loaded = json.loads((output_dir / str(entry["path"])).read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError):
+            sidecar_cache[cache_key] = None
+            return None
+        data = loaded if isinstance(loaded, dict) else None
+        sidecar_cache[cache_key] = data
+        return data
+
+    def _block_content_hash(block: Mapping[str, Any]) -> str:
+        content = {key: str(block.get(key) or "") for key in ("text", "html", "label")}
+        return hashlib.sha256(
+            json.dumps(content, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+
+    page_rows = {
+        int(row["page"]): row
+        for row in report.get("pages", []) or []
+        if isinstance(row, dict) and str(row.get("page", "")).isdigit()
+    }
+    newly_added_review_pages: set[int] = set()
+
+    def _ensure_page_row(page_num: int) -> dict[str, Any]:
+        existing_row = page_rows.get(page_num)
+        if existing_row is not None:
+            return existing_row
+        new_row = {"page": page_num, "candidates": [], "secondary_only_candidates": []}
+        report.setdefault("pages", []).append(new_row)
+        page_rows[page_num] = new_row
+        return new_row
+
+    saved_items = list(prior_result_audit.get("admitted_candidates", []) or [])
+    if (
+        isinstance(prior_normalization, Mapping)
+        and prior_normalization.get("valid") is True
+        and prior_normalization.get("status") == "validated"
+        and isinstance(prior_review_data, Mapping)
+    ):
+        evidence_hashes: dict[tuple[int, str, int, str, str], str] = {}
+        for ev in prior_normalization.get("decision_evidence", []) or []:
+            if not isinstance(ev, Mapping) or not ev.get("block_content_sha256"):
+                continue
+            try:
+                ev_key = (
+                    int(ev["page"]),
+                    str(ev.get("source") or "primary").strip().lower(),
+                    int(ev["block"]),
+                    str(ev.get("role") or ""),
+                    str(ev.get("key") or ""),
+                )
+            except (KeyError, TypeError, ValueError):
+                continue
+            evidence_hashes[ev_key] = str(ev["block_content_sha256"])
+        for dec in prior_review_data.get("decisions", []) or []:
+            if not isinstance(dec, Mapping) or dec.get("role") != "footnote_continuation":
+                continue
+            try:
+                dec_page = int(dec["page"])
+                dec_source = str(dec.get("source") or "primary").strip().lower()
+                dec_block = int(dec["block"])
+                dec_key = str(dec.get("key") or "")
+            except (KeyError, TypeError, ValueError):
+                continue
+            verified_hash = evidence_hashes.get((dec_page, dec_source, dec_block, "footnote_continuation", dec_key))
+            if not verified_hash:
+                continue
+            saved_items.append({
+                "key": dec_key,
+                "block_content_sha256": verified_hash,
+                "source_address": {
+                    "page": dec_page,
+                    "source": dec_source,
+                    "block": dec_block,
+                },
+            })
+
+    for saved in saved_items:
+        if not isinstance(saved, Mapping) or not isinstance(saved.get("source_address"), Mapping):
+            continue
+        addr = saved["source_address"]
+        try:
+            sp = int(addr["page"])
+            ssrc = str(addr.get("source") or "primary").strip().lower()
+            sblk = int(addr["block"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if ssrc not in {"primary", "secondary"}:
+            continue
+        sidecar_data = _load_sidecar(sp, ssrc)
+        if not isinstance(sidecar_data, Mapping):
+            continue
+        blocks = sidecar_data.get("blocks", [])
+        if not isinstance(blocks, list) or not 0 <= sblk < len(blocks) or not isinstance(blocks[sblk], Mapping):
+            continue
+        blk = blocks[sblk]
+        expected_hash = str(saved.get("block_content_sha256") or "")
+        if expected_hash and _block_content_hash(blk) != expected_hash:
+            continue
+        row = _ensure_page_row(sp)
+        field = "secondary_only_candidates" if ssrc == "secondary" else "candidates"
+        cands = row.setdefault(field, [])
+        if any(
+            isinstance(c, Mapping)
+            and str(c.get("source") or ssrc).strip().lower() == ssrc
+            and str(c.get("block", "")) == str(sblk)
+            for c in cands
+        ):
+            continue
+        nbbox = normalized_bbox(blk, sidecar_data) or [0.0, 0.0, 0.0, 0.0]
+        cands.append({
+            "page": sp,
+            "source": ssrc,
+            "block": sblk,
+            "order": int(blk.get("order", sblk)),
+            "label": str(blk.get("label") or "Text"),
+            "bbox": nbbox,
+            "key": str(saved.get("key") or ""),
+            "marker_label": "",
+            "marker_identity": None,
+            "bottom_edge": nbbox[3],
+            "bottom_intersection_ratio": 0.0,
+            "bottom_geometry": "truncated_continuation_recall",
+            "relative_tail": False,
+            "confidence": "review",
+            "disposition": "review_required",
+            "text": text_from_block(blk),
+            "review_reason": "truncated_continuation_recall",
+            "result_audit_admitted": True,
+            "local_role": None,
+        })
+        row["has_review_candidates"] = True
+        newly_added_review_pages.add(sp)
+
+    truncated = [
+        item for item in prior_result_audit["findings"]
+        if isinstance(item, Mapping) and item.get("code") == "normalized_note_truncated"
+    ]
+    if truncated:
+        chapter_end_by_id: dict[str, int] = {}
+        for rec in records:
+            cid = str(rec.get("chapter_id") or "")
+            if cid:
+                chapter_end_by_id[cid] = max(chapter_end_by_id.get(cid, 0), int(rec.get("end_page") or 0))
+        for finding in truncated:
+            file = str(finding.get("file") or "")
+            excerpt = str(finding.get("evidence_excerpt") or "")
+            sig = "".join(ch.casefold() for ch in excerpt.split(":", 1)[-1] if ch.isalnum())
+            if len(sig) < 25:
+                continue
+            record = next((r for r in records if str(r.get("name") or "") == file), None)
+            if not record:
+                continue
+            start_p, end_p = int(record.get("start_page") or 0), int(record.get("end_page") or 0)
+            chapter_end_p = max(end_p, chapter_end_by_id.get(str(record.get("chapter_id") or ""), end_p))
+            start_pages = []
+            for p in range(start_p, end_p + 1):
+                data = _load_sidecar(p, "primary")
+                if not isinstance(data, Mapping):
+                    continue
+                for blk in data.get("blocks", []):
+                    if not isinstance(blk, Mapping):
+                        continue
+                    raw_blk = text_from_block(blk)
+                    bsig = "".join(ch.casefold() for ch in raw_blk if ch.isalnum())
+                    if len(bsig) >= 25 and (sig in bsig or bsig in sig):
+                        start_pages.append(p)
+                        break
+            for p in start_pages:
+                next_p = p + 1
+                if next_p > chapter_end_p:
+                    continue
+                sidecar_data = _load_sidecar(next_p, "primary")
+                if not isinstance(sidecar_data, Mapping):
+                    continue
+                blocks = sidecar_data.get("blocks", [])
+                if not isinstance(blocks, list) or not blocks:
+                    continue
+                row = _ensure_page_row(next_p)
+                cands = row.setdefault("candidates", [])
+                existing_blocks = {
+                    int(c["block"])
+                    for c in cands
+                    if isinstance(c, Mapping)
+                    and str(c.get("source") or "primary").strip().lower() == "primary"
+                    and str(c.get("block", "")).isdigit()
+                }
+                bottom_cands: list[int] = []
+                for c in cands:
+                    if (
+                        not isinstance(c, Mapping)
+                        or str(c.get("source") or "primary").strip().lower() != "primary"
+                        or not str(c.get("block", "")).isdigit()
+                    ):
+                        continue
+                    cbbox = c.get("bbox")
+                    if isinstance(cbbox, list) and len(cbbox) >= 4:
+                        cy = float(cbbox[1])
+                        if cy > 1.5 and int(c["block"]) < len(blocks) and isinstance(blocks[int(c["block"])], Mapping):
+                            norm = normalized_bbox(blocks[int(c["block"])], sidecar_data)
+                            cy = norm[1] if norm else cy / 1000.0
+                        if cy >= 0.45:
+                            bottom_cands.append(int(c["block"]))
+
+                def _append_recalled_block(idx: int, blk: Mapping[str, Any], nbbox: list[float]) -> None:
+                    cands.append({
+                        "page": next_p,
+                        "source": "primary",
+                        "block": idx,
+                        "order": int(blk.get("order", idx)),
+                        "label": str(blk.get("label") or "Text"),
+                        "bbox": nbbox,
+                        "key": "",
+                        "marker_label": "",
+                        "marker_identity": None,
+                        "bottom_edge": nbbox[3],
+                        "bottom_intersection_ratio": 0.0,
+                        "bottom_geometry": "truncated_continuation_recall",
+                        "relative_tail": False,
+                        "confidence": "review",
+                        "disposition": "review_required",
+                        "text": text_from_block(blk),
+                        "review_reason": "truncated_continuation_recall",
+                        "result_audit_admitted": True,
+                        "local_role": None,
+                    })
+                    existing_blocks.add(idx)
+                    row["has_review_candidates"] = True
+                    newly_added_review_pages.add(next_p)
+
+                if bottom_cands:
+                    first_cand = min(bottom_cands)
+                    for idx in range(first_cand - 1, -1, -1):
+                        if idx in existing_blocks or idx >= len(blocks):
+                            break
+                        blk = blocks[idx]
+                        if not isinstance(blk, Mapping) or str(blk.get("label") or "").strip().casefold() != "text":
+                            break
+                        nbbox = normalized_bbox(blk, sidecar_data)
+                        if nbbox is None:
+                            break
+                        _append_recalled_block(idx, blk, nbbox)
+                        if idx == 0:
+                            break
+                        prev_blk = blocks[idx - 1]
+                        if not isinstance(prev_blk, Mapping):
+                            break
+                        npbbox = normalized_bbox(prev_blk, sidecar_data)
+                        if npbbox is None or nbbox[1] - npbbox[3] >= 0.018:
+                            break
+
+                # Also recall the leading top-of-page Text block when the
+                # continuation sits at the top of page+1 (or page+1 has no bottom cands).
+                for idx, blk in enumerate(blocks):
+                    if not isinstance(blk, Mapping):
+                        continue
+                    label = str(blk.get("label") or "").strip()
+                    if _FURNITURE_LABEL_RE.search(label) or re.search(r"(?:^section[\s_-]*header$|^title$|^heading$)", label, re.IGNORECASE):
+                        continue
+                    if label.casefold() == "text" and idx not in existing_blocks:
+                        nbbox = normalized_bbox(blk, sidecar_data) or [0.0, 0.0, 0.0, 0.0]
+                        _append_recalled_block(idx, blk, nbbox)
+                    break
+
+    if newly_added_review_pages:
+        report["review_required"] = True
+        existing_review_pages = {
+            int(p) for p in (report.get("review_pages") or []) if str(p).isdigit()
+        }
+        report["review_pages"] = sorted(existing_review_pages | newly_added_review_pages)
+        image_evidence = ensure_visual_review_images(output_dir, newly_added_review_pages, config)
+        image_files = image_evidence.get("files", {}) if isinstance(image_evidence, Mapping) else {}
+        if isinstance(image_files, Mapping) and image_files:
+            visual_ev = report.setdefault("visual_evidence", {})
+            if isinstance(visual_ev, dict):
+                files_map = visual_ev.setdefault("files", {})
+                if isinstance(files_map, dict):
+                    for key_p, rel_path in image_files.items():
+                        files_map[str(key_p)] = str(rel_path)
+            for p_num in newly_added_review_pages:
+                rel_path = image_files.get(str(p_num), image_files.get(p_num))
+                if rel_path and p_num in page_rows and not page_rows[p_num].get("visual_file"):
+                    page_rows[p_num]["visual_file"] = str(rel_path)
 
 
 def _admit_leading_superscripts(
@@ -2069,6 +2434,16 @@ def _resolve_result_audit(
         source_texts=source_texts,
         exact_sidecars=exact_sidecars,
     )
+    _admit_truncated_continuation_blocks(
+        report,
+        output_dir=output_dir,
+        prior_result_audit=prior_result_audit,
+        prior_normalization=prior_normalization,
+        prior_review_data=prior_review_data,
+        records=records,
+        exact_sidecars=exact_sidecars,
+        config=config,
+    )
     known_task_ids = {str(item.get("task_id")) for item in audit.get("findings", [])}
     _admit_leading_superscripts(
         audit, report,
@@ -2097,6 +2472,23 @@ def _resolve_result_audit(
     # definition it refers to; keep that linked candidate available for an
     # occurrence-level confirmed_footnote review without moving the body block.
     _link_marker_candidates(audit)
+    deduped_findings: dict[str, dict[str, Any]] = {}
+    unkeyed_findings: list[dict[str, Any]] = []
+    for item in audit.get("findings", []):
+        if not isinstance(item, Mapping):
+            continue
+        tid = str(item.get("task_id") or "")
+        if not tid:
+            unkeyed_findings.append(dict(item))
+        else:
+            deduped_findings[tid] = dict(item)
+    audit["findings"] = [*deduped_findings.values(), *unkeyed_findings]
+    finding_ids = set(deduped_findings)
+    if finding_ids and isinstance(audit.get("reviewed_candidate_tasks"), list):
+        audit["reviewed_candidate_tasks"] = [
+            item for item in audit["reviewed_candidate_tasks"]
+            if isinstance(item, Mapping) and str(item.get("task_id") or "") not in finding_ids
+        ]
     _annotate_review_attempts(audit, prior_audit_reviews, output_dir=output_dir)
     _populate_visual_context(
         audit, report,
