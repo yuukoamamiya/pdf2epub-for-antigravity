@@ -64,37 +64,58 @@ def endnote_definition_keys(text: str, *, file_role: str | None = None) -> List[
     return keys
 
 
-def _note_section_keys(text: str) -> List[str]:
-    """Return legacy numbered note definitions under a Notes heading."""
+def _note_definition_line_map(text: str) -> dict[int, str]:
+    """Map 0-based line indices of confirmed legacy note definitions to their keys."""
+    from .refine.endnote_scopes import markdown_fence_mask
+
     lines = text.splitlines()
+    fenced = markdown_fence_mask(lines)
     in_notes = False
     note_level = 0
-    keys: List[str] = []
-    for line in lines:
+    in_trailing_md_notes = False
+    definitions: dict[int, str] = {}
+    sup_def_re = re.compile(
+        r"^[ \t]{0,3}<sup\b[^>]*>\s*(?P<key>\d+(?:bis|ter)?)\s*</sup>\s+\S",
+        re.IGNORECASE,
+    )
+    for idx, line in enumerate(lines):
+        if fenced[idx]:
+            continue
         heading = _NOTE_HEADING_RE.match(line.strip())
         if heading:
             in_notes = True
             note_level = len(heading.group("marks"))
+            in_trailing_md_notes = False
             continue
-        if in_notes:
-            next_heading = re.match(r"^(#{1,6})\s+", line)
-            if next_heading and len(next_heading.group(1)) <= note_level:
-                in_notes = False
+        next_heading = re.match(r"^(#{1,6})\s+", line)
+        if in_notes and next_heading and len(next_heading.group(1)) <= note_level:
+            in_notes = False
+        if next_heading:
+            in_trailing_md_notes = False
+            continue
+        if re.match(r"^\[\^\d+(?:bis|ter)?\]:", line.strip()):
+            in_trailing_md_notes = True
+            continue
+        if in_notes or in_trailing_md_notes:
+            sup_def = sup_def_re.match(line)
+            if sup_def:
+                definitions[idx] = sup_def.group("key")
                 continue
+        if in_notes:
             match = _RAW_NOTE_DEF_RE.match(line)
             if match:
-                k = (
-                    match.group("key")
-                    if "key" in match.groupdict()
-                    else (match.group("html_key") or match.group("number_key"))
-                )
+                k = match.group("html_key") or match.group("number_key")
                 if k:
-                    keys.append(k)
-            else:
-                match = _LEGACY_DEF_RE.match(line)
-                if match:
-                    keys.append(match.group("key"))
-    return keys
+                    definitions[idx] = k
+            continue
+        if in_trailing_md_notes and line.strip() and line == line.lstrip():
+            in_trailing_md_notes = False
+    return definitions
+
+
+def _note_section_keys(text: str) -> List[str]:
+    """Return legacy numbered note definitions under a Notes heading or trailing note block."""
+    return list(_note_definition_line_map(text).values())
 
 
 def _is_math_or_formula_superscript(
@@ -136,6 +157,24 @@ def _is_math_or_formula_superscript(
     # A year immediately followed by its page locator is strong local evidence
     # even when this citation is embedded in a longer bibliographic sentence.
     if follows_year and re.match(r"^,\s*pp?\.\s*\d", after[:24], re.IGNORECASE):
+        return True
+    # Paired/semicolon-delimited edition superscripts in bibliographic entries
+    # (e.g., "Paris, 1936<sup>1</sup>, 1946<sup>2</sup>;" or "Calif. 1949<sup>1</sup>; cfr. pp. 556-574").
+    if follows_year and (
+        re.match(r"^,\s*\d{4}<sup\b[^>]*>\s*\d+\s*</sup>", after[:40], re.IGNORECASE)
+        or (
+            re.search(r"\b\d{4}<sup\b[^>]*>\s*\d+\s*</sup>,\s*\d{4}$", before, re.IGNORECASE)
+            and re.match(r"^\s*[;,.)]", after[:8])
+        )
+        or (
+            re.search(r"(?:[A-Z][A-Za-zÀ-ÖØ-öø-ÿ.\-']{1,24},?\s+)\d{4}$", before[-48:])
+            and re.match(
+                r"^\s*;\s*(?:[^;\n]{0,48}?(?:pp?\.\s*\d|cit\.|cfr\.|vol\.|ed\.|,\s*\d{4}\b))",
+                after[:64],
+                re.IGNORECASE,
+            )
+        )
+    ):
         return True
     return not follows_year and _follows_cited_item_in_list(before)
 
@@ -193,7 +232,9 @@ def validate_polish_footnote_normalization(
             ):
                 source_refs.append(key)
     else:
-        legacy_defs = _note_section_keys(source_text)
+        legacy_def_map = _note_definition_line_map(source_text)
+        legacy_defs = list(legacy_def_map.values())
+        legacy_def_lines = set(legacy_def_map)
         # Preserve every definition occurrence.  Numbered source definitions
         # only count inside a confirmed Notes section; Markdown definitions
         # were collected independently above and remain local definitions.
@@ -209,6 +250,11 @@ def validate_polish_footnote_normalization(
                 key = key_getter(match)
                 if key not in allowed_keys:
                     continue
+                if pattern is _HTML_SUP_RE:
+                    line_index = source_text.count("\n", 0, match.start())
+                    line_start = source_text.rfind("\n", 0, match.start()) + 1
+                    if line_index in legacy_def_lines and source_text[line_start:match.start()].strip() == "":
+                        continue
                 if any(a < match.end() and match.start() < b for a, b in occupied):
                     continue
                 if _is_note_definition_occurrence(source_text, match.start(), match.end(), note_ranges):

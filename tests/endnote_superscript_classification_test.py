@@ -150,3 +150,46 @@ def test_unconverted_reference_inside_notes_is_rejected_by_polish_validation():
     )
 
     assert any("reference migration mismatch" in error for error in errors)
+
+
+def test_prose_with_word_press_does_not_misclassify_year_footnote():
+    line = "The freedom of the press was restricted in 1949<sup>1</sup>; Another decree followed."
+    start = line.index("<sup>")
+    end = line.index("</sup>") + len("</sup>")
+    assert not _is_math_or_formula_superscript(line, start, end, key="1")
+
+
+def test_paired_and_local_bibliographic_edition_superscripts_are_preserved():
+    paired = "Paris, 1936<sup>1</sup>, 1946<sup>2</sup>; other text."
+    first_s = paired.index("<sup>1</sup>")
+    first_e = first_s + len("<sup>1</sup>")
+    second_s = paired.index("<sup>2</sup>")
+    second_e = second_s + len("<sup>2</sup>")
+    assert _is_math_or_formula_superscript(paired, first_s, first_e, key="1")
+    assert _is_math_or_formula_superscript(paired, second_s, second_e, key="2")
+
+    local_cue = "Calif. 1949<sup>1</sup>; cfr. pp. 556-574."
+    ls = local_cue.index("<sup>1</sup>")
+    le = ls + len("<sup>1</sup>")
+    assert _is_math_or_formula_superscript(local_cue, ls, le, key="1")
+
+
+def test_body_line_starting_with_superscript_is_still_validated():
+    source = "<sup>5</sup> Leading body reference.\n\n[^5]: Note.\n"
+    target = "Leading body reference.\n\n[^5]: Note.\n"
+    errors = validate_polish_footnote_normalization(source, target)
+    assert any("reference migration mismatch" in error for error in errors)
+
+
+def test_indented_list_item_under_notes_is_not_counted_as_definition():
+    source = "## Notes\n\n1. First note:\n    1. Subitem inside note.\n"
+    target = "## Notes\n\n[^1]: First note:\n    1. Subitem inside note.\n"
+    errors = validate_polish_footnote_normalization(source, target)
+    assert errors == []
+
+
+def test_trailing_sup_definition_after_markdown_def_is_recognized():
+    source = "Text[^20] and<sup>21bis</sup>.\n\n[^20]: Note twenty.\n\n<sup>21bis</sup> Note 21bis.\n"
+    target = "Text[^20] and[^21bis].\n\n[^20]: Note twenty.\n\n[^21bis]: Note 21bis.\n"
+    errors = validate_polish_footnote_normalization(source, target)
+    assert errors == []
