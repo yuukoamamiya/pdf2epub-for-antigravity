@@ -975,6 +975,17 @@ def _validate_pdf_markdown_task_impl(args, task: str, *, context=None):
             logger.info(f"Pending: {name}")
     for item in report["invalid"][:10]:
         logger.error(f"Invalid: {item['file']}: {item['reason']}")
+    quarantined = report.get("quarantined_files")
+    if isinstance(quarantined, dict) and quarantined:
+        items = list(quarantined.items())
+        for name, rel_path in items[:10]:
+            logger.info(
+                f"Quarantined invalid output (preserved for editing): {name} -> {rel_path}"
+            )
+        if len(items) > 10:
+            logger.info(
+                f"... and {len(items) - 10} more quarantined invalid output(s)"
+            )
     if report.get("safety_blocked"):
         logger.error(
             f"Safety/refusal blocked units: {report['safety_blocked'][:10]}"

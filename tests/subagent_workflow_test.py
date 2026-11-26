@@ -3966,3 +3966,54 @@ def test_local_refine_generates_units_without_constructing_model(tmp_path: Path)
     assert len(units) == 2
     assert (tmp_path / "ocr_markdown" / "chapter_1.md").exists()
     assert (tmp_path / "ocr_markdown" / "chapter_2.md").exists()
+
+
+def test_translate_validate_logs_quarantined_invalid_output_paths(tmp_path: Path, monkeypatch):
+    import pdf2epub.commands.markdown as command
+    import pdf2epub.markdown_subagent_validation as validation_mod
+
+    source_dir = tmp_path / "ocr_markdown"
+    source_dir.mkdir()
+    (source_dir / "unit.md").write_text("# Unit\nBody\n", encoding="utf-8")
+
+    context = SimpleNamespace(
+        config={},
+        book_title="Book",
+        output_dir=tmp_path,
+        config_path=tmp_path / "config.yaml",
+    )
+    monkeypatch.setattr(command, "load_book_context", lambda *_args, **_kwargs: context)
+    monkeypatch.setattr(command, "_resolve_pdf_markdown_source", lambda *_args: (source_dir, "ocr"))
+    monkeypatch.setattr(command, "load_pdf_file_roles", lambda *_args: {"unit.md": ""})
+    monkeypatch.setattr(command, "_pdf_file_role_sources", lambda *_args: {})
+    monkeypatch.setattr(
+        validation_mod,
+        "validate_markdown_subagent",
+        lambda *_args, **_kwargs: {
+            "task": "translate",
+            "all_passed": False,
+            "completed": 0,
+            "total": 1,
+            "missing": [],
+            "invalid": [{"file": "unit.md", "reason": "marker mismatch"}],
+            "valid_files": [],
+            "quarantined_files": {"unit.md": "scratch/translate/invalid_outputs/unit.md"},
+            "discarded_temp_files": [],
+            "retry_required": [],
+            "human_review_required": [],
+            "safety_blocked": [],
+            "target_language_blocked": [],
+        },
+    )
+    info_messages: list[str] = []
+    monkeypatch.setattr(command.logger, "info", info_messages.append)
+
+    args = SimpleNamespace(config="config.yaml", file="unit.md", check_only=False)
+    rc = command.translate_validate_command(args)
+
+    assert rc == 1
+    assert any(
+        "Quarantined invalid output (preserved for editing): unit.md -> scratch/translate/invalid_outputs/unit.md"
+        in msg
+        for msg in info_messages
+    )
