@@ -11,6 +11,7 @@ from .endnote_patterns import (
     MARKDOWN_REF_RE as _MARKDOWN_REF_RE,
     UNICODE_DIGITS as _UNICODE_DIGITS,
     UNICODE_SUP_RE as _UNICODE_SUP_RE,
+    markdown_fence_mask as _markdown_fence_mask,
 )
 from .footnote_keys import key_from_printed_marker
 
@@ -66,10 +67,8 @@ def endnote_definition_keys(text: str, *, file_role: str | None = None) -> List[
 
 def _note_definition_line_map(text: str) -> dict[int, str]:
     """Map 0-based line indices of confirmed legacy note definitions to their keys."""
-    from .refine.endnote_scopes import markdown_fence_mask
-
     lines = text.splitlines()
-    fenced = markdown_fence_mask(lines)
+    fenced = _markdown_fence_mask(lines)
     in_notes = False
     note_level = 0
     in_trailing_md_notes = False

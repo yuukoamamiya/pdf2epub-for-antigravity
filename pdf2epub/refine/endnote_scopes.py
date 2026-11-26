@@ -13,6 +13,7 @@ import html
 from collections import defaultdict
 from typing import Any, Iterable, Mapping, Optional
 
+from ..endnote_patterns import markdown_fence_mask as markdown_fence_mask
 from ..footnote_keys import key_from_printed_marker
 from ..footnote_normalization import _is_math_or_formula_superscript
 from .footnote_structure import FOOTNOTE_STRUCTURE_EXEMPT_TYPES
@@ -54,35 +55,6 @@ _UNICODE_SUP_RE = re.compile(r"(?P<value>[⁰¹²³⁴⁵⁶⁷⁸⁹]+)")
 _UNICODE_DIGITS = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789")
 _MARKDOWN_REF_RE = re.compile(r"\[\^(?P<key>[A-Za-z0-9_-]+)\](?!:)")
 _MARKDOWN_DEF_RE = re.compile(r"^[ \t]*\[\^(?P<key>[A-Za-z0-9_-]+)\]:", re.MULTILINE)
-
-
-def markdown_fence_mask(lines: list[str]) -> list[bool]:
-    """Mark fenced-code lines so source-like code is not read as structure."""
-    mask = [False] * len(lines)
-    fence_char: Optional[str] = None
-    fence_length = 0
-    for index, line in enumerate(lines):
-        if fence_char is not None:
-            mask[index] = True
-            close = re.match(r"^[ \t]{0,3}(`{3,}|~{3,})[ \t]*$", line)
-            if (
-                close
-                and close.group(1)[0] == fence_char
-                and len(close.group(1)) >= fence_length
-            ):
-                fence_char = None
-                fence_length = 0
-            continue
-        opening = re.match(r"^[ \t]{0,3}(`{3,}|~{3,})(.*)$", line)
-        if opening is None:
-            continue
-        run = opening.group(1)
-        if run[0] == "`" and "`" in opening.group(2):
-            continue
-        mask[index] = True
-        fence_char = run[0]
-        fence_length = len(run)
-    return mask
 
 
 class EndnoteScopeError(ValueError):
