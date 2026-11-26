@@ -21,13 +21,17 @@ from collections import Counter, defaultdict
 from typing import Any, Iterator, Mapping, NamedTuple, Optional
 
 from ..footnote_normalization import (
+    _NOTE_HEADING_RE,
     _is_math_or_formula_superscript,
     endnote_definition_keys,
 )
 from ..footnote_keys import key_from_printed_marker
-from .endnote_review import NUMBERED_PUNCT_DEF_RE as _NUMBERED_PUNCT_DEF_RE
-from .endnote_review import is_ambiguous_definition_line
-from .endnote_review import inline_endnote_candidates
+from .endnote_review import (
+    NUMBERED_PUNCT_DEF_RE as _NUMBERED_PUNCT_DEF_RE,
+    _inside_inline_code_or_math,
+    inline_endnote_candidates,
+    is_ambiguous_definition_line,
+)
 from .endnote_scopes import markdown_fence_mask, scope_for_line, scope_report
 from ..endnote_patterns import (
     MARKDOWN_REF_RE as _MARKDOWN_REF_RE,
@@ -1246,6 +1250,220 @@ def _normalize_legacy(
     )
 
 
+def _normalize_embedded_chapter_notes(
+    source_texts: Mapping[str, str],
+    file_roles: Mapping[str, str],
+    report: Mapping[str, Any],
+) -> tuple[dict[str, str], dict[str, Any]]:
+    """Normalize raw endnote sections embedded under a Notes heading inside chapter files."""
+    exempt_roles = {"notes", "bibliography", "index"}
+    candidate_files = sorted(
+        name
+        for name in source_texts
+        if str(file_roles.get(name, "")).strip().lower() not in exempt_roles
+    )
+    if not candidate_files:
+        return dict(source_texts), dict(report)
+
+    def _body_keys_for_lines(lines: list[str], fenced: list[bool], notes_lines: set[int]) -> set[str]:
+        body_text = "\n".join(
+            line for idx, line in enumerate(lines)
+            if not fenced[idx] and idx not in notes_lines
+        )
+        keys = {
+            key
+            for match in _HTML_SUP_RE.finditer(body_text)
+            if (key := key_from_printed_marker(html.unescape(match.group("key"))))
+            and not _is_math_or_formula_superscript(body_text, match.start(), match.end(), key=key)
+        }
+        keys.update(match.group("value").translate(_UNICODE_DIGITS) for match in _UNICODE_SUP_RE.finditer(body_text))
+        return keys
+
+    parsed_by_file: dict[str, dict[str, Any]] = {}
+    files_per_key: dict[str, set[str]] = defaultdict(set)
+    for name in candidate_files:
+        text = source_texts[name]
+        lines = text.splitlines()
+        fenced = markdown_fence_mask(lines)
+        in_notes = False
+        note_level = 0
+        notes_lines: set[int] = set()
+        section_ranges: list[tuple[int, int]] = []
+        active_start: int | None = None
+        for idx, line in enumerate(lines):
+            if fenced[idx]:
+                if in_notes:
+                    notes_lines.add(idx)
+                continue
+            heading = _NOTE_HEADING_RE.match(line.strip())
+            next_heading = re.match(r"^(#{1,6})\s+", line)
+            if in_notes and next_heading and len(next_heading.group(1)) <= note_level:
+                in_notes = False
+                if active_start is not None:
+                    section_ranges.append((active_start, idx))
+                    active_start = None
+            if heading:
+                in_notes = True
+                note_level = len(heading.group("marks"))
+                active_start = idx + 1
+                continue
+            if in_notes:
+                notes_lines.add(idx)
+        if active_start is not None:
+            section_ranges.append((active_start, len(lines)))
+        if not section_ranges:
+            continue
+
+        body_keys = _body_keys_for_lines(lines, fenced, notes_lines)
+        defs: list[dict[str, Any]] = []
+        for sec_start, sec_end in section_ranges:
+            for idx in range(sec_start, sec_end):
+                if fenced[idx]:
+                    continue
+                line = lines[idx]
+                if not line.strip():
+                    continue
+                if len(line) - len(line.lstrip(" ")) >= 4 or line.startswith("\t"):
+                    continue
+                if _MARKDOWN_DEF_RE.match(line):
+                    continue
+                prev_blank = idx == sec_start or not lines[idx - 1].strip()
+                parsed = _definition_line(line, body_keys=body_keys, previous_line_blank=prev_blank)
+                if parsed is None:
+                    continue
+                raw_key, content, kind = parsed
+                if kind == "markdown":
+                    continue
+                defs.append({
+                    "line_index": idx,
+                    "raw_key": raw_key,
+                    "content": content,
+                    "continuations": [],
+                    "sec_end": sec_end,
+                })
+        if not defs:
+            continue
+        for pos, entry in enumerate(defs):
+            start_idx = entry["line_index"]
+            limit = defs[pos + 1]["line_index"] if pos + 1 < len(defs) and defs[pos + 1]["sec_end"] == entry["sec_end"] else entry["sec_end"]
+            for cont_idx in range(start_idx + 1, limit):
+                if fenced[cont_idx]:
+                    continue
+                cont_line = lines[cont_idx]
+                if _MARKDOWN_DEF_RE.match(cont_line):
+                    break
+                if cont_line.strip():
+                    entry["continuations"].append(cont_idx)
+            files_per_key[entry["raw_key"]].add(name)
+        parsed_by_file[name] = {
+            "lines": lines,
+            "fenced": fenced,
+            "notes_lines": notes_lines,
+            "defs": defs,
+            "trailing_newline": text.endswith(("\n", "\r")),
+        }
+
+    if not parsed_by_file:
+        return dict(source_texts), dict(report)
+
+    existing_md_keys: set[str] = set(report.get("definition_keys") or [])
+    for text in source_texts.values():
+        existing_md_keys.update(match.group("key") for match in _MARKDOWN_DEF_RE.finditer(text))
+
+    used_keys: set[str] = set(existing_md_keys)
+    transformed = dict(source_texts)
+    new_def_keys: list[str] = []
+    normalized_defs = 0
+    converted_refs = 0
+    embedded_ref_counts: Counter[str] = Counter()
+
+    for ch_idx, name in enumerate(sorted(parsed_by_file), 1):
+        info = parsed_by_file[name]
+        lines = list(info["lines"])
+        fenced = info["fenced"]
+        notes_lines = info["notes_lines"]
+        key_map: dict[str, list[str]] = defaultdict(list)
+
+        for entry in info["defs"]:
+            raw_key = entry["raw_key"]
+            needs_scope = len(files_per_key[raw_key]) > 1 or raw_key in existing_md_keys
+            base = f"fnc-ch{ch_idx}-{raw_key}" if needs_scope else raw_key
+            out_key = base
+            suffix = 2
+            while out_key in used_keys:
+                out_key = f"{base}-o{suffix}"
+                suffix += 1
+            used_keys.add(out_key)
+            entry["output_key"] = out_key
+            key_map[raw_key].append(out_key)
+            new_def_keys.append(out_key)
+
+            lines[entry["line_index"]] = f"[^{out_key}]: {entry['content']}".rstrip()
+            normalized_defs += 1
+            for cont_idx in entry["continuations"]:
+                cont_line = lines[cont_idx]
+                if not cont_line.startswith("    "):
+                    lines[cont_idx] = f"    {cont_line}"
+
+        # Rewrite body markers outside the embedded Notes sections in this chapter.
+        # Keep lines aligned one-to-one so _is_math_or_formula_superscript inspects local line context.
+        body_mask_keys = {raw_key: outs[0] for raw_key, outs in key_map.items() if len(outs) == 1}
+        for idx, line in enumerate(lines):
+            if fenced[idx] or idx in notes_lines:
+                continue
+
+            def _repl_html(match: re.Match[str], line_text: str = line) -> str:
+                nonlocal converted_refs
+                if _inside_inline_code_or_math(line_text, match.start()):
+                    return match.group(0)
+                k = key_from_printed_marker(html.unescape(match.group("key")))
+                if not k or k not in body_mask_keys:
+                    return match.group(0)
+                if _is_math_or_formula_superscript(line_text, match.start(), match.end(), key=k):
+                    return match.group(0)
+                out_k = body_mask_keys[k]
+                converted_refs += 1
+                embedded_ref_counts[out_k] += 1
+                return f"[^{out_k}]"
+
+            def _repl_unicode(match: re.Match[str], line_text: str = line) -> str:
+                nonlocal converted_refs
+                if _inside_inline_code_or_math(line_text, match.start()):
+                    return match.group(0)
+                k = match.group("value").translate(_UNICODE_DIGITS)
+                if k not in body_mask_keys:
+                    return match.group(0)
+                out_k = body_mask_keys[k]
+                converted_refs += 1
+                embedded_ref_counts[out_k] += 1
+                return f"[^{out_k}]"
+
+            updated_line = _HTML_SUP_RE.sub(_repl_html, line)
+            updated_line = _UNICODE_SUP_RE.sub(_repl_unicode, updated_line)
+            lines[idx] = updated_line
+
+        transformed[name] = "\n".join(lines) + ("\n" if info["trailing_newline"] else "")
+
+    new_report = dict(report)
+    if new_report.get("status") in {"not_applicable", "no_definitions"}:
+        new_report["status"] = "validated"
+    new_report["valid"] = True
+    merged_keys = sorted(set(new_report.get("definition_keys") or []) | set(new_def_keys))
+    new_report["definition_keys"] = merged_keys
+    new_report["definition_count"] = int(new_report.get("definition_count") or 0) + len(new_def_keys)
+    new_report["normalized_definition_count"] = int(new_report.get("normalized_definition_count") or 0) + normalized_defs
+    new_report["converted_reference_count"] = int(new_report.get("converted_reference_count") or 0) + converted_refs
+    merged_ref_counts = dict(new_report.get("reference_counts") or {})
+    for k, count in embedded_ref_counts.items():
+        merged_ref_counts[k] = int(merged_ref_counts.get(k, 0)) + count
+    new_report["reference_counts"] = dict(sorted(merged_ref_counts.items()))
+    existing_orphans = set(new_report.get("orphan_definition_keys") or [])
+    new_orphans = {k for k in new_def_keys if merged_ref_counts.get(k, 0) == 0}
+    new_report["orphan_definition_keys"] = sorted(existing_orphans | new_orphans)
+    new_report["embedded_note_files"] = sorted(parsed_by_file)
+    return transformed, new_report
+
+
 def normalize_endnotes(
     source_texts: Mapping[str, str],
     file_roles: Mapping[str, str],
@@ -1267,7 +1485,11 @@ def normalize_endnotes(
         if str(role).strip().lower() == "notes" and str(name) in source_texts
     }
     if not note_files:
-        return dict(source_texts), _empty_report("not_applicable", note_files)
+        return _normalize_embedded_chapter_notes(
+            source_texts,
+            file_roles,
+            _empty_report("not_applicable", note_files),
+        )
     inline_decisions = definition_decisions.get("decisions", []) if isinstance(definition_decisions, Mapping) else definition_decisions
     supplied_inline: dict[tuple[str, int, int], Mapping[str, Any]] = {}
     if isinstance(inline_decisions, (list, tuple)):
@@ -1357,7 +1579,7 @@ def normalize_endnotes(
         report["endnote_inline_definition_decisions_sha256"] = hashlib.sha256(
             json.dumps(sorted(inline_records, key=lambda item: (item["file"], item["line"], item["column"])), sort_keys=True).encode("utf-8")
         ).hexdigest()
-    return transformed, report
+    return _normalize_embedded_chapter_notes(transformed, file_roles, report)
 
 
 _PHYSICAL_UNIT_EXPONENT_RE = re.compile(

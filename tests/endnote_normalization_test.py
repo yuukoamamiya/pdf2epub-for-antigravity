@@ -303,3 +303,58 @@ def test_normalized_typed_endnotes_render_as_cross_file_epub_links(tmp_path):
 
     assert report["forward_hrefs"] == 1
     assert report["unlinked_sup_count"] == 0
+
+
+def test_mixed_page_footnotes_and_embedded_chapter_notes_normalize_without_collision() -> None:
+    source = {
+        "ch1.md": (
+            "Body with page footnote[^fnm-star-1] and endnote<sup>1</sup>.\n\n"
+            "## Note\n\n"
+            "<sup>1</sup> First chapter endnote.\n"
+            "continued line.\n\n"
+            "[^fnm-star-1]: Page footnote moved by footnote-apply.\n"
+        ),
+        "ch2.md": (
+            "Second chapter endnote<sup>1</sup> and unique<sup>2</sup>.\n\n"
+            "## Notes\n\n"
+            "1. Second chapter endnote one.\n\n"
+            "2. Second chapter endnote two.\n"
+        ),
+    }
+    roles = {"ch1.md": "chapter", "ch2.md": "chapter"}
+
+    normalized, report = normalize_endnotes(source, roles)
+
+    assert report["status"] == "validated"
+    assert report["valid"] is True
+    assert report["embedded_note_files"] == ["ch1.md", "ch2.md"]
+    assert "[^fnm-star-1]: Page footnote moved by footnote-apply." in normalized["ch1.md"]
+    assert "[^fnc-ch1-1]" in normalized["ch1.md"]
+    assert "[^fnc-ch1-1]: First chapter endnote.\n    continued line." in normalized["ch1.md"]
+    assert "[^fnc-ch2-1]" in normalized["ch2.md"]
+    assert "[^fnc-ch2-1]: Second chapter endnote one." in normalized["ch2.md"]
+    assert "[^2]" in normalized["ch2.md"]
+    assert "[^2]: Second chapter endnote two." in normalized["ch2.md"]
+
+
+def test_no_notes_role_and_no_embedded_notes_stays_not_applicable() -> None:
+    source = {"ch1.md": "Ordinary chapter text<sup>1</sup> without Notes heading.\n"}
+    normalized, report = normalize_endnotes(source, {"ch1.md": "chapter"})
+    assert report["status"] == "not_applicable"
+    assert normalized == source
+
+
+def test_embedded_chapter_note_colliding_with_existing_markdown_def_is_scoped() -> None:
+    source = {
+        "ch1.md": (
+            "Page footnote[^1] and embedded endnote<sup>1</sup>.\n\n"
+            "## Notes\n\n"
+            "<sup>1</sup> Embedded note one.\n\n"
+            "[^1]: Existing page footnote one.\n"
+        ),
+    }
+    normalized, report = normalize_endnotes(source, {"ch1.md": "chapter"})
+    assert report["status"] == "validated"
+    assert "[^1]: Existing page footnote one." in normalized["ch1.md"]
+    assert "[^fnc-ch1-1]: Embedded note one." in normalized["ch1.md"]
+    assert "Page footnote[^1] and embedded endnote[^fnc-ch1-1]." in normalized["ch1.md"]
