@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping, MutableMapping, Sequence
 
 from ..footnote_markdown import collect_footnote_definition_blocks
+from ..footnote_normalization import _note_section_ranges
 from .endnote_review import _inside_inline_code_or_math
 from .endnote_scopes import markdown_fence_mask
 from .footnote_structure import FOOTNOTE_STRUCTURE_EXEMPT_TYPES
@@ -316,6 +317,52 @@ class _TargetAuditContext:
     page_texts: Mapping[int | str, str] | None
 
 
+def _top_chapter_scope(record: Mapping[str, Any], file: str) -> str:
+    """Return the chapter scope for matching chapter-end endnotes."""
+    chapter_id = str(record.get("chapter_id") or "").strip()
+    return chapter_id or str(file)
+
+
+def _collect_chapter_endnote_keys(
+    target_texts: Mapping[str, str],
+    record_by_file: Mapping[str, Mapping[str, Any]],
+    expected_by_target_key: Mapping[tuple[str, str], Mapping[str, Any]] = (),
+) -> dict[str, set[str]]:
+    """Collect numeric endnote keys defined inside confirmed Notes sections."""
+    keys_by_scope: dict[str, set[str]] = defaultdict(set)
+    endnote_def_re = re.compile(
+        r"^\s{0,3}(?:<sup\b[^>]*>\s*(?P<sup>\d+)\s*</sup>\s+\S|(?P<num>\d+)[.)]\s+\S|\[\^(?P<fn>\d+)\]:)",
+        re.IGNORECASE,
+    )
+    expected_keys = expected_by_target_key if isinstance(expected_by_target_key, Mapping) else {}
+    for file, text in target_texts.items():
+        record = record_by_file.get(file, {})
+        scope = _top_chapter_scope(record, file)
+        is_notes_unit = str(record.get("type") or "").strip().lower() == "notes"
+        visible_text = _visible(text)
+        note_ranges = [] if is_notes_unit else _note_section_ranges(visible_text)
+        if not is_notes_unit and not note_ranges:
+            continue
+        offset = 0
+        for line in visible_text.splitlines(keepends=True):
+            line_len = len(line)
+            in_notes_section = is_notes_unit or any(a <= offset < b for a, b in note_ranges)
+            offset += line_len
+            if not in_notes_section:
+                continue
+            match = endnote_def_re.match(line)
+            if not match:
+                continue
+            raw_key = match.group("sup") or match.group("num")
+            if raw_key:
+                keys_by_scope[scope].add(raw_key)
+                continue
+            fn_key = match.group("fn")
+            if fn_key and (is_notes_unit or (file, fn_key) not in expected_keys):
+                keys_by_scope[scope].add(fn_key)
+    return keys_by_scope
+
+
 def _audit_normalized_targets(
     ctx: _TargetAuditContext,
     record_finding: Callable[[dict[str, Any]], None],
@@ -325,6 +372,19 @@ def _audit_normalized_targets(
     Split out of ``audit_footnote_result`` so the source-side and target-side
     audits stay readable; the logic and finding identities are unchanged.
     """
+    chapter_endnote_keys = _collect_chapter_endnote_keys(
+        ctx.target_texts,
+        ctx.record_by_file,
+        ctx.expected_by_target_key,
+    )
+    resolved_by_file_key: dict[tuple[str, str], list[Mapping[str, Any]]] = defaultdict(list)
+    for resolved_item in ctx.resolved_blocks:
+        if isinstance(resolved_item, Mapping) and resolved_item.get("output_key"):
+            resolved_by_file_key[(
+                str(resolved_item.get("target_file") or resolved_item.get("file") or ""),
+                str(resolved_item["output_key"]),
+            )].append(resolved_item)
+    tracked_keys = ctx.expected_by_target_key if ctx.expected_by_target_key else resolved_by_file_key
     for file, source in sorted(ctx.source_texts.items()):
         target = ctx.target_texts.get(file)
         if target is None:
@@ -344,13 +404,12 @@ def _audit_normalized_targets(
         target_occurrence_counts: dict[str, int] = {}
         target_lines = visible_target_lines
         target_defs, target_consumed = collect_footnote_definition_blocks(target_lines)
-        resolved_by_output_key: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
-        for resolved_item in ctx.resolved_blocks:
-            if isinstance(resolved_item, Mapping) and resolved_item.get("output_key"):
-                resolved_by_output_key[str(resolved_item["output_key"])].append(resolved_item)
         definition_lines = {line + 1 for line in target_defs}
         definition_lines.update(line + 1 for line in target_consumed)
         target_record = ctx.record_by_file.get(file, {})
+        chapter_endnote_keys_for_file = chapter_endnote_keys.get(
+            _top_chapter_scope(target_record, file), ()
+        )
         target_marker_scan = (
             ctx.mode != "endnotes_only"
             and str(target_record.get("type") or "") not in FOOTNOTE_STRUCTURE_EXEMPT_TYPES
@@ -369,6 +428,8 @@ def _audit_normalized_targets(
                 if _is_in_inline_code(line, match.start()):
                     continue
                 key = match.group("key")
+                if key in chapter_endnote_keys_for_file:
+                    continue
                 occurrence_id = _marker_occurrence_identity(visible_target_lines, line_number - 1, match, key, occurrence, target_occurrence_counts)
                 finding = _finding(
                     "unexplained_numeric_superscript", file, line_number, line.strip(),
@@ -485,12 +546,22 @@ def _audit_normalized_targets(
                 record_finding(finding)
         covered = set(target_consumed)
         covered.update(target_defs)
-        for index in target_defs:
+        for index, (key, _) in target_defs.items():
             cursor = index + 1
             while cursor < len(target_lines) and not target_lines[cursor].strip():
                 cursor += 1
-            if cursor < len(target_lines) and cursor not in covered and not target_lines[cursor].lstrip().startswith("#"):
-                record_finding(_finding("possible_body_note_boundary_contamination", file, 0, target_lines[cursor].strip(), detail="Unindented body text follows a note definition; verify the page/body boundary and paragraph ownership."))
+            if cursor >= len(target_lines) or cursor in covered:
+                continue
+            next_line = target_lines[cursor].lstrip()
+            if next_line.startswith("#"):
+                continue
+            is_moved_note = (file, str(key)) in tracked_keys
+            if not is_moved_note and (
+                re.match(r"^(?:[-*_]){3,}\s*$", next_line)
+                or re.match(r"^<sup\b[^>]*>\s*\d+(?:bis|ter)?\s*</sup>\s+\S", next_line, re.IGNORECASE)
+            ):
+                continue
+            record_finding(_finding("possible_body_note_boundary_contamination", file, 0, target_lines[cursor].strip(), detail="Unindented body text follows a note definition; verify the page/body boundary and paragraph ownership."))
 
     # Verify the complete expected note parts against the actual
     # materialized definitions, including ordering within the chapter-end

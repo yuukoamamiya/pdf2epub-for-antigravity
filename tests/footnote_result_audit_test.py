@@ -321,3 +321,110 @@ def test_same_context_duplicate_marker_findings_have_independent_exceptions():
     remaining = [item for item in reviewed["findings"] if item["code"] == "unexplained_numeric_superscript"]
     assert len(remaining) == 1
     assert remaining[0]["task_id"] == findings[1]["task_id"]
+
+
+def test_moved_page_footnote_does_not_suppress_residual_body_superscript():
+    result = audit_footnote_result(
+        {"chapter.md": "Body text<sup>1</sup>.\n"},
+        records=[{"name": "chapter.md", "chapter_id": "ch1", "index_path": [1]}],
+        target_texts={"chapter.md": "Body text<sup>1</sup>.\n\n[^1]: A moved page footnote.\n"},
+        expected_notes=[{
+            "chapter_id": "ch1",
+            "target_file": "chapter.md",
+            "output_key": "1",
+            "parts": ["A moved page footnote."],
+            "candidate_refs": [{"page": 1, "source": "primary", "block": 1}],
+        }],
+    )
+    assert any(
+        item["code"] == "unexplained_numeric_superscript" and item["key"] == "1"
+        for item in result["findings"]
+    )
+
+
+def test_unmoved_page_footnote_in_body_does_not_self_exempt():
+    target_text = "Body claim<sup>1</sup>.\n\n<sup>1</sup> Missed page footnote in body.\n"
+    result = audit_footnote_result(
+        {"chapter.md": target_text},
+        records=[{"name": "chapter.md", "chapter_id": "ch1", "index_path": [1]}],
+        target_texts={"chapter.md": target_text},
+    )
+    findings = [
+        item for item in result["findings"]
+        if item["code"] == "unexplained_numeric_superscript"
+    ]
+    assert len(findings) >= 1
+
+
+def test_sibling_chapters_under_same_part_do_not_exempt_each_other():
+    result = audit_footnote_result(
+        {"ch1.md": "Body<sup>1</sup>\n", "ch2.md": "## Notes\n\n<sup>1</sup> Ch2 endnote.\n"},
+        records=[
+            {"name": "ch1.md", "chapter_id": "toc-path:2.1", "index_path": [2, 1]},
+            {"name": "ch2.md", "chapter_id": "toc-path:2.2", "index_path": [2, 2]},
+        ],
+        target_texts={
+            "ch1.md": "Body<sup>1</sup>\n",
+            "ch2.md": "## Notes\n\n<sup>1</sup> Ch2 endnote.\n",
+        },
+    )
+    assert any(
+        item["code"] == "unexplained_numeric_superscript" and item["file"] == "ch1.md"
+        for item in result["findings"]
+    )
+
+
+def test_explicit_notes_section_exempts_same_chapter_body_superscript():
+    result = audit_footnote_result(
+        {
+            "ch1.part1.md": "Body claim<sup>1</sup>.\n",
+            "ch1.part2.md": "## Notes\n\n<sup>1</sup> Chapter endnote definition.\n",
+        },
+        records=[
+            {"name": "ch1.part1.md", "chapter_id": "toc-path:1.1", "index_path": [1, 1]},
+            {"name": "ch1.part2.md", "chapter_id": "toc-path:1.1", "index_path": [1, 1]},
+        ],
+        target_texts={
+            "ch1.part1.md": "Body claim<sup>1</sup>.\n",
+            "ch1.part2.md": "## Notes\n\n<sup>1</sup> Chapter endnote definition.\n",
+        },
+    )
+    assert not any(item["code"] == "unexplained_numeric_superscript" for item in result["findings"])
+
+
+def test_boundary_contamination_scopes_by_target_file_and_supports_resolved_blocks():
+    cross_file = audit_footnote_result(
+        {"ch1.md": "Body<sup>*</sup>\n", "ch2.md": "## Notes\n\n<sup>1</sup> Endnote.\n"},
+        records=[
+            {"name": "ch1.md", "chapter_id": "ch1"},
+            {"name": "ch2.md", "chapter_id": "ch2"},
+        ],
+        target_texts={
+            "ch1.md": "Body[^fnm-star-1]\n\n[^fnm-star-1]: Footnote in ch1.\n",
+            "ch2.md": "[^fnm-star-1]: Footnote in ch2.\n\n<sup>1</sup> Endnote in ch2.\n",
+        },
+        expected_notes=[{
+            "chapter_id": "ch1",
+            "target_file": "ch1.md",
+            "output_key": "fnm-star-1",
+            "parts": ["Footnote in ch1."],
+        }],
+        resolved_blocks=[{"file": "ch1.md", "chapter_id": "ch1", "output_key": "fnm-star-1"}],
+    )
+    assert not any(
+        item["code"] == "possible_body_note_boundary_contamination"
+        for item in cross_file["findings"]
+    )
+
+    with_resolved_only = audit_footnote_result(
+        {"ch1.md": "Body<sup>*</sup>\n"},
+        records=[{"name": "ch1.md", "chapter_id": "ch1"}],
+        target_texts={
+            "ch1.md": "Body[^fnm-star-1]\n\n[^fnm-star-1]: Footnote in ch1.\n\nUnindented body prose after note.\n",
+        },
+        resolved_blocks=[{"file": "ch1.md", "chapter_id": "ch1", "output_key": "fnm-star-1"}],
+    )
+    assert any(
+        item["code"] == "possible_body_note_boundary_contamination"
+        for item in with_resolved_only["findings"]
+    )
