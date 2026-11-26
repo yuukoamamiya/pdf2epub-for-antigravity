@@ -717,3 +717,44 @@ def test_real_epub_renderer_places_repeated_title_anchors_by_source_occurrence(t
     assert rendered.count('id="toc-child"') == 1
     assert '<h1 id="repeated"><span id="toc-parent"></span>Repeated</h1>' in rendered
     assert '<h2 id="repeated_1"><span id="toc-child"></span>Repeated</h2>' in rendered
+
+
+def test_container_only_subchapter_anchor_skips_binding_without_warning(monkeypatch):
+    import pdf2epub.build_epub as builder
+    from pdf2epub.build_epub import add_subchapter_anchors_to_parts
+    from pdf2epub.epub.converter import ContentConverter
+
+    warnings: list[str] = []
+    monkeypatch.setattr(builder.logger, "warning", lambda msg, *args, **kwargs: warnings.append(str(msg)))
+
+    converter = ContentConverter.__new__(ContentConverter)
+    rendered_parts = [("part1.html", "<p>Some chapter prose without the part title.</p>")]
+    updated, locations = add_subchapter_anchors_to_parts(
+        converter,
+        rendered_parts,
+        1,
+        [
+            {
+                "title": "Parte prima",
+                "anchor": "toc-parte-1",
+                "binding_mode": "container_only",
+                "source_occurrence": 0,
+                "source_match_count": 0,
+                "source_candidate_kind": "container_only",
+            },
+            {
+                "title": "Missing visible heading",
+                "anchor": "toc-missing-visible",
+                "binding_mode": "visible",
+                "source_occurrence": 1,
+                "source_match_count": 1,
+                "source_candidate_kind": "heading",
+            },
+        ],
+    )
+
+    assert updated == rendered_parts
+    assert locations == {}
+    assert len(warnings) == 1
+    assert "toc-missing-visible" in warnings[0]
+    assert not any("toc-parte-1" in w for w in warnings)

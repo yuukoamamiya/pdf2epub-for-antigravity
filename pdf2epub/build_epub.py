@@ -261,6 +261,11 @@ def add_subchapter_anchors_to_parts(
     """
     locations: dict[str, str] = {}
     for child_index, info in enumerate(subchapter_info, 1):
+        if (
+            str(info.get("binding_mode") or "").strip().lower() == "container_only"
+            or str(info.get("source_candidate_kind") or "").strip().lower() == "container_only"
+        ):
+            continue
         title = str(info.get("title") or "")
         anchor = str(info.get("anchor") or f"toc-{chapter_index}-{child_index}")
         anchor_id = anchor.lstrip("#")
@@ -1314,6 +1319,7 @@ def _prepare_epub_structure(
                         "node_id": identity,
                         "title": target_node["title"],
                         "anchor": target_node.get("anchor"),
+                        "binding_mode": mode,
                         "source_occurrence": heading.get("source_occurrence"),
                         "source_match_count": heading.get("source_match_count"),
                         "source_candidate_kind": heading.get("source_candidate_kind"),
