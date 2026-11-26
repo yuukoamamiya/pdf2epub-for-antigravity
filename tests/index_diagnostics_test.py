@@ -149,3 +149,75 @@ def test_index_merge_diagnostic_points_to_late_first_boundary_drift():
     assert errors
     assert "source line 88" in errors[0]
     assert "target line 87" in errors[0]
+
+
+def test_bibliography_accepts_prose_range_translated_with_dash():
+    assert not validate_special_role_markers(
+        "# Scritti dal 1945 al 1970\n",
+        "# 1945—1970年著作全目\n",
+        "bibliography",
+    )
+    assert not validate_special_role_markers(
+        "pp. 12–15\n",
+        "第12至15页\n",
+        "bibliography",
+    )
+    assert validate_special_role_markers(
+        "# Scritti dal 1945 al 1970\n",
+        "# 1945—1971年著作全目\n",
+        "bibliography",
+    )
+
+
+def test_range_boundary_alteration_is_rejected_for_index_and_bibliography():
+    for role in ("index", "bibliography"):
+        assert validate_special_role_markers(
+            "12, 15–20\n",
+            "12–15, 20\n",
+            role,
+        )
+        assert validate_special_role_markers(
+            "12–15\n",
+            "12, 15\n",
+            role,
+        )
+
+
+def test_bibliography_accepts_natural_chinese_dates_and_issues_and_rejects_mismatches():
+    assert not validate_special_role_markers(
+        "25 giugno 1945\n",
+        "1945年6月25日\n",
+        "bibliography",
+    )
+    assert validate_special_role_markers(
+        "25 giugno 1945\n",
+        "1945年7月25日\n",
+        "bibliography",
+    )
+    assert not validate_special_role_markers(
+        "Prometeo, n. 5, 1952, p. 10\n",
+        "《普罗米修斯》，1952年第5期，第10页\n",
+        "bibliography",
+    )
+    assert validate_special_role_markers(
+        "Prometeo, n. 5, 1952, p. 10\n",
+        "《普罗米修斯》，1952年第6期，第10页\n",
+        "bibliography",
+    )
+
+
+def test_long_bibliography_mismatch_reports_source_and_target_line_numbers():
+    source_lines = [f"Entry {i}, 1950" for i in range(1, 51)]
+    target_lines = [f"条目 {i}，1950" for i in range(1, 51)]
+    target_lines[44] = "条目 45，1951"
+
+    errors = validate_special_role_markers(
+        "\n".join(source_lines),
+        "\n".join(target_lines),
+        "bibliography",
+    )
+
+    assert len(errors) == 1
+    assert "source line 45" in errors[0]
+    assert "target line 45" in errors[0]
+    assert "1950" in errors[0] and "1951" in errors[0]

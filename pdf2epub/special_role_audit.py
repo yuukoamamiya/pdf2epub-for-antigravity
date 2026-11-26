@@ -1,33 +1,89 @@
 """Audits shared by translation pipelines for special-role identity markers."""
 from __future__ import annotations
+import difflib
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from .page_furniture_rules import candidate_for_line
 
 _SPECIAL_ROLE_NUMERIC_MARKER_RE = re.compile(r"(?<![A-Za-z0-9])\d+(?:[./:]\d+)*(?:[-‐‑‒–—]\d+(?:[./:]\d+)*)*(?![A-Za-z0-9])")
+_PROSE_WESTERN_RANGE_RE = re.compile(
+    r"(?<![A-Za-z0-9])\b(?:dal|da|from|von|de)\s+(\d+)\s+(?:al|a|to|bis|à)\s+(\d+)\b",
+    re.IGNORECASE,
+)
+_PROSE_CJK_RANGE_RE = re.compile(r"(?<![A-Za-z0-9])(\d+)\s*(?:至|到)\s*(\d+)(?![A-Za-z0-9])")
 
-def special_role_numeric_markers(text: str) -> list[str]:
-    """Extract stable numeric markers from bibliography/index content.
+_MONTH_NUMBERS: dict[str, int] = {
+    "gennaio": 1, "febbraio": 2, "marzo": 3, "aprile": 4, "maggio": 5, "giugno": 6,
+    "luglio": 7, "agosto": 8, "settembre": 9, "ottobre": 10, "novembre": 11, "dicembre": 12,
+    "january": 1, "jan": 1, "february": 2, "feb": 2, "march": 3, "mar": 3,
+    "april": 4, "apr": 4, "may": 5, "june": 6, "jun": 6, "july": 7, "jul": 7,
+    "august": 8, "aug": 8, "september": 9, "sep": 9, "sept": 9,
+    "october": 10, "oct": 10, "november": 11, "nov": 11, "december": 12, "dec": 12,
+    "janvier": 1, "février": 2, "fevrier": 2, "mars": 3, "avril": 4, "mai": 5,
+    "juin": 6, "juillet": 7, "août": 8, "aout": 8, "octobre": 10, "décembre": 12, "decembre": 12,
+    "januar": 1, "jänner": 1, "februar": 2, "märz": 3, "maerz": 3,
+    "juni": 6, "juli": 7, "oktober": 10, "dezember": 12,
+    "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6,
+    "七": 7, "八": 8, "九": 9, "十": 10, "十一": 11, "十二": 12,
+}
+_WESTERN_MONTH_PATTERN = "|".join(
+    sorted((re.escape(k) for k in _MONTH_NUMBERS if k.isascii() or k in {"février", "août", "décembre", "jänner", "märz"}), key=len, reverse=True)
+)
+_CJK_MONTH_PATTERN = r"十二|十一|[一二三四五六七八九十]|\d{1,2}"
+_FULL_DMY_RE = re.compile(rf"\b(\d{{1,2}})\s+({_WESTERN_MONTH_PATTERN})\s+((?:18|19|20)\d{{2}})\b", re.IGNORECASE)
+_FULL_MDY_RE = re.compile(rf"\b({_WESTERN_MONTH_PATTERN})\s+(\d{{1,2}}),?\s+((?:18|19|20)\d{{2}})\b", re.IGNORECASE)
+_FULL_CJK_DATE_RE = re.compile(rf"((?:18|19|20)\d{{2}})\s*年\s*({_CJK_MONTH_PATTERN})\s*月\s*(\d{{1,2}})\s*[日号]")
+_MY_WESTERN_RE = re.compile(rf"\b({_WESTERN_MONTH_PATTERN})\s+((?:18|19|20)\d{{2}})\b", re.IGNORECASE)
+_MY_CJK_RE = re.compile(rf"((?:18|19|20)\d{{2}})\s*年\s*({_CJK_MONTH_PATTERN})\s*月")
+_ISSUE_WESTERN_RE = re.compile(r"\bn\.\s*(\d+),\s*((?:18|19|20)\d{2})\b", re.IGNORECASE)
+_ISSUE_CJK_RE = re.compile(r"((?:18|19|20)\d{2})\s*年\s*第\s*(\d+)\s*期")
 
-    Arabic numerals carry bibliographic identity (years, editions, DOI/ISBN
-    fragments) and index navigation (page numbers and ranges).  Normalize
-    Unicode dashes and whitespace around ranges, but keep the marker order and
-    punctuation so a changed mapping is not silently accepted.
-    """
-    import unicodedata
 
-    normalized = unicodedata.normalize("NFKC", text)
-    normalized = re.sub(
-        r"(?<=\d)\s*([-‐‑‒–—])\s*(?=\d)",
-        r"\1",
-        normalized,
-    )
-    markers = [
-        (match.start(), re.sub(r"[‐‑‒–—]", "-", match.group(0)))
-        for match in _SPECIAL_ROLE_NUMERIC_MARKER_RE.finditer(normalized)
-    ]
-    # Roman numerals are semantic only in explicit volume/part contexts. Bare
-    # I/II remains ordinary prose, initials, or an identifier and is ignored.
+def _parse_month(token: str) -> int | None:
+    if token.isdigit():
+        val = int(token)
+        return val if 1 <= val <= 12 else None
+    return _MONTH_NUMBERS.get(token.casefold())
+
+
+def _canonicalize_bibliography_dates_and_issues(text: str) -> str:
+    """Canonicalize explicit dates and issue+year pairs without altering any digit."""
+    def repl_dmy(match: re.Match[str]) -> str:
+        day, month = int(match.group(1)), _parse_month(match.group(2))
+        if month is None or not 1 <= day <= 31:
+            return match.group(0)
+        return f"{match.group(3)}-{month:02d}-{day:02d}"
+
+    def repl_mdy(match: re.Match[str]) -> str:
+        month, day = _parse_month(match.group(1)), int(match.group(2))
+        if month is None or not 1 <= day <= 31:
+            return match.group(0)
+        return f"{match.group(3)}-{month:02d}-{day:02d}"
+
+    def repl_cjk_dmy(match: re.Match[str]) -> str:
+        month, day = _parse_month(match.group(2)), int(match.group(3))
+        if month is None or not 1 <= day <= 31:
+            return match.group(0)
+        return f"{match.group(1)}-{month:02d}-{day:02d}"
+
+    def repl_my(match: re.Match[str], year_first: bool) -> str:
+        month = _parse_month(match.group(2 if year_first else 1))
+        year = match.group(1 if year_first else 2)
+        return f"{year}-{month:02d}" if month is not None else match.group(0)
+
+    updated = _FULL_DMY_RE.sub(repl_dmy, text)
+    updated = _FULL_MDY_RE.sub(repl_mdy, updated)
+    updated = _FULL_CJK_DATE_RE.sub(repl_cjk_dmy, updated)
+    updated = _MY_WESTERN_RE.sub(lambda m: repl_my(m, False), updated)
+    updated = _MY_CJK_RE.sub(lambda m: repl_my(m, True), updated)
+    updated = _ISSUE_WESTERN_RE.sub(lambda m: f"{m.group(2)}/{m.group(1)}", updated)
+    updated = _ISSUE_CJK_RE.sub(lambda m: f"{m.group(1)}/{m.group(2)}", updated)
+    return updated
+
+
+def _special_role_numeric_markers_with_lines(text: str) -> list[tuple[int, str]]:
+    """Extract stable numeric markers along with their 1-based line numbers."""
     roman_context = re.compile(
         r"(?:\b(?:vol(?:ume)?|part)\s*\.?\s*"
         r"(?P<english_roman>M{0,3}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3}))\b"
@@ -46,19 +102,47 @@ def special_role_numeric_markers(text: str) -> list[str]:
             previous = max(previous, number)
         return total
 
-    roman_scan_text = re.sub(
-        r"https?://\S+|\b\d{1,4}\.\d{3,9}/\S+|doi(?:\.org)?/\S+|`[^`]*`",
-        lambda match: " " * len(match.group(0)),
-        normalized,
-        flags=re.IGNORECASE,
-    )
-    for match in roman_context.finditer(roman_scan_text):
-        roman = match.group("english_roman") or match.group("chinese_roman")
-        if roman:
-            value = roman_value(roman)
-            if value > 0 and _int_to_roman(value) == roman.upper():
-                markers.append((match.start(), str(value)))
-    return [value for _, value in sorted(markers)]
+    all_markers: list[tuple[int, str]] = []
+    for line_no, raw_line in enumerate(str(text or "").splitlines(), 1):
+        normalized = unicodedata.normalize("NFKC", raw_line)
+        normalized = _PROSE_WESTERN_RANGE_RE.sub(r"\1-\2", normalized)
+        normalized = _PROSE_CJK_RANGE_RE.sub(r"\1-\2", normalized)
+        normalized = re.sub(
+            r"(?<=\d)\s*([-‐‑‒–—])\s*(?=\d)",
+            r"\1",
+            normalized,
+        )
+        line_markers = [
+            (match.start(), re.sub(r"[‐‑‒–—]", "-", match.group(0)))
+            for match in _SPECIAL_ROLE_NUMERIC_MARKER_RE.finditer(normalized)
+        ]
+        roman_scan_text = re.sub(
+            r"https?://\S+|\b\d{1,4}\.\d{3,9}/\S+|doi(?:\.org)?/\S+|`[^`]*`",
+            lambda match: " " * len(match.group(0)),
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        for match in roman_context.finditer(roman_scan_text):
+            roman = match.group("english_roman") or match.group("chinese_roman")
+            if roman:
+                value = roman_value(roman)
+                if value > 0 and _int_to_roman(value) == roman.upper():
+                    line_markers.append((match.start(), str(value)))
+        for _, value in sorted(line_markers):
+            all_markers.append((line_no, value))
+    return all_markers
+
+
+def special_role_numeric_markers(text: str) -> list[str]:
+    """Extract stable numeric markers from bibliography/index content.
+
+    Arabic numerals carry bibliographic identity (years, editions, DOI/ISBN
+    fragments) and index navigation (page numbers and ranges).  Normalize
+    Unicode dashes, whitespace around dashes, and explicit prose ranges, while
+    keeping marker order and boundaries strict so a changed mapping is never
+    silently accepted.
+    """
+    return [value for _, value in _special_role_numeric_markers_with_lines(text)]
 
 
 def _int_to_roman(value: int) -> str:
@@ -72,6 +156,36 @@ def _int_to_roman(value: int) -> str:
         count, value = divmod(value, number)
         parts.append(numeral * count)
     return "".join(parts)
+
+
+def _markers_match_with_optional_furniture(
+    source_text: str,
+    source_markers: list[str],
+    target_markers: list[str],
+    *,
+    allow_page_furniture_deletion: bool,
+) -> bool:
+    if source_markers == target_markers:
+        return True
+    if not allow_page_furniture_deletion:
+        return False
+    furniture_numbers = []
+    for line in source_text.splitlines():
+        if candidate_for_line(line):
+            furniture_numbers.extend(special_role_numeric_markers(line))
+    matcher = difflib.SequenceMatcher(
+        None, source_markers, target_markers, autojunk=False
+    )
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        if tag == "delete":
+            for num in source_markers[i1:i2]:
+                if num not in furniture_numbers:
+                    return False
+        else:
+            return False
+    return True
 
 
 def validate_special_role_markers(
@@ -89,8 +203,10 @@ def validate_special_role_markers(
     translated naturally.  Sequence comparison catches both dropped markers
     and accidental reordering of page mappings.
     """
-    source_markers = special_role_numeric_markers(source_text)
-    target_markers = special_role_numeric_markers(target_text)
+    source_pairs = _special_role_numeric_markers_with_lines(source_text)
+    target_pairs = _special_role_numeric_markers_with_lines(target_text)
+    source_markers = [value for _, value in source_pairs]
+    target_markers = [value for _, value in target_pairs]
 
     if role == "index":
         source_entries = _index_entry_groups(
@@ -141,36 +257,43 @@ def validate_special_role_markers(
                 )
         if errors:
             return errors
-    if source_markers == target_markers:
+
+    if _markers_match_with_optional_furniture(
+        source_text,
+        source_markers,
+        target_markers,
+        allow_page_furniture_deletion=allow_page_furniture_deletion,
+    ):
         return []
 
-    if allow_page_furniture_deletion:
-        import difflib
-
-        furniture_numbers = []
-        for line in source_text.splitlines():
-            if candidate_for_line(line):
-                furniture_numbers.extend(special_role_numeric_markers(line))
-        matcher = difflib.SequenceMatcher(
-            None, source_markers, target_markers, autojunk=False
-        )
-        mismatch = False
-        for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-            if tag == "equal":
-                continue
-            if tag == "delete":
-                deleted = source_markers[i1:i2]
-                for num in deleted:
-                    if num not in furniture_numbers:
-                        mismatch = True
-                        break
-                if mismatch:
-                    break
-            else:
-                mismatch = True
-                break
-        if not mismatch:
+    if role == "bibliography":
+        canon_source = _canonicalize_bibliography_dates_and_issues(source_text)
+        canon_target = _canonicalize_bibliography_dates_and_issues(target_text)
+        canon_source_markers = special_role_numeric_markers(canon_source)
+        canon_target_markers = special_role_numeric_markers(canon_target)
+        if _markers_match_with_optional_furniture(
+            canon_source,
+            canon_source_markers,
+            canon_target_markers,
+            allow_page_furniture_deletion=allow_page_furniture_deletion,
+        ):
             return []
+
+    first_diff = ""
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(
+        None, source_markers, target_markers, autojunk=False
+    ).get_opcodes():
+        if tag != "equal":
+            s_line = source_pairs[min(i1, len(source_pairs) - 1)][0] if source_pairs else 0
+            t_line = target_pairs[min(j1, len(target_pairs) - 1)][0] if target_pairs else 0
+            s_ctx = source_markers[max(0, i1 - 2) : min(len(source_markers), i2 + 3)]
+            t_ctx = target_markers[max(0, j1 - 2) : min(len(target_markers), j2 + 3)]
+            first_diff = (
+                f" (first diff {tag} at source line {s_line} [{i1}:{i2}]={source_markers[i1:i2]!r} "
+                f"vs target line {t_line} [{j1}:{j2}]={target_markers[j1:j2]!r}; "
+                f"context source={s_ctx!r}, target={t_ctx!r})"
+            )
+            break
 
     limit = 12
     source_preview = source_markers[:limit]
@@ -178,7 +301,7 @@ def validate_special_role_markers(
     suffix = " ..." if len(source_markers) > limit or len(target_markers) > limit else ""
     return [
         f"{role} numeric marker mismatch: "
-        f"source={source_preview!r}, target={target_preview!r}{suffix}"
+        f"source={source_preview!r}, target={target_preview!r}{suffix}{first_diff}"
     ]
 
 
