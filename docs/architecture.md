@@ -61,7 +61,8 @@ Subagent 合同层
 ├── markdown_validation_persistence.py validated staging、报告/checkpoint 和隔离写入
 ├── markdown_validation_checkpoint.py 临时输出清理和无效目标隔离
 ├── markdown_validation.py           结构、脚注、双语和特殊标记规则
-├── special_role_audit.py             书目/索引标记审计
+├── endnote_patterns.py              共享尾注正则与围栏掩码（无内部依赖）
+├── special_role_audit.py            书目/索引标记审计（含显式范围、书目日期/期号与行号诊断）
 ├── document_roles.py                特殊单元角色和参考文献识别
 ├── entity_context.py               书内实体术语交接和新鲜度合同
 ├── page_furniture_rules.py          页眉、页脚、页码候选的纯规则
@@ -272,8 +273,11 @@ TOC 中标记为
   `endnote_definition_decisions.json` 中为每条歧义给出的 `definition`/`continuation`
   决定。`N text` 日期续行、Markdown/HTML 定义和 scope 识别不进入该队列；缺失、重复、
   多余或 `review_required` 决定都视为未解决并阻断。
-- `refine/endnote_normalization.py`：只处理 `type: notes` 单元中的集中尾注定义及普通单元
-  上标引用的确定性归一化，并提供构建前的残留检查；不参与页面脚注候选识别。存在重复
+- `refine/endnote_normalization.py`：处理 `type: notes` 单元中的集中尾注定义及普通单元
+  上标引用的确定性归一化，并支持非 `notes` 章节单元内嵌 `## Notes`/`## Note` 区块的混合注释
+  归一化（当编号跨章重复或与既有 `[^k]:` 页底脚注冲突时自动改写为 `fnc-ch<idx>-<key>`，
+  并在 `endnotes` 报告中记录 `embedded_note_files`；两类来源均无定义时返回 `not_applicable`），
+  同时提供构建前的残留检查；不参与页面脚注候选识别。存在重复
   打印编号时，它消费 `endnote_scopes.py` 的目录，只把需要去重的 key 改写为
   `fnc-<scope>-<number>`（第 N 个定义再加 `-oN`），并支持“外层页计数器 + 内层真实
   注释号”的双层编号判定。后代 scope 的引用在本 scope 无定义时向最近祖先 scope 查找同一
@@ -306,7 +310,7 @@ TOC 中标记为
   也不执行脚注物化。
 - `refine/footnote_status.py`：集中计算脚注归一化 checkpoint 的哈希和 freshness 状态；不依赖
   apply/prepare 编排，供命令层和 readiness 诊断复用。
-- `refine/footnote_result_audit.py`：纯函数生成归一化结果审计与待复核证据，不读取工作区文件、不验证审核提交。`audit_footnote_result()` 只做编排；源稿侧的截断定义、跨页注释边界和编号序列分别由 `_audit_truncated_definitions()`、`_audit_cross_page_note_boundaries()`、`_audit_note_numbering()` 负责，归一化稿侧由 `_audit_normalized_targets()` 配合 `_TargetAuditContext` 负责。拆分不改变 finding 身份、task_id 或 evidence 哈希。
+- `refine/footnote_result_audit.py`：纯函数生成归一化结果审计与待复核证据，不读取工作区文件、不验证审核提交。`audit_footnote_result()` 只做编排；源稿侧的截断定义、跨页注释边界和编号序列分别由 `_audit_truncated_definitions()`、`_audit_cross_page_note_boundaries()`、`_audit_note_numbering()` 负责，归一化稿侧由 `_audit_normalized_targets()` 配合 `_TargetAuditContext` 负责。目标侧尾注豁免按 `chapter_id` 限定作用域，仅收集已确认 `Notes` 区块/单元内的定义并显式排除 `expected_by_target_key` 中被移动的页底脚注；注释边界污染检查按 `(target_file, output_key)`（基于 `expected_by_target_key`，或仅传 `resolved_blocks` 时回退其 `file`）隔离并保持既有 finding 身份、task_id 与 evidence 哈希稳定。
 - `refine/footnote_result_review.py`：读取当前源/归一化稿、sidecar、页图和图像 manifest，验证 scoped result review 的地址、决定及 evidence freshness。
 
 按章尾注 scope 是归一化用的派生数据，没有独立 scope 文件；其事实嵌入

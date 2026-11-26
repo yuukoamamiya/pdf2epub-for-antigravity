@@ -90,7 +90,7 @@ PDF `translate`/`polish` 的全量报告和逐文件 ledger 会保存 validation
 正式 Markdown 校验不会在开始时清空 `validated/`。每个通过核心校验的文件先写入临时候选副本，再核对候选 SHA-256 与审计目标，并复查源、目标、语义侧车和 prepared context 快照；只有这些检查通过才原子替换接受副本。替换前的最后成功字节按内容哈希保存到 `scratch/<task>/previous_validated/`，以便中断或后续替换失败时恢复。全量失败仍保存逐文件结果，当前有效的兄弟文件可由 `--resume` 复用；但旧副本本身不能让过期全量 receipt 通过 readiness/build。全量成功时，源清单之外的接受副本移至 `scratch/<task>/retired_validated/`，避免阻塞新的完整 inventory。translate `--file` 的局部 TOC 标题检查在候选提升前对原始目标运行；失败时只更新文件 checkpoint，不删除旧接受副本。translate 的局部成功不会把之前失败的全量 receipt 升级为通过，需再次运行全量校验。多个文件的候选提升中断时，已替换的旧内容仍在 `previous_validated/`，混合目录哈希也会使旧 receipt 失效。
 
 脚注 handoff 的 unit context 使用独立的 `projection_version`：当单元在 `tree_progress.json` 中提供显式、合法的 `part_page_ranges` 时按该分片页范围投影以缩小失效半径；缺少精确 part→page 映射时继续使用章节级证据与失效范围，不推断分片级页范围。加载时以候选报告和 review packet 的页来源重新核对侧车路径，context 自身的页/fact/hash 不能作为来源证明。旧 context 缺少当前 projection version 时，重新运行 `footnote-prepare` 与 `footnote-validate`，原有 decision 文件保留，只有当前证据身份仍一致且校验通过时才可复用。此刷新不会调用 OCR，也不会放宽语义决定门禁。
-成功 apply receipt 还会记录已应用决定的拥有文件和 OCR block 内容哈希。恢复时仅在该文件所属单元内查找唯一内容匹配；若清理改变了 block 序号，可据此恢复地址，内容变化、无匹配或多重匹配会保留旧决定并创建局部视觉复核。上一页最后物理脚注以断词连字符、开放括号等形式结束时，下一页页首候选可作为 review-only top recall 进入现有审阅流程；它不会自动分类或移动正文。重复准备/校验同一当前决定保持幂等，不增加 retry 计数；这次证据字段变化没有提升全局 schema。
+成功 apply receipt 还会记录已应用决定的拥有文件和 OCR block 内容哈希。恢复时仅在该文件所属单元内查找唯一内容匹配；若清理改变了 block 序号，可据此恢复地址，内容变化、无匹配或多重匹配会保留旧决定并创建局部视觉复核。上一页最后物理脚注以断词连字符、开放括号等形式结束时，下一页页首（含跨 `part` 边界及块 0）或既有底部候选紧邻上方的合格文本块可作为带 `result_audit_admitted: true` 的 review-only recall 进入现有审阅流程；它会自动保持 `review_pages` 有序并补齐新增页面的视觉图，不会自动分类或移动正文。重复准备/校验同一当前决定保持幂等，不增加 retry 计数；这次证据字段变化没有提升全局 schema。
 
 PDF/EPUB 的 `translate` manifest 会在 `worker_handoffs/` 按 TOC 顺序为相邻短章节装箱，生成隔离的最小 manifest 和提示词；拆分单元的后续 part 会收到只读的 `preceding_context`（前一分片的源文尾部，已剔除脚注定义），仅用于承接代词和论证语气，不计入输出、不得翻译或复制；父级 manifest 保留完整审计索引，worker 只接收自己的文件、批次、上下文哈希和必要的章节元数据，不重复携带全书文件统计、章节映射或审计快照路径；
 `polish` 使用独立的 `polish_worker_handoffs/`，避免不同阶段的任务被误认。每个 Subagent
@@ -100,7 +100,7 @@ PDF/EPUB 的 `translate` manifest 会在 `worker_handoffs/` 按 TOC 顺序为相
 `bibliography`、`notes`、`author_notes`、`toc`、`catalog`、`ad`、`copyright`、
 `frontmatter`、`metadata` 和 `cover` 会标记为 isolated batch，并各自占用独立 worker，
 不与普通章节或其他特殊角色混排。隔离 worker 的 prompt 只针对其 assigned files 高亮
-index 条目 1:1、书目逐条、notes 标记和 CIP/版权页短行标识符规则。普通单章节 worker 的
+index 条目 1:1、书目逐条、notes 标记和 CIP/版权页短行标识符规则。其中 `special_role_audit.py` 支持显式文本范围（如 `dal A al B`、`A至B` ↔ `A-B`）与书目自然中文日期/期号（如 `25 giugno 1945` ↔ `1945年6月25日`、`n. 5, 1952` ↔ `1952年第5期`），但仍严格拒绝数字篡改或范围边界重组，并在不匹配时输出精确的 `source line` / `target line` 与局部上下文；校验失败的无效目标会保留并移动到 `scratch/<task>/invalid_outputs/`，CLI 同时打印隔离路径供定位修改。普通单章节 worker 的
 术语上下文只注入一次；相邻章节合并 worker 使用按
 文件分区的直接上下文；大章节拆分时使用 `shared_entries` 和当前分片的 `local_entries`。
 
@@ -957,7 +957,9 @@ scope 没有对应定义；有多个定义时引用数超过定义数。定义�
 Notes，并作为 `orphan_scoped_definitions` 报告。scope 目录没有独立文件；相关事实写入
 `output/<title>/footnote_normalization.json` 的 `endnotes` 报告字段（`scope_mode`、`scopes`、
 `scoped_keys`、`double_numbered_definition_count`、`duplicate_definition_occurrences`、
-`orphan_scoped_definitions`）。
+`orphan_scoped_definitions`、`embedded_note_files`）。
+
+对于同时存在页底脚注（已由 `footnote-apply` 转为 `[^fnm-...]:`）与章节内嵌 `## Notes`/`## Note` 区块的混合注释书稿，`normalize_endnotes()` 会一并归一化非 `notes` 章节内嵌 `Notes` 标题下的原始数字/`<sup>` 尾注及对应章节正文（跳过代码围栏与既有 `[^...]:` 定义）；当编号跨章重复或与既有页底脚注定义冲突时自动生成无冲突的 `fnc-ch<idx>-<key>` 并记录 `embedded_note_files`；全书既无 `notes` 单元也无章节内嵌 `Notes` 区块时保持 `not_applicable`。
 
 OCR 把 Notes 定义识别成无序列表时，行首可选的 `-`/`*`/`+` 标记与 `N.`/`N)`/`N：`
 等价；`footnote-apply` 的本地 normalization 会把 `- N. text`、`* N. text`、

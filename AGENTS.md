@@ -307,8 +307,8 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
   章节术语上下文只记录 `chapter_file_count` 或 `chapter_file_counts`，不得重复写入完整
   `chapter_files` 列表。
 - 翻译 worker 必须按 manifest 的 `atomic_output_contract` 先写入临时同级文件，再原子替换
-  正式目标；校验器会清理遗留临时文件，并把无效/半截目标移到 `scratch/<task>/invalid_outputs/`
-  供恢复诊断。`--resume` 重建 handoff 时，所有 assigned 文件均已有当前校验 checkpoint 的旧
+  正式目标；校验器会清理遗留临时文件，把无效/半截目标移到 `scratch/<task>/invalid_outputs/`
+  供恢复诊断，并在 CLI 输出隔离保存路径（不会无提示丢失已写稿件）。`--resume` 重建 handoff 时，所有 assigned 文件均已有当前校验 checkpoint 的旧
   handoff 标记为 `completed`，源哈希已变化的旧 handoff 标记为 `superseded`，不得再次派发。
 - 父级 manifest 可提供 `dispatch_plan`，按波次给出 `worker_ids`、`max_concurrency` 和
   `reason`（`ordinary`、`large_units` 或 `extreme_unit`）；handoff 的 `dispatch_wave`、
@@ -334,7 +334,10 @@ Subagent 必须读取本地命令生成的 `*_subagent_prompt.md` 和 manifest�
   替换前将旧成功字节按内容哈希留存在 `scratch/<task>/previous_validated/`，失败或中断时可恢复。当前全量 receipt 失效时保留副本不能通过 readiness 或 build；全量成功后才把清单之外的旧 Markdown 副本移入 `scratch/<task>/retired_validated/`。translate 单文件校验先对原始目标运行局部 TOC 标题门禁，再决定是否提升副本；check-only 不改副本。translate 的单文件结果不会把失败的全量报告重新认证为通过，必须再次运行全量校验。
 - 中文目标语言的普通正文翻译必须通过目标语言内容审计：高置信度的原文长段落未变化、
   中文密度明显不足或模型敷衍套话都会进入失败报告。`bibliography` 和 `index` 文件
-  不使用中文密度门禁，但仍保留数字标记与拒答检测。密度审计会先剥离
+  不使用中文密度门禁，但仍保留数字标记与拒答检测（`bibliography` 接受显式范围如
+  `dal A al B`/`A至B` ↔ `A-B` 与自然中文日期/期号如 `25 giugno 1945` ↔ `1945年6月25日`、
+  `n. 5, 1952` ↔ `1952年第5期`，严格校验数字和范围边界不被篡改，并在失败时报告
+  `source line` / `target line`）。密度审计会先剥离
   `[^n]: ...` 脚注定义及其续行，再统计正文；不要因为某个 part 尾注较多就把它自动
   标成 `notes`/`reference` 角色，角色必须由 TOC/结构证据决定。
 - 本地校验报告中的 `safety_blocked`、拒答或免责声明不得进入 `validated`，也不得通过打包。
@@ -574,7 +577,8 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
   收到独立的 scoped context：子标题只下发到其源标题首次出现的 part，父标题只在可见的 part
   标记 `visible`；所有 part 都找不到源标题的子标题只挂到第一个 part 并标记 `container_only`。
   `container_only` 节点不伪造 Markdown 标题锚点；TOC 层级保留，并导航到所属文件或首个有内容的
-  后代。显式 `container_only` 节点在分配可见标题候选前跳过匹配，不消耗同名候选；后续可见节点仍须
+  后代。显式 `container_only` 节点在分配可见标题候选前跳过匹配，不消耗同名候选；`build-epub`
+  在注入子章节锚点时也会直接跳过 `container_only` 节点而不输出无效的源标题绑定警告；后续可见节点仍须
   在其实际所属 part 中通过 occurrence/count 与导航锚点校验。`visible` 锚点必须出现在其投影指定的
   part 中并落在对应标题上，缺失时构建阻断。
   阅读目录是完整书稿结构树的展示投影。`navigation_visibility` 可设 `auto`、`include` 或 `exclude`；
@@ -748,7 +752,8 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    不作猜测。尾注段落和列表、引文、表格等 Markdown 块应保留边界。
    `endnotes` 报告记录
    `scope_mode`、`scopes`、`scoped_keys`、`double_numbered_definition_count`、
-   `duplicate_definition_occurrences` 和 `orphan_scoped_definitions`。EPUB 中的引用和定义
+   `duplicate_definition_occurrences`、`orphan_scoped_definitions` 与 `embedded_note_files`（混合注释
+   书稿中，页底脚注与章节末尾显式 `## Notes`/`## Note` 区块的尾注会一并归一化并避免键冲突）。EPUB 中的引用和定义
    显示由内部 key 解码；集中尾注中的数字/圈号别名可规范化为数字，去重后缀不会显示，内部 key 用于链接和锚点。
 
    Notes 定义还支持 OCR 产生的可选无序列表标记 `- N.`、`* N.`、`+ N.`；它们与

@@ -99,14 +99,14 @@ PDF 结构复核还要求逐项处置独立数字，明确绑定标题的源行�
 不要求重新 OCR 或重译全书。书目、索引、注释和作者注释可从明确标注的 TOC 节点沿普通章节结构继承；
 角色或来源变化只会使对应文件的翻译校验失效，需重新校验后再恢复复用。
 正式 Markdown 校验会保留最后成功的 `validated/` 文件副本。校验失败时，当前失败文件不能作为有效证明，
-但已通过当前校验的其他文件会继续供 `--resume` 复用；读取失败或校验中发生变化的输入会重试，不当作损坏内容隔离。
+但已通过当前校验的其他文件会继续供 `--resume` 复用；读取失败或校验中发生变化的输入会重试，不当作损坏内容隔离；校验失败的无效目标会保留在 `scratch/<task>/invalid_outputs/` 并由 CLI 输出具体路径。
 新副本先暂存并核对文件哈希及源、目标、上下文快照，再原子替换旧副本。旧副本不会让过期全量报告通过 readiness 或打包；
 替换前旧成功字节会按哈希保存到 `scratch/<task>/previous_validated/`。只有全量校验成功后，源清单之外的旧副本才会移入
 `scratch/<task>/retired_validated/` 保存。translate `--file` 会在提升副本前先检查该文件的 TOC 标题；失败时保留最后成功副本，check-only 不写文件。
 
 PDF 的页脚注抽取会复核疑似跨页断词缺口；需要时会把相邻两页图像交给工作区 Subagent，
 由图像证据确认原文截断或恢复缺失续文。`footnotes.mode: disabled` 会关闭页脚注自动提取和链接创建；
-若与 TOC 的脚注判断冲突，准备、校验和应用阶段都会显示警告。集中尾注的 Markdown 链接仍可能生成。
+若与 TOC 的脚注判断冲突，准备、校验和应用阶段都会显示警告。集中尾注与章节内嵌 `Notes` 区块（可与页底脚注在混合注释书稿中共存）的 Markdown 链接仍可安全生成。
 双 OCR 的人工页面复核可多次使用 `ocr-correct --file PAGE.md` 累积页面。`ocr-correct --resume` 恢复既有选择。
 单页 `ocr-correct-validate --file PAGE.md` 只记录该页，完成整书复核后仍须运行无 `--file` 的全量 validate，
 才会生成可供后续结构整理使用的 validated OCR。请求绑定源 PDF、数字排序的完整 OCR 页清单及逐页 Markdown/sidecar 哈希。
