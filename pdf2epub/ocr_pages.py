@@ -419,6 +419,7 @@ class _SecondaryConsensusState:
     secondary_workers: int
     secondary_max_retries: int
     secondary_initial_backoff: float
+    resume: bool = False
 
 
 def _load_secondary_consensus_state(
@@ -495,7 +496,51 @@ def _load_secondary_consensus_state(
         secondary_workers=secondary_workers,
         secondary_max_retries=secondary_max_retries,
         secondary_initial_backoff=secondary_initial_backoff,
+        resume=resume,
     )
+
+
+def _reusable_secondary_page(
+    page_number: int,
+    *,
+    state: _SecondaryConsensusState,
+) -> Optional[tuple[str, Dict[str, Any]]]:
+    """Return existing secondary page text and sidecar during resume when valid."""
+    if not state.resume:
+        return None
+    name = f"page_{page_number:03d}.md"
+    secondary_md = state.secondary_dir / name
+    secondary_sidecar = state.secondary_dir / f"page_{page_number:03d}.ocr.json"
+    if not secondary_md.is_file() or not secondary_sidecar.is_file():
+        return None
+    secondary_layout = _load_page_sidecar(secondary_sidecar)
+    if not isinstance(secondary_layout, dict):
+        return None
+    if str(secondary_layout.get("backend") or "").strip().lower() != state.secondary_backend:
+        return None
+    if not isinstance(secondary_layout.get("blocks"), list):
+        return None
+    try:
+        secondary_text = secondary_md.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return None
+    if secondary_text.strip():
+        return secondary_text, secondary_layout
+    record_path = state.record_dir / f"{Path(name).stem}.json"
+    if not record_path.is_file():
+        return None
+    try:
+        existing_record = json.loads(record_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(existing_record, dict):
+        return None
+    if (
+        existing_record.get("secondary_sha256") == sha256_file(secondary_md)
+        and existing_record.get("secondary_layout_sha256") == sha256_file(secondary_sidecar)
+    ):
+        return secondary_text, secondary_layout
+    return None
 
 
 def _process_secondary_page(
@@ -512,34 +557,40 @@ def _process_secondary_page(
     primary_path = output_dir / "pages" / name
     try:
         primary_text = primary_path.read_text(encoding="utf-8")
-        pdf_bytes = extract_pdf_pages(ocr_pdf, page_number, page_number)
-        secondary_result = ocr_pdf_page(
-            pdf_bytes,
-            chunk_info=f"Secondary OCR page {page_number}",
-            page_number=page_number,
-            backend=state.secondary_backend,
-            max_retries=state.secondary_max_retries,
-            initial_backoff=state.secondary_initial_backoff,
-            config=config,
-        )
-        # Keep a Chandra-shaped secondary sidecar.  The consensus record
-        # still compares Markdown, but footnote review can now compare
-        # page zones, labels, and numeric note keys as well.
-        save_page_artifacts(secondary_result, state.secondary_dir, page_number)
+        reused = _reusable_secondary_page(page_number, state=state)
+        if reused is not None:
+            secondary_text, secondary_layout = reused
+        else:
+            pdf_bytes = extract_pdf_pages(ocr_pdf, page_number, page_number)
+            secondary_result = ocr_pdf_page(
+                pdf_bytes,
+                chunk_info=f"Secondary OCR page {page_number}",
+                page_number=page_number,
+                backend=state.secondary_backend,
+                max_retries=state.secondary_max_retries,
+                initial_backoff=state.secondary_initial_backoff,
+                config=config,
+            )
+            # Keep a Chandra-shaped secondary sidecar.  The consensus record
+            # still compares Markdown, but footnote review can now compare
+            # page zones, labels, and numeric note keys as well.
+            save_page_artifacts(secondary_result, state.secondary_dir, page_number)
+            secondary_text = secondary_result.markdown
+            secondary_layout = _load_page_sidecar(
+                state.secondary_dir / f"page_{page_number:03d}.ocr.json"
+            )
         record = write_page_consensus(
             output_dir,
             source_name=name,
             primary_text=primary_text,
-            secondary_text=secondary_result.markdown,
+            secondary_text=secondary_text,
             primary_backend=primary_backend,
             secondary_backend=state.secondary_backend,
             config=config,
             primary_layout=_load_page_sidecar(
                 output_dir / "pages" / f"page_{page_number:03d}.ocr.json"
             ),
-            secondary_layout=_load_page_sidecar(
-                state.secondary_dir / f"page_{page_number:03d}.ocr.json"
-            ),
+            secondary_layout=secondary_layout,
         )
         record["primary_source_sha256"] = sha256_file(primary_path)
         primary_sidecar = output_dir / "pages" / f"page_{page_number:03d}.ocr.json"

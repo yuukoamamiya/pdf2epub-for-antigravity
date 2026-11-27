@@ -1,6 +1,7 @@
 """Filesystem checkpoint operations for Markdown validation retries."""
 from __future__ import annotations
 import hashlib
+import os
 from pdf2epub.workflow_contracts import sha256_file
 import shutil
 from pathlib import Path
@@ -56,8 +57,12 @@ def quarantine_invalid_targets(
             digest = sha256_file(target)[:12]
             destination = quarantine_dir / f"{Path(raw_name).stem}.{digest}.md"
         try:
-            shutil.move(str(target), str(destination))
+            os.replace(target, destination)
         except OSError:
-            continue
+            try:
+                destination.unlink(missing_ok=True)
+                shutil.move(str(target), str(destination))
+            except OSError:
+                continue
         moved[raw_name] = destination.relative_to(output_dir).as_posix()
     return moved

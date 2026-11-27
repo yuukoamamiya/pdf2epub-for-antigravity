@@ -658,3 +658,64 @@ def test_status_reports_refine_prepare_passed_and_zero_illustration_not_applicab
     stale_report = build_status(config_path)
     stale_stages = {item["name"]: item for item in stale_report["stages"]}
     assert stale_stages["illustration"]["status"] == "pending"
+
+
+def test_build_receipt_tracks_translated_toc_external_output_and_blocks_escape(tmp_path: Path):
+    from pdf2epub.build_receipt import PDF_TRANSLATED, receipt_status, write_build_receipt
+
+    out = tmp_path / "book"
+    out.mkdir()
+    for name in ("translate_validation.json", "polish_validation.json", "toc_tree.json", "toc_tree_translated.json"):
+        (out / name).write_text("{}", encoding="utf-8")
+    external_epub = tmp_path / "release" / "final.epub"
+    external_epub.parent.mkdir()
+    external_epub.write_bytes(b"epub-bytes")
+
+    receipt = write_build_receipt(out, external_epub, kind=PDF_TRANSLATED)
+    assert receipt["builds"][PDF_TRANSLATED]["external_epub_path"] == str(external_epub.resolve())
+    assert receipt_status(out, PDF_TRANSLATED)[0] == "current"
+
+    (out / "toc_tree_translated.json").write_text('{"changed":true}', encoding="utf-8")
+    assert receipt_status(out, PDF_TRANSLATED)[0] == "stale"
+
+    escape = tmp_path / "escape.epub"
+    escape.write_bytes(b"evil")
+    (out / "epub_build_receipt.json").write_text(
+        json.dumps({"schema_version": 1, "builds": {PDF_TRANSLATED: {"epub": "../escape.epub", "sha256": "x", "inputs": {}}}}),
+        encoding="utf-8",
+    )
+    state, detail = receipt_status(out, PDF_TRANSLATED)
+    assert state == "stale"
+    assert "escapes" in detail
+
+
+def test_build_html_epub_command_forwards_resolved_config_path(tmp_path: Path, monkeypatch):
+    from pdf2epub.commands.html import build_html_epub_command
+
+    cfg = tmp_path / "book.yaml"
+    cfg.write_text("title: HtmlCfg\npipeline: html\n", encoding="utf-8")
+    epub = tmp_path / "input.epub"
+    epub.write_bytes(b"epub")
+    out = tmp_path / "out"
+    out.mkdir()
+    captured = {}
+
+    class FakePipeline:
+        def __init__(self, *, epub_path, output_dir, config, config_path=None):
+            captured["config_path"] = config_path
+
+        def validate_translated_units(self):
+            return {"all_passed": True}
+
+        def postprocess_and_build(self, *_a, **_k):
+            return out / "out.epub"
+
+    monkeypatch.setattr("pdf2epub.commands.html._load_html_book_context", lambda *_a: ({}, "HtmlCfg", out, epub))
+    monkeypatch.setattr("pdf2epub.utils.ebook_converter.needs_conversion", lambda _p: False)
+    monkeypatch.setattr("pdf2epub.html_translation.HTMLEpubPipeline", FakePipeline)
+
+    args = __import__("argparse").Namespace(
+        config=str(cfg), output=None, allow_partial=False, allow_navigation_warnings=False
+    )
+    assert build_html_epub_command(args) == 0
+    assert captured["config_path"] == cfg.resolve()

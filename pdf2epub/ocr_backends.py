@@ -65,7 +65,7 @@ def ocr_pdf_chunk_vllm(
                 logger.error(
                     f"OCR failed for page {page_idx + 1} after {max_retries} retries: {exc}"
                 )
-                markdown_parts.append(f"\n\n[OCR Error on page {page_idx + 1}]\n\n")
+                raise
     finally:
         doc.close()
 

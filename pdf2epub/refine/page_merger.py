@@ -569,6 +569,7 @@ class PageMerger:
         pages_dir: Path,
         next_node: TOCNode = None,
         illustration_pages: Optional[Set[int]] = None,
+        page_spans_out: Optional[List[Tuple[int, int, int, int]]] = None,
     ) -> str:
         """
         Merge page content for a node.
@@ -695,11 +696,14 @@ class PageMerger:
             if page_content.strip():
                 content_parts.append((page_num, page_content))
 
-        return _merge_full_page_insertions(
+        merged_text, spans = _merge_full_page_insertions_with_spans(
             content_parts,
             illustration_pages,
             join_soft_page_breaks=True,
         )
+        if page_spans_out is not None:
+            page_spans_out.extend(spans)
+        return merged_text
 
     def merge_nodes_content(
         self,
@@ -707,6 +711,7 @@ class PageMerger:
         pages_dir: Path,
         next_node: TOCNode = None,
         illustration_pages: Optional[Set[int]] = None,
+        page_spans_out: Optional[List[Tuple[int, int, int, int]]] = None,
     ) -> str:
         """
         Merge content for multiple consecutive nodes.
@@ -728,6 +733,8 @@ class PageMerger:
         start_page = min(n.start_page for n in nodes)
         end_page = max(n.end_page for n in nodes)
         first_boundary = nodes[0].boundary_info or {}
+        end_nodes = [n for n in nodes if n.end_page == end_page]
+        last_boundary = (end_nodes[-1].boundary_info if end_nodes else None) or {}
         previous_header = None
 
         content_parts: list[tuple[int, str]] = []
@@ -749,11 +756,11 @@ class PageMerger:
                 if isinstance(start_line, int) and start_line > 1:
                     start_index = start_line - 1
 
-            # Handle last page - apply the node boundary and then the next
+            # Handle last page - apply the ending node boundary and then the next
             # unit boundary, both measured against the original page.
             explicit_end_boundary = False
             if page_num == end_page:
-                end_line = first_boundary.get('end_line')
+                end_line = last_boundary.get('end_line')
                 if isinstance(end_line, int):
                     end_index = min(end_index, end_line - 1)
                     explicit_end_boundary = True
@@ -825,11 +832,14 @@ class PageMerger:
             if page_content.strip():
                 content_parts.append((page_num, page_content))
 
-        return _merge_full_page_insertions(
+        merged_text, spans = _merge_full_page_insertions_with_spans(
             content_parts,
             illustration_pages,
             join_soft_page_breaks=True,
         )
+        if page_spans_out is not None:
+            page_spans_out.extend(spans)
+        return merged_text
 
 
 _SENTENCE_END = frozenset("。！？!?；;：:….!?")
@@ -892,6 +902,63 @@ def _join_page_fragments(previous: str, following: str) -> str:
     return previous + separator + following
 
 
+def _merge_full_page_insertions_with_spans(
+    entries: Iterable[Tuple[int, str]],
+    illustration_pages: Set[int],
+    *,
+    join_soft_page_breaks: bool = False,
+) -> tuple[str, list[tuple[int, int, int, int]]]:
+    """Merge page blocks and record ``(char_start, char_end, min_page, max_page)`` spans."""
+    ordered = [(int(page), str(content)) for page, content in entries]
+    merged: list[tuple[str, int, int]] = []
+    index = 0
+    while index < len(ordered):
+        page, content = ordered[index]
+        is_full_page = page in illustration_pages
+        if (
+            is_full_page
+            and index > 0
+            and index + 1 < len(ordered)
+            and ordered[index - 1][0] not in illustration_pages
+            and ordered[index + 1][0] not in illustration_pages
+            and _can_join_across_page(merged[-1][0] if merged else "", ordered[index + 1][1])
+        ):
+            prev_text, p_start, p_end = merged[-1]
+            next_page, next_text = ordered[index + 1]
+            merged[-1] = (
+                _join_page_fragments(prev_text, next_text),
+                min(p_start, next_page),
+                max(p_end, next_page),
+            )
+            if content.strip():
+                merged.append((content, page, page))
+            index += 2
+            continue
+        if content.strip():
+            if (
+                join_soft_page_breaks
+                and merged
+                and _can_join_across_page(merged[-1][0], content)
+            ):
+                prev_text, p_start, p_end = merged[-1]
+                merged[-1] = (
+                    _join_page_fragments(prev_text, content),
+                    min(p_start, page),
+                    max(p_end, page),
+                )
+            else:
+                merged.append((content, page, page))
+        index += 1
+    spans: list[tuple[int, int, int, int]] = []
+    offset = 0
+    for block_idx, (block_text, min_page, max_page) in enumerate(merged):
+        start = offset
+        end = start + len(block_text)
+        spans.append((start, end, min_page, max_page))
+        offset = end + (2 if block_idx + 1 < len(merged) else 0)
+    return "\n\n".join(block_text for block_text, _, _ in merged), spans
+
+
 def _merge_full_page_insertions(
     entries: Iterable[Tuple[int, str]],
     illustration_pages: Set[int],
@@ -904,33 +971,9 @@ def _merge_full_page_insertions(
     eligible.  Ordinary figures, captions, and all unreviewed pages retain the
     physical page order.
     """
-    ordered = [(int(page), str(content)) for page, content in entries]
-    merged: list[str] = []
-    index = 0
-    while index < len(ordered):
-        page, content = ordered[index]
-        is_full_page = page in illustration_pages
-        if (
-            is_full_page
-            and index > 0
-            and index + 1 < len(ordered)
-            and ordered[index - 1][0] not in illustration_pages
-            and ordered[index + 1][0] not in illustration_pages
-            and _can_join_across_page(merged[-1] if merged else "", ordered[index + 1][1])
-        ):
-            merged[-1] = _join_page_fragments(merged[-1], ordered[index + 1][1])
-            if content.strip():
-                merged.append(content)
-            index += 2
-            continue
-        if content.strip():
-            if (
-                join_soft_page_breaks
-                and merged
-                and _can_join_across_page(merged[-1], content)
-            ):
-                merged[-1] = _join_page_fragments(merged[-1], content)
-            else:
-                merged.append(content)
-        index += 1
-    return "\n\n".join(merged)
+    text, _ = _merge_full_page_insertions_with_spans(
+        entries,
+        illustration_pages,
+        join_soft_page_breaks=join_soft_page_breaks,
+    )
+    return text

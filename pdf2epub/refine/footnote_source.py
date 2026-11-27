@@ -35,13 +35,44 @@ def _safe_unit_filename(value: Any) -> str:
     return name
 
 
+def _validated_part_page_ranges(
+    unit: Mapping[str, Any],
+    names: list[str],
+    chapter_start: int,
+    chapter_end: int,
+) -> dict[str, tuple[int, int]] | None:
+    """Return validated per-part ``(start_page, end_page)`` bounds when explicit."""
+    if len(names) <= 1:
+        return None
+    raw = unit.get("part_page_ranges")
+    if not isinstance(raw, Mapping):
+        return None
+    parsed: dict[str, tuple[int, int]] = {}
+    for name in names:
+        bounds = raw.get(name)
+        if not isinstance(bounds, (list, tuple)) or len(bounds) != 2:
+            return None
+        p_start, p_end = bounds
+        if (
+            isinstance(p_start, bool)
+            or isinstance(p_end, bool)
+            or not isinstance(p_start, int)
+            or not isinstance(p_end, int)
+        ):
+            return None
+        if not (chapter_start <= p_start <= p_end <= chapter_end):
+            return None
+        parsed[name] = (p_start, p_end)
+    return parsed
+
+
 def unit_records(output_dir: Path) -> list[dict[str, Any]]:
-    """Read refined unit mapping and expand ordered split parts."""
-    progress_path = Path(output_dir) / "ocr_markdown" / "tree_progress.json"
+    """Return refined unit records indexed from ``tree_progress.json``."""
+    output_dir = Path(output_dir)
     try:
-        progress = json.loads(progress_path.read_text(encoding="utf-8"))
+        progress = json.loads((output_dir / "ocr_markdown" / "tree_progress.json").read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
-        raise ValueError(f"ocr_markdown/tree_progress.json is missing") from exc
+        raise ValueError("ocr_markdown/tree_progress.json is missing") from exc
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise ValueError(f"could not read ocr_markdown/tree_progress.json: {exc}") from exc
     if not isinstance(progress, Mapping):
@@ -66,12 +97,20 @@ def unit_records(output_dir: Path) -> list[dict[str, Any]]:
             chapter_id = f"toc-path:{'.'.join(str(value) for value in index_path)}"
         else:
             chapter_id = f"unit:{unit.get('file')}"
-        names = unit.get("part_files") or [unit.get("file")]
-        for part_index, raw_name in enumerate(names, 1):
+        names = [_safe_unit_filename(raw_name) for raw_name in (unit.get("part_files") or [unit.get("file")])]
+        explicit_ranges = _validated_part_page_ranges(unit, names, start_page, end_page)
+        for part_index, name in enumerate(names, 1):
+            p_start, p_end = (
+                explicit_ranges[name]
+                if explicit_ranges is not None
+                else (start_page, end_page)
+            )
             records.append({
-                "name": _safe_unit_filename(raw_name),
-                "start_page": start_page,
-                "end_page": end_page,
+                "name": name,
+                "start_page": p_start,
+                "end_page": p_end,
+                "chapter_start_page": start_page,
+                "chapter_end_page": end_page,
                 "chapter_id": chapter_id,
                 "unit_order": unit_order,
                 "part_index": part_index,

@@ -287,3 +287,50 @@ def test_rebuild_consensus_reuses_existing_page_artifacts(tmp_path: Path):
     manifest = load_consensus_manifest(output_dir)
     assert manifest["schema_version"] == 4
     assert manifest["rebuild_mode"] == "offline_existing_artifacts"
+
+
+def test_secondary_ocr_resume_reuses_existing_page_outputs(tmp_path: Path, monkeypatch):
+    import pdf2epub.ocr_pages as ocr_pages_mod
+
+    pdf_path = tmp_path / "book.pdf"
+    _make_pdf(pdf_path, page_count=1)
+    output_dir = tmp_path / "out"
+    (output_dir / "pages").mkdir(parents=True)
+    secondary_dir = output_dir / "ocr_secondary"
+    secondary_dir.mkdir(parents=True)
+    record_dir = output_dir / "ocr_consensus"
+    record_dir.mkdir(parents=True)
+    (output_dir / "pages" / "page_001.md").write_text("Primary text.\n", encoding="utf-8")
+    (secondary_dir / "page_001.md").write_text("Secondary text.\n", encoding="utf-8")
+    (secondary_dir / "page_001.ocr.json").write_text(
+        json.dumps({"backend": "vllm", "blocks": [{"label": "Text", "text": "Secondary text.", "bbox": [0, 0, 10, 10]}]}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        ocr_pages_mod,
+        "ocr_pdf_page",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("should reuse existing secondary page")),
+    )
+    state = ocr_pages_mod._SecondaryConsensusState(
+        secondary_backend="vllm",
+        source_sha256="src",
+        source_names=["page_001.md"],
+        secondary_dir=secondary_dir,
+        record_dir=record_dir,
+        secondary_workers=1,
+        secondary_max_retries=1,
+        secondary_initial_backoff=0.1,
+        resume=True,
+    )
+    result = ocr_pages_mod._process_secondary_page(
+        1,
+        state=state,
+        ocr_pdf=pdf_path,
+        output_dir=output_dir,
+        config={"ocr": {"secondary": {"enabled": True, "backend": "vllm"}}},
+        primary_backend="chandra",
+    )
+
+    assert result["error"] is None
+    assert result["record"]["secondary_backend"] == "vllm"

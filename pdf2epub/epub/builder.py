@@ -8,6 +8,7 @@ This module handles all EPUB-specific file generation including:
 """
 
 import os
+import re
 import html
 import tempfile
 import uuid
@@ -30,6 +31,24 @@ def localized_toc_label(language: str) -> str:
     if normalized == "japanese" or normalized.startswith("ja"):
         return "目次"
     return "Table of Contents"
+
+
+def _unique_manifest_id(raw: str, prefix: str, used_ids: set[str]) -> str:
+    """Return a unique, XML NCName-compatible OPF manifest identifier."""
+    sanitized = re.sub(r"[^A-Za-z0-9_.-]", "_", str(raw or ""))
+    if not sanitized:
+        candidate = prefix
+    elif not (sanitized[0].isalpha() or sanitized[0] == "_"):
+        candidate = f"{prefix}{sanitized}"
+    else:
+        candidate = f"{prefix}{sanitized}" if prefix and not sanitized.startswith(prefix) else sanitized
+    base = candidate
+    suffix = 2
+    while candidate in used_ids:
+        candidate = f"{base}_{suffix}"
+        suffix += 1
+    used_ids.add(candidate)
+    return candidate
 
 
 class EpubBuilder:
@@ -73,7 +92,7 @@ class EpubBuilder:
 </head>
 <body class="{lang_class}">
     <div class="cover">
-        <img src="../images/{cover_image_filename}" alt="{html.escape(self.config.book_title)} Cover" />
+        <img src="../images/{html.escape(cover_image_filename, quote=True)}" alt="{html.escape(self.config.book_title)} Cover" />
     </div>
 </body>
 </html>"""
@@ -249,36 +268,46 @@ a { text-decoration: none; }
         <item id="toc" href="text/toc.html" media-type="application/xhtml+xml"/>
 """
             
+            used_ids = {"ncx", "stylesheet", "toc"}
+            if cover_image:
+                used_ids.update({"cover", "cover-image"})
+
             # Add cover image to manifest
             if cover_image:
-                opf += f"""        <item id="cover-image" href="images/{cover_image}" media-type="image/jpeg"/>
+                cover_media_type = self._get_image_media_type(Path(cover_image).suffix) or "image/jpeg"
+                opf += f"""        <item id="cover-image" href="images/{html.escape(cover_image, quote=True)}" media-type="{cover_media_type}"/>
 """
-            
+
             # Add HTML files to manifest
+            html_item_ids: dict[str, str] = {}
             if all_html_files:
                 # Use provided list of HTML files (for proper ordering with multi-part chapters)
                 for html_file in all_html_files:
                     if html_file is None:
                         continue
-                    item_id = html_file.replace(".html", "").replace(" ", "_").replace("-", "_")
-                    opf += f"""        <item id="{item_id}" href="text/{html_file}" media-type="application/xhtml+xml"/>
+                    item_id = _unique_manifest_id(html_file.removesuffix(".html"), "unit_", used_ids)
+                    html_item_ids[html_file] = item_id
+                    opf += f"""        <item id="{item_id}" href="text/{html.escape(html_file, quote=True)}" media-type="application/xhtml+xml"/>
 """
             else:
                 # Fallback to structure-based manifest
                 # Add front matter if exists
                 if structure.get("front_matter"):
+                    used_ids.add("front_matter")
                     opf += """        <item id="front_matter" href="text/front_matter.html" media-type="application/xhtml+xml"/>
 """
                 
                 # Add chapters to manifest
                 for i, chapter in enumerate(structure.get("chapters", []), 1):
                     chapter_id = f"chapter_{chapter.get('index', i)}"
+                    used_ids.add(chapter_id)
                     chapter_file = f"{chapter_id}.html"
                     opf += f"""        <item id="{chapter_id}" href="text/{chapter_file}" media-type="application/xhtml+xml"/>
 """
                 
                 # Add back matter if exists
                 if structure.get("back_matter"):
+                    used_ids.add("back_matter")
                     opf += """        <item id="back_matter" href="text/back_matter.html" media-type="application/xhtml+xml"/>
 """
             
@@ -287,10 +316,10 @@ a { text-decoration: none; }
             if images_dir.exists():
                 for img_file in sorted(images_dir.iterdir()):
                     if img_file.is_file() and img_file.name != cover_image:
-                        img_id = img_file.stem.replace(" ", "_").replace("-", "_")
                         media_type = self._get_image_media_type(img_file.suffix)
                         if media_type:
-                            opf += f"""        <item id="img_{img_id}" href="images/{img_file.name}" media-type="{media_type}"/>
+                            img_id = _unique_manifest_id(img_file.stem, "img_", used_ids)
+                            opf += f"""        <item id="{img_id}" href="images/{html.escape(img_file.name, quote=True)}" media-type="{media_type}"/>
 """
             
             opf += """    </manifest>
@@ -310,7 +339,7 @@ a { text-decoration: none; }
                     if html_file is None:
                         continue
                     if html_file != "cover.html" and html_file != "toc.html":  # Already added
-                        item_id = html_file.replace(".html", "").replace(" ", "_").replace("-", "_")
+                        item_id = html_item_ids[html_file]
                         opf += f"""        <itemref idref="{item_id}"/>
 """
             else:

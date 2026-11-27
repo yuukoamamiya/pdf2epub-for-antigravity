@@ -625,3 +625,95 @@ def test_page_merger_does_not_join_a_page_starting_with_a_footnote_or_heading(
         "The body sentence is incomplete at the page edge\n\n"
         "# New section\n\n[^1]: A footnote definition."
     )
+
+
+def test_merge_nodes_content_uses_last_node_end_line(tmp_path: Path):
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    (pages / "page_001.md").write_text("First heading\nBody line 1.", encoding="utf-8")
+    (pages / "page_002.md").write_text(
+        "Second body line.\nTail before next section.\nNext chapter heading.",
+        encoding="utf-8",
+    )
+    first = TOCNode("Part 1", 1, 1, 1, boundary_info={"start_line": 1, "end_line": 3})
+    second = TOCNode("Part 2", 1, 2, 2, boundary_info={"start_line": 1, "end_line": 3})
+
+    spans: list[tuple[int, int, int, int]] = []
+    merged = PageMerger().merge_nodes_content([first, second], pages, page_spans_out=spans)
+
+    assert "Tail before next section." in merged
+    assert "Next chapter heading." not in merged
+    assert len(spans) == 2
+
+
+def test_split_save_units_emits_part_page_ranges_and_disambiguates_evidence(tmp_path: Path):
+    from pdf2epub.refine.main import RefinedBreakdown
+    from pdf2epub.refine.footnote_source import unit_records
+    from pdf2epub.refine.footnote_apply import _successful_decision_evidence
+    from pdf2epub.workflow_contracts import sha256_file
+    from types import SimpleNamespace
+
+    pages = tmp_path / "pages"
+    out_dir = tmp_path / "ocr_markdown"
+    pages.mkdir()
+    out_dir.mkdir()
+    long_p1 = "Paragraph page one " + ("alpha " * 40) + "unique-marker-one."
+    long_p2 = "Paragraph page two " + ("beta " * 40) + "unique-marker-two."
+    (pages / "page_001.md").write_text(long_p1, encoding="utf-8")
+    (pages / "page_002.md").write_text(long_p2, encoding="utf-8")
+    (pages / "page_001.ocr.json").write_text(
+        json.dumps({"blocks": [{"label": "Footnote", "text": "unique-marker-one."}]}),
+        encoding="utf-8",
+    )
+    (pages / "page_002.ocr.json").write_text(
+        json.dumps({"blocks": [{"label": "Footnote", "text": "unique-marker-two."}]}),
+        encoding="utf-8",
+    )
+
+    refiner = RefinedBreakdown(
+        {
+            "refine": {
+                "oversized_unit_split": {
+                    "enabled": True,
+                    "threshold_tokens": 50,
+                    "target_tokens": 35,
+                    "threshold_tokens_by_type": {"chapter": 50},
+                    "target_tokens_by_type": {"chapter": 35},
+                    "types": ["chapter"],
+                }
+            }
+        }
+    )
+    node = TOCNode("Big Chapter", 1, 1, 2, chapter_type="chapter", node_id="big-ch")
+    unit = refiner._create_unit(node, [1])
+    unit_metadata = refiner._save_units([unit], pages, out_dir)
+    progress_path = out_dir / "tree_progress.json"
+    progress_path.write_text(json.dumps({"units": unit_metadata}), encoding="utf-8")
+
+    assert len(unit_metadata[0]["part_files"]) >= 2
+    assert "part_page_ranges" in unit_metadata[0]
+    records = unit_records(tmp_path)
+    assert records[0]["start_page"] == 1
+    assert records[-1]["end_page"] == 2
+
+    # Also verify shared boundary page disambiguation when two parts share page 1.
+    shared_meta = [dict(unit_metadata[0])]
+    shared_meta[0]["part_page_ranges"] = {
+        name: [1, 2] for name in unit_metadata[0]["part_files"]
+    }
+    progress_path.write_text(json.dumps({"units": shared_meta}), encoding="utf-8")
+    report = {
+        "ocr_evidence_mode": "single_ocr",
+        "sidecar_sha256": {
+            "pages/page_001.ocr.json": sha256_file(pages / "page_001.ocr.json"),
+            "pages/page_002.ocr.json": sha256_file(pages / "page_002.ocr.json"),
+        },
+    }
+    evidence = _successful_decision_evidence(
+        tmp_path,
+        report,
+        SimpleNamespace(effective_decisions=[
+            {"page": 1, "source": "primary", "block": 0, "role": "footnote_start", "key": "1"}
+        ]),
+    )
+    assert evidence[0]["file"] == unit_metadata[0]["part_files"][0]

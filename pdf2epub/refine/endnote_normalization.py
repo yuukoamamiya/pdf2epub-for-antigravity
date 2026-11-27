@@ -1279,8 +1279,13 @@ def _normalize_embedded_chapter_notes(
         keys.update(match.group("value").translate(_UNICODE_DIGITS) for match in _UNICODE_SUP_RE.finditer(body_text))
         return keys
 
-    parsed_by_file: dict[str, dict[str, Any]] = {}
-    files_per_key: dict[str, set[str]] = defaultdict(set)
+    def _logical_chapter_key(file_name: str) -> str:
+        stem = file_name.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+        return re.sub(r"\.part\d+$", "", stem)
+
+    scanned_files: dict[str, dict[str, Any]] = {}
+    chapter_files: dict[str, list[str]] = defaultdict(list)
+    chapter_body_keys: dict[str, set[str]] = defaultdict(set)
     for name in candidate_files:
         text = source_texts[name]
         lines = text.splitlines()
@@ -1311,10 +1316,29 @@ def _normalize_embedded_chapter_notes(
                 notes_lines.add(idx)
         if active_start is not None:
             section_ranges.append((active_start, len(lines)))
+        chapter_key = _logical_chapter_key(name)
+        chapter_files[chapter_key].append(name)
+        chapter_body_keys[chapter_key].update(_body_keys_for_lines(lines, fenced, notes_lines))
+        scanned_files[name] = {
+            "chapter_key": chapter_key,
+            "lines": lines,
+            "fenced": fenced,
+            "notes_lines": notes_lines,
+            "section_ranges": section_ranges,
+            "trailing_newline": text.endswith(("\n", "\r")),
+        }
+
+    parsed_by_file: dict[str, dict[str, Any]] = {}
+    chapters_per_key: dict[str, set[str]] = defaultdict(set)
+    for name in candidate_files:
+        info = scanned_files[name]
+        section_ranges = info["section_ranges"]
         if not section_ranges:
             continue
-
-        body_keys = _body_keys_for_lines(lines, fenced, notes_lines)
+        lines = info["lines"]
+        fenced = info["fenced"]
+        notes_lines = info["notes_lines"]
+        body_keys = chapter_body_keys[info["chapter_key"]]
         defs: list[dict[str, Any]] = []
         for sec_start, sec_end in section_ranges:
             for idx in range(sec_start, sec_end):
@@ -1354,13 +1378,10 @@ def _normalize_embedded_chapter_notes(
                     break
                 if cont_line.strip():
                     entry["continuations"].append(cont_idx)
-            files_per_key[entry["raw_key"]].add(name)
+            chapters_per_key[entry["raw_key"]].add(info["chapter_key"])
         parsed_by_file[name] = {
-            "lines": lines,
-            "fenced": fenced,
-            "notes_lines": notes_lines,
+            **info,
             "defs": defs,
-            "trailing_newline": text.endswith(("\n", "\r")),
         }
 
     if not parsed_by_file:
@@ -1377,72 +1398,87 @@ def _normalize_embedded_chapter_notes(
     converted_refs = 0
     embedded_ref_counts: Counter[str] = Counter()
 
-    for ch_idx, name in enumerate(sorted(parsed_by_file), 1):
-        info = parsed_by_file[name]
-        lines = list(info["lines"])
-        fenced = info["fenced"]
-        notes_lines = info["notes_lines"]
+    active_chapters = sorted(
+        {parsed_by_file[name]["chapter_key"] for name in parsed_by_file}
+    )
+    for ch_idx, chapter_key in enumerate(active_chapters, 1):
         key_map: dict[str, list[str]] = defaultdict(list)
+        chapter_def_files = [
+            name for name in sorted(chapter_files[chapter_key]) if name in parsed_by_file
+        ]
+        for name in chapter_def_files:
+            info = parsed_by_file[name]
+            lines = list(info["lines"])
+            for entry in info["defs"]:
+                raw_key = entry["raw_key"]
+                needs_scope = len(chapters_per_key[raw_key]) > 1 or raw_key in existing_md_keys
+                base = f"fnc-ch{ch_idx}-{raw_key}" if needs_scope else raw_key
+                out_key = base
+                suffix = 2
+                while out_key in used_keys:
+                    out_key = f"{base}-o{suffix}"
+                    suffix += 1
+                used_keys.add(out_key)
+                entry["output_key"] = out_key
+                key_map[raw_key].append(out_key)
+                new_def_keys.append(out_key)
 
-        for entry in info["defs"]:
-            raw_key = entry["raw_key"]
-            needs_scope = len(files_per_key[raw_key]) > 1 or raw_key in existing_md_keys
-            base = f"fnc-ch{ch_idx}-{raw_key}" if needs_scope else raw_key
-            out_key = base
-            suffix = 2
-            while out_key in used_keys:
-                out_key = f"{base}-o{suffix}"
-                suffix += 1
-            used_keys.add(out_key)
-            entry["output_key"] = out_key
-            key_map[raw_key].append(out_key)
-            new_def_keys.append(out_key)
+                lines[entry["line_index"]] = f"[^{out_key}]: {entry['content']}".rstrip()
+                normalized_defs += 1
+                for cont_idx in entry["continuations"]:
+                    cont_line = lines[cont_idx]
+                    if not cont_line.startswith("    "):
+                        lines[cont_idx] = f"    {cont_line}"
+            info["lines"] = lines
 
-            lines[entry["line_index"]] = f"[^{out_key}]: {entry['content']}".rstrip()
-            normalized_defs += 1
-            for cont_idx in entry["continuations"]:
-                cont_line = lines[cont_idx]
-                if not cont_line.startswith("    "):
-                    lines[cont_idx] = f"    {cont_line}"
-
-        # Rewrite body markers outside the embedded Notes sections in this chapter.
-        # Keep lines aligned one-to-one so _is_math_or_formula_superscript inspects local line context.
+        # Rewrite body markers outside embedded Notes sections across all part files
+        # belonging to this logical chapter so multi-part references link cleanly.
         body_mask_keys = {raw_key: outs[0] for raw_key, outs in key_map.items() if len(outs) == 1}
-        for idx, line in enumerate(lines):
-            if fenced[idx] or idx in notes_lines:
-                continue
+        for name in sorted(chapter_files[chapter_key]):
+            if name in parsed_by_file:
+                info = parsed_by_file[name]
+            else:
+                info = scanned_files[name]
+            lines = list(info["lines"])
+            fenced = info["fenced"]
+            notes_lines = info["notes_lines"]
+            file_refs_before = converted_refs
+            for idx, line in enumerate(lines):
+                if fenced[idx] or idx in notes_lines:
+                    continue
 
-            def _repl_html(match: re.Match[str], line_text: str = line) -> str:
-                nonlocal converted_refs
-                if _inside_inline_code_or_math(line_text, match.start()):
-                    return match.group(0)
-                k = key_from_printed_marker(html.unescape(match.group("key")))
-                if not k or k not in body_mask_keys:
-                    return match.group(0)
-                if _is_math_or_formula_superscript(line_text, match.start(), match.end(), key=k):
-                    return match.group(0)
-                out_k = body_mask_keys[k]
-                converted_refs += 1
-                embedded_ref_counts[out_k] += 1
-                return f"[^{out_k}]"
+                def _repl_html(match: re.Match[str], line_text: str = line) -> str:
+                    nonlocal converted_refs
+                    if _inside_inline_code_or_math(line_text, match.start()):
+                        return match.group(0)
+                    k = key_from_printed_marker(html.unescape(match.group("key")))
+                    if not k or k not in body_mask_keys:
+                        return match.group(0)
+                    if _is_math_or_formula_superscript(line_text, match.start(), match.end(), key=k):
+                        return match.group(0)
+                    out_k = body_mask_keys[k]
+                    converted_refs += 1
+                    embedded_ref_counts[out_k] += 1
+                    return f"[^{out_k}]"
 
-            def _repl_unicode(match: re.Match[str], line_text: str = line) -> str:
-                nonlocal converted_refs
-                if _inside_inline_code_or_math(line_text, match.start()):
-                    return match.group(0)
-                k = match.group("value").translate(_UNICODE_DIGITS)
-                if k not in body_mask_keys:
-                    return match.group(0)
-                out_k = body_mask_keys[k]
-                converted_refs += 1
-                embedded_ref_counts[out_k] += 1
-                return f"[^{out_k}]"
+                def _repl_unicode(match: re.Match[str], line_text: str = line) -> str:
+                    nonlocal converted_refs
+                    if _inside_inline_code_or_math(line_text, match.start()):
+                        return match.group(0)
+                    k = match.group("value").translate(_UNICODE_DIGITS)
+                    if k not in body_mask_keys:
+                        return match.group(0)
+                    out_k = body_mask_keys[k]
+                    converted_refs += 1
+                    embedded_ref_counts[out_k] += 1
+                    return f"[^{out_k}]"
 
-            updated_line = _HTML_SUP_RE.sub(_repl_html, line)
-            updated_line = _UNICODE_SUP_RE.sub(_repl_unicode, updated_line)
-            lines[idx] = updated_line
+                updated_line = _HTML_SUP_RE.sub(_repl_html, line)
+                updated_line = _UNICODE_SUP_RE.sub(_repl_unicode, updated_line)
+                lines[idx] = updated_line
 
-        transformed[name] = "\n".join(lines) + ("\n" if info["trailing_newline"] else "")
+            if name in parsed_by_file or converted_refs > file_refs_before:
+                transformed[name] = "\n".join(lines) + ("\n" if info["trailing_newline"] else "")
 
     new_report = dict(report)
     if new_report.get("status") in {"not_applicable", "no_definitions"}:

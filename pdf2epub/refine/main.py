@@ -779,6 +779,58 @@ class RefinedBreakdown:
             'include_children': include_children
         }
 
+    @staticmethod
+    def _compute_part_page_ranges(
+        content: str,
+        part_files: list[str],
+        part_contents: list[str],
+        page_spans: list[tuple[int, int, int, int]],
+        chapter_start: int,
+        chapter_end: int,
+    ) -> dict[str, list[int]]:
+        """Map split part texts onto inclusive ``[start_page, end_page]`` bounds."""
+        if not content or len(part_files) <= 1 or not page_spans:
+            return {}
+        ranges: dict[str, list[int]] = {}
+        exact_concat = "".join(part_contents) == content
+        cursor = 0
+        for part_name, part_text in zip(part_files, part_contents):
+            if exact_concat:
+                raw_start = cursor
+                raw_end = cursor + len(part_text)
+                cursor = raw_end
+                l_trim = len(part_text) - len(part_text.lstrip())
+                r_trim = len(part_text) - len(part_text.rstrip())
+                start = raw_start + l_trim
+                end = raw_end - r_trim
+                if start >= end:
+                    return {}
+            else:
+                candidate = part_text
+                pos = content.find(candidate, cursor)
+                if pos == -1 and candidate.strip():
+                    candidate = candidate.strip()
+                    pos = content.find(candidate, cursor)
+                if pos == -1:
+                    return {}
+                start = pos
+                end = pos + len(candidate)
+                cursor = end
+            overlapping = [
+                (min_p, max_p)
+                for span_start, span_end, min_p, max_p in page_spans
+                if span_end > start and span_start < end
+            ]
+            if not overlapping:
+                return {}
+            p_start = max(chapter_start, min(p0 for p0, _ in overlapping))
+            p_end = min(chapter_end, max(p1 for _, p1 in overlapping))
+            if not (chapter_start <= p_start <= p_end <= chapter_end):
+                return {}
+            ranges[part_name] = [p_start, p_end]
+        return ranges if len(ranges) == len(part_files) else {}
+
+
     def _save_units(
         self,
         work_units: List[Dict],
@@ -798,6 +850,7 @@ class RefinedBreakdown:
                 next_node = work_units[i + 1]['node']
 
             # Merge content
+            page_spans: list[tuple[int, int, int, int]] = []
             if unit.get('include_children'):
                 # Get all nodes to merge
                 all_nodes = [node] + node.get_all_leaves()
@@ -806,6 +859,7 @@ class RefinedBreakdown:
                     pages_dir,
                     next_node,
                     illustration_pages=illustration_pages,
+                    page_spans_out=page_spans,
                 )
             else:
                 content = self.page_merger.merge_node_content(
@@ -813,6 +867,7 @@ class RefinedBreakdown:
                     pages_dir,
                     next_node,
                     illustration_pages=illustration_pages,
+                    page_spans_out=page_spans,
                 )
 
             role = str(getattr(node, "chapter_type", "") or "").strip().lower() or "body"
@@ -872,6 +927,16 @@ class RefinedBreakdown:
                         "split_target_tokens": split_target,
                     }
                 )
+                part_page_ranges = self._compute_part_page_ranges(
+                    content,
+                    part_files,
+                    part_contents,
+                    page_spans,
+                    unit["start_page"],
+                    unit["end_page"],
+                )
+                if part_page_ranges:
+                    metadata["part_page_ranges"] = part_page_ranges
             if node.chapter_type:
                 metadata['type'] = node.chapter_type
             if node.navigation_visibility != "auto":

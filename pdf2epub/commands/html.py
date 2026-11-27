@@ -573,10 +573,14 @@ def html_validate_command(args):
         return 1
     config, book_title, output_dir, epub_path = context
 
+    resolved_config_path = (
+        Path(args.config).expanduser().resolve() if getattr(args, "config", None) else None
+    )
     pipeline = HTMLEpubPipeline(
         epub_path=epub_path,
         output_dir=output_dir,
-        config=config
+        config=config,
+        config_path=resolved_config_path,
     )
 
     report = pipeline.validate_translated_units(file_name=file_name)
@@ -661,7 +665,15 @@ def html_skeleton_retry_command(args):
     config, book_title, output_dir, epub_path = context
     from pdf2epub.html_translation import HTMLEpubPipeline
 
-    pipeline = HTMLEpubPipeline(epub_path=epub_path, output_dir=output_dir, config=config)
+    resolved_config_path = (
+        Path(args.config).expanduser().resolve() if getattr(args, "config", None) else None
+    )
+    pipeline = HTMLEpubPipeline(
+        epub_path=epub_path,
+        output_dir=output_dir,
+        config=config,
+        config_path=resolved_config_path,
+    )
     if file_name not in pipeline._declared_html_source_names():
         logger.error(f"Unknown HTML translation unit: {file_name}")
         return 1
@@ -764,11 +776,15 @@ def build_html_epub_command(args):
     logger.info(f"Building translated EPUB for: {book_title}")
 
     try:
+        resolved_config_path = (
+            Path(args.config).expanduser().resolve() if getattr(args, "config", None) else None
+        )
         # Create pipeline
         pipeline = HTMLEpubPipeline(
             epub_path=epub_path,
             output_dir=output_dir,
-            config=config
+            config=config,
+            config_path=resolved_config_path,
         )
 
         # Determine output path (None = let postprocess_and_build use translated title)

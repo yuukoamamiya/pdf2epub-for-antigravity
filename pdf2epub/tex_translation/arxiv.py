@@ -292,9 +292,13 @@ def _safe_extract_tar(
     tar.extractall(destination, members=members, filter="data")
 
 
+def _is_symlink_or_junction(path: Path) -> bool:
+    return path.is_symlink() or (hasattr(path, "is_junction") and path.is_junction())
+
+
 def _flatten_single_directory(destination: Path) -> None:
     entries = list(destination.iterdir())
-    if len(entries) != 1 or not entries[0].is_dir():
+    if len(entries) != 1 or not entries[0].is_dir() or _is_symlink_or_junction(entries[0]):
         return
     nested = entries[0]
     for child in list(nested.iterdir()):
@@ -305,10 +309,11 @@ def _flatten_single_directory(destination: Path) -> None:
 def _copy_tree(source: Path, destination: Path) -> None:
     for child in source.iterdir():
         target = destination / child.name
-        if child.is_symlink():
+        if _is_symlink_or_junction(child):
             raise ValueError(f"Symlinks are not supported in TeX source trees: {child}")
         if child.is_dir():
-            shutil.copytree(child, target)
+            target.mkdir(parents=True, exist_ok=True)
+            _copy_tree(child, target)
         else:
             shutil.copy2(child, target)
 
@@ -346,7 +351,7 @@ def _tree_sha256(root: Path) -> str:
     digest = hashlib.sha256()
     for path in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix()):
         relative = path.relative_to(root).as_posix()
-        if path.is_symlink():
+        if _is_symlink_or_junction(path):
             raise ValueError(f"Symlinks are not supported in TeX source trees: {path}")
         if path.is_dir():
             digest.update(b"D\0" + relative.encode("utf-8") + b"\0")

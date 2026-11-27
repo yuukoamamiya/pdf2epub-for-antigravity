@@ -106,7 +106,7 @@ PDF 结构复核还要求逐项处置独立数字，明确绑定标题的源行�
 
 PDF 的页脚注抽取会复核疑似跨页断词缺口；需要时会把相邻两页图像交给工作区 Subagent，
 由图像证据确认原文截断或恢复缺失续文。`footnotes.mode: disabled` 会关闭页脚注自动提取和链接创建；
-若与 TOC 的脚注判断冲突，准备、校验和应用阶段都会显示警告。集中尾注与章节内嵌 `Notes` 区块（可与页底脚注在混合注释书稿中共存）的 Markdown 链接仍可安全生成。
+若与 TOC 的脚注判断冲突，准备、校验和应用阶段都会显示警告。集中尾注与章节内嵌 `Notes` 区块（包括拆分成多个 `.partN.md` 分片的同章正反跨片引用，且可与页底脚注在混合注释书稿中共存）的 Markdown 链接仍可安全生成。
 双 OCR 的人工页面复核可多次使用 `ocr-correct --file PAGE.md` 累积页面。`ocr-correct --resume` 恢复既有选择。
 单页 `ocr-correct-validate --file PAGE.md` 只记录该页，完成整书复核后仍须运行无 `--file` 的全量 validate，
 才会生成可供后续结构整理使用的 validated OCR。请求绑定源 PDF、数字排序的完整 OCR 页清单及逐页 Markdown/sidecar 哈希。
@@ -134,7 +134,7 @@ EPUB 翻译生成译文 EPUB。
 
 `build-epub` 默认行为保持为只构建原语言 EPUB；`--translated` 构建原语言与译文两版，
 `--only-translated` 只构建译文版。`status` 按配置的 pipeline 目标检查：翻译 pipeline 要求
-译文 EPUB 当前，原语言 EPUB 不能代替它；转换 pipeline 要求原语言 EPUB。每个 receipt target
+译文 EPUB 当前（receipt 同步绑定 `toc_tree_translated.json`，并支持追踪显式 `-o` 外部输出路径），原语言 EPUB 不能代替它；转换 pipeline 要求原语言 EPUB。每个 receipt target
 会单独显示状态和文件路径。无 receipt 的旧 EPUB 仍标为历史产物并按兼容规则通过，但不会根据文件名猜测语言。
 
 高保真 EPUB 重建可配置外部 EPUBCheck。需安装官方 W3C EPUBCheck Java 发布版本，并通过 PATH 或

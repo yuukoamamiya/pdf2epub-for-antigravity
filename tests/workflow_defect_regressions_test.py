@@ -377,7 +377,9 @@ def test_footnote_unit_contexts_use_explicit_part_page_ranges_when_present():
     assert projected_b["chapter_8.part2.md"] != projected_a["chapter_8.part2.md"]
 
 
-def test_polish_semantic_issue_maps_whitespace_and_adjacent_blocks_and_closes_upstream(tmp_path: Path):
+def test_polish_semantic_issue_maps_whitespace_and_adjacent_blocks_and_closes_upstream(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     """Arch 7: tolerant unique mapping + upstream audit closure breaks polish->footnote loops."""
     pages_dir = tmp_path / "pages"
     ocr_dir = tmp_path / "ocr_markdown"
@@ -479,6 +481,10 @@ def test_polish_semantic_issue_maps_whitespace_and_adjacent_blocks_and_closes_up
 
     # 3. After valid footnote_normalization + applied audit review closes the exact task_id,
     # polish semantic review converges to valid=True instead of looping forever.
+    monkeypatch.setattr(
+        "pdf2epub.refine.footnote_status.footnote_normalization_is_current",
+        lambda *_args, **_kwargs: True,
+    )
     (tmp_path / "footnote_normalization.json").write_text(
         json.dumps({"valid": True, "status": "applied"}), encoding="utf-8"
     )

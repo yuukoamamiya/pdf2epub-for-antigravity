@@ -629,3 +629,34 @@ def test_confirmed_reset_and_unaddressed_reset_survive_validation_and_next_prepa
     assert kept_errors == []
     assert len(kept_reviews) == 1 and kept_reviews[0]["outcome"] == "confirmed_footnote"
     assert len(kept_tasks) == 1
+
+
+def test_sync_audit_review_pages_marks_review_required_and_pages(tmp_path):
+    from pdf2epub.refine.footnote_handoff import _sync_audit_review_pages
+
+    report = {
+        "footnote_mode": "footnotes",
+        "review_required": False,
+        "review_pages": [],
+        "pages": [
+            {
+                "page": 4,
+                "visual_file": "ocr_review_images/page_004.png",
+                "candidates": [
+                    {
+                        "page": 4,
+                        "source": "primary",
+                        "block": 2,
+                        "confidence": "review",
+                        "disposition": "review_required",
+                    }
+                ],
+                "secondary_only_candidates": [],
+            }
+        ],
+    }
+
+    _sync_audit_review_pages(tmp_path, report, {})
+
+    assert report["review_required"] is True
+    assert report["review_pages"] == [4]

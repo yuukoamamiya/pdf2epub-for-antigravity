@@ -2555,7 +2555,63 @@ def _resolve_result_audit(
         if valid_reviews:
             audit["applied_result_audit_reviews"] = valid_reviews
             audit["applied_result_audit_review_tasks"] = valid_tasks
+    _sync_audit_review_pages(output_dir, report, config)
     return audit
+
+
+def _sync_audit_review_pages(
+    output_dir: Path,
+    report: dict[str, Any],
+    config: Optional[Mapping[str, Any]],
+) -> None:
+    """Keep ``review_pages``, ``review_required``, and visuals aligned after audit injection."""
+    if report.get("footnote_mode") == "disabled":
+        return
+    pages_by_number = {
+        int(row["page"]): row
+        for row in (report.get("pages") or [])
+        if isinstance(row, dict) and str(row.get("page", "")).isdigit()
+    }
+    review_pages: set[int] = {
+        int(p) for p in (report.get("review_pages") or []) if str(p).isdigit()
+    }
+    injected_pages: set[int] = set()
+    for page_num, page_row in pages_by_number.items():
+        has_review = False
+        for field in ("candidates", "secondary_only_candidates"):
+            for cand in page_row.get(field, []) or []:
+                if not isinstance(cand, Mapping):
+                    continue
+                if cand.get("confidence") == "review" or cand.get("disposition") == "review_required":
+                    has_review = True
+                    break
+            if has_review:
+                break
+        if has_review:
+            injected_pages.add(page_num)
+    if not injected_pages:
+        return
+    report["review_pages"] = sorted(review_pages | injected_pages)
+    report["review_required"] = True
+    missing_visual_pages = {
+        page_num
+        for page_num in injected_pages
+        if not (pages_by_number.get(page_num) or {}).get("visual_file")
+    }
+    if missing_visual_pages:
+        image_evidence = ensure_visual_review_images(output_dir, missing_visual_pages, config)
+        image_files = image_evidence.get("files", {}) if isinstance(image_evidence, Mapping) else {}
+        if isinstance(image_files, Mapping) and image_files:
+            visual_ev = report.setdefault("visual_evidence", {})
+            if isinstance(visual_ev, dict):
+                files_map = visual_ev.setdefault("files", {})
+                if isinstance(files_map, dict):
+                    for key_p, rel_path in image_files.items():
+                        files_map[str(key_p)] = str(rel_path)
+            for p_num in missing_visual_pages:
+                rel_path = image_files.get(str(p_num), image_files.get(p_num))
+                if rel_path and p_num in pages_by_number and not pages_by_number[p_num].get("visual_file"):
+                    pages_by_number[p_num]["visual_file"] = str(rel_path)
 
 
 def _write_footnote_prepare_artifacts(

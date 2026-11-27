@@ -37,7 +37,18 @@ def _emit(result: dict, as_json: bool) -> int:
         for key, value in result.items():
             if key not in {"errors", "fields", "artifacts"}:
                 logger.info("{}: {}", key, value)
-    return 1 if result.get("state") == "invalid" or result.get("missing_required_fields") or result.get("errors") else 0
+    cover_status = (
+        result.get("cover_candidate", {}).get("status")
+        if isinstance(result.get("cover_candidate"), dict)
+        else None
+    )
+    failed = (
+        result.get("state") in {"invalid", "blocked", "request_failed"}
+        or cover_status in {"invalid", "blocked", "request_failed"}
+        or bool(result.get("missing_required_fields"))
+        or bool(result.get("errors"))
+    )
+    return 1 if failed else 0
 
 
 def metadata_prepare_command(args):

@@ -358,3 +358,23 @@ def test_embedded_chapter_note_colliding_with_existing_markdown_def_is_scoped() 
     assert "[^1]: Existing page footnote one." in normalized["ch1.md"]
     assert "[^fnc-ch1-1]: Embedded note one." in normalized["ch1.md"]
     assert "Page footnote[^1] and embedded endnote[^fnc-ch1-1]." in normalized["ch1.md"]
+
+
+def test_cross_part_embedded_chapter_notes_resolve_across_split_files() -> None:
+    source = {
+        "ch1.part1.md": "Body opening with first reference<sup>1</sup>.\n",
+        "ch1.part2.md": (
+            "Continuation prose.\n\n"
+            "## Notes\n\n"
+            "1. Cross-part note defined in part two.\n"
+        ),
+    }
+    normalized, report = normalize_endnotes(
+        source, {"ch1.part1.md": "chapter", "ch1.part2.md": "chapter"}
+    )
+
+    assert report["status"] == "validated"
+    assert report["valid"] is True
+    assert "Body opening with first reference[^1]." in normalized["ch1.part1.md"]
+    assert "[^1]: Cross-part note defined in part two." in normalized["ch1.part2.md"]
+    assert report["orphan_definition_keys"] == []

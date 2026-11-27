@@ -94,13 +94,24 @@ export async function onRequestPost(context) {
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
       return errorResponse(env, request, 400, 'base_url must use http or https');
     }
+    if (parsed.username || parsed.password) {
+      return errorResponse(env, request, 400, 'Credentials in base_url are not allowed');
+    }
+    if (parsed.search || parsed.hash) {
+      return errorResponse(env, request, 400, 'Query string or fragment in base_url is not allowed');
+    }
+    if (parsed.pathname.split('/').some((seg) => seg === '..')) {
+      return errorResponse(env, request, 400, 'Invalid path in base_url');
+    }
     if (!allowedHosts(env).includes(parsed.host.toLowerCase())) {
       return errorResponse(env, request, 403, 'base_url host is not allowed');
     }
 
-    const endpoint = `${String(base_url).replace(/\/+$/, '')}/ocr`;
+    const cleanPath = parsed.pathname.replace(/\/+$/, '');
+    const endpoint = `${parsed.origin}${cleanPath}/ocr`;
     const resp = await fetch(endpoint, {
       method: 'POST',
+      redirect: 'error',
       headers: {
         'Authorization': `Bearer ${api_key}`,
         'Content-Type': 'application/json',

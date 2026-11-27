@@ -136,3 +136,23 @@ def test_marker_write_failure_leaves_remote_snapshot_untrusted_on_resume(tmp_pat
 
     with pytest.raises(ValueError, match="no verifiable source identity"):
         resolver.materialize("2401.12345", destination)
+
+
+def test_copy_tree_and_hash_reject_nested_symlinks_and_junctions(tmp_path, monkeypatch):
+    from pathlib import Path
+    source = tmp_path / "src"
+    nested = source / "sub"
+    nested.mkdir(parents=True)
+    link_target = nested / "linked"
+    link_target.mkdir()
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    real_is_junction = getattr(Path, "is_junction", None)
+    monkeypatch.setattr(Path, "is_junction", lambda self: self == link_target, raising=False)
+    with pytest.raises(ValueError, match="Symlinks are not supported"):
+        arxiv_module._copy_tree(source, dest)
+    with pytest.raises(ValueError, match="Symlinks are not supported"):
+        arxiv_module._tree_sha256(source)
+    if real_is_junction is None:
+        monkeypatch.delattr(Path, "is_junction", raising=False)

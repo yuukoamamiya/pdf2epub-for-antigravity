@@ -162,3 +162,17 @@ def test_resume_preserves_reviewed_skip_without_redispatch(tmp_path, applicabili
     assert resumed["pending_fields"] == []
     assert resumed["pending_units"] == []
     assert before == {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in root.iterdir() if p.is_file()}
+
+
+def test_metadata_fetch_command_exits_nonzero_on_request_failed(tmp_path, monkeypatch):
+    from pdf2epub.commands.metadata import metadata_fetch_command
+
+    cfg = tmp_path / "book.yaml"
+    cfg.write_text("title: FetchFail\npipeline: epub_conversion\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "pdf2epub.commands.metadata.fetch_enrichment",
+        lambda *_a, **_k: {"state": "request_failed", "candidates": []},
+    )
+    args = argparse.Namespace(config=str(cfg), json=True, retry=False, cover_url=None)
+    assert metadata_fetch_command(args) == 1

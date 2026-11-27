@@ -89,7 +89,7 @@ PDF `translate`/`polish` 的全量报告和逐文件 ledger 会保存 validation
 
 正式 Markdown 校验不会在开始时清空 `validated/`。每个通过核心校验的文件先写入临时候选副本，再核对候选 SHA-256 与审计目标，并复查源、目标、语义侧车和 prepared context 快照；只有这些检查通过才原子替换接受副本。替换前的最后成功字节按内容哈希保存到 `scratch/<task>/previous_validated/`，以便中断或后续替换失败时恢复。全量失败仍保存逐文件结果，当前有效的兄弟文件可由 `--resume` 复用；但旧副本本身不能让过期全量 receipt 通过 readiness/build。全量成功时，源清单之外的接受副本移至 `scratch/<task>/retired_validated/`，避免阻塞新的完整 inventory。translate `--file` 的局部 TOC 标题检查在候选提升前对原始目标运行；失败时只更新文件 checkpoint，不删除旧接受副本。translate 的局部成功不会把之前失败的全量 receipt 升级为通过，需再次运行全量校验。多个文件的候选提升中断时，已替换的旧内容仍在 `previous_validated/`，混合目录哈希也会使旧 receipt 失效。
 
-脚注 handoff 的 unit context 使用独立的 `projection_version`：当单元在 `tree_progress.json` 中提供显式、合法的 `part_page_ranges` 时按该分片页范围投影以缩小失效半径；缺少精确 part→page 映射时继续使用章节级证据与失效范围，不推断分片级页范围。加载时以候选报告和 review packet 的页来源重新核对侧车路径，context 自身的页/fact/hash 不能作为来源证明。旧 context 缺少当前 projection version 时，重新运行 `footnote-prepare` 与 `footnote-validate`，原有 decision 文件保留，只有当前证据身份仍一致且校验通过时才可复用。此刷新不会调用 OCR，也不会放宽语义决定门禁。
+脚注 handoff 的 unit context 使用独立的 `projection_version`：`refine-local` 在大章拆分后会根据各分片跨页 span 自动写入 `part_page_ranges`，当单元在 `tree_progress.json` 中提供显式、合法的 `part_page_ranges` 时按该分片页范围投影以缩小失效半径；缺少精确 part→page 映射时继续使用章节级证据与失效范围，不推断分片级页范围。`footnote-apply` 在写入成功证据时若多片共享边界页，会结合计划归属与块文本唯一解析所属分片。加载时以候选报告和 review packet 的页来源重新核对侧车路径，context 自身的页/fact/hash 不能作为来源证明。旧 context 缺少当前 projection version 时，重新运行 `footnote-prepare` 与 `footnote-validate`，原有 decision 文件保留，只有当前证据身份仍一致且校验通过时才可复用。此刷新不会调用 OCR，也不会放宽语义决定门禁。
 成功 apply receipt 还会记录已应用决定的拥有文件和 OCR block 内容哈希。恢复时仅在该文件所属单元内查找唯一内容匹配；若清理改变了 block 序号，可据此恢复地址，内容变化、无匹配或多重匹配会保留旧决定并创建局部视觉复核。上一页最后物理脚注以断词连字符、开放括号等形式结束时，下一页页首（含跨 `part` 边界及块 0）或既有底部候选紧邻上方的合格文本块可作为带 `result_audit_admitted: true` 的 review-only recall 进入现有审阅流程；它会自动保持 `review_pages` 有序并补齐新增页面的视觉图，不会自动分类或移动正文。重复准备/校验同一当前决定保持幂等，不增加 retry 计数；这次证据字段变化没有提升全局 schema。
 
 PDF/EPUB 的 `translate` manifest 会在 `worker_handoffs/` 按 TOC 顺序为相邻短章节装箱，生成隔离的最小 manifest 和提示词；拆分单元的后续 part 会收到只读的 `preceding_context`（前一分片的源文尾部，已剔除脚注定义），仅用于承接代词和论证语气，不计入输出、不得翻译或复制；父级 manifest 保留完整审计索引，worker 只接收自己的文件、批次、上下文哈希和必要的章节元数据，不重复携带全书文件统计、章节映射或审计快照路径；
@@ -583,7 +583,7 @@ Markdown 外层标记差异。行数、全局数字序列和脚注垂直范围�
 脚注 Subagent，不能仅凭次 OCR 文本或启发式标签自动改变页面结构。两套 OCR 一致仍只是通过
 筛查，不是正确性证明。已有两套 OCR 产物而只需重算规则时，
 可运行 `uv run pdf2epub -c config.yaml ocr-consensus-rebuild`；该命令离线复用文本和 sidecar，
-不重新调用任何 OCR 后端。
+不重新调用任何 OCR 后端。若使用 `ocr-pages --resume` 续跑，已落盘且后端与结构有效的 `ocr_secondary/page_*.md` 与 `.ocr.json` sidecar 也会直接复用，避免重算已完成的次 OCR 页面。
 
 ### 已有双 OCR 产物的恢复路径
 

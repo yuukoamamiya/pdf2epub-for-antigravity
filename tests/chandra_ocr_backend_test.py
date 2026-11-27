@@ -298,3 +298,84 @@ def test_chandra_client_rejects_incomplete_cloudflare_access_environment(monkeyp
                 }
             }
         })
+
+
+def test_chandra_retries_preserve_deterministic_sampling_and_fail_fast_on_client_http(monkeypatch):
+    import pdf2epub.ocr.backends.chandra as chandra_mod
+    from openai import APIStatusError
+
+    calls = []
+
+    class TransientClient(ChandraClient):
+        def __init__(self):
+            self.max_retries = 3
+            self.initial_backoff = 0.0
+            self.dpi = 72
+            self.min_dimension = 16
+            self.model = "chandra"
+            self.model_revision = None
+            self.include_headers_footers = False
+
+        def _request(self, model_image, *, temperature, top_p):
+            calls.append((temperature, top_p))
+            if len(calls) == 1:
+                raise RuntimeError("transient 502")
+            return '<div data-label="Text"><p>Recovered</p></div>', 10, "stop"
+
+    monkeypatch.setattr(chandra_mod, "render_pdf_page", lambda *_a, **_k: Image.new("RGB", (32, 32)))
+    monkeypatch.setattr(chandra_mod, "_scale_to_fit", lambda img: img)
+    monkeypatch.setattr(chandra_mod.time, "sleep", lambda *_a: None)
+
+    result = TransientClient().process_pdf_page(
+        b"%PDF", page_number=1, images_dir=None, image_counter=0
+    )
+    assert calls == [(0.0, 0.1), (0.0, 0.1)]
+    assert "Recovered" in result.markdown
+
+    class FakeStatusError(APIStatusError):
+        def __init__(self, status_code: int):
+            Exception.__init__(self, f"http {status_code}")
+            self.status_code = status_code
+
+    auth_calls = []
+
+    class UnauthorizedClient(TransientClient):
+        def _request(self, model_image, *, temperature, top_p):
+            auth_calls.append(temperature)
+            raise FakeStatusError(401)
+
+    with pytest.raises(RuntimeError, match="non-retryable HTTP 401"):
+        UnauthorizedClient().process_pdf_page(
+            b"%PDF", page_number=1, images_dir=None, image_counter=0
+        )
+    assert len(auth_calls) == 1
+
+
+def test_ocr_pdf_chunk_vllm_raises_instead_of_writing_error_placeholder(monkeypatch):
+    import sys
+    import types
+    import pymupdf
+
+    if "tenacity" not in sys.modules:
+        fake_tenacity = types.ModuleType("tenacity")
+        fake_tenacity.retry = lambda *_a, **_k: (lambda fn: fn)
+        fake_tenacity.retry_if_exception_type = lambda *_a, **_k: None
+        fake_tenacity.stop_after_attempt = lambda *_a, **_k: None
+        fake_tenacity.wait_exponential = lambda *_a, **_k: None
+        monkeypatch.setitem(sys.modules, "tenacity", fake_tenacity)
+
+    import pdf2epub.ocr_backends as backends_mod
+
+    doc = pymupdf.open()
+    doc.new_page()
+    pdf_bytes = doc.tobytes()
+
+    fake_vllm = types.ModuleType("pdf2epub.ocr.backends.vllm")
+    fake_vllm.init_client = lambda _cfg: types.SimpleNamespace(
+        ocr=lambda _img: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
+    monkeypatch.setitem(sys.modules, "pdf2epub.ocr.backends.vllm", fake_vllm)
+    with pytest.raises(RuntimeError, match="boom"):
+        backends_mod.ocr_pdf_chunk_vllm(
+            pdf_bytes, {"ocr": {"backend": "vllm"}}, "page 1", max_retries=1, initial_backoff=0.0
+        )

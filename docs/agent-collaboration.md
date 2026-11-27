@@ -86,6 +86,17 @@ uv run pdf2epub --help      # 工作流顺序由 pdf2epub/workflow_stages.py 渲
 
 本节记录实现范围；具体验收数量以本轮实际命令输出为准，不沿用历史测试总数。
 
+## 5a. 2026-11-27 全仓审计四批修复
+
+针对 `AGENT_HANDOFF.md` 与全仓审计发现的结构、并发/恢复、误报及安全缺口，按依赖边界分四批在 `main` 上独立提交修复：
+
+| 批次 | 修复范围 | 提交 / 验证说明 |
+|---|---|---|
+| 1. 脚注回滚与边界角色 | `footnote_apply`/`footnote_versions`/`footnote_source`/`footnote_handoff` 的回滚原子性与页级归属、`prepare_footnote_subagent` `footnotes.mode` 对齐、脚注后置带注 TOC 标题清洗/映射、`build_epub` 与 `unit_mapping` 可继承特殊角色及 EPUB `lang`/`xml:lang` | `46a080d`（目标 678 passed、契约检查、Ruff、14/14 DeepSec 0 findings） |
+| 2. CLI/轻小说/术语与租赁 | `novel.py` 标题空值、`dynamic_terminology` 分片 `context_sha256` 与可继承特殊角色、`status` 下 `refine-prepare` 与零插图短路、`dispatch` 活跃 lease 优先级与 `new_worker_slots`、`review_escalation` 单文件回写与禁止失败 target 写回、`translate-validate --check-only` | `a405f8f`（目标 179 passed、契约检查、Ruff、15/15 DeepSec 0 findings） |
+| 3. 校验误报、语义提示与安全门禁 | `build_epub` 模块边界合规、页眉页脚与独立日期/`toc`/带号 TOC 标题误报消除、`polish` 脚注语义明确 schema 与跨片匹配、`special_role_audit` 年代/月份/范围/带强调索引交叉引用、`subagent_safety` 拒答与文学引用边界 | `b2a5d4a`（目标 731 passed、契约检查、Ruff、23/23 DeepSec 0 findings） |
+| 4. 跨片跨度、OCR/构建加固与代理安全 | `page_merger` 末节点 `end_line`、`unit_splitter` 避免纯空白尾分片及 `main.py` 自动写 `part_page_ranges`、共享页唯一归属与跨 `.partN.md` 内嵌 `## Notes`、audit 注入同步 `review_pages`、`ocr_backends`/Chandra 重试与 `--resume` 次 OCR 复用、`metadata` 非零退出、`html` `config_path`、`build_receipt` 与 `quarantine`、`builder`/`markdown_to_html` ID 去重、TeX 子目录/junction 与 `web/functions/api/ocr.js` SSRF 加固 | `check_maintenance.py` 全量通过（`1939 passed, 4 skipped`、`check_workflow_contract.py`、Ruff、`git diff --check`、`node --check`、31 个 `.py`/`.js` 文件 DeepSec 0 findings） |
+
 ## 6. 2026-11-20 审计批次已完成项
 
 这些改动已经落地并各自独立提交；接手时不要重复修，也不要回退它们的测试。

@@ -78,7 +78,7 @@ def _split_by_lines(
     current: List[str] = []
     for line in lines:
         candidate = "".join(current) + line
-        if current and estimate_tokens(candidate) > target_tokens:
+        if current and line.strip() and estimate_tokens(candidate) > target_tokens:
             parts.append("".join(current))
             current = [line]
         else:
@@ -158,7 +158,11 @@ def split_markdown_unit(
         block_tokens = estimate_tokens(block)
         if block_tokens > target_tokens:
             if current:
-                parts.append("".join(current))
+                flushed = "".join(current)
+                if not flushed.strip() and parts:
+                    parts[-1] += flushed
+                else:
+                    parts.append(flushed)
                 current = []
                 current_tokens = 0
             line_parts = _split_by_lines(block, target_tokens, estimate_tokens)

@@ -102,7 +102,11 @@ class TexCompiler:
         duration = time.perf_counter() - started
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text(output, encoding="utf-8")
-        pdf_path = main_path.with_suffix(".pdf")
+        pdf_candidates = [
+            main_path.with_suffix(".pdf"),
+            (project_dir / main_path.name).with_suffix(".pdf"),
+        ]
+        pdf_path = next((candidate for candidate in pdf_candidates if candidate.is_file()), pdf_candidates[0])
         return CompileResult(
             success=returncode == 0 and pdf_path.is_file(),
             returncode=returncode,

@@ -29,6 +29,7 @@ _INPUT_FILES: dict[str, tuple[str, ...]] = {
         "translate_validation.json",
         "polish_validation.json",
         "toc_tree.json",
+        "toc_tree_translated.json",
     ),
     HTML_TRANSLATED: (
         "translate-html_validation.json",
@@ -73,10 +74,14 @@ def write_build_receipt(
     builds = existing.get("builds") if isinstance(existing, dict) else None
     if not isinstance(builds, dict):
         builds = {}
+    resolved_output = output_dir.resolve()
+    resolved_epub = epub_path.resolve()
+    external_epub_path: Optional[str] = None
     try:
-        relative = epub_path.resolve().relative_to(output_dir.resolve()).as_posix()
+        relative = resolved_epub.relative_to(resolved_output).as_posix()
     except ValueError:
         relative = epub_path.name
+        external_epub_path = str(resolved_epub)
     bound_inputs = dict(inputs) if inputs is not None else current_build_inputs(output_dir, kind)
     if metadata_plan is not None:
         bound_inputs["metadata_enrichment_effective"] = effective_metadata_digest(metadata_plan)
@@ -86,6 +91,7 @@ def write_build_receipt(
         bound_inputs["metadata_enrichment_cover_path"] = str(cover_path.resolve()) if cover_path and cover_path.is_file() else None
     builds[kind] = {
         "epub": relative,
+        **({"external_epub_path": external_epub_path} if external_epub_path is not None else {}),
         "sha256": sha256_file(epub_path),
         "size": epub_path.stat().st_size if epub_path.is_file() else None,
         "inputs": bound_inputs,
@@ -116,7 +122,23 @@ def receipt_status(output_dir: Path, kind: str, *, config: Optional[Mapping[str,
     if not isinstance(builds, Mapping) or not isinstance(builds.get(kind), Mapping):
         return "missing", f"no {kind} build receipt"
     entry = builds[kind]
-    epub = output_dir / str(entry.get("epub") or "")
+    external_raw = entry.get("external_epub_path")
+    if isinstance(external_raw, str) and external_raw.strip():
+        epub = Path(external_raw.strip())
+        if epub.is_symlink() or (hasattr(epub, "is_junction") and epub.is_junction()):
+            return "stale", f"{kind} build artifact is a symlink or junction"
+    else:
+        raw_epub = str(entry.get("epub") or "").strip()
+        if not raw_epub:
+            return "stale", f"{kind} build artifact path is missing"
+        candidate = output_dir / raw_epub
+        if candidate.is_symlink() or (hasattr(candidate, "is_junction") and candidate.is_junction()):
+            return "stale", f"{kind} build artifact is a symlink or junction"
+        try:
+            epub = candidate.resolve()
+            epub.relative_to(output_dir.resolve())
+        except (OSError, ValueError):
+            return "stale", f"{kind} build receipt path escapes output directory"
     if not epub.is_file():
         return "stale", f"{kind} build artifact is missing"
     if sha256_file(epub) != str(entry.get("sha256") or ""):

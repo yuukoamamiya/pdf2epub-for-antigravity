@@ -881,3 +881,40 @@ def test_builder_structural_failures_raise_epub_build_error(tmp_path: Path) -> N
     stylesheet_message = str(stylesheet_error.value)
     assert "builder.py:" in stylesheet_message
     assert "create_stylesheet" in stylesheet_message
+
+
+def test_epub_builder_dynamic_cover_media_type_unique_ids_and_dedup_html_ids(tmp_path: Path) -> None:
+    from pdf2epub.markdown_to_html import _normalize_epub_ids
+
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    (images_dir / "cover.png").write_bytes(b"png")
+    (images_dir / "fig-1.png").write_bytes(b"a")
+    (images_dir / "fig_1.png").write_bytes(b"b")
+
+    builder = EpubBuilder(SimpleNamespace(book_title="Test", author="Auth", language="en"))
+    cover_html = tmp_path / "cover.html"
+    assert builder.create_cover_html("cover & 1.png", cover_html)
+    assert "cover%20" in cover_html.read_text(encoding="utf-8") or "cover &amp; 1.png" in cover_html.read_text(encoding="utf-8")
+
+    opf_path = tmp_path / "content.opf"
+    assert builder.create_content_opf(
+        {"chapters": []},
+        tmp_path,
+        opf_path,
+        cover_image="cover.png",
+        all_html_files=["01-intro.html"],
+    )
+    opf = ET.parse(opf_path)
+    cover_item = opf.find(".//{http://www.idpf.org/2007/opf}item[@id='cover-image']")
+    assert cover_item is not None and cover_item.attrib["media-type"] == "image/png"
+    manifest_ids = [el.attrib["id"] for el in opf.findall(".//{http://www.idpf.org/2007/opf}item")]
+    assert len(manifest_ids) == len(set(manifest_ids))
+    unit_item = opf.find(".//{http://www.idpf.org/2007/opf}item[@href='text/01-intro.html']")
+    spine_ref = opf.find(".//{http://www.idpf.org/2007/opf}itemref[@idref='" + unit_item.attrib["id"] + "']")
+    assert spine_ref is not None
+
+    deduped = _normalize_epub_ids('<p id="1 a">A</p><p id="1:a">B</p><a href="#1:a">ref</a>')
+    assert 'id="epub-id-1-a"' in deduped
+    assert 'id="epub-id-1-a-2"' in deduped
+    assert 'href="#epub-id-1-a-2"' in deduped

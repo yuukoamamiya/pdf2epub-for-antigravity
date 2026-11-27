@@ -183,3 +183,15 @@ def test_partial_validation_consolidates_with_full_validation_and_never_normaliz
     assert second_full["review_escalation"][0]["retry_count"] == 2
     assert second_full["review_escalation"][0]["state"] == "human_review_required"
     assert second_full["human_review_required_files"] == ["unit.md"]
+
+
+def test_quarantine_invalid_targets_replaces_existing_identical_digest_file(tmp_path):
+    from pdf2epub.markdown_validation_checkpoint import quarantine_invalid_targets
+
+    target_dir = tmp_path / "target"
+    target_dir.mkdir()
+    for _ in range(2):
+        (target_dir / "unit.md").write_bytes(b"bad output\n")
+        moved = quarantine_invalid_targets(tmp_path, "translate", target_dir, ["unit.md"])
+        assert "unit.md" in moved
+        assert not (target_dir / "unit.md").exists()

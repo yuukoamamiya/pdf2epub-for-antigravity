@@ -929,13 +929,20 @@ def _normalize_epub_xml_id(value: str) -> str:
 
 def _normalize_epub_ids(html: str) -> str:
     """Normalize IDs and same-document fragment links deterministically."""
-    id_map = {}
+    id_map: dict[str, str] = {}
+    used_ids: set[str] = set()
 
     def replace_id(match: re.Match) -> str:
         original = match.group(2)
-        normalized = _normalize_epub_xml_id(original)
-        id_map[original] = normalized
-        return f'{match.group(1)}{normalized}{match.group(3)}'
+        base = _normalize_epub_xml_id(original)
+        candidate = base
+        suffix = 2
+        while candidate in used_ids:
+            candidate = f"{base}-{suffix}"
+            suffix += 1
+        used_ids.add(candidate)
+        id_map.setdefault(original, candidate)
+        return f'{match.group(1)}{candidate}{match.group(3)}'
 
     html = ID_ATTRIBUTE_RE.sub(replace_id, html)
 

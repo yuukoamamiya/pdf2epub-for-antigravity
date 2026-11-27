@@ -26,7 +26,7 @@ import pymupdf as fitz
 import six
 from bs4 import BeautifulSoup, NavigableString, Tag
 from markdownify import MarkdownConverter, re_whitespace
-from openai import OpenAI
+from openai import APIStatusError, OpenAI
 from PIL import Image
 
 from ..artifacts import OCRPageResult
@@ -643,10 +643,11 @@ class ChandraClient:
         raw = ""
         token_count = 0
         finish_reason: Optional[str] = None
+        quality_attempt = 0
         for attempt in range(self.max_retries):
             try:
-                temperature = min(0.2 * attempt, 0.8)
-                top_p = 0.1 if attempt == 0 else 0.95
+                temperature = min(0.2 * quality_attempt, 0.8)
+                top_p = 0.1 if quality_attempt == 0 else 0.95
                 raw, token_count, finish_reason = self._request(
                     model_image,
                     temperature=temperature,
@@ -663,7 +664,19 @@ class ChandraClient:
                 if _detect_repeat_token(raw) or (len(raw) > 50 and _detect_repeat_token(raw[:-50])):
                     raise ValueError("Chandra response ended in a repeated sequence")
                 break
+            except APIStatusError as error:
+                status_code = getattr(error, "status_code", None)
+                if status_code in {400, 401, 403, 404}:
+                    raise RuntimeError(
+                        f"Chandra OCR failed with non-retryable HTTP {status_code}: {error}"
+                    ) from error
+                last_error = error
+                if attempt + 1 >= self.max_retries:
+                    raise RuntimeError(f"Chandra OCR failed after {self.max_retries} attempts: {error}") from error
+                time.sleep(self.initial_backoff * (attempt + 1))
             except Exception as error:
+                if isinstance(error, ValueError):
+                    quality_attempt += 1
                 last_error = error
                 if attempt + 1 >= self.max_retries:
                     raise RuntimeError(f"Chandra OCR failed after {self.max_retries} attempts: {error}") from error
@@ -697,14 +710,37 @@ class ChandraClient:
         )
 
 
-_CLIENTS: Dict[Tuple[str, str], ChandraClient] = {}
+_CLIENTS: Dict[Tuple[Any, ...], ChandraClient] = {}
 
 
 def get_client(config: Dict[str, Any]) -> ChandraClient:
-    backend_config = config.get("ocr", {}).get("backends", {}).get("chandra", {})
+    ocr_config = config.get("ocr", {})
+    backend_config = ocr_config.get("backends", {}).get("chandra", {})
+    access_client_id_env = str(
+        backend_config.get("access_client_id_env", "CHANDRA_CF_ACCESS_CLIENT_ID")
+    )
+    access_client_secret_env = str(
+        backend_config.get("access_client_secret_env", "CHANDRA_CF_ACCESS_CLIENT_SECRET")
+    )
     key = (
         backend_config.get("base_url", "http://127.0.0.1:8100/v1"),
         backend_config.get("model", "chandra"),
+        backend_config.get("model_revision"),
+        int(backend_config.get("max_output_tokens", 12384)),
+        int(backend_config.get("max_retries", ocr_config.get("max_retries", 6))),
+        float(backend_config.get("initial_backoff", ocr_config.get("initial_backoff", 2.0))),
+        float(backend_config.get("request_timeout", 300.0)),
+        bool(backend_config.get("include_headers_footers", False)),
+        int(backend_config.get("dpi", 192)),
+        int(backend_config.get("min_dimension", 1024)),
+        backend_config.get("api_key", "EMPTY"),
+        access_client_id_env,
+        access_client_secret_env,
+        backend_config.get("access_client_id") or os.environ.get(access_client_id_env),
+        backend_config.get("access_client_secret") or os.environ.get(access_client_secret_env),
+        str(backend_config.get("credentials_file", "chandra-access.json")),
+        os.environ.get("CHANDRA_ACCESS_CREDENTIALS", ""),
+        str(config.get("_config_dir") or ""),
     )
     if key not in _CLIENTS:
         _CLIENTS[key] = ChandraClient(config)

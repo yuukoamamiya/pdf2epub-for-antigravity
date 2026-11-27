@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Optional
@@ -513,6 +514,71 @@ def _build_success_result(inputs: _SuccessReceiptInputs) -> dict[str, Any]:
     return result
 
 
+def _resolve_unique_block_owner(
+    output_dir: Path,
+    planning: Any,
+    owner_records: list[Mapping[str, Any]],
+    *,
+    page: int,
+    source: str,
+    block_index: int,
+    block: Any,
+) -> Mapping[str, Any]:
+    """Identify the unique owner part file on a shared boundary page when possible."""
+    owner_by_name = {
+        str(item.get("name") or ""): item
+        for item in owner_records
+        if str(item.get("name") or "")
+    }
+    resolved_blocks = getattr(getattr(planning, "edit_plan", None), "resolved_blocks", None) or []
+    matched_from_plan = {
+        str(entry.get("file") or "")
+        for entry in resolved_blocks
+        if isinstance(entry, Mapping)
+        and str(entry.get("file") or "") in owner_by_name
+        and str(entry.get("page", "")).lstrip("-").isdigit()
+        and int(entry["page"]) == page
+        and str(entry.get("source") or "primary") == source
+        and str(entry.get("block", "")).lstrip("-").isdigit()
+        and int(entry["block"]) == block_index
+    }
+    if len(matched_from_plan) == 1:
+        return owner_by_name[next(iter(matched_from_plan))]
+    if not isinstance(block, Mapping):
+        return {}
+    snippets: list[str] = []
+    for key in ("text", "markdown", "html"):
+        raw = block.get(key)
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        plain = re.sub(r"<[^>]+>", " ", raw)
+        plain = re.sub(r"\s+", " ", plain).strip()
+        if plain:
+            snippets.append(plain)
+            if len(plain) > 80:
+                snippets.append(plain[:80].strip())
+    if not snippets:
+        return {}
+    source_texts = getattr(getattr(planning, "source_snapshot", None), "source_texts", None) or {}
+    for snippet in snippets:
+        if len(snippet) < 12 and len(snippets) > 1:
+            continue
+        matched_owners: set[str] = set()
+        for owner_name in owner_by_name:
+            text = source_texts.get(owner_name)
+            if text is None:
+                try:
+                    text = (output_dir / "ocr_markdown" / owner_name).read_text(encoding="utf-8")
+                except (OSError, UnicodeError):
+                    text = ""
+            normalized_owner = re.sub(r"\s+", " ", str(text))
+            if snippet in normalized_owner:
+                matched_owners.add(owner_name)
+        if len(matched_owners) == 1:
+            return owner_by_name[next(iter(matched_owners))]
+    return {}
+
+
 def _successful_decision_evidence(output_dir: Path, report: Mapping[str, Any], planning: Any) -> list[dict[str, Any]]:
     """Persist content identities for decisions from the successful apply."""
     from .footnote_source import unit_records
@@ -529,8 +595,13 @@ def _successful_decision_evidence(output_dir: Path, report: Mapping[str, Any], p
             page, source, block_index = int(decision["page"]), str(decision.get("source") or "primary"), int(decision["block"])
         except (KeyError, TypeError, ValueError):
             continue
-        owners = {str(item.get("name") or "") for item in records if int(item.get("start_page", -1)) <= page <= int(item.get("end_page", -1))}
-        record = next((item for item in records if str(item.get("name") or "") in owners), {}) if len(owners) == 1 else {}
+        owner_records = [
+            item
+            for item in records
+            if int(item.get("start_page", -1)) <= page <= int(item.get("end_page", -1))
+        ]
+        owners = {str(item.get("name") or "") for item in owner_records if str(item.get("name") or "")}
+        record = next((item for item in owner_records if str(item.get("name") or "") in owners), {}) if len(owners) == 1 else {}
         entry = sidecars.get(page, {}).get(source)
         if not isinstance(entry, Mapping):
             continue
@@ -539,6 +610,16 @@ def _successful_decision_evidence(output_dir: Path, report: Mapping[str, Any], p
             block = data["blocks"][block_index]
         except (OSError, UnicodeError, json.JSONDecodeError, KeyError, IndexError, TypeError):
             continue
+        if not record and len(owners) > 1:
+            record = _resolve_unique_block_owner(
+                output_dir,
+                planning,
+                owner_records,
+                page=page,
+                source=source,
+                block_index=block_index,
+                block=block,
+            )
         content_hash = _footnote_block_content_sha256(block)
         if not content_hash:
             continue
