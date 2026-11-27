@@ -820,7 +820,7 @@ ISBN/CIP 等标识符的独立性，不得当作页边装饰删除。
 合并跨页续文，并按实际生成的 TOC 单元（完整 `unit_id`；其 `.partM` 分片共享作用域）追加为 `[^N]: ...` 章末注，生成独立的
 `footnote_normalized/`；原始 `ocr_markdown/` 不会被覆盖。如果 `ocr-correct` 已经修正了块内字符，
 脚本会用原始页与已验证页的字符对齐生成匹配变体，但最终仍要求在章稿中唯一命中；无法唯一定位时保持阻断并要求复核。
-之后 `polish` 优先读取这个归一化源稿。Apply 会保留成功版本，并将失败 attempt 与 staged 文本/审计分开保存；显式 apply 或 `polish --resume` 可恢复已验证基线，失败 attempt 仍阻断当前 freshness gate。Polish resume 用版本哈希链做逐文件 exact-block sync，保留旧 target 备份；唯一匹配的变更自动同步，其余以 source/target hashes、block 身份和 anchors 附加到 assigned-file manifest/prompt，继续走常规 polish review/validate。PDF `translate --resume` 可把文件级脚注变更摘要传给对应 worker 作建议；提示绑定当前源稿和已有译文哈希，不会自动改写译文。
+之后 `polish` 优先读取这个归一化源稿。Apply 会保留成功版本，并将失败 attempt 与 staged 文本/审计分开保存；显式 apply 或 `polish --resume` 可恢复已验证基线，失败 attempt 仍阻断当前 freshness gate。在 `footnote_normalization_attempt.json` 记录了 `attempt_evidence_dir` 时，随后的 `footnote-prepare` 结转与 `footnote-validate` 校验均从该保留快照读取目标哈希与上下文，从而支持对已回滚的目标审计 findings 完成复核与消解；`confirmed_footnote` 与已复核的无候选复位决定也会持久保留。Polish resume 用版本哈希链做逐文件 exact-block sync，保留旧 target 备份；唯一匹配的变更自动同步，其余以 source/target hashes、block 身份和 anchors 附加到 assigned-file manifest/prompt，继续走常规 polish review/validate。PDF `translate --resume` 可把文件级脚注变更摘要传给对应 worker 作建议；提示绑定当前源稿和已有译文哈希，不会自动改写译文。
 验证通过的单元上下文会挂载到后续 `polish` handoff，避免每个 worker 读取整本脚注报告。
 
 脚注和整页插图共用 `ocr.secondary.enabled` 作为证据模式开关：关闭时只使用主 OCR，且会

@@ -116,8 +116,27 @@ def output_marker_key(key: str, marker_label: str, occurrence: int = 1) -> str:
     return output_key
 
 
+_SCOPED_KEY_RE = re.compile(r"^fnc-[A-Za-z0-9]+-(?P<number>\d+)(?:-o\d+)?$")
+_SCOPED_MARKER_RE = re.compile(r"^fnc-[A-Za-z0-9]+-(?P<marker>fnm-.+)$")
+
+
+def printed_label_from_key(key: str) -> str:
+    """Decode any reserved internal footnote/endnote key to its printed label."""
+    value = str(key)
+    marker_label = marker_label_from_key(value)
+    if marker_label is not None:
+        return marker_label
+    scoped_marker = _SCOPED_MARKER_RE.fullmatch(value)
+    if scoped_marker:
+        marker_label = marker_label_from_key(scoped_marker.group("marker"))
+        if marker_label is not None:
+            return marker_label
+    match = _SCOPED_KEY_RE.match(value)
+    return match.group("number") if match else value
+
+
 __all__ = [
     "FootnoteMarker", "marker_from_label", "marker_label_from_key",
-    "output_marker_key", "CIRCLED_LABELS", "key_from_printed_marker",
-    "canonical_numeric_label", "is_valid_footnote_key",
+    "output_marker_key", "printed_label_from_key", "CIRCLED_LABELS",
+    "key_from_printed_marker", "canonical_numeric_label", "is_valid_footnote_key",
 ]

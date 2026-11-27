@@ -310,8 +310,8 @@ TOC 中标记为
   也不执行脚注物化。
 - `refine/footnote_status.py`：集中计算脚注归一化 checkpoint 的哈希和 freshness 状态；不依赖
   apply/prepare 编排，供命令层和 readiness 诊断复用。
-- `refine/footnote_result_audit.py`：纯函数生成归一化结果审计与待复核证据，不读取工作区文件、不验证审核提交。`audit_footnote_result()` 只做编排；源稿侧的截断定义、跨页注释边界和编号序列分别由 `_audit_truncated_definitions()`、`_audit_cross_page_note_boundaries()`、`_audit_note_numbering()` 负责，归一化稿侧由 `_audit_normalized_targets()` 配合 `_TargetAuditContext` 负责。目标侧尾注豁免按 `chapter_id` 限定作用域，仅收集已确认 `Notes` 区块/单元内的定义并显式排除 `expected_by_target_key` 中被移动的页底脚注；注释边界污染检查按 `(target_file, output_key)`（基于 `expected_by_target_key`，或仅传 `resolved_blocks` 时回退其 `file`）隔离并保持既有 finding 身份、task_id 与 evidence 哈希稳定。
-- `refine/footnote_result_review.py`：读取当前源/归一化稿、sidecar、页图和图像 manifest，验证 scoped result review 的地址、决定及 evidence freshness。
+- `refine/footnote_result_audit.py`：纯函数生成归一化结果审计与待复核证据，不读取工作区文件、不验证审核提交。`audit_footnote_result()` 只做编排；源稿侧的截断定义、跨页注释边界和编号序列分别由 `_audit_truncated_definitions()`、`_audit_cross_page_note_boundaries()`、`_audit_note_numbering()` 负责（编号审计通过 `printed_label_from_key()` 解码 `fnm-*`/`fnc-*` 内部 key 并按物理段顺序检查递增/复位），归一化稿侧由 `_audit_normalized_targets()` 配合 `_TargetAuditContext` 负责，并将真实来源标注为 `origin: "normalized_target"` / `"source_markdown"` 及绑定 `evidence_target_sha256`。目标侧尾注豁免按 `chapter_id` 限定作用域，仅收集已确认 `Notes` 区块/单元内的定义并显式排除 `expected_by_target_key` 中被移动的页底脚注；注释边界污染检查按 `(target_file, output_key)`（基于 `expected_by_target_key`，或仅传 `resolved_blocks` 时回退其 `file`）隔离并保持既有 finding 身份、task_id 与 evidence 哈希稳定。
+- `refine/footnote_result_review.py`：读取当前源/归一化稿、sidecar、页图和图像 manifest，验证 scoped result review 的地址、决定及 evidence freshness；当 `footnote_normalization_attempt.json` 记录了失败回滚快照目录 `attempt_evidence_dir` 时，通过 `resolve_audit_target_dir()` 从该快照而非已回滚的 `footnote_normalized/` 核对 `evidence_target_sha256` 与截断定义上下文，并把 `confirmed_footnote` 保留到后续 `footnote-prepare` 验证范围。
 
 按章尾注 scope 是归一化用的派生数据，没有独立 scope 文件；其事实嵌入
 `footnote_normalization.json` 的 `endnotes` 报告。`footnote_apply.py` 在生成
@@ -323,9 +323,7 @@ TOC 中标记为
 引用时多出的定义保留为 orphan；引用所在 scope 无定义、定义 scope 无正文 span、存在多个
 定义且引用数超过定义数或重复 key 落在未匹配区域时 fail closed。单一定义可由同一 scope
 内的多条引用共享。标记形式、结构续接及恢复合同详见
-[`docs/antigravity-workflow.md` 脚注与尾注合同](antigravity-workflow.md#pdf-footnote-and-endnote-contract)。EPUB 侧由
-`pdf2epub/epub/footnotes/keys.py` 的 `display_footnote_key()` 统一把内部 key 还原为读者
-显示由内部 key 解码；集中尾注中的数字/圈号别名可规范化为数字，去重后缀不会显示；scanner、链接和锚点仍使用真实 key。
+[`docs/antigravity-workflow.md` 脚注与尾注合同](antigravity-workflow.md#pdf-footnote-and-endnote-contract)。EPUB 侧由 `pdf2epub/footnote_keys.py` 的共享 `printed_label_from_key()` 与 `pdf2epub/epub/footnotes/keys.py` 的 `display_footnote_key()` 统一把内部 key 还原为读者可见标记；集中尾注中的数字/圈号别名可规范化为数字，去重后缀不会显示；scanner、链接、锚点与 `toc_model.py` 的扁平脚注标题解码均共用这套映射。
 
 EPUB 构建的链接作用域独立于页面脚注候选模式：存在 Notes 单元时，即使有效
 `footnote_mode` 为 `footnotes`，也启用跨文件链接映射。映射保留所有源定义，优先使用同一
@@ -465,8 +463,8 @@ worker `dispatch_status` 计数与波次数，用于判断是否需要开 Subage
 - `polish_footnote_semantics.py`：构造和校验 polish 脚注语义 sidecar。schema 1 sidecar 将每个 assigned 文件的检查绑定到源、目标及 context 哈希，并记录正文扫描、脚注定义和跨分片关联的覆盖情况与精确 issue 摘录。该模块不改变脚注归属，也不修改 Markdown。
 - `commands/markdown_context.py`：只读加载 TOC、续文和章节分组上下文；准备、校验和
   worker 装箱共享同一份 PDF 单元投影，`commands.markdown` 不再承载这组状态读取细节。
-- `document_roles.py`：集中维护特殊翻译角色、参考文献/前置内容识别、目标语言密度豁免和
-  文件名角色回退规则。编号书目标题仅按有限多语言完整标签识别；续页需要重复的书目条目结构，
+- `document_roles.py`：集中维护特殊翻译角色、参考文献/前置内容/注释章节识别、目标语言密度豁免和
+  文件名角色回退规则。编号书目标题按有限多语言完整标签（含 `Selected bibliography` 等）及纯净标题标签（兼容内联上标/脚注）识别，独立 `Notes`/`Endnotes` 等标签优先归入 `notes` 而非 `bibliography`；续页需要重复的书目条目结构，
   普通正文的年份、引用或 DOI/URL 本身不触发豁免。它只处理文本与文件名事实，不读取工作流状态，也不执行写入。
 - `entity_context.py`：集中维护 PDF/EPUB 共用的实体增量交接、已完成快照和当前性检查。
   准备快照身份由有序 Markdown 结构与语言对确定，普通空白/换行刷新可复用；变更文件进入
@@ -539,9 +537,9 @@ worker `dispatch_status` 计数与波次数，用于判断是否需要开 Subage
   `toc_tree_translated.json`，再从已验证的译文 TOC 生成按 token 预算自适应的全书方向性轮廓。
   `status`/`doctor` 调用只读校验，不物化合并文件；不匹配或旧版本合同必须重新准备并审阅 TOC。
 - `toc_model.py`：提供显式 `node_id` 身份、锚点和遍历合同；节点数组路径只用于定位结构，不能
-  代替身份。`project_toc_ownership()` 依据 TOC、`tree_progress.json` 和源 Markdown 为物理文件
+  代替身份。`project_toc_ownership()` 依据 TOC、`tree_progress.json` 和通过 `_resolve_ownership_source_inventory()` 解析出的当前单一阶段源 Markdown（不跨阶段按单文件混用）为物理文件
   确定节点所有权及 `visible`/`container_only` 绑定状态，并记录
-  `source_candidate_kind`（`heading`、`paragraph` 或 `container_only`）。同一逻辑单元中只要有
+  `source_candidate_kind`（`heading`、`paragraph` 或 `container_only`）。当 `toc_tree.json` 将源标题脚注标记扁平为数字/符号（如 `Heading1` ↔ `# Heading[^fnm-number-1-o7]`）时，`project_toc_ownership()` 通过 `printed_label_from_key()` 还原并在无脚注/有脚注变体间优先绑定对应候选（记录 `flattened_footnote` 与 `expected_visible_title`），`build_epub.py` 据此在源构建中传播 `navigation_expected_title`/`navigation_display_title`。同一逻辑单元中只要有
   标题候选，就优先绑定标题，包括位于后续 part 的标题；否则才选段落候选。源 Markdown 和
   渲染 HTML 都按这个候选类别核对 occurrence/count，不能靠跨类别的相似文本凑数。
 - `toc_navigation.py`：在 HTML 内容完成渲染后，将逻辑 TOC 节点解析成唯一的不可变导航树。

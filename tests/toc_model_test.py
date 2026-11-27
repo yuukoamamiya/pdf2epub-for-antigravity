@@ -405,3 +405,133 @@ def test_literal_markdown_punctuation_and_raw_superscript_roundtrip():
                 source_match_count=1, source_candidate_kind=kind,
             )
             assert not false_match
+
+
+def test_flattened_footnote_headings_handle_scoped_keys_and_prefer_footnoted_part():
+    from pdf2epub.toc_model import toc_markdown_visible_title_candidates
+
+    for key, label in (
+        ("fnm-number-1-o7", "1"),
+        ("fnc-ch1-2", "2"),
+        ("fnm-star-1", "*"),
+        ("fnm-circle-3", "③"),
+    ):
+        md = f"# Heading[^{key}]\n\nBody.\n\n[^{key}]: Note."
+        assert toc_markdown_visible_title_candidates(md, f"Heading{label}", "heading") == ["Heading"]
+
+    projection = project_toc_ownership(
+        [
+            {
+                "node_id": "plain",
+                "title": "1 Yesterday",
+                "children": [{"node_id": "noted", "title": "1 Yesterday1"}],
+            },
+        ],
+        {"units": [
+            {"node_id": "plain", "index_path": [1], "part_files": ["p1.md", "p2.md"]},
+        ]},
+        {
+            "p1.md": "# 1 Yesterday\n\nPlain body.\n",
+            "p2.md": "# 1 Yesterday[^1]\n\nFootnoted body.\n\n[^1]: Note.\n",
+        },
+    )
+    plain_row = projection["p1.md"]["headings"][0]
+    noted_row = projection["p2.md"]["headings"][0]
+    assert plain_row["node_id"] == "plain"
+    assert plain_row["owner_file"] == "p1.md"
+    assert plain_row["flattened_footnote"] is False
+    assert noted_row["node_id"] == "noted"
+    assert noted_row["owner_file"] == "p2.md"
+    assert noted_row["flattened_footnote"] is True
+    assert noted_row["expected_visible_title"] == "1 Yesterday"
+
+
+def test_source_build_succeeds_with_flattened_footnote_toc_heading(tmp_path):
+    import hashlib
+    from pdf2epub.build_epub import BuildEpubConfig, build_epub
+    from pdf2epub.markdown_subagent_validation import markdown_validation_schema_version
+    from pdf2epub.toc_model import TOC_TREE_SCHEMA_VERSION
+
+    output = tmp_path / "output"
+    ocr_dir = output / "ocr_markdown"
+    polished_dir = output / "polished_markdown" / "validated"
+    ocr_dir.mkdir(parents=True)
+    polished_dir.mkdir(parents=True)
+    ocr_text = "# 1 Yesterday<sup>1</sup>\n\nBody text.\n"
+    md_text = "# 1 Yesterday[^fnm-number-1-o7]\n\nBody text.\n\n[^fnm-number-1-o7]: Note body.\n"
+    (ocr_dir / "chapter_1.md").write_bytes(ocr_text.encode("utf-8"))
+    (polished_dir / "chapter_1.md").write_bytes(md_text.encode("utf-8"))
+    (output / "polish_validation.json").write_text(
+        json.dumps({
+            "schema_version": markdown_validation_schema_version("polish"),
+            "task": "polish",
+            "scope": "full",
+            "all_passed": True,
+            "source_sha256": {"chapter_1.md": hashlib.sha256(ocr_text.encode("utf-8")).hexdigest()},
+            "target_sha256": {"chapter_1.md": hashlib.sha256(md_text.encode("utf-8")).hexdigest()},
+        }),
+        encoding="utf-8",
+    )
+    (ocr_dir / "tree_progress.json").write_text(
+        json.dumps({"units": [{"unit_id": "chapter_1", "node_id": "n1", "index_path": [1], "file": "chapter_1.md"}]}),
+        encoding="utf-8",
+    )
+    toc_path = output / "toc_tree.json"
+    toc_path.write_text(
+        json.dumps({
+            "schema_version": TOC_TREE_SCHEMA_VERSION,
+            "book_title": "Book",
+            "chapters": [{"node_id": "n1", "title": "1 Yesterday1", "level": 1, "binding_mode": "visible"}],
+        }),
+        encoding="utf-8",
+    )
+    epub_path = build_epub(BuildEpubConfig(
+        book_title="Book",
+        output_dir=output,
+        markdown_dir=polished_dir,
+        toc_tree_path=toc_path,
+        cover_image=output / "missing.jpg",
+        translated=False,
+        config={"footnotes": {"mode": "disabled"}},
+    ))
+    assert epub_path.is_file()
+
+
+def test_ownership_source_inventory_never_falls_back_per_file_from_current_polished(tmp_path):
+    import hashlib
+    from pdf2epub.build_epub import BuildEpubConfig, _resolve_ownership_source_inventory
+    from pdf2epub.markdown_subagent_validation import markdown_validation_schema_version
+
+    ocr_dir = tmp_path / "ocr_markdown"
+    polished_dir = tmp_path / "polished_markdown" / "validated"
+    ocr_dir.mkdir(parents=True)
+    polished_dir.mkdir(parents=True)
+    (ocr_dir / "a.md").write_bytes(b"ocr a")
+    (polished_dir / "a.md").write_bytes(b"polished a")
+    (tmp_path / "polish_validation.json").write_text(json.dumps({
+        "schema_version": markdown_validation_schema_version("polish"),
+        "task": "polish",
+        "scope": "full",
+        "all_passed": True,
+        "source_sha256": {"a.md": hashlib.sha256(b"ocr a").hexdigest()},
+        "target_sha256": {"a.md": hashlib.sha256(b"polished a").hexdigest()},
+    }), encoding="utf-8")
+
+    cfg = BuildEpubConfig(
+        book_title="Book",
+        output_dir=tmp_path,
+        markdown_dir=tmp_path / "translated" / "validated",
+        toc_tree_path=tmp_path / "toc_tree.json",
+        cover_image=tmp_path / "missing.jpg",
+        translated=True,
+        config={"footnotes": {"mode": "disabled"}},
+    )
+    inv = _resolve_ownership_source_inventory(cfg, ["a.md", "missing.md"])
+    assert set(inv) == {"a.md"}
+    assert inv["a.md"][0] == "polished a"
+
+    # If ocr_markdown adds b.md without polish re-validating, stage falls back as a whole
+    # instead of mixing polished a.md with ocr b.md.
+    (ocr_dir / "b.md").write_bytes(b"ocr b")
+    fallback_inv = _resolve_ownership_source_inventory(cfg, ["a.md", "b.md"])
+    assert {k: v[0] for k, v in fallback_inv.items()} == {"a.md": "ocr a", "b.md": "ocr b"}

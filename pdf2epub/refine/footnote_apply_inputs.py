@@ -200,6 +200,7 @@ def load_footnote_apply_inputs(
         audit_data.get("applied_result_audit_reviews"),
         audit_data.get("applied_result_audit_review_tasks"),
         current_tasks=current_audit_tasks,
+        ordinary_decisions=validation.get("decisions", []),
     )
     if history_errors or history_reviews != audit_data.get("applied_result_audit_reviews", []):
         raise FootnoteApplyInputError(

@@ -8,6 +8,8 @@ import re
 import unicodedata
 from typing import Any, Iterator, Mapping, Sequence
 
+from .footnote_keys import printed_label_from_key
+
 TOCPath = tuple[int, ...]
 TOC_TREE_SCHEMA_VERSION = 2
 TOC_HEADING_CONTEXT_PROJECTION_VERSION = 5
@@ -304,13 +306,25 @@ def toc_markdown_visible_title_candidates(
         if stripped:
             resolved_key = stripped_key
         else:
-            exact = [row for row in inventory
-                 if (candidate_kind is None or row["kind"] == candidate_kind)
-                 and row["raw"] == title]
-            visible_keys = {toc_title_match_key(row["visible"]) for row in exact}
-            if len(visible_keys) != 1:
-                return []
-            resolved_key = next(iter(visible_keys))
+            fn_matches = [
+                row for row in inventory
+                if (candidate_kind is None or row["kind"] == candidate_kind)
+                and "[^" in row["raw"]
+                and toc_title_match_key(
+                    normalize_toc_source_label(_flatten_markdown_footnotes(row["raw"]))
+                ) == expected
+            ]
+            fn_visible_keys = {toc_title_match_key(row["visible"]) for row in fn_matches}
+            if len(fn_visible_keys) == 1:
+                resolved_key = next(iter(fn_visible_keys))
+            else:
+                exact = [row for row in inventory
+                     if (candidate_kind is None or row["kind"] == candidate_kind)
+                     and row["raw"] == title]
+                visible_keys = {toc_title_match_key(row["visible"]) for row in exact}
+                if len(visible_keys) != 1:
+                    return []
+                resolved_key = next(iter(visible_keys))
     matching = [row for row in inventory
                 if toc_title_match_key(row["visible"]) == resolved_key]
     if candidate_kind is not None:
@@ -410,6 +424,21 @@ def _title_occurrences(text: str, title: str, candidate_kind: str | None = None)
     if not literal and len({toc_title_match_key(row["visible"]) for row in matched}) != 1:
         return 0
     return len(matched)
+
+
+def _flatten_markdown_footnotes(raw: str) -> str:
+    """Replace Markdown footnote references [^key] with their printed labels."""
+    def _repl(match: re.Match[str]) -> str:
+        key = match.group(1)
+        if key.isdigit():
+            return key
+        if key.startswith(("fnm-", "fnc-")):
+            decoded = printed_label_from_key(key)
+            if decoded != key:
+                return decoded
+        return match.group(0)
+
+    return re.sub(r"\[\^([^\]]+)\](?!:)", _repl, raw)
 
 
 def project_toc_ownership(
@@ -512,7 +541,6 @@ def project_toc_ownership(
     for path, node in iter_toc_nodes(chapters):
         unit_path = owner_by_node[path]
         names = names_by_path[unit_path]
-        texts = texts_by_path[unit_path]
         node_id = toc_node_id(node, path)
         source_title = compose_numbered_title(
             str(node.get("title") or ""), node.get("numbering_label")
@@ -525,8 +553,15 @@ def project_toc_ownership(
                    if toc_title_match_key(candidate["visible"]) == literal_key]
             for name, inventory in inventories.items()
         }
+        preferred_matches: dict[str, list[dict[str, Any]]] | None = None
+        flattened_footnote = False
         if any(literal_matches.values()):
             resolved_key = literal_key
+            unfootnoted = {
+                name: [candidate for candidate in rows if "[^" not in candidate["raw"]]
+                for name, rows in literal_matches.items()
+            }
+            preferred_matches = unfootnoted if any(unfootnoted.values()) else literal_matches
         else:
             stripped_key = toc_title_match_key(
                 normalize_toc_source_label(
@@ -544,18 +579,45 @@ def project_toc_ownership(
             }
             if any(stripped_matches.values()):
                 resolved_key = stripped_key
+                preferred_matches = stripped_matches
             else:
-                # A marked legacy TOC label is interpreted as Markdown only when
-                # the owning source contains that exact raw label.
-                exact_matches = {
-                    name: [candidate for candidate in inventory if candidate["raw"] == source_title]
+                # A heading with a footnote marker [^key] may have had its
+                # pre-normalization <sup>label</sup> flattened to label in
+                # toc_tree.json.
+                fn_matches = {
+                    name: [
+                        candidate for candidate in inventory
+                        if "[^" in candidate["raw"]
+                        and toc_title_match_key(
+                            normalize_toc_source_label(_flatten_markdown_footnotes(candidate["raw"]))
+                        ) == literal_key
+                    ]
                     for name, inventory in inventories.items()
                 }
-                visible_keys = {
+                fn_visible_keys = {
                     toc_title_match_key(candidate["visible"])
-                    for rows in exact_matches.values() for candidate in rows
+                    for rows in fn_matches.values() for candidate in rows
                 }
-                resolved_key = next(iter(visible_keys)) if len(visible_keys) == 1 else None
+                if len(fn_visible_keys) == 1:
+                    resolved_key = next(iter(fn_visible_keys))
+                    preferred_matches = fn_matches
+                    flattened_footnote = True
+                else:
+                    # A marked legacy TOC label is interpreted as Markdown only when
+                    # the owning source contains that exact raw label.
+                    exact_matches = {
+                        name: [candidate for candidate in inventory if candidate["raw"] == source_title]
+                        for name, inventory in inventories.items()
+                    }
+                    visible_keys = {
+                        toc_title_match_key(candidate["visible"])
+                        for rows in exact_matches.values() for candidate in rows
+                    }
+                    if len(visible_keys) == 1:
+                        resolved_key = next(iter(visible_keys))
+                        preferred_matches = exact_matches
+                    else:
+                        resolved_key = None
         matched = {
             name: [candidate for candidate in inventory
                    if resolved_key is not None
@@ -572,23 +634,40 @@ def project_toc_ownership(
             name: [candidate for candidate in rows if candidate["kind"] == candidate_kind]
             for name, rows in matched.items()
         }
+        preferred_by_file: dict[str, list[dict[str, Any]]] | None = None
+        if preferred_matches is not None:
+            preferred_ids = {
+                name: {candidate["candidate_id"] for candidate in rows}
+                for name, rows in preferred_matches.items()
+            }
+            preferred_by_file = {
+                name: [
+                    candidate for candidate in rows
+                    if candidate["candidate_id"] in preferred_ids.get(name, set())
+                ]
+                for name, rows in matched.items()
+            }
         match_counts = {name: len(rows) for name, rows in matched.items()}
         # An explicit container owns a navigation position, not a source-title
         # occurrence. Leave matching candidates available to visible nodes.
         match = None
         occurrence = None
         if not explicit_container:
-            for name in names:
-                available = [candidate for candidate in matched[name]
-                             if (unit_path, name, candidate["candidate_id"]) not in used_candidates]
-                if available:
-                    match = name
-                    selected = available[0]
-                    used_candidates.add((unit_path, name, selected["candidate_id"]))
-                    occurrence = next(
-                        index for index, candidate in enumerate(matched[name], 1)
-                        if candidate["candidate_id"] == selected["candidate_id"]
-                    )
+            search_pools = (preferred_by_file, matched) if preferred_by_file is not None else (matched,)
+            for pool in search_pools:
+                for name in names:
+                    available = [candidate for candidate in pool[name]
+                                 if (unit_path, name, candidate["candidate_id"]) not in used_candidates]
+                    if available:
+                        match = name
+                        selected = available[0]
+                        used_candidates.add((unit_path, name, selected["candidate_id"]))
+                        occurrence = next(
+                            index for index, candidate in enumerate(matched[name], 1)
+                            if candidate["candidate_id"] == selected["candidate_id"]
+                        )
+                        break
+                if match is not None:
                     break
         if match is None and not explicit_container:
             raise ValueError(f"visible TOC node {node_id} ({source_title!r}) is absent from its owning source unit")
@@ -602,6 +681,7 @@ def project_toc_ownership(
             "path": path,
             "source_title": source_title,
             "expected_visible_title": resolved_visible_title,
+            "flattened_footnote": flattened_footnote,
             "owner_file": owner_file,
             "binding_mode": "visible" if match else "container_only",
             "structural_ancestor": path != unit_path and not (len(path) > len(unit_path) and path[:len(unit_path)] == unit_path),

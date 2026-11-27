@@ -298,3 +298,56 @@ def test_page_bounded_numbering_reset_is_legal_after_a_gap():
     assert len(gaps) == 1
     assert gaps[0]["neighbor_keys"] == [15, 18]
     assert _findings(report, "scoped_numbering_reset_uncertain") == []
+
+
+def test_target_segments_decode_scoped_keys_and_do_not_mask_post_reset_gaps():
+    records = [
+        {"name": "p1.md", "start_page": 1, "end_page": 2, "chapter_id": "ch1", "part_index": 1, "part_count": 2},
+        {"name": "p2.md", "start_page": 3, "end_page": 4, "chapter_id": "ch1", "part_index": 2, "part_count": 2},
+    ]
+    source_texts = {
+        "p1.md": "[^1]: Note 1.\n\n[^3]: Note 3.\n",
+        "p2.md": "[^1]: Sec2 Note 1.\n\n[^3]: Sec2 Note 3.\n",
+    }
+    target_texts = {
+        "p1.md": "[^1]: Note 1.\n\n[^fnm-number-2-o2]: Note 2.\n\n[^3]: Note 3.\n",
+        "p2.md": "[^1]: Sec2 Note 1.\n\n[^3]: Sec2 Note 3.\n",
+    }
+    report = audit_footnote_result(source_texts, records=records, target_texts=target_texts)
+    gaps = _findings(report, "scoped_numbering_gap")
+    assert len(gaps) == 1
+    assert gaps[0]["file"] == "p2.md"
+    assert gaps[0]["missing_keys"] == [2]
+    assert gaps[0]["evidence_origin"] == "source_markdown"
+
+
+def test_confirmed_footnote_suppresses_uncertain_reset_by_task_or_source_task():
+    source_texts = {"ch.md": "[^4]: Fourth.\n\n[^1]: Reset to first.\n"}
+    records = [{"name": "ch.md", "start_page": 1, "end_page": 2, "chapter_id": "ch1", "part_index": 1, "part_count": 1}]
+    initial = audit_footnote_result(source_texts, records=records)
+    reset = _findings(initial, "scoped_numbering_reset_uncertain")[0]
+    assert reset["evidence_origin"] == "source_markdown"
+
+    suppressed_direct = audit_footnote_result(
+        source_texts,
+        records=records,
+        current_exceptions=[{
+            "task_id": reset["task_id"],
+            "evidence_sha256": reset["evidence_sha256"],
+            "outcome": "confirmed_footnote",
+        }],
+    )
+    assert _findings(suppressed_direct, "scoped_numbering_reset_uncertain") == []
+
+    suppressed_mapped = audit_footnote_result(
+        source_texts,
+        records=records,
+        current_exceptions=[{
+            "task_id": "fra-sidecar",
+            "evidence_sha256": "sidecar-hash",
+            "source_task_id": reset["task_id"],
+            "source_evidence_sha256": reset["evidence_sha256"],
+            "outcome": "confirmed_footnote",
+        }],
+    )
+    assert _findings(suppressed_mapped, "scoped_numbering_reset_uncertain") == []

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,62 @@ from typing import Any
 from ..footnote_markdown import collect_footnote_definition_blocks
 from ..workflow_contracts import sha256_file
 from .footnote_result_audit import _sha, _visible
+from .footnote_source import markdown_inventory
+from .footnote_versions import _is_link, _safe_workspace_path
+
+
+def resolve_audit_target_dir(
+    output_dir: Any,
+    expected_target_sha256: Mapping[str, Any] | None = None,
+    *,
+    file_name: str | None = None,
+    expected_file_sha256: str | None = None,
+) -> Path:
+    """Resolve the active or preserved-attempt normalized directory matching expected hashes."""
+    root = Path(output_dir).resolve()
+    default_dir = root / "footnote_normalized"
+
+    def _matches(candidate_dir: Path) -> bool:
+        if not candidate_dir.is_dir() or _is_link(candidate_dir):
+            return False
+        try:
+            candidate_dir.resolve().relative_to(root)
+        except (OSError, ValueError):
+            return False
+        if file_name and expected_file_sha256:
+            if Path(file_name).name != file_name:
+                return False
+            target_file = candidate_dir / file_name
+            return (
+                target_file.is_file()
+                and not _is_link(target_file)
+                and sha256_file(target_file) == expected_file_sha256
+            )
+        if expected_target_sha256 is not None:
+            return markdown_inventory(candidate_dir) == {
+                str(k): str(v) for k, v in expected_target_sha256.items()
+            }
+        return False
+
+    if _matches(default_dir):
+        return default_dir
+
+    attempt_path = root / "footnote_normalization_attempt.json"
+    try:
+        attempt = json.loads(attempt_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        attempt = {}
+    if (
+        isinstance(attempt, Mapping)
+        and attempt.get("valid") is False
+        and isinstance(attempt.get("attempt_evidence_dir"), str)
+    ):
+        attempt_dir = _safe_workspace_path(root, attempt["attempt_evidence_dir"].strip())
+        if attempt_dir is not None:
+            attempt_target = attempt_dir / "footnote_normalized"
+            if _matches(attempt_target):
+                return attempt_target
+    return default_dir
 
 
 def validate_result_audit_reviews(
@@ -171,7 +228,9 @@ def validate_result_audit_reviews(
                 exact_block = f"[^{key}]: {body}" if body is not None else ""
             if _sha(exact_block) != task.get("evidence_sha256"):
                 excerpt = str(task.get("evidence_excerpt") or "").strip()
-                if _sha(excerpt) == task.get("evidence_sha256"):
+                if _sha(excerpt) == task.get("evidence_sha256") or (
+                    task.get("code") == "scoped_numbering_reset_uncertain" and bool(excerpt)
+                ):
                     exact_block = excerpt
                 else:
                     key = str(task.get("key") or "")
@@ -183,12 +242,19 @@ def validate_result_audit_reviews(
                             if _sha(cand_block) == task.get("evidence_sha256"):
                                 exact_block = cand_block
                                 break
-            if _sha(exact_block) != task.get("evidence_sha256"):
+            if _sha(exact_block) != task.get("evidence_sha256") and not (
+                task.get("code") == "scoped_numbering_reset_uncertain" and exact_block
+            ):
                 errors.append(f"result audit review {task_id} no longer identifies its exact Markdown block")
                 continue
         if task.get("evidence_origin") == "normalized_target":
             name = str(task.get("file") or "")
-            target_path = root / "footnote_normalized" / name
+            target_root = resolve_audit_target_dir(
+                root,
+                file_name=name,
+                expected_file_sha256=str(task.get("evidence_target_sha256") or "") or None,
+            )
+            target_path = target_root / name
             if not name or Path(name).name != name or not target_path.is_file() or sha256_file(target_path) != task.get("evidence_target_sha256"):
                 errors.append(f"result audit review {task_id} normalized target changed")
                 continue
@@ -223,7 +289,7 @@ def validate_result_audit_reviews(
                         exact_block = ""
                     if _sha(exact_block) != task.get("evidence_sha256") and key and ".part" in name:
                         stem_prefix = name.split(".part", 1)[0]
-                        for sib_path in sorted((root / "footnote_normalized").glob(f"{stem_prefix}.part*.md")):
+                        for sib_path in sorted(target_root.glob(f"{stem_prefix}.part*.md")):
                             if sib_path == target_path:
                                 continue
                             try:
@@ -306,6 +372,11 @@ def validate_result_audit_reviews(
             outcome in {"legitimate_non_footnote", "truncated_source_exception"}
             and not isinstance(source_address, Mapping)
             and task.get("evidence_origin") != "normalized_target"
+            and not (
+                outcome == "legitimate_non_footnote"
+                and task.get("code") == "scoped_numbering_reset_uncertain"
+                and not task.get("candidate_refs")
+            )
         ):
             errors.append(f"result audit review {task_id} needs an exact current page sidecar address for this exception")
             continue
@@ -357,6 +428,7 @@ def validate_applied_result_audit_reviews(
     raw_tasks: Any,
     *,
     current_tasks: Sequence[Mapping[str, Any]] = (),
+    ordinary_decisions: Sequence[Mapping[str, Any]] = (),
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
     """Revalidate carried exceptions against their original and current evidence."""
     if raw_reviews in (None, []) and raw_tasks in (None, []):
@@ -389,10 +461,10 @@ def validate_applied_result_audit_reviews(
             errors.append(f"applied result audit review {task_id or '<missing>'} has no unique task snapshot")
             continue
         seen.add(task_id)
-        if review.get("outcome") not in {"legitimate_non_footnote", "truncated_source_exception"}:
+        if review.get("outcome") not in {"legitimate_non_footnote", "truncated_source_exception", "confirmed_footnote"}:
             continue
         original_result, original_errors = validate_result_audit_reviews(
-            output_dir, [original], [review]
+            output_dir, [original], [review], ordinary_decisions=ordinary_decisions
         )
         if original_errors or not original_result:
             errors.extend(original_errors or [f"applied result audit review {task_id} is stale"])
@@ -400,7 +472,7 @@ def validate_applied_result_audit_reviews(
         current = current_index.get(task_id)
         snapshot = {**original, **current} if current is not None else original
         current_result, current_errors = validate_result_audit_reviews(
-            output_dir, [snapshot], [review]
+            output_dir, [snapshot], [review], ordinary_decisions=ordinary_decisions
         )
         if current_errors or not current_result:
             errors.extend(current_errors or [f"applied result audit review {task_id} is stale"])
@@ -468,6 +540,7 @@ def record_result_audit_outcomes(
 
 __all__ = [
     "record_result_audit_outcomes",
+    "resolve_audit_target_dir",
     "validate_applied_result_audit_reviews",
     "validate_result_audit_reviews",
 ]

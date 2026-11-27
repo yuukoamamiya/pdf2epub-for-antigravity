@@ -68,3 +68,39 @@ def test_years_citations_and_urls_in_prose_do_not_exempt_unit(text):
 
 def test_explicit_structural_role_beats_content_inference():
     assert infer_translation_file_role("chapter_index.md", "Ordinary body text.") == "index"
+
+
+def test_html_wrapped_selected_bibliography_heading_is_bibliography():
+    text = "<a/><a/><a>Selected bibliography</a>\nAbensour, Miguel. <em>Democracy Against the State</em> (Cambridge: Polity, 2011)."
+    assert is_bibliography_text(text)
+    assert infer_translation_file_role("9781623563318_12_ref--hash.md", text) == "bibliography"
+
+
+def test_standalone_notes_heading_is_notes_not_bibliography():
+    for heading in ("<a>Notes</a>", "# Endnotes", "## **1. Notes**"):
+        text = f"{heading}\n\n1. First explanatory note on the argument."
+        assert not is_bibliography_text(text)
+        assert infer_translation_file_role("unit_bm1.md", text) == "notes"
+
+
+def test_numbered_and_superscript_selected_bibliography_and_chinese_density_strip():
+    from pdf2epub.markdown_validation import target_language_ratio_check
+
+    for heading in ("**1. Selected bibliography**", "<h2>Selected bibliography<sup>1</sup></h2>"):
+        assert is_bibliography_text(f"{heading}\n\nSmith, John. Work (London: Press, 2000).")
+
+    source = (
+        "This chapter develops an extensive political and historical argument across several sentences "
+        "examining early twentieth-century debates in detail.\n\n"
+        "Selected bibliography\n\n"
+        "Abensour, Miguel. Democracy Against the State (Cambridge: Polity, 2011).\n\n"
+        "Bordiga, Amadeo. The Science and Passion of Communism (Leiden: Brill, 2020).\n"
+    )
+    target = (
+        "本章用多段文字详细考察二十世纪初的政治与历史争论，阐明相关理论脉络与实践分歧。\n\n"
+        "精选参考文献\n\n"
+        "Abensour, Miguel. Democracy Against the State (Cambridge: Polity, 2011).\n\n"
+        "Bordiga, Amadeo. The Science and Passion of Communism (Leiden: Brill, 2020).\n"
+    )
+    audit = target_language_ratio_check(source, target, "Chinese", min_source_letters=40, min_target_letters=20)
+    assert audit["blocked"] is False, audit

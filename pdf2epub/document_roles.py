@@ -7,6 +7,7 @@ and validation modules from becoming the de facto shared-services layer.
 
 from __future__ import annotations
 
+import html
 import re
 from pathlib import Path
 from typing import Any, Mapping, Optional
@@ -43,12 +44,14 @@ _REFERENCE_SOURCE_LABELS = {
     "references",
     "reference",
     "bibliography",
+    "selected bibliography",
+    "select bibliography",
+    "selected references",
     "literatur",
     "literature",
     "nachweise",
     "quellennachweise",
     "textnachweise",
-    "bibliographie",
     "works cited",
     "sources",
     "notes",
@@ -61,14 +64,20 @@ _REFERENCE_SOURCE_LABELS = {
     "sekundärliteratur",
     "literaturverzeichnis",
     "bibliografía",
-    "bibliographie",
     "ouvrages cités",
     "bibliografia",
     "riferimenti bibliografici",
 }
+_NOTES_STANDALONE_LABELS = frozenset({"notes", "endnotes"})
 _REFERENCE_TARGET_LABELS = {
     "参考文献",
     "参考书目",
+    "精选参考文献",
+    "精选参考书目",
+    "精选书目",
+    "选编书目",
+    "参考书目选",
+    "精选参考资料",
     "文献",
     "书目",
     "注释",
@@ -93,10 +102,15 @@ def is_front_matter_text(text: str) -> bool:
 
 def _plain_markdown_label(line: str) -> str:
     """Normalize a standalone label without treating it as a heading."""
-    value = line.strip()
-    value = re.sub(r"^#{1,6}\s+", "", value)
-    value = re.sub(r"^\d{1,3}[.)]\s+", "", value)
-    value = re.sub(r"^\*{1,3}|\*{1,3}$|^_{1,3}|_{1,3}$", "", value)
+    value = html.unescape(str(line or "").strip())
+    value = re.sub(r"<sup\b[^>]*>.*?</sup>", "", value, flags=re.IGNORECASE | re.DOTALL)
+    value = re.sub(r"\[\^[^\]]+\](?!:)", "", value)
+    value = re.sub(r"<[^>]+>", " ", value)
+    value = re.sub(r"^#{1,6}\s+", "", value.strip())
+    value = re.sub(r"\s+#+\s*$", "", value.strip())
+    value = re.sub(r"^\*{1,3}|\*{1,3}$|^_{1,3}|_{1,3}$", "", value.strip())
+    value = re.sub(r"^\d{1,3}[.)]\s+", "", value.strip())
+    value = re.sub(r"^\*{1,3}|\*{1,3}$|^_{1,3}|_{1,3}$", "", value.strip())
     value = value.strip().strip("：:—–-·• ")
     return re.sub(r"\s+", " ", value).casefold()
 
@@ -116,7 +130,7 @@ def is_bibliography_text(text: str) -> bool:
     if not blocks:
         return False
     first_line = blocks[0].splitlines()[0].strip()
-    if _is_reference_label(first_line):
+    if _is_reference_label(first_line) and _plain_markdown_label(first_line) not in _NOTES_STANDALONE_LABELS:
         return True
     if len(blocks) >= 5:
         citation_patterns = (
@@ -153,6 +167,9 @@ def infer_translation_file_role(
         ("index", "index"),
         ("notes", "notes"),
         ("endnotes", "notes"),
+        ("toc", "toc"),
+        ("frontmatter", "frontmatter"),
+        ("metadata", "metadata"),
         ("copyright", "copyright"),
         ("cover", "cover"),
         ("catalog", "catalog"),
@@ -161,8 +178,12 @@ def infer_translation_file_role(
     for token, role in role_tokens:
         if any(re.match(rf"^{re.escape(token)}\d*$", t) for t in tokens):
             return role
-    if text and is_bibliography_text(text):
-        return "bibliography"
+    if text:
+        if is_bibliography_text(text):
+            return "bibliography"
+        first_line = next((line.strip() for line in str(text).splitlines() if line.strip()), "")
+        if first_line and _plain_markdown_label(first_line) in _NOTES_STANDALONE_LABELS:
+            return "notes"
     return None
 
 
@@ -177,6 +198,8 @@ def infer_translation_file_role_with_reason(
     if infer_translation_file_role(filename, None) is not None:
         return role, {"source": "filename_inference", "reason": f"recognized special-unit filename: {stem}"}
     first = next((line.strip() for line in str(text or "").splitlines() if line.strip()), "")
+    if role == "notes" and first and _plain_markdown_label(first) in _NOTES_STANDALONE_LABELS:
+        return role, {"source": "text_inference", "reason": f"standalone notes heading: {first[:120]}"}
     if first and _is_reference_label(first):
         return role, {"source": "text_inference", "reason": f"standalone bibliography heading: {first[:120]}"}
     return role, {"source": "text_inference", "reason": "bibliographic entry format repeated across unit"}

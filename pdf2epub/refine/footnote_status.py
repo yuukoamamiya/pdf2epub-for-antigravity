@@ -147,6 +147,7 @@ def footnote_normalization_status(
         prepared_audit.get("applied_result_audit_reviews"),
         prepared_audit.get("applied_result_audit_review_tasks"),
         current_tasks=current_audit_tasks,
+        ordinary_decisions=validation.get("decisions", []),
     )
     if history_errors or history_reviews != prepared_audit.get("applied_result_audit_reviews", []):
         fail(

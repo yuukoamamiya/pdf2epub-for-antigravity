@@ -492,3 +492,140 @@ def test_resolve_result_audit_deduplicates_findings_and_reviewed_tasks(tmp_path,
     assert [f["task_id"] for f in audit["findings"]] == ["dup-1"]
     assert audit["findings"][0]["extra"] == "kept"
     assert [t["task_id"] for t in audit["reviewed_candidate_tasks"]] == ["keep-2"]
+
+
+def test_failed_apply_rollback_preserves_target_audit_findings_across_prepare_and_validate(tmp_path, monkeypatch):
+    import pdf2epub.ocr_correction as correction_module
+    from pdf2epub.refine.footnote_handoff import _carry_prior_audit_findings
+    from pdf2epub.refine.footnote_source import markdown_inventory
+    from pdf2epub.refine.footnote_versions import capture_last_good, preserve_failed_attempt, recover_interrupted_apply, mark_apply_running
+
+    monkeypatch.setattr(correction_module, "review_images_are_current", lambda *_args: True)
+    (tmp_path / "ocr_markdown").mkdir()
+    (tmp_path / "ocr_markdown" / "ch1.md").write_bytes(b"Body.\n")
+    (tmp_path / "footnote_normalized").mkdir()
+    good_text = "Body.\n\n[^1]: Baseline note.\n"
+    (tmp_path / "footnote_normalized" / "ch1.md").write_bytes(good_text.encode("utf-8"))
+    good_inv = markdown_inventory(tmp_path / "footnote_normalized")
+    (tmp_path / "footnote_normalization.json").write_text(json.dumps({
+        "schema_version": 8, "valid": True, "status": "validated", "target_sha256": good_inv,
+    }), encoding="utf-8")
+    baseline_ver = capture_last_good(tmp_path)
+    assert baseline_ver is not None
+
+    failed_text = "Body<sup>9</sup>.\n\n[^1]: Baseline note.\n"
+    mark_apply_running(tmp_path, {"ch1.md": failed_text}, baseline_ver)
+    (tmp_path / "footnote_normalized" / "ch1.md").write_bytes(failed_text.encode("utf-8"))
+    failed_inv = markdown_inventory(tmp_path / "footnote_normalized")
+    failed_audit = audit_footnote_result({"ch1.md": "Body<sup>9</sup>.\n"}, target_texts={"ch1.md": failed_text})
+    finding = dict(failed_audit["findings"][0])
+    finding["pages"] = [1]
+    img_dir = tmp_path / "ocr_review_images"
+    img_dir.mkdir()
+    img = img_dir / "page_001.png"
+    img.write_bytes(b"png")
+    img_manifest = tmp_path / "ocr_review_images.json"
+    img_manifest.write_text(json.dumps({"source_sha256": "pdf"}), encoding="utf-8")
+    finding["visual_files"] = {"1": {"path": "ocr_review_images/page_001.png", "sha256": sha256_file(img)}}
+    finding["visual_image_manifest_sha256"] = sha256_file(img_manifest)
+    finding["source_pdf_sha256"] = "pdf"
+    attempt_dir = preserve_failed_attempt(tmp_path)
+    assert attempt_dir is not None
+    assert recover_interrupted_apply(tmp_path) is True
+    (tmp_path / "footnote_normalization_attempt.json").write_text(json.dumps({
+        "schema_version": 8, "valid": False, "status": "review_required", "attempt_evidence_dir": attempt_dir,
+    }), encoding="utf-8")
+
+    carried_audit = {"findings": []}
+    _carry_prior_audit_findings(
+        {
+            "source_sha256": markdown_inventory(tmp_path / "ocr_markdown"),
+            "target_sha256": failed_inv,
+            "findings": [finding],
+        },
+        carried_audit,
+        output_dir=tmp_path,
+        current_target_inventory=markdown_inventory(tmp_path / "footnote_normalized"),
+        records=[{"name": "ch1.md", "start_page": 1, "end_page": 1}],
+        report={"footnote_mode": "footnotes"},
+        config={},
+    )
+    assert len(carried_audit["findings"]) == 1
+    carried_task = carried_audit["findings"][0]
+    assert carried_task["evidence_target_sha256"] == failed_inv["ch1.md"]
+
+    reviews, errors = validate_result_audit_reviews(
+        tmp_path,
+        [carried_task],
+        [{
+            "task_id": carried_task["task_id"],
+            "evidence_sha256": carried_task["evidence_sha256"],
+            "outcome": "legitimate_non_footnote",
+            "reason": "Ordinal superscript in body.",
+            "evidence_pages": [1],
+        }],
+    )
+    assert errors == []
+    assert len(reviews) == 1
+
+
+def test_confirmed_reset_and_unaddressed_reset_survive_validation_and_next_prepare(tmp_path, monkeypatch):
+    import pdf2epub.ocr_correction as correction_module
+    from pdf2epub.refine.footnote_result_review import validate_applied_result_audit_reviews
+
+    monkeypatch.setattr(correction_module, "review_images_are_current", lambda *_args: True)
+    (tmp_path / "ocr_markdown").mkdir()
+    (tmp_path / "ocr_markdown" / "ch1.md").write_text("[^4]: Fourth.\n\n[^1]: Reset.\n", encoding="utf-8")
+    img_dir = tmp_path / "ocr_review_images"
+    img_dir.mkdir()
+    img = img_dir / "page_001.png"
+    img.write_bytes(b"png")
+    img_manifest = tmp_path / "ocr_review_images.json"
+    img_manifest.write_text(json.dumps({"source_sha256": "pdf"}), encoding="utf-8")
+
+    audit = audit_footnote_result(
+        {"ch1.md": "[^4]: Fourth.\n\n[^1]: Reset.\n"},
+        records=[{"name": "ch1.md", "start_page": 1, "end_page": 2, "chapter_id": "ch1", "part_index": 1, "part_count": 1}],
+    )
+    task = dict(audit["findings"][0])
+    task["evidence_file_sha256"] = sha256_file(tmp_path / "ocr_markdown" / "ch1.md")
+    task["pages"] = [1]
+    task["visual_files"] = {"1": {"path": "ocr_review_images/page_001.png", "sha256": sha256_file(img)}}
+    task["visual_image_manifest_sha256"] = sha256_file(img_manifest)
+    task["source_pdf_sha256"] = "pdf"
+
+    # When no sidecar candidate_refs exist, legitimate_non_footnote is permitted.
+    task["candidate_refs"] = []
+    reviews_no_ref, errs_no_ref = validate_result_audit_reviews(
+        tmp_path,
+        [task],
+        [{
+            "task_id": task["task_id"],
+            "evidence_sha256": task["evidence_sha256"],
+            "outcome": "legitimate_non_footnote",
+            "reason": "Section reset verified on page image.",
+            "evidence_pages": [1],
+        }],
+    )
+    assert errs_no_ref == [] and len(reviews_no_ref) == 1
+
+    # When candidate_refs exist and confirmed_footnote is chosen, applied history retains it.
+    task["candidate_refs"] = [{"page": 1, "source": "primary", "block": 2}]
+    ordinary_decisions = [{"page": 1, "source": "primary", "block": 2, "role": "footnote_start", "key": "1"}]
+    confirm_review = {
+        "task_id": task["task_id"],
+        "evidence_sha256": task["evidence_sha256"],
+        "outcome": "confirmed_footnote",
+        "candidate_ref": {"page": 1, "source": "primary", "block": 2},
+        "reason": "Section resets at part 2.",
+        "evidence_pages": [1],
+    }
+    kept_reviews, kept_tasks, kept_errors = validate_applied_result_audit_reviews(
+        tmp_path,
+        [confirm_review],
+        [task],
+        ordinary_decisions=ordinary_decisions,
+    )
+    assert kept_errors == []
+    assert len(kept_reviews) == 1 and kept_reviews[0]["outcome"] == "confirmed_footnote"
+    assert len(kept_tasks) == 1

@@ -13,7 +13,7 @@ import hashlib
 import difflib
 import re
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 from dataclasses import dataclass
 from loguru import logger
 
@@ -323,7 +323,7 @@ def add_subchapter_anchors_to_parts(
             title,
             re.I,
         ))
-        if has_inline_formatting and expected_visible_title is not None and expected_visible_title != title:
+        if (has_inline_formatting or info.get("flattened_footnote")) and expected_visible_title is not None and expected_visible_title != title:
             info["navigation_expected_title"] = expected_visible_title
             info["navigation_display_title"] = expected_visible_title
         if source_occurrence is not None or source_match_count is not None:
@@ -1238,6 +1238,61 @@ def _load_build_toc(config: BuildEpubConfig) -> Tuple[Dict, Dict]:
     return original_toc_tree, toc_tree
 
 
+def _resolve_ownership_source_inventory(
+    config: BuildEpubConfig,
+    required_names: Sequence[str],
+) -> MarkdownInventory:
+    """Resolve one authoritative Markdown inventory for TOC ownership projection."""
+    output_dir = Path(config.output_dir)
+    from .commands.sources import _polished_stage_is_current
+    from .refine.footnote_status import (
+        footnote_normalization_baseline_is_attested,
+        footnote_normalization_is_current,
+    )
+
+    normalized_dir = output_dir / "footnote_normalized"
+    normalized_active = (
+        normalized_dir.is_dir()
+        and (
+            footnote_normalization_is_current(output_dir, config=config.config)
+            or footnote_normalization_baseline_is_attested(output_dir)
+        )
+    )
+    polish_input_dir = normalized_dir if normalized_active else (output_dir / "ocr_markdown")
+    polished_dir = output_dir / "polished_markdown" / "validated"
+    polish_receipt = output_dir / "polish_validation.json"
+    polished_current = polish_receipt.is_file() and _polished_stage_is_current(
+        output_dir,
+        polished_dir,
+        polish_input_dir,
+        config=config.config,
+        config_path=config.config_path,
+    )
+
+    if not config.translated:
+        candidate_dir = Path(config.markdown_dir).resolve()
+        if polished_current and candidate_dir == polished_dir.resolve():
+            return build_markdown_inventory(polished_dir)
+        if normalized_active and candidate_dir == normalized_dir.resolve():
+            normalized_inventory = build_markdown_inventory(normalized_dir)
+            if all(name in normalized_inventory for name in required_names):
+                return normalized_inventory
+        return build_markdown_inventory(output_dir / "ocr_markdown")
+
+    if polished_current:
+        return build_markdown_inventory(polished_dir)
+    if not polish_receipt.is_file() and polished_dir.is_dir():
+        polished_inventory = build_markdown_inventory(polished_dir)
+        if all(name in polished_inventory for name in required_names):
+            return polished_inventory
+
+    if normalized_active:
+        normalized_inventory = build_markdown_inventory(normalized_dir)
+        if all(name in normalized_inventory for name in required_names):
+            return normalized_inventory
+    return build_markdown_inventory(output_dir / "ocr_markdown")
+
+
 def _prepare_epub_structure(
     config: BuildEpubConfig, toc_tree: Dict, source_toc_tree: Optional[Dict] = None
 ) -> List[Dict]:
@@ -1274,15 +1329,19 @@ def _prepare_epub_structure(
                 raise ValueError("Invalid source/translated TOC correspondence: " + "; ".join(identity_errors))
             source_texts = {}
             missing_source_files = []
-            source_inventory = build_markdown_inventory(config.output_dir / "ocr_markdown")
-            for unit in progress.get("units", []):
-                for name in unit.get("part_files") or [unit.get("file")]:
-                    if name:
-                        entry = source_inventory.get(str(name))
-                        if entry is not None:
-                            source_texts[str(name)] = entry[0]
-                        else:
-                            missing_source_files.append(str(name))
+            required_names = [
+                str(name)
+                for unit in progress.get("units", [])
+                for name in (unit.get("part_files") or [unit.get("file")])
+                if name
+            ]
+            source_inventory = _resolve_ownership_source_inventory(config, required_names)
+            for name in required_names:
+                entry = source_inventory.get(name)
+                if entry is not None:
+                    source_texts[name] = entry[0]
+                else:
+                    missing_source_files.append(name)
             if missing_source_files:
                 raise ValueError(
                     "TOC ownership source Markdown is missing: "
@@ -1323,6 +1382,12 @@ def _prepare_epub_structure(
                         "source_occurrence": heading.get("source_occurrence"),
                         "source_match_count": heading.get("source_match_count"),
                         "source_candidate_kind": heading.get("source_candidate_kind"),
+                        "flattened_footnote": bool(heading.get("flattened_footnote")),
+                        **(
+                            {"expected_visible_title": heading.get("expected_visible_title")}
+                            if not config.translated and heading.get("expected_visible_title") is not None
+                            else {}
+                        ),
                     })
 
             def apply_binding(entries):

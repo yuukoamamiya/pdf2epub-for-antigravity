@@ -190,11 +190,11 @@ def _dry_run_preflight_audit_findings(
         ]
         dry_audit = audit_footnote_result(
             source_snapshot.source_texts,
-            edit_plan.transformed_texts,
-            records,
+            records=records,
+            target_texts=edit_plan.transformed_texts,
+            mode="footnotes",
             expected_notes=expected_notes,
             resolved_blocks=list(edit_plan.resolved_blocks),
-            footnote_mode="footnotes",
         )
         surfaced: list[dict[str, Any]] = []
         for finding in dry_audit.get("findings", []) or []:
@@ -596,10 +596,6 @@ def _build_prepare_manifest(inputs: _ManifestInputs) -> dict[str, Any]:
             name: sha256_file(output_dir / relative)
             for name, relative in unit_context_files.items()
         },
-        "unit_context_sha256": {
-            name: sha256_file(output_dir / relative)
-            for name, relative in unit_context_files.items()
-        },
         "decision_file": (
             "footnote_decisions.json" if page_review_required else None
         ),
@@ -630,11 +626,20 @@ def _carry_prior_audit_findings(
     config: Optional[Mapping[str, Any]],
 ) -> None:
     """Carry exact findings from the previous audit while their evidence is unchanged."""
+    carried_target_finding = False
     if (
         isinstance(prior_result_audit, Mapping)
         and prior_result_audit.get("source_sha256") == markdown_inventory(output_dir / "ocr_markdown")
         and isinstance(prior_result_audit.get("findings"), list)
     ):
+        from .footnote_result_review import resolve_audit_target_dir
+
+        prior_target_hashes = prior_result_audit.get("target_sha256")
+        if isinstance(prior_target_hashes, Mapping):
+            resolved_target_dir = resolve_audit_target_dir(output_dir, prior_target_hashes)
+            audit_target_inventory = markdown_inventory(resolved_target_dir) if resolved_target_dir.is_dir() else {}
+        else:
+            audit_target_inventory = current_target_inventory
         known = {str(item.get("task_id")) for item in audit.get("findings", []) if isinstance(item, Mapping)}
         for prior in prior_result_audit["findings"]:
             if isinstance(prior, Mapping) and prior.get("task_id") and str(prior["task_id"]) not in known:
@@ -646,7 +651,7 @@ def _carry_prior_audit_findings(
                     continue
                 if (
                     origin == "normalized_target"
-                    and prior_result_audit.get("target_sha256") != current_target_inventory
+                    and prior_target_hashes != audit_target_inventory
                 ):
                     continue
                 carried = dict(prior)
@@ -656,14 +661,20 @@ def _carry_prior_audit_findings(
                     carried["evidence_file_sha256"] = sha256_file(evidence_file) if evidence_file.is_file() else None
                 else:
                     carried["evidence_origin"] = "normalized_target"
-                    carried["evidence_target_sha256"] = (prior_result_audit.get("target_sha256") or {}).get(str(carried.get("file") or ""))
+                    carried["evidence_target_sha256"] = (prior_target_hashes or {}).get(str(carried.get("file") or ""))
+                    carried_target_finding = True
                 audit.setdefault("findings", []).append(carried)
                 known.add(str(prior["task_id"]))
         prior_applied = prior_result_audit.get("applied_result_audit_reviews")
         prior_applied_tasks = prior_result_audit.get("applied_result_audit_review_tasks")
         audit["_prior_applied_reviews"] = prior_applied
         audit["_prior_applied_review_tasks"] = prior_applied_tasks
-    elif not current_target_inventory and records and str(report.get("footnote_mode") or "") == "footnotes":
+    if (
+        not current_target_inventory
+        and not carried_target_finding
+        and records
+        and str(report.get("footnote_mode") or "") == "footnotes"
+    ):
         known = {str(item.get("task_id")) for item in audit.get("findings", []) if isinstance(item, Mapping)}
         try:
             from .footnote_source import load_footnote_source_snapshot
@@ -1331,7 +1342,14 @@ def _resolve_truncated_definitions(
         source_text = source_texts.get(file, "")
         evidence_text = source_text
         if audit_task.get("evidence_origin") == "normalized_target":
-            normalized_path = output_dir / "footnote_normalized" / file
+            from .footnote_result_review import resolve_audit_target_dir
+
+            target_root = resolve_audit_target_dir(
+                output_dir,
+                file_name=file,
+                expected_file_sha256=str(audit_task.get("evidence_target_sha256") or "") or None,
+            )
+            normalized_path = target_root / file
             if normalized_path.is_file():
                 evidence_text = normalized_path.read_text(encoding="utf-8")
         definitions, _ = collect_footnote_definition_blocks(evidence_text.splitlines())
@@ -2501,6 +2519,27 @@ def _resolve_result_audit(
     prior_review_tasks = audit.pop("_prior_applied_review_tasks", None)
     if prior_reviews is not None or prior_review_tasks is not None:
         from .footnote_result_review import validate_applied_result_audit_reviews
+        from .footnote_validation_audit import merge_region_and_flat_decisions
+
+        ordinary_decisions: list[Any] = []
+        if isinstance(prior_review_data, Mapping) and prior_review_data:
+            nested_decisions = [
+                item
+                for region in (prior_review_data.get("region_audits") or [])
+                if isinstance(region, Mapping)
+                for item in (region.get("decisions") or [])
+                if isinstance(item, Mapping)
+            ]
+            flat_decisions = (
+                prior_review_data.get("decisions")
+                if isinstance(prior_review_data.get("decisions"), list)
+                else []
+            )
+            ordinary_decisions = merge_region_and_flat_decisions(nested_decisions, flat_decisions)
+        elif isinstance(prior_normalization, Mapping) and prior_normalization.get("valid") is True:
+            eff = prior_normalization.get("effective_decisions")
+            if isinstance(eff, list):
+                ordinary_decisions = list(eff)
 
         valid_reviews, valid_tasks, _history_errors = validate_applied_result_audit_reviews(
             output_dir,
@@ -2510,6 +2549,7 @@ def _resolve_result_audit(
                 *(audit.get("findings", []) if isinstance(audit.get("findings"), list) else []),
                 *(audit.get("reviewed_candidate_tasks", []) if isinstance(audit.get("reviewed_candidate_tasks"), list) else []),
             ],
+            ordinary_decisions=ordinary_decisions,
         )
         if valid_reviews:
             audit["applied_result_audit_reviews"] = valid_reviews
