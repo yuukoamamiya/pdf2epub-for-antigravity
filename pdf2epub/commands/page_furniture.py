@@ -24,6 +24,7 @@ def repair_page_furniture_command(args):
         )
         return 1
     try:
+        from pdf2epub.commands.markdown_context import _load_pdf_toc_titles
         from pdf2epub.page_furniture_repair import prepare_page_furniture_repair
 
         paths = prepare_page_furniture_repair(
@@ -32,6 +33,8 @@ def repair_page_furniture_command(args):
             policy.source_language or "Original",
             policy.target_language or "Chinese",
             resume=bool(getattr(args, "resume", False)),
+            file_roles=load_pdf_file_roles(context.output_dir),
+            protected_toc_titles=_load_pdf_toc_titles(context.output_dir),
         )
     except Exception as exc:
         logger.error(f"Could not prepare page-furniture repair: {exc}")

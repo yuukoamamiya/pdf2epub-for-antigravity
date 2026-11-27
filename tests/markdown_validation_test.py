@@ -314,3 +314,33 @@ def test_markdown_part_heading_is_not_exempted_when_unregistered():
     assert [item["kind"] for item in findings] == [
         "running_title_plus_page_label"
     ]
+
+
+def test_protected_footnoted_numbered_toc_headings_dates_and_toc_role():
+    md = (
+        "# 1 Yesterday[^fnm-number-1-o7]\n\n"
+        "Body paragraph on 19 May 1922.\n\n"
+        "19 May 1922\n\n"
+        "Chapter One 12\n\n"
+        "[^fnm-number-1-o7]: Note.\n"
+    )
+    assert detect_polish_page_furniture(
+        md,
+        role="toc",
+        protected_toc_titles=["1 Yesterday", "Yesterday"],
+    ) == []
+
+    # Deleting a protected TOC heading or standalone date line must be caught by polish integrity.
+    integrity_loss = polish_content_integrity_check(
+        "# 1 Yesterday[^fnm-number-1-o7]\n\n19 May 1922\n\nLong enough body text here.\n\n[^fnm-number-1-o7]: Note.\n",
+        "Long enough body text here.\n\n[^fnm-number-1-o7]: Note.\n",
+        protected_toc_titles=["1 Yesterday"],
+    )
+    assert integrity_loss["valid"] is False
+
+    # Removing a genuine detected running header remains tolerated.
+    header_removed = polish_content_integrity_check(
+        "Long enough body paragraph.\n\nPreface XII\n\nAnother paragraph continues here.\n",
+        "Long enough body paragraph.\n\nAnother paragraph continues here.\n",
+    )
+    assert header_removed["valid"] is True

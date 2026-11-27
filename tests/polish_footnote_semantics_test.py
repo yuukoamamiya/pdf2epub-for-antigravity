@@ -428,3 +428,56 @@ def test_repeated_semantic_validation_and_manifest_rebuild_are_idempotent(tmp_pa
     assert repeat_after_manifest_rebuild["human_review_required"] == []
 
     assert repeat_after_manifest_rebuild["polish_footnote_reflow"]["chapter.md"]["rounds"] == 1
+
+
+def test_boolean_coverage_error_and_upstream_requires_current_normalization(tmp_path):
+    from pdf2epub.polish_footnote_semantics import validate_prepared_file_review
+
+    source, target = "Body.\n", "Body.\n"
+    contract = build_semantic_review_contract("chapter.md", source)
+    sidecar = tmp_path / contract["sidecar"]
+    sidecar.parent.mkdir()
+    payload = _review(source, target, contract)
+    payload["coverage"]["body_reviewed"] = True
+    sidecar.write_text(json.dumps(payload), encoding="utf-8")
+    result = validate_semantic_review_sidecar(sidecar, contract, source_text=source, target_text=target)
+    assert result["valid"] is False
+    assert any("must be an object" in error and "not a boolean" in error for error in result["errors"])
+
+    # Stale normalization must never resolve an upstream issue task ID.
+    source_dir = tmp_path / "ocr_markdown"
+    target_dir = tmp_path / "polished_markdown"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "chapter.md").write_bytes(b"Body[^1].\n\n[^1]: Note.\n")
+    (target_dir / "chapter.md").write_bytes(b"Body[^1].\n\n[^1]: Note.\n")
+    contract2 = build_semantic_review_contract("chapter.md", "Body[^1].\n\n[^1]: Note.\n")
+    (tmp_path / "polish_subagent_manifest.json").write_text(json.dumps({
+        "task": "polish",
+        "source_sha256": {"chapter.md": contract2["source_sha256"]},
+        "footnote_semantics": {"schema_version": 1, "enabled": True, "files": {"chapter.md": contract2}},
+    }), encoding="utf-8")
+    issue = {
+        "issue_id": "issue-1", "code": "leaked_continuation",
+        "source_excerpt": "Note.", "target_excerpt": "Note.",
+        "reason": "Needs visual verification.",
+        "file": "chapter.md", "unit_id": None,
+        "source_sha256": contract2["source_sha256"],
+        "target_sha256": hashlib.sha256(b"Body[^1].\n\n[^1]: Note.\n").hexdigest(),
+        "context_sha256": contract2["context_sha256"],
+    }
+    sidecar.write_text(json.dumps(_review("Body[^1].\n\n[^1]: Note.\n", "Body[^1].\n\n[^1]: Note.\n", contract2, status="issues", issues=[issue])), encoding="utf-8")
+    from pdf2epub.polish_footnote_semantics import polish_issue_task_id
+
+    tid = polish_issue_task_id("chapter.md", issue)
+    (tmp_path / "footnote_normalization.json").write_text(
+        json.dumps({"valid": True, "applied_result_audit_reviews": [{"task_id": tid, "outcome": "legitimate_non_footnote"}]}),
+        encoding="utf-8",
+    )
+    review = validate_prepared_file_review(
+        tmp_path, "chapter.md",
+        source_text="Body[^1].\n\n[^1]: Note.\n",
+        target_text="Body[^1].\n\n[^1]: Note.\n",
+        required=True,
+    )
+    assert review["valid"] is False

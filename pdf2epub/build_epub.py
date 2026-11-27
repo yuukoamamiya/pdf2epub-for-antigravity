@@ -1244,7 +1244,7 @@ def _resolve_ownership_source_inventory(
 ) -> MarkdownInventory:
     """Resolve one authoritative Markdown inventory for TOC ownership projection."""
     output_dir = Path(config.output_dir)
-    from .commands.sources import _polished_stage_is_current
+    from .validation_receipts import validation_receipt_is_current
     from .refine.footnote_status import (
         footnote_normalization_baseline_is_attested,
         footnote_normalization_is_current,
@@ -1261,12 +1261,19 @@ def _resolve_ownership_source_inventory(
     polish_input_dir = normalized_dir if normalized_active else (output_dir / "ocr_markdown")
     polished_dir = output_dir / "polished_markdown" / "validated"
     polish_receipt = output_dir / "polish_validation.json"
-    polished_current = polish_receipt.is_file() and _polished_stage_is_current(
-        output_dir,
-        polished_dir,
-        polish_input_dir,
-        config=config.config,
-        config_path=config.config_path,
+    polished_current = (
+        polished_dir.is_dir()
+        and any(polished_dir.glob("*.md"))
+        and polish_receipt.is_file()
+        and validation_receipt_is_current(
+            polish_receipt,
+            polish_input_dir,
+            polished_dir,
+            task="polish",
+            output_dir=output_dir,
+            config=config.config,
+            config_path=config.config_path,
+        )
     )
 
     if not config.translated:

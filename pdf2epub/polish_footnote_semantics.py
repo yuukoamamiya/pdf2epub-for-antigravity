@@ -56,10 +56,21 @@ def _upstream_resolved_issue_task_ids(
     filename: str,
     issues: list[Mapping[str, Any]],
 ) -> list[str]:
-    """Return upstream-closed task IDs when a valid footnote_normalization closed every issue."""
+    """Return upstream-closed task IDs when a current footnote_normalization closed every issue."""
     if not issues:
         return []
     root = Path(output_dir)
+    from .refine.footnote_status import footnote_normalization_is_current
+
+    if not footnote_normalization_is_current(root):
+        return []
+    attempt_path = root / "footnote_normalization_attempt.json"
+    try:
+        attempt = json.loads(attempt_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        attempt = {}
+    if isinstance(attempt, Mapping) and attempt.get("valid") is False:
+        return []
     norm_path = root / "footnote_normalization.json"
     try:
         norm = json.loads(norm_path.read_text(encoding="utf-8"))
@@ -368,7 +379,12 @@ def validate_semantic_review_sidecar(
         for key in ("body_reviewed", "definitions_reviewed", "cross_boundary_reviewed"):
             item = coverage.get(key)
             if not isinstance(item, Mapping):
-                errors.append(f"review coverage {key} is missing")
+                if isinstance(item, bool):
+                    errors.append(
+                        f'review coverage {key} must be an object like {{"status": "reviewed"}}, not a boolean'
+                    )
+                else:
+                    errors.append(f"review coverage {key} is missing")
                 continue
             state = item.get("status")
             if key == "cross_boundary_reviewed" and state == "not_applicable" and contract.get("has_boundary_context") is not True:

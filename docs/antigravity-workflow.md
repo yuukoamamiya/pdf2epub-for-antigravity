@@ -100,7 +100,7 @@ PDF/EPUB 的 `translate` manifest 会在 `worker_handoffs/` 按 TOC 顺序为相
 `bibliography`、`notes`、`author_notes`、`toc`、`catalog`、`ad`、`copyright`、
 `frontmatter`、`metadata` 和 `cover` 会标记为 isolated batch，并各自占用独立 worker，
 不与普通章节或其他特殊角色混排。隔离 worker 的 prompt 只针对其 assigned files 高亮
-index 条目 1:1、书目逐条、notes 标记和 CIP/版权页短行标识符规则。其中 `special_role_audit.py` 支持显式文本范围（如 `dal A al B`、`A至B` ↔ `A-B`）与书目自然中文日期/期号（如 `25 giugno 1945` ↔ `1945年6月25日`、`n. 5, 1952` ↔ `1952年第5期`），但仍严格拒绝数字篡改或范围边界重组，并在不匹配时输出精确的 `source line` / `target line` 与局部上下文；校验失败的无效目标会保留并移动到 `scratch/<task>/invalid_outputs/`，CLI 同时打印隔离路径供定位修改。普通单章节 worker 的
+index 条目 1:1、书目逐条、notes 标记和 CIP/版权页短行标识符规则。其中 `special_role_audit.py` 支持显式文本范围（如 `dal A al B`、`1939年至1941年`、`1911-26` ↔ `1911-1926`）与书目/`notes` 自然中文日期/年代/期号（如 `25 giugno 1945` ↔ `1945年6月25日`、`Jan. 1922` ↔ `1922年1月`、`1920s` ↔ `20世纪20年代`、`n. 5, 1952` ↔ `1952年第5期`），并在索引条目解析中识别带强调的 `*See also*`/`siehe`/`voir` 交叉引用；它仍严格拒绝数字篡改或范围边界重组，并在不匹配时输出精确的 `source line` / `target line` 与局部上下文；校验失败的无效目标会保留并移动到 `scratch/<task>/invalid_outputs/`，CLI 同时打印隔离路径供定位修改。普通单章节 worker 的
 术语上下文只注入一次；相邻章节合并 worker 使用按
 文件分区的直接上下文；大章节拆分时使用 `shared_entries` 和当前分片的 `local_entries`。
 

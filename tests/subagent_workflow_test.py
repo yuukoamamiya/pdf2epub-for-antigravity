@@ -194,6 +194,64 @@ def test_detect_refusal_still_flags_as_ai_first_person_disclaimer():
     assert "Chinese" in reason
 
 
+def test_detect_refusal_literary_first_person_vs_disclaimer_inside_dialogue(tmp_path: Path):
+    # First-person literary prose across clauses must NOT false-positive on generic verbs.
+    assert (
+        detect_refusal(
+            "I could not understand his decision, nor provide further clues.",
+            "我无法理解他的决定，也无法提供更多线索。",
+        )
+        is None
+    )
+    # Explicit AI/policy meta-disclaimer MUST still block even near source character dialogue.
+    assert detect_refusal(
+        "I cannot help you with that.",
+        "As an AI language model, I cannot assist with this request.",
+    )
+    # Non-special HTML role (e.g. toc) must NOT invoke bibliography/index marker checks.
+    from pdf2epub.html_translation.translation_validation import (
+        HTMLTranslationValidator,
+        HTMLValidationWorkspace,
+    )
+
+    src_dir = tmp_path / "compressed_units"
+    tgt_dir = tmp_path / "translated_compressed"
+    src_dir.mkdir()
+    tgt_dir.mkdir()
+    nav_src = "12 Introduction\n"
+    (src_dir / "nav.md").write_bytes(nav_src.encode("utf-8"))
+    (tgt_dir / "nav.md").write_bytes("导论\n".encode("utf-8"))
+    (src_dir / "nav.mapping.json").write_text(
+        json.dumps({"original_extension": ".xhtml", "translation_parts": ["nav.md"]}),
+        encoding="utf-8",
+    )
+    input_epub = tmp_path / "input.epub"
+    input_epub.write_bytes(b"PK\x03\x04")
+    (tmp_path / "translated_metadata.json").write_text(
+        json.dumps({"translated_title": "书名"}), encoding="utf-8"
+    )
+    import hashlib
+    manifest_dir = tmp_path / "translate-html_subagent_manifest.json"
+    manifest_dir.write_text(
+        json.dumps({
+            "task": "translate-html",
+            "files": ["nav.md"],
+            "source_sha256": {"nav.md": hashlib.sha256(nav_src.encode("utf-8")).hexdigest()},
+            "input_epub": "input.epub",
+            "input_epub_sha256": hashlib.sha256(b"PK\x03\x04").hexdigest(),
+            "file_roles": {"nav.md": "toc"},
+        }),
+        encoding="utf-8",
+    )
+    validator = HTMLTranslationValidator(
+        HTMLValidationWorkspace(tmp_path, src_dir, tgt_dir, {"translation": {"target_language": "Chinese"}})
+    )
+    report = validator.validate(file_name="nav.md")
+    assert report["invalid"] == []
+    assert report["source_snapshot"]["errors"] == []
+    assert report["all_passed"] is True
+
+
 def test_detect_bilingual_output_is_advisory_for_long_unchanged_spans():
     line = "This is a deliberately long English paragraph that should remain unchanged in a bilingual output warning."
     warning = detect_bilingual_output(f"{line}\n{line}", f"{line}\n{line}")

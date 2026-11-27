@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -166,6 +167,11 @@ def polish_semantic_issue_tasks(
             raw_record = record
             raw_text = raw_source
             raw_spans = find_exact_signature_spans(raw_text, excerpt)
+            if len(raw_spans) != 1 and excerpt:
+                stripped_excerpt = re.sub(r"^\s*\[\^[^\]\r\n]+\]\s*:\s*", "", excerpt)
+                stripped_excerpt = re.sub(r"\[\^[^\]\r\n]+\](?!:)", "", stripped_excerpt).strip()
+                if stripped_excerpt and stripped_excerpt != excerpt:
+                    raw_spans = find_exact_signature_spans(raw_text, stripped_excerpt)
             if len(raw_spans) != 1 and record.get("chapter_id"):
                 chapter_id = str(record.get("chapter_id"))
                 chapter_matches: list[tuple[Mapping[str, Any], str, list[tuple[int, int]]]] = []
@@ -178,6 +184,11 @@ def polish_semantic_issue_tasks(
                     if sib_text is None:
                         continue
                     sib_spans = find_exact_signature_spans(sib_text, excerpt)
+                    if not sib_spans and excerpt:
+                        stripped_excerpt = re.sub(r"^\s*\[\^[^\]\r\n]+\]\s*:\s*", "", excerpt)
+                        stripped_excerpt = re.sub(r"\[\^[^\]\r\n]+\](?!:)", "", stripped_excerpt).strip()
+                        if stripped_excerpt and stripped_excerpt != excerpt:
+                            sib_spans = find_exact_signature_spans(sib_text, stripped_excerpt)
                     if sib_spans:
                         total_chapter_spans += len(sib_spans)
                         chapter_matches.append((sibling, sib_text, sib_spans))
@@ -284,6 +295,7 @@ def polish_semantic_issue_tasks(
                     and int(source_note.get("block", -1)) == block_index
                 ):
                     linked_pages.update(int(value) for value in gap.get("pages", []) if str(value).isdigit())
+            raw_source_name = str(raw_record.get("name") or filename)
             tasks.append({
                 "task_id": task_id,
                 "code": "polish_semantic_issue",
@@ -294,8 +306,8 @@ def polish_semantic_issue_tasks(
                 "evidence_origin": "source_markdown",
                 "evidence_sha256": evidence_hash,
                 "evidence_excerpt": raw_excerpt,
-                "evidence_file_sha256": sha256_file(output_dir / "ocr_markdown" / filename),
-                **({"polish_raw_source_file": str(raw_record.get("name"))} if str(raw_record.get("name") or "") != filename else {}),
+                "evidence_file_sha256": sha256_file(output_dir / "ocr_markdown" / raw_source_name),
+                **({"polish_raw_source_file": raw_source_name} if raw_source_name != filename else {}),
                 "evidence_target_sha256": review.get("target_sha256"),
                 "polish_issue": {
                     key: issue.get(key) for key in (

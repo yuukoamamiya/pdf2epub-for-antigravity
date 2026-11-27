@@ -129,3 +129,116 @@ def test_unknown_angle_text_and_urls_are_preserved():
         "<x>literal</x> https://example.test/a?b=1"
     )
     assert plain_block_text({"html": "<a title='a > b'>link</a>"}) == "link"
+
+
+def test_signature_with_map_decodes_scoped_footnote_keys():
+    sig_def, off_def = signature_with_map("[^fnm-number-1-o7]: Sample note.")
+    assert sig_def == "1 Sample note."
+    assert len(sig_def) == len(off_def)
+
+    sig_ref, off_ref = signature_with_map("Word[^fnm-number-1-o7].")
+    assert sig_ref == "Word1."
+    assert len(sig_ref) == len(off_ref)
+
+
+def test_cross_part_polish_semantic_issue_binds_owner_source_file_sha256(tmp_path, monkeypatch):
+    import hashlib
+    import json
+    import pdf2epub.ocr_correction as correction_module
+    from pdf2epub.polish_footnote_semantics import build_semantic_review_contract
+    from pdf2epub.refine.footnote_polish_review import polish_semantic_issue_tasks
+    from pdf2epub.refine.footnote_result_review import validate_result_audit_reviews
+    from pdf2epub.workflow_contracts import sha256_file
+
+    monkeypatch.setattr(correction_module, "review_images_are_current", lambda *_args: True)
+    ocr_dir = tmp_path / "ocr_markdown"
+    polished_dir = tmp_path / "polished_markdown"
+    pages_dir = tmp_path / "pages"
+    img_dir = tmp_path / "ocr_review_images"
+    ocr_dir.mkdir()
+    polished_dir.mkdir()
+    pages_dir.mkdir()
+    img_dir.mkdir()
+
+    part1_raw = "Body prose.[^1]\n\n1 Cross-part orphan note line.\n"
+    part2_raw = "Second part body.\n"
+    part2_norm = "Second part body.\n\n[^1]: Cross-part orphan note line.\n"
+    (ocr_dir / "part1.md").write_bytes(part1_raw.encode("utf-8"))
+    (ocr_dir / "part2.md").write_bytes(part2_raw.encode("utf-8"))
+    (tmp_path / "footnote_normalized").mkdir()
+    (tmp_path / "footnote_normalized" / "part1.md").write_bytes(b"Body prose.[^1]\n")
+    (tmp_path / "footnote_normalized" / "part2.md").write_bytes(part2_norm.encode("utf-8"))
+    (polished_dir / "part2.md").write_bytes(part2_norm.encode("utf-8"))
+
+    sidecar_path = pages_dir / "page_001.ocr.json"
+    block = {"type": "Text", "html": "1 Cross-part orphan note line."}
+    sidecar_path.write_text(json.dumps({"blocks": [block]}), encoding="utf-8")
+    (img_dir / "page_001.png").write_bytes(b"png")
+    img_manifest = tmp_path / "ocr_review_images.json"
+    img_manifest.write_text(json.dumps({"source_sha256": "pdf"}), encoding="utf-8")
+
+    contract2 = build_semantic_review_contract("part2.md", part2_norm)
+    (tmp_path / "polish_subagent_manifest.json").write_text(json.dumps({
+        "task": "polish",
+        "source_dir": "footnote_normalized",
+        "target_dir": "polished_markdown",
+        "source_sha256": {"part2.md": contract2["source_sha256"]},
+        "footnote_semantics": {"schema_version": 1, "enabled": True, "files": {"part2.md": contract2}},
+    }), encoding="utf-8")
+    issue_sidecar = tmp_path / contract2["sidecar"]
+    issue_sidecar.parent.mkdir(parents=True, exist_ok=True)
+    issue_sidecar.write_text(json.dumps({
+        "schema_version": 1,
+        "file": "part2.md",
+        "status": "issues",
+        "source_sha256": contract2["source_sha256"],
+        "target_sha256": hashlib.sha256(part2_norm.encode("utf-8")).hexdigest(),
+        "context_sha256": contract2["context_sha256"],
+        "coverage": {
+            "body_reviewed": {"status": "reviewed"},
+            "definitions_reviewed": {"status": "reviewed"},
+            "cross_boundary_reviewed": {"status": "reviewed"},
+        },
+        "issues": [{
+            "issue_id": "i1",
+            "code": "cross_part_orphan",
+            "unit_id": None,
+            "file": "part2.md",
+            "source_excerpt": "Cross-part orphan note line.",
+            "target_excerpt": "Cross-part orphan note line.",
+            "reason": "Belongs to part1 block.",
+            "source_sha256": contract2["source_sha256"],
+            "target_sha256": hashlib.sha256(part2_norm.encode("utf-8")).hexdigest(),
+            "context_sha256": contract2["context_sha256"],
+        }],
+    }), encoding="utf-8")
+
+    records = [
+        {"name": "part1.md", "chapter_id": "ch1", "start_page": 1, "end_page": 1},
+        {"name": "part2.md", "chapter_id": "ch1", "start_page": 2, "end_page": 2},
+    ]
+    tasks, diagnostics = polish_semantic_issue_tasks(
+        tmp_path,
+        records,
+        {"part1.md": part1_raw, "part2.md": part2_raw},
+        {1: {"primary": {"path": "pages/page_001.ocr.json", "sha256": sha256_file(sidecar_path)}}},
+        {},
+    )
+    assert diagnostics == []
+    assert len(tasks) == 1
+    task = tasks[0]
+    assert task["polish_raw_source_file"] == "part1.md"
+    assert task["evidence_file_sha256"] == sha256_file(ocr_dir / "part1.md")
+    task["visual_files"] = {"1": {"path": "ocr_review_images/page_001.png", "sha256": sha256_file(img_dir / "page_001.png")}}
+    task["visual_image_manifest_sha256"] = sha256_file(img_manifest)
+    task["source_pdf_sha256"] = "pdf"
+
+    reviews, errs = validate_result_audit_reviews(tmp_path, [task], [{
+        "task_id": task["task_id"],
+        "evidence_sha256": task["evidence_sha256"],
+        "outcome": "legitimate_non_footnote",
+        "reason": "Confirmed.",
+        "evidence_pages": [1],
+    }])
+    assert errs == []
+    assert len(reviews) == 1

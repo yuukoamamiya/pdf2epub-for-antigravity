@@ -715,10 +715,17 @@ def detect_polish_page_furniture(
         prevent two copies of the same running title from being recognized as
         a repeat.
         """
-        value = str(candidate.get("text") or "")
+        value = re.sub(r"</?sup\b[^>]*>", "", str(candidate.get("text") or ""), flags=re.I)
+        value = re.sub(r"^\s*#{1,6}\s+", "", value.strip())
         if candidate.get("kind") == "running_title_plus_page_label":
             value = re.sub(
                 r"\s+(?:\d{1,4}|[ivxlcdm]{1,12})$",
+                "",
+                value,
+                flags=re.IGNORECASE,
+            )
+            value = re.sub(
+                r"^(?:\d{1,4}|[ivxlcdm]{1,12})\s+",
                 "",
                 value,
                 flags=re.IGNORECASE,
@@ -727,6 +734,8 @@ def detect_polish_page_furniture(
 
     def normalize_toc_label(value: str) -> str:
         normalized = re.sub(r"^\s*#{1,6}\s+", "", str(value or "").strip())
+        normalized = re.sub(r"\[\^[^\]\r\n]+\](?!:)", "", normalized)
+        normalized = re.sub(r"</?sup\b[^>]*>", "", normalized, flags=re.I)
         normalized = re.sub(r"[*_`]+", "", normalized).strip()
         return re.sub(r"\s+", " ", normalized).casefold()
 
@@ -757,7 +766,7 @@ def detect_polish_page_furniture(
         if not candidate or candidate.get("confidence") != "high":
             continue
         if (
-            candidate.get("kind") == "running_title_plus_page_label"
+            candidate.get("kind") in {"running_title_plus_page_label", "running_header"}
             and protected_labels
             and re.match(r"^\s*#{1,6}\s+", line)
         ):
@@ -780,12 +789,9 @@ def detect_polish_page_furniture(
             continue
         if special_role:
             kind = candidate.get("kind")
-            # Index entries commonly have the form "term page" and the same
-            # term may legitimately occur with several page references.  In
-            # that role, a title-plus-page candidate is content, not enough
-            # evidence of a running header/footer.  Repeated plain running
-            # headers are still checked below.
-            if role == "index" and kind == "running_title_plus_page_label":
+            # Index and TOC entries commonly contain "term page" lines; only
+            # repeated running headers count as page furniture there.
+            if role in {"index", "toc"} and kind == "running_title_plus_page_label":
                 continue
             # A standalone number, publisher imprint, or one-off title-like
             # line is ordinary bibliography/index content until repetition
@@ -810,29 +816,32 @@ def _polish_clean_lines(text: str) -> list[str]:
 
 
 
-def _polish_tokens(text: str, *, notes_role: bool) -> list[str]:
+def _polish_tokens(
+    text: str,
+    *,
+    notes_role: bool,
+    role: Optional[str] = None,
+    protected_toc_titles: list[str] | tuple[str, ...] = (),
+) -> list[str]:
+        cleaned_lines = _polish_clean_lines(text)
+        cleaned_text = "\n".join(cleaned_lines)
+        flagged_lines = {
+            item["line"]
+            for item in detect_polish_page_furniture(
+                cleaned_text,
+                role=role,
+                protected_toc_titles=protected_toc_titles,
+            )
+        }
         visible_lines: list[str] = []
-        for line_number, line in enumerate(_polish_clean_lines(text), 1):
+        for line_number, line in enumerate(cleaned_lines, 1):
             candidate = candidate_for_line(line)
-            if candidate and candidate.get("confidence") == "high":
-                if candidate.get("ornamented"):
-                    continue
-                if candidate.get("kind") == "running_header" and line_number <= 5:
-                    pass
-                else:
-                    continue
-            line = re.sub(
-                r"\s+(?:Introduction|Transforming Translation|ChatGPT in Professional Translation|Ethical Issues in Translation Education in the AI Era|Contributors)\s*(?:<sup\b[^>]*>\s*)?(?:\d{1,4}|[ivxlcdm]{1,12})(?:\s*</sup>)?$",
-                "",
-                line,
-                flags=re.IGNORECASE,
-            )
-            line = re.sub(
-                r"\s+(?:<sup\b[^>]*>\s*)?(?:\d{1,4}|[ivxlcdm]{1,12})(?:\s*</sup>)?\s+Translation Studies in the Age of Artificial Intelligence$",
-                "",
-                line,
-                flags=re.IGNORECASE,
-            )
+            if line_number in flagged_lines or (
+                candidate
+                and candidate.get("confidence") == "high"
+                and candidate.get("ornamented")
+            ):
+                continue
             visible_lines.append(line)
         value = "\n".join(visible_lines)
         value = re.sub(r"([A-Za-zÄÖÜäöüß]+)[-‐‑‒–—][ \t]*\n[ \t]*([A-Za-zÄÖÜäöüß]+)", r"\1\2", value)
@@ -952,6 +961,7 @@ def polish_content_integrity_check(
     source_text: str,
     target_text: str,
     file_role: str | None = None,
+    protected_toc_titles: list[str] | tuple[str, ...] = (),
 ) -> Dict[str, Any]:
     """Detect substantial source-content loss during full-text polishing.
 
@@ -968,8 +978,18 @@ def polish_content_integrity_check(
 
     notes_role = str(file_role or "").strip().lower() == "notes"
 
-    source_tokens = _polish_tokens(source_text, notes_role=notes_role)
-    target_tokens = _polish_tokens(target_text, notes_role=notes_role)
+    source_tokens = _polish_tokens(
+        source_text,
+        notes_role=notes_role,
+        role=file_role,
+        protected_toc_titles=protected_toc_titles,
+    )
+    target_tokens = _polish_tokens(
+        target_text,
+        notes_role=notes_role,
+        role=file_role,
+        protected_toc_titles=protected_toc_titles,
+    )
     removed_tokens, removed_characters, missing_numbers = _polish_removal_metrics(
         source_tokens, target_tokens
     )

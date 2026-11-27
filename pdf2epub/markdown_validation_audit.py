@@ -228,7 +228,9 @@ def audit_polish_content(
     protected_titles: tuple[str, ...],
 ) -> PolishContentAudit:
     """Audit polish content integrity, page furniture, and paragraph fidelity."""
-    integrity = polish_content_integrity_check(source_text, target_text, file_role=role)
+    integrity = polish_content_integrity_check(
+        source_text, target_text, file_role=role, protected_toc_titles=protected_titles
+    )
     furniture = tuple(
         {"file": name, **finding}
         for finding in detect_polish_page_furniture(

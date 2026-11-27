@@ -13,28 +13,28 @@ _REFUSAL_PATTERNS = (
     (
         "English refusal",
         re.compile(
-            r"\b(?:i|we)\s+(?:cannot|can't|can not|won't|will not|must not|mustn't)"
-            r"\s+(?:translate|assist|help|provide|comply|fulfill|process|continue|generate|rewrite)\b",
+            r"\b(?:i|we)\s+(?:cannot|can't|can not|could not|couldn't|won't|will not|must not|mustn't)"
+            r"\s+(?:translate|assist|help|provide|answer|comply|fulfill|process|continue|generate|rewrite)\b",
             re.IGNORECASE,
         ),
     ),
     (
         "English refusal",
         re.compile(
-            r"\b(?:i am|i'm)\s+unable\s+to\s+"
-            r"(?:translate|assist|help|provide|comply|process|continue|generate|rewrite)\b",
+            r"\b(?:i am|i'm|i was|we are|we're|we were)\s+unable\s+to\s+"
+            r"(?:translate|assist|help|provide|answer|comply|process|continue|generate|rewrite)\b",
             re.IGNORECASE,
         ),
     ),
     (
         "English refusal",
-        re.compile(r"\b(?:i\s+must|i\s+have\s+to)\s+refuse\b", re.IGNORECASE),
+        re.compile(r"\b(?:i\s+must|i\s+have\s+to|i\s+had\s+to)\s+refuse\b", re.IGNORECASE),
     ),
     (
         "English refusal",
         re.compile(
-            r"\b(?:i|we)\s+(?:refuse|decline)\s+to\s+"
-            r"(?:translate|assist|help|provide|process|continue|generate|rewrite)\b",
+            r"\b(?:i|we)\s+(?:refuse|refused|decline|declined)\s+to\s+"
+            r"(?:translate|assist|help|provide|answer|process|continue|generate|rewrite)\b",
             re.IGNORECASE,
         ),
     ),
@@ -50,9 +50,11 @@ _REFUSAL_PATTERNS = (
     (
         "Chinese refusal",
         re.compile(
-            r"(?:抱歉|很抱歉).{0,25}(?:无法|不能|不可以|拒绝).{0,20}"
-            r"(?:翻译|协助|帮助|处理|提供|改写|重写|生成|回答|"
-            r"完成(?:这(?:项|个)|该)?(?:请求|任务))"
+            r"(?:抱歉|很抱歉)[^，。！？；：,.!?;:\r\n]{0,20}(?:无法|不能|不可以|拒绝)[^，。！？；：,.!?;:\r\n]{0,16}"
+            r"(?:翻译|协助翻译|改写|重写|完成(?:这(?:项|个)|该)?(?:请求|任务)|"
+            r"(?:提供|生成)[^，。！？；：,.!?;:\r\n]{0,6}(?:译文|帮助|内容|支持)|"
+            r"(?:处理|回答)[^，。！？；：,.!?;:\r\n]{0,6}(?:请求|任务|问题|内容|文本)|"
+            r"帮助[^，。！？；：,.!?;:\r\n]{0,6}(?:翻译|完成|处理))"
         ),
     ),
     (
@@ -60,9 +62,12 @@ _REFUSAL_PATTERNS = (
         re.compile(
             r"(?<![\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff])"
             r"(?:我|本人)(?=[，。、！？；：,.!?;:\s]|无法|不能|不可以|拒绝)"
-            r"(?:无法|不能|不可以|拒绝).{0,20}"
-            r"(?:翻译|协助|帮助|处理|提供|改写|重写|生成|回答|"
-            r"完成(?:这(?:项|个)|该)?(?:请求|任务))"
+            r"[^。！？；.!?;:\r\n]{0,6}(?:无法|不能|不可以|拒绝)"
+            r"[^，。！？；：,.!?;:\r\n]{0,12}"
+            r"(?:翻译|协助翻译|改写|重写|完成(?:这(?:项|个)|该)?(?:请求|任务)|"
+            r"(?:提供|生成)[^，。！？；：,.!?;:\r\n]{0,6}(?:译文|帮助|内容|支持)|"
+            r"(?:处理|回答)[^，。！？；：,.!?;:\r\n]{0,6}(?:请求|任务|问题|内容|文本)|"
+            r"帮助[^，。！？；：,.!?;:\r\n]{0,6}(?:翻译|完成|处理))"
         ),
     ),
     (
@@ -90,7 +95,8 @@ _REFUSAL_PATTERNS = (
 )
 
 
-
+def _is_meta_disclaimer_label(label: str) -> bool:
+    return "disclaimer" in label or "placeholder" in label
 
 
 def _normalize_detection_text(text: str) -> str:
@@ -111,27 +117,63 @@ def detect_refusal(source_text: str, translated_text: str) -> Optional[str]:
     translated normally, while a model-generated "I cannot translate this"
     replacing ordinary source text is rejected.
     """
-    source_lines = [line for line in source_text.splitlines() if line.strip()]
-    target_lines = [line for line in translated_text.splitlines() if line.strip()]
+    source_lines = [_normalize_detection_text(line) for line in source_text.splitlines() if line.strip()]
+    target_lines = [_normalize_detection_text(line) for line in translated_text.splitlines() if line.strip()]
+    joined_source_pairs = [
+        f"{source_lines[pos]} {source_lines[pos + 1]}"
+        for pos in range(max(0, len(source_lines) - 1))
+    ]
     for index, target_line in enumerate(target_lines):
-        target_line = _normalize_detection_text(target_line)
-        target_match = next(
+        # Always prioritize meta-disclaimers / translation placeholders over
+        # generic refusal phrases so character dialogue never exempts AI policy text.
+        meta_match = next(
+            (
+                (label, pattern)
+                for label, pattern in _REFUSAL_PATTERNS
+                if _is_meta_disclaimer_label(label) and pattern.search(target_line)
+            ),
+            None,
+        )
+        target_match = meta_match or next(
             ((label, pattern) for label, pattern in _REFUSAL_PATTERNS if pattern.search(target_line)),
             None,
         )
         if target_match is None:
             continue
+        target_label, target_pattern = target_match
         source_line = source_lines[index] if index < len(source_lines) else ""
-        source_line = _normalize_detection_text(source_line)
-        if any(pattern.search(source_line) for _label, pattern in _REFUSAL_PATTERNS):
+        if _is_meta_disclaimer_label(target_label):
+            # Never let character dialogue or nearby refusal lines exempt an AI/policy meta-disclaimer
+            # or translation placeholder unless the aligned source itself carries that meta label.
+            matching_patterns = [
+                pattern for label, pattern in _REFUSAL_PATTERNS if _is_meta_disclaimer_label(label)
+            ]
+            if any(pattern.search(source_line) for pattern in matching_patterns):
+                continue
+            return f"{target_label} detected at non-empty line {index + 1}"
+
+        refusal_patterns = [
+            pattern for label, pattern in _REFUSAL_PATTERNS if not _is_meta_disclaimer_label(label)
+        ]
+        if any(pattern.search(source_line) for pattern in refusal_patterns):
             continue
-        if any(target_match[1].search(_normalize_detection_text(s)) for s in source_lines):
+        if any(target_pattern.search(s) for s in source_lines) or any(
+            target_pattern.search(pair) for pair in joined_source_pairs
+        ):
             continue
         start_win = max(0, index - 30)
         end_win = min(len(source_lines), index + 31)
-        if any(pattern.search(_normalize_detection_text(source_lines[w])) for w in range(start_win, end_win) for _label, pattern in _REFUSAL_PATTERNS):
+        win_pairs = [
+            f"{source_lines[w]} {source_lines[w + 1]}"
+            for w in range(start_win, max(start_win, end_win - 1))
+        ]
+        if any(
+            pattern.search(candidate)
+            for candidate in [*source_lines[start_win:end_win], *win_pairs]
+            for pattern in refusal_patterns
+        ):
             continue
-        return f"{target_match[0]} detected at non-empty line {index + 1}"
+        return f"{target_label} detected at non-empty line {index + 1}"
     return None
 
 

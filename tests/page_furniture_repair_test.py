@@ -192,3 +192,29 @@ def test_section_and_proposition_headings_are_not_page_furniture():
 def test_plain_running_titles_remain_page_furniture_candidates():
     for line in ("PART I", "Hegel-Handbuch 212"):
         assert candidate_for_line(line) is not None
+
+
+def test_standalone_multilingual_dates_and_protected_toc_headings_are_skipped(tmp_path: Path):
+    for line in ("19 May 1922", "Jan. 1922", "25 giugno 1945", "19 May", "1922年5月19日"):
+        assert candidate_for_line(line) is None
+
+    translated = tmp_path / "translated"
+    reference = tmp_path / "polished_markdown" / "validated"
+    translated.mkdir(parents=True)
+    reference.mkdir(parents=True)
+    (translated / "chapter_1.md").write_text("# 第一章 1\n\n正文。\n", encoding="utf-8")
+    (reference / "chapter_1.md").write_text("# PART I\n\nBody.\n", encoding="utf-8")
+    (translated / "toc.md").write_text("第一章 12\n", encoding="utf-8")
+    (reference / "toc.md").write_text("Chapter One 12\n", encoding="utf-8")
+
+    prepare_page_furniture_repair(
+        tmp_path,
+        _config(),
+        "English",
+        "Chinese",
+        file_roles={"toc.md": "toc"},
+        protected_toc_titles=["PART I"],
+    )
+    manifest = json.loads((tmp_path / MANIFEST_NAME).read_text(encoding="utf-8"))
+    assert manifest["repair_candidates"]["chapter_1.md"]["reference"]["candidate_count"] == 0
+    assert manifest["repair_candidates"]["toc.md"]["target"]["candidate_count"] == 0

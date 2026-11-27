@@ -11,7 +11,9 @@ _PROSE_WESTERN_RANGE_RE = re.compile(
     r"(?<![A-Za-z0-9])\b(?:dal|da|from|von|de)\s+(\d+)\s+(?:al|a|to|bis|à)\s+(\d+)\b",
     re.IGNORECASE,
 )
-_PROSE_CJK_RANGE_RE = re.compile(r"(?<![A-Za-z0-9])(\d+)\s*(?:至|到)\s*(\d+)(?![A-Za-z0-9])")
+_PROSE_CJK_RANGE_RE = re.compile(
+    r"(?<![A-Za-z0-9])(\d+)\s*年?\s*(?:至|到|～|~|——)\s*(\d+)\s*年?(?![A-Za-z0-9])"
+)
 
 _MONTH_NUMBERS: dict[str, int] = {
     "gennaio": 1, "febbraio": 2, "marzo": 3, "aprile": 4, "maggio": 5, "giugno": 6,
@@ -24,6 +26,8 @@ _MONTH_NUMBERS: dict[str, int] = {
     "juin": 6, "juillet": 7, "août": 8, "aout": 8, "octobre": 10, "décembre": 12, "decembre": 12,
     "januar": 1, "jänner": 1, "februar": 2, "märz": 3, "maerz": 3,
     "juni": 6, "juli": 7, "oktober": 10, "dezember": 12,
+    "enero": 1, "febrero": 2, "abril": 4, "mayo": 5, "junio": 6,
+    "julio": 7, "septiembre": 9, "octubre": 10, "diciembre": 12,
     "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6,
     "七": 7, "八": 8, "九": 9, "十": 10, "十一": 11, "十二": 12,
 }
@@ -31,16 +35,26 @@ _WESTERN_MONTH_PATTERN = "|".join(
     sorted((re.escape(k) for k in _MONTH_NUMBERS if k.isascii() or k in {"février", "août", "décembre", "jänner", "märz"}), key=len, reverse=True)
 )
 _CJK_MONTH_PATTERN = r"十二|十一|[一二三四五六七八九十]|\d{1,2}"
-_FULL_DMY_RE = re.compile(rf"\b(\d{{1,2}})\s+({_WESTERN_MONTH_PATTERN})\s+((?:18|19|20)\d{{2}})\b", re.IGNORECASE)
-_FULL_MDY_RE = re.compile(rf"\b({_WESTERN_MONTH_PATTERN})\s+(\d{{1,2}}),?\s+((?:18|19|20)\d{{2}})\b", re.IGNORECASE)
-_FULL_CJK_DATE_RE = re.compile(rf"((?:18|19|20)\d{{2}})\s*年\s*({_CJK_MONTH_PATTERN})\s*月\s*(\d{{1,2}})\s*[日号]")
-_MY_WESTERN_RE = re.compile(rf"\b({_WESTERN_MONTH_PATTERN})\s+((?:18|19|20)\d{{2}})\b", re.IGNORECASE)
-_MY_CJK_RE = re.compile(rf"((?:18|19|20)\d{{2}})\s*年\s*({_CJK_MONTH_PATTERN})\s*月")
-_ISSUE_WESTERN_RE = re.compile(r"\bn\.\s*(\d+),\s*((?:18|19|20)\d{2})\b", re.IGNORECASE)
-_ISSUE_CJK_RE = re.compile(r"((?:18|19|20)\d{2})\s*年\s*第\s*(\d+)\s*期")
+_YEAR_4 = r"(?:17|18|19|20)\d{2}"
+_FULL_DMY_RE = re.compile(rf"\b(\d{{1,2}})\s+({_WESTERN_MONTH_PATTERN})\.?\s+({_YEAR_4})\b", re.IGNORECASE)
+_FULL_MDY_RE = re.compile(rf"(?<!\w)({_WESTERN_MONTH_PATTERN})\.?\s+(\d{{1,2}}),?\s+({_YEAR_4})\b", re.IGNORECASE)
+_FULL_CJK_DATE_RE = re.compile(rf"({_YEAR_4})\s*年\s*({_CJK_MONTH_PATTERN})\s*月\s*(\d{{1,2}})\s*[日号]")
+_MY_WESTERN_RE = re.compile(rf"(?<!\w)({_WESTERN_MONTH_PATTERN})\.?\s+({_YEAR_4})\b", re.IGNORECASE)
+_MY_CJK_RE = re.compile(rf"({_YEAR_4})\s*年\s*({_CJK_MONTH_PATTERN})\s*月")
+_DM_WESTERN_RE = re.compile(rf"\b(\d{{1,2}})\s+({_WESTERN_MONTH_PATTERN})\.?(?=\W|$)", re.IGNORECASE)
+_MD_WESTERN_RE = re.compile(rf"(?<!\w)({_WESTERN_MONTH_PATTERN})\.?\s+(\d{{1,2}})\b", re.IGNORECASE)
+_MD_CJK_RE = re.compile(rf"(?<![\d])({_CJK_MONTH_PATTERN})\s*月\s*(\d{{1,2}})\s*[日号]")
+_ISSUE_WESTERN_RE = re.compile(rf"\bn\.\s*(\d+),\s*({_YEAR_4})\b", re.IGNORECASE)
+_ISSUE_CJK_RE = re.compile(rf"({_YEAR_4})\s*年\s*第\s*(\d+)\s*期")
+_ABBR_YEAR_RANGE_RE = re.compile(r"(?<![A-Za-z0-9/.-])((?:17|18|19|20)(\d{2}))[-‐‑‒–—](\d{2})(?![A-Za-z0-9./-])")
+_WESTERN_DECADE_RE = re.compile(rf"\b({_YEAR_4})s\b", re.IGNORECASE)
+_CJK_CENTURY_DECADE_RE = re.compile(r"(1[789]|20)\s*世纪\s*(\d)0\s*年代")
+_CJK_YEAR_DECADE_RE = re.compile(rf"({_YEAR_4})\s*年代")
+_ORDINAL_NUMBER_RE = re.compile(r"\b(\d{1,3})(?:st|nd|rd|th)\b", re.IGNORECASE)
 
 
 def _parse_month(token: str) -> int | None:
+    token = token.rstrip(".")
     if token.isdigit():
         val = int(token)
         return val if 1 <= val <= 12 else None
@@ -48,7 +62,7 @@ def _parse_month(token: str) -> int | None:
 
 
 def _canonicalize_bibliography_dates_and_issues(text: str) -> str:
-    """Canonicalize explicit dates and issue+year pairs without altering any digit."""
+    """Canonicalize explicit dates, year ranges, decades, and issue+year pairs without altering numeric meaning."""
     def repl_dmy(match: re.Match[str]) -> str:
         day, month = int(match.group(1)), _parse_month(match.group(2))
         if month is None or not 1 <= day <= 31:
@@ -72,13 +86,36 @@ def _canonicalize_bibliography_dates_and_issues(text: str) -> str:
         year = match.group(1 if year_first else 2)
         return f"{year}-{month:02d}" if month is not None else match.group(0)
 
-    updated = _FULL_DMY_RE.sub(repl_dmy, text)
+    def repl_dm_or_md(match: re.Match[str], month_first: bool) -> str:
+        month_raw = match.group(1 if month_first else 2)
+        day_raw = match.group(2 if month_first else 1)
+        month = _parse_month(month_raw)
+        day = int(day_raw)
+        if month is None or not 1 <= day <= 31:
+            return match.group(0)
+        return f"{month:02d}-{day:02d}"
+
+    def repl_abbr_range(match: re.Match[str]) -> str:
+        full_start, start2, end2 = match.group(1), match.group(2), match.group(3)
+        if int(end2) > 12 and int(end2) > int(start2):
+            return f"{full_start}-{full_start[:2]}{end2}"
+        return match.group(0)
+
+    updated = _ABBR_YEAR_RANGE_RE.sub(repl_abbr_range, text)
+    updated = _FULL_DMY_RE.sub(repl_dmy, updated)
     updated = _FULL_MDY_RE.sub(repl_mdy, updated)
     updated = _FULL_CJK_DATE_RE.sub(repl_cjk_dmy, updated)
     updated = _MY_WESTERN_RE.sub(lambda m: repl_my(m, False), updated)
     updated = _MY_CJK_RE.sub(lambda m: repl_my(m, True), updated)
+    updated = _DM_WESTERN_RE.sub(lambda m: repl_dm_or_md(m, False), updated)
+    updated = _MD_WESTERN_RE.sub(lambda m: repl_dm_or_md(m, True), updated)
+    updated = _MD_CJK_RE.sub(lambda m: repl_dm_or_md(m, True), updated)
     updated = _ISSUE_WESTERN_RE.sub(lambda m: f"{m.group(2)}/{m.group(1)}", updated)
     updated = _ISSUE_CJK_RE.sub(lambda m: f"{m.group(1)}/{m.group(2)}", updated)
+    updated = _WESTERN_DECADE_RE.sub(r"\1", updated)
+    updated = _CJK_CENTURY_DECADE_RE.sub(lambda m: f"{int(m.group(1)) - 1}{m.group(2)}0", updated)
+    updated = _CJK_YEAR_DECADE_RE.sub(r"\1", updated)
+    updated = _ORDINAL_NUMBER_RE.sub(r"\1", updated)
     return updated
 
 
@@ -108,8 +145,8 @@ def _special_role_numeric_markers_with_lines(text: str) -> list[tuple[int, str]]
         normalized = _PROSE_WESTERN_RANGE_RE.sub(r"\1-\2", normalized)
         normalized = _PROSE_CJK_RANGE_RE.sub(r"\1-\2", normalized)
         normalized = re.sub(
-            r"(?<=\d)\s*([-‐‑‒–—])\s*(?=\d)",
-            r"\1",
+            r"(?<=\d)\s*(?:[-‐‑‒–—～]|——)\s*(?=\d)",
+            r"-",
             normalized,
         )
         line_markers = [
@@ -266,7 +303,7 @@ def validate_special_role_markers(
     ):
         return []
 
-    if role == "bibliography":
+    if role in {"bibliography", "notes", "author_notes"}:
         canon_source = _canonicalize_bibliography_dates_and_issues(source_text)
         canon_target = _canonicalize_bibliography_dates_and_issues(target_text)
         canon_source_markers = special_role_numeric_markers(canon_source)
@@ -343,8 +380,11 @@ def _index_entry_groups(
         indent = len(line) - len(line.lstrip())
         stripped = line.strip()
         markers = special_role_numeric_markers(stripped)
+        plain_stripped = re.sub(r"</?(?:em|i|strong|b)\b[^>]*>", "", stripped, flags=re.IGNORECASE)
+        plain_stripped = plain_stripped.strip("*_`~ ")
         cross_reference = bool(re.match(
-            r"(?i)(?:see(?: also)?\b|参见|另见|见|另见条目)", stripped
+            r"(?i)(?:see(?: also)?\b|siehe(?:\s+auch)?\b|voir(?:\s+aussi)?\b|参见|另见|见|另见条目)",
+            plain_stripped,
         ))
         explicit_nested_marker = bool(re.match(r"^(?:[-*+]\s+|\d+[.)]\s+)", stripped))
         # Distinguish a term with a locator from a locator-only continuation.

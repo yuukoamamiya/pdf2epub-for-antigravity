@@ -16,7 +16,12 @@ from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from ..workflow_contracts import sha256_file
-from ..footnote_keys import CIRCLED_LABELS, marker_from_label, marker_label_from_key
+from ..footnote_keys import (
+    CIRCLED_LABELS,
+    marker_from_label,
+    marker_label_from_key,
+    printed_label_from_key,
+)
 
 
 _MARKDOWN_REF_RE = re.compile(r"\[\^(?P<key>[A-Za-z0-9_-]+)\]")
@@ -148,14 +153,30 @@ def signature_with_map(value: str) -> tuple[str, list[int]]:
             )
             if definition:
                 key = definition.group(1)
+                label = printed_label_from_key(key)
                 key_start = index + 2
-                chars.extend(key)
-                positions.extend(range(key_start, key_start + len(key)))
+                max_offset = max(0, len(key) - 1)
+                for offset, ch in enumerate(label):
+                    chars.append(ch)
+                    positions.append(key_start + min(offset, max_offset))
                 index += len(definition.group(0))
                 if index < len(value) and value[index] != "\n":
                     chars.append(" ")
                     positions.append(max(key_start + len(key), index - 1))
                 continue
+        if char == "[":
+            inline_ref = re.match(r"^\[\^([A-Za-z0-9_-]+)\](?!:)", value[index:])
+            if inline_ref:
+                key = inline_ref.group(1)
+                label = printed_label_from_key(key)
+                if key.startswith(("fnm-", "fnc-")) and label != key:
+                    key_start = index + 2
+                    max_offset = max(0, len(key) - 1)
+                    for offset, ch in enumerate(label):
+                        chars.append(ch)
+                        positions.append(key_start + min(offset, max_offset))
+                    index += len(inline_ref.group(0))
+                    continue
         if char == "[":
             link_match = re.match(r"^\[([^\]\n]+)\]\(([^)\n]+)\)", value[index:])
             if link_match:

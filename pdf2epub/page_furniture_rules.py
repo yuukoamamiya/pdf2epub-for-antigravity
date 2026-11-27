@@ -43,8 +43,23 @@ _PUBLISHER_METADATA_RE = re.compile(
     r"^(?:(?:W\.\s+)?Jaeschke,\s+Hegel-Handbuch,?|DOI:?\s+10\.\d{4}.*|[©\xa9]\s*\d{4}\s+J\.\s*B\.\s*Metzler.*)$",
     re.IGNORECASE,
 )
+_MONTH_WORDS = (
+    r"Frühjahr|Fruehjahr|Sommer|Herbst|Winter|"
+    r"Januar|Februar|März|Maerz|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember|"
+    r"January|Jan\.?|February|Feb\.?|March|Mar\.?|Apr\.?|May|June|Jun\.?|July|Jul\.?|Aug\.?|Sept\.?|Sep\.?|Oct\.?|Nov\.?|Dec\.?|"
+    r"janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre|"
+    r"gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre|"
+    r"enero|febrero|abril|mayo|junio|julio|septiembre|octubre|diciembre"
+)
 _DATE_SUFFIX_RE = re.compile(
-    r"\b(?:im\s+)?(?:Frühjahr|Fruehjahr|Sommer|Herbst|Winter|Januar|Februar|März|Maerz|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)\b",
+    rf"(?<!\w)(?:im\s+)?(?:{_MONTH_WORDS})(?=\W|$)",
+    re.IGNORECASE,
+)
+_STANDALONE_DATE_LINE_RE = re.compile(
+    rf"^(?:(?:\d{{1,2}}(?:st|nd|rd|th)?\s+(?:{_MONTH_WORDS})(?:\s+\d{{2,4}})?)|"
+    rf"(?:(?:{_MONTH_WORDS})\s+\d{{1,2}}(?:st|nd|rd|th)?(?:,?\s+\d{{2,4}})?)|"
+    rf"(?:(?:{_MONTH_WORDS})\s+\d{{4}})|"
+    rf"(?:\d{{4}}\s*年\s*(?:十二|十一|[一二三四五六七八九十]|\d{{1,2}})\s*月(?:\s*\d{{1,2}}\s*[日号])?))$",
     re.IGNORECASE,
 )
 _ORNAMENTED_HEADER_RE = re.compile(
@@ -118,6 +133,8 @@ def candidate_for_line(line: str) -> Optional[dict[str, Any]]:
     ):
         return None
     if _ALIGNMENT_LEADER_RE.search(title_line):
+        return None
+    if _STANDALONE_DATE_LINE_RE.fullmatch(title_line):
         return None
     if _NUMBERED_RUNNING_HEADER_RE.fullmatch(title_line) and not re.search(
         r"[。！？；.!?;]", title_line

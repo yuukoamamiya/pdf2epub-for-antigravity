@@ -112,16 +112,20 @@ def validate_result_audit_reviews(
             continue
         if task.get("evidence_origin") == "source_markdown":
             name = str(task.get("file") or "")
-            source_path = root / "ocr_markdown" / name
-            if not name or Path(name).name != name or not source_path.is_file() or sha256_file(source_path) != task.get("evidence_file_sha256"):
+            excerpt_source_name = str(task.get("polish_raw_source_file") or name)
+            if not name or Path(name).name != name or not excerpt_source_name or Path(excerpt_source_name).name != excerpt_source_name:
+                errors.append(f"result audit review {task_id} source Markdown changed")
+                continue
+            source_path = root / "ocr_markdown" / excerpt_source_name
+            if not source_path.is_file() or sha256_file(source_path) != task.get("evidence_file_sha256"):
                 errors.append(f"result audit review {task_id} source Markdown changed")
                 continue
             if task.get("code") == "polish_semantic_issue":
                 excerpt = str(task.get("evidence_excerpt") or "")
-                excerpt_source_name = str(task.get("polish_raw_source_file") or name)
-                excerpt_source_path = root / "ocr_markdown" / excerpt_source_name if Path(excerpt_source_name).name == excerpt_source_name else source_path
+                from .footnote_source import project_footnote_source_text
+
                 try:
-                    source_text = excerpt_source_path.read_text(encoding="utf-8")
+                    source_text = project_footnote_source_text(source_path.read_bytes())
                 except (OSError, UnicodeError):
                     source_text = ""
                 polish_issue = task.get("polish_issue") if isinstance(task.get("polish_issue"), Mapping) else {}

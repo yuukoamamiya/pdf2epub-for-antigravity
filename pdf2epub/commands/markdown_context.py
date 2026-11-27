@@ -61,7 +61,13 @@ def _load_pdf_toc_titles(output_dir: Path) -> list[str]:
         toc = json.loads(toc_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError):
         return []
+    from pdf2epub.toc_model import compose_numbered_title
+
     titles: list[str] = []
+
+    def add_title(candidate: str) -> None:
+        if candidate and candidate not in titles:
+            titles.append(candidate)
 
     def visit(nodes: Any) -> None:
         if not isinstance(nodes, list):
@@ -70,8 +76,13 @@ def _load_pdf_toc_titles(output_dir: Path) -> list[str]:
             if not isinstance(node, dict):
                 continue
             title = str(node.get("title") or "").strip()
-            if title and title not in titles:
-                titles.append(title)
+            add_title(title)
+            label = node.get("numbering_label")
+            if isinstance(label, str) and label.strip() and title:
+                try:
+                    add_title(compose_numbered_title(title, label))
+                except ValueError:
+                    pass
             visit(node.get("children", []))
 
     visit(toc.get("chapters", []))

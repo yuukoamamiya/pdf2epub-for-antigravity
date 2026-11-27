@@ -963,11 +963,11 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    翻译，按当前哈希和校验结果重处理失效项。
   当前 TOC 标签会作为 polish 的保护证据；唯一出现且与 TOC 标签相同的源行被删除时，
   必须进入 `review_required`，不能仅因该行位于页首就自动视为页眉。已登记的 TOC
-  Part/Chapter **Markdown 标题行**在页边装饰检测中豁免，例如 `# PART I`、`## PART II`
+  Part/Chapter **Markdown 标题行**（含编号与内联脚注变体）在页边装饰检测中豁免，独立日期行和 `toc` 非重复页码行同样豁免；例如 `# PART I`、`## PART II`
   不会因尾部罗马数字被误判为 `running_title_plus_page_label`；TOC 标题带副标题时，冒号前
   的短标签也可作为豁免前缀。纯文本 `PART I` 等重复页眉仍按页边装饰候选检测，不因匹配
   TOC 标题而豁免。`bilingual_warnings`/未翻译长英文段落门禁只在 `translate-validate`
-  生效，polish 阶段输入输出同为源语言，不触发该警告。
+  生效，polish 阶段输入输出同为源语言，不触发该警告；遇到有效的 `polish_footnote_reviews` `status: "issues"` sidecar 时，`--check-only` 也会返回非零退出码以路由回脚注复核。
 
 ### 2.2 术语提取和翻译
 

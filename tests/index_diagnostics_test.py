@@ -221,3 +221,21 @@ def test_long_bibliography_mismatch_reports_source_and_target_line_numbers():
     assert "source line 45" in errors[0]
     assert "target line 45" in errors[0]
     assert "1950" in errors[0] and "1951" in errors[0]
+
+
+def test_bibliography_and_notes_dates_abbreviated_ranges_decades_and_emphasized_index():
+    assert not validate_special_role_markers(
+        "Letter of Jan. 1922, 1911-26, 1789, 1920s, and 1939–1941\n",
+        "1922年1月信件，1911-1926年，1789年，20世纪20年代，以及1939年至1941年\n",
+        "bibliography",
+    )
+    assert not validate_special_role_markers(
+        "Note on 25 giugno 1945\n",
+        "1945年6月25日注\n",
+        "notes",
+    )
+    assert not validate_special_role_markers(
+        "Dialectic, 10–12\n  *See also* Logic\n",
+        "辩证法，10–12\n  *另见* 逻辑学\n",
+        "index",
+    )

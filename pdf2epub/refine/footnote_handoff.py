@@ -417,6 +417,7 @@ def _review_prompt_audit(audit: Mapping[str, Any], report: Mapping[str, Any]) ->
         if any(task.get("code") == "polish_semantic_issue" for task in audit.get("findings", [])):
             prompt += (
                 "\n\nFor a `polish_semantic_issue`, compare the exact source excerpt, OCR sidecar, and cited page image. "
+                "To override a whole existing OCR block's decision cleanly (e.g. changing a multi-item block from `footnote` to `body`), emit `override: true` on the updated block decision. "
                 "If one OCR block mixes body and footnote text, replace that block's whole-block decision with `role: \"body\", override: true` and a `segments` array. "
                 "Each segment must contain its exact OCR `text` and a `role`; moved segments also need their exact `key` and visible `marker_label` when applicable. "
                 "List segments in physical reading order. The apply stage moves only exact footnote segments and leaves body text at its source position; it rejects duplicate, overlapping, stale, or non-unique excerpts. "

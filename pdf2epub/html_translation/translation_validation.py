@@ -362,7 +362,7 @@ class HTMLTranslationValidator:
 
         for group in special_role_groups.values():
             role = str(group.get("role") or "").strip().lower()
-            if not role:
+            if role not in {"bibliography", "index", "notes", "author_notes", "catalog", "ad"}:
                 continue
             marker_errors = validate_special_role_markers(
                 "\n".join(group["sources"]),

@@ -447,7 +447,7 @@ worker `dispatch_status` 计数与波次数，用于判断是否需要开 Subage
 - 依赖方向保持单向：handoff/validation 协调入口调用各自的 context、planning/resume、audit/state、manifest/prompt 或 persistence 服务；纯审计和状态服务不导入协调器，checkpoint 工具也不反向导入 validator。Markdown 校验报告和 manifest 保持既有字段结构；校验规则改变时仍须提升版本以使旧 checkpoint 失效。
 - `markdown_validation.py`：提供纯函数式的 Markdown 风险检测、目标语言审计、规范化辅助
   函数和 polish 内容保真检查；它会阻断结构性空父标题导致的重复正文，并对 `notes`
-  单元中的标准尾注章节标题提供窄范围页眉误报豁免。PDF polish/translate 的 Markdown validation
+  单元中的标准尾注章节标题、`toc` 非重复页码行、独立日期行（EN/DE/FR/IT/ES/中文）以及已登记或带编号/脚注的 TOC Markdown 标题提供误报豁免；`_polish_tokens()` 复用 `detect_polish_page_furniture()` 决定可删除的页边装饰，不包含单书硬编码标题。PDF polish/translate 的 Markdown validation
   translate schema 5 和 polish schema 6 分别维护 PDF validation receipt。polish schema 6 还要求当前脚注语义 sidecar。有序标题保真规则变更前的全量 receipt 和逐文件 ledger 失效。OCR correction 与
   HTML validation 仍使用 schema 3。必须用当前校验器
   重新校验后才能作为 checkpoint。polish 按标题层级及共享 TOC Markdown 语义规范化后的文本序列
@@ -457,10 +457,10 @@ worker `dispatch_status` 计数与波次数，用于判断是否需要开 Subage
   触发双语警告。该模块把角色判断委托给
   `document_roles.py`，把页眉页脚候选判断委托给 `page_furniture_rules.py`，避免校验模块
   反向依赖具体修复工作流。
-- `special_role_audit.py`：为 PDF/EPUB 共用的 bibliography/index 单元审计数字与条目身份标记；不依赖 Markdown validator 或 HTML builder。
+- `special_role_audit.py`：为 PDF/EPUB 共用的 `bibliography`/`index`/`notes`/`author_notes`/`catalog`/`ad` 单元审计数字与条目身份标记（HTML 验证仅对这六类特殊角色启用，`toc` 等不触发）；支持 `17xx`–`20xx` 日期（含 `Jan.`/`Feb.` 缩写及月日配对）、`1939年至1941年` 范围、`1911-26` ↔ `1911-1926` 两位年份缩写展开、`1920s`/`19th` 年代序数，以及剥离 Markdown/HTML 强调后的 `*See also*` / `siehe` / `voir` 索引交叉引用；不依赖 Markdown validator 或 HTML builder。
 - `footnote_normalization.py`：提供 polish 阶段的尾注引用/定义迁移校验；它只校验
   Subagent 输出，不负责识别页面脚注或修改源稿。
-- `polish_footnote_semantics.py`：构造和校验 polish 脚注语义 sidecar。schema 1 sidecar 将每个 assigned 文件的检查绑定到源、目标及 context 哈希，并记录正文扫描、脚注定义和跨分片关联的覆盖情况与精确 issue 摘录。该模块不改变脚注归属，也不修改 Markdown。
+- `polish_footnote_semantics.py`：构造和校验 polish 脚注语义 sidecar。schema 1 sidecar 将每个 assigned 文件的检查绑定到源、目标及 context 哈希，并要求 `coverage` 三项均为 `{"status": "reviewed"}` 对象（布尔值会明确报错）；只有当前有效的 `footnote_normalization.json`（且无未解决 `footnote_normalization_attempt.json`）才允许闭环上游已裁决任务。该模块不改变脚注归属，也不修改 Markdown。
 - `commands/markdown_context.py`：只读加载 TOC、续文和章节分组上下文；准备、校验和
   worker 装箱共享同一份 PDF 单元投影，`commands.markdown` 不再承载这组状态读取细节。
 - `document_roles.py`：集中维护特殊翻译角色、参考文献/前置内容/注释章节识别、目标语言密度豁免和

@@ -47,14 +47,71 @@ def _candidate_windows(
     *,
     include_repeated_lines: bool = True,
     context_radius: int = _REPAIR_CONTEXT_RADIUS,
+    role: Optional[str] = None,
+    protected_toc_titles: Optional[list[str] | tuple[str, ...]] = None,
 ) -> dict[str, Any]:
     """Extract compact line windows instead of exposing a whole Markdown file."""
     lines = text.splitlines()
+    normalized_role = str(role or "").strip().lower()
+    protected_labels = {
+        re.sub(
+            r"\s+",
+            " ",
+            re.sub(r"[*_`]+", "", re.sub(r"</?sup\b[^>]*>", "", re.sub(r"\[\^[^\]\r\n]+\](?!:)", "", re.sub(r"^\s*#{1,6}\s+", "", str(item or "").strip())))).strip(),
+        ).casefold()
+        for item in (protected_toc_titles or ())
+        if str(item or "").strip()
+    }
+    exempt_front_role = normalized_role in {
+        "author_notes",
+        "metadata",
+        "frontmatter",
+        "copyright",
+        "cover",
+    }
     candidates: list[dict[str, Any]] = []
-    for index, line in enumerate(lines):
-        candidate = candidate_for_line(line)
-        if candidate is not None:
-            candidates.append({"line": index + 1, **candidate})
+    special_role = normalized_role in {"bibliography", "index", "toc"}
+    raw_candidates = [candidate_for_line(line) for line in lines]
+
+    def _repeat_key(cand: Mapping[str, Any]) -> str:
+        val = re.sub(r"</?sup\b[^>]*>", "", str(cand.get("text") or ""), flags=re.I)
+        val = re.sub(r"^\s*#{1,6}\s+", "", val.strip())
+        if cand.get("kind") == "running_title_plus_page_label":
+            val = re.sub(r"\s+(?:\d{1,4}|[ivxlcdm]{1,12})$", "", val, flags=re.I)
+            val = re.sub(r"^(?:\d{1,4}|[ivxlcdm]{1,12})\s+", "", val, flags=re.I)
+        return re.sub(r"\s+", " ", val).strip().casefold()
+
+    from collections import Counter
+    repeated_keys = Counter(
+        _repeat_key(cand)
+        for cand in raw_candidates
+        if cand and cand.get("kind") in {"running_header", "running_title_plus_page_label"}
+    )
+    for index, (line, candidate) in enumerate(zip(lines, raw_candidates)):
+        if candidate is None:
+            continue
+        kind = candidate.get("kind")
+        if exempt_front_role and candidate.get("confidence") == "high":
+            continue
+        if normalized_role in {"index", "toc"} and kind == "running_title_plus_page_label":
+            continue
+        if special_role and kind in {"running_header", "running_title_plus_page_label"} and repeated_keys.get(_repeat_key(candidate), 0) < 2:
+            continue
+        if (
+            kind in {"running_title_plus_page_label", "running_header"}
+            and protected_labels
+            and re.match(r"^\s*#{1,6}\s+", line)
+        ):
+            line_label = re.sub(
+                r"\s+",
+                " ",
+                re.sub(r"[*_`]+", "", re.sub(r"</?sup\b[^>]*>", "", re.sub(r"\[\^[^\]\r\n]+\](?!:)", "", re.sub(r"^\s*#{1,6}\s+", "", line.strip())))).strip(),
+            ).casefold()
+            if line_label in protected_labels or any(
+                title.startswith(f"{line_label}:") for title in protected_labels
+            ):
+                continue
+        candidates.append({"line": index + 1, **candidate})
 
     if include_repeated_lines:
         occurrences: dict[str, list[int]] = {}
@@ -126,11 +183,18 @@ def _candidate_windows(
 def _repair_hints(
     translated_path: Path,
     reference_path: Path,
+    *,
+    role: Optional[str] = None,
+    protected_toc_titles: Optional[list[str] | tuple[str, ...]] = None,
 ) -> dict[str, Any]:
     target_text = translated_path.read_text(encoding="utf-8")
     reference_text = reference_path.read_text(encoding="utf-8")
-    target = _candidate_windows(target_text)
-    reference = _candidate_windows(reference_text)
+    target = _candidate_windows(target_text, role=role)
+    reference = _candidate_windows(
+        reference_text,
+        role=role,
+        protected_toc_titles=protected_toc_titles,
+    )
     context_text = "\n\n".join(
         [
             *(window["text"] for window in target["windows"]),
@@ -310,6 +374,8 @@ def prepare_page_furniture_repair(
     target_language: str,
     *,
     resume: bool = False,
+    file_roles: Optional[Mapping[str, str]] = None,
+    protected_toc_titles: Optional[list[str] | tuple[str, ...]] = None,
 ) -> dict[str, Any]:
     """Snapshot existing translations and create a repair Subagent hand-off."""
     output_dir = Path(output_dir)
@@ -342,8 +408,15 @@ def prepare_page_furniture_repair(
     completed = _validated_repair_files(output_dir, files) if resume else set()
     pending = [name for name in files if name not in completed]
     file_stats = _manifest_stats(translated_dir, files)
+    roles_map = dict(file_roles or {})
+    protected_list = list(protected_toc_titles or ())
     repair_candidates = {
-        name: _repair_hints(translated_dir / name, reference_dir / name)
+        name: _repair_hints(
+            translated_dir / name,
+            reference_dir / name,
+            role=roles_map.get(name),
+            protected_toc_titles=protected_list,
+        )
         for name in files
     }
     # Keep full-file statistics for auditability, but schedule workers by the
