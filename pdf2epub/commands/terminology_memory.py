@@ -86,12 +86,26 @@ def _read_only_consistency_audits(output_dir, task, manifest, files, config):
         if not isinstance(prepared, dict) or prepared.get("entries") != projection["entries"]:
             raise ValueError(f"prepared context differs from current projection: {name}")
         if task == "translate":
+            from pdf2epub.commands.markdown import _pdf_file_role_sources
             from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
+            from pdf2epub.pdf_unit_roles import load_pdf_file_roles
 
+            try:
+                file_roles = load_pdf_file_roles(output_dir)
+                file_role_sources = _pdf_file_role_sources(output_dir)
+            except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
+                file_roles = manifest.get("file_roles") if isinstance(manifest.get("file_roles"), dict) else None
+                file_role_sources = (
+                    manifest.get("file_role_sources")
+                    if isinstance(manifest.get("file_role_sources"), dict)
+                    else None
+                )
             report = validate_markdown_subagent(
                 output_dir, task, source_dir, target_dir,
                 structural_patterns=(r"^#{1,6}\s", r"!\[[^\]]*\]\([^)]+\)", r"^\d+\\\.\s", r"\[\^[^\]]+\]"),
                 create_validated_copy=False, selected_files=[name], target_language=target_language,
+                file_roles=file_roles,
+                file_role_sources=file_role_sources,
             )
         else:
             from pdf2epub.html_translation.translation_validation import (

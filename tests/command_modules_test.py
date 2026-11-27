@@ -367,6 +367,57 @@ def test_polish_validate_check_only_writes_no_checkpoint_or_validated_copy(
     assert json.loads(checkpoint.read_text(encoding="utf-8")) == sentinel
 
 
+def test_translate_validate_parser_accepts_check_only_and_writes_no_checkpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from pdf2epub.commands import markdown as markdown_commands
+
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers(dest="command")
+    register_command_parsers(subparsers)
+    parsed = parser.parse_args(
+        ["translate-validate", "--file", "chapter_1.md", "--check-only"]
+    )
+    assert parsed.file == "chapter_1.md"
+    assert parsed.check_only is True
+
+    output_dir = tmp_path / "output"
+    source_dir = output_dir / "polished_markdown" / "validated"
+    target_dir = output_dir / "translated"
+    source_dir.mkdir(parents=True)
+    target_dir.mkdir(parents=True)
+    (source_dir / "unit.md").write_text("# Heading\n\nBody.\n", encoding="utf-8")
+    (target_dir / "unit.md").write_text("# 标题\n\n正文。\n", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("title: Book\npipeline: pdf_translation\nocr:\n  backend: chandra\n  secondary:\n    enabled: false\n", encoding="utf-8")
+    context = SimpleNamespace(
+        config={"translation": {"target_language": "Chinese"}},
+        book_title="Book",
+        output_dir=output_dir,
+        config_path=config_path,
+    )
+    monkeypatch.setattr(markdown_commands, "load_book_context", lambda *_a, **_kw: context)
+    monkeypatch.setattr(
+        markdown_commands, "_resolve_pdf_markdown_source", lambda *_a, **_kw: (source_dir, "polished")
+    )
+    monkeypatch.setattr(markdown_commands, "load_pdf_file_roles", lambda _output: {})
+    monkeypatch.setattr(markdown_commands, "_pdf_file_role_sources", lambda _output: {})
+    monkeypatch.setattr(markdown_commands, "_apply_local_toc_heading_binding", lambda *_a, **_kw: None)
+
+    args = SimpleNamespace(
+        config=str(config_path),
+        check_only=True,
+        file="unit.md",
+        allow_review_warnings=False,
+        fix_reference_heading=False,
+        target_language=None,
+        final=False,
+    )
+    assert markdown_commands.translate_validate_command(args) == 0
+    assert not (output_dir / "translate_file_validation.json").exists()
+    assert not (target_dir / "validated" / "unit.md").exists()
+
+
 def test_polish_validate_check_only_does_not_read_sibling_contexts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

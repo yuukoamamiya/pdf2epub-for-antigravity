@@ -248,6 +248,7 @@ def validate_markdown_subagent(
             scope_files=[source.name for source in sources],
             human_decision_id=human_decision_id,
             acknowledge=bool(allow_review_warnings),
+            partial_scope=partial,
         )
         escalation_rows = [
             {
@@ -329,6 +330,10 @@ def validate_markdown_subagent(
     if protected_workspace_blocked:
         # A guard failure is never allowed to appear as a successful file checkpoint.
         valid_files.clear()
+    accepted_targets = set(valid_files)
+    for name in list(normalized_targets):
+        if name not in accepted_targets:
+            normalized_targets.pop(name, None)
     snapshot_changes = validation_snapshot_changes(
         context.paths.output_dir, task, context.paths.source_dir, target_dir,
         source_sha256, audit.target_sha256, semantic_reviews,

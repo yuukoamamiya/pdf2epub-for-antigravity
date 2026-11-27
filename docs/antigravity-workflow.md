@@ -164,18 +164,17 @@ worker 是不可跨越的边界；边界内 ordinary workers 稳定收集后按�
 实际 extreme 活跃时不得启动普通波。没有 pending 正文时不重派正文，只处理仍 pending 的 metadata
 并完成全量校验。PDF translate/polish 保持 source-order 规划。
 
-polish worker 的 scoped prompt 会在 assigned task 前给出只读自检命令：
-`uv run pdf2epub -c <config_path> polish-validate --file <assigned_file> --check-only`。
+polish/translate worker 的 scoped prompt 会在 assigned task 前给出只读自检命令：
+`uv run pdf2epub -c <config_path> polish-validate --file <assigned_file> --check-only`（`translate-validate` 同样支持 `--file <assigned_file> --check-only`）。
 manifest 记录当前 hand-off 的 `config_path`（POSIX `/` 分隔）；若旧 manifest 没有该字段，
 prompt 使用“本次 hand-off 使用的同一配置”措辞，不编造路径。`--check-only` 必须与
-`--file` 同时使用，只运行单文件校验，不写 `polish_file_validation.json`，不创建或清理
-`polished_markdown/validated/`，也不移动或删除已暂存文件。这样每个 worker 可以独立闭环，
+`--file` 同时使用，只运行单文件校验，不写 `polish_file_validation.json`/`translate_file_validation.json`，不创建或清理
+`validated/`，也不移动或删除已暂存文件。这样每个 worker 可以独立闭环，
 又不会并发争写共享 checkpoint。worker 全部结束后，主 Agent 仍运行正式
-`polish-validate --file`（或全量 `polish-validate`）写入权威 checkpoint；只有该权威记录
+`polish-validate --file`/`translate-validate --file`（或全量 `<task>-validate`）写入权威 checkpoint；只有该权威记录
 才可作为后续打包和翻译门禁。check-only 识别到 Markdown 外层 fence 或可修复的参考文献标题时，
 只审计内存中的规范化候选，不写回目标 Markdown；它也不清理临时文件、不写 partial ledger、
-验证报告或 checkpoint。formal 校验才应用规范化；写入后重新计算目标 SHA-256，并以实际落盘
-内容写入 validated 副本和 checkpoint。
+验证报告或 checkpoint。formal 校验也仅对通过验收的目标应用规范化并重新计算实际落盘 SHA-256；未通过或未确认的目标保留原文以保持 `evidence_hash` 一致。单文件 `--file` 记录的 review 信号若紧接同一 `evidence_hash` 的全量校验会合并计算为同一轮（不重复计次），随后再次未改动重跑全量才升级人工复核。
 PDF translate 使用 Markdown validator schema 5，polish 使用 schema 6。各自的版本升级会使旧 receipt 和逐文件 ledger 失效。
 保留已有目标时，旧 translate 目标可由正式 `translate-validate` 重新验收；单文件 ledger 需按文件重新校验。
 旧 polish 目标要先运行 `polish --resume`，交 worker 完成当前脚注语义检查并写入 sidecar，再运行正式

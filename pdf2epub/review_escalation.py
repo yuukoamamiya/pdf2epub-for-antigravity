@@ -183,6 +183,7 @@ def record_review_signals(
     acknowledge: bool = False,
     escalate_after: int = DEFAULT_ESCALATE_AFTER,
     increment_same_hash: bool = True,
+    partial_scope: bool = False,
 ) -> dict[tuple[str, str, str], ReviewEscalation]:
     """Record the current review signals and persist their escalation state.
 
@@ -212,6 +213,9 @@ def record_review_signals(
         existing_raw = payload["signals"].get(key)
         existing = _coerce(task, filename, kind, existing_raw) if isinstance(existing_raw, Mapping) else None
         if existing is None or existing.state == STATE_RESOLVED:
+            merged_detail = dict(detail)
+            if partial_scope and evidence_hash:
+                merged_detail["_awaiting_full_consolidation_hash"] = evidence_hash
             entry = ReviewEscalation(
                 signal_id=signal_id_for(task, filename, kind),
                 task=_text(task),
@@ -222,11 +226,27 @@ def record_review_signals(
                 state=STATE_RETRY,
                 last_seen_hash=evidence_hash,
                 escalate_after=escalate_after,
-                detail=detail,
+                detail=merged_detail,
             )
         else:
             same_evidence = existing.last_seen_hash == evidence_hash and bool(evidence_hash)
-            retry_count = existing.retry_count if (same_evidence and not increment_same_hash) else existing.retry_count + 1
+            merged_detail = dict(detail or existing.detail)
+            consolidating_partial = (
+                not partial_scope
+                and bool(evidence_hash)
+                and existing.detail.get("_awaiting_full_consolidation_hash") == evidence_hash
+            )
+            if consolidating_partial:
+                merged_detail.pop("_awaiting_full_consolidation_hash", None)
+                retry_count = existing.retry_count
+            elif same_evidence and not increment_same_hash:
+                retry_count = existing.retry_count
+            else:
+                retry_count = existing.retry_count + 1
+            if partial_scope and evidence_hash:
+                merged_detail["_awaiting_full_consolidation_hash"] = evidence_hash
+            elif not partial_scope and not consolidating_partial:
+                merged_detail.pop("_awaiting_full_consolidation_hash", None)
             state = existing.state
             if state != STATE_HUMAN and retry_count >= max(1, escalate_after):
                 state = STATE_HUMAN
@@ -236,10 +256,17 @@ def record_review_signals(
                 state=state,
                 last_seen_hash=evidence_hash or existing.last_seen_hash,
                 escalate_after=escalate_after,
-                detail=detail or existing.detail,
+                detail=merged_detail,
             )
         if acknowledge:
-            entry = replace(entry, state=STATE_RESOLVED, human_decision_id=decision_id)
+            clean_detail = dict(entry.detail)
+            clean_detail.pop("_awaiting_full_consolidation_hash", None)
+            entry = replace(
+                entry,
+                state=STATE_RESOLVED,
+                human_decision_id=decision_id,
+                detail=clean_detail,
+            )
         payload["signals"][key] = entry.as_dict()
         recorded[(_text(task), filename, kind)] = entry
     if acknowledge:

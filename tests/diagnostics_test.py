@@ -615,3 +615,46 @@ def test_native_text_source_is_the_single_truth_predicate(tmp_path: Path) -> Non
     )
     with pytest.raises(ValueError, match="conflicting PDF source metadata"):
         is_native_text_source(tmp_path)
+
+
+def test_status_reports_refine_prepare_passed_and_zero_illustration_not_applicable(
+    tmp_path: Path, monkeypatch
+):
+    config_path = _config(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    output_dir = tmp_path / "output" / "Diagnostics Book"
+    pages_dir = output_dir / "pages"
+    pages_dir.mkdir(parents=True)
+    source_hash = hashlib.sha256((tmp_path / "input" / "book.pdf").read_bytes()).hexdigest()
+    (output_dir / "pdf_text_probe.json").write_text(
+        json.dumps({"page_count": 1, "source_sha256": source_hash}), encoding="utf-8"
+    )
+    progress = new_progress(source_sha256=source_hash, total_pages=1, backend="chandra")
+    progress["pages_processed"] = [1]
+    progress["missing_pages"] = []
+    (pages_dir / "ocr_progress.json").write_text(json.dumps(progress), encoding="utf-8")
+    (pages_dir / "page_001.md").write_text("page", encoding="utf-8")
+    (output_dir / "toc_tree.json").write_text(
+        json.dumps({"schema_version": 2, "chapters": [{"node_id": "c1", "title": "Ch 1", "level": 1}]}),
+        encoding="utf-8",
+    )
+    report_bytes = json.dumps({"candidates": []}).encode("utf-8")
+    (output_dir / "illustration_candidate_report.json").write_bytes(report_bytes)
+    report_sha = hashlib.sha256(report_bytes).hexdigest()
+    (output_dir / "illustration_bindings.json").write_text(
+        json.dumps({"status": "not_applicable", "candidate_report_sha256": report_sha}),
+        encoding="utf-8",
+    )
+
+    report = build_status(config_path)
+    stages = {item["name"]: item for item in report["stages"]}
+    assert stages["refine-prepare"]["status"] == "passed"
+    assert stages["illustration"]["status"] == "passed"
+    assert stages["refine-local"]["status"] == "pending"
+    assert report["next_command"].endswith("refine-local --resume")
+
+    # Stale zero-candidate binding must reopen illustration.
+    (output_dir / "illustration_candidate_report.json").write_text('{"candidates":[{"page":1}]}', encoding="utf-8")
+    stale_report = build_status(config_path)
+    stale_stages = {item["name"]: item for item in stale_report["stages"]}
+    assert stale_stages["illustration"]["status"] == "pending"

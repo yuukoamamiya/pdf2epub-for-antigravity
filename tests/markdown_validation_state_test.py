@@ -141,3 +141,45 @@ def test_allow_review_warnings_requires_human_decision_id(tmp_path):
             tmp_path, "polish", source_dir, target_dir,
             allow_review_warnings=True,
         )
+
+
+def test_partial_validation_consolidates_with_full_validation_and_never_normalizes_rejected_targets(tmp_path):
+    from pdf2epub.markdown_subagent_validation import validate_markdown_subagent
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    line = "This is a deliberately long English paragraph that remains unchanged in the output."
+    (source_dir / "unit.md").write_bytes(f"{line}\n{line}\n".encode("utf-8"))
+    fenced_target = f"```markdown\n{line}\n{line}\n```\n"
+    (target_dir / "unit.md").write_bytes(fenced_target.encode("utf-8"))
+
+    partial = validate_markdown_subagent(
+        tmp_path, "translate", source_dir, target_dir,
+        selected_files=["unit.md"], target_language="Chinese", create_validated_copy=True,
+    )
+    assert partial["review_escalation"][0]["retry_count"] == 1
+    assert partial["review_escalation"][0]["state"] == "retry"
+    # Rejected target must preserve its un-normalized fenced bytes in quarantine.
+    quarantined = tmp_path / partial["quarantined_files"]["unit.md"]
+    assert quarantined.read_text(encoding="utf-8") == fenced_target
+    (target_dir / "unit.md").write_bytes(quarantined.read_bytes())
+
+    consolidated = validate_markdown_subagent(
+        tmp_path, "translate", source_dir, target_dir,
+        target_language="Chinese", create_validated_copy=True,
+    )
+    assert consolidated["review_escalation"][0]["retry_count"] == 1
+    assert consolidated["review_escalation"][0]["state"] == "retry"
+    assert consolidated["human_review_required"] == []
+    quarantined2 = tmp_path / consolidated["quarantined_files"]["unit.md"]
+    (target_dir / "unit.md").write_bytes(quarantined2.read_bytes())
+
+    second_full = validate_markdown_subagent(
+        tmp_path, "translate", source_dir, target_dir,
+        target_language="Chinese", create_validated_copy=True,
+    )
+    assert second_full["review_escalation"][0]["retry_count"] == 2
+    assert second_full["review_escalation"][0]["state"] == "human_review_required"
+    assert second_full["human_review_required_files"] == ["unit.md"]

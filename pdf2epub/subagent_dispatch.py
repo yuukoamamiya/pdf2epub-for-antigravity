@@ -351,9 +351,14 @@ def renew_dispatch_lease(
     with _state_lock(state_path):
         state = _load_state(state_path)
         leases = _expire_and_prune(state["leases"], current_time)
-        for lease in leases:
-            if lease.get("assignment_sha256") != assignment_sha256:
-                continue
+        matching = [
+            lease for lease in leases if lease.get("assignment_sha256") == assignment_sha256
+        ]
+        ordered_matches = [
+            *[lease for lease in matching if _is_active(lease, current_time)],
+            *[lease for lease in matching if not _is_active(lease, current_time)],
+        ]
+        for lease in ordered_matches:
             if lease.get("owner_id") != owner_id:
                 return _lease_result("not_owner", lease)
             if not _is_active(lease, current_time):
@@ -387,9 +392,14 @@ def release_dispatch_lease(
     with _state_lock(state_path):
         state = _load_state(state_path)
         leases = _expire_and_prune(state["leases"], current_time)
-        for lease in leases:
-            if lease.get("assignment_sha256") != assignment_sha256:
-                continue
+        matching = [
+            lease for lease in leases if lease.get("assignment_sha256") == assignment_sha256
+        ]
+        ordered_matches = [
+            *[lease for lease in matching if _is_active(lease, current_time)],
+            *[lease for lease in matching if not _is_active(lease, current_time)],
+        ]
+        for lease in ordered_matches:
             if lease.get("owner_id") != owner_id:
                 return _lease_result("not_owner", lease)
             lease["status"] = "released"

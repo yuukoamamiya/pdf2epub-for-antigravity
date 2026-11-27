@@ -925,11 +925,12 @@ EPUB 构建器分配子章节锚点时先选精确标题，再接受仅前导编
    应据此检查自己 assigned 文件的交界，但 preview 只是布局证据，不得据此移动正文、改写
    脚注或新增 Markdown 结构。
    每个 Worker 写完一个 assigned file 后，必须先运行只读自检
-   `uv run pdf2epub -c <config> polish-validate --file <file> --check-only`；该命令只校验，
+   `uv run pdf2epub -c <config> polish-validate --file <file> --check-only`（translate 同样支持
+   `translate-validate --file <file> --check-only`）；该命令只校验，
    不规范化写回目标 Markdown、不写报告或 checkpoint、不创建或清理 `validated/`，因此多个 Worker 可安全并发。自检不通过时
    格式或检查记录错误由 Worker 在原地修复并重跑。脚注语义 issue 须保留目标和 sidecar，报告主 Agent 回到脚注视觉复核流程。
    Worker 全部结束后，主 Agent 仍须运行
-   正式的 `polish-validate --file`（或全量 `polish-validate`）写入权威 checkpoint。
+   正式的 `polish-validate --file`（或全量 `polish-validate`）写入权威 checkpoint；单文件 `--file` 校验产生同一 `evidence_hash` 的 review 信号时，紧随其后的全量 `<task>-validate`（目标未变化）只汇总合并而不额外叠加 retry 计数，但连续两次全量未改写重试仍按 `retry_count == 2` 升级人工复核，且未通过或未确认的文件不会把格式规范化写回磁盘。
    若启用第二套 OCR，对 OCR/混合型 PDF，前置 `ocr-correct` 通过校验后的字符、词语和符号视为权威；
    该步骤只处理残留换行、段落边界和块级结构，不再纠正 OCR 字符、拼写或措辞。普通正文段落内部不得为了视觉排版新增换行；若仍疑似有 OCR 错误，应退回
    `ocr-correct`，不得在 polish 中改写。若只启用一套 OCR，则没有 page-level 视觉纠错闸门，polish 仍只处理

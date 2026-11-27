@@ -385,6 +385,17 @@ def build_authority_from_manifest(
     root_source_hashes = manifest.get("source_sha256", {}) or {}
     root_unit_hashes = manifest.get("unit_context_sha256", {}) or {}
     root_global_hashes = manifest.get("context_sha256", {}) or {}
+    prompt_contexts = manifest.get("prompt_context_files")
+    if isinstance(prompt_contexts, Mapping):
+        expected_scoped_global_hashes = {
+            name: root_global_hashes[name]
+            for name in prompt_contexts
+            if name in root_global_hashes
+        }
+    elif "audit_only_context_files" not in manifest:
+        expected_scoped_global_hashes = dict(root_global_hashes)
+    else:
+        expected_scoped_global_hashes = {}
     for worker in manifest.get("worker_handoffs", []):
         if not isinstance(worker, Mapping):
             raise ValueError("parent worker handoff record must be an object")
@@ -409,7 +420,7 @@ def build_authority_from_manifest(
         unit_hashes = {name: root_unit_hashes[name] for name in files if name in root_unit_hashes}
         if scoped.get("unit_context_sha256", {}) != unit_hashes:
             raise ValueError("scoped unit context hashes do not match parent inventory")
-        if scoped.get("context_sha256", {}) != root_global_hashes:
+        if scoped.get("context_sha256", {}) != expected_scoped_global_hashes:
             raise ValueError("scoped global context hashes do not match parent inventory")
         batch_ids = worker.get("batch_ids")
         if not isinstance(batch_ids, list) or not batch_ids:
@@ -426,9 +437,25 @@ def build_authority_from_manifest(
         ]
         if sorted(batched_files) != sorted(files):
             raise ValueError("scoped batches do not cover exactly assigned_files")
+        role_context_hashes: dict[str, str] = {}
+        for role_key in ("file_roles", "file_role_sources"):
+            root_roles = manifest.get(role_key)
+            expected_role_subset = (
+                {name: root_roles[name] for name in files if name in root_roles}
+                if isinstance(root_roles, Mapping)
+                else {}
+            )
+            scoped_roles = scoped.get(role_key)
+            if expected_role_subset and scoped_roles != expected_role_subset:
+                raise ValueError(f"scoped {role_key} do not match parent handoff")
+            if isinstance(scoped_roles, Mapping) and not expected_role_subset and scoped_roles:
+                raise ValueError(f"scoped {role_key} do not match parent handoff")
+            for name, value in expected_role_subset.items():
+                role_context_hashes[f"{role_key}:{name}"] = _sha_json(value)
         context_hashes = {
             **{f"unit:{name}": value for name, value in unit_hashes.items()},
             **{f"global:{name}": value for name, value in root_global_hashes.items()},
+            **role_context_hashes,
         }
         assignment_digest = worker.get("assignment_sha256")
         calculated = build_assignment_sha256(

@@ -705,6 +705,14 @@ def _register_markdown_commands(subparsers) -> None:
             "still missing; normally this gate waits for complete output."
         ),
     )
+    translate_validate_parser.add_argument(
+        "--check-only",
+        action="store_true",
+        help=(
+            "Run single-file validation without writing checkpoints, validated copies, "
+            "or quarantine moves; requires --file."
+        ),
+    )
     translate_validate_parser.set_defaults(func=_lazy_handler("pdf2epub.commands.markdown", "translate_validate_command"))
 
 

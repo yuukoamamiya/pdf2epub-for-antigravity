@@ -187,3 +187,54 @@ def test_invalid_dispatch_state_is_not_silently_reset(tmp_path):
             assignment_sha256="assignment",
             assigned_files=["unit.md"],
         )
+
+
+def test_renew_and_release_prefer_active_lease_over_historical_entry(tmp_path):
+    state = tmp_path / "leases.json"
+    assignment = _assignment(["unit.md"])
+    first = claim_dispatch_lease(
+        state,
+        task="translate",
+        assignment_sha256=assignment,
+        worker_id="worker_001",
+        assigned_files=["unit.md"],
+        owner_id="old-owner",
+        lease_seconds=10,
+        now=_time(0),
+    )
+    assert first["status"] == "claimed"
+    assert release_dispatch_lease(
+        state,
+        assignment_sha256=assignment,
+        owner_id="old-owner",
+        now=_time(2),
+    )["status"] == "released"
+
+    second = claim_dispatch_lease(
+        state,
+        task="translate",
+        assignment_sha256=assignment,
+        worker_id="worker_001",
+        assigned_files=["unit.md"],
+        owner_id="new-owner",
+        lease_seconds=10,
+        now=_time(3),
+    )
+    assert second["status"] == "claimed"
+
+    renewed = renew_dispatch_lease(
+        state,
+        assignment_sha256=assignment,
+        owner_id="new-owner",
+        lease_seconds=30,
+        now=_time(4),
+    )
+    assert renewed["status"] == "renewed"
+
+    released = release_dispatch_lease(
+        state,
+        assignment_sha256=assignment,
+        owner_id="new-owner",
+        now=_time(5),
+    )
+    assert released["status"] == "released"

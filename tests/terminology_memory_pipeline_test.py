@@ -280,3 +280,81 @@ def test_source_hash_refresh_does_not_reuse_old_memory_consistency_review(tmp_pa
         for error in report["errors"]
     )
     assert (target / "part1.md").read_text(encoding="utf-8") == "社会形式在前一章出现"
+
+
+def test_current_authority_for_pdf_manifest_with_audit_only_contexts_and_roles(tmp_path):
+    from pdf2epub.dynamic_terminology import current_authority_for_task
+    from pdf2epub.subagent_runtime import write_worker_handoffs
+
+    output = tmp_path / "output"
+    source = output / "polished_markdown" / "validated"
+    target = output / "translated"
+    source.mkdir(parents=True)
+    target.mkdir(parents=True)
+    (source / "chapter_1.md").write_text("# Contents\n\n- Chapter One\n", encoding="utf-8")
+    (target / "chapter_1.md").write_text("# 目录\n\n- 第一章\n", encoding="utf-8")
+    entities = output / "translation_entities.json"
+    entities.write_text('{"entities": []}', encoding="utf-8")
+    glossary_dir = output / "translation_glossaries"
+    glossary_dir.mkdir(parents=True)
+    ref_path = glossary_dir / "ref.json"
+    ref_path.write_text('{"terms": []}', encoding="utf-8")
+    unit_ctx = glossary_dir / "unit_contexts" / "chapter_1.json"
+    unit_ctx.parent.mkdir(parents=True)
+    unit_ctx.write_text('{"entries": []}', encoding="utf-8")
+    (output / "toc_tree.json").write_text(
+        json.dumps({"schema_version": 2, "chapters": [{"node_id": "n1", "title": "Contents", "type": "toc", "level": 1}]}),
+        encoding="utf-8",
+    )
+    (source.parent.parent / "ocr_markdown").mkdir(parents=True)
+    (source.parent.parent / "ocr_markdown" / "tree_progress.json").write_text(
+        json.dumps({"units": [{"node_id": "n1", "index_path": [1], "file": "chapter_1.md", "type": "toc"}]}),
+        encoding="utf-8",
+    )
+
+    paths = prepare_markdown_subagent(
+        MarkdownHandoffRequest(
+            output_dir=output,
+            task="translate",
+            source_dir=source,
+            target_dir=target,
+            source_language="English",
+            target_language="Chinese",
+            config={},
+            context_files={"translation_entities": entities, "reference": ref_path},
+            prompt_context_files={"reference": ref_path},
+            unit_context_files={"chapter_1.md": unit_ctx},
+            file_roles={"chapter_1.md": "toc"},
+            file_role_sources={"chapter_1.md": {"source": "toc", "type": "toc"}},
+            chapter_groups={"chapter-1": ["chapter_1.md"]},
+        )
+    )
+    write_worker_handoffs(output, paths["manifest"], paths["prompt"])
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    manifest["book_title"] = "Book"
+    manifest["dynamic_terminology"] = _dynamic_manifest_fields(target)
+    atomic_write_json(paths["manifest"], manifest)
+
+    from pdf2epub.commands.terminology_memory import _read_only_consistency_audits
+
+    audits = _read_only_consistency_audits(
+        output,
+        "translate",
+        manifest,
+        ["chapter_1.md"],
+        {"title": "Book"},
+    )
+    assert audits["chapter_1.md"]["valid"] is True
+
+    _report, authority = current_authority_for_task(
+        output,
+        "translate",
+        book_id="Book",
+        source_language="English",
+        target_language="Chinese",
+        chapter_groups={"chapter-1": ["chapter_1.md"]},
+        book_entities_path=entities,
+        consistency_units=["chapter_1.md"],
+        consistency_audits=audits,
+    )
+    assert len(authority.assignments) == 1

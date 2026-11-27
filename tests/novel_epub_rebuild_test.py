@@ -178,3 +178,77 @@ def test_novel_xhtml_rebuild_refuses_missing_translation_file(tmp_path: Path):
             xhtml_dir=xhtml_dir,
             parser=_ParserStub("<html><body><p>原文</p></body></html>"),
         )
+
+
+def test_build_novel_epub_auto_enrichment_without_unbound_local(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Default auto metadata enrichment must not fail with UnboundLocalError on enrichment_outcome."""
+    from pdf2epub.commands import novel as novel_commands
+
+    output_dir = tmp_path / "output" / "Novel Book"
+    (output_dir / "novel_units").mkdir(parents=True)
+    (output_dir / "translated_novel").mkdir(parents=True)
+    (output_dir / "input.epub").write_bytes(b"PK\x03\x04")
+    (output_dir / "translated_metadata.json").write_text(
+        '{"translated_title": "Translated Novel"}', encoding="utf-8"
+    )
+    context = SimpleNamespace(
+        config={
+            "title": "Novel Book",
+            "metadata_enrichment": {"mode": "auto", "cover_policy": "preserve"},
+        },
+        book_title="Novel Book",
+        output_dir=output_dir,
+        config_path=tmp_path / "config.yaml",
+    )
+    monkeypatch.setattr(novel_commands, "load_book_context", lambda *_a, **_kw: context)
+    monkeypatch.setattr(novel_commands, "translate_novel_validate_command", lambda *_a, **_kw: 0)
+    monkeypatch.setattr(novel_commands, "_convert_txt_to_xhtml", lambda *_a, **_kw: 1)
+
+    class _FakeParser:
+        def __init__(self, _path: str) -> None:
+            pass
+
+    class _FakeExtractor:
+        def __init__(self, _parser) -> None:
+            pass
+
+        def extract_all(self, _dir: Path):
+            return [SimpleNamespace(has_content=True)]
+
+    captured: dict[str, object] = {}
+
+    class _FakeBuilder:
+        def __init__(self, cfg) -> None:
+            self.config = cfg
+            captured["enrichment_outcome"] = cfg.enrichment_outcome
+
+        def build(self) -> None:
+            self.config.output_path.parent.mkdir(parents=True, exist_ok=True)
+            self.config.output_path.write_bytes(b"PK\x03\x04")
+
+    import pdf2epub.build_receipt as build_receipt_mod
+    import pdf2epub.html_translation.builder as html_builder_mod
+    import pdf2epub.html_translation.epub_parser as epub_parser_mod
+    import pdf2epub.html_translation.novel_extractor as novel_extractor_mod
+    import pdf2epub.metadata_enrichment.service as enrichment_service_mod
+
+    monkeypatch.setattr(epub_parser_mod, "EPUBParser", _FakeParser)
+    monkeypatch.setattr(novel_extractor_mod, "NovelExtractor", _FakeExtractor)
+    monkeypatch.setattr(html_builder_mod, "HTMLEpubBuilder", _FakeBuilder)
+    monkeypatch.setattr(
+        enrichment_service_mod,
+        "resolve_enrichment",
+        lambda *_a, **_kw: {"status": "verified", "metadata": {"author": "Author"}, "verified_fields": ["author"]},
+    )
+    monkeypatch.setattr(
+        build_receipt_mod,
+        "write_build_receipt",
+        lambda *args, **kwargs: captured.setdefault("receipt_outcome", kwargs.get("metadata_outcome")),
+    )
+
+    rc = novel_commands.build_novel_epub_command(SimpleNamespace(config=str(tmp_path / "config.yaml")))
+    assert rc == 0
+    assert captured["enrichment_outcome"] == {"status": "applied"}
+    assert captured["receipt_outcome"] == {"status": "applied"}

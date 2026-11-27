@@ -128,13 +128,37 @@ def _pdf_ocr_status(output_dir: Path, input_path: Path) -> tuple[str, str]:
 
 def _pdf_tree_status(output_dir: Path, config: Mapping[str, Any]) -> tuple[str, str]:
     toc_path = output_dir / "toc_tree.json"
+    if not toc_path.is_file():
+        return "pending", "toc_tree.json is missing; run refine-prepare and use a Subagent"
+    toc_data = _read_json(toc_path)
+    if not isinstance(toc_data.get("chapters"), list) or not toc_data.get("chapters"):
+        return "pending", "toc_tree.json is invalid or lacks chapter nodes; rerun refine-prepare"
+    refine_manifest = _read_json(output_dir / "refine_subagent_manifest.json")
+    expected_pages = refine_manifest.get("source_pages_sha256")
+    if isinstance(expected_pages, str) and expected_pages:
+        try:
+            from pdf2epub.ocr_correction import select_refinement_pages
+            from pdf2epub.utils.fingerprints import pages_fingerprint
+
+            pages_dir, _ = select_refinement_pages(output_dir, config=config)
+            if pages_fingerprint(pages_dir) != expected_pages:
+                return "pending", "toc_tree.json is stale after an OCR page change; rerun refine-prepare"
+        except (OSError, TypeError, ValueError):
+            return "pending", "could not verify the TOC preparation page fingerprint"
+    return "passed", "TOC tree checkpoint is ready"
+
+
+def _pdf_refine_local_status(output_dir: Path, config: Mapping[str, Any]) -> tuple[str, str]:
+    toc_path = output_dir / "toc_tree.json"
     progress_path = output_dir / "ocr_markdown" / "tree_progress.json"
     if not toc_path.is_file():
         return "pending", "toc_tree.json is missing; run refine-prepare and use a Subagent"
-    if not progress_path.is_file():
-        return "pending", "refine-local has not generated tree_progress.json"
+    if not progress_path.is_file() or not _file_list(output_dir / "ocr_markdown"):
+        return "pending", "run refine-local after the TOC and illustration checkpoints are complete"
     progress = _read_json(progress_path)
     fingerprint = progress.get("fingerprint")
+    if not progress and not isinstance(fingerprint, Mapping):
+        return "passed", "OCR pages are merged into current Markdown units"
     if not isinstance(fingerprint, Mapping):
         return "pending", "tree_progress.json is invalid or lacks its input fingerprint"
     try:
@@ -175,7 +199,7 @@ def _pdf_tree_status(output_dir: Path, config: Mapping[str, Any]) -> tuple[str, 
             return "pending", "tree_progress.json is stale after an illustration binding change"
     except (OSError, TypeError, ValueError):
         return "pending", "could not verify the current refinement fingerprint"
-    return "passed", "TOC and merged Markdown checkpoint are current"
+    return "passed", "OCR pages are merged into current Markdown units"
 
 
 def _current_polish(output_dir: Path, config: Mapping[str, Any]) -> bool:
@@ -336,30 +360,39 @@ def _pdf_stages(
 
     illustration_report = _read_json(output_dir / "illustration_candidate_report.json")
     bindings = _read_json(output_dir / "illustration_bindings.json")
-    illustration_current = bool(illustration_report) and bindings.get("status") == "validated"
+    binding_status = bindings.get("status")
+    report_sha_ok = (
+        "candidate_report_sha256" not in bindings
+        or bindings.get("candidate_report_sha256")
+        == _source_sha256(output_dir / "illustration_candidate_report.json")
+    )
+    illustration_current = (
+        bool(illustration_report)
+        and binding_status in {"validated", "not_applicable"}
+        and report_sha_ok
+    )
     stages.append(
         _status_record(
             "illustration",
             "illustration-prepare",
             "passed" if illustration_current else "pending",
-            "illustration candidates were applied"
+            (
+                "no illustration candidates required binding"
+                if binding_status == "not_applicable"
+                else "illustration candidates were applied"
+            )
             if illustration_current
             else "run illustration-prepare, illustration-validate, and illustration-apply",
         )
     )
 
-    tree_ready = bool(
-        (output_dir / "ocr_markdown" / "tree_progress.json").is_file()
-        and _file_list(output_dir / "ocr_markdown")
-    )
+    refine_local_status, refine_local_detail = _pdf_refine_local_status(output_dir, config)
     stages.append(
         _status_record(
             "refine-local",
             "refine-local --resume",
-            "passed" if tree_ready else "pending",
-            "OCR pages are merged into current Markdown units"
-            if tree_ready
-            else "run refine-local after the TOC and illustration checkpoints are complete",
+            refine_local_status,
+            refine_local_detail,
         )
     )
 

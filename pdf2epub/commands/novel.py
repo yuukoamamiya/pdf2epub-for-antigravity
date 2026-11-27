@@ -465,6 +465,7 @@ def build_novel_epub_command(args):
         from pdf2epub.pipeline_policy import PipelinePolicy
         policy = PipelinePolicy.from_config(config, default_kind="novel")
         enrichment_plan = {"status": "disabled", "metadata": {}, "verified_fields": []}
+        enrichment_outcome = {"status": "applied"}
         if policy.metadata_enrichment_mode != "disabled":
             from pdf2epub.metadata_enrichment.service import resolve_enrichment
             try:
