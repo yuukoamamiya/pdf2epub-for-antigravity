@@ -40,9 +40,9 @@ subagent:
   task_models:
     refine: gemini-4-hydrogen
     footnote-prepare: gemini-4-hydrogen
-    polish: gemini-3.8-flash
-    extract-entities: gemini-3.8-flash
-    illustration-prepare: gemini-3.8-flash
+    polish: gemini-4-hydrogen
+    extract-entities: gemini-4-hydrogen
+    illustration-prepare: gemini-4-hydrogen
 
 # 本地凭据目录（整个目录已加入 .gitignore；不要把密钥写入 YAML）
 credentials:

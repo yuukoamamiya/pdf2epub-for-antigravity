@@ -63,9 +63,9 @@ def test_resolve_subagent_model_uses_translation_and_default_defaults():
     assert resolve_subagent_model({}, "translate-html") == DEFAULT_TRANSLATION_MODEL
     assert resolve_subagent_model({}, "refine") == "gemini-4-hydrogen"
     assert resolve_subagent_model({}, "footnote-prepare") == "gemini-4-hydrogen"
-    assert resolve_subagent_model({}, "polish") == "gemini-3.8-flash"
-    assert resolve_subagent_model({}, "extract-entities") == "gemini-3.8-flash"
-    assert resolve_subagent_model({}, "illustration-prepare") == "gemini-3.8-flash"
+    assert resolve_subagent_model({}, "polish") == "gemini-4-hydrogen"
+    assert resolve_subagent_model({}, "extract-entities") == "gemini-4-hydrogen"
+    assert resolve_subagent_model({}, "illustration-prepare") == "gemini-4-hydrogen"
     assert resolve_subagent_model({}, "unknown-task") == DEFAULT_SUBAGENT_MODEL
 
 

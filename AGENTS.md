@@ -128,11 +128,9 @@ footnotes:
 单 OCR 的长文本空白页检查只扫描至少 80 词或 400 个非空白字符的页稿；正文区域灰度小于 200 的像素比例不高于 0.0005，才可列为图像支持的疑似空白页。全页墨迹至少 0.005 或页边墨迹至少 0.0001 时只产生 advisory；重复页文和缺失当前图像证据只作提示。该检查不做通用语言检测或自动清空。复核仅使用 assigned 页图；已有可信整页图覆盖稀疏复核页时可复用。同一 PDF 下仅 OCR 文本变化会重算相应页面的异常候选，其他当前页面证据可复用；PDF 哈希变化会使旧页图失效。
 
 模型推荐按 `task_models[task]` → `models[task]` → 通用模型配置回退；翻译任务的通用顺序为
-`models.translation` → `models.default`，其他任务为 `models.default`。配置均未命中时，翻译默认
-推荐 `gemini-4-hydrogen`；TOC/结构判断 `refine` 和 `footnote-prepare` 默认推荐
-`gemini-4-hydrogen`，常规 `polish`、`extract-entities` 和 `illustration-prepare` 默认推荐
-`gemini-3.8-flash`，其余任务推荐 `inherit`。复杂脚注、多栏或段落边界等润色任务，由操作员依据
-结构证据在该书配置中显式设置 `task_models.polish: gemini-4-hydrogen`。
+`models.translation` → `models.default`，其他任务为 `models.default`。配置均未命中时，翻译、
+TOC/结构判断 `refine`、`footnote-prepare`、`polish`、`extract-entities` 和 `illustration-prepare`
+均默认推荐 `gemini-4-hydrogen`，其余任务推荐 `inherit`；操作员也可在单书配置中显式覆盖 `task_models`。
 
 新建或复制配置时应显式保留 `footnotes.mode: auto`。`auto` 根据 TOC 结构判断处理方式；只有确认该书是集中尾注而非页底脚注时，才可考虑 `disabled`，其他情况或判断不确定时均使用 `auto`。确认存在尾注本身不代表应禁用：通常让 `auto` 将其判为 `endnotes_only`。
 

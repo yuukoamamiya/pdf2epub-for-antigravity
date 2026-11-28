@@ -79,7 +79,7 @@ subagent:
   #   refine: <configured task model>
 ```
 
-默认规则是：先读取 `task_models[task]`、`models[task]`；翻译任务随后读取 `models.translation`、`models.default`，其他任务随后读取 `models.default`。配置均未命中时，翻译推荐 `gemini-4-hydrogen`；`refine`（TOC/结构判断）和 `footnote-prepare` 推荐 `gemini-4-hydrogen`；常规 `polish`、`extract-entities` 初筛和简单 `illustration-prepare` 推荐 `gemini-3.8-flash`；其他任务推荐 `inherit`。显式配置仍可覆盖相应任务。复杂脚注、多栏或段落边界等复杂润色，由操作员依据已确认的书页结构证据，在该书配置中显式设置 `task_models.polish: gemini-4-hydrogen`。`config.hegels_development_night_thoughts.yaml` 和 `config.hegels_development_towards_the_sunlight.yaml` 已按此方式配置。每个生成的 `*_subagent_manifest.json` 和提示词都会写出推荐模型，供 Antigravity 中的 Subagent 选择。这里是任务合同，不是 Python 对模型 API 的调用或强制切换。
+默认规则是：先读取 `task_models[task]`、`models[task]`；翻译任务随后读取 `models.translation`、`models.default`，其他任务随后读取 `models.default`。配置均未命中时，翻译、`refine`（TOC/结构判断）、`footnote-prepare`、`polish`、`extract-entities` 和 `illustration-prepare` 统一推荐 `gemini-4-hydrogen`；其他任务推荐 `inherit`。显式配置仍可覆盖相应任务。每个生成的 `*_subagent_manifest.json` 和提示词都会写出推荐模型，供 Antigravity 中的 Subagent 选择。这里是任务合同，不是 Python 对模型 API 的调用或强制切换。
 
 ## 额度耗尽与断点续传
 

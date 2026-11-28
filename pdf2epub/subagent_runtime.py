@@ -57,9 +57,9 @@ DEFAULT_SUBAGENT_MODEL = "inherit"
 DEFAULT_TASK_MODELS = {
     "refine": "gemini-4-hydrogen",
     "footnote-prepare": "gemini-4-hydrogen",
-    "polish": "gemini-3.8-flash",
-    "extract-entities": "gemini-3.8-flash",
-    "illustration-prepare": "gemini-3.8-flash",
+    "polish": "gemini-4-hydrogen",
+    "extract-entities": "gemini-4-hydrogen",
+    "illustration-prepare": "gemini-4-hydrogen",
 }
 
 _TRANSLATION_TASKS = {

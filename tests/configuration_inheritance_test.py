@@ -50,12 +50,12 @@ def test_override_is_shallow_and_replaces_whole_section(tmp_path: Path):
         "base: config.base.yaml\n"
         "subagent:\n"
         "  models:\n"
-        "    default: gemini-3.8-flash\n",
+        "    default: gemini-4-hydrogen\n",
     )
 
     config = load_config(str(child))
 
-    assert config["subagent"] == {"models": {"default": "gemini-3.8-flash"}}
+    assert config["subagent"] == {"models": {"default": "gemini-4-hydrogen"}}
     assert "batching" not in config["subagent"]
 
 

@@ -100,7 +100,7 @@ def test_illustration_decision_is_hash_bound_and_applied(tmp_path: Path):
     report = json.loads(paths["report"].read_text(encoding="utf-8"))
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
     assert report["status"] == "pending_review"
-    assert manifest["model"] == "gemini-3.8-flash"
+    assert manifest["model"] == "gemini-4-hydrogen"
     assert report["candidate_pages"]
     assert report["candidate_pages"][0]["previous_page"] == 1
     assert report["candidate_pages"][0]["next_page"] == 3

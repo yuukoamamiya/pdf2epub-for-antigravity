@@ -22,10 +22,13 @@ translation:
 
 # Antigravity Subagent 模型（只作为 IDE 子 Agent 的任务提示，不调用任何 API）。
 # 翻译优先级：task_models -> models[task] -> models.translation -> models.default。
-# 复杂脚注、多栏或段落边界润色由操作员根据结构证据设置单书覆盖：
+# 如需单书覆盖默认模型（默认均为 gemini-4-hydrogen），可取消注释并设置：
 # subagent:
+#   models:
+#     translation: gemini-4-hydrogen
+#     default: inherit
 #   task_models:
-#     polish: gemini-4-hydrogen
+#     extract-entities: gemini-4-hydrogen
 
 # EPUB 构建与校验选项
 html_translation:
